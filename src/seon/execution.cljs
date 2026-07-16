@@ -4,6 +4,7 @@
    [cognitect.transit :as transit]
    [clojure.walk :as walk]
    [shadow.cljs.devtools.client.env :as shadow-env]
+   [seon.agent.home :as home]
    [seon.db :as db]
    [seon.db.coordinate]
    [seon.db.protocol :as db.protocol]
@@ -215,9 +216,38 @@
 (def ^:private maximum-program-rows 2048)
 (def ^:private maximum-program-bytes (* 3 1024 1024))
 
-(def ^:private authored-function-query
-  '[:find ?sym ?source ?ns-name ?ns-source
+(def ^:private authored-namespace-query
+  '[:find ?name ?source
+    :in $ ?agent-id
+    :where
+    [?namespace :seon.ns/name ?name]
+    [?namespace :seon.ns/source ?source ?tx]
+    [?tx :seon.db/user ?author]
+    [?author :seon.agent/id ?agent-id]
+    [?tx :seon.db/process ?process]
+    [?process :seon.db.process/id :seon.db.process/repl]])
+
+(def ^:private authored-require-edge-query
+  '[:find ?name (pull ?edge [*])
+    :in $ ?agent-id
+    :where
+    [?namespace :seon.ns/name ?name]
+    [?namespace :seon.ns/require-edges ?edge ?tx]
+    [?tx :seon.db/user ?author]
+    [?author :seon.agent/id ?agent-id]
+    [?tx :seon.db/process ?process]
+    [?process :seon.db.process/id :seon.db.process/repl]])
+
+(def ^:private home-namespace-query
+  '[:find ?home-name ?source
            (pull ?namespace [{:seon.ns/require-edges [*]}])
+    :in $ ?home-name
+    :where
+    [?namespace :seon.ns/name ?home-name]
+    [?namespace :seon.ns/source ?source]])
+
+(def ^:private authored-function-query
+  '[:find ?sym ?source ?ns-name
     :in $ ?agent-id
     :where
     [?function :seon.fn/sym ?sym]
@@ -226,21 +256,68 @@
     [?author :seon.agent/id ?agent-id]
     [?tx :seon.db/process ?process]
     [?process :seon.db.process/id :seon.db.process/repl]
-    [?function :seon.fn/ns ?namespace]
-    [?namespace :seon.ns/name ?ns-name]
-    [(get-else $ ?namespace :seon.ns/source "") ?ns-source]])
+    [?function :seon.fn/ns ?namespace ?ns-tx]
+    [?ns-tx :seon.db/user ?ns-author]
+    [?ns-author :seon.agent/id ?agent-id]
+    [?ns-tx :seon.db/process ?ns-process]
+    [?ns-process :seon.db.process/id :seon.db.process/repl]
+    [?namespace :seon.ns/name ?ns-name]])
+
+(def ^:private authored-test-query
+  '[:find ?sym ?source ?ns-name
+    :in $ ?agent-id
+    :where
+    [?test :seon.test/sym ?sym]
+    [?test :seon.test/source ?source ?tx]
+    [?tx :seon.db/user ?author]
+    [?author :seon.agent/id ?agent-id]
+    [?tx :seon.db/process ?process]
+    [?process :seon.db.process/id :seon.db.process/repl]
+    [?test :seon.test/ns ?namespace ?ns-tx]
+    [?ns-tx :seon.db/user ?ns-author]
+    [?ns-author :seon.agent/id ?agent-id]
+    [?ns-tx :seon.db/process ?ns-process]
+    [?ns-process :seon.db.process/id :seon.db.process/repl]
+    [?namespace :seon.ns/name ?ns-name]])
 
 (def ^:private schema-query
   '[:find ?key ?form
+    :in $ ?agent-id
     :where
     [?schema :seon.schema/key ?key]
-    [?schema :seon.schema/form ?form]])
+    [?schema :seon.schema/form ?form ?tx]
+    (or-join [[?tx ?agent-id]]
+      (and
+        [?tx :seon.db/process ?boot-process]
+        [?boot-process :seon.db.process/id :seon.db.process/boot])
+      (and
+        [?tx :seon.db/user ?author]
+        [?author :seon.agent/id ?agent-id]
+        [?tx :seon.db/process ?repl-process]
+        [?repl-process :seon.db.process/id :seon.db.process/repl]))])
 
 (def ^:private function-contract-query
   '[:find ?sym ?form
+    :in $ ?agent-id
     :where
     [?function :seon.fn/sym ?sym]
-    [?function :seon.fn/spec ?form]])
+    [?function :seon.fn/spec ?form ?spec-tx]
+    [?function :seon.fn/source _ ?source-tx]
+    (or-join [[?source-tx ?spec-tx ?agent-id]]
+      (and
+        [?source-tx :seon.db/process ?source-boot-process]
+        [?source-boot-process :seon.db.process/id :seon.db.process/boot]
+        [?spec-tx :seon.db/process ?spec-boot-process]
+        [?spec-boot-process :seon.db.process/id :seon.db.process/boot])
+      (and
+        [?source-tx :seon.db/user ?source-author]
+        [?source-author :seon.agent/id ?agent-id]
+        [?source-tx :seon.db/process ?source-repl-process]
+        [?source-repl-process :seon.db.process/id :seon.db.process/repl]
+        [?spec-tx :seon.db/user ?spec-author]
+        [?spec-author :seon.agent/id ?agent-id]
+        [?spec-tx :seon.db/process ?spec-repl-process]
+        [?spec-repl-process :seon.db.process/id :seon.db.process/repl]))])
 
 (def ^:private invocation-source-query
   '[:find ?sym ?source
@@ -267,34 +344,91 @@
     (throw (ex-info "Authored program acquisition failed."
                     {:seon.db/error member :seon.error/kind :core-bug}))))
 
-(defn- normalize-require-edges [pulled]
-  (->> (:seon.ns/require-edges pulled)
-       (map (fn [edge]
-              (cond-> (dissoc edge :db/id)
-                (seq (:seon.ns.require/refers edge))
-                (update :seon.ns.require/refers
-                        #(vec (sort-by str %))))))
+(defn- normalize-require-edge [edge]
+  (cond-> (dissoc edge :db/id)
+    (seq (:seon.ns.require/refers edge))
+    (update :seon.ns.require/refers #(vec (sort-by str %)))))
+
+(defn- normalize-require-edges [edges]
+  (->> edges
+       (map normalize-require-edge)
        (sort-by pr-str)
        vec))
+
+(defn- namespace-row [name]
+  {:seon.ns/name name
+   :seon.ns/require-edges []
+   :seon.fn/_ns []
+   :seon.test/_ns []})
+
+(defn- ensure-namespace-row [known name]
+  (update known name #(or % (namespace-row name))))
 
 (defn canonical-program
   "Canonicalize unordered database rows before source identity hashing."
   {:malli/schema [:=> [:cat [:sequential :any]
                        [:sequential :any]
+                       [:sequential :any]
+                       [:sequential :any]
+                       [:sequential :any]
+                       [:sequential :any]
                        [:sequential :any]] :map]}
-  [function-rows schema-rows contract-rows]
-  (let [namespace-rows
-        (->> function-rows
-             (group-by #(nth % 2))
-             (map
-              (fn [[ns-name rows]]
-                (let [rows (sort-by (comp str first) rows)
-                      [_ _ _ ns-source pulled] (first rows)]
-                  {:seon.ns/name ns-name
-                   :seon.ns/source ns-source
-                   :seon.ns/require-edges (normalize-require-edges pulled)
-                   :seon.fn/symbols (mapv (comp symbol first) rows)
-                   :seon.fn/sources (->> rows (map second) distinct sort vec)})))
+  [namespace-source-rows require-edge-rows home-rows function-rows test-rows
+   schema-rows contract-rows]
+  (let [by-name
+        (reduce (fn [known [name source]]
+                  (assoc known name
+                         (assoc (get known name (namespace-row name))
+                                :seon.ns/source source)))
+                {} namespace-source-rows)
+        by-name
+        (reduce (fn [known [name edge]]
+                  (-> known
+                      (ensure-namespace-row name)
+                      (update-in [name :seon.ns/require-edges]
+                                 conj (normalize-require-edge edge))))
+                by-name require-edge-rows)
+        by-name
+        (reduce (fn [known [name source pulled]]
+                  (assoc known name
+                         (-> (get known name (namespace-row name))
+                             (assoc :seon.ns/source source)
+                             (update :seon.ns/require-edges
+                                     into
+                                     (map normalize-require-edge
+                                          (:seon.ns/require-edges pulled))))))
+                by-name home-rows)
+        by-name
+        (reduce (fn [known [sym source name]]
+                  (-> known
+                      (ensure-namespace-row name)
+                      (update-in [name :seon.fn/_ns]
+                                 conj
+                                 {:seon.fn/sym (symbol sym)
+                                  :seon.fn/source source})))
+                by-name function-rows)
+        by-name
+        (reduce (fn [known [sym source name]]
+                  (-> known
+                      (ensure-namespace-row name)
+                      (update-in [name :seon.test/_ns]
+                                 conj
+                                 {:seon.test/sym (symbol sym)
+                                  :seon.test/source source})))
+                by-name test-rows)
+        namespace-rows
+        (->> by-name
+             vals
+             (map (fn [row]
+                    (-> row
+                        (update :seon.ns/require-edges
+                                #(normalize-require-edges (distinct %)))
+                        (update :seon.fn/_ns
+                                #(vec (sort-by (comp str :seon.fn/sym)
+                                               (distinct %))))
+                        (update :seon.test/_ns
+                                #(vec (sort-by (comp str :seon.test/sym)
+                                               (distinct %)))))))
              (sort-by (comp str :seon.ns/name))
              vec)]
     {::namespace-rows namespace-rows
@@ -399,12 +533,18 @@
                  {::db/coordinate coordinate
                   ::db/max-result-weight maximum-program-bytes
                   ::db/members
-                  [(query-member authored-function-query
-                                 [agent-id])
-                   (query-member schema-query [])
-                   (query-member function-contract-query [])]}))
-        [functions schemas contracts] (mapv query-result (::db/results result))
-        program (canonical-program functions schemas contracts)
+                  [(query-member authored-namespace-query [agent-id])
+                   (query-member authored-require-edge-query [agent-id])
+                   (query-member home-namespace-query
+                                 [(keyword (str (home/home-ns agent-id)))])
+                   (query-member authored-function-query [agent-id])
+                   (query-member authored-test-query [agent-id])
+                   (query-member schema-query [agent-id])
+                   (query-member function-contract-query [agent-id])]}))
+        [namespaces edges homes functions tests schemas contracts]
+        (mapv query-result (::db/results result))
+        program (canonical-program namespaces edges homes functions tests
+                                   schemas contracts)
         source-by-symbol (into {}
                                (map (fn [[sym source & _]]
                                       [(symbol sym) source]))

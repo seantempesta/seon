@@ -1584,6 +1584,20 @@ second owner.
   local snapshot dependencies from every accepted function definition and
   removes stale-diff code without adding a remote read. Focused pure
   transaction proof passes 2 tests/4 assertions.
+- Cold authored-program reconstruction now uses one seven-member
+  coordinate-pinned authority request for the agent's namespace sources,
+  require-edge links, functions, tests, home namespace, schemas, and function
+  contracts. It returns only ordinary rows and canonicalizes them into the
+  existing `:seon.ns/name`, `:seon.fn/_ns`, and `:seon.test/_ns` shapes before
+  loading them into the child-owned compiler state. Source, namespace-link,
+  schema-form, and paired source/spec transaction provenance fail closed so
+  another agent cannot redirect or amend the accepted program. A direct
+  maintained-Datahike probe exercised all seven query forms and returned the
+  expected owned plus boot rows; focused acquisition/canonicalization/real
+  compiler proof passes 4 tests/14 assertions, and both execution artifacts
+  compile at 415 files/18 pre-existing migration warnings. The remaining
+  `guarded-load*` local fallback is deleted only with the parent replay callers
+  that still depend on it; this slice adds no child database cache or replica.
 - **Next refill:** move the remaining parent eval/schedule/test/authored-route
   consumers onto the existing per-agent child execution owner, delete global
   pod replay rather than adapting it, finish the remaining web synchronous

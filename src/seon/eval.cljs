@@ -924,12 +924,16 @@
   "Return one loadable source string from an ordinary namespace row.
 
    The row contains `:seon.ns/name`, optional `:seon.ns/source`, optional
-   `:seon.ns/require-edges`, and `:seon.fn/sources`. This is deliberately a
-   pure database-row projection so execution children need no Datahike value."
+   `:seon.ns/require-edges`, plus its `:seon.fn/_ns` and `:seon.test/_ns`
+   source rows. This is deliberately a pure database-row projection so
+   execution children need no Datahike value."
   {:malli/schema [:=> [:cat :map] :string]}
   [{:seon.ns/keys [name source require-edges]
-    :seon.fn/keys [sources]}]
-  (let [head (or (when-not (str/blank? source) source)
+    function-rows :seon.fn/_ns
+    test-rows :seon.test/_ns}]
+  (let [sources (concat (map :seon.fn/source function-rows)
+                        (map :seon.test/source test-rows))
+        head (or (when-not (str/blank? source) source)
                  (when (seq sources)
                    (namespace-head name require-edges)))]
     (->> (concat [head] sources)
@@ -1119,9 +1123,13 @@
         namespace-by-symbol
         (into {}
               (mapcat (fn [row]
-                        (map (fn [function-symbol]
-                               [function-symbol (:seon.ns/name row)])
-                             (:seon.fn/symbols row))))
+                        (concat
+                         (map (fn [{:seon.fn/keys [sym]}]
+                                [sym (:seon.ns/name row)])
+                              (:seon.fn/_ns row))
+                         (map (fn [{:seon.test/keys [sym]}]
+                                [sym (:seon.ns/name row)])
+                              (:seon.test/_ns row)))))
               namespace-rows)
         missing (->> function-symbols
                      (remove #(get sources (get namespace-by-symbol %)))

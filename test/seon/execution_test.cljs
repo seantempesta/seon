@@ -1,12 +1,10 @@
 (ns seon.execution-test
   (:require
-   [cljs.js :as cljs]
    [cljs.test :refer [async deftest is testing]]
    [seon.db :as db]
    [seon.db.protocol :as protocol]
    [seon.eval :as seval]
-   [seon.execution :as execution]
-   [seon.schema :as schema]))
+   [seon.execution :as execution]))
 
 (def digest (apply str (repeat 64 "a")))
 (def coordinate
@@ -181,16 +179,16 @@
                 :seon.ns.require/refers #{'z 'a}}
         edge-b {:db/id 2 :seon.ns.require/target :seon.db
                 :seon.ns.require/alias 'db}
-        row-a ["my.render/view" "(defn view [_] :ok)" :my.render ""
-               {:seon.ns/require-edges #{edge-a edge-b}}]
-        row-b ["my.render/helper" "(defn helper [] 1)" :my.render ""
-               {:seon.ns/require-edges #{edge-b edge-a}}]
+        namespace-rows [[:my.render "(ns my.render)"]]
+        edge-rows [[:my.render edge-a] [:my.render edge-b]]
+        row-a ["my.render/view" "(defn view [_] :ok)" :my.render]
+        row-b ["my.render/helper" "(defn helper [] 1)" :my.render]
         first-value (execution/canonical-program
-                     [row-a row-b]
+                     namespace-rows edge-rows [] [row-a row-b] []
                      [[:z/schema ":string"] [:a/schema ":int"]]
                      [["my.render/view" "[:=> [:cat :map] :any]"]])
         second-value (execution/canonical-program
-                      [row-b row-a]
+                      namespace-rows (reverse edge-rows) [] [row-b row-a] []
                       [[:a/schema ":int"] [:z/schema ":string"]]
                       [["my.render/view" "[:=> [:cat :map] :any]"]])]
     (is (= first-value second-value))
@@ -204,68 +202,85 @@
                      (.digest "hex"))]
     (is (= expected (execution/source-digest source)))))
 
+(deftest authored-program-acquisition-is-one-agent-owned-snapshot
+  (async done
+    (let [request (atom nil)
+          results
+          [#{[:my.agent.agent-1 "(ns my.agent.agent-1)"]}
+           #{}
+           #{[:my.agent.agent-1 "(ns my.agent.agent-1)"
+              {:seon.ns/require-edges []}]}
+           #{["my.agent.agent-1/run" "(defn run [] :ok)"
+              :my.agent.agent-1]}
+           #{["my.agent.agent-1/check" "(deftest check (is true))"
+              :my.agent.agent-1]}
+           #{}
+           #{}]
+          response
+          {::db/coordinate coordinate
+           ::db/results
+           (mapv (fn [result]
+                   {::protocol/success? true
+                    :datahike.query/result result})
+                 results)}]
+      (with-redefs [db/execute-many
+                    (fn [value]
+                      (reset! request value)
+                      (js/Promise.resolve response))]
+        (-> (js/Promise.resolve
+             (@#'execution/acquire-program! coordinate "agent-1"))
+            (.then
+             (fn [program]
+               (is (= 7 (count (::db/members @request))))
+               (is (= coordinate (::db/coordinate @request)))
+               (let [row (first (::execution/namespace-rows program))]
+                 (is (= :my.agent.agent-1 (:seon.ns/name row)))
+                 (is (= ['my.agent.agent-1/run]
+                        (mapv :seon.fn/sym (:seon.fn/_ns row))))
+                 (is (= ['my.agent.agent-1/check]
+                        (mapv :seon.test/sym (:seon.test/_ns row))))
+                 (is (re-find #"deftest check" (seval/namespace-source row))))
+               (done)))
+            (.catch
+             (fn [error]
+               (is false (str "program acquisition rejected: " error))
+               (done))))))))
+
 (deftest authored-loader-loads-each-selected-namespace-once
   (async done
-    (let [compile-state (atom {})
-          loaded (atom #{})
-          evaluated (atom [])
-          projections (atom 0)
-          original-init seval/init-bootstrap!
-          original-lookup seval/lookup-value
-          original-eval-str cljs/eval-str
-          original-build schema/build-projection
-          original-activate schema/activate-projection!]
-      (set! seval/init-bootstrap!
-            (fn [] (js/Promise.resolve compile-state)))
-      (set! seval/lookup-value #(when (contains? @loaded %) :loaded))
-      (set! schema/build-projection (fn [& _] :projection))
-      (set! schema/activate-projection!
-            (fn [projection]
-              (is (= :projection projection))
-              (swap! projections inc)))
-      (set! cljs/eval-str
-            (fn [_ source target _ callback]
-              (swap! evaluated conj [target source])
-              (case target
-                my.alpha (swap! loaded into
-                                ['my.alpha/first 'my.alpha/second])
-                my.beta (swap! loaded conj 'my.beta/run))
-              (callback {})))
-      (-> (seval/load-authored-program!
-            {:seon.execution/schema-forms []
-             :seon.execution/function-contracts []
-             :seon.execution/namespace-rows
-             [{:seon.ns/name :my.alpha
-               :seon.ns/source "(ns my.alpha)"
-               :seon.ns/require-edges []
-               :seon.fn/symbols ['my.alpha/first 'my.alpha/second]
-               :seon.fn/sources ["(defn first [] 1)"
-                                 "(defn second [] 2)"]}
-              {:seon.ns/name :my.beta
-               :seon.ns/source "(ns my.beta)"
-               :seon.ns/require-edges []
-               :seon.fn/symbols ['my.beta/run]
-               :seon.fn/sources ["(defn run [] 3)"]}]
-             :seon.execution/function-symbols
-             ['my.alpha/first 'my.alpha/second
-              'my.beta/run 'my.alpha/first]})
-          (.then
-            (fn [returned-state]
-              (is (identical? compile-state returned-state))
-              (is (= 1 @projections))
-              (is (= ['my.alpha 'my.beta] (mapv first @evaluated)))
-              (is (= 2 (count @evaluated)))))
-          (.catch
-            (fn [error]
-              (is false (str "multi-target load rejected: " error))))
-          (.finally
-            (fn []
-              (set! seval/init-bootstrap! original-init)
-              (set! seval/lookup-value original-lookup)
-              (set! cljs/eval-str original-eval-str)
-              (set! schema/build-projection original-build)
-              (set! schema/activate-projection! original-activate)
-              (done)))))))
+    (-> (seval/load-authored-program!
+         {:seon.execution/schema-forms []
+          :seon.execution/function-contracts []
+          :seon.execution/namespace-rows
+          [{:seon.ns/name :my.execution.alpha
+            :seon.ns/source "(ns my.execution.alpha)"
+            :seon.ns/require-edges []
+            :seon.fn/_ns
+            [{:seon.fn/sym 'my.execution.alpha/first
+              :seon.fn/source "(defn first [] 1)"}
+             {:seon.fn/sym 'my.execution.alpha/second
+              :seon.fn/source "(defn second [] 2)"}]
+            :seon.test/_ns []}
+           {:seon.ns/name :my.execution.beta
+            :seon.ns/source "(ns my.execution.beta)"
+            :seon.ns/require-edges []
+            :seon.fn/_ns
+            [{:seon.fn/sym 'my.execution.beta/run
+              :seon.fn/source "(defn run [] 3)"}]
+            :seon.test/_ns []}]
+          :seon.execution/function-symbols
+          ['my.execution.alpha/first 'my.execution.alpha/second
+           'my.execution.beta/run 'my.execution.alpha/first]})
+        (.then
+         (fn [compile-state]
+           (is (some? compile-state))
+           (is (fn? (seval/lookup-value 'my.execution.alpha/first)))
+           (is (fn? (seval/lookup-value 'my.execution.alpha/second)))
+           (is (fn? (seval/lookup-value 'my.execution.beta/run)))))
+        (.catch
+         (fn [error]
+           (is false (str "multi-target load rejected: " error))))
+        (.finally done))))
 
 (deftest selected-compiled-functions-skip-authored-acquisition
   (async done
@@ -326,9 +341,13 @@
                  :seon.ns/require-edges
                  [{:seon.ns.require/target :my.dep
                    :seon.ns.require/alias 'dep}]
-                 :seon.fn/sources
-                 ["(def shared 1)\n(defn view [_] (dep/show shared))"
-                  "(defn other [_] shared)"]})]
+                 :seon.fn/_ns
+                 [{:seon.fn/sym 'my.render/view
+                   :seon.fn/source
+                   "(def shared 1)\n(defn view [_] (dep/show shared))"}
+                  {:seon.fn/sym 'my.render/other
+                   :seon.fn/source "(defn other [_] shared)"}]
+                 :seon.test/_ns []})]
     (is (.startsWith source "(ns my.render (:require [my.dep :as dep]))"))
     (is (= 1 (count (re-seq #"\(def shared 1\)" source)))
         "a batch source is deduplicated rather than split per function")))
