@@ -86,7 +86,7 @@ ordinary namespaced map with these projections:
  :seon.agent.ctx.namespaces/with-tests #{...}
  :seon.agent.ctx.namespaces/current-full? true
  :seon.agent.ctx.namespaces/current-tests? true
- :seon.execution/namespace-rows
+ :seon.agent.ctx.namespaces/namespace-rows
  [{:seon.ns/name namespace-keyword
    :seon.db/tx transaction-id
    :seon.ns/source source-or-nil
@@ -111,8 +111,9 @@ compact renderers:
 - reverse `:seon.fn/_ns` rows with symbol, argument lists, doc, source, spec,
   privacy, function fact, and schema error;
 - reverse `:seon.schema/_ns` rows with key and form; and
-- reverse `:seon.test/_ns` rows with symbol, source, last pass, last failure,
-  and failure summary.
+- reverse `:seon.test/_ns` rows with symbol, source,
+  `:seon.test/last-passed-at`, `:seon.test/last-failed-at`, and failure
+  summary.
 
 One selector prevents the current full/compact/test split from fetching the
 same namespace several times. Optional uninstalled attributes are naturally
@@ -123,47 +124,45 @@ never-installed optional attribute.
 
 ### 1. Agent dials and current namespace
 
-Issue one namespace-owned `execute-many` with two independent members:
+Issue one namespace-owned `execute-many` with three independent members:
 
 1. pull the agent by `[:seon.agent/id id]`, including its four existing
    namespace dial attributes and `:seon.agent/ctx` blocks with `:db/id`,
    `:seon.agent.ctx/name`, and the same four attributes; and
 2. query the latest successful eval namespace for this agent, breaking equal
-   timestamps by the `:seon.eval/at` datom transaction.
+   timestamps by the `:seon.eval/at` datom transaction; and
+3. pull `:seon.config/current-ns` from the existing cluster config singleton,
+   so the pure formatter never falls through to an ambient config/database
+   read.
 
-The exact bounded form is the existing run -> turn -> eval join with an
-anti-join that rejects any later successful eval:
+The executable falsifier rejected the originally proposed anti-join. Datahike
+charges intermediate relation rows and structural weight before final
+projection; the anti-join expanded pairwise candidates and exhausted a
+`max-results` of 1 even with three successful evals. The selected form keeps
+the existing run -> turn -> eval join, lets Datahike order candidates once,
+and then retains one row:
 
 ```clojure
-[:find ?ns .
- :in $ ?aid
- :where
- [?agent :seon.agent/id ?aid]
- [?run :seon.agent.run/agent ?agent]
- [?turn :seon.agent.turn/run ?run]
- [?turn :seon.agent.turn/evals ?eval]
- [?eval :seon.eval/ok? true]
- [?eval :seon.eval/at ?at ?eval-tx]
- [?eval :seon.eval/ns ?ns]
- (not-join [?agent ?at ?eval-tx]
-   [?later-run :seon.agent.run/agent ?agent]
-   [?later-turn :seon.agent.turn/run ?later-run]
-   [?later-turn :seon.agent.turn/evals ?later-eval]
-   [?later-eval :seon.eval/ok? true]
-   [?later-eval :seon.eval/at ?later-at ?later-tx]
-   (or-join [?at ?eval-tx ?later-at ?later-tx]
-     [(> ?later-at ?at)]
-     (and [(= ?later-at ?at)] [(> ?later-tx ?eval-tx)])))]
+{:find [?ns ?at ?eval-tx]
+ :in [$ ?aid]
+ :where [[?agent :seon.agent/id ?aid]
+         [?run :seon.agent.run/agent ?agent]
+         [?turn :seon.agent.turn/run ?run]
+         [?turn :seon.agent.turn/evals ?eval]
+         [?eval :seon.eval/ok? true]
+         [?eval :seon.eval/at ?at ?eval-tx]
+         [?eval :seon.eval/ns ?ns]]
+ :order-by [?at :desc ?eval-tx :desc]
+ :limit 1}
 
 ```
 
-Set `max-results` to 1 and give the member explicit work and result-weight
-limits. Datahike resource exhaustion is an error, never a clipped answer. The
-shortest implementation probe is equal timestamps, a later transaction with
-an earlier timestamp, no successful eval, and a large history. If the
-anti-join does not return the same intended latest value as the current
-sort, the cut is not ready; do not fall back to silently clipping all eval
-rows.
+The member uses finite intermediate bounds of 1,000,000 work, 32,768 result
+nodes, and 262,144 structural weight. A direct Datahike probe with 512
+successful evals plus equal-time and later-transaction/older-time sentinels
+selected the later equal-time transaction and reported 1,036 work, 1,542
+result nodes, and 9,766 structural weight. Resource exhaustion remains an
+explicit block error, never a clipped namespace answer.
 
 Resolve the `:namespaces` block and the block -> agent -> default precedence
 with the existing `resolve-cfg` logic over the two ordinary maps. When no
@@ -370,6 +369,15 @@ strict byte/RSS bound, not a preconceived round-trip count.
    proof passes; it is not retained as a second execution mechanism.
 
 ## Implementation boundary
+
+Commit `db365729` implements the private bounded acquisition head, owner-local
+ordinary namespace rows, exact config/current-namespace discovery, selected
+`pull-many` plus transaction rows, and pure derived-render-function selection.
+The focused Shadow artifact compiles; execution of its focused CLJS tests is
+blocked before namespace startup by the known legacy replica import. The direct
+Datahike grown-history/equal-time probe above passes. Production wiring still
+waits for the shared `ctx.cljs` pure namespace/schema formatter and bounded
+schema-frontier seam; no alternate formatter was added.
 
 The smallest coherent atomic source unit is:
 

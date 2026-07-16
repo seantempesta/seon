@@ -147,8 +147,8 @@ Missing entity or attributes resolve through the existing `:batch` and
  [?turn :seon.agent.turn/run ?run]]
 ```
 
-Arguments are `[agent-id]`. Limits: `max-work 1000000`, `max-results 8`, and
-`max-result-weight 128`.
+Arguments are `[agent-id]`. Limits: `max-work 1000000`, `max-results 1000000`,
+and `max-result-weight 4096`.
 
 ### Member 2 — newest possible retained turns
 
@@ -169,7 +169,7 @@ bound:
  :limit window-size}
 ```
 
-Limits: `max-work 1000000`, `max-results 4096`, and
+Limits: `max-work 1000000`, `max-results 1000000`, and
 `max-result-weight 65536`. The child reverses the rows to ascending
 `[at turn]` order. Datahike applies `:order-by` after result production, so
 the limit bounds retained rows and wire size but does not falsely claim an
@@ -188,7 +188,9 @@ rotation retains no more than that many turns at any point.
  :in [$ ?agent-id]
  :where
  [[?agent :seon.agent/id ?agent-id]
-  [?eval :seon.eval/agent ?agent]
+  [?run :seon.agent.run/agent ?agent]
+  [?turn :seon.agent.turn/run ?run]
+  [?turn :seon.agent.turn/evals ?eval]
   [?eval :seon.eval/ok? true]
   [?eval :seon.eval/at ?at]
   [?eval :seon.eval/ns ?ns]]
@@ -196,8 +198,8 @@ rotation retains no more than that many turns at any point.
  :limit 1}
 ```
 
-Limits: `max-work 500000`, `max-results 64`, and
-`max-result-weight 1024`. An empty result uses the existing
+Limits: `max-work 500000`, `max-results 500000`, and
+`max-result-weight 8192`. An empty result uses the existing
 `home/home-ns` fallback. Including the entity ID makes equal timestamps
 deterministic.
 
@@ -213,14 +215,16 @@ events by asking for the newest eval or outbound-message time:
  :where
  [?agent :seon.agent/id ?agent-id]
  (or-join [?agent ?at]
-   (and [?eval :seon.eval/agent ?agent]
+   (and [?run :seon.agent.run/agent ?agent]
+        [?turn :seon.agent.turn/run ?run]
+        [?turn :seon.agent.turn/evals ?eval]
         [?eval :seon.eval/at ?at])
    (and [?message :seon.agent.message/from ?agent]
         [?message :seon.agent.message/at ?at]))]
 ```
 
-Limits: `max-work 500000`, `max-results 8`, and
-`max-result-weight 128`. This avoids incorrectly marking a retained inbound as
+Limits: `max-work 500000`, `max-results 500000`, and
+`max-result-weight 8192`. This avoids incorrectly marking a retained inbound as
 new merely because the action it answered rotated out of the visible window.
 
 ### Members 5 and 6 — current-run work counts
@@ -247,8 +251,8 @@ For an open `run-id`, retain the existing `derive/run-turn-count` and
  [?turn :seon.agent.turn/evals ?eval]]
 ```
 
-Each uses `max-work 500000`, `max-results 8`, and
-`max-result-weight 128`. The formatter selects the form count in `:stream`
+Each uses `max-work 500000`, `max-results 500000`, and
+`max-result-weight 4096`. The formatter selects the form count in `:stream`
 mode and the turn count in `:batch` mode. It derives `:seon.derive/state` by
 calling the existing pure `derive/state-from-primitives` over the supplied
 agent/current-run maps.
@@ -256,6 +260,17 @@ agent/current-run maps.
 Stage one's aggregate `max-result-weight` is 131072. A member error remains at
 its vector position and becomes the transcript block's ordinary error text;
 siblings are not discarded.
+
+The larger member result-count bounds are intentional corrections to the
+initial proposal. Datahike charges intermediate relation rows and their
+structural weight during query execution, before aggregate/order/limit reduces
+the final wire value. A direct 200-turn/200-eval/200-message fixture measured
+result counts of `[200 601 800 400 400 501 401 1600 2200]` and structural
+weights of `[400 3607 3600 1600 1800 3407 3812 6470 8380]` across turn count,
+current namespace, last action, run-turn count, run-form count, prior namespace,
+turn window, eval rows, and message rows. Every production member retains a
+finite work, result-count, and structural-weight bound that admits those exact
+measurements; final aggregate and frame limits remain independently tighter.
 
 ## Stage two: retained evals and messages
 
@@ -294,7 +309,7 @@ groups by returned turn EID, sorts each turn's evals by
 index. It then calls `seval/result-live?` in the owning child unless the
 effective node has `::result-handles? false`.
 
-Limits: `max-work 1000000`, `max-results 16384`, and
+Limits: `max-work 1000000`, `max-results 1000000`, and
 `max-result-weight 524288`. These are hard failure bounds, not truncation.
 Datahike's resource counter includes pulled result nodes, so
 `max-result-weight` is the principal content bound; `max-results` catches
@@ -332,7 +347,7 @@ new agent retains current behavior.
 The no-turn form has the same clauses without `?cutoff-at` and its predicate.
 The child applies the existing `message->event` waking/hop gate, assigns turn
 indices with `turn-index-at`, and sorts by `[at db/id]`. Limits are
-`max-work 1000000`, `max-results 8192`, and
+`max-work 1000000`, `max-results 1000000`, and
 `max-result-weight 262144`.
 
 ### Member 2 — namespace marker seed
@@ -357,8 +372,8 @@ has omitted old turns, preserve whether the first retained eval needs an
  :limit 1}
 ```
 
-Limits: `max-work 500000`, `max-results 64`, and
-`max-result-weight 1024`. Omit this member when no turns were rotated out.
+Limits: `max-work 500000`, `max-results 500000`, and
+`max-result-weight 8192`. Omit this member when no turns were rotated out.
 Pass its namespace as the initial previous namespace to `with-ns-markers`.
 The maintained write path stamps turns before their evals and uses increasing
 times; add an adversarial fixture to keep that temporal invariant explicit.
@@ -523,6 +538,15 @@ The whole-context gates remain:
 - rendering writes no datoms.
 
 ## Cold and warm performance falsifiers
+
+Commit `a5df3d79` implements the private two-stage acquisition, the schema'd
+async transcript block owner, and the existing synchronous formatter over
+ordinary data. A temporary local acquisition inside that same formatter keeps
+the current production prompt intact until the compiled prompt caller is wired;
+it is deleted in that caller cut. The focused gate passes 17 tests and 77
+assertions, including zero database I/O in formatting, exact-coordinate two-
+stage composition, grown Datahike resource evidence, and exclusion of newer
+direct/core evals outside the existing agent -> run -> turn transcript scope.
 
 Record the current local implementation before replacement and the remote
 implementation after replacement. Use fixtures with 0, 50, and 200 retained

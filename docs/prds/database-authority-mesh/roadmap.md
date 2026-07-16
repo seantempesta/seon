@@ -1307,12 +1307,29 @@ is prohibited.
   and 115 assertions; both execution artifacts compile and include the shipped
   symbol-backed block owners through ordinary Shadow reachability. It adds no
   production caller or compatibility route.
+  Commit `db365729` adds the private namespace acquisition head: one
+  coordinate-pinned discovery request, one dependent current-namespace edge
+  pull, and one selected `pull-many` plus transaction query. Its executable
+  falsifier rejected the proposed quadratic anti-join in favor of Datahike's
+  ordered query-map path; 512 successful evals use 1,036 work, 1,542 result
+  nodes, and 9,766 structural weight and select the correct equal-time later
+  transaction. The artifact compiles; focused runtime assertions remain blocked
+  before namespace startup by the known legacy replica import. The remaining
+  namespace dependency is the shared pure `ctx.cljs` namespace/schema
+  formatter and bounded schema-frontier acquisition.
+  Commit `a5df3d79` adds the transcript's two coordinate-pinned acquisition
+  stages and retains its one synchronous formatter over ordinary data. The
+  focused gate passes 17 tests and 77 assertions, including exact production
+  resource bounds over 200 turns/evals/messages, zero formatting database I/O,
+  and exclusion of direct/core evals outside the existing turn graph. Its
+  temporary local acquisition is deleted when the compiled prompt caller
+  invokes the async owner.
 - **Next refill:** implement the namespace and transcript acquisitions through
-  the stable asynchronous `seon.db` facade, retaining their existing pure
-  formatting owners and data-dependent two-stage reads. Then migrate the
-  remaining canvas, menu/typeahead, plan, warnings, subagent, and authored
-  slots before wiring one complete prompt result into turn/debug. In parallel,
-  finish restore/readiness,
+  the compiled prompt coordinator, first closing the shared pure
+  namespace/schema formatting seam and bounded schema frontiers. Then migrate
+  canvas, plan, warnings, subagent, menu/typeahead, and authored slots through
+  their block-owned acquisitions before wiring one complete prompt result into
+  turn/debug. In parallel, finish restore/readiness,
   quiescence, and session close. Only then switch client open atomically and
   delete replica, publisher/replay, Node adapters, SCI render reconstruction,
   synchronous database-value arities, and compatibility reachability.
