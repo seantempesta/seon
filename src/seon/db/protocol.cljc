@@ -24,7 +24,11 @@
 (def query-operation :seon.db.protocol.operation/query)
 (def pull-operation :seon.db.protocol.operation/pull)
 (def pull-many-operation :seon.db.protocol.operation/pull-many)
+(def schema-operation :seon.db.protocol.operation/schema)
+(def index-page-operation :seon.db.protocol.operation/index-page)
 (def execute-many-operation :seon.db.protocol.operation/execute-many)
+(def listen-operation :seon.db.protocol.operation/listen)
+(def unlisten-operation :seon.db.protocol.operation/unlisten)
 (def cancel-operation :seon.db.protocol.operation/cancel)
 (def ensure-database-operation
   :seon.db.protocol.operation/ensure-database)
@@ -44,6 +48,8 @@
 (def knn-search-operation :seon.db.protocol.operation/knn-search)
 
 (def transaction-event :seon.db.protocol.event/transaction)
+(def datoms-event :seon.db.protocol.event/datoms)
+(def resynchronization-event :seon.db.protocol.event/resynchronization)
 
 (def protocol-error :seon.db.protocol.error/protocol)
 (def database-error :seon.db.protocol.error/database)
@@ -90,7 +96,7 @@
 (def unknown-status :seon.db.protocol.status/unknown)
 (def feed-behind-status :seon.db.protocol.status/feed-behind)
 
-(def current-version 5)
+(def current-version 6)
 
 ;; One wire contract must reject the same legal frame on every host. Paging and
 ;; operation-level result bounds remain the preferred way to stay well below it.
@@ -108,7 +114,11 @@
   query-operation
   pull-operation
   pull-many-operation
+  schema-operation
+  index-page-operation
   execute-many-operation
+  listen-operation
+  unlisten-operation
   cancel-operation
   ensure-database-operation
   acquire-database-operation
@@ -133,6 +143,7 @@
 (schema/register! ::entity-id :any)
 (schema/register! ::query-form
                   [:or [:vector :any] :map [:string {:min 1}]])
+(schema/register! ::history? :boolean)
 (schema/register! :datahike.resource/max-work [:int {:min 1}])
 (schema/register! :datahike.resource/max-results [:int {:min 1}])
 (schema/register! :datahike.resource/max-result-weight [:int {:min 1}])
@@ -195,9 +206,51 @@
 (schema/register! ::generated-candidate :any)
 (schema/register! ::generated-entity-ids :map)
 (schema/register! ::recovered? :boolean)
-(schema/register! ::event [:enum transaction-event])
+(schema/register! ::event
+                  [:enum transaction-event datoms-event
+                   resynchronization-event])
 (schema/register! ::query [:string {:min 1}])
 (schema/register! ::limit [:int {:min 1}])
+(schema/register! ::index [:enum :eavt :aevt :avet])
+(schema/register! ::prefix [:vector {:max 4} :any])
+(schema/register! ::direction [:enum :forward :reverse])
+(schema/register! ::index-page-limit [:int {:min 1 :max 200}])
+(schema/register!
+ ::datom
+ [:map {:closed true}
+  [:seon.db/e :int]
+  [:seon.db/a :qualified-keyword]
+  [:seon.db/v :any]
+  [:seon.db/tx :int]
+  [:seon.db/added? :boolean]])
+(schema/register! ::datoms [:vector ::datom])
+(schema/register!
+ ::cursor
+ [:map {:closed true}
+  [::coordinate ::coordinate]
+  [::index ::index]
+  [::prefix ::prefix]
+  [::direction ::direction]
+  [::history? ::history?]
+  [:seon.db/e :int]
+  [:seon.db/a :qualified-keyword]
+  [:seon.db/v :any]
+  [:seon.db/tx :int]
+  [:seon.db/added? :boolean]])
+(schema/register! ::schema :map)
+(schema/register!
+ :datahike.query/attribute-dependencies
+ [:or [:= :all] [:set :qualified-keyword]])
+(schema/register!
+ ::datom-pattern
+ [:map {:closed true}
+  [:seon.db/a :qualified-keyword]
+  [:seon.db/e {:optional true} :int]
+  [:seon.db/v {:optional true} :any]
+  [:seon.db/added? {:optional true} :boolean]])
+(schema/register! ::datom-patterns
+                  [:vector {:min 1 :max 64} ::datom-pattern])
+(schema/register! ::listening? :boolean)
 (schema/register! ::entity-ids [:vector :any])
 (schema/register! ::knn-entity-ids [:vector :int])
 (schema/register! ::hits [:vector :map])
@@ -288,6 +341,36 @@
 (schema/register! :seon.db.protocol.tempid/key-edn :string)
 (schema/register! :seon.db.protocol.tempid/entity :seon.db/ref)
 
+(defn- cursor-matches-index-page?
+  [coordinate* request]
+  (if-let [cursor (::cursor request)]
+    (= {::coordinate coordinate*
+        ::index (::index request)
+        ::prefix (::prefix request)
+        ::direction (::direction request)
+        ::history? (true? (::history? request))}
+       (select-keys cursor
+                    [::coordinate ::index ::prefix ::direction ::history?]))
+    true))
+
+(defn- execute-many-cursors-match?
+  [{::keys [coordinate members]}]
+  (every? (fn [member]
+            (or (not= index-page-operation (::operation member))
+                (cursor-matches-index-page? coordinate member)))
+          members))
+
+(defn- request-cursors-match?
+  [request]
+  (case (::operation request)
+    :seon.db.protocol.operation/index-page
+    (cursor-matches-index-page? (::coordinate request) request)
+
+    :seon.db.protocol.operation/execute-many
+    (execute-many-cursors-match? request)
+
+    true))
+
 (schema/register!
  ::ping-request
  [:map {:closed true}
@@ -314,6 +397,7 @@
   [::coordinate ::coordinate]
   [::query-form ::query-form]
   [::arguments ::arguments]
+  [::history? {:optional true} ::history?]
   [:datahike.resource/max-work {:optional true}
    :datahike.resource/max-work]
   [:datahike.resource/max-results {:optional true}
@@ -353,11 +437,34 @@
   [:datahike.resource/max-result-weight {:optional true}
    :datahike.resource/max-result-weight]])
 (schema/register!
+ ::schema-request
+ [:map {:closed true}
+  [::operation [:= schema-operation]]
+  [::request-id ::request-id]
+  [::database-name ::database-name]
+  [::attachment ::attachment]
+  [::coordinate ::coordinate]])
+(schema/register!
+ ::index-page-request
+ [:map {:closed true}
+  [::operation [:= index-page-operation]]
+  [::request-id ::request-id]
+  [::database-name ::database-name]
+  [::attachment ::attachment]
+  [::coordinate ::coordinate]
+  [::index ::index]
+  [::prefix ::prefix]
+  [::direction ::direction]
+  [::limit ::index-page-limit]
+  [::history? {:optional true} ::history?]
+  [::cursor {:optional true} ::cursor]])
+(schema/register!
  ::query-member
  [:map {:closed true}
   [::operation [:= query-operation]]
   [::query-form ::query-form]
   [::arguments ::arguments]
+  [::history? {:optional true} ::history?]
   [:datahike.resource/max-work {:optional true} :datahike.resource/max-work]
   [:datahike.resource/max-results {:optional true} :datahike.resource/max-results]
   [:datahike.resource/max-result-weight {:optional true}
@@ -383,11 +490,27 @@
   [:datahike.resource/max-result-weight {:optional true}
    :datahike.resource/max-result-weight]])
 (schema/register!
+ ::schema-member
+ [:map {:closed true}
+  [::operation [:= schema-operation]]])
+(schema/register!
+ ::index-page-member
+ [:map {:closed true}
+  [::operation [:= index-page-operation]]
+  [::index ::index]
+  [::prefix ::prefix]
+  [::direction ::direction]
+  [::limit ::index-page-limit]
+  [::history? {:optional true} ::history?]
+  [::cursor {:optional true} ::cursor]])
+(schema/register!
  ::member
  [:multi {:dispatch ::operation}
   [query-operation ::query-member]
   [pull-operation ::pull-member]
-  [pull-many-operation ::pull-many-member]])
+  [pull-many-operation ::pull-many-member]
+  [schema-operation ::schema-member]
+  [index-page-operation ::index-page-member]])
 (schema/register! ::members [:vector {:min 1 :max 64} ::member])
 (schema/register!
  ::execute-many-request
@@ -402,6 +525,31 @@
  ::cancel-request
  [:map {:closed true}
   [::operation [:= cancel-operation]]
+  [::request-id ::request-id]
+  [::target-request-id ::target-request-id]])
+(schema/register!
+ ::query-listen-request
+ [:map {:closed true}
+  [::operation [:= listen-operation]]
+  [::request-id ::request-id]
+  [::database-name ::database-name]
+  [::attachment ::attachment]
+  [:datahike.query/attribute-dependencies
+   :datahike.query/attribute-dependencies]])
+(schema/register!
+ ::datom-listen-request
+ [:map {:closed true}
+  [::operation [:= listen-operation]]
+  [::request-id ::request-id]
+  [::database-name ::database-name]
+  [::attachment ::attachment]
+  [::datom-patterns ::datom-patterns]])
+(schema/register! ::listen-request
+                  [:or ::query-listen-request ::datom-listen-request])
+(schema/register!
+ ::unlisten-request
+ [:map {:closed true}
+  [::operation [:= unlisten-operation]]
   [::request-id ::request-id]
   [::target-request-id ::target-request-id]])
 (schema/register!
@@ -500,7 +648,11 @@
   [query-operation ::query-request]
   [pull-operation ::pull-request]
   [pull-many-operation ::pull-many-request]
+  [schema-operation ::schema-request]
+  [index-page-operation ::index-page-request]
   [execute-many-operation ::execute-many-request]
+  [listen-operation ::listen-request]
+  [unlisten-operation ::unlisten-request]
   [cancel-operation ::cancel-request]
   [ensure-database-operation ::ensure-database-request]
   [acquire-database-operation ::acquire-database-request]
@@ -564,6 +716,26 @@
   [::coordinate ::coordinate]
   [::result ::result]])
 (schema/register!
+ ::schema-response
+ [:map {:closed true}
+  [::success? [:= true]]
+  [::request-id ::request-id]
+  [::database-name ::database-name]
+  [::attachment ::attachment]
+  [::coordinate ::coordinate]
+  [::schema ::schema]])
+(schema/register!
+ ::index-page-response
+ [:map {:closed true}
+  [::success? [:= true]]
+  [::request-id ::request-id]
+  [::database-name ::database-name]
+  [::attachment ::attachment]
+  [::coordinate ::coordinate]
+  [::datoms ::datoms]
+  [::complete? ::complete?]
+  [::cursor {:optional true} ::cursor]])
+(schema/register!
  ::query-member-response
  [:map {:closed true}
   [::success? [:= true]]
@@ -576,6 +748,18 @@
   [::success? [:= true]]
   [::result ::result]])
 (schema/register!
+ ::schema-member-response
+ [:map {:closed true}
+  [::success? [:= true]]
+  [::schema ::schema]])
+(schema/register!
+ ::index-page-member-response
+ [:map {:closed true}
+  [::success? [:= true]]
+  [::datoms ::datoms]
+  [::complete? ::complete?]
+  [::cursor {:optional true} ::cursor]])
+(schema/register!
  ::failed-member-response
  [:map {:closed true}
   [::success? [:= false]]
@@ -583,7 +767,8 @@
   [::error ::error]])
 (schema/register! ::member-response
                   [:or ::failed-member-response ::query-member-response
-                   ::read-member-response])
+                   ::read-member-response ::schema-member-response
+                   ::index-page-member-response])
 (schema/register! ::results [:vector ::member-response])
 (schema/register!
  ::execute-many-response
@@ -602,6 +787,35 @@
   [::target-request-id ::target-request-id]
   [::canceled? ::canceled?]
   [::running? ::running?]])
+(schema/register!
+ ::listen-response
+ [:map {:closed true}
+  [::success? [:= true]]
+  [::request-id ::request-id]
+  [::database-name ::database-name]
+  [::attachment ::attachment]
+  [::coordinate ::coordinate]
+  [::listening? [:= true]]])
+(schema/register!
+ ::unlisten-response
+ [:map {:closed true}
+  [::success? [:= true]]
+  [::request-id ::request-id]
+  [::target-request-id ::target-request-id]
+  [::listening? [:= false]]])
+(schema/register!
+ ::datoms-event-map
+ [:map {:closed true}
+  [::event [:= datoms-event]]
+  [::request-id ::request-id]
+  [::coordinate ::coordinate]
+  [::datoms ::datoms]])
+(schema/register!
+ ::resynchronization-event-map
+ [:map {:closed true}
+  [::event [:= resynchronization-event]]
+  [::request-id ::request-id]
+  [::coordinate ::coordinate]])
 (schema/register!
  ::ensure-database-response
  [:map {:closed true}
@@ -714,8 +928,14 @@
   ::resolve-head-response
   ::query-response
   ::read-response
+  ::schema-response
+  ::index-page-response
   ::execute-many-response
   ::cancel-response
+  ::listen-response
+  ::unlisten-response
+  ::datoms-event-map
+  ::resynchronization-event-map
   ::ensure-database-response
   ::acquire-database-response
   ::observe-database-lifecycle-response
@@ -766,6 +986,7 @@
   [::coordinate ::coordinate]
   [::query-form ::query-form]
   [::arguments ::arguments]
+  [::history? {:optional true} ::history?]
   [:datahike.resource/max-work {:optional true}
    :datahike.resource/max-work]
   [:datahike.resource/max-results {:optional true}
@@ -803,6 +1024,26 @@
   [:datahike.resource/max-result-weight {:optional true}
    :datahike.resource/max-result-weight]])
 (schema/register!
+ ::schema-request-input
+ [:map {:closed true}
+  [::request-id ::request-id]
+  [::database-name ::database-name]
+  [::attachment ::attachment]
+  [::coordinate ::coordinate]])
+(schema/register!
+ ::index-page-request-input
+ [:map {:closed true}
+  [::request-id ::request-id]
+  [::database-name ::database-name]
+  [::attachment ::attachment]
+  [::coordinate ::coordinate]
+  [::index ::index]
+  [::prefix ::prefix]
+  [::direction ::direction]
+  [::limit ::index-page-limit]
+  [::history? {:optional true} ::history?]
+  [::cursor {:optional true} ::cursor]])
+(schema/register!
  ::execute-many-request-input
  [:map {:closed true}
   [::request-id ::request-id]
@@ -812,6 +1053,29 @@
   [::members ::members]])
 (schema/register!
  ::cancel-request-input
+ [:map {:closed true}
+  [::request-id ::request-id]
+  [::target-request-id ::target-request-id]])
+(schema/register!
+ ::query-listen-request-input
+ [:map {:closed true}
+  [::request-id ::request-id]
+  [::database-name ::database-name]
+  [::attachment ::attachment]
+  [:datahike.query/attribute-dependencies
+   :datahike.query/attribute-dependencies]])
+(schema/register!
+ ::datom-listen-request-input
+ [:map {:closed true}
+  [::request-id ::request-id]
+  [::database-name ::database-name]
+  [::attachment ::attachment]
+  [::datom-patterns ::datom-patterns]])
+(schema/register! ::listen-request-input
+                  [:or ::query-listen-request-input
+                   ::datom-listen-request-input])
+(schema/register!
+ ::unlisten-request-input
  [:map {:closed true}
   [::request-id ::request-id]
   [::target-request-id ::target-request-id]])
@@ -917,6 +1181,19 @@
   [input]
   (assoc input ::operation pull-many-operation))
 
+(defn schema-request
+  "Construct one coordinate-pinned Datahike schema request."
+  {:malli/schema [:=> [:cat ::schema-request-input] ::schema-request]}
+  [input]
+  (assoc input ::operation schema-operation))
+
+(defn index-page-request
+  "Construct one coordinate-pinned bounded Datahike index page request."
+  {:malli/schema [:=> [:cat ::index-page-request-input]
+                  ::index-page-request]}
+  [input]
+  (assoc input ::operation index-page-operation))
+
 (defn execute-many-request
   "Construct one coordinate-pinned group of independent database reads."
   {:malli/schema [:=> [:cat ::execute-many-request-input]
@@ -929,6 +1206,18 @@
   {:malli/schema [:=> [:cat ::cancel-request-input] ::cancel-request]}
   [input]
   (assoc input ::operation cancel-operation))
+
+(defn listen-request
+  "Construct one physical-connection-owned database interest request."
+  {:malli/schema [:=> [:cat ::listen-request-input] ::listen-request]}
+  [input]
+  (assoc input ::operation listen-operation))
+
+(defn unlisten-request
+  "Construct one request to remove a database interest by request identity."
+  {:malli/schema [:=> [:cat ::unlisten-request-input] ::unlisten-request]}
+  [input]
+  (assoc input ::operation unlisten-operation))
 
 (defn ensure-database-request
   "Construct one idempotent database-open request."
@@ -1064,13 +1353,17 @@
   "True when `request` is one complete canonical protocol request."
   {:malli/schema [:=> [:cat :any] :boolean]}
   [request]
-  (@request-validator request))
+  (and (@request-validator request)
+       (request-cursors-match? request)))
 
 (defn explain-request
   "Malli explanation for an invalid request, or nil when valid."
   {:malli/schema [:=> [:cat :any] [:maybe :map]]}
   [request]
-  (@request-explainer request))
+  (or (@request-explainer request)
+      (when-not (request-cursors-match? request)
+        {::cursor (::cursor request)
+         ::error "Index-page cursor does not match request."})))
 
 (defn valid-response?
   "True when `response` is one complete canonical protocol response."
