@@ -54,8 +54,11 @@ close cut that makes atomic session open and replica removal possible. Restore
 completion recording, retry adoption, startup attachment validation, and HTTP
 readiness now share one coordinate-pinned ordinary-data authority acquisition;
 readiness no longer dereferences the local replica. The next boundary is the
-remaining startup/web synchronous consumers and launch-descriptor ownership,
-followed by atomic client session open and replica/feed deletion.
+remaining startup/web synchronous consumers and launch-descriptor ownership.
+Program admission is also session-native: it acquires schema forms and function
+contracts together at one authority coordinate and publishes only after the
+ordinary projection verifies. Atomic client session open and replica/feed
+deletion follow.
 Autocomplete/export and the debug feed already consume the same coordinate-
 pinned compiled child result; the obsolete synchronous AI composer is deleted.
 Stale debug completions cannot install candidate catalogs, and raw AI

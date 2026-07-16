@@ -1432,6 +1432,13 @@ is prohibited.
   `seon.db.replica.js` import stops the runner before namespace startup. The
   `bench-client` artifact compiles with 40 synchronous-consumer warnings, down
   from 46, and the execution artifact remains at 18.
+- Runtime program admission now acquires schema forms and function contracts
+  together at one authority coordinate before building and reconciling the
+  process-local projection. Preparation, immediate publication, eval
+  publication, and Shadow rebuild publication honestly await that acquisition;
+  none dereferences `seon.db/*conn*`. `bench-client` compiles with the same 40
+  remaining warnings, so this removes a hidden local database dependency
+  without adding a compatibility projection path.
 - **Next refill:** finish the remaining startup/web synchronous consumers,
   move launch-descriptor ownership out of the replica, switch client open
   atomically, and

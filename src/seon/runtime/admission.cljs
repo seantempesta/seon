@@ -8,6 +8,7 @@
   (:require
     [cljs.reader :as reader]
     [seon.db :as db]
+    [seon.db.protocol :as protocol]
     [seon.error :as error]
     [seon.instrument :as instrument]
     [seon.schema :as schema]))
@@ -166,35 +167,71 @@
     (and (= :publishing (::status before))
          (= :available (::status after)))))
 
+(def ^:private schema-query
+  '[:find ?key ?form
+    :where
+    [?schema :seon.schema/key ?key]
+    [?schema :seon.schema/form ?form]])
+
+(def ^:private function-contract-query
+  '[:find ?sym ?form
+    :where
+    [?function :seon.fn/sym ?sym]
+    [?function :seon.fn/spec ?form]])
+
 (defn ^:no-doc committed-projection
-  "Build the canonical projection from one already-frozen database value."
-  {:malli/schema [:=> [:catn [::database :any]] :map]}
-  [database]
+  "Build the canonical projection from ordinary acquired rows."
+  {:malli/schema [:=> [:catn [::acquired :map]] :map]}
+  [{::keys [schema-rows function-contract-rows]}]
   (let [forms
         (into {}
               (map (fn [[key form]]
                      [key (reader/read-string form)]))
-              (db/query
-                '[:find ?key ?form
-                  :where
-                  [?schema :seon.schema/key ?key]
-                  [?schema :seon.schema/form ?form]]
-                database))
+              schema-rows)
         function-contracts
         (into {}
               (map (fn [[sym form]]
                      [(symbol sym) (reader/read-string form)]))
-              (db/query
-                '[:find ?sym ?form
-                  :where
-                  [?function :seon.fn/sym ?sym]
-                  [?function :seon.fn/spec ?form]]
-                database))]
+              function-contract-rows)]
     (schema/build-projection forms function-contracts)))
 
-(defn- reconcile-committed!
-  [database old-projection]
-  (let [projection (committed-projection database)
+(defn- query-member
+  [query]
+  {::protocol/operation protocol/query-operation
+   ::protocol/query-form query
+   ::protocol/arguments []
+   :datahike.resource/max-work 1000000
+   :datahike.resource/max-results 4096
+   :datahike.resource/max-result-weight (* 3 1024 1024)})
+
+(defn- query-result
+  [member]
+  (if (::protocol/success? member)
+    (:datahike.query/result member)
+    (throw (ex-info "Committed program acquisition failed."
+                    {:seon.db/error member :seon.error/kind :core-bug}))))
+
+(defn ^:async ^:private acquire-committed-projection!
+  []
+  (let [acquired
+        (await
+         (db/execute-many
+          {::db/max-result-weight (* 6 1024 1024)
+           ::db/members [(query-member schema-query)
+                         (query-member function-contract-query)]}))
+        _ (when (:seon.error/message acquired)
+            (throw (ex-info "Committed program acquisition failed."
+                            {:seon.db/error acquired
+                             :seon.error/kind :core-bug})))
+        [schemas contracts] (::db/results acquired)]
+    {::db/coordinate (::db/coordinate acquired)
+     ::schema-rows (query-result schemas)
+     ::function-contract-rows (query-result contracts)}))
+
+(defn- ^:async reconcile-committed!
+  [old-projection]
+  (let [acquired (await (acquire-committed-projection!))
+        projection (committed-projection acquired)
         stats
         (instrument/reconcile-projection!
           {::instrument/old-projection old-projection
@@ -208,6 +245,7 @@
            (:seon.schema.projection/fingerprint projection)})))
     (schema/activate-projection! projection)
     {::projection projection
+     ::db/coordinate (::db/coordinate acquired)
      ::instrumentation stats
      ::generation (:seon.schema.projection/fingerprint projection)}))
 
@@ -225,7 +263,7 @@
          (not (contains? before ::prepared-generation))
          (= generation (::prepared-generation after)))))
 
-(defn prepare-committed!
+(defn ^:async prepare-committed!
   "Reconstruct and retain one verified committed projection.
 
    Normal callers acquire publication here. Cold boot may call
@@ -252,7 +290,7 @@
       (let [old-projection (::previous-projection @!state)]
         (try
           (let [{::keys [generation instrumentation]}
-                (reconcile-committed! @db/*conn* old-projection)]
+                (await (reconcile-committed! old-projection))]
             (when-not (retain-prepared-generation! generation)
               (throw
                 (ex-info
@@ -272,7 +310,7 @@
                 {:seon.error/raw original :seon.error/fault :core}))
             (try
               (let [{::keys [generation instrumentation]}
-                    (reconcile-committed! @db/*conn* old-projection)]
+                    (await (reconcile-committed! old-projection))]
                 (when-not (retain-prepared-generation! generation)
                   (throw
                     (ex-info
@@ -334,7 +372,7 @@
                  {::generation generation
                   ::state (state)}))))))
 
-(defn publish-committed!
+(defn ^:async publish-committed!
   "Reconstruct, verify, and immediately admit the committed program."
   {:malli/schema
    [:=> [:cat]
@@ -345,7 +383,7 @@
      [::instrumentation {:optional true} :map]
      [:seon/error {:optional true} :map]]]}
   []
-  (admit-prepared! (prepare-committed! {})))
+  (admit-prepared! (await (prepare-committed! {}))))
 
 (defn detach!
   "Close admission and remove the detached database's live projection.

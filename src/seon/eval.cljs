@@ -4745,7 +4745,7 @@
               publication
               (cond
                 new-projection
-                (admission/publish-committed!)
+                (await (admission/publish-committed!))
 
                 (seq changed-schemas)
                 (do

@@ -562,24 +562,31 @@
          ::admission/reason "Shadow build failed"})
 
       :build-complete
-      (let [publication (admission/publish-committed!)]
-        (log/info-console!
-          "seon.client"
-          (str "reload: committed publication "
-               (pr-str
-                 (instrumentation-summary
-                   (::admission/instrumentation publication)))))
-        (when (::admission/published? publication)
-          ;; Reinstall listeners/ticker only after the reloaded program is one
-          ;; verified generation. Web feeds re-arm their own lazy listeners.
-          (if (autonomous-runtime?)
-            (do
-              (rehost-agent-runtimes!)
-              (agent-loop/install-ticker!))
-            (do
-              (agent-loop/uninstall-ticker!)
-              (agent-runtime/unhost-all!)))
-          (start-heartbeat!)))
+      (-> (admission/publish-committed!)
+          (.then
+           (fn [publication]
+             (log/info-console!
+              "seon.client"
+              (str "reload: committed publication "
+                   (pr-str
+                    (instrumentation-summary
+                     (::admission/instrumentation publication)))))
+             (when (::admission/published? publication)
+               ;; Reinstall listeners/ticker only after the reloaded program is
+               ;; one verified generation. Web feeds re-arm lazily.
+               (if (autonomous-runtime?)
+                 (do
+                   (rehost-agent-runtimes!)
+                   (agent-loop/install-ticker!))
+                 (do
+                   (agent-loop/uninstall-ticker!)
+                   (agent-runtime/unhost-all!)))
+               (start-heartbeat!))))
+          (.catch
+           (fn [error]
+             (admission/mark-unavailable!
+              {:seon.error/raw error
+               ::admission/reason "Committed reload publication failed"}))))
 
       nil))
   true)
@@ -2970,8 +2977,9 @@
                         replay-stats)))
                 preparation
                 (when restore-startup
-                  (admission/prepare-committed!
-                    {::admission/record-failures? false}))
+                  (await
+                   (admission/prepare-committed!
+                    {::admission/record-failures? false})))
                 _ (when (and restore-startup
                              (not (::admission/prepared? preparation)))
                     (throw
@@ -3002,7 +3010,7 @@
                     (swap! !state assoc
                            ::restore-completion-result completion-result))
                 publication (when-not restore-startup
-                              (admission/publish-committed!))
+                              (await (admission/publish-committed!)))
                 _ (when (and (nil? restore-startup)
                              (not (::admission/published? publication)))
                     (throw
