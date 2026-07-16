@@ -232,7 +232,7 @@
   [::direction ::direction]
   [::history? ::history?]
   [:seon.db/e :int]
-  [:seon.db/a :qualified-keyword]
+  [:seon.db/a :keyword]
   [:seon.db/v :any]
   [:seon.db/tx :int]
   [:seon.db/added? :boolean]])

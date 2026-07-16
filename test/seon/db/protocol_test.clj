@@ -127,11 +127,14 @@
           ::protocol/attachment attachment
           ::protocol/coordinate point
           ::protocol/index :avet
-          ::protocol/prefix [:person/fingerprint value]
+          ::protocol/prefix [:fingerprint value]
           ::protocol/direction :forward
           ::protocol/limit 10
           ::protocol/cursor
-          (merge cursor {:seon.db/v value ::protocol/index :avet})})
+          (merge cursor
+                 {:seon.db/a :fingerprint
+                  :seon.db/v value
+                  ::protocol/index :avet})})
         decoded (transit-roundtrip request)]
     (is (protocol/valid-request? decoded))
     (is (= [1 2 3]
