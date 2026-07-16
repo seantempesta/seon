@@ -564,28 +564,25 @@
 
 ;;; Transaction reports
 
+(declare database-value)
+
 (defn- transaction-report-data
-  [report request-id]
+  [database-name db-before-descriptor report request-id]
   (let [db-after (:db-after report)
         db-before (:db-before report)
         transaction-data (public-transaction-datoms (:tx-data report))]
-    {::protocol/transaction-data
-     (transaction-data->protocol transaction-data)
-     ::protocol/datoms-added (count (filter :added transaction-data))
-     ::protocol/datoms-retracted (count (remove :added transaction-data))
-     ::protocol/coordinate (coordinate/resolved db-after)
-     ::protocol/previous-coordinate
-     (coordinate/at
-      {::coordinate/db-value db-after
-       ::coordinate/target-t (basis-t-of db-before)})
-     ::protocol/temporary-ids
+    {:db-before (or db-before-descriptor
+                    (database-value database-name db-before))
+     :db-after (database-value database-name db-after)
+     :tx-data (transaction-data->protocol transaction-data)
+     :tempids
      (into {}
            (remove
             (fn [[tempid _entity]]
               (or (= :db/current-tx tempid)
                   (internal-tempid? tempid))))
            (:tempids report))
-     ::protocol/transaction-meta (public-transaction-meta (:tx-meta report))
+     :tx-meta (public-transaction-meta (:tx-meta report))
      ::protocol/request-id request-id}))
 
 (defn initialize-connection!
@@ -1130,14 +1127,11 @@
   [data]
   (cond->
    {::protocol/request-id (::protocol/request-id data)
-    ::protocol/coordinate (::protocol/coordinate data)
-    ::protocol/previous-coordinate (::protocol/previous-coordinate data)
-    ::protocol/temporary-ids (::protocol/temporary-ids data)
-    ::protocol/transaction-data (::protocol/transaction-data data)
-    ::protocol/datoms-added (::protocol/datoms-added data)
-    ::protocol/datoms-retracted (::protocol/datoms-retracted data)}
-    (seq (::protocol/transaction-meta data))
-    (assoc ::protocol/transaction-meta (::protocol/transaction-meta data))
+    :db-before (:db-before data)
+    :db-after (:db-after data)
+    :tx-data (:tx-data data)
+    :tempids (:tempids data)
+    :tx-meta (:tx-meta data)}
 
     (::protocol/recovered? data)
     (assoc ::protocol/recovered? true)))
@@ -1189,7 +1183,7 @@
           candidates)))
 
 (defn- recovered-response
-  [db transaction request-id candidates]
+  [db database-name transaction request-id candidates]
   (let [all-datoms (transaction-datoms db transaction)
         datoms (public-transaction-datoms all-datoms)
         stored-transaction-meta
@@ -1202,23 +1196,17 @@
                  (= transaction (.-e datom)))
                all-datoms))
         transaction-meta (public-transaction-meta stored-transaction-meta)
+        current (database-value database-name db)
         response
         (response-from-report-data
          {::protocol/request-id request-id
-          ::protocol/coordinate
-          (coordinate/at
-           {::coordinate/db-value db
-            ::coordinate/target-t transaction})
-          ::protocol/previous-coordinate
-          (coordinate/at
-           {::coordinate/db-value db
-            ::coordinate/target-t (dec transaction)})
-          ::protocol/temporary-ids
-          (recovered-temporary-ids db transaction)
-          ::protocol/transaction-data (transaction-data->protocol datoms)
-          ::protocol/datoms-added (count (filter :added datoms))
-          ::protocol/datoms-retracted (count (remove :added datoms))
-          ::protocol/transaction-meta transaction-meta
+          :db-before (assoc current :as-of (dec transaction))
+          :db-after (if (= transaction (basis-t-of db))
+                      current
+                      (assoc current :as-of transaction))
+          :tempids (recovered-temporary-ids db transaction)
+          :tx-data (transaction-data->protocol datoms)
+          :tx-meta transaction-meta
           ::protocol/recovered? true})
         generated-entity-ids
         (recovered-generated-entity-ids datoms candidates)]
@@ -1235,35 +1223,34 @@
             ::actual-request-hash actual-hash}))
 
 (defn- recover-committed
-  [db transaction request-id expected-hash candidates]
+  [db database-name transaction request-id expected-hash candidates]
   (let [actual-hash (::protocol/request-hash (d/entity db transaction))]
     (if (= expected-hash actual-hash)
-      (recovered-response db transaction request-id candidates)
+      (recovered-response db database-name transaction request-id candidates)
       (throw (request-conflict request-id expected-hash actual-hash)))))
 
 (defn- recover-current
-  [connection request-id fingerprint candidates]
+  [connection database-name request-id fingerprint candidates]
   (let [db-value (d/db connection)]
     (when-let [transaction (committed-transaction db-value request-id)]
-      (recover-committed db-value transaction request-id fingerprint
+      (recover-committed db-value database-name transaction request-id fingerprint
                          candidates))))
 
-(defn- assert-current-coordinate!
-  [db-value expected-coordinate]
-  (when (and expected-coordinate
-             (not= expected-coordinate (coordinate/resolved db-value)))
-    (throw
-     (ex-info "The database coordinate changed before commit."
-              {::failure-kind protocol/stale-coordinate-error
-               ::protocol/expected-coordinate expected-coordinate
-               ::protocol/current-coordinate
-               (coordinate/resolved db-value)}))))
+(defn- assert-current-database-value!
+  [database-name db-value expected-db]
+  (let [current-db (database-value database-name db-value)]
+    (when (and expected-db (not= expected-db current-db))
+      (throw
+       (ex-info "The database changed before commit."
+                {::failure-kind protocol/stale-coordinate-error
+                 :seon.db/expected-db expected-db
+                 :seon.db/current-db current-db})))))
 
 (defn- prepare-transaction!
   [runtime connection database-name attachment request]
   (let [transaction-data (::protocol/transaction-data request)
         transaction-meta (::protocol/transaction-meta request)
-        expected-coordinate (::protocol/expected-coordinate request)
+        expected-db (:seon.db/expected-db request)
         request-id (::protocol/request-id request)
         candidates (::protocol/generated-candidates request)
         generated? (contains? request ::protocol/generated-candidates)
@@ -1271,10 +1258,11 @@
         _ (assert-protocol-attributes-free! transaction-data transaction-meta)]
     (locking connection
       (if-let [response
-               (recover-current connection request-id fingerprint candidates)]
+               (recover-current connection database-name request-id fingerprint
+                                candidates)]
         {::response response}
         (let [db-value (d/db connection)
-              _ (assert-current-coordinate! db-value expected-coordinate)
+              _ (assert-current-database-value! database-name db-value expected-db)
               schema-declarations
               (derive-transaction-schema db-value transaction-data)
               effective-schema
@@ -1301,47 +1289,52 @@
               transaction
               (cond-> {:tx-data data-with-receipts
                        :tx-meta transaction-meta*}
-                expected-coordinate
+                expected-db
                 (assoc :datahike/expected-basis-t
-                       (::coordinate/t expected-coordinate))
+                       (:t expected-db))
                 generated?
                 (assoc ::id/generated-candidates candidates))]
           {::transaction-result (d/transact! connection transaction)
+           ::database-before (database-value database-name db-value)
            ::request-id request-id
            ::fingerprint fingerprint
            ::candidates candidates
            ::database-name database-name
            ::coordinate/attachment attachment
-           ::protocol/expected-coordinate expected-coordinate
+           :seon.db/expected-db expected-db
            ::connection connection
            ::runtime runtime})))))
 
 (defn- serialized-transaction-error
-  [connection expected-coordinate ^Throwable throwable]
+  [database-name connection expected-db ^Throwable throwable]
   (if (= :transaction/stale-basis (:error (ex-data throwable)))
-    (ex-info "The database coordinate changed before commit."
+    (ex-info "The database changed before commit."
              {::failure-kind protocol/stale-coordinate-error
-              ::protocol/expected-coordinate expected-coordinate
-              ::protocol/current-coordinate
-              (coordinate/resolved (d/db connection))}
+              :seon.db/expected-db expected-db
+              :seon.db/current-db
+              (database-value database-name (d/db connection))}
              throwable)
     throwable))
 
 (defn- finish-transaction!
   [{::keys [runtime connection database-name request-id fingerprint candidates]
     attachment ::coordinate/attachment
-    expected-coordinate ::protocol/expected-coordinate}
+    db-before-descriptor ::database-before
+    expected-db :seon.db/expected-db}
    result]
   (if (instance? Throwable result)
     ;; A commit can win before the acknowledgement is lost. The durable
     ;; receipt, not the delivery failure, is authoritative.
     (if-let [response
-             (recover-current connection request-id fingerprint candidates)]
+             (recover-current connection database-name request-id fingerprint
+                              candidates)]
       response
       (throw
-       (serialized-transaction-error connection expected-coordinate result)))
+       (serialized-transaction-error database-name connection expected-db result)))
     (let [response
-          (response-from-report-data (transaction-report-data result request-id))
+          (response-from-report-data
+           (transaction-report-data database-name db-before-descriptor result
+                                    request-id))
           generated-entity-ids (::id/generated-eids result)]
       (enqueue-embedding! runtime database-name attachment request-id result)
       (cond-> response
@@ -1523,29 +1516,23 @@
   (when-let [scope (database-scope database-name expected-attachment)]
     (drain-database-scope! runtime scope)))
 
+(declare release-connection-acquisition!)
+
 (defn- handle-release-database
-  [runtime request]
-  (let [database-name (::protocol/target-database-name request)
-        attachment (::protocol/target-attachment request)
-        scope (database-scope database-name attachment)
+  [runtime transport-connection request]
+  (let [database-name (get-in request [:seon.db/db :db-name])
+        route (registry/resolve-connection
+               {::registry/database-name (keyword database-name)})
         result
-        (registry/release-attachment!
-         {::registry/target-database-name
-          (keyword database-name)
-          ::registry/attachment attachment
-          ::registry/expected-target-head
-          (::protocol/expected-target-head request)
-          ::registry/drain!
-          (fn [_release]
-            (when scope (drain-database-scope! runtime scope)))})]
-    (when (and scope (::registry/released? result) (::executor runtime))
-      (executor/release-scope!
-       {::executor/executor (::executor runtime) ::executor/scope scope}))
+        (if (::registry/conn route)
+          (release-connection-acquisition!
+           runtime transport-connection database-name (::registry/attachment route))
+          {::registry/released? false})]
+    (when (::registry/released? result)
+      (swap! (::acquisitions transport-connection)
+             disj [database-name (::registry/attachment route)]))
     (protocol/success
-     {::protocol/target-database-name
-      (::protocol/target-database-name request)
-      ::protocol/target-attachment (::registry/attachment result)
-      ::protocol/released? (::registry/released? result)})))
+     {::protocol/released? (boolean (::registry/released? result))})))
 
 (defn- handle-delete-branch
   [runtime request]
@@ -1792,10 +1779,8 @@
        {::protocol/error-kind protocol/stale-coordinate-error
         ::protocol/error (.getMessage throwable)
         ::protocol/body
-        {::protocol/expected-coordinate
-         (::protocol/expected-coordinate (ex-data throwable))
-         ::protocol/current-coordinate
-         (::protocol/current-coordinate (ex-data throwable))}})
+        {:seon.db/expected-db (:seon.db/expected-db (ex-data throwable))
+         :seon.db/current-db (:seon.db/current-db (ex-data throwable))}})
 
       (= failure-kind protocol/request-conflict-error)
       (protocol/failure
@@ -2073,12 +2058,6 @@
 (defn- install-interest-locked!
   [runtime transport-connection request connection database-name attachment]
   (let [request-id (::protocol/request-id request)
-        _
-        (when (contains? @(::interests transport-connection) request-id)
-          (throw
-           (ex-info "The request id already names a live database interest."
-                    {::failure-kind protocol/request-conflict-error
-                     ::protocol/request-id request-id})))
         db-value (d/db connection)
         scope (committed-scope database-name attachment db-value)
         interest (listen-interest request scope)
@@ -2124,19 +2103,13 @@
       (let [{::keys [connection database-name]
              attachment ::coordinate/attachment}
             (connection-for-request transport-connection request)
-            _ (when-not (= attachment (::protocol/attachment request))
-                (throw
-                 (ex-info "The listen attachment is no longer current."
-                          {::failure-kind protocol/stale-coordinate-error})))
-            coordinate
+            _
             (locking (::interest-lock runtime)
+              (remove-interest-locked! runtime transport-connection request-id)
               (install-interest-locked! runtime transport-connection request
                                         connection database-name attachment))]
         (protocol/success
          {::protocol/request-id request-id
-          ::protocol/database-name database-name
-          ::protocol/attachment attachment
-          ::protocol/coordinate coordinate
           ::protocol/listening? true})))))
 
 (defn- handle-unlisten!
@@ -2231,17 +2204,18 @@
   [runtime scope report]
   (let [datoms (mapv datom-map
                      (public-transaction-datoms (:tx-data report)))
-        coordinate (coordinate/resolved (:db-after report))]
+        database-name (::executor/database-name scope)]
     (doseq [[[transport-connection request-id owner] interest]
             (candidate-interests runtime scope datoms)
             :let [matches (matching-datoms interest datoms)]
             :when (seq matches)]
       (send-interest-event!
        transport-connection request-id owner
-       {::protocol/event protocol/datoms-event
-        ::protocol/request-id request-id
-        ::protocol/coordinate coordinate
-        ::protocol/datoms matches}))))
+       (merge
+        {::protocol/event protocol/datoms-event
+         ::protocol/request-id request-id}
+        (dissoc (transaction-report-data database-name nil report request-id)
+                ::protocol/request-id))))))
 
 (defn- replace-gapped-source!
   [runtime scope source]
@@ -2256,7 +2230,8 @@
                (::executor/connection-id scope)
                (::executor/generation scope)
                committed-report-capacity)
-              coordinate (coordinate/resolved (d/db (::connection entry)))
+              db-after (database-value (::database-name entry)
+                                       (d/db (::connection entry)))
               references
               (into (::all entry) (mapcat val) (::by-attribute entry))
               next-entry (assoc entry ::source replacement)]
@@ -2266,20 +2241,20 @@
                       (update ::by-source dissoc source)
                       (assoc-in [::by-source replacement] scope)))
           {::source replacement
-           ::protocol/coordinate coordinate
+           :db-after db-after
            ::references references})))))
 
 (defn- deliver-resynchronization!
   [runtime scope source]
   (when-let [{::keys [references]
-              coordinate ::protocol/coordinate}
+              db-after :db-after}
              (replace-gapped-source! runtime scope source)]
     (doseq [[transport-connection request-id owner] references]
       (send-interest-event!
        transport-connection request-id owner
        {::protocol/event protocol/resynchronization-event
         ::protocol/request-id request-id
-        ::protocol/coordinate coordinate}))))
+        :db-after db-after}))))
 
 (defn- execute-delivery!
   [runtime {::keys [scope source]}]
@@ -3122,7 +3097,7 @@
          (handle-create-branch runtime request)
 
          :seon.db.protocol.operation/release-database
-         (handle-release-database runtime request)
+         (handle-release-database runtime transport-connection request)
 
          :seon.db.protocol.operation/delete-branch
          (handle-delete-branch runtime request)

@@ -52,6 +52,9 @@
       {:db/ident :remote.contract/friend
        :db/valueType :db.type/ref
        :db/cardinality :db.cardinality/one}
+      {:db/ident :remote.contract/source
+       :db/valueType :db.type/keyword
+       :db/cardinality :db.cardinality/one}
       {:db/id "primary"
        :remote.contract/id (str database-name "/primary")
        :remote.contract/name (str "name-" rank)
@@ -178,9 +181,9 @@
        (finally (close-authority! ~binding)))))
 
 (defn- transact-request
-  [request-id database-name tx-data tx-meta]
+  [request-id database tx-data tx-meta]
   (request protocol/transact-operation request-id
-           (cond-> {::protocol/database-name database-name
+           (cond-> {:seon.db/db database
                     ::protocol/transaction-data tx-data}
              tx-meta (assoc ::protocol/transaction-meta tx-meta))))
 
@@ -252,7 +255,7 @@
             response
             (call! channel
                    (transact-request
-                    "report/transact" database-name
+                    "report/transact" before
                     [[:db/add [:remote.contract/id
                                (str database-name "/primary")]
                       :remote.contract/name "changed"]]
@@ -586,8 +589,7 @@
               (call!
                channel
                (request protocol/listen-operation request-id
-                         {::protocol/database-name (database-name-of database)
-                         :seon.db/db database
+                         {:seon.db/db database
                          ::protocol/query-form
                          '[:find ?name :where
                            [?e :remote.contract/name ?name]]})))]
@@ -606,7 +608,7 @@
                     (call!
                      mutations
                      (transact-request
-                      "listen/write-a" database-a
+                      "listen/write-a" (database-value database-a)
                       [[:db/add [:remote.contract/id
                                  (str database-a "/primary")]
                         :remote.contract/name "event-a"]]
@@ -621,7 +623,7 @@
                 (call!
                  mutations
                  (transact-request
-                  "listen/write-b" database-b
+                  "listen/write-b" (database-value database-b)
                   [[:db/add [:remote.contract/id
                              (str database-b "/primary")]
                     :remote.contract/name "event-b"]]
@@ -637,7 +639,7 @@
                   (call!
                    mutations
                    (transact-request
-                    "listen/write-after" database-a
+                    "listen/write-after" (database-value database-a)
                     [[:db/add [:remote.contract/id
                                (str database-a "/primary")]
                       :remote.contract/name "after-unlisten"]]
@@ -662,6 +664,9 @@
             entered (CountDownLatch. 1)
             release-owner (CountDownLatch. 1)
             original-run d/run-q!
+            db-a (database-value database-a)
+            db-b (database-value database-b)
+            db-c (database-value database-c)
             query
             (query-request
              "cleanup/owner"
@@ -670,9 +675,7 @@
                [$b ?eb :remote.contract/rank ?b]
                [$c ?ec :remote.contract/rank ?c]
                [(< ?a 10)] [(< ?b 10)] [(< ?c 10)]]
-             [(database-value database-a)
-              (database-value database-b)
-              (database-value database-c)])]
+             [db-a db-b db-c])]
         (try
           (with-redefs [d/run-q!
                         (fn [call]
@@ -710,7 +713,7 @@
                (send-multiplexed!
                 session
                 (request protocol/release-database-operation "cleanup/release-b"
-                         {::protocol/target-database-name database-b}))
+                         {:seon.db/db db-b}))
                3000 {::protocol/released? false})
               duplicate
               (deref
@@ -718,7 +721,7 @@
                 session
                 (request protocol/release-database-operation
                          "cleanup/release-b-again"
-                         {::protocol/target-database-name database-b}))
+                         {:seon.db/db db-b}))
                3000 {::protocol/released? false})]
           (is (true? (::protocol/released? released)))
           (is (false? (::protocol/released? duplicate)))

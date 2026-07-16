@@ -1254,6 +1254,19 @@ and explicit-release contract cut. Every query result shape, two- and
 three-database placement, descriptor-shaped nested input, temporal composition,
 pull/pull-many nesting, and native index cursor assertion is green.
 
+The transaction, listener, and explicit-release cut is now green. Transaction
+requests select their database with the same ordinary database value as reads;
+the optional `:seon.db/expected-db` is translated to Datahike's serialized
+expected-basis fence. Reports and listener events preserve Datahike's native
+ordinary shape: `:db-before`, `:db-after`, `:tx-data`, `:tempids`, and
+`:tx-meta`. Listener keys replace their prior interest and session release
+drops only that physical session's acquisition. A direct probe found that the
+raw Datahike report's `:db-before` can retain the correct basis while exposing
+a different attached commit identity after completion, so the writer captures
+and returns the exact ordinary database value under its preparation lock; no
+database copy or second cache is created. The real UDS authority contract now
+passes nine tests and 62 assertions with zero failures or errors.
+
 The source-grounded database-value seam is
 [[research/datahike-remote-database-value-seam-2026-07-16]]. Datahike's native
 `RemoteDB`, `RemoteHistoricalDB`, `RemoteAsOfDB`, and `RemoteSinceDB` records
