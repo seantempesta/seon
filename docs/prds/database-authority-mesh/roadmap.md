@@ -1230,14 +1230,20 @@ is prohibited.
   acquired data. No compatibility connection, query-result replay map, public
   namespace alias, or second database facade may make old local-Datahike call
   shapes appear synchronous.
-- **Earliest unsettled contract:** wire one complete remotely acquired prompt
-  result into the turn/debug callers. The compiled prompt composition root and
-  the namespace, transcript, plan, and canvas async owners are settled at one
-  inherited coordinate; their local prompt-time database adapters are deleted.
-  Warnings, subagent, menu/typeahead, and authored slots still need block-owned
-  acquisition before the caller cut. Recursive formatting receives only
-  ordinary precomputed results and remains synchronous. No caller invokes SCI,
-  discovers a local database value, or introduces a render-only executor.
+- **Earliest unsettled contract:** complete the remaining optional warning,
+  subagent, menu, and typeahead owners, then let the live debug feed consume the
+  same coordinate-pinned child result without adding a synchronous cache or a
+  second renderer. Commit `43645eaa` closes the production turn caller: one
+  trusted compiled invocation returns the complete rendered-context value, the
+  pod validates its exact coordinate, and only the returned text reaches the
+  LLM turn. Commit `e5556524` restores derived auto-run blocks from namespace
+  rows and canvas selection already acquired in the child, so discovery adds no
+  duplicate database request. Recursive formatting receives only ordinary
+  precomputed results and remains synchronous. The current Datastar debug
+  transition callback is synchronous; its async child result must cross the one
+  reactive owner rather than being hidden in a prompt-specific process cache.
+  No caller invokes SCI, discovers a local database value for prompt rendering,
+  or introduces a render-only executor.
 - **Integrated proof that closes it:** commit `86db045d` supplies deterministic
   authored-program identity, target-plus-reachable `cljs.js` loading, exact
   symbol/source/agent/REPL verification, one compiler state per child, fresh
@@ -1362,9 +1368,16 @@ is prohibited.
   removes its local `render-agent-canvas`/source-query branch. Both execution
   artifact flavors compile with the same 20 pre-existing synchronous-consumer
   warnings, now the explicit deletion/migration inventory.
-- **Next refill:** migrate warnings, subagent, menu/typeahead, and authored slots
-  through their block-owned acquisitions, then wire one complete prompt result
-  into turn/debug. In parallel, finish restore/readiness,
+  Commit `e5556524` derives auto-run renderer blocks entirely from the already
+  acquired namespace rows and canvas pin, then executes their AI functions in a
+  second bounded child-local batch. Both execution artifact flavors compile
+  with the unchanged 20-warning inventory. Commit `43645eaa` wires that complete
+  child result into real turn execution and converts outer child/coordinate
+  failure to turn error data.
+- **Next refill:** finish warnings, subagent, and menu/typeahead through their
+  block-owned acquisitions, then make the existing Datastar debug transition
+  owner honestly asynchronous and consume the same child result. In parallel,
+  finish restore/readiness,
   quiescence, and session close. Only then switch client open atomically and
   delete replica, publisher/replay, Node adapters, SCI render reconstruction,
   synchronous database-value arities, and compatibility reachability.
