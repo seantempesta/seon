@@ -557,6 +557,22 @@ coordinator loop. Completion updates accounting under the executor lock and
 routes outside it; cancellation retains physical cleanup until the shared
 database value can be released exactly once.
 
+The first callback checkpoint is implemented: executor startup owns one stable
+completion function; value, throwable, admission rejection, queued cancel,
+running cancel after physical release, queued/running fence, and the final
+provider-to-KNN phase publish exactly once outside the executor lock. Completion
+can reenter admission, and a throwing completion cannot leak job/class counts.
+Legacy result promises remain only as the current writer's proof oracle until
+the active-request migration deletes them in the next checkpoint. The focused
+executor proof passes 22 tests/134 assertions; executor, writer integration,
+request receipts, and server pass 49 tests/342 assertions.
+
+That audit also found and closed a real collision: transaction-derived
+embedding reused the still-running mutation job ID and could be treated as a
+duplicate instead of admitted. It now uses `[request-id :embedding]`; a
+mutation-dispatch regression proves the commit remains nonblocking and the
+provider job actually starts (7 tests/45 assertions).
+
 [[research/selector-session-source-proof-2026-07-16]] validates the replacement
 against exact Bun and JDK 26 source. A disposable fragmented-frame probe
 delivered 10,000 multiplexed requests at about 164,862 requests per second,

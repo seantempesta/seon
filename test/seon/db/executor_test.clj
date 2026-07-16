@@ -16,8 +16,11 @@
 (defn- start-worker
   ([execute] (start-worker 1 execute))
   ([processors execute]
+   (start-worker processors execute (fn [_completion] nil)))
+  ([processors execute complete!]
    (executor/start! {::executor/capacity (test-capacity processors)
-                     ::executor/execute execute})))
+                     ::executor/execute execute
+                     ::executor/complete! complete!})))
 
 (defn- await-queued
   [worker expected]
@@ -94,6 +97,157 @@
       (is (zero? (::executor/retained-identities
                   (executor/evidence worker))))
       (finally (executor/stop! {::executor/executor worker})))))
+
+(deftest one-start-owned-completion-runs-once-outside-the-executor-lock
+  (let [worker* (atom nil)
+        completions (atom [])
+        reentered (promise)
+        second-completed (promise)
+        database-id (random-uuid)
+        generation (random-uuid)
+        exact-scope (scope "a" database-id generation)
+        complete!
+        (fn [completion]
+          (swap! completions conj completion)
+          (case (::executor/job-id completion)
+            "callback/first"
+            (deliver
+             reentered
+             (executor/try-submit!
+              (request @worker* "a" exact-scope "callback/second" :second)))
+
+            "callback/second"
+            (deliver second-completed completion)
+
+            nil))
+        worker (start-worker 1 {:read :request/value} complete!)]
+    (reset! worker* worker)
+    (try
+      (is (= :first
+             (executor/submit!
+              (request worker "a" exact-scope "callback/first" :first))))
+      (is (= {::executor/accepted? true ::executor/joined? false}
+             (deref reentered 5000 nil))
+          "completion can synchronously reenter admission")
+      (is (= [::executor/value :second]
+             (::executor/outcome (deref second-completed 5000 nil))))
+      (is (= ["callback/first" "callback/second"]
+             (mapv ::executor/job-id @completions)))
+      (finally
+        (executor/stop! {::executor/executor worker})))))
+
+(deftest completion-distinguishes-queued-from-physically-running-cancellation
+  (let [entered (CountDownLatch. 1)
+        release (CountDownLatch. 1)
+        completions (atom [])
+        worker
+        (start-worker
+         1
+         {:read (fn [request]
+                  (when (:request/block? request)
+                    (.countDown entered)
+                    (.await release))
+                  (:request/value request))}
+         #(swap! completions conj %))
+        exact-scope (scope "a" (random-uuid) (random-uuid))
+        running-request
+        (assoc-in (request worker "a" exact-scope "cancel/running-callback" :run)
+                  [::executor/request :request/block?] true)
+        running (executor/submit-async! running-request)]
+    (try
+      (is (.await entered 5 TimeUnit/SECONDS))
+      (let [queued
+            (executor/submit-async!
+             (request worker "a" exact-scope "cancel/queued-callback" :queued))]
+        (is (await-queued worker 1))
+        (is (= {::executor/cancellation :queued}
+               (executor/cancel!
+                {::executor/executor worker
+                 ::executor/job-id "cancel/queued-callback"})))
+        (is (= ::executor/throwable (first @queued)))
+        (is (= ["cancel/queued-callback"]
+               (mapv ::executor/job-id @completions)))
+        (is (= :running
+               (::executor/cancellation
+                (executor/cancel!
+                 {::executor/executor worker
+                  ::executor/job-id "cancel/running-callback"}))))
+        (is (= ::executor/throwable (first @running)))
+        (is (= ["cancel/queued-callback"]
+               (mapv ::executor/job-id @completions))
+            "running cancellation does not claim physical completion")
+        (.countDown release)
+        (loop [attempt 0]
+          (when (and (< attempt 10000) (< (count @completions) 2))
+            (Thread/yield)
+            (recur (inc attempt))))
+        (is (= ["cancel/queued-callback" "cancel/running-callback"]
+               (mapv ::executor/job-id @completions)))
+        (is (= ::executor/throwable
+               (first (::executor/outcome (second @completions))))))
+      (finally
+        (.countDown release)
+        (executor/stop! {::executor/executor worker})))))
+
+(deftest rejection-and-abandoned-work-each-complete-once
+  (let [entered (CountDownLatch. 1)
+        release (CountDownLatch. 1)
+        completions (atom [])
+        worker
+        (start-worker
+         1
+         {:read (fn [_request]
+                  (.countDown entered)
+                  (.await release)
+                  :late)}
+         #(swap! completions conj %))
+        exact-scope (scope "a" (random-uuid) (random-uuid))]
+    (try
+      (let [rejected
+            (executor/submit-async!
+             (assoc (request worker "a" exact-scope "callback/rejected" :x)
+                    ::executor/request-bytes
+                    (inc (::executor/maximum-request-bytes
+                          (test-capacity 1)))))]
+        (is (= ::executor/throwable (first @rejected)))
+        (is (= ["callback/rejected"]
+               (mapv ::executor/job-id @completions))))
+      (let [running
+            (executor/submit-async!
+             (request worker "a" exact-scope "callback/abandoned" :late))]
+        (is (.await entered 5 TimeUnit/SECONDS))
+        (is (= {::executor/abandoned-count 0}
+               (executor/remove-database!
+                {::executor/executor worker ::executor/scope exact-scope})))
+        (is (= ::executor/throwable (first @running)))
+        (is (= ["callback/rejected" "callback/abandoned"]
+               (mapv ::executor/job-id @completions)))
+        (.countDown release)
+        (loop [attempt 0]
+          (when (and (< attempt 10000)
+                     (pos? (::executor/running (executor/evidence worker))))
+            (Thread/yield)
+            (recur (inc attempt))))
+        (is (= ["callback/rejected" "callback/abandoned"]
+               (mapv ::executor/job-id @completions))
+            "the late abandoned worker cannot publish a second completion"))
+      (finally
+        (.countDown release)
+        (executor/stop! {::executor/executor worker})))))
+
+(deftest throwing-completion-cannot-leak-executor-accounting
+  (let [worker (start-worker 1 {:read :request/value}
+                             (fn [_completion]
+                               (throw (ex-info "injected completion failure" {}))))
+        exact-scope (scope "a" (random-uuid) (random-uuid))]
+    (try
+      (is (= :value
+             (executor/submit!
+              (request worker "a" exact-scope "callback/throws" :value))))
+      (is (zero? (::executor/retained-identities (executor/evidence worker))))
+      (is (zero? (::executor/running (executor/evidence worker))))
+      (finally
+        (executor/stop! {::executor/executor worker})))))
 
 (deftest duplicate-jobs-join-one-running-result
   (let [entered (CountDownLatch. 1)
@@ -421,6 +575,7 @@
         knn-entered (CountDownLatch. 1)
         release-knn (CountDownLatch. 1)
         calls (atom [])
+        completions (atom [])
         worker
         (start-worker
          2
@@ -433,7 +588,8 @@
                  (swap! calls conj [:knn request])
                  (.countDown knn-entered)
                  (.await release-knn)
-                 :hits)})
+                 :hits)}
+         #(swap! completions conj %))
         one-scope (scope "a" (random-uuid) (random-uuid))
         submission (assoc (request worker "a" one-scope "semantic/1" :query)
                           ::executor/work-class :provider
@@ -453,6 +609,8 @@
         (is (= [[:provider {:request/value :query}]
                 [:knn {:request/vector [1.0]}]]
                @calls))
+        (is (= ["semantic/1"] (mapv ::executor/job-id @completions))
+            "the provider phase emits no intermediate completion")
         (is (zero? (::executor/retained-identities
                     (executor/evidence worker)))))
       (finally

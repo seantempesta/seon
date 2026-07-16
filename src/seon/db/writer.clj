@@ -889,7 +889,7 @@
       ::executor/work-class :provider
       ::executor/database-name database-name
       ::executor/scope scope
-      ::executor/job-id request-id
+      ::executor/job-id [request-id :embedding]
       ::executor/request {::database-name database-name
                           ::scope scope
                           ::entity-ids entity-ids}})))

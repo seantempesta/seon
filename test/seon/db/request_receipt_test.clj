@@ -169,14 +169,20 @@
                (fn [_db-value assertions] assertions))]
     (ensure-database! base-runtime database-name)
     (install-schema! base-runtime database-name)
-    (let [execute (var-get (ns-resolve 'seon.db.writer 'execute-embedding!))
+    (let [execute-provider
+          (var-get (ns-resolve 'seon.db.writer 'execute-embedding!))
+          execute-mutation
+          (var-get (ns-resolve 'seon.db.writer 'execute-mutation!))
+          runtime* (atom nil)
           worker (executor/start!
                   {::executor/capacity (executor/capacity 2)
                    ::executor/execute
-                   {:provider (partial execute provider-runtime)}})
+                   {:provider #(execute-provider @runtime* %)
+                    :mutation #(execute-mutation @runtime* %)}})
           provider-runtime (assoc provider-runtime
                                   ::writer/embedding-enabled? true
                                   ::writer/executor worker)]
+      (reset! runtime* provider-runtime)
       (try
         (let [blocked
               (future
@@ -187,7 +193,7 @@
               "the primary commit returns before background provider work")
           (is (true? (::protocol/success? response))))
         (is (.await provider-entered 5 TimeUnit/SECONDS)
-            "the committed entity is handed to background embedding")
+            "the committed entity receives a distinct background job identity")
         (let [independent
               (future
                 (transact! provider-runtime database-name "provider/independent"
