@@ -19,6 +19,9 @@
 (def ^:private maximum-frame-bytes protocol/maximum-frame-bytes)
 (def ^:private maximum-pending-requests 16)
 (def ^:private maximum-queued-bytes (* 2 protocol/maximum-frame-bytes))
+(def ^:private maximum-pending-events 64)
+(def ^:private maximum-queued-event-bytes
+  (* 2 protocol/maximum-frame-bytes))
 (def ^:private deadline-tick-ms 250)
 
 (def default-socket-path
@@ -28,11 +31,15 @@
 (schema/register! ::socket-path [:string {:min 1}])
 (schema/register! ::message :map)
 (schema/register! ::timeout-ms [:int {:min 1}])
+(schema/register! ::on-event! 'fn?)
+(schema/register! ::on-close! 'fn?)
 (schema/register! ::connected? 'fn?)
 (schema/register! ::request! 'fn?)
 (schema/register! ::close! 'fn?)
 (schema/register! ::pending-count 'fn?)
 (schema/register! ::queued-bytes 'fn?)
+(schema/register! ::pending-event-count 'fn?)
+(schema/register! ::queued-event-bytes 'fn?)
 (schema/register!
  ::session
  [:map {:closed true}
@@ -40,13 +47,17 @@
   [::request! ::request!]
   [::close! ::close!]
   [::pending-count ::pending-count]
-  [::queued-bytes ::queued-bytes]])
+  [::queued-bytes ::queued-bytes]
+  [::pending-event-count ::pending-event-count]
+  [::queued-event-bytes ::queued-event-bytes]])
 (schema/register! ::failure :keyword)
 (schema/register! ::frame-bytes [:int {:min 0}])
 (schema/register!
  ::connect-request
  [:map {:closed true}
-  [::socket-path {:optional true} ::socket-path]])
+  [::socket-path {:optional true} ::socket-path]
+  [::on-event! {:optional true} ::on-event!]
+  [::on-close! {:optional true} ::on-close!]])
 (schema/register!
  ::request
  [:map {:closed true}
@@ -148,6 +159,47 @@
   {::frames []
    ::queued-bytes 0})
 
+(defn- empty-events []
+  {::request-ids []
+   ::events {}
+   ::queued-event-bytes 0})
+
+(defn- resynchronization [event]
+  {::protocol/event protocol/resynchronization-event
+   ::protocol/request-id (::protocol/request-id event)
+   ::protocol/coordinate (::protocol/coordinate event)})
+
+(defn- append-event
+  "Retain one event per interest; repetition becomes explicit resync."
+  [events event frame-bytes]
+  (let [request-id (::protocol/request-id event)
+        prior (get-in events [::events request-id])
+        next-event (if prior (resynchronization event) event)
+        queued-event-bytes (+ (- (::queued-event-bytes events)
+                                 (or (::frame-bytes prior) 0))
+                              frame-bytes)
+        pending-event-count (+ (count (::events events)) (if prior 0 1))]
+    (when (or (> pending-event-count maximum-pending-events)
+              (> queued-event-bytes maximum-queued-event-bytes))
+      (throw
+       (failure "Database session event delivery exceeded its limit."
+                :seon.db.transport.uds.failure/event-overflow
+                {::frame-bytes queued-event-bytes})))
+    (cond-> (-> events
+                (assoc-in [::events request-id]
+                          {::event next-event ::frame-bytes frame-bytes})
+                (assoc ::queued-event-bytes queued-event-bytes))
+      (nil? prior) (update ::request-ids conj request-id))))
+
+(defn- take-event [events]
+  (when-let [request-id (first (::request-ids events))]
+    (let [{::keys [event frame-bytes]} (get-in events [::events request-id])]
+      {::event event
+       ::events (-> events
+                    (update ::request-ids subvec 1)
+                    (update ::events dissoc request-id)
+                    (update ::queued-event-bytes - frame-bytes))})))
+
 (defn- append-output [output ^js frame]
   (let [queued-bytes (+ (::queued-bytes output) (.-byteLength frame))]
     (when (> queued-bytes maximum-queued-bytes)
@@ -185,8 +237,10 @@
 (defn connect!
   "Open one persistent multiplexed Bun database session."
   {:malli/schema [:=> [:catn [::request ::connect-request]] :any]}
-  [{::keys [socket-path]
-    :or {socket-path default-socket-path}}]
+  [{::keys [socket-path on-event! on-close!]
+    :or {socket-path default-socket-path
+         on-event! (fn [_])
+         on-close! (fn [_])}}]
   (js/Promise.
    (fn [resolve-connect reject-connect]
      (let [!socket (atom nil)
@@ -195,8 +249,10 @@
            !connect-settled? (atom false)
            !pending (atom {})
            !output (atom (empty-output))
+           !events (atom (empty-events))
            !parser (atom (fresh-parser))
-           !deadline-timer (atom nil)]
+           !deadline-timer (atom nil)
+           !event-timer (atom nil)]
        (letfn [(as-error [reason]
                  (if (instance? js/Error reason)
                    reason
@@ -208,19 +264,32 @@
                    (if error
                      (reject-connect error)
                      (resolve-connect session))))
+               (notify-close! [error connected?]
+                 (when connected?
+                   (js/setTimeout
+                    (fn []
+                      (try
+                        (on-close! error)
+                        (catch :default _)))
+                    0)))
                (terminate! [reason]
                  (if @!terminal?
                    false
                    (let [error (as-error reason)
                          socket @!socket
+                         connected? @!connected?
                          pending (vals @!pending)]
                      (reset! !terminal? true)
                      (reset! !connected? false)
                      (when-let [timer @!deadline-timer]
                        (js/clearInterval timer))
                      (reset! !deadline-timer nil)
+                     (when-let [timer @!event-timer]
+                       (js/clearTimeout timer))
+                     (reset! !event-timer nil)
                      (reset! !pending {})
                      (reset! !output (empty-output))
+                     (reset! !events (empty-events))
                      (settle-connect! error nil)
                      (doseq [{::keys [reject]} pending]
                        (when reject
@@ -229,7 +298,37 @@
                        (try
                          (js-invoke socket "close")
                          (catch :default _)))
+                     (notify-close! error connected?)
                      true)))
+               (schedule-event-delivery! []
+                 (when (and (not @!terminal?)
+                            (nil? @!event-timer)
+                            (seq (::request-ids @!events)))
+                   (reset!
+                    !event-timer
+                    (js/setTimeout
+                     (fn []
+                       (reset! !event-timer nil)
+                       (when-not @!terminal?
+                         (when-let [{::keys [event events]}
+                                    (take-event @!events)]
+                           (reset! !events events)
+                           (try
+                             (let [result (on-event! event)]
+                               (when (and (some? result)
+                                          (fn? (.-then result)))
+                                 (.catch (js/Promise.resolve result)
+                                         terminate!)))
+                             (catch :default error
+                               (terminate! error)))
+                           (schedule-event-delivery!))))
+                     0))))
+               (enqueue-event! [event frame-bytes]
+                 (try
+                   (swap! !events append-event event frame-bytes)
+                   (schedule-event-delivery!)
+                   (catch :default error
+                     (terminate! error))))
                (flush-output! []
                  (when (and @!connected? (not @!terminal?))
                    (loop []
@@ -309,16 +408,25 @@
                            :seon.db.transport.uds.failure/timeout
                            {::protocol/request-id request-id}))
                          (enqueue-cancel! request-id))))))
-               (deliver-response! [response]
-                 (let [request-id (::protocol/request-id response)]
+               (deliver-message! [message frame-bytes]
+                 (let [request-id (::protocol/request-id message)]
                    (when-not (string? request-id)
                      (throw
-                      (failure "Database response has no request id."
+                      (failure "Database message has no request id."
                                :seon.db.transport.uds.failure/protocol)))
-                   (when-let [{::keys [resolve]} (get @!pending request-id)]
-                     (swap! !pending dissoc request-id)
-                     (when resolve
-                       (resolve response)))))
+                   (if (::protocol/event message)
+                     (if (and (contains? #{protocol/datoms-event
+                                          protocol/resynchronization-event}
+                                        (::protocol/event message))
+                              (protocol/valid-response? message))
+                       (enqueue-event! message frame-bytes)
+                       (throw
+                        (failure "Database session received an invalid event."
+                                 :seon.db.transport.uds.failure/protocol)))
+                     (when-let [{::keys [resolve]} (get @!pending request-id)]
+                       (swap! !pending dissoc request-id)
+                       (when resolve
+                         (resolve message))))))
                (receive! [chunk]
                  (when-not @!terminal?
                    (try
@@ -326,7 +434,9 @@
                            (consume-chunk @!parser chunk)]
                        (reset! !parser parser)
                        (doseq [payload payloads]
-                         (deliver-response! (decode-payload payload))))
+                         (when-not @!terminal?
+                           (deliver-message! (decode-payload payload)
+                                             (.-byteLength ^js payload)))))
                      (catch :default error
                        (terminate! error)))))
                (request-map! [{::keys [message timeout-ms]}]
@@ -381,7 +491,9 @@
                              (failure "Database session was closed by its owner."
                                       :seon.db.transport.uds.failure/closed))
                   ::pending-count #(count @!pending)
-                  ::queued-bytes #(::queued-bytes @!output)})
+                  ::queued-bytes #(::queued-bytes @!output)
+                  ::pending-event-count #(count (::events @!events))
+                  ::queued-event-bytes #(::queued-event-bytes @!events)})
                (opened! [socket]
                  (when (and (not @!terminal?) (not @!connected?))
                    (reset! !socket socket)
@@ -411,7 +523,9 @@
                                         :seon.db.transport.uds.failure/closed))))
                 "connectError" (fn [_socket error]
                                  (terminate! error)))
-               options (js-obj "unix" socket-path "socket" handler)]
+               options (js-obj "unix" socket-path
+                               "allowHalfOpen" false
+                               "socket" handler)]
            (try
              (-> (@!connect-native options)
                  (.then opened!)

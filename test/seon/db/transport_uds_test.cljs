@@ -1,6 +1,7 @@
 (ns seon.db.transport-uds-test
   "Focused Bun session framing, correlation, and terminal-state tests."
   (:require [cljs.test :refer-macros [async deftest is testing]]
+            [seon.db.coordinate :as coordinate]
             [seon.db.protocol :as protocol]
             [seon.db.transport.uds :as uds]))
 
@@ -10,7 +11,39 @@
 (def ^:private fresh-parser @#'uds/fresh-parser)
 (def ^:private maximum-frame-bytes @#'uds/maximum-frame-bytes)
 (def ^:private maximum-queued-bytes @#'uds/maximum-queued-bytes)
+(def ^:private maximum-pending-events @#'uds/maximum-pending-events)
+(def ^:private maximum-queued-event-bytes
+  @#'uds/maximum-queued-event-bytes)
+(def ^:private append-event @#'uds/append-event)
+(def ^:private empty-events @#'uds/empty-events)
+(def ^:private take-event @#'uds/take-event)
 (def ^:private !connect-native @#'uds/!connect-native)
+
+(def ^:private point
+  {::coordinate/database-id
+   #uuid "54b5b7e7-51fb-3220-b079-81a81914d86f"
+   ::coordinate/branch :db
+   ::coordinate/commit-id
+   #uuid "6a56b426-c836-5817-9f6b-20584f2e81d5"
+   ::coordinate/t 536870929})
+
+(def ^:private datom
+  {:seon.db/e 17
+   :seon.db/a :person/name
+   :seon.db/v "Ada"
+   :seon.db/tx 536870929
+   :seon.db/added? true})
+
+(defn- datoms-event [request-id]
+  {::protocol/event protocol/datoms-event
+   ::protocol/request-id request-id
+   ::protocol/coordinate point
+   ::protocol/datoms [datom]})
+
+(defn- resynchronization-event [request-id]
+  {::protocol/event protocol/resynchronization-event
+   ::protocol/request-id request-id
+   ::protocol/coordinate point})
 
 (defn- concatenate [arrays]
   (let [result (js/Uint8Array.
@@ -55,6 +88,7 @@
 (defn- fake-bun [accepted-counts]
   (let [!handler (atom nil)
         !socket (atom nil)
+        !options (atom nil)
         !accepted-counts (atom accepted-counts)
         !writes (atom [])
         !close-count (atom 0)
@@ -75,6 +109,7 @@
         connect
         (fn [options]
           (let [handler (aget options "socket")]
+            (reset! !options options)
             (reset! !handler handler)
             (reset! !socket socket)
             ((aget handler "open") socket)
@@ -82,18 +117,22 @@
     {::bun (js-obj "connect" connect)
      ::handler !handler
      ::socket !socket
+     ::options !options
      ::writes !writes
      ::close-count !close-count}))
 
-(defn- with-fake-bun [accepted-counts body]
-  (let [prior-connect @!connect-native
-        fixture (fake-bun accepted-counts)]
-    (reset! !connect-native (aget (::bun fixture) "connect"))
-    (-> (uds/connect! {})
-        (.then (fn [session] (body session fixture)))
-        (.finally
-         (fn []
-           (reset! !connect-native prior-connect))))))
+(defn- with-fake-bun
+  ([accepted-counts body]
+   (with-fake-bun accepted-counts {} body))
+  ([accepted-counts options body]
+   (let [prior-connect @!connect-native
+         fixture (fake-bun accepted-counts)]
+     (reset! !connect-native (aget (::bun fixture) "connect"))
+     (-> (uds/connect! options)
+         (.then (fn [session] (body session fixture)))
+         (.finally
+          (fn []
+            (reset! !connect-native prior-connect)))))))
 
 (defn- inject! [fixture bytes]
   ((aget @(::handler fixture) "data")
@@ -106,6 +145,9 @@
     (if error
       (callback @(::socket fixture) error)
       (callback @(::socket fixture)))))
+
+(defn- after-event-turn []
+  (js/Promise. (fn [resolve _] (js/setTimeout resolve 10))))
 
 (deftest linear-parser-handles-fragmentation-and-coalescing
   (let [a (response-message "a" :first)
@@ -160,6 +202,136 @@
         (.catch (fn [error]
                   (is false (str "out-of-order session failed: " error))
                   (done))))))
+
+(deftest protocol-events-are-demultiplexed-without-consuming-correlation
+  (async done
+    (let [!events (atom [])]
+      (-> (with-fake-bun
+            []
+            {::uds/on-event! #(swap! !events conj %)}
+            (fn [session fixture]
+              (let [response
+                    (uds/request!
+                     {::uds/session session
+                      ::uds/message (request-message "listen/shared")})]
+                (is (false? (aget @(::options fixture) "allowHalfOpen")))
+                (inject!
+                 fixture
+                 (concatenate
+                  [(encode-frame (datoms-event "listen/shared"))
+                   (encode-frame (response-message "listen/shared" :ack))
+                   (encode-frame (response-message "already-late" :ignored))]))
+                (-> response
+                    (.then
+                     (fn [value]
+                       (is (= :ack (::protocol/result value)))
+                       (after-event-turn)))
+                    (.then
+                     (fn [_]
+                       (inject!
+                        fixture
+                        (concatenate
+                         [(encode-frame (datoms-event "listen/shared"))
+                          (encode-frame (datoms-event "listen/shared"))]))
+                       (after-event-turn)))
+                    (.then
+                     (fn [_]
+                       (is (= [(datoms-event "listen/shared")
+                               (resynchronization-event "listen/shared")]
+                              @!events))
+                       (is (zero? ((::uds/pending-event-count session))))
+                       (is (zero? ((::uds/queued-event-bytes session))))
+                       (uds/close! session)))))))
+          (.then (fn [_] (done)))
+          (.catch (fn [error]
+                    (is false (str "event demultiplexing failed: " error
+                                   "\n" (.-stack error)))
+                    (done)))))))
+
+(deftest event-queue-is-bounded-and-repetition-coalesces-to-resynchronization
+  (let [first-event (datoms-event "listen/shared")
+        events (-> (empty-events)
+                   (append-event first-event 100)
+                   (append-event first-event 120))
+        taken (take-event events)]
+    (is (= 1 (count (::uds/events events))))
+    (is (= 120 (::uds/queued-event-bytes events)))
+    (is (= (resynchronization-event "listen/shared")
+           (::uds/event taken)))
+    (is (empty? (::uds/events (::uds/events taken))))
+    (is (zero? (::uds/queued-event-bytes (::uds/events taken))))
+    (is (thrown-with-msg?
+         js/Error
+         #"event delivery exceeded"
+         (reduce (fn [queued index]
+                   (append-event queued (datoms-event (str "listen/" index)) 1))
+                 (empty-events)
+                 (range (inc maximum-pending-events)))))
+    (is (thrown-with-msg?
+         js/Error
+         #"event delivery exceeded"
+         (append-event (empty-events)
+                       (datoms-event "listen/too-large")
+                       (inc maximum-queued-event-bytes))))))
+
+(deftest event-overflow-terminates-once-and-discards-old-generation-callbacks
+  (async done
+    (let [!events (atom [])
+          !terminal-errors (atom [])]
+      (-> (with-fake-bun
+            []
+            {::uds/on-event! #(swap! !events conj %)
+             ::uds/on-close! #(swap! !terminal-errors conj %)}
+            (fn [session fixture]
+              (inject!
+               fixture
+               (concatenate
+                (mapv (comp encode-frame datoms-event #(str "listen/" %))
+                      (range (inc maximum-pending-events)))))
+              (event! fixture "error" (js/Error. "late error"))
+              (event! fixture "end")
+              (event! fixture "close")
+              (inject! fixture (encode-frame (datoms-event "late/event")))
+              (-> (after-event-turn)
+                  (.then
+                   (fn [_]
+                     (is (false? (uds/connected? session)))
+                     (is (= 1 @(::close-count fixture)))
+                     (is (empty? @!events))
+                     (is (= 1 (count @!terminal-errors)))
+                     (is (= :seon.db.transport.uds.failure/event-overflow
+                            (::uds/failure (ex-data (first @!terminal-errors)))))
+                     (is (zero? ((::uds/pending-event-count session))))
+                     (is (zero? ((::uds/queued-event-bytes session)))))))))
+          (.then (fn [_] (done)))
+          (.catch (fn [error]
+                    (is false (str "event overflow failed: " error
+                                   "\n" (.-stack error)))
+                    (done)))))))
+
+(deftest consumer-callback-failure-closes-outside-the-native-data-callback
+  (async done
+    (let [callback-error (js/Error. "consumer failed")
+          !terminal-errors (atom [])]
+      (-> (with-fake-bun
+            []
+            {::uds/on-event! (fn [_] (throw callback-error))
+             ::uds/on-close! #(swap! !terminal-errors conj %)}
+            (fn [session fixture]
+              (inject! fixture (encode-frame (datoms-event "listen/failure")))
+              (is (uds/connected? session)
+                  "the native data callback only enqueues consumer work")
+              (-> (after-event-turn)
+                  (.then
+                   (fn [_]
+                     (is (false? (uds/connected? session)))
+                     (is (= 1 @(::close-count fixture)))
+                     (is (= [callback-error] @!terminal-errors)))))))
+          (.then (fn [_] (done)))
+          (.catch (fn [error]
+                    (is false (str "callback failure handling failed: " error
+                                   "\n" (.-stack error)))
+                    (done)))))))
 
 (deftest output-retains-the-exact-suffix-across-zero-and-drain
   (async done
