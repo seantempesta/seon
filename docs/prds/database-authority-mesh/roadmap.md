@@ -1128,10 +1128,14 @@ failure/retry, reentrancy, final-release, and reconnect matrix is grounded in
 [[research/datahike-temporal-query-sharing-seam-2026-07-16]]. The grown
 latency/allocation benchmark remains a Unit 10 graduation measure in
 [[../../seon/issues/temporal-query-work-is-not-shared]], not another cache
-design. Temporal KNN also currently embeds before rejecting the unsupported
-cut;
-[[../../seon/issues/temporal-knn-embeds-before-rejection]] owns the provider-work
-optimization without retaining a database value across the slow call.
+design. Temporal KNN validation now runs before provider work. Commit
+`6424165b` validates current and historical coordinates through the existing
+Datahike resolver with secondary-index restoration disabled, releases only
+owned materialized values, and resolves again for native KNN after the
+embedding is ready. Invalid earlier, missing, sibling, and force-discarded
+coordinates invoke neither provider nor KNN; current-head and historical
+native-index behavior is covered by the 45-test/914-assertion writer and
+executor checkpoint.
 
 The earliest unsettled Unit 7 contract is the async `seon.db` facade and route
 consumer cut. Source audit found that the JVM discarded the existing
@@ -1175,28 +1179,35 @@ fallback is prohibited.
 
 ### 2026-07-16 active implementation card
 
-- **Earliest unsettled contract:** one atomic writer transaction derives only
-  the non-Datahike attributes actually used by that transaction from canonical
-  `:seon.schema/key` / `:seon.schema/form` facts, prepends their Datahike
-  declarations, and commits schema plus facts under the expected coordinate.
-  Schema rows describe functions, requests, responses, and entities as well as
-  stored attributes, so eager installation of the complete registry and a new
-  persisted attribute marker are both rejected.
-- **Integrated proof that closes it:** same-transaction schema plus first fact,
-  later first use from a stored form, real component and generated-identity
-  forms, incompatible installed schema rollback, unknown used attribute,
-  concurrent expected-coordinate writers, and no coordinate advance on any
-  rejected form. Datahike `670cd1ad` closes the dependency reducer defect.
-- **Dependency-ready parallel portfolio:** the writer/schema bridge owns that
-  atomic seam; the client lane owns the complete cold-start replacement audit;
-  the Bun-child lane owns the one shared execution-service contract; top-level
-  integration owns the committed async facade, route, embedding, roadmap, and
-  cross-lane review.
-- **Next refill:** after writer admission, migrate remote provenance and schema
-  preparation; after the child contract, implement one eval/render invocation
-  cohort; then land the full coordinate-pinned prompt acquisition and immutable
-  retry inputs; only after the complete client call graph is remote may the
-  client session switch land again.
+- **Earliest unsettled contract:** an authored render function is acquired at
+  the invocation coordinate, verified by its existing symbol, exact source
+  digest, agent, and REPL provenance, compiled through the existing Shadow
+  bootstrap and `cljs.js` loader inside that agent's supervised Bun child, and
+  invoked with no SCI environment or local database value. Unchanged loaded
+  source may stay warm; changed or removed loaded source retires the child and
+  permits one fresh-child retry instead of mutable namespace unloading.
+- **Integrated proof that closes it:** cold same-namespace and transitive
+  authored loading, schema-overlay and standalone-data falsifiers, exact digest
+  and provenance refusal, warm no-compile reuse, changed/removed source
+  retirement, bounded source/result bytes, cancellation during acquisition,
+  compilation, Promise wait, and a synchronous loop, plus concurrent distinct
+  child PIDs and direct authority sessions. The SCI and in-pod authored-render
+  door are deleted in the same cut.
+- **Dependency-ready parallel portfolio:** commit `72bcf3ba` owns the
+  flavor-specific execution artifact and native `Bun.spawn` host; its focused
+  proof passes 5 tests/23 assertions and its artifact/config/process proof
+  passes 79/364. Commits `eff08b64` and `62681ee5` own coordinate-pinned core
+  program/config acquisition, pure transaction compilation, exact lookup-pair
+  resolution, and bounded stale core-index retry. The independent client lane
+  now migrates recovery/resume over ordinary coordinate-pinned data while the
+  execution lane implements the one authored-source owner grounded in
+  [[research/unit-8-authored-source-loading-seam-2026-07-16]].
+- **Next refill:** after authored render parity, migrate interaction and eval
+  through that same child owner and land the 13/16-member prompt acquisition
+  with immutable retry inputs. In parallel, finish restore/readiness,
+  quiescence, and session close. Only then switch client open atomically and
+  delete replica, publisher/replay, Node adapters, SCI render reconstruction,
+  synchronous database-value arities, and compatibility reachability.
 
 Datahike's existing `pull-many` already parses once, owns one pull frame
 machine and resource budget, and certifies one eager result. Its dependency
