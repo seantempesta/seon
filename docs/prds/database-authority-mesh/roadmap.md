@@ -1187,16 +1187,24 @@ Datahike `:in` source positions, so zero, one, or several named/temporal
 databases use the same function and wire argument model. Query forms already
 are runtime data; no macro or second query language is introduced.
 
-The earliest unsettled contract is now maintained Datahike's multi-source
-query-cache ownership. Its current completed-cache and single-flight keys own
-only `(first args)` and can retain another native database value as an ordinary
-argument. The one replacement uses every parsed source's ordered exact
-identity, the existing conservative attribute-dependency union, and reverse
-membership in every contributing connection generation. Closing any member
-generation fences publication, evicts completed entries, and detaches active
-callers. A source without an exact committed identity makes the whole query
-uncacheable; there is no separate long-lived multi-source cache path. The open
-dependency issue is
+Maintained Datahike's multi-source query-cache ownership is closed at
+`0070d507` and selected by root commit `5dcaa1d2`. The completed cache and
+single-flight coordinator now derive ordered source symbols and top-level
+argument positions from Datahike's parsed `:in`, replace every native database
+with its exact committed identity, and retain no source database in a cache or
+flight key. One-source keys remain compatible; two- and three-source keys carry
+all member identities. Closing any member generation fences publication,
+evicts completed entries, and detaches active callers. Propagation advances
+only the changed source, preserves every other source, and uses the existing
+conservative attribute-dependency union. A source without exact committed
+identity makes the whole query uncacheable; there is no second cache path.
+
+The exact four new behaviors pass 12 tests/66 assertions across PSS, HHT, and
+specification configurations. The complete focused query-cache namespace
+passes 114/822, and related single-flight, specification, and capability tests
+pass 54/435. The remaining dependency risk is measured cache cost, retained as
+a later performance gate rather than a second design. The source issue remains
+open through that retained proof:
 [[../../seon/issues/multi-source-query-cache-retains-foreign-database-values]].
 
 The integrated proof that closes this contract ports Datahike's existing
@@ -1212,17 +1220,19 @@ var; no runner or full-suite tax is added. The exact upstream-test mapping,
 test inventory, exclusions, selectors, and graduation matrix are
 [[research/datahike-selective-compatibility-proof-2026-07-16]].
 
-Current parallel portfolio: the dependency lane owns only the Datahike
-composite cache/lifetime patch and focused proofs. Commits `74953530`,
-`ae43154c`, and `022c09ef` settle the always-current database-value
-architecture, explicit secondary-database lifetime, and selective upstream
-compatibility proof respectively. The top level owns protocol/facade fixtures
-and integration judgment. The stopped plan-consumer draft remains an explicit uncommitted
+Current parallel portfolio: the JVM proof lane owns only the real writer/UDS
+remote-contract namespace. Commits `74953530`, `ae43154c`, and `022c09ef`
+settle the always-current database-value architecture, explicit secondary-
+database lifetime, and selective upstream compatibility proof. Commit
+`97f9d6bb` adds the six exact-var-selectable CLJS facade contracts using only
+ordinary database values; they intentionally reject the legacy coordinate
+handshake and remain red until the canonical protocol/facade cut. The top level
+owns that protocol/facade implementation and integration judgment. The stopped plan-consumer draft remains an explicit uncommitted
 handoff because its pure row transformations are reusable but its coordinate
 and compact-envelope transport is not. After the dependency proof, refill that
 slot with the real writer/UDS remote-contract tests; the next independent
-refill is the namespaced public facade schemas and CLJS compatibility tests.
-Only then replace protocol, resolver, reports/listeners, and consumers in one
+refill is protocol-consumer deletion proof after the public contract turns
+green. Replace protocol, resolver, reports/listeners, and consumers in one
 dependency-ordered cut.
 
 The previous facade history remains as implementation evidence. Source audit

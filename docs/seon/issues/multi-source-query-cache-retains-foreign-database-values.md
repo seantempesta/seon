@@ -42,6 +42,22 @@ all database inputs to their exact cache identities inside that one mechanism;
 do not add a Seon cache, a transport cache, or a second multi-source query
 path.
 
+## Current state
+
+Datahike commit `0070d507` implements the one cache/single-flight mechanism for
+one, two, three, or more parsed database sources. It retains one-source key
+compatibility, tags ordered multi-source identities by source symbol and
+top-level argument position, removes every native database from the generic
+argument key, requires every contributing generation at publication, advances
+only the changed member during safe propagation, and lets release of any member
+evict the completed bucket and detach the flight.
+
+The exact four new behaviors pass 12 tests/66 assertions across PSS, HHT, and
+specification configurations. The complete query-cache namespace passes
+114/822; related single-flight, API specification, and capability tests pass
+54/435. The issue remains open for the retained four-source case, full
+dependency checkpoint, and measured one-source hit/allocation comparison.
+
 ## Acceptance
 
 - Queries with one, two, and four database inputs preserve Datahike result
