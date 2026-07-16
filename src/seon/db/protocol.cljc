@@ -219,7 +219,7 @@
  ::datom
  [:map {:closed true}
   [:seon.db/e :int]
-  [:seon.db/a :qualified-keyword]
+  [:seon.db/a :keyword]
   [:seon.db/v :any]
   [:seon.db/tx :int]
   [:seon.db/added? :boolean]])
@@ -229,7 +229,6 @@
  [:map {:closed true}
   [::coordinate ::coordinate]
   [::index ::index]
-  [::prefix ::prefix]
   [::direction ::direction]
   [::history? ::history?]
   [:seon.db/e :int]
@@ -240,11 +239,11 @@
 (schema/register! ::schema :map)
 (schema/register!
  :datahike.query/attribute-dependencies
- [:or [:= :all] [:set :qualified-keyword]])
+ [:or [:= :all] [:set :keyword]])
 (schema/register!
  ::datom-pattern
  [:map {:closed true}
-  [:seon.db/a :qualified-keyword]
+  [:seon.db/a :keyword]
   [:seon.db/e {:optional true} :int]
   [:seon.db/v {:optional true} :any]
   [:seon.db/added? {:optional true} :boolean]])
@@ -346,11 +345,10 @@
   (if-let [cursor (::cursor request)]
     (= {::coordinate coordinate*
         ::index (::index request)
-        ::prefix (::prefix request)
         ::direction (::direction request)
         ::history? (true? (::history? request))}
        (select-keys cursor
-                    [::coordinate ::index ::prefix ::direction ::history?]))
+                    [::coordinate ::index ::direction ::history?]))
     true))
 
 (defn- execute-many-cursors-match?
@@ -457,7 +455,9 @@
   [::direction ::direction]
   [::limit ::index-page-limit]
   [::history? {:optional true} ::history?]
-  [::cursor {:optional true} ::cursor]])
+  [::cursor {:optional true} ::cursor]
+  [:datahike.resource/max-result-weight {:optional true}
+   :datahike.resource/max-result-weight]])
 (schema/register!
  ::query-member
  [:map {:closed true}
@@ -502,7 +502,9 @@
   [::direction ::direction]
   [::limit ::index-page-limit]
   [::history? {:optional true} ::history?]
-  [::cursor {:optional true} ::cursor]])
+  [::cursor {:optional true} ::cursor]
+  [:datahike.resource/max-result-weight {:optional true}
+   :datahike.resource/max-result-weight]])
 (schema/register!
  ::member
  [:multi {:dispatch ::operation}
@@ -534,8 +536,7 @@
   [::request-id ::request-id]
   [::database-name ::database-name]
   [::attachment ::attachment]
-  [:datahike.query/attribute-dependencies
-   :datahike.query/attribute-dependencies]])
+  [::query-form ::query-form]])
 (schema/register!
  ::datom-listen-request
  [:map {:closed true}
@@ -704,6 +705,8 @@
   [::attachment ::attachment]
   [::coordinate ::coordinate]
   [:datahike.query/result :datahike.query/result]
+  [:datahike.query/attribute-dependencies
+   :datahike.query/attribute-dependencies]
   [:datahike.query/cache-evidence :datahike.query/cache-evidence]
   [:datahike.query/resource-evidence :datahike.query/resource-evidence]])
 (schema/register!
@@ -740,6 +743,8 @@
  [:map {:closed true}
   [::success? [:= true]]
   [:datahike.query/result :datahike.query/result]
+  [:datahike.query/attribute-dependencies
+   :datahike.query/attribute-dependencies]
   [:datahike.query/cache-evidence :datahike.query/cache-evidence]
   [:datahike.query/resource-evidence :datahike.query/resource-evidence]])
 (schema/register!
@@ -1042,7 +1047,9 @@
   [::direction ::direction]
   [::limit ::index-page-limit]
   [::history? {:optional true} ::history?]
-  [::cursor {:optional true} ::cursor]])
+  [::cursor {:optional true} ::cursor]
+  [:datahike.resource/max-result-weight {:optional true}
+   :datahike.resource/max-result-weight]])
 (schema/register!
  ::execute-many-request-input
  [:map {:closed true}
@@ -1062,8 +1069,7 @@
   [::request-id ::request-id]
   [::database-name ::database-name]
   [::attachment ::attachment]
-  [:datahike.query/attribute-dependencies
-   :datahike.query/attribute-dependencies]])
+  [::query-form ::query-form]])
 (schema/register!
  ::datom-listen-request-input
  [:map {:closed true}

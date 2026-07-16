@@ -506,7 +506,13 @@
           [(::protocol/selector request) (::protocol/entity-id request)]
 
           :seon.db.protocol.operation/pull-many
-          [(::protocol/selector request) (::protocol/entity-ids request)])]
+          [(::protocol/selector request) (::protocol/entity-ids request)]
+
+          :seon.db.protocol.operation/schema
+          []
+
+          :seon.db.protocol.operation/index-page
+          [(::protocol/prefix request) (::protocol/cursor request)])]
     (when-not (every? #(ordinary-data? true %) values)
       (throw
        (ex-info "A database read request contained a host-owned or lazy value."
@@ -561,6 +567,70 @@
    ::protocol/attachment (::protocol/attachment request)
    ::protocol/coordinate (::protocol/coordinate request)})
 
+(def ^:private read-operations
+  #{protocol/query-operation
+    protocol/pull-operation
+    protocol/pull-many-operation
+    protocol/schema-operation
+    protocol/index-page-operation})
+
+(defn- datom-map
+  [^datahike.datom.Datom datom]
+  {:seon.db/e (.-e datom)
+   :seon.db/a (.-a datom)
+   :seon.db/v (.-v datom)
+   :seon.db/tx (datahike.datom/datom-tx datom)
+   :seon.db/added? (boolean (:added datom))})
+
+(defn- datahike-cursor
+  [cursor]
+  (when cursor
+    [(:seon.db/e cursor)
+     (:seon.db/a cursor)
+     (:seon.db/v cursor)
+     (:seon.db/tx cursor)
+     (:seon.db/added? cursor)]))
+
+(defn- index-page
+  [db-value request]
+  (let [history? (true? (::protocol/history? request))
+        index (::protocol/index request)
+        direction (::protocol/direction request)
+        page
+        (try
+          (d/index-page
+           (if history? (d/history db-value) db-value)
+           (cond->
+             {:index index
+              :components (::protocol/prefix request)
+              :direction direction
+              :limit (::protocol/limit request)}
+             (::protocol/cursor request)
+             (assoc :cursor (datahike-cursor (::protocol/cursor request)))
+             (:datahike.resource/max-result-weight request)
+             (assoc :max-result-weight
+                    (:datahike.resource/max-result-weight request))))
+          (catch clojure.lang.ExceptionInfo throwable
+            (if (= :datahike.index-page/invalid-request
+                   (:type (ex-data throwable)))
+              (throw
+               (ex-info (.getMessage throwable)
+                        (assoc (ex-data throwable)
+                               ::failure-kind protocol/protocol-error)
+                        throwable))
+              (throw throwable))))
+        datoms (mapv datom-map (:datahike.index-page/datoms page))
+        next-cursor
+        (when (:datahike.index-page/cursor page)
+          (merge (datom-map (peek (:datahike.index-page/datoms page)))
+                 {::protocol/coordinate (::protocol/coordinate request)
+                  ::protocol/index index
+                  ::protocol/direction direction
+                  ::protocol/history? history?}))]
+    (cond-> {::protocol/datoms datoms
+             ::protocol/complete? (:datahike.index-page/complete? page)}
+      next-cursor (assoc ::protocol/cursor next-cursor))))
+
 (defn- execute-db-read
   [db-value request caller-id]
   (let [options (resource-options request)]
@@ -570,7 +640,10 @@
        (d/q-with-evidence
         (merge
          {:query (::protocol/query-form request)
-          :args (into [db-value] (::protocol/arguments request))
+          :args (into [(if (true? (::protocol/history? request))
+                        (d/history db-value)
+                        db-value)]
+                      (::protocol/arguments request))
           :request-id caller-id}
          options))
        :datahike.query/result materialize-result)
@@ -589,7 +662,13 @@
         (d/pull-many db-value
                      (merge {:selector (::protocol/selector request)
                              :eids (::protocol/entity-ids request)}
-                            options)))})))
+                            options)))}
+
+      :seon.db.protocol.operation/schema
+      {::protocol/schema (materialize-result (d/schema db-value))}
+
+      :seon.db.protocol.operation/index-page
+      (materialize-result (index-page db-value request)))))
 
 (defn- execute-read!
   [{request ::request :as work}]
@@ -1677,11 +1756,12 @@
 (declare claim-request!)
 
 (defn- transport-connection
-  [close!]
+  [{close! ::uds/close! send! ::uds/send!}]
   {::connection-lock (Object.)
    ::closed? (atom false)
    ::acquisitions (atom #{})
-   ::close! close!})
+   ::close! close!
+   ::send! send!})
 
 (defn- claim-connection-request!
   [runtime transport-connection request frame-bytes complete!]
@@ -1821,10 +1901,7 @@
   [request [outcome value]]
   (if (= ::executor/throwable outcome)
     (request-failure-response value)
-    (if (#{protocol/query-operation
-           protocol/pull-operation
-           protocol/pull-many-operation}
-         (::protocol/operation request))
+    (if (read-operations (::protocol/operation request))
       (protocol/success value)
       value)))
 
@@ -2063,6 +2140,12 @@
          (throw (ex-info "Database reads require callback completion." {}))
 
          :seon.db.protocol.operation/pull-many
+         (throw (ex-info "Database reads require callback completion." {}))
+
+         :seon.db.protocol.operation/schema
+         (throw (ex-info "Database reads require callback completion." {}))
+
+         :seon.db.protocol.operation/index-page
          (throw (ex-info "Database reads require callback completion." {}))
 
          :seon.db.protocol.operation/execute-many
@@ -2387,6 +2470,14 @@
                                   request-id owner)
 
              :seon.db.protocol.operation/pull-many
+             (start-read-request! runtime transport-connection request
+                                  request-id owner)
+
+             :seon.db.protocol.operation/schema
+             (start-read-request! runtime transport-connection request
+                                  request-id owner)
+
+             :seon.db.protocol.operation/index-page
              (start-read-request! runtime transport-connection request
                                   request-id owner)
 

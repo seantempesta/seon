@@ -92,7 +92,8 @@ Rust, cloud, Tauri, and mobile hosts conform to the same data fixtures.
 
 ## Dependency ledger
 
-- Datahike `d7ac886f` (graduated Units 1–3 at `940810f5`, plus attached
+- Datahike `d9765276cd8d0778f39e93046c2d59b8c2fa8ff2` (graduated Units
+  1–3 at `940810f5`, plus attached
   exact-commit cache identity, atop
   `9ada755087228e10cfb179fa5779ce227a6ed220`):
   `db.cljc`, `connections.cljc`, `connector.cljc`, `core.cljc`,
@@ -760,6 +761,16 @@ are deleted from this owner. A focused release artifact, including a real
 `Bun.listen`/`Bun.connect` UDS roundtrip, passes 7 tests/19 assertions under Bun
 and the same artifact under Node.
 
+The native session now also demultiplexes repeated addressed database events
+without confusing them with one-shot request responses. Callback handoff is
+bounded to 64 interests and two maximum frames of retained event bytes; a
+second undelivered event for one interest becomes one explicit
+resynchronization instead of an unbounded local transaction queue. Overflow,
+callback failure, or any native terminal callback enters one idempotent close
+transition. The Bun 1.3.14 proof passes 14 tests and 53 assertions, including
+interleaved response/event correlation, repeated-event coalescing, partial and
+zero writes, `drain`, and a real native UDS roundtrip.
+
 The first integrated resource cut now uses one shared four-megabyte protocol
 ceiling across Bun, JVM framing, and executor admission. The selector reserves
 exact `4 + payload` input bytes globally before allocation, passes that charge
@@ -796,6 +807,15 @@ selector, executor, and writer integration pass 60 tests/884 assertions. The
 broader registry, routing, receipts, generated IDs, transaction coordinates,
 replay, transport, writer, and server gate passes 109 tests/1,196 assertions.
 
+Addressed JVM delivery is now admission-only: the caller reserves bounded
+session/authority slots and bytes, appends to that session's ordered codec
+queue, and returns without doing Transit work. Sessions encode in parallel;
+one session preserves admission order. Session pressure closes only the slow
+session, while authority pressure is a structured retryable result. Review
+found and fixed the empty-queue/idle handoff race by making observation and
+idle publication one transition under the admission lock. The focused UDS
+proof passes 30 tests and 143 assertions.
+
 Two shortest throughput falsifiers precede larger tuning. First, Datahike
 single-flight waiters currently join only after Seon's scarce read admission;
 enough identical cold callers may therefore park every read worker while an
@@ -805,6 +825,15 @@ the selector remains responsive. The deterministic proofs hold A with latches
 and require B to progress before A releases. Their results decide whether join
 coordination moves before CPU admission and whether control needs its own decode
 floor; worker-count tuning cannot answer either question.
+
+The first falsifier now confirms the gate. With three read workers, one A owner
+and two identical A joiners occupy all three while distinct database B remains
+queued. Datahike reports one `miss-owner`, two `miss-joined`, and executes the
+predicate once; only after A releases does B enter. The focused executor gate
+passes 24 tests/658 assertions. The repair must expose Datahike's existing
+single-flight acquisition before scarce Seon CPU admission: the owner consumes
+one read worker, while joiners await the same Datahike completion outside CPU
+capacity. Seon must not reproduce Datahike's cache key or coordination.
 
 ### Unit 7 — remote `seon.db` and coarse core reads
 
@@ -882,12 +911,12 @@ protocol and database APIs do not change.
 The implementation is ordered by semantic dependency, while independent proof
 and consumer inventory may run in parallel:
 
-- Spine: close decoded-frame, response-byte, timeout-correlation, and bounded
-  shutdown ownership across the integrated selector and Bun session.
-- Slot 2: add the missing existing Datahike operations needed by real consumers:
-  installed schema, bounded index/rseek pages, operation-local history, and
-  connection-owned selective listen/unlisten interests.
-- Slot 3: make the bottom-up `seon.db` consumer closure Promise-ready around
+- Spine: integrate physical-connection-owned selective interests over the
+  completed Datahike paging and fair committed-report batch/requeue seams.
+- Slot 2: integrate the completed native session admission and Bun event
+  demultiplexing into addressed delivery with pressure resynchronization.
+- Slot 3: use the completed Bun event demultiplexing and bounded callback
+  handoff to make the bottom-up `seon.db` consumer closure Promise-ready around
   coarse query/pull-many/execute-many plans, then delete lazy entity traversal.
 - Slot 4: prepare the atomic reachability deletion across `db.cljs`,
   `db/internal.cljs`, `client.cljs`, `repl.cljs`, `embed.cljs`, `handlers/ns.cljs`,
@@ -901,29 +930,53 @@ checkpoint freezes all artifact inputs; lifecycle remains operator-owned.
 The callback deletion and physical-connection acquisition boundaries are closed:
 the writer is the only public request-lifetime owner, and the socket is the one
 internal authority token with no wire session ID or second reference count.
-Earliest unsettled implementation contract: expose `schema`, bounded
-`index-page`, operation-local `history?`, and physical-connection-owned selective
-`listen`/`unlisten` from the maintained Datahike seams. This closes the actual
-consumer requirements before any synchronous local read is made asynchronous.
+Earliest unsettled implementation contract: expose physical-connection-owned
+selective `listen`/`unlisten` over the completed `schema`, operation-local
+`history?`, native `index-page`, and fair committed-report batch/requeue seams.
+This closes the actual consumer requirements before any synchronous local read
+is made asynchronous.
 
 The source-grounded split is now exact. `schema` calls Datahike's existing
-public `d/schema`; no parallel schema projection is built. Seon pages the
-existing lazy `seek-datoms`/`rseek-datoms` primitives and seals the complete
-last datom plus coordinate, index, prefix, direction, and `history?` into an
-ordinary cursor. History is an operation option over the captured raw value,
-not another remotely addressable database. One Datahike committed-report source
-per connection generation is the only commit-delivery source; installing a
-listener beside it would duplicate work. Seon owns physical-connection
-interests and addressed delivery.
+public `d/schema`; no parallel schema projection is built. Executable probes
+proved that Seon cannot correctly compose raw `seek-datoms`/`rseek-datoms` into
+paging: retraction polarity, content-equal bytes, and resolved lookup refs are
+Datahike comparator concerns. The maintained fork therefore owns eager bounded
+`index-page`; Seon keeps only the pinned value, ordinary datom conversion, and
+coordinate/index/direction/history cursor seal. History is an operation option
+over the captured raw value, not another remotely addressable database.
 
-Two maintained-Datahike gaps precede selective delivery: `q-with-evidence`
-must return its already-analyzed attribute dependencies on miss, joined miss,
-and cache hit, and committed-report sources need one process-wide readiness
-handoff plus close/reopen after a gap. Seon does not parse Datalog, busy-poll
-one thread per database, or keep a terminal gapped source. Registration stores
-the returned coordinate; reports at or below it are already reflected, later
-reports are filtered, and a gap emits resynchronization before reopening at the
-latest coordinate.
+Datahike `d9765276` now returns already-analyzed attribute dependencies on cold,
+joined, hit, and uncacheable queries. It also owns one bounded process-wide
+blocking committed-report readiness queue, with no Datahike-created thread,
+callback, Future, sleep, or per-database poller. One source per connection
+generation remains the only commit-delivery source. The remaining small
+host integration drains a bounded batch and requeues a still-ready source only
+after its serialized per-database delivery job completes. The existing fair
+executor then filters different databases in parallel without another queue
+or scheduler.
+
+The same dependency now owns eager bounded native paging across current and
+history values. Its exact five-field cursor includes retraction polarity;
+lookup refs, ref values, content-equal byte arrays, forward/reverse order, and
+wrong-prefix/absent cursor errors remain Datahike concerns. Datahike's paging
+proof passes 96 tests and 450 assertions. Seon has deleted its local comparator
+and seek logic and retains only ordinary protocol conversion and sealing.
+
+Committed delivery now drains at most one configured batch from a ready source
+and requeues that still-ready source at the global tail only after delivery.
+Rejected Seon admission requeues without consuming a report. Duplicate
+requeue, close/reopen ABA, gaps, shutdown, and hot-A/cold-B fairness are
+dependency-owned invariants; 102 relevant Datahike tests and 840 assertions
+pass. The maintained seam creates no thread, Future, callback, or sleep.
+
+Registration opens its source before reading the acknowledgement coordinate;
+reports at or below that cut are already reflected, later reports are filtered,
+and a gap abandons the partial prefix, opens a replacement before its new cut,
+and emits one resynchronization event. Query interests carry the query form and
+the authority derives dependencies; correctness never trusts a client-supplied
+dependency set. Physical connection locks order acknowledgement, event, and
+unlisten. Native send is admission-only with per-session ordering, so Transit
+encoding cannot serialize the report dispatcher.
 
 Integrated proof that closes it:
 Schema/index/history/selective-interest conformance, including forward/reverse

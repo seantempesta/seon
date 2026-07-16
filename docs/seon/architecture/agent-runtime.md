@@ -315,27 +315,28 @@ visible in the subagents-section line.
 
 ## Triggering + fencing — the reactive wake
 
-Triggering is **DB-reactive**. Each agent installs one `db/listen!` tx-listener
-(`install-wake-trigger!`, idempotent — it unlistens the prior key first, so a hot
-reload never doubles up). On every commit the listener inspects the added
-`:seon.agent.message/to` datoms; a datom **wakes** the agent iff:
+Triggering is **DB-reactive**. Each active agent child registers one database
+interest on its direct authority session (`install-wake-trigger!`, idempotent —
+it unlistens the prior request ID first, so a hot reload never doubles up). The
+interest names the existing `:seon.agent.message/to` attribute and exact agent
+entity pattern, so the authority sends only matching committed datoms and their
+coordinate to that child. A datom **wakes** the agent iff:
 
 > `to ∋ me` ∧ `from ≠ me` ∧ `origin ∈ {:human :agent}` (never `:core`) ∧ `hops < hop-cap`
 
-The `to`-check is load-bearing (every agent installs the listener; without it one
-message wakes everyone). Hop-exhausted messages are the **dead-letter** — they
-stay as datoms, render as a reactive warning, and never wake. `:core`-origin
-messages are substrate nudges and are **quiet** by construction: they never wake
-an idle agent. Durable agent initialization does not manufacture eval rows.
+The `to`-check is load-bearing in both the authority interest and the receiving
+function; without it one message wakes everyone. Hop-exhausted messages are the
+**dead-letter** — they stay as datoms, render as a reactive warning, and never
+wake. `:core`-origin messages are substrate nudges and are **quiet** by
+construction: they never wake an idle agent. Durable agent initialization does
+not manufacture eval rows.
 
-The listener runs inside the transaction fiber that delivered the datom, but
-the work it starts belongs to the receiving agent. Every timer-driven wake,
-renew, and re-drive therefore enters one colocated runtime boundary that sets
-both scopes explicitly: `user = receiving agent` and `process = REPL`. Restoring
-only `with-agent` is insufficient because an explicit transaction user inherited
-from the notifying fiber correctly outranks a derived agent scope. The boundary
-prevents an inbound caller from becoming the recorded user for the receiver's
-run transactions.
+The addressed event callback runs in the receiving agent process, but the work
+it starts still enters one colocated runtime boundary that explicitly sets
+`user = receiving agent` and `process = REPL`. Timer-driven wake, renew, and
+re-drive use the same boundary. No transaction fiber, callback, or provenance
+context crosses the protocol. The explicit receiving scope prevents an inbound
+caller from becoming the recorded user for the receiver's run transactions.
 
 **Fencing is two-layered, both via the single writer:**
 
@@ -518,7 +519,7 @@ The cluster runtime has one boot entry and a strict durable/runtime split:
    there is no ghost-pruning or config-healing pass.
 5. Publish one validated program candidate: atomically swap in its complete
    Malli registry, load only its safe committed declarations, instrument the
-   complete loaded program once, install global services/listeners once, and
+   complete loaded program once, install global services/interests once, and
    recover runtime services. Any validation or instrumentation failure rejects
    the candidate, records one bounded core fault, and fails admission.
 6. On a provably fresh database only, call the same atomic birth compiler used by

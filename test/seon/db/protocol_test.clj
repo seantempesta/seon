@@ -27,7 +27,6 @@
   (merge datom
          {::protocol/coordinate point
           ::protocol/index :aevt
-          ::protocol/prefix [:person/name]
           ::protocol/direction :forward
           ::protocol/history? false}))
 
@@ -112,13 +111,32 @@
               [(assoc-in request [::protocol/cursor ::protocol/coordinate]
                          (assoc point ::coordinate/t 536870928))
                (assoc request ::protocol/index :avet)
-               (assoc request ::protocol/prefix [:person/age])
                (assoc request ::protocol/direction :reverse)
                (assoc request ::protocol/history? true)]]
         (is (false? (protocol/valid-request? mismatched)))
         (is (map? (protocol/explain-request mismatched)))))
     (is (false? (protocol/valid-response?
                  (update response ::protocol/cursor dissoc :seon.db/added?))))))
+
+(deftest byte-valued-prefix-and-cursor-survive-transit-as-content
+  (let [value (byte-array [1 2 3])
+        request
+        (protocol/index-page-request
+         {::protocol/request-id "index/bytes"
+          ::protocol/database-name "default"
+          ::protocol/attachment attachment
+          ::protocol/coordinate point
+          ::protocol/index :avet
+          ::protocol/prefix [:person/fingerprint value]
+          ::protocol/direction :forward
+          ::protocol/limit 10
+          ::protocol/cursor
+          (merge cursor {:seon.db/v value ::protocol/index :avet})})
+        decoded (transit-roundtrip request)]
+    (is (protocol/valid-request? decoded))
+    (is (= [1 2 3]
+           (vec (second (::protocol/prefix decoded)))
+           (vec (get-in decoded [::protocol/cursor :seon.db/v]))))))
 
 (deftest execute-many-composes-only-immutable-read-members
   (let [request
@@ -166,7 +184,8 @@
          {::protocol/request-id "listen/query"
           ::protocol/database-name "default"
           ::protocol/attachment attachment
-          :datahike.query/attribute-dependencies #{:person/name}})
+          ::protocol/query-form
+          '[:find ?name :where [?entity :person/name ?name]]})
         datom-listen
         (protocol/listen-request
          {::protocol/request-id "listen/datoms"

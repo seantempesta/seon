@@ -32,16 +32,33 @@ plus Seon's existing coordinate-bound browser paging code.
 
 ## Index page
 
-The request carries index, zero to four prefix components, direction, limit
-between one and 200, optional history, and an ordinary cursor map. Results are
-eager vectors of plain `:seon.db/e`, `:seon.db/a`, `:seon.db/v`, `:seon.db/tx`,
-and `:seon.db/added?` maps. No lazy Datahike sequence or Datom crosses the wire.
+The first interpreter attempted to compose `seek-datoms`, `rseek-datoms`, raw
+prefix equality, and a five-field cursor in Seon. Four executable falsifiers
+rejected that seam:
 
-Datahike seek continues after the requested prefix, so the authority applies a
-prefix `take-while`. Resume includes the last complete datom in the cursor,
-seeks inclusively from its four ordered components, and discards through the
-exact five-field datom. The cursor also seals coordinate, history, index,
-prefix, and direction, preventing reuse against another ordered view.
+- retractions encode a negative transaction field internally, while the public
+  transaction ID is positive;
+- one transaction may retract and add the same E/A/V, so `added?` participates
+  in temporal order even though public seek accepts only four components;
+- Transit reconstructs byte arrays and ordinary Clojure equality compares
+  those arrays by identity; and
+- Datahike resolves lookup refs and ref values before index comparison, so raw
+  request components do not equal the resulting numeric datom components.
+
+Bounded paging therefore belongs in the owned Datahike fork. Its eager
+`index-page` capability accepts index, zero to four native components,
+forward/reverse direction, a one-to-200 limit, optional retained-weight bound,
+and an exact five-field Datahike cursor. The database argument itself selects
+current versus history. Datahike resolves components and resumes strictly after
+the cursor with its native current/temporal comparator, touches only the seek
+path plus cursor verification and `limit + 1` rows, and rejects an absent,
+tampered, or outside-prefix cursor as structured data.
+
+Seon chooses the pinned immutable value, calls that operation, and converts the
+returned Datoms once to plain `:seon.db/e`, `:seon.db/a`, `:seon.db/v`,
+`:seon.db/tx`, and `:seon.db/added?` maps. The wire cursor adds only coordinate,
+index, direction, and history; it does not duplicate the prefix or Datahike's
+comparison rules. No lazy sequence or Datom crosses the wire.
 
 ## Selective interests
 
@@ -51,33 +68,55 @@ physical connection plus that request ID.
 
 Two filters cover current consumers:
 
-- Datahike's existing conservative query attribute dependencies, either `:all`
-  or a set; and
+- a query form whose conservative attribute dependencies are derived by the
+  authority, either `:all` or a set; and
 - small ORed datom patterns with required attribute and optional entity, value,
   and added fields.
 
 One generation-fenced committed-report source serves each active database
 generation. A Datahike listener beside it would duplicate the same committed
-transaction delivery. Reverse indexes from changed attribute to interested
-connection/request pairs make a normal commit proportional to transaction
-datoms plus matches, not all children. Exact patterns let one addressed agent
-message wake one child. The event is only a coordinate and the matching plain
-datoms; the actual result remains a coordinate-pinned grouped read.
+transaction delivery. Datahike now exposes one bounded process-wide blocking
+readiness queue; it creates no thread, callback, Future, sleep, or per-database
+poller. Reverse indexes from existing committed scope and changed attribute to
+interested connection/request pairs make a normal commit proportional to
+transaction datoms plus matches, not all children. Exact patterns let one
+addressed agent message wake one child. The event is only a coordinate and the
+matching plain datoms; the actual result remains a coordinate-pinned grouped
+read.
+
+The readiness thread only hands a source to the existing fair authority
+executor. A bounded Datahike batch is one serialized delivery job for that
+database; different databases filter and deliver in parallel. Completion
+requeues a still-ready source at the global tail. Rejected admission returns
+the source without consuming reports. This avoids both a hot database
+monopolizing readiness and a new Seon queue/fairness owner.
 
 On committed-report overflow, selective filtering is no longer provably
-complete. The authority emits one resynchronization event at the latest
-coordinate to every remaining interest for that database. This exceptional gap
-is the only database-wide wakeup. The terminal gapped source is then closed and
-reopened for the same generation at that latest coordinate; it is not polled
-forever.
+complete. The authority abandons the retained prefix, opens a replacement
+before reading the new head, and emits one resynchronization event at that
+coordinate to every interest that existed at the cut. This exceptional gap is
+the only database-wide wakeup. Later listeners start from the replacement
+coordinate and do not receive the old resynchronization.
+
+Native session send is admission, not synchronous encoding on the readiness or
+delivery worker. Each physical session drains one ordered bounded encode path;
+different sessions encode in parallel. Its host result distinguishes closed,
+session-full, authority-full, and encode failure. Per-session pressure or an
+encoding failure may close only that session; authority-wide pressure cannot be
+misreported as a slow client.
 
 ## Ordering laws
 
-- Registration stores the returned coordinate. A racing commit is reflected in
-  that coordinate or appears later from the ordered report source.
+- Registration opens the source before reading and returning its coordinate.
+  A racing commit is reflected in that coordinate or appears later from the
+  ordered report source; no event precedes the acknowledgement.
 - Unlisten removes the interest and queues its acknowledgement under the same
   ordering; no event follows that acknowledgement.
 - Disconnect removes its interests before releasing its acquisitions.
+- Delivery jobs serialize per database but run in parallel across databases.
+- Shutdown drains physical cleanup, proves the interest indexes empty,
+  interrupts the one blocking readiness thread, and only then releases
+  Datahike connections.
 - Final release removes the committed-report source before indexes and storage
   close.
 - No database, connection, Datom, report, callback, stream, Future, or Promise

@@ -252,7 +252,8 @@
                  :db/unique :db.unique/identity}
                 {:db/ident :reader/score
                  :db/valueType :db.type/long
-                 :db/cardinality :db.cardinality/one}
+                 :db/cardinality :db.cardinality/one
+                 :db/index true}
                 {:reader/id "alice" :reader/score 1}
                 {:reader/id "bob" :reader/score 2}]}))
       (let [head
@@ -262,7 +263,7 @@
                      ::protocol/database-name database-name}))
             attachment (::protocol/attachment head)
             frozen (::protocol/coordinate head)
-            _
+            advanced
             (call! request-channel
                    (protocol/transaction-request
                     {::protocol/database-name database-name
@@ -306,6 +307,94 @@
                      ::protocol/selector [:reader/id :reader/score]
                      ::protocol/entity-ids [[:reader/id "alice"]
                                             [:reader/id "bob"]]}))
+            schema-response
+            (call! request-channel
+                   (protocol/schema-request
+                    {::protocol/request-id "read/schema"
+                     ::protocol/database-name database-name
+                     ::protocol/attachment attachment
+                     ::protocol/coordinate frozen}))
+            first-page
+            (call! request-channel
+                   (protocol/index-page-request
+                    {::protocol/request-id "read/index-first"
+                     ::protocol/database-name database-name
+                     ::protocol/attachment attachment
+                     ::protocol/coordinate frozen
+                     ::protocol/index :avet
+                     ::protocol/prefix [:reader/score]
+                     ::protocol/direction :forward
+                     ::protocol/limit 1}))
+            second-page
+            (call! request-channel
+                   (protocol/index-page-request
+                    {::protocol/request-id "read/index-second"
+                     ::protocol/database-name database-name
+                     ::protocol/attachment attachment
+                     ::protocol/coordinate frozen
+                     ::protocol/index :avet
+                     ::protocol/prefix [:reader/score]
+                     ::protocol/direction :forward
+                     ::protocol/limit 1
+                     ::protocol/cursor (::protocol/cursor first-page)}))
+            wrong-prefix-page
+            (call! request-channel
+                   (protocol/index-page-request
+                    {::protocol/request-id "read/index-wrong-prefix"
+                     ::protocol/database-name database-name
+                     ::protocol/attachment attachment
+                     ::protocol/coordinate frozen
+                     ::protocol/index :avet
+                     ::protocol/prefix [:reader/id]
+                     ::protocol/direction :forward
+                     ::protocol/limit 1
+                     ::protocol/cursor (::protocol/cursor first-page)}))
+            reverse-page
+            (call! request-channel
+                   (protocol/index-page-request
+                    {::protocol/request-id "read/index-reverse"
+                     ::protocol/database-name database-name
+                     ::protocol/attachment attachment
+                     ::protocol/coordinate frozen
+                     ::protocol/index :avet
+                     ::protocol/prefix [:reader/score]
+                     ::protocol/direction :reverse
+                     ::protocol/limit 2}))
+            current-query
+            (call! request-channel
+                   (protocol/query-request
+                    {::protocol/request-id "read/query-current"
+                     ::protocol/database-name database-name
+                     ::protocol/attachment attachment
+                     ::protocol/coordinate (::protocol/coordinate advanced)
+                     ::protocol/query-form
+                     '[:find ?score ?added
+                       :where [?entity :reader/score ?score ?tx ?added]]
+                     ::protocol/arguments []}))
+            history-query
+            (call! request-channel
+                   (protocol/query-request
+                    {::protocol/request-id "read/query-history"
+                     ::protocol/database-name database-name
+                     ::protocol/attachment attachment
+                     ::protocol/coordinate (::protocol/coordinate advanced)
+                     ::protocol/query-form
+                     '[:find ?score ?added
+                       :where [?entity :reader/score ?score ?tx ?added]]
+                     ::protocol/arguments []
+                     ::protocol/history? true}))
+            history-page
+            (call! request-channel
+                   (protocol/index-page-request
+                    {::protocol/request-id "read/index-history"
+                     ::protocol/database-name database-name
+                     ::protocol/attachment attachment
+                     ::protocol/coordinate (::protocol/coordinate advanced)
+                     ::protocol/index :avet
+                     ::protocol/prefix [:reader/score]
+                     ::protocol/direction :forward
+                     ::protocol/limit 20
+                     ::protocol/history? true}))
             many
             (call! request-channel
                    (protocol/execute-many-request
@@ -323,7 +412,13 @@
                       {::protocol/operation protocol/pull-many-operation
                        ::protocol/selector [:reader/id]
                        ::protocol/entity-ids [[:reader/id "alice"]
-                                              [:reader/id "bob"]]}]}))
+                                              [:reader/id "bob"]]}
+                      {::protocol/operation protocol/schema-operation}
+                      {::protocol/operation protocol/index-page-operation
+                       ::protocol/index :avet
+                       ::protocol/prefix [:reader/score]
+                       ::protocol/direction :forward
+                       ::protocol/limit 2}]}))
             large-many
             (call! request-channel
                    (protocol/execute-many-request
@@ -338,7 +433,10 @@
                                ::protocol/selector [:reader/id]
                                ::protocol/entity-id [:reader/id "alice"]}))}))]
         (is (every? protocol/valid-response?
-                    [owner hit pull pulls many large-many]))
+                    [owner hit pull pulls schema-response first-page second-page
+                     wrong-prefix-page
+                     reverse-page current-query history-query history-page many
+                     large-many]))
         (is (= #{{:id "alice" :score 1} {:id "bob" :score 2}}
                (set (:datahike.query/result owner))
                (set (:datahike.query/result hit))))
@@ -348,6 +446,9 @@
         (is (= :datahike.cache.outcome/hit
                (get-in hit [:datahike.query/cache-evidence
                             :datahike.cache/outcome])))
+        (is (= #{:reader/id :reader/score}
+               (:datahike.query/attribute-dependencies owner)
+               (:datahike.query/attribute-dependencies hit)))
         (is (= {:reader/id "alice" :reader/score 1}
                (::protocol/result pull)))
         (is (= [{:reader/id "alice" :reader/score 1}
@@ -361,6 +462,25 @@
                                        :datahike.query/result])))))
         (is (= [{:reader/id "alice"} {:reader/id "bob"}]
                (get-in many [::protocol/results 2 ::protocol/result])))
+        (is (contains? (::protocol/schema schema-response) :reader/score))
+        (is (= [1] (mapv :seon.db/v (::protocol/datoms first-page))))
+        (is (= [2] (mapv :seon.db/v (::protocol/datoms second-page))))
+        (is (false? (::protocol/success? wrong-prefix-page)))
+        (is (= protocol/protocol-error
+               (::protocol/error-kind wrong-prefix-page)))
+        (is (= [2 1] (mapv :seon.db/v (::protocol/datoms reverse-page))))
+        (is (= #{[2 true] [9 true]}
+               (set (:datahike.query/result current-query))))
+        (is (= #{[1 true] [1 false] [2 true] [9 true]}
+               (set (:datahike.query/result history-query))))
+        (is (= #{[1 true] [1 false] [2 true] [9 true]}
+               (set (map (juxt :seon.db/v :seon.db/added?)
+                         (::protocol/datoms history-page)))))
+        (is (contains? (get-in many [::protocol/results 3 ::protocol/schema])
+                       :reader/score))
+        (is (= [1 2]
+               (mapv :seon.db/v
+                     (get-in many [::protocol/results 4 ::protocol/datoms]))))
         (is (= 64 (count (::protocol/results large-many))))
         (is (every? ::protocol/success? (::protocol/results large-many)))
         (is (= frozen (::protocol/coordinate owner)
