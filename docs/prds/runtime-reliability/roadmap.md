@@ -57,8 +57,9 @@ the unsettled boundary has moved to replacing every outer authored
 render/action/prompt caller while keeping recursive rendering synchronous.
 Commit `551723fc`
 moves recovery, generated-ID allocation, and resumable-agent acquisition onto
-the settled authority session; its remaining MCP-membership freshness
-falsifier must close before that cohort is accepted. Parent-owned deadlines,
+the settled authority session. Commit `6ccd25df` closes its post-boot
+MCP-membership freshness regression with one coordinate-fenced database
+interest over the shared resumable-agent query. Parent-owned deadlines,
 terminal `proc.exited` evidence, immediate idle retirement, and a thin remote
 database child artifact—not a heartbeat or RSS poller—form the measured
 supervision/density path. The remaining client lifecycle migrates in parallel;
