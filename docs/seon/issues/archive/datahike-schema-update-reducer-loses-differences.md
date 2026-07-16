@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: archived
 severity: blocker
 tags: [issue, database, schema, flow]
 ---
@@ -34,3 +34,17 @@ Every permutation of a schema entity's map order reports the same invalid
 value-type/cardinality/uniqueness differences. A transaction attempting one of
 those incompatible changes fails without changing the database or advancing
 its transaction coordinate, while explicitly allowed changes remain allowed.
+
+## Resolution
+
+Datahike commit `670cd1ad` makes every comparison branch preserve the reducer
+accumulator. Only an incompatible difference adds an entry; unchanged and
+explicitly mutable entries leave earlier differences intact.
+
+## Evidence
+
+The regression places an incompatible value-type change before, between, and
+after unchanged or mutable entries. The transaction form that previously
+passed now throws without changing the installed value type or `:max-tx`.
+Focused persistent-set, hitchhiker-tree, and spec-instrumented runs each pass
+one test with six assertions.
