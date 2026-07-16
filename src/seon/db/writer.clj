@@ -725,7 +725,7 @@
 (declare ancestor-commit?)
 
 (defn- pinned-database
-  [{::keys [database-name scope connection]
+  [{::keys [database-name scope connection primary-only?]
     attachment ::coordinate/attachment
     request ::request}]
   (let [conn connection
@@ -742,8 +742,12 @@
           (if (= (::coordinate/commit-id expected-coordinate)
                  (::coordinate/commit-id head-coordinate))
             head
-            (d/commit-as-db conn
-                            (::coordinate/commit-id expected-coordinate)))
+            (if primary-only?
+              (d/commit-as-db
+               conn (::coordinate/commit-id expected-coordinate)
+               {:secondary-indices? false})
+              (d/commit-as-db
+               conn (::coordinate/commit-id expected-coordinate))))
           release? (and containing-db (not (identical? head containing-db)))]
       (try
         (when-not (and containing-db
@@ -779,6 +783,7 @@
                                        (::coordinate/t expected-coordinate))
                               containing-db)
            ::containing-database-value containing-db
+           ::release-containing-database? release?
            ::temporal? temporal?})
         (catch Throwable throwable
           (when release?
@@ -1949,6 +1954,17 @@
 
 (defn- execute-knn-provider!
   [dependencies {request ::request :as work}]
+  (let [{::keys [containing-database-value
+                 release-containing-database? temporal?]}
+        (pinned-database (assoc work ::primary-only? true))]
+    (try
+      (when temporal?
+        (throw
+         (ex-info "Semantic search is unavailable at an earlier transaction cut."
+                  {::failure-kind protocol/protocol-error})))
+      (finally
+        (when release-containing-database?
+          (d/release-materialized-db containing-database-value)))))
   (let [vector (:seon.embed/vector
                 ((::query-vec dependencies)
                  {:seon.embed/text (::protocol/query request)}))]
@@ -1962,7 +1978,8 @@
 
 (defn- execute-knn!
   [dependencies {request ::request :as work}]
-  (let [{::keys [database-value containing-database-value temporal?]}
+  (let [{::keys [database-value containing-database-value
+                 release-containing-database? temporal?]}
         (pinned-database work)]
     (try
       (when temporal?
@@ -1982,7 +1999,8 @@
                          :seon.embed/distance (double distance)})
                       rows))))
       (finally
-        (d/release-materialized-db containing-database-value)))))
+        (when release-containing-database?
+          (d/release-materialized-db containing-database-value))))))
 
 (defn- compact-explanation
   [explanation]

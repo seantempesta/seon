@@ -737,7 +737,9 @@
         publish-path (socket-path "knn-publish")
         observed (atom {})
         knn-calls (atom 0)
-        deps (assoc (dependencies)
+        knn-observations (atom [])
+        deps (assoc (dependencies (fn [connection _database-name]
+                                    (embed/install! connection)))
                     ::writer/query-vec
                     (fn [request]
                       (swap! observed assoc
@@ -747,6 +749,15 @@
                     ::writer/knn
                     (fn [db-value vector k eids]
                       (swap! knn-calls inc)
+                      (swap! knn-observations conj
+                             {:coordinate (coordinate/resolved db-value)
+                              :native-index?
+                              (boolean
+                               (get-in db-value
+                                       [:secondary-indices embed/index-ident]))
+                              :materialized-secondary?
+                              (:datahike.db/materialized-secondary-indices?
+                               db-value)})
                       (swap! observed assoc
                              :knn-thread (.getName (Thread/currentThread))
                              :coordinate (coordinate/resolved db-value)
@@ -759,59 +770,237 @@
                  ::writer/selected-processors 2
                  ::writer/request-socket-path request-path
                  ::writer/publish-socket-path publish-path})
-        ^SocketChannel request-channel (uds/connect! request-path)]
+        runtime (::writer/runtime server)]
     (try
-      (acquire! request-channel database-name "knn/session")
-      (let [frozen (::protocol/coordinate
-                    (call! request-channel
-                           (protocol/resolve-head-request
-                            {::protocol/request-id "knn/head"
-                             ::protocol/database-name database-name})))
-            attachment (coordinate/attachment frozen)
-            advanced (call! request-channel
-                            (protocol/transaction-request
-                             {::protocol/database-name database-name
-                              ::protocol/request-id "knn/advance"
-                              ::protocol/transaction-data
-                              [{:db/ident :knn/advanced :db/doc "advanced"}]}))
-            response
-            (call! request-channel
-                   (protocol/knn-search-request
-                    {::protocol/request-id "knn/search"
-                     ::protocol/database-name database-name
-                     ::protocol/attachment attachment
-                     ::protocol/coordinate frozen
-                     ::protocol/query "nearest"
-                     ::protocol/limit 3
-                     ::protocol/entity-ids [42 99]}))
+      (let [search!
+            (fn [request-id target-name target-attachment target-coordinate query]
+              (writer/handle-request
+               runtime
+               (protocol/knn-search-request
+                {::protocol/request-id request-id
+                 ::protocol/database-name target-name
+                 ::protocol/attachment target-attachment
+                 ::protocol/coordinate target-coordinate
+                 ::protocol/query query
+                 ::protocol/limit 3
+                 ::protocol/entity-ids [42 99]})))
+            initial (::protocol/coordinate
+                     (writer/handle-request
+                      runtime
+                      (protocol/resolve-head-request
+                       {::protocol/request-id "knn/head"
+                        ::protocol/database-name database-name})))
+            attachment (coordinate/attachment initial)
+            embedding
+            (into [(float 1.0)]
+                  (repeat (dec embed/embedding-dim) (float 0.0)))
+            frozen
+            (::protocol/coordinate
+             (writer/handle-request
+              runtime
+              (protocol/transaction-request
+               {::protocol/database-name database-name
+                ::protocol/request-id "knn/seed-versioned-index"
+                ::protocol/transaction-data
+                [{:db/ident :knn/versioned
+                  :db/doc "versioned"
+                  :seon/embedding embedding
+                  :seon.embed/source-hash "knn-versioned"}]})))
+            head-response
+            (search! "knn/search-head" database-name attachment frozen
+                     "nearest head")
+            main-connection
+            (::registry/conn
+             (registry/resolve-connection
+              {::registry/database-name (keyword database-name)}))
+            native-head-result
+            (embed/knn (d/db main-connection) embedding 1)
+            advanced
+            (writer/handle-request
+             runtime
+             (protocol/transaction-request
+              {::protocol/database-name database-name
+               ::protocol/request-id "knn/advance"
+               ::protocol/transaction-data
+               [{:db/ident :knn/advanced :db/doc "advanced"}]}))
+            advanced-coordinate (::protocol/coordinate advanced)
+            response (search! "knn/search" database-name attachment frozen
+                              "nearest")
             temporal-response
-            (call! request-channel
-                   (protocol/knn-search-request
-                    {::protocol/request-id "knn/search-temporal"
-                     ::protocol/database-name database-name
-                     ::protocol/attachment attachment
-                     ::protocol/coordinate (::protocol/previous-coordinate advanced)
-                     ::protocol/query "nearest earlier"
-                     ::protocol/limit 3
-                     ::protocol/entity-ids [42 99]}))]
+            (search! "knn/search-temporal" database-name attachment
+                     (::protocol/previous-coordinate advanced)
+                     "nearest earlier")
+            missing-response
+            (search! "knn/search-missing" database-name attachment
+                     (assoc frozen ::coordinate/commit-id
+                                       (random-uuid))
+                     "nearest missing")]
+        (is (protocol/valid-response? head-response))
+        (is (= 1 (count native-head-result))
+            "current-head KNN leaves the attached native index usable")
+        (is (protocol/valid-response? advanced)
+            "preflight validation leaves the attached head connection usable")
         (is (protocol/valid-response? response))
         (is (= frozen (::protocol/coordinate response)
                (:coordinate @observed)))
         (is (= [{:seon.embed/eid 42 :seon.embed/distance 0.25}]
                (::protocol/hits response)))
-        (is (= [{:seon.embed/text "nearest"}
-                {:seon.embed/text "nearest earlier"}]
+        (is (= [{:seon.embed/text "nearest head"}
+                {:seon.embed/text "nearest"}]
                (:queries @observed)))
         (is (= [[1.0 0.0] 3 '(42 99)]
                [(:vector @observed) (:k @observed) (:eids @observed)]))
+        (is (= [true true]
+               (mapv :native-index? @knn-observations))
+            "current and historical KNN both receive the native index")
+        (is (false?
+             (boolean
+              (:materialized-secondary? (first @knn-observations))))
+            "current KNN uses the attached live database value")
+        (is (true?
+             (:materialized-secondary? (second @knn-observations)))
+            "full historical KNN restores its committed native index")
         (is (.startsWith ^String (:knn-thread @observed) "seon-database-cpu-"))
         (is (not= (:provider-thread @observed) (:knn-thread @observed)))
         (is (= protocol/protocol-error
                (::protocol/error-kind temporal-response)))
-        (is (= 1 @knn-calls)
-            "an earlier cut never reaches a containing-commit secondary index"))
+        (is (= protocol/stale-coordinate-error
+               (::protocol/error-kind missing-response)))
+        (is (= 2 @knn-calls)
+            "unsupported coordinates invoke neither provider nor secondary index"))
       (finally
-        (try (.close request-channel) (catch Throwable _))
+        (writer/stop! server)
+        (.delete (File. request-path))
+        (.delete (File. publish-path))))))
+
+(deftest semantic-search-rejects-a-force-discarded-coordinate-before-provider
+  (let [database-name (str "writer-knn-force-" (random-uuid))
+        request-path (socket-path "knn-force-request")
+        publish-path (socket-path "knn-force-publish")
+        provider-calls (atom 0)
+        knn-calls (atom 0)
+        server
+        (writer/start!
+         {::writer/dependencies
+          (assoc (dependencies)
+                 ::writer/query-vec
+                 (fn [_request]
+                   (swap! provider-calls inc)
+                   {:seon.embed/vector [1.0 0.0]})
+                 ::writer/knn
+                 (fn [& _]
+                   (swap! knn-calls inc)
+                   []))
+          ::writer/database-name database-name
+          ::writer/backend :memory
+          ::writer/request-socket-path request-path
+          ::writer/publish-socket-path publish-path})
+        runtime (::writer/runtime server)]
+    (try
+      (let [initial
+            (::protocol/coordinate
+             (writer/handle-request
+              runtime
+              (protocol/resolve-head-request
+               {::protocol/request-id "knn-force/head"
+                ::protocol/database-name database-name})))
+            attachment (coordinate/attachment initial)
+            search!
+            (fn [request-id target-coordinate query]
+              (writer/handle-request
+               runtime
+               (protocol/knn-search-request
+                {::protocol/request-id request-id
+                 ::protocol/database-name database-name
+                 ::protocol/attachment attachment
+                 ::protocol/coordinate target-coordinate
+                 ::protocol/query query
+                 ::protocol/limit 3})))
+            selected
+            (::protocol/coordinate
+             (writer/handle-request
+              runtime
+              (protocol/transaction-request
+               {::protocol/request-id "knn-force/selected"
+                ::protocol/database-name database-name
+                ::protocol/transaction-data
+                [{:db/ident :knn.force/selected :db/doc "selected"}]})))
+            advanced
+            (::protocol/coordinate
+             (writer/handle-request
+              runtime
+              (protocol/transaction-request
+               {::protocol/request-id "knn-force/advanced"
+                ::protocol/database-name database-name
+                ::protocol/transaction-data
+                [{:db/ident :knn.force/advanced :db/doc "advanced"}]})))
+            sibling-name (str database-name "-sibling")
+            created
+            (writer/handle-request
+             runtime
+             (protocol/create-branch-request
+              {::protocol/request-id "knn-force/create-sibling"
+               ::protocol/source-database-name database-name
+               ::protocol/target-database-name sibling-name
+               ::protocol/source-coordinate selected
+               ::protocol/expected-source-head advanced
+               ::protocol/target-branch :experiment/knn-sibling}))
+            sibling-coordinate
+            (::protocol/coordinate
+             (writer/handle-request
+              runtime
+              (protocol/transaction-request
+               {::protocol/request-id "knn-force/sibling-write"
+                ::protocol/database-name sibling-name
+                ::protocol/transaction-data []})))
+            sibling-response
+            (search! "knn-force/search-sibling"
+                     (assoc sibling-coordinate ::coordinate/branch :db)
+                     "nearest sibling")
+            connection
+            (::registry/conn
+             (registry/resolve-connection
+              {::registry/database-name (keyword database-name)}))
+            selected-db
+            (d/commit-as-db connection (::coordinate/commit-id selected))
+            _
+            (try
+              (d/force-branch!
+               selected-db :db #{(::coordinate/commit-id selected)}
+               {:expected-current-commit (::coordinate/commit-id advanced)})
+              (finally
+                (d/release-materialized-db selected-db)))
+            released
+            (writer/handle-request
+             runtime
+             (protocol/release-database-request
+              {::protocol/request-id "knn-force/release"
+               ::protocol/target-database-name database-name
+               ::protocol/target-attachment attachment
+               ::protocol/expected-target-head advanced}))
+            reopened
+            (writer/handle-request
+             runtime
+             (protocol/ensure-database-request
+              {::protocol/request-id "knn-force/reopen"
+               ::protocol/database-name database-name
+               ::protocol/backend :memory
+               ::coordinate/attachment attachment}))
+            forced (::coordinate/coordinate reopened)
+            response (search! "knn-force/search-discarded" advanced
+                              "nearest discarded")]
+        (is (true? (::protocol/success? created)))
+        (is (= protocol/stale-coordinate-error
+               (::protocol/error-kind sibling-response)))
+        (is (true? (::protocol/released? released)))
+        (is (true? (::protocol/success? reopened)))
+        (is (not= advanced forced))
+        (is (= (::coordinate/t selected) (::coordinate/t forced)))
+        (is (= protocol/stale-coordinate-error
+               (::protocol/error-kind response)))
+        (is (zero? @provider-calls))
+        (is (zero? @knn-calls)))
+      (finally
         (writer/stop! server)
         (.delete (File. request-path))
         (.delete (File. publish-path))))))
