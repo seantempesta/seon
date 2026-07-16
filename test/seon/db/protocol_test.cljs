@@ -3,7 +3,8 @@
   (:require [cljs.test :refer [deftest is testing]]
             [cognitect.transit :as transit]
             [seon.db.coordinate :as coordinate]
-            [seon.db.protocol :as protocol]))
+            [seon.db.protocol :as protocol]
+            [seon.schema :as schema]))
 
 (def ^:private point
   {::coordinate/database-id
@@ -16,6 +17,18 @@
 (def ^:private attachment (coordinate/attachment point))
 
 (defrecord HostOwner [value])
+
+(deftest failures-preserve-the-existing-seon-error-kind
+  (let [failure
+        (protocol/failure
+         {::protocol/error-kind protocol/database-error
+          ::protocol/error "unknown attribute"
+          :seon.error/kind :user-input
+          ::protocol/body {::protocol/request-id "query/user-input"}})
+        member (dissoc failure ::protocol/request-id)]
+    (is (protocol/valid-response? failure))
+    (is (= :user-input (:seon.error/kind failure)))
+    (is (schema/valid-candidate-value? ::protocol/member-response member))))
 
 (deftest ordinary-wire-values-are-eager-portable-data
   (let [accepted

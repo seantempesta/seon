@@ -784,11 +784,14 @@
 
 (defn- member-failure
   [throwable]
-  (protocol/failure
-   {::protocol/error-kind
-    (or (::failure-kind (ex-data throwable)) protocol/database-error)
-    ::protocol/error (or (.getMessage ^Throwable throwable)
-                         "The database read failed.")}))
+  (let [kind (:seon.error/kind (ex-data throwable))]
+    (protocol/failure
+     (cond->
+      {::protocol/error-kind
+       (or (::failure-kind (ex-data throwable)) protocol/database-error)
+       ::protocol/error (or (.getMessage ^Throwable throwable)
+                            "The database read failed.")}
+       kind (assoc :seon.error/kind kind)))))
 
 (declare cancel-query-caller!)
 
@@ -1789,23 +1792,25 @@
 
 (defn- request-failure-response
   [^Throwable throwable]
-  (protocol/failure
-   {::protocol/error-kind
-    (let [kind (:seon.error/kind (ex-data throwable))]
-      (cond
-        (::failure-kind (ex-data throwable))
-        (::failure-kind (ex-data throwable))
+  (let [kind (:seon.error/kind (ex-data throwable))]
+    (protocol/failure
+     (cond->
+      {::protocol/error-kind
+       (cond
+         (::failure-kind (ex-data throwable))
+         (::failure-kind (ex-data throwable))
 
-        (or (= protocol/not-found-error kind)
-            (contains? protocol/lifecycle-error-kinds kind))
-        kind
+         (or (= protocol/not-found-error kind)
+             (contains? protocol/lifecycle-error-kinds kind))
+         kind
 
-        (= :seon.db.registry.error/releasing kind)
-        protocol/release-error
+         (= :seon.db.registry.error/releasing kind)
+         protocol/release-error
 
-        :else protocol/database-error))
-    ::protocol/error
-    (str (.getMessage throwable) " " (pr-str (ex-data throwable)))}))
+         :else protocol/database-error)
+       ::protocol/error
+       (str (.getMessage throwable) " " (pr-str (ex-data throwable)))}
+       kind (assoc :seon.error/kind kind)))))
 
 (declare claim-request!)
 
@@ -2998,20 +3003,7 @@
              (str "Unknown database: "
                   (::protocol/database-name request))})))
        (catch clojure.lang.ExceptionInfo exception
-         (protocol/failure
-          {::protocol/error-kind
-           (let [kind (:seon.error/kind (ex-data exception))]
-             (cond
-               (::failure-kind (ex-data exception))
-               (::failure-kind (ex-data exception))
-
-               (or (= protocol/not-found-error kind)
-                   (contains? protocol/lifecycle-error-kinds kind))
-               kind
-
-               :else protocol/database-error))
-           ::protocol/error
-           (str (.getMessage exception) " " (pr-str (ex-data exception)))}))
+         (request-failure-response exception))
        (catch Throwable throwable
          (log/error throwable "database request failed")
          (protocol/failure

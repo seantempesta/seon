@@ -158,7 +158,7 @@
                   ::protocol/attachment attachment
                   ::protocol/coordinate point
                   ::protocol/members members})]
-    (is (= 6 protocol/current-version))
+    (is (= 7 protocol/current-version))
     (is (protocol/valid-request? request))
     (is (= request (uds/decode (uds/encode request))))
     (is (false? (protocol/valid-request?

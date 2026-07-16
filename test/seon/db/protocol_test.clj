@@ -3,7 +3,8 @@
   (:require [clojure.test :refer [deftest is testing]]
             [cognitect.transit :as transit]
             [seon.db.coordinate :as coordinate]
-            [seon.db.protocol :as protocol])
+            [seon.db.protocol :as protocol]
+            [seon.schema :as schema])
   (:import [java.io ByteArrayInputStream ByteArrayOutputStream]))
 
 (def ^:private point
@@ -39,6 +40,20 @@
     (transit/read
      (transit/reader (ByteArrayInputStream. (.toByteArray output)) :json))))
 
+(deftest failures-preserve-the-existing-seon-error-kind
+  (let [failure
+        (protocol/failure
+         {::protocol/error-kind protocol/database-error
+          ::protocol/error "unknown attribute"
+          :seon.error/kind :user-input
+          ::protocol/body {::protocol/request-id "query/user-input"}})
+        member
+        (dissoc failure ::protocol/request-id)]
+    (is (protocol/valid-response? failure))
+    (is (= :user-input (:seon.error/kind failure)))
+    (is (= failure (transit-roundtrip failure)))
+    (is (schema/valid-candidate-value? ::protocol/member-response member))))
+
 (deftest schema-and-history-requests-are-closed-and-transit-stable
   (let [schema-request
         (protocol/schema-request
@@ -64,7 +79,7 @@
           ::protocol/query-form '[:find ?e :where [?e :person/name]]
           ::protocol/arguments []
           ::protocol/history? true})]
-    (is (= 6 protocol/current-version))
+    (is (= 7 protocol/current-version))
     (is (every? protocol/valid-request? [schema-request query-request]))
     (is (protocol/valid-response? schema-response))
     (is (= schema-request (transit-roundtrip schema-request)))

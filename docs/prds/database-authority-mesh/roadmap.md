@@ -1132,10 +1132,16 @@ cut;
 [[../../seon/issues/temporal-knn-embeds-before-rejection]] owns the provider-work
 optimization without retaining a database value across the slow call.
 
-The earliest unsettled Unit 7 contract is the async `seon.db` consumer cut:
-core render/context/route/turn acquisition first, then agent-authored reads in
-their owning Bun children. The dependency and protocol contracts are settled;
-no consumer may preserve a replica or invent another cache while migrating.
+The earliest unsettled Unit 7 contract is the async `seon.db` facade and route
+consumer cut. Source audit found that the JVM discarded the existing
+`:seon.error/kind` while constructing protocol failures, so version 7 first
+preserves that ordinary field on outer and grouped-member errors. The facade
+then replaces local handles with one process session; route is the first
+consumer, followed by core render/context/turn acquisition and agent-authored
+reads in their owning Bun children. No consumer may preserve a replica or
+invent another cache while migrating. Exact source and decisions are in
+[[research/async-db-facade-source-audit-2026-07-16]] and
+[[research/route-direct-interest-source-audit-2026-07-16]].
 
 Datahike's existing `pull-many` already parses once, owns one pull frame
 machine and resource budget, and certifies one eager result. Its dependency

@@ -49,6 +49,15 @@
   [channel request]
   (uds/call! {::uds/channel channel ::uds/message request}))
 
+(deftest writer-failures-preserve-the-existing-seon-error-kind
+  (let [throwable (ex-info "unknown attribute" {:seon.error/kind :user-input})
+        response (#'writer/request-failure-response throwable)
+        member (#'writer/member-failure throwable)]
+    (is (= :user-input (:seon.error/kind response)))
+    (is (= :user-input (:seon.error/kind member)))
+    (is (protocol/valid-response?
+         (assoc member ::protocol/request-id "query/user-input")))))
+
 (defn- acquire!
   [channel database-name label]
   (let [head

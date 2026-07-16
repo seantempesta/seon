@@ -23,6 +23,10 @@ differ locally and remotely without changing database semantics.
 data encoded with Transit. Request and response values name their operation,
 one request identity, database attachment/coordinate, and typed result or error.
 Transport owners carry those values and do not reinterpret them.
+Protocol version 7 preserves the existing `:seon.error/kind` on failed outer
+and member responses alongside the protocol's operation-level error kind. A
+client can therefore keep user-input and core-bug classification without
+parsing an error string or learning JVM exception types.
 
 The authority is the sole durable writer and indexed-read owner. Clients never
 send closures or database handles; transaction functions such as CAS cross only

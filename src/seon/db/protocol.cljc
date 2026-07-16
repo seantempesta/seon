@@ -98,7 +98,7 @@
 (def unknown-status :seon.db.protocol.status/unknown)
 (def feed-behind-status :seon.db.protocol.status/feed-behind)
 
-(def current-version 6)
+(def current-version 7)
 
 ;; One wire contract must reject the same legal frame on every host. Paging and
 ;; operation-level result bounds remain the preferred way to stay well below it.
@@ -748,9 +748,10 @@
  ::failed-response
  [:map
   [::success? [:= false]]
-  [::request-id ::request-id]
-  [::error-kind ::error-kind]
-  [::error ::error]
+ [::request-id ::request-id]
+ [::error-kind ::error-kind]
+ [::error ::error]
+  [:seon.error/kind {:optional true} :keyword]
   [::generated-candidate {:optional true} ::generated-candidate]
   [::expected-coordinate {:optional true} ::expected-coordinate]
   [::current-coordinate {:optional true} ::current-coordinate]])
@@ -845,9 +846,10 @@
 (schema/register!
  ::failed-member-response
  [:map {:closed true}
-  [::success? [:= false]]
-  [::error-kind ::error-kind]
-  [::error ::error]])
+ [::success? [:= false]]
+ [::error-kind ::error-kind]
+  [::error ::error]
+  [:seon.error/kind {:optional true} :keyword]])
 (schema/register! ::member-response
                   [:or ::failed-member-response ::query-member-response
                    ::read-member-response ::schema-member-response
@@ -1036,6 +1038,7 @@
  [:map
   [::error-kind ::error-kind]
   [::error ::error]
+  [:seon.error/kind {:optional true} :keyword]
   [::body {:optional true} ::body]])
 (schema/register!
  ::ensure-request-input
@@ -1416,11 +1419,13 @@
 (defn failure
   "Construct the canonical failed response."
   {:malli/schema [:=> [:cat ::failure-request] :map]}
-  [{::keys [error-kind error body]}]
-  (assoc (or body {})
-         ::success? false
-         ::error-kind error-kind
-         ::error error))
+  [{::keys [error-kind error body] :as input}]
+  (cond-> (assoc (or body {})
+                 ::success? false
+                 ::error-kind error-kind
+                 ::error error)
+    (:seon.error/kind input)
+    (assoc :seon.error/kind (:seon.error/kind input))))
 
 (defonce ^:private request-schema
   (delay (m/deref-recursive ::request)))
