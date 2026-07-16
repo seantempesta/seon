@@ -2332,6 +2332,7 @@
               '[:db/id :seon.agent/id
                 :seon.agent/purpose
                 :seon.agent/default-turn-limit
+                :seon.agent.ctx/cache-breakpoint
                 :seon.render/ai :seon.render/html
                 :seon.render.canvas/content
                 {:seon.agent/ctx [*]}]
@@ -2439,11 +2440,14 @@
                         (sort-by (juxt :seon.agent.ctx/priority
                                        (comp str :seon.agent.ctx/name)))
                         vec))]
-    (cond-> {:seon.agent.ctx/name     :context
-             :seon.agent/entity       entity
-             :seon.agent.ctx/children children
-             :seon.render/ai          'seon.agent.ctx/render-context-ai
-             :seon.render/html        'seon.agent.ctx/render-context-html}
+    (cond-> {:seon.agent.ctx/name             :context
+             :seon.agent.ctx/cache-breakpoint
+             (or (:seon.agent.ctx/cache-breakpoint entity)
+                 default-cache-breakpoint)
+             :seon.agent/entity               entity
+             :seon.agent.ctx/children         children
+             :seon.render/ai                  'seon.agent.ctx/render-context-ai
+             :seon.render/html                'seon.agent.ctx/render-context-html}
       ;; Flag a profile render on the root so [[render-context-ai]] skips
       ;; the provider cache-boundary split (and its live-conn breakpoint
       ;; read) — profile renders are deterministic over the db value.
@@ -2585,7 +2589,8 @@
                                         (:seon.render/text block))))))]
     (if (:seon.agent.ctx/profile-render? root)
       (->> bracketed (map :seon.render/bracketed) (str/join "\n\n"))
-      (let [breakpoint (cache-breakpoint)
+      (let [breakpoint (or (:seon.agent.ctx/cache-breakpoint root)
+                           default-cache-breakpoint)
             stable (->> bracketed
                         (filter #(<= (or (:seon.agent.ctx/priority %) 999)
                                      breakpoint))
@@ -2600,6 +2605,82 @@
           (str/blank? stable) volatile
           (str/blank? volatile) stable
           :else (str stable "\n\n" stable-boundary "\n\n" volatile))))))
+
+(schema/register! ::acquired-context-request
+  [:map {:closed true}
+   [:seon.agent/entity :map]
+   [:seon.agent.ctx/profile {:optional true} :seon.agent.ctx/profile]])
+
+(defn- unresolved-prompt-slot
+  [block]
+  (if-let [function-symbol (when (symbol? (:seon.render/ai block))
+                             (:seon.render/ai block))]
+    (assoc block :seon.render/ai
+           (str "[" (name (:seon.agent.ctx/name block))
+                "] render failed: fn " function-symbol
+                " is not available in compiled prompt execution yet"))
+    block))
+
+(defn rendered-context-from-entity
+  "Render literal prompt data from one already-acquired agent entity.
+
+   This is the synchronous tail for the compiled prompt owner. It selects the
+   entity's complete stored block set or the requested profile, preserves the
+   existing omission, cap, order, bracket, and cache-boundary behavior, and
+   returns the ordinary [[rendered-context]] shape. Symbol slots remain
+   explicit block-local errors until their asynchronous owning cohorts supply
+   resolved literal values."
+  {:malli/schema [:=> [:cat ::acquired-context-request] ::rendered-context]}
+  [{:seon.agent/keys [entity] profile :seon.agent.ctx/profile}]
+  (let [stored (agent-blocks entity)
+        children
+        (if (seq profile)
+          (let [by-name (into {} (map (juxt :seon.agent.ctx/name identity))
+                              stored)]
+            (->> profile
+                 (mapv (fn [patch]
+                         (merge (get by-name
+                                     (:seon.agent.ctx/name patch) {})
+                                patch)))
+                 (sort-by (juxt :seon.agent.ctx/priority
+                                (comp str :seon.agent.ctx/name)))
+                 vec))
+          stored)
+        whole-prompt (when-not (seq profile)
+                       (some->> (:seon.render/ai entity)
+                                (db/decode-edn-value :seon.render/ai)))]
+    (if (or (string? whole-prompt) (symbol? whole-prompt))
+      (let [prompt (unresolved-prompt-slot
+                    {:seon.agent.ctx/name :prompt
+                     :seon.agent.ctx/priority 0
+                     :seon.render/ai whole-prompt})
+            text (:seon.render/ai prompt)
+            blocks (cond-> []
+                     (and (string? text) (not (str/blank? text)))
+                     (conj {:seon.agent.ctx/name :prompt
+                            :seon.agent.ctx/priority 0
+                            :seon.render/text text
+                            :seon.render/token-estimate
+                            (tokens/estimate text)}))]
+        {:seon.render/text (or text "")
+         :seon.agent.ctx/rendered-blocks blocks})
+      (let [root (cond->
+                   {:seon.agent.ctx/name :context
+                    :seon.agent.ctx/cache-breakpoint
+                    (or (:seon.agent.ctx/cache-breakpoint entity)
+                        default-cache-breakpoint)
+                    :seon.agent/entity entity
+                    :seon.agent.ctx/children
+                    (mapv unresolved-prompt-slot children)}
+                   (seq profile)
+                   (assoc :seon.agent.ctx/profile-render? true))
+            blocks (rendered-child-blocks
+                    (:seon.agent.ctx/children root)
+                    #{:ai}
+                    :seon.render/ai
+                    (constantly nil))]
+        {:seon.render/text (rendered-blocks->context-text root blocks)
+         :seon.agent.ctx/rendered-blocks blocks}))))
 
 (defn rendered-context
   "Render one frozen context projection, reusing its AI block results.

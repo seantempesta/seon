@@ -132,7 +132,7 @@
   :execution
   {:target           :node-script
    :output-to        "out/execution/main.js"
-   :main             seon.execution/-main
+   :main             seon.execution.runtime/-main
    :devtools         {:enabled false}
    :compiler-options {:warnings-as-errors false
                       :optimizations      :simple
@@ -144,7 +144,7 @@
   :acme-execution
   {:target           :node-script
    :output-to        "out-acme/execution/main.js"
-   :main             seon.execution/-main
+   :main             seon.execution.runtime/-main
    :devtools         {:enabled false}
    :compiler-options {:warnings-as-errors false
                       :optimizations      :simple
