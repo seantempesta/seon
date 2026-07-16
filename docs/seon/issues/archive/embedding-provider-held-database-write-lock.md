@@ -35,8 +35,11 @@ requests, stops the embedding executor, and closes the shared Gemini client.
 
 ## Proof
 
-The deterministic regression blocks the background provider, proves the primary
-response has already returned, commits an unrelated transaction to the same
-database, then releases the provider. The focused request-receipt gate passes 5
-tests and 31 assertions. The focused executor, embedding, receipt, and writer
-integration gates pass 30 tests and 198 assertions.
+The deterministic regressions block the background provider, prove the primary
+response has already returned, commit an unrelated transaction to the same
+database, fill the embedding queue, change the source before provider return,
+and release/reopen the attachment before provider return. Only the current
+document installs a derived value and the old generation cannot affect its
+replacement. The focused request-receipt gate passes 7 tests and 45 assertions;
+the focused executor, embedding, receipt, and writer integration gates pass 32
+tests and 212 assertions.

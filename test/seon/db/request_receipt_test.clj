@@ -2,6 +2,7 @@
   "Durable transaction request receipt and recovery tests."
   (:require [clojure.test :refer [deftest is use-fixtures]]
             [datahike.api :as d]
+            [seon.db.coordinate :as coordinate]
             [seon.db.executor :as executor]
             [seon.db.protocol :as protocol]
             [seon.db.registry :as registry]
@@ -56,6 +57,15 @@
   (::registry/conn
    (registry/lookup-connection
     {::registry/database-name (keyword database-name)})))
+
+(defn- eventually
+  [predicate]
+  (loop [remaining 200]
+    (cond
+      (predicate) true
+      (zero? remaining) false
+      :else (do (Thread/sleep 10)
+                (recur (dec remaining))))))
 
 (defn- install-schema!
   [runtime database-name]
@@ -202,6 +212,162 @@
                    (d/q '[:find ?value
                           :where [_ :receipt/value ?value]]
                         (d/db (connection database-name))))))))))
+
+(deftest stale-background-embedding-is-discarded-before-derived-commit
+  (let [base-runtime (runtime)
+        database-name (str "receipt-stale-embedding-" (random-uuid))
+        provider-entered (CountDownLatch. 1)
+        release-provider (CountDownLatch. 1)
+        embedding-runtime
+        (assoc base-runtime
+               ::writer/embedding-enabled? true
+               ::writer/embedding-inputs-for-eids
+               (fn [db-value entity-ids]
+                 (->> entity-ids
+                      (keep (fn [entity-id]
+                              (when-let [value
+                                         (:receipt/value
+                                          (d/pull db-value
+                                                  [:receipt/value]
+                                                  entity-id))]
+                                {::entity-id entity-id ::value value})))
+                      vec))
+               ::writer/embedding-assertions
+               (fn [inputs]
+                 (when (some #(= "a" (::value %)) inputs)
+                   (.countDown provider-entered)
+                   (.await release-provider))
+                 inputs)
+               ::writer/revalidate-embedding-assertions
+               (fn [db-value assertions]
+                 (into []
+                       (keep
+                        (fn [{::keys [entity-id value]}]
+                          (when (= value
+                                   (:receipt/value
+                                    (d/pull db-value [:receipt/value]
+                                            entity-id)))
+                            {:db/id entity-id :receipt/derived value})))
+                       assertions)))]
+    (ensure-database! base-runtime database-name)
+    (install-schema! base-runtime database-name)
+    (transact! base-runtime database-name "schema/derived"
+               [{:db/ident :receipt/derived
+                 :db/valueType :db.type/string
+                 :db/cardinality :db.cardinality/one}])
+    (let [execute (var-get (ns-resolve 'seon.db.writer 'execute-embedding!))
+          worker (executor/start!
+                  {::executor/name :stale-embedding-test
+                   ::executor/workers 1
+                   ::executor/maximum-queued 4
+                   ::executor/execute (partial execute embedding-runtime)})
+          embedding-runtime (assoc embedding-runtime
+                                   ::writer/embedding-executor worker)]
+      (try
+        (is (true?
+             (::protocol/success?
+              (transact! embedding-runtime database-name "embedding/source-a"
+                         [{:db/id "target" :receipt/value "a"}]))))
+        (is (.await provider-entered 5 TimeUnit/SECONDS))
+        (let [entity-id
+              (d/q '[:find ?entity .
+                     :where [?entity :receipt/value "a"]]
+                   (d/db (connection database-name)))]
+          (is (true?
+               (::protocol/success?
+                (transact! embedding-runtime database-name "embedding/source-b"
+                           [{:db/id entity-id :receipt/value "b"}]))))
+          (.countDown release-provider)
+          (is (eventually
+               #(= "b"
+                   (:receipt/derived
+                    (d/pull (d/db (connection database-name))
+                            [:receipt/derived] entity-id))))
+              "only the later current source produces a derived value"))
+        (finally
+          (.countDown release-provider)
+          (executor/stop! {::executor/executor worker}))))))
+
+(deftest released-generation-cannot-install-a-late-derived-value
+  (let [base-runtime (runtime)
+        database-name (str "receipt-released-embedding-" (random-uuid))
+        provider-entered (CountDownLatch. 1)
+        release-provider (CountDownLatch. 1)
+        embedding-runtime
+        (assoc base-runtime
+               ::writer/embedding-enabled? true
+               ::writer/embedding-inputs-for-eids
+               (fn [db-value entity-ids]
+                 (->> entity-ids
+                      (keep (fn [entity-id]
+                              (when (:receipt/value
+                                     (d/pull db-value [:receipt/value]
+                                             entity-id))
+                                {:db/id entity-id
+                                 :receipt/derived "late"})))
+                      vec))
+               ::writer/embedding-assertions
+               (fn [inputs]
+                 (.countDown provider-entered)
+                 (.await release-provider)
+                 inputs)
+               ::writer/revalidate-embedding-assertions
+               (fn [_db-value assertions] assertions))]
+    (ensure-database! base-runtime database-name)
+    (install-schema! base-runtime database-name)
+    (transact! base-runtime database-name "schema/released-derived"
+               [{:db/ident :receipt/derived
+                 :db/valueType :db.type/string
+                 :db/cardinality :db.cardinality/one}])
+    (let [execute (var-get (ns-resolve 'seon.db.writer 'execute-embedding!))
+          worker (executor/start!
+                  {::executor/name :released-embedding-test
+                   ::executor/workers 1
+                   ::executor/maximum-queued 4
+                   ::executor/execute (partial execute embedding-runtime)})
+          embedding-runtime (assoc embedding-runtime
+                                   ::writer/embedding-executor worker)]
+      (try
+        (is (true?
+             (::protocol/success?
+              (transact! embedding-runtime database-name
+                         "embedding/before-release"
+                         [{:db/id "target" :receipt/value "source"}]))))
+        (is (.await provider-entered 5 TimeUnit/SECONDS))
+        (let [{::registry/keys [attachment coordinate]}
+              (registry/resolve-connection
+               {::registry/database-name (keyword database-name)})
+              release-response
+              (writer/handle-request
+               embedding-runtime
+               (protocol/release-database-request
+                {::protocol/target-database-name database-name
+                 ::protocol/target-attachment attachment
+                 ::protocol/expected-target-head coordinate}))]
+          (is (true? (::protocol/success? release-response)))
+          (is (true? (::protocol/released? release-response)))
+          (is (true?
+               (::protocol/success?
+                (writer/handle-request
+                 embedding-runtime
+                 (protocol/ensure-database-request
+                  {::protocol/database-name database-name
+                   ::protocol/backend :memory
+                   ::coordinate/attachment attachment})))))
+          (.countDown release-provider)
+          (is (eventually
+               #(zero? (::executor/running (executor/evidence worker)))))
+          (let [db-value (d/db (connection database-name))]
+            (is (= "source"
+                   (d/q '[:find ?value .
+                          :where [_ :receipt/value ?value]] db-value)))
+            (is (nil?
+                 (d/q '[:find ?value .
+                        :where [_ :receipt/derived ?value]] db-value))
+                "the old generation cannot commit after reopen")))
+        (finally
+          (.countDown release-provider)
+          (executor/stop! {::executor/executor worker}))))))
 
 (deftest request-id-reuse-with-different-data-is-rejected
   (let [runtime (runtime)

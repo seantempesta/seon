@@ -254,14 +254,17 @@ admission is the release race fence, so no global Seon lifecycle lock was added.
 Boot backfill is admitted in bounded 256-entity batches after the connection is
 published instead of blocking database initialization.
 
-The focused executor, embedding, receipt, and writer integration gates pass 30
-tests and 200 assertions. A deterministic provider latch proves the primary
+The focused executor, embedding, receipt, and writer integration gates pass 32
+tests and 212 assertions. Deterministic provider latches prove the primary
 response and an unrelated same-database write complete before provider release.
 The same proof fills the per-database embedding queue and shows another primary
 write still returns. That falsifier exposed per-message Malli schema
 recompilation; retained recursively resolved protocol validators reduce a
 warmed 10,000-response probe from 621.69 ms to 2.38 ms (about 261 times) while
-preserving validation.
+preserving validation. Further proofs change an entity while its old provider
+call is blocked and show only the later document installs a derived value, then
+release and reopen the same attachment while a provider is blocked and prove
+the old generation cannot install into the replacement.
 This is not Unit 4 graduation because query, KNN, encode/delivery, mutation, and
 control capacity are not all wired and 2/4/8-database adversarial proof remains.
 
