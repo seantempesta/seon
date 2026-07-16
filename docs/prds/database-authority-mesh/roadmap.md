@@ -92,7 +92,8 @@ Rust, cloud, Tauri, and mobile hosts conform to the same data fixtures.
 
 ## Dependency ledger
 
-- Datahike `a53158582dd2d8ba12e8bfc0843125d246b573c6` (two-phase host query
+- Datahike `f0ee54c22d70a20de0279996f93aea98c6a9d1df` (ordered temporal
+  index-page over ordered pull-many and two-phase host query
   admission atop fair report batching at `d9765276`; graduated Units 1–3 at
   `940810f5`, plus attached
   exact-commit cache identity, atop
@@ -162,7 +163,9 @@ Strict reads inside one containing commit are grounded in
 ordered/missing-value pull contract is
 [[research/datahike-ordered-pull-many-seam-2026-07-16]]. Deterministic aggregate
 member-result admission is
-[[research/aggregate-execute-many-result-bound-2026-07-16]].
+[[research/aggregate-execute-many-result-bound-2026-07-16]]. The exact
+dependency-native cache/single-flight extension for numeric earlier cuts is
+[[research/datahike-temporal-query-sharing-seam-2026-07-16]].
 
 ## Ordered implementation spine
 
@@ -1091,6 +1094,42 @@ so neither numeric range nor raw full-coordinate equality is sufficient.
 Temporal schema and KNN remain explicitly unsupported until their dependency
 owners can prove earlier-`t` semantics; releasing the raw containing value, not
 only its wrapper, owns restored secondary resources.
+
+The Seon temporal cut is implemented in the existing coordinate and writer
+owners. `coordinate/at` now requires an exact `:db/txInstant` transaction (with
+Datahike's `tx0` origin exception). The writer proves current-branch ancestry,
+derives one `d/as-of` operation value, retains and releases the raw containing
+value across standalone query physical completion or the entire execute-many,
+and reports temporal schema/KNN as unsupported protocol operations. Current
+head, older full commit, same-container earlier cut, native-fork source commit,
+future cut, and sibling-lineage cases are covered in the focused proof.
+
+The first integrated run exposed and closed one dependency defect: temporal
+AVET paging at the same cut returned `[1 2]` forward but only `[2]` reverse when
+bootstrap datoms preceded the requested prefix. Datahike `f0ee54c2` restores
+native comparator order after time-filtered reconstruction and before prefix or
+cursor handling; Seon adds no comparator or compensating scan. Persistent-set,
+hitchhiker-tree, and specification proof passes 30 tests/141 assertions, and
+the canonical CLJS gate passes 137/940. The integrated coordinate, writer,
+query-lifetime, fork/sibling, temporal history/index, schema/KNN rejection, and
+ordered-missing-pull checkpoint passes 24 tests/226 assertions.
+
+The same audit confirmed that `AsOfDB` shares immutable primary indexes but bypasses
+completed query caching and single-flight. That measured follow-up is recorded
+in [[../../seon/issues/temporal-query-work-is-not-shared]] and grounded in
+[[research/datahike-temporal-query-sharing-seam-2026-07-16]]. Its smallest seam
+extends only Datahike's private direct-numeric-AsOf query key to the existing
+connection, generation, commit, and `t`; public raw-value identity and every
+cache/coordinator owner remain unchanged. Temporal KNN also currently embeds
+before rejecting the unsupported cut;
+[[../../seon/issues/temporal-knn-embeds-before-rejection]] owns the provider-work
+optimization without retaining a database value across the slow call.
+
+The earliest unsettled Unit 7 contract is now dependency-native numeric-AsOf
+query sharing, followed by deterministic aggregate execute-many result weight.
+Both strengthen existing Datahike cache/resource mechanisms before remote
+consumer migration; neither adds a Seon cache, another coordinate, or another
+scheduler.
 
 Datahike's existing `pull-many` already parses once, owns one pull frame
 machine and resource budget, and certifies one eager result. Its dependency

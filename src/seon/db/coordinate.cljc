@@ -104,4 +104,11 @@
                    {::target-t target-t
                     ::coordinate container
                     :seon.error/kind :invalid-database-coordinate})))
+       (when (and (> target-t constants/tx0)
+                  (empty? (d/datoms db-value :eavt target-t :db/txInstant)))
+         (throw
+          (ex-info "The temporal cut is not an exact committed transaction."
+                   {::target-t target-t
+                    ::coordinate container
+                    :seon.error/kind :invalid-database-coordinate})))
        (assoc container ::t target-t))))

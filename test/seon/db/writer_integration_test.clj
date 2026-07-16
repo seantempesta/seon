@@ -270,6 +270,22 @@
                      ::protocol/request-id "read/advance"
                      ::protocol/transaction-data
                      [[:db/add [:reader/id "alice"] :reader/score 9]]}))
+            temporal (::protocol/previous-coordinate advanced)
+            connection
+            (::registry/conn
+             (registry/lookup-connection
+              {::registry/database-name (keyword database-name)}))
+            direct-temporal-reverse
+            (d/index-page
+             (d/as-of (d/db connection) (::coordinate/t temporal))
+             {:index :avet
+              :components [:reader/score]
+              :direction :reverse
+              :limit 20})
+            direct-score-history
+            (mapv (juxt :e :v :tx :added)
+                  (d/datoms (d/history (d/db connection))
+                            :avet :reader/score))
             query-input
             {::protocol/database-name database-name
              ::protocol/attachment attachment
@@ -306,6 +322,7 @@
                      ::protocol/coordinate frozen
                      ::protocol/selector [:reader/id :reader/score]
                      ::protocol/entity-ids [[:reader/id "alice"]
+                                            [:reader/id "missing"]
                                             [:reader/id "bob"]]}))
             schema-response
             (call! request-channel
@@ -395,6 +412,81 @@
                      ::protocol/direction :forward
                      ::protocol/limit 20
                      ::protocol/history? true}))
+            temporal-query
+            (call! request-channel
+                   (protocol/query-request
+                    (assoc query-input
+                           ::protocol/request-id "read/query-temporal"
+                           ::protocol/coordinate temporal)))
+            temporal-history
+            (call! request-channel
+                   (protocol/query-request
+                    {::protocol/request-id "read/query-temporal-history"
+                     ::protocol/database-name database-name
+                     ::protocol/attachment attachment
+                     ::protocol/coordinate temporal
+                     ::protocol/query-form
+                     '[:find ?score ?added
+                       :where [?entity :reader/score ?score ?tx ?added]]
+                     ::protocol/arguments []
+                     ::protocol/history? true}))
+            temporal-page
+            (call! request-channel
+                   (protocol/index-page-request
+                    {::protocol/request-id "read/index-temporal"
+                     ::protocol/database-name database-name
+                     ::protocol/attachment attachment
+                     ::protocol/coordinate temporal
+                     ::protocol/index :avet
+                     ::protocol/prefix [:reader/score]
+                     ::protocol/direction :forward
+                     ::protocol/limit 20}))
+            temporal-reverse-page
+            (call! request-channel
+                   (protocol/index-page-request
+                    {::protocol/request-id "read/index-temporal-reverse"
+                     ::protocol/database-name database-name
+                     ::protocol/attachment attachment
+                     ::protocol/coordinate temporal
+                     ::protocol/index :avet
+                     ::protocol/prefix [:reader/score]
+                     ::protocol/direction :reverse
+                     ::protocol/limit 20}))
+            temporal-schema
+            (call! request-channel
+                   (protocol/schema-request
+                    {::protocol/request-id "read/schema-temporal"
+                     ::protocol/database-name database-name
+                     ::protocol/attachment attachment
+                     ::protocol/coordinate temporal}))
+            future-query
+            (call! request-channel
+                   (protocol/query-request
+                    (assoc query-input
+                           ::protocol/request-id "read/query-future"
+                           ::protocol/coordinate
+                           (update (::protocol/coordinate advanced)
+                                   ::coordinate/t inc))))
+            temporal-many
+            (call! request-channel
+                   (protocol/execute-many-request
+                    {::protocol/request-id "read/many-temporal"
+                     ::protocol/database-name database-name
+                     ::protocol/attachment attachment
+                     ::protocol/coordinate temporal
+                     ::protocol/members
+                     [{::protocol/operation protocol/pull-operation
+                       ::protocol/selector [:reader/id :reader/score]
+                       ::protocol/entity-id [:reader/id "alice"]}
+                      {::protocol/operation protocol/query-operation
+                       ::protocol/query-form (::protocol/query-form query-input)
+                       ::protocol/arguments []}
+                      {::protocol/operation protocol/index-page-operation
+                       ::protocol/index :avet
+                       ::protocol/prefix [:reader/score]
+                       ::protocol/direction :reverse
+                       ::protocol/limit 2}
+                      {::protocol/operation protocol/schema-operation}]}))
             many
             (call! request-channel
                    (protocol/execute-many-request
@@ -435,8 +527,10 @@
         (is (every? protocol/valid-response?
                     [owner hit pull pulls schema-response first-page second-page
                      wrong-prefix-page
-                     reverse-page current-query history-query history-page many
-                     large-many]))
+                     reverse-page current-query history-query history-page
+                     temporal-query temporal-history temporal-page
+                     temporal-reverse-page
+                     temporal-schema future-query temporal-many many large-many]))
         (is (= #{{:id "alice" :score 1} {:id "bob" :score 2}}
                (set (:datahike.query/result owner))
                (set (:datahike.query/result hit))))
@@ -452,6 +546,7 @@
         (is (= {:reader/id "alice" :reader/score 1}
                (::protocol/result pull)))
         (is (= [{:reader/id "alice" :reader/score 1}
+                nil
                 {:reader/id "bob" :reader/score 2}]
                (::protocol/result pulls)))
         (is (= {:reader/id "bob" :reader/score 2}
@@ -476,6 +571,34 @@
         (is (= #{[1 true] [1 false] [2 true] [9 true]}
                (set (map (juxt :seon.db/v :seon.db/added?)
                          (::protocol/datoms history-page)))))
+        (is (= #{{:id "alice" :score 1} {:id "bob" :score 2}}
+               (set (:datahike.query/result temporal-query))))
+        (is (= #{[1 true] [2 true]}
+               (set (:datahike.query/result temporal-history))))
+        (is (= [1 2] (mapv :seon.db/v (::protocol/datoms temporal-page))))
+        (is (= 4 (count direct-score-history))
+            (pr-str {:temporal temporal
+                     :advanced (::protocol/coordinate advanced)
+                     :score-history direct-score-history}))
+        (is (= [2 1]
+               (mapv :v (:datahike.index-page/datoms direct-temporal-reverse))))
+        (is (= [2 1]
+               (mapv :seon.db/v (::protocol/datoms temporal-reverse-page))))
+        (is (= protocol/stale-coordinate-error
+               (::protocol/error-kind future-query)))
+        (is (= protocol/protocol-error
+               (::protocol/error-kind temporal-schema)
+               (get-in temporal-many
+                       [::protocol/results 3 ::protocol/error-kind])))
+        (is (= {:reader/id "alice" :reader/score 1}
+               (get-in temporal-many [::protocol/results 0 ::protocol/result])))
+        (is (= #{{:id "alice" :score 1} {:id "bob" :score 2}}
+               (set (get-in temporal-many
+                            [::protocol/results 1 :datahike.query/result]))))
+        (is (= [2 1]
+               (mapv :seon.db/v
+                     (get-in temporal-many
+                             [::protocol/results 2 ::protocol/datoms]))))
         (is (contains? (get-in many [::protocol/results 3 ::protocol/schema])
                        :reader/score))
         (is (= [1 2]
@@ -521,15 +644,17 @@
         request-path (socket-path "knn-request")
         publish-path (socket-path "knn-publish")
         observed (atom {})
+        knn-calls (atom 0)
         deps (assoc (dependencies)
                     ::writer/query-vec
                     (fn [request]
                       (swap! observed assoc
-                             :provider-thread (.getName (Thread/currentThread))
-                             :query request)
+                             :provider-thread (.getName (Thread/currentThread)))
+                      (swap! observed update :queries (fnil conj []) request)
                       {:seon.embed/vector [1.0 0.0]})
                     ::writer/knn
                     (fn [db-value vector k eids]
+                      (swap! knn-calls inc)
                       (swap! observed assoc
                              :knn-thread (.getName (Thread/currentThread))
                              :coordinate (coordinate/resolved db-value)
@@ -551,12 +676,12 @@
                             {::protocol/request-id "knn/head"
                              ::protocol/database-name database-name})))
             attachment (coordinate/attachment frozen)
-            _ (call! request-channel
-                     (protocol/transaction-request
-                       {::protocol/database-name database-name
-                       ::protocol/request-id "knn/advance"
-                       ::protocol/transaction-data
-                       [{:db/ident :knn/advanced :db/doc "advanced"}]}))
+            advanced (call! request-channel
+                            (protocol/transaction-request
+                             {::protocol/database-name database-name
+                              ::protocol/request-id "knn/advance"
+                              ::protocol/transaction-data
+                              [{:db/ident :knn/advanced :db/doc "advanced"}]}))
             response
             (call! request-channel
                    (protocol/knn-search-request
@@ -566,17 +691,33 @@
                      ::protocol/coordinate frozen
                      ::protocol/query "nearest"
                      ::protocol/limit 3
+                     ::protocol/entity-ids [42 99]}))
+            temporal-response
+            (call! request-channel
+                   (protocol/knn-search-request
+                    {::protocol/request-id "knn/search-temporal"
+                     ::protocol/database-name database-name
+                     ::protocol/attachment attachment
+                     ::protocol/coordinate (::protocol/previous-coordinate advanced)
+                     ::protocol/query "nearest earlier"
+                     ::protocol/limit 3
                      ::protocol/entity-ids [42 99]}))]
         (is (protocol/valid-response? response))
         (is (= frozen (::protocol/coordinate response)
                (:coordinate @observed)))
         (is (= [{:seon.embed/eid 42 :seon.embed/distance 0.25}]
                (::protocol/hits response)))
-        (is (= {:seon.embed/text "nearest"} (:query @observed)))
+        (is (= [{:seon.embed/text "nearest"}
+                {:seon.embed/text "nearest earlier"}]
+               (:queries @observed)))
         (is (= [[1.0 0.0] 3 '(42 99)]
                [(:vector @observed) (:k @observed) (:eids @observed)]))
         (is (.startsWith ^String (:knn-thread @observed) "seon-database-cpu-"))
-        (is (not= (:provider-thread @observed) (:knn-thread @observed))))
+        (is (not= (:provider-thread @observed) (:knn-thread @observed)))
+        (is (= protocol/protocol-error
+               (::protocol/error-kind temporal-response)))
+        (is (= 1 @knn-calls)
+            "an earlier cut never reaches a containing-commit secondary index"))
       (finally
         (try (.close request-channel) (catch Throwable _))
         (writer/stop! server)
@@ -1022,20 +1163,44 @@
                        ::protocol/expected-source-head source-head
                        ::protocol/target-branch branch}))
               target-attachment (::protocol/target-attachment created)
-              target-write
+              target-session
               (with-open [target-channel (uds/connect! request-path)]
                 (call! target-channel
                        (protocol/acquire-database-request
                         {::protocol/request-id "lifecycle/target-acquire"
                          ::protocol/database-name target-name
                          ::protocol/attachment target-attachment}))
-                (call! target-channel
-                       (protocol/transaction-request
-                        {::protocol/database-name target-name
-                         ::protocol/request-id "lifecycle/target-write"
-                         ::protocol/transaction-data
-                         [{:writer.lifecycle/value "target-only"}]})))
+                [(call! target-channel
+                        (protocol/query-request
+                         {::protocol/request-id "lifecycle/target-read-fork"
+                          ::protocol/database-name target-name
+                          ::protocol/attachment target-attachment
+                          ::protocol/coordinate (::protocol/coordinate created)
+                          ::protocol/query-form
+                          '[:find ?value
+                            :where [?entity :writer.lifecycle/value ?value]]
+                          ::protocol/arguments []}))
+                 (call! target-channel
+                        (protocol/transaction-request
+                         {::protocol/database-name target-name
+                          ::protocol/request-id "lifecycle/target-write"
+                          ::protocol/transaction-data
+                          [{:writer.lifecycle/value "target-only"}]}))])
+              target-read (first target-session)
+              target-write (second target-session)
               target-head (::protocol/coordinate target-write)
+              sibling-read
+              (call! channel
+                     (protocol/query-request
+                      {::protocol/request-id "lifecycle/source-reject-sibling"
+                       ::protocol/database-name source-name
+                       ::protocol/attachment (coordinate/attachment source-head)
+                       ::protocol/coordinate
+                       (assoc target-head ::coordinate/branch :db)
+                       ::protocol/query-form
+                       '[:find ?value
+                         :where [?entity :writer.lifecycle/value ?value]]
+                       ::protocol/arguments []}))
               source-connection
               (::registry/conn
                (registry/resolve-connection
@@ -1075,6 +1240,11 @@
           (is (false? (::protocol/adopted? created)))
           (is (= (assoc source-head ::coordinate/branch branch)
                  (::protocol/coordinate created)))
+          (is (= #{["shared"]} (set (:datahike.query/result target-read)))
+              "the attached fork accepts its source commit after ancestry proof")
+          (is (= protocol/stale-coordinate-error
+                 (::protocol/error-kind sibling-read))
+              "a retained sibling commit cannot cross the attached lineage")
           (is (::protocol/success? target-write))
           (is (some? (d/q '[:find ?entity .
                              :where [?entity :writer.lifecycle/value "target-only"]]

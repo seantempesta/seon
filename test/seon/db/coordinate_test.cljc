@@ -4,6 +4,7 @@
    #?(:clj  [clojure.test :refer [deftest is testing use-fixtures]]
       :cljs [cljs.test :refer [deftest is testing use-fixtures]])
    #?(:clj [datahike.api :as d])
+   [datahike.constants :as datahike.constants]
    [malli.core :as m]
    [seon.db.coordinate :as coordinate]
    [seon.schema :as schema]))
@@ -104,6 +105,19 @@
                  {::coordinate/db-value after
                   ::coordinate/target-t
                   (::coordinate/t (coordinate/resolved after))})))
+         (is (= datahike.constants/tx0
+                (::coordinate/t
+                 (coordinate/at
+                  {::coordinate/db-value after
+                   ::coordinate/target-t datahike.constants/tx0}))))
+         (is (thrown-with-msg?
+              clojure.lang.ExceptionInfo
+              #"not an exact committed transaction"
+              (with-redefs [d/datoms (fn [& _] [])]
+                (coordinate/at
+                 {::coordinate/db-value after
+                  ::coordinate/target-t
+                  (::coordinate/t (coordinate/resolved after))}))))
          (is (thrown-with-msg?
               clojure.lang.ExceptionInfo
               #"outside its containing commit"

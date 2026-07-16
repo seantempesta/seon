@@ -526,6 +526,8 @@
                 {::failure-kind protocol/protocol-error})))
     request))
 
+(declare ancestor-commit?)
+
 (defn- pinned-database
   [{::keys [database-name scope connection]
     attachment ::coordinate/attachment
@@ -540,21 +542,65 @@
                  ::protocol/expected-coordinate expected-coordinate})))
     (let [head (d/db conn)
           head-coordinate (coordinate/resolved head)
-          db-value
-          (if (= expected-coordinate head-coordinate)
+          containing-db
+          (if (= (::coordinate/commit-id expected-coordinate)
+                 (::coordinate/commit-id head-coordinate))
             head
             (d/commit-as-db conn
-                            (::coordinate/commit-id expected-coordinate)))]
-      (when-not (and db-value
-                     (= expected-coordinate (coordinate/resolved db-value))
-                     (= scope
-                        (committed-scope database-name attachment db-value)))
-        (throw
-         (ex-info "The requested database coordinate is unavailable."
-                  {::failure-kind protocol/stale-coordinate-error
-                   ::protocol/expected-coordinate expected-coordinate
-                   ::protocol/current-coordinate head-coordinate})))
-      db-value)))
+                            (::coordinate/commit-id expected-coordinate)))
+          release? (and containing-db (not (identical? head containing-db)))]
+      (try
+        (when-not (and containing-db
+                       (= (::coordinate/database-id expected-coordinate)
+                          (::coordinate/database-id
+                           (coordinate/resolved containing-db)))
+                       (= (::coordinate/commit-id expected-coordinate)
+                          (d/commit-id containing-db))
+                       (ancestor-commit?
+                        head (::coordinate/commit-id expected-coordinate))
+                       (= scope
+                          (committed-scope database-name attachment containing-db)))
+          (throw
+           (ex-info "The requested database coordinate is unavailable."
+                    {::failure-kind protocol/stale-coordinate-error
+                     ::protocol/expected-coordinate expected-coordinate
+                     ::protocol/current-coordinate head-coordinate})))
+        (let [verified-coordinate
+              (coordinate/at
+               {::coordinate/db-value containing-db
+                ::coordinate/attachment attachment
+                ::coordinate/target-t (::coordinate/t expected-coordinate)})
+              temporal? (< (::coordinate/t expected-coordinate)
+                           (basis-t-of containing-db))]
+          (when-not (= expected-coordinate verified-coordinate)
+            (throw
+             (ex-info "The requested database coordinate is unavailable."
+                      {::failure-kind protocol/stale-coordinate-error
+                       ::protocol/expected-coordinate expected-coordinate
+                       ::protocol/current-coordinate head-coordinate})))
+          {::database-value (if temporal?
+                              (d/as-of containing-db
+                                       (::coordinate/t expected-coordinate))
+                              containing-db)
+           ::containing-database-value containing-db
+           ::temporal? temporal?})
+        (catch Throwable throwable
+          (when release?
+            (try
+              (d/release-materialized-db containing-db)
+              (catch Throwable release-error
+                (log/error release-error "failed rejected database value release"
+                           {::protocol/expected-coordinate expected-coordinate}))))
+          (if (= protocol/stale-coordinate-error
+                 (::failure-kind (ex-data throwable)))
+            (throw throwable)
+            (throw
+             (ex-info (or (.getMessage throwable)
+                          "The requested database coordinate is unavailable.")
+                      {::failure-kind protocol/stale-coordinate-error
+                       ::protocol/expected-coordinate expected-coordinate
+                       ::protocol/current-coordinate head-coordinate}
+                      throwable))))))))
 
 (defn- resource-options
   [request]
@@ -639,7 +685,7 @@
       next-cursor (assoc ::protocol/cursor next-cursor))))
 
 (defn- execute-db-read
-  [db-value request caller-id]
+  [db-value request caller-id temporal?]
   (let [options (resource-options request)]
     (case (::protocol/operation request)
       :seon.db.protocol.operation/query
@@ -672,7 +718,11 @@
                             options)))}
 
       :seon.db.protocol.operation/schema
-      {::protocol/schema (materialize-result (d/schema db-value))}
+      (if temporal?
+        (throw
+         (ex-info "Schema is unavailable at an earlier transaction cut."
+                  {::failure-kind protocol/protocol-error}))
+        {::protocol/schema (materialize-result (d/schema db-value))})
 
       :seon.db.protocol.operation/index-page
       (materialize-result (index-page db-value request)))))
@@ -708,14 +758,17 @@
     (::resolve-only? work) (pinned-database work)
     (::database-value work)
     (protocol/success
-     (execute-db-read (::database-value work) request (::caller-id work)))
+     (execute-db-read (::database-value work) request (::caller-id work)
+                      (::temporal? work)))
     :else
-    (let [db-value (pinned-database work)]
+    (let [{::keys [database-value containing-database-value temporal?]}
+          (pinned-database work)]
       (try
         (merge (read-response-base request)
-               (execute-db-read db-value request (::protocol/request-id request)))
+               (execute-db-read database-value request
+                                (::protocol/request-id request) temporal?))
         (finally
-          (d/release-materialized-db db-value))))))
+          (d/release-materialized-db containing-database-value))))))
 
 (declare connection-for-request)
 
@@ -1684,10 +1737,15 @@
 
 (defn- execute-knn!
   [dependencies {request ::request :as work}]
-  (let [db-value (pinned-database work)]
+  (let [{::keys [database-value containing-database-value temporal?]}
+        (pinned-database work)]
     (try
+      (when temporal?
+        (throw
+         (ex-info "Semantic search is unavailable at an earlier transaction cut."
+                  {::failure-kind protocol/protocol-error})))
       (let [rows (or ((::knn dependencies)
-                      db-value (::query-vector work)
+                      database-value (::query-vector work)
                       (long (::protocol/limit request))
                       (seq (::protocol/entity-ids request)))
                      [])]
@@ -1699,7 +1757,7 @@
                          :seon.embed/distance (double distance)})
                       rows))))
       (finally
-        (d/release-materialized-db db-value)))))
+        (d/release-materialized-db containing-database-value)))))
 
 (defn- compact-explanation
   [explanation]
@@ -2304,8 +2362,8 @@
 (declare complete-execute-many-query!)
 
 (defn- complete-query-call!
-  [runtime request-id owner job-id request db-value execute-many?
-   release-on-callback? completion]
+  [runtime request-id owner job-id request execute-many?
+   release-on-callback? containing-db completion]
   (if execute-many?
     (complete-execute-many-query! runtime request-id owner job-id completion)
     (try
@@ -2314,15 +2372,19 @@
       (finally
         (when release-on-callback?
           (try
-            (d/release-materialized-db db-value)
+            (d/release-materialized-db containing-db)
             (catch Throwable throwable
               (log/error throwable "query caller database release failed"
                          {::protocol/request-id request-id}))))))))
 
 (defn- acquire-query-call!
-  [runtime {::keys [request database-value caller-id job-id]
+  [runtime {::keys [request database-value containing-database-value
+                    caller-id job-id]
             :as work}]
-  (let [db-value (or database-value (pinned-database work))
+  (let [pinned (when-not database-value (pinned-database work))
+        db-value (or database-value (::database-value pinned))
+        containing-db (or containing-database-value
+                          (::containing-database-value pinned))
         release-on-error? (nil? database-value)
         physical-db-owned? (atom false)
         request-id (or (::public-request-id work)
@@ -2350,20 +2412,22 @@
         (if-not installed?
           (do
             (cancel-query-caller! runtime caller-id)
-            (when release-on-error? (d/release-materialized-db db-value))
+            (when release-on-error?
+              (d/release-materialized-db containing-db))
             {::query-acquired? true})
           (do
             (when (= :run state)
               (register-query-job! runtime caller-id job-id
-                                   (when release-on-error? db-value))
+                                   (when release-on-error? containing-db))
               (reset! physical-db-owned? release-on-error?))
             (d/on-q-complete!
              call
              (fn [completion]
                (when (.compareAndSet completed? false true)
                  (complete-query-call! runtime request-id (::owner work) job-id
-                                       request db-value execute-many?
+                                       request execute-many?
                                        (and release-on-error? (not= :run state))
+                                       containing-db
                                        completion))))
             (let [canceled?
                   (locking active
@@ -2380,7 +2444,7 @@
       (catch Throwable throwable
         (when (and release-on-error? (not @physical-db-owned?))
           (try
-            (d/release-materialized-db db-value)
+            (d/release-materialized-db containing-db)
             (catch Throwable release-error
               (log/error release-error "failed query acquisition database release"
                          {::protocol/request-id request-id}))))
@@ -2496,7 +2560,8 @@
   (let [active (::active-requests runtime)
         dispatcher (::executor runtime)]
     (locking active
-      (let [{::keys [request scope database-value next-position jobs canceled?]
+      (let [{::keys [request scope database-value containing-database-value
+                     temporal? next-position jobs canceled?]
              :as entry}
             (get @active request-id)]
         (when (and entry (identical? owner (::owner entry)) database-value
@@ -2531,6 +2596,8 @@
                        {::database-name (::protocol/database-name request)
                         ::scope scope
                         ::database-value database-value
+                        ::containing-database-value containing-database-value
+                        ::temporal? temporal?
                         ::job-id job-id
                         ::caller-id caller-id
                         ::public-request-id request-id
@@ -2579,7 +2646,7 @@
     (when final
       (let [[entry response] final
             release-error
-            (when-let [database-value (::database-value entry)]
+            (when-let [database-value (::containing-database-value entry)]
               (try
                 (d/release-materialized-db database-value)
                 nil
@@ -2619,7 +2686,7 @@
               (swap! active update request-id
                      #(-> %
                           (update ::jobs disj job-id)
-                          (assoc ::database-value (second outcome)))))
+                          (merge (second outcome)))))
             (let [position (second job-id)
                   query? (= protocol/query-operation
                             (::protocol/operation

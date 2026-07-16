@@ -161,10 +161,10 @@ Every semantic rejection uses the existing
 `:seon.db.protocol.error/stale-coordinate`; malformed wire shapes remain
 `:seon.db.protocol.error/protocol`. No new error vocabulary is needed.
 
-1. Protocol schema requires the existing closed four-field coordinate. Tighten
-   `:seon.db.coordinate/t` from nonnegative to Datahike's transaction floor
-   `536870912` (`datahike.constants/tx0`). `t = tx0` is the valid empty origin
-   even though it has no `:db/txInstant` datom.
+1. Protocol schema requires the existing closed four-field coordinate. It stays
+   implementation-neutral and nonnegative; the Datahike resolver enforces
+   Datahike's transaction floor `536870912` (`datahike.constants/tx0`). `t =
+   tx0` is the valid empty origin even though it has no `:db/txInstant` datom.
 2. The live acquired route must exactly equal the request attachment. This is
    already checked before materialization.
 3. Resolve the requested commit from that connection. Absence is stale.
@@ -207,7 +207,8 @@ negative case.
 No Datahike production change is required for the first strict cut.
 
 1. Strengthen `coordinate/at` to reject a nonexistent transaction, with `tx0`
-   as the explicit origin exception. Tighten the registered `t` lower bound.
+   as the explicit origin exception. Keep the portable coordinate schema free
+   of Datahike's implementation-specific transaction floor.
 2. Refactor `pinned-database` to keep two host-local values together:
    the raw containing value that owns materialized resources and the operation
    value, which is either that raw value or `d/as-of` over it.
@@ -231,6 +232,16 @@ Datahike's public API.
 A later Datahike improvement could make `release-materialized-db` recursively
 release a temporal wrapper's origin. That would be a useful defensive library
 fix, but it is not required to settle or expose the protocol seam.
+
+`commit-as-db` also restores configured secondary indexes before Seon knows
+whether the selected `t` is earlier than the containing commit. Those owners
+are useful for a full-commit historical Datalog query, but unavailable to an
+`AsOfDB` query and unnecessary for temporal pull/index work. Do not disable
+them broadly in Seon: that would silently remove native-index acceleration from
+valid old-commit queries. The measured follow-up belongs in Datahike, where the
+stored commit's max transaction is already available during materialization
+and can decide whether secondary restoration is useful without a second store
+read.
 
 ## Protocol fixtures
 
@@ -418,3 +429,23 @@ following in one source-frozen checkpoint:
 This is the optimal seam because it makes the existing coordinate truthful,
 uses Datahike's immutable and temporal machinery directly, preserves one
 resource owner, and adds no public concept.
+
+## Implemented proof
+
+Seon's existing coordinate and writer owners now implement this seam. The
+authority proves attachment and branch ancestry, reconstructs the exact
+transaction through `coordinate/at`, derives one `d/as-of` operation value, and
+retains the raw containing value until standalone physical query completion or
+the entire execute-many request drains. Temporal query, pull, ordered
+pull-many, history, and forward/reverse index pages succeed. Temporal schema and
+KNN return protocol errors; future and sibling coordinates return stale errors;
+a native fork accepts the source commit only after ancestry proof.
+
+The integrated coordinate, writer, and query-admission checkpoint passes 24
+tests and 226 assertions. It includes a missing `pull-many` lookup position,
+same-containing-commit earlier reads, current and older full commits, exact
+transaction validation, execute-many shared lifetime, source-branch config
+mismatch, and retained sibling rejection. Datahike `f0ee54c2` closes the
+bootstrap-sensitive temporal reverse index-page omission at its native owner;
+its focused CLJ proof passes 30 tests/141 assertions and its canonical CLJS gate
+passes 137/940.
