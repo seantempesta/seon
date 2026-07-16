@@ -50,9 +50,14 @@ execution; protocol and persistent native sessions; asynchronous `seon.db`;
 isolated Bun children; atomic replica/feed removal; then density, packaging, and
 the measured one-versus-2/4-authority-shard decision. Its current earliest
 unsettled contract is coordinate-pinned authored source loading and compiled
-execution inside the now-supervised per-agent Bun child. Recovery/resume and
-the remaining client lifecycle migrate in parallel over the settled async
-database facade; the session-open switch waits for their one atomic cut.
+execution inside the now-supervised per-agent Bun child. Commit `551723fc`
+moves recovery, generated-ID allocation, and resumable-agent acquisition onto
+the settled authority session; its remaining MCP-membership freshness
+falsifier must close before that cohort is accepted. Parent-owned deadlines,
+terminal `proc.exited` evidence, immediate idle retirement, and a thin remote
+database child artifact—not a heartbeat or RSS poller—form the measured
+supervision/density path. The remaining client lifecycle migrates in parallel;
+the session-open switch waits for its one atomic cut.
 
 The database lifecycle work already integrated below remains a prerequisite and
 evidence source, but its older restore/undo scheduling cards are not the active
