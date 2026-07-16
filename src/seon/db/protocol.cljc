@@ -456,9 +456,12 @@
   [::transaction-id ::transaction-id]])
 (schema/register!
   ::knn-search-request
-  [:map
+  [:map {:closed true}
   [::operation [:= knn-search-operation]]
+  [::request-id ::request-id]
   [::database-name ::database-name]
+  [::attachment ::attachment]
+  [::coordinate ::coordinate]
   [::query ::query]
   [::limit ::limit]
   [::entity-ids {:optional true} ::knn-entity-ids]])
@@ -645,8 +648,12 @@
   [::coordinate ::coordinate]])
 (schema/register!
  ::knn-search-response
- [:map
+ [:map {:closed true}
   [::success? [:= true]]
+  [::request-id ::request-id]
+  [::database-name ::database-name]
+  [::attachment ::attachment]
+  [::coordinate ::coordinate]
   [::hits ::hits]])
 (schema/register!
  ::response
@@ -798,8 +805,11 @@
   [::transaction-id ::transaction-id]])
 (schema/register!
   ::knn-request-input
-  [:map
+  [:map {:closed true}
+  [::request-id ::request-id]
   [::database-name ::database-name]
+  [::attachment ::attachment]
+  [::coordinate ::coordinate]
   [::query ::query]
   [::limit ::limit]
   [::entity-ids {:optional true} ::knn-entity-ids]])
@@ -935,9 +945,12 @@
 (defn knn-search-request
   "Construct one bounded embedding-neighbor request."
   {:malli/schema [:=> [:cat ::knn-request-input] ::knn-search-request]}
-  [{::keys [database-name query limit entity-ids]}]
+  [{::keys [request-id database-name attachment coordinate query limit entity-ids]}]
   (cond-> {::operation knn-search-operation
+           ::request-id request-id
            ::database-name database-name
+           ::attachment attachment
+           ::coordinate coordinate
            ::query query
            ::limit limit}
     (seq entity-ids) (assoc ::entity-ids entity-ids)))

@@ -55,7 +55,7 @@
    same `:seon/embedding` attr + single Proximum index.
 
    Writer boot composes `augment-tx-with-embeddings`, `initialize-database!`,
-   and `knn-search` explicitly into one runtime value. Merely requiring this
+   plus `query-vec` and `knn` explicitly into one runtime value. Merely requiring this
    namespace never mutates the transaction path, operation dispatch, or
    connection initialization.
 
@@ -1267,46 +1267,6 @@
                   :seon.embed/embed-text-response]}
   [{:seon.embed/keys [text]}]
   (embed-text {:seon.embed/text (str query-instruction-prefix text)}))
-
-;;; --- knn-search request/response shapes ------------------------------------
-
-(schema/register! :seon.embed/query :seon.embed/text)         ; NL query text
-(schema/register! :seon.embed/k [:int {:min 1}])
-(schema/register! :seon.embed/eid :int)
-(schema/register! :seon.embed/eids [:set :seon.embed/eid])
-(schema/register! :seon.embed/distance :double)
-(schema/register! :seon.embed/hit
-                  [:map
-                   [:seon.embed/eid :seon.embed/eid]
-                   [:seon.embed/distance :seon.embed/distance]])
-(schema/register! :seon.embed/hits [:vector :seon.embed/hit])
-
-(schema/register! :seon.embed/knn-search-request
-                  [:map
-                   [:seon.embed/query :seon.embed/query]
-                   [:seon.embed/k :seon.embed/k]
-                   [:seon.embed/eids {:optional true} :seon.embed/eids]])
-(schema/register! :seon.embed/knn-search-response
-                  [:map [:seon.embed/hits :seon.embed/hits]])
-
-(defn knn-search
-  "Embed the NL `:seon.embed/query` (with the retrieval prefix) and run KNN over
-   the live Proximum index on `db`, scoped to `:seon.embed/eids` when present.
-   Returns `{:seon.embed/hits [{:seon.embed/eid e :seon.embed/distance d} …]}`,
-   distance-ascending. The Gemini call happens HERE (the database server owns the
-   key); the pod sends only the query TEXT + the optional eid scope.
-
-   `db` is the conn's current db value (third-party datahike handle, hence
-   `:any`). An index that isn't live yields no hits (empty vector)."
-  {:malli/schema [:=> [:catn [:db :any] [:request :seon.embed/knn-search-request]]
-                  :seon.embed/knn-search-response]}
-  [db {:seon.embed/keys [query k eids]}]
-  (let [qvec (:seon.embed/vector (query-vec {:seon.embed/text query}))
-        rows (or (knn db qvec k eids) [])]
-    {:seon.embed/hits (mapv (fn [{:keys [entity-id distance]}]
-                              {:seon.embed/eid      (long entity-id)
-                               :seon.embed/distance (double distance)})
-                            rows)}))
 
 ;;; --- Explicit writer initialization ----------------------------------------
 

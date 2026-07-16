@@ -43,7 +43,8 @@
 (schema/register! ::embedding-assertions 'fn?)
 (schema/register! ::revalidate-embedding-assertions 'fn?)
 (schema/register! ::executor ::executor/executor)
-(schema/register! ::knn-search 'fn?)
+(schema/register! ::query-vec 'fn?)
+(schema/register! ::knn 'fn?)
 (schema/register! ::publisher :seon.db.transport.uds/publisher)
 (schema/register!
  ::dependencies
@@ -54,7 +55,8 @@
   [::embedding-inputs-for-eids ::embedding-inputs-for-eids]
   [::embedding-assertions ::embedding-assertions]
   [::revalidate-embedding-assertions ::revalidate-embedding-assertions]
-  [::knn-search ::knn-search]])
+  [::query-vec ::query-vec]
+  [::knn ::knn]])
 (schema/register!
  ::runtime
   [:map
@@ -64,7 +66,8 @@
   [::embedding-inputs-for-eids ::embedding-inputs-for-eids]
   [::embedding-assertions ::embedding-assertions]
   [::revalidate-embedding-assertions ::revalidate-embedding-assertions]
-  [::knn-search ::knn-search]
+  [::query-vec ::query-vec]
+  [::knn ::knn]
   [::executor ::executor]
   [::publisher ::publisher]])
 (schema/register! ::request-server :seon.db.transport.uds/request-server)
@@ -1627,18 +1630,57 @@
               (::protocol/through-coordinate request))))
     ::protocol/database-name database-name)))
 
+(defn- execute-knn-provider!
+  [dependencies {request ::request :as work}]
+  (let [vector (:seon.embed/vector
+                ((::query-vec dependencies)
+                 {:seon.embed/text (::protocol/query request)}))]
+    (executor/continue-with :knn (assoc work ::query-vector vector))))
+
+(defn- execute-provider!
+  [dependencies request]
+  (if (contains? request ::request)
+    (execute-knn-provider! dependencies request)
+    (execute-embedding! dependencies request)))
+
+(defn- execute-knn!
+  [dependencies {request ::request :as work}]
+  (let [db-value (pinned-database work)]
+    (try
+      (let [rows (or ((::knn dependencies)
+                      db-value (::query-vector work)
+                      (long (::protocol/limit request))
+                      (seq (::protocol/entity-ids request)))
+                     [])]
+        (protocol/success
+         (assoc (read-response-base request)
+                ::protocol/hits
+                (mapv (fn [{:keys [entity-id distance]}]
+                        {:seon.embed/eid (long entity-id)
+                         :seon.embed/distance (double distance)})
+                      rows))))
+      (finally
+        (d/release-materialized-db db-value)))))
+
 (defn- handle-knn-search
-  [runtime connection request]
-  (let [search-request
-        (cond->
-         {:seon.embed/query (::protocol/query request)
-          :seon.embed/k (long (::protocol/limit request))}
-          (seq (::protocol/entity-ids request))
-          (assoc :seon.embed/eids
-                 (set (::protocol/entity-ids request))))
-        result ((::knn-search runtime) (d/db connection) search-request)]
-    (protocol/success
-     {::protocol/hits (:seon.embed/hits result)})))
+  [runtime request]
+  (if-let [scope (scope-for-read request)]
+    (executor/submit!
+     {::executor/executor (::executor runtime)
+      ::executor/work-class :provider
+      ::executor/database-name (::protocol/database-name request)
+      ::executor/scope scope
+      ::executor/job-id (::protocol/request-id request)
+      ::executor/request
+      {::database-name (::protocol/database-name request)
+       ::scope scope
+       ::request request}
+      ::executor/reserved-work-class :knn
+      ::executor/reserved-request-bytes (* 64 1024)})
+    (protocol/failure
+     {::protocol/error-kind protocol/stale-coordinate-error
+      ::protocol/error "The database attachment is no longer current."
+      ::protocol/body {::protocol/request-id (::protocol/request-id request)}})))
 
 (defn- compact-explanation
   [explanation]
@@ -1751,7 +1793,7 @@
              (handle-resolve-transaction-coordinate connection request)
 
              :seon.db.protocol.operation/knn-search
-             (handle-knn-search runtime connection request))
+             (handle-knn-search runtime request))
            (protocol/failure
             {::protocol/error-kind protocol/not-found-error
              ::protocol/error
@@ -1793,7 +1835,8 @@
                                 (executor/capacity))
           ::executor/execute
           {:read execute-read!
-           :provider (partial execute-embedding! dependencies)
+           :provider (partial execute-provider! dependencies)
+           :knn (partial execute-knn! dependencies)
            :mutation (partial execute-mutation! dependencies)}})
         runtime (assoc dependencies
                        ::publisher publisher

@@ -364,7 +364,13 @@
           {::uds/socket-path request-socket-path
            ::uds/message
            (protocol/knn-search-request
-            (cond-> {::protocol/database-name routed-database-name
+            (cond-> {::protocol/request-id (str (random-uuid))
+                     ::protocol/database-name routed-database-name
+                     ::protocol/attachment
+                     (get-in attachment-state
+                             [::database-coordinate ::coordinate/attachment])
+                     ::protocol/coordinate
+                     (coordinate/resolved @(::conn attachment-state))
                      ::protocol/query query
                      ::protocol/limit limit}
               (seq entity-ids)

@@ -294,7 +294,7 @@
         (is (= ::executor/throwable (first @queued-a)))
         (is (= ::executor/throwable (first @queued-b)))
         (.countDown release)
-        (is (= [::executor/value :running] @running))
+        (is (= ::executor/throwable (first @running)))
         (executor/release-request!
          {::executor/executor worker ::executor/request-id request-id}))
       (finally
@@ -411,6 +411,91 @@
         (.countDown release)
         (is (= [::executor/value :read] @read-result))
         (is (= [::executor/value :provider] @provider-result)))
+      (finally
+        (.countDown release)
+        (executor/stop! {::executor/executor worker})))))
+
+(deftest one-job-transitions-from-provider-to-knn-without-an-identity-gap
+  (let [provider-entered (CountDownLatch. 1)
+        release-provider (CountDownLatch. 1)
+        knn-entered (CountDownLatch. 1)
+        release-knn (CountDownLatch. 1)
+        calls (atom [])
+        worker
+        (start-worker
+         2
+         {:provider (fn [request]
+                      (swap! calls conj [:provider request])
+                      (.countDown provider-entered)
+                      (.await release-provider)
+                      (executor/continue-with :knn {:request/vector [1.0]}))
+          :knn (fn [request]
+                 (swap! calls conj [:knn request])
+                 (.countDown knn-entered)
+                 (.await release-knn)
+                 :hits)})
+        one-scope (scope "a" (random-uuid) (random-uuid))
+        submission (assoc (request worker "a" one-scope "semantic/1" :query)
+                          ::executor/work-class :provider
+                          ::executor/reserved-work-class :knn
+                          ::executor/reserved-request-bytes 65536)]
+    (try
+      (let [result (executor/submit-async! submission)]
+        (is (.await provider-entered 5 TimeUnit/SECONDS))
+        (is (identical? result (executor/submit-async! submission)))
+        (.countDown release-provider)
+        (is (.await knn-entered 5 TimeUnit/SECONDS))
+        (is (= {:knn 1}
+               (::executor/running-by-class (executor/evidence worker))))
+        (is (= 1 (::executor/retained-identities (executor/evidence worker))))
+        (.countDown release-knn)
+        (is (= [::executor/value :hits] @result))
+        (is (= [[:provider {:request/value :query}]
+                [:knn {:request/vector [1.0]}]]
+               @calls))
+        (is (zero? (::executor/retained-identities
+                    (executor/evidence worker)))))
+      (finally
+        (.countDown release-provider)
+        (.countDown release-knn)
+        (executor/stop! {::executor/executor worker})))))
+
+(deftest canceled-provider-cannot-resurrect-as-knn
+  (let [entered (CountDownLatch. 1)
+        release (CountDownLatch. 1)
+        knn-calls (atom 0)
+        worker
+        (start-worker
+         2
+         {:provider (fn [_]
+                      (.countDown entered)
+                      (.await release)
+                      (executor/continue-with :knn {:request/vector [1.0]}))
+          :knn (fn [_] (swap! knn-calls inc) :hits)})
+        one-scope (scope "a" (random-uuid) (random-uuid))
+        submission (assoc (request worker "a" one-scope "semantic/cancel" :query)
+                          ::executor/work-class :provider
+                          ::executor/reserved-work-class :knn
+                          ::executor/reserved-request-bytes 65536)]
+    (try
+      (let [result (executor/submit-async! submission)]
+        (is (.await entered 5 TimeUnit/SECONDS))
+        (is (= :running
+               (::executor/cancellation
+                (executor/cancel!
+                 {::executor/executor worker
+                  ::executor/job-id "semantic/cancel"}))))
+        (is (= ::executor/throwable (first @result)))
+        (.countDown release)
+        (loop [attempt 0]
+          (when (and (pos? (::executor/retained-identities
+                            (executor/evidence worker)))
+                     (< attempt 10000))
+            (Thread/yield)
+            (recur (inc attempt))))
+        (is (zero? @knn-calls))
+        (is (zero? (::executor/retained-identities
+                    (executor/evidence worker)))))
       (finally
         (.countDown release)
         (executor/stop! {::executor/executor worker})))))

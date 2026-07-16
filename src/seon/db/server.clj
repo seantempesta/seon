@@ -311,7 +311,8 @@
          {:seon.embed/embeddables embeddables
           :seon.embed/db-value db-value
           :seon.embed/assertions assertions})))
-     ::writer/knn-search embed/knn-search}))
+     ::writer/query-vec embed/query-vec
+     ::writer/knn embed/knn}))
 
 (defn- resolve-repl-port-file
   [{::keys [database-name repl-port-file]}]

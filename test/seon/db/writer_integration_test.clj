@@ -31,7 +31,8 @@
     ::writer/embedding-inputs-for-eids (fn [_db-value _entity-ids] [])
     ::writer/embedding-assertions (fn [_inputs] [])
     ::writer/revalidate-embedding-assertions (fn [_db-value _assertions] [])
-    ::writer/knn-search (fn [_db-value _request] {:seon.embed/hits []})}))
+    ::writer/query-vec (fn [_] {:seon.embed/vector [0.0]})
+    ::writer/knn (fn [_db-value _vector _k _eids] [])}))
 
 (defn- wait-for-subscriber!
   [publisher]
@@ -274,7 +275,73 @@
            {::protocol/operation protocol/query-operation
             ::protocol/query-form
             [:find '?value :where ['?entity :value '?value]]
-            ::protocol/arguments []})))))
+           ::protocol/arguments []})))))
+
+(deftest semantic-search-transitions-from-provider-to-coordinate-pinned-knn
+  (let [database-name (str "writer-knn-" (random-uuid))
+        request-path (socket-path "knn-request")
+        publish-path (socket-path "knn-publish")
+        observed (atom {})
+        deps (assoc (dependencies)
+                    ::writer/query-vec
+                    (fn [request]
+                      (swap! observed assoc
+                             :provider-thread (.getName (Thread/currentThread))
+                             :query request)
+                      {:seon.embed/vector [1.0 0.0]})
+                    ::writer/knn
+                    (fn [db-value vector k eids]
+                      (swap! observed assoc
+                             :knn-thread (.getName (Thread/currentThread))
+                             :coordinate (coordinate/resolved db-value)
+                             :vector vector :k k :eids eids)
+                      [{:entity-id 42 :distance 0.25}]))
+        server (writer/start!
+                {::writer/dependencies deps
+                 ::writer/database-name database-name
+                 ::writer/backend :memory
+                 ::writer/selected-processors 2
+                 ::writer/request-socket-path request-path
+                 ::writer/publish-socket-path publish-path})
+        ^SocketChannel request-channel (uds/connect! request-path)]
+    (try
+      (let [frozen (::protocol/coordinate
+                    (call! request-channel
+                           (protocol/resolve-head-request
+                            {::protocol/request-id "knn/head"
+                             ::protocol/database-name database-name})))
+            attachment (coordinate/attachment frozen)
+            _ (call! request-channel
+                     (protocol/transaction-request
+                       {::protocol/database-name database-name
+                       ::protocol/request-id "knn/advance"
+                       ::protocol/transaction-data
+                       [{:db/ident :knn/advanced :db/doc "advanced"}]}))
+            response
+            (call! request-channel
+                   (protocol/knn-search-request
+                    {::protocol/request-id "knn/search"
+                     ::protocol/database-name database-name
+                     ::protocol/attachment attachment
+                     ::protocol/coordinate frozen
+                     ::protocol/query "nearest"
+                     ::protocol/limit 3
+                     ::protocol/entity-ids [42 99]}))]
+        (is (protocol/valid-response? response))
+        (is (= frozen (::protocol/coordinate response)
+               (:coordinate @observed)))
+        (is (= [{:seon.embed/eid 42 :seon.embed/distance 0.25}]
+               (::protocol/hits response)))
+        (is (= {:seon.embed/text "nearest"} (:query @observed)))
+        (is (= [[1.0 0.0] 3 '(42 99)]
+               [(:vector @observed) (:k @observed) (:eids @observed)]))
+        (is (.startsWith ^String (:knn-thread @observed) "seon-database-cpu-"))
+        (is (not= (:provider-thread @observed) (:knn-thread @observed))))
+      (finally
+        (try (.close request-channel) (catch Throwable _))
+        (writer/stop! server)
+        (.delete (File. request-path))
+        (.delete (File. publish-path))))))
 
 (deftest release-waits-until-a-running-read-relinquishes-the-generation
   (let [database-name (str "writer-read-release-" (random-uuid))

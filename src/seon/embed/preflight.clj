@@ -145,9 +145,9 @@
                          [{:db/id "probe" trigger probe}])
                 report  (d/transact conn augment)
                 eid     (get-in report [:tempids "probe"])
-                {:seon.embed/keys [hits]}
-                (embed/knn-search (d/db conn)
-                                  {:seon.embed/query probe :seon.embed/k 1})
+                qvec (:seon.embed/vector
+                      (embed/query-vec {:seon.embed/text probe}))
+                hits (or (embed/knn (d/db conn) qvec 1) [])
                 top     (first hits)]
             (cond
               (nil? eid)
@@ -158,9 +158,9 @@
               {:code :knn-selftest
                :msg  "KNN self-test: install!+write succeeded but the Proximum index returned ZERO neighbours. The :proximum index is not live (register-index-type! / embed-on-write did not run)."}
 
-              (not= eid (:seon.embed/eid top))
+              (not= eid (:entity-id top))
               {:code :knn-selftest
-               :msg  (str "KNN self-test: top-1 hit was eid " (:seon.embed/eid top)
+               :msg  (str "KNN self-test: top-1 hit was eid " (:entity-id top)
                           ", expected the seeded row eid " eid ".")}
 
               :else nil))

@@ -23,6 +23,8 @@
 (schema/register! ::request-id :seon.db.protocol/request-id)
 (schema/register! ::work-class :keyword)
 (schema/register! ::request-bytes [:int {:min 0}])
+(schema/register! ::reserved-work-class ::work-class)
+(schema/register! ::reserved-request-bytes [:int {:min 0}])
 (schema/register! ::maximum-active [:int {:min 1}])
 (schema/register! ::maximum-queued [:int {:min 1}])
 (schema/register! ::maximum-queued-by-database [:int {:min 1}])
@@ -42,6 +44,9 @@
                    [::job-id ::job-id]
                    [::request-id {:optional true} ::request-id]
                    [::request ::request]
+                   [::reserved-work-class {:optional true} ::reserved-work-class]
+                   [::reserved-request-bytes {:optional true}
+                    ::reserved-request-bytes]
                    [::request-bytes {:optional true} ::request-bytes]])
 (schema/register! ::remove-database-request
                   [:map [::executor ::executor] [::scope ::scope]])
@@ -233,7 +238,17 @@
                         (= database-name (::database-name job))))
                  (::jobs state))))
 (defn- queued-request-bytes [state]
-  (reduce + 0 (map (comp ::request-bytes val) (queued-jobs state))))
+  (+ (reduce + 0 (map (comp ::request-bytes val) (queued-jobs state)))
+     (reduce + 0 (keep (comp ::reserved-request-bytes val) (::jobs state)))))
+
+(defn- reserved-count
+  [state work-class database-name]
+  (count
+   (filter (fn [[_ job]]
+             (and (= work-class (::reserved-work-class job))
+                  (or (nil? database-name)
+                      (= database-name (::database-name job)))))
+           (::jobs state))))
 
 (defn- remove-queued-results [state results]
   (update state ::ready
@@ -263,44 +278,31 @@
           @(::stopped executor) nil
           :else (do (.wait ^Object (::lock executor)) (recur)))))))
 
+(defn- decrement-running
+  [state {::keys [work-class database-name]}]
+  (let [class-left (dec (get-in state [::running-by-class work-class]))
+        class-db-left (dec (get-in state [::running-by-class-database
+                                          [work-class database-name]]))
+        db-left (dec (get-in state [::running-by-database database-name]))]
+    (cond-> state
+      (zero? class-left) (update ::running-by-class dissoc work-class)
+      (pos? class-left) (assoc-in [::running-by-class work-class] class-left)
+      (zero? class-db-left)
+      (update ::running-by-class-database dissoc [work-class database-name])
+      (pos? class-db-left)
+      (assoc-in [::running-by-class-database [work-class database-name]]
+                class-db-left)
+      (zero? db-left) (update ::running-by-database dissoc database-name)
+      (pos? db-left) (assoc-in [::running-by-database database-name] db-left))))
+
 (defn- finish-work! [executor work]
   (locking (::lock executor)
-    (let [{::keys [job-id request-id result work-class database-name]} work]
+    (let [{::keys [job-id request-id result]} work]
       (swap! (::state executor)
              (fn [state]
-               (if (identical? result (get-in state [::jobs job-id ::result]))
-                 (let [class-left (dec (get-in state [::running-by-class work-class]))
-                       class-db-left
-                       (dec (get-in state [::running-by-class-database
-                                           [work-class database-name]]))
-                       db-left (dec (get-in state [::running-by-database database-name]))]
-                   (cond-> (update state ::jobs dissoc job-id)
-                     (zero? class-left) (update ::running-by-class dissoc work-class)
-                     (pos? class-left) (assoc-in [::running-by-class work-class] class-left)
-                     (zero? class-db-left)
-                     (update ::running-by-class-database dissoc
-                             [work-class database-name])
-                     (pos? class-db-left)
-                     (assoc-in [::running-by-class-database
-                                [work-class database-name]] class-db-left)
-                     (zero? db-left) (update ::running-by-database dissoc database-name)
-                     (pos? db-left) (assoc-in [::running-by-database database-name] db-left)))
-                 (let [class-left (dec (get-in state [::running-by-class work-class]))
-                       class-db-left
-                       (dec (get-in state [::running-by-class-database
-                                           [work-class database-name]]))
-                       db-left (dec (get-in state [::running-by-database database-name]))]
-                   (cond-> state
-                     (zero? class-left) (update ::running-by-class dissoc work-class)
-                     (pos? class-left) (assoc-in [::running-by-class work-class] class-left)
-                     (zero? class-db-left)
-                     (update ::running-by-class-database dissoc
-                             [work-class database-name])
-                     (pos? class-db-left)
-                     (assoc-in [::running-by-class-database
-                                [work-class database-name]] class-db-left)
-                     (zero? db-left) (update ::running-by-database dissoc database-name)
-                     (pos? db-left) (assoc-in [::running-by-database database-name] db-left))))))
+               (cond-> (decrement-running state work)
+                 (identical? result (get-in state [::jobs job-id ::result]))
+                 (update ::jobs dissoc job-id))))
       (when (and request-id
                  (get-in @(::state executor) [::retained-requests request-id]))
         (swap! (::state executor) update-in
@@ -309,14 +311,58 @@
       (swap! (::counts executor) update ::completed inc)
       (.notifyAll ^Object (::lock executor)))))
 
+(defn continue-with
+  "Return a private dispatcher value that advances one admitted job in place."
+  [work-class request]
+  {::continue-work-class work-class ::continue-request request})
+
+(defn- continue-work!
+  [executor work continuation]
+  (locking (::lock executor)
+    (let [{::keys [job-id result scope reserved-work-class
+                   reserved-request-bytes]} work
+          next-class (::continue-work-class continuation)
+          state @(::state executor)
+          current (get-in state [::jobs job-id])]
+      (when (and (= next-class reserved-work-class)
+                 (identical? result (::result current))
+                 (not (::canceled? current))
+                 (not (contains? (::closed-scopes state) scope)))
+        (let [next-work (-> current
+                            (assoc ::work-class next-class
+                                   ::request (::continue-request continuation)
+                                   ::request-bytes reserved-request-bytes
+                                   ::status :queued)
+                            (dissoc ::reserved-work-class
+                                    ::reserved-request-bytes))]
+          (reset! (::state executor)
+                  (-> (decrement-running state work)
+                      (enqueue next-class (::database-name work) next-work)
+                      (assoc-in [::jobs job-id] next-work)))
+          (.notifyAll ^Object (::lock executor))
+          true)))))
+
 (defn- run-work! [executor work]
   (let [result (::result work)
         execute (get (::execute executor) (::work-class work))
         outcome (try
                   [::value (execute (::request work))]
-                  (catch Throwable throwable [::throwable throwable]))]
-    (finish-work! executor work)
-    (deliver result outcome)))
+                  (catch Throwable throwable [::throwable throwable]))
+        continuation (when (= ::value (first outcome))
+                       (let [value (second outcome)]
+                         (when (and (map? value)
+                                    (::continue-work-class value))
+                           value)))]
+    (if (and continuation (continue-work! executor work continuation))
+      nil
+      (do
+        (finish-work! executor work)
+        (deliver result
+                 (if continuation
+                   [::throwable
+                    (ex-info "The database request was canceled before its next phase."
+                             {::job-id (::job-id work)})]
+                   outcome))))))
 
 (defn- run-worker! [executor allowed-classes]
   (loop []
@@ -378,8 +424,9 @@
   [{::accepted? false ::joined? false} result])
 
 (defn- admit! [{::keys [executor work-class database-name scope job-id request-id
-                         request request-bytes]
-                  :or {request-bytes 0}}]
+                         request request-bytes reserved-work-class
+                         reserved-request-bytes]
+                  :or {request-bytes 0 reserved-request-bytes 0}}]
   (locking (::lock executor)
     (let [state @(::state executor)]
       (if-let [existing (get-in state [::jobs job-id])]
@@ -388,14 +435,29 @@
               class-capacity (get-in (::capacity executor) [::classes work-class])
               class-count (get (queued-by-class state) work-class 0)
               database-count (queued-by-class-database state work-class database-name)
+              reserved-capacity (when reserved-work-class
+                                  (get-in (::capacity executor)
+                                          [::classes reserved-work-class]))
               queued-bytes (queued-request-bytes state)
               valid? (and class-capacity
+                          (or (nil? reserved-work-class)
+                              (and reserved-capacity
+                                   (< (+ (get (queued-by-class state)
+                                              reserved-work-class 0)
+                                         (reserved-count state reserved-work-class nil))
+                                      (::maximum-queued reserved-capacity))
+                                   (< (+ (queued-by-class-database
+                                          state reserved-work-class database-name)
+                                         (reserved-count state reserved-work-class
+                                                         database-name))
+                                      (::maximum-queued-by-database
+                                       reserved-capacity))))
                           (not @(::stopped executor))
                           (not (contains? (::closed-scopes state) scope))
                           (<= request-bytes (::maximum-request-bytes (::capacity executor)))
                           (< class-count (::maximum-queued class-capacity))
                           (< database-count (::maximum-queued-by-database class-capacity))
-                          (<= (+ queued-bytes request-bytes)
+                          (<= (+ queued-bytes request-bytes reserved-request-bytes)
                               (::maximum-queued-request-bytes (::capacity executor))))]
           (if-not valid?
             (rejection! executor result database-name work-class
@@ -407,6 +469,8 @@
                         ::request-id request-id
                         ::request request
                         ::request-bytes request-bytes
+                        ::reserved-work-class reserved-work-class
+                        ::reserved-request-bytes reserved-request-bytes
                         ::result result}]
               (reset! (::state executor)
                       (-> state
@@ -587,7 +651,12 @@
                            (ex-info "The database request was canceled."
                                     {::job-id job-id})])
           {::cancellation :queued})
-        {::cancellation :running ::request request})
+        (do
+          (swap! (::state executor) assoc-in [::jobs job-id ::canceled?] true)
+          (deliver result [::throwable
+                           (ex-info "The database request was canceled."
+                                    {::job-id job-id})])
+          {::cancellation :running ::request request}))
       {::cancellation :not-found})))
 
 (defn cancel-request!
@@ -603,7 +672,8 @@
           queued (into {}
                        (filter (fn [[_ job]] (= :queued (::status job))))
                        matching)
-          running (vals (apply dissoc matching (keys queued)))
+          running-map (apply dissoc matching (keys queued))
+          running (vals running-map)
           results (set (map (comp ::result val) queued))]
       (when retained
         (swap! (::state executor)
@@ -613,8 +683,18 @@
                      (update-in [::retained-requests request-id ::completed-jobs]
                                 #(into (or % empty-queue) (keys queued)))
                      (remove-queued-results results)
-                     (update ::jobs #(apply dissoc % (keys queued)))))))
+                     (update ::jobs #(apply dissoc % (keys queued)))
+                     (update ::jobs
+                             (fn [jobs]
+                               (reduce (fn [current job-id]
+                                         (assoc-in current [job-id ::canceled?] true))
+                                       jobs (keys running-map))))))))
       (doseq [[job-id {::keys [result]}] queued]
+        (deliver result [::throwable
+                         (ex-info "The database request was canceled."
+                                  {::job-id job-id
+                                   ::request-id request-id})]))
+      (doseq [[job-id {::keys [result]}] running-map]
         (deliver result [::throwable
                          (ex-info "The database request was canceled."
                                   {::job-id job-id

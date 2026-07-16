@@ -26,7 +26,8 @@
    ::writer/embedding-inputs-for-eids (fn [_db-value _entity-ids] [])
    ::writer/embedding-assertions (fn [_inputs] [])
    ::writer/revalidate-embedding-assertions (fn [_db-value _assertions] [])
-   ::writer/knn-search (fn [_db-value _request] {:seon.embed/hits []})
+   ::writer/query-vec (fn [_] {:seon.embed/vector [0.0]})
+   ::writer/knn (fn [_db-value _vector _k _eids] [])
    ::writer/publisher
    {::uds/channel (Object.)
     ::uds/subscribers (atom #{})

@@ -91,7 +91,7 @@ Rust, cloud, Tauri, and mobile hosts conform to the same data fixtures.
 
 ## Dependency ledger
 
-- Datahike `c1faf70d` (graduated Units 1–3 at `940810f5`, plus attached
+- Datahike `d7ac886f` (graduated Units 1–3 at `940810f5`, plus attached
   exact-commit cache identity, atop
   `9ada755087228e10cfb179fa5779ce227a6ed220`):
   `db.cljc`, `connections.cljc`, `connector.cljc`, `core.cljc`,
@@ -367,12 +367,31 @@ entity IDs, supply HNSW construction capacity, add encode/session byte
 ownership, and give provider calls explicit deadlines with matching connection
 capacity.
 
+Semantic search is now one continuously owned dispatcher job with two resource
+phases. Initial admission reserves downstream KNN queue and conservative vector
+bytes before paying provider cost. Provider completion atomically rewrites the
+same job, scope, result, and request ID from `:provider` to queued `:knn`; it
+never runs native search on the provider virtual thread and cancellation or a
+scope fence cannot resurrect the next phase. The KNN phase resolves the
+request's exact attachment and coordinate only while holding its CPU permit,
+then releases historical secondary resources in `finally`. The protocol no
+longer accepts unpinned KNN requests, and the combined `embed/knn-search` path
+has been removed in favor of the existing `query-vec` and `knn` functions.
+Focused transition and historical integration proof contributes to a 64-test,
+384-assertion writer gate; the focused Bun/CLJS embedding build passes 3 tests
+and 8 assertions from a clean dependency SHA.
+
 The Datahike Proximum adapter now converts an upstream `EntityBitSet` once to
 external entity IDs and calls Proximum's indexed external-ID filter seam.
 Filtered search no longer translates every indexed internal node back to an
 entity ID merely to run a predicate. The focused PSS/HHT/spec secondary-index
 gate passes 45 tests and 267 assertions. Sparse/dense crossover measurement
 remains a later tuning question; correctness uses the same entity set.
+
+The clean Bun/CLJS compile also exposed an unconditional refer to Datahike's
+CLJ-only `release-db`; owned fork `d7ac886f` conditions that refer at the source.
+[[docs/seon/issues/archive/datahike-cljs-release-db-refer]] records the resolved
+dependency defect.
 
 This is not Unit 4 graduation because query, KNN, encode/delivery, mutation, and
 control capacity are not all wired and 2/4/8-database adversarial proof remains.
