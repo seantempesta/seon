@@ -72,6 +72,28 @@
     (is (map? (protocol/explain-response response)))
     (is (false? (protocol/valid-response? event)))))
 
+(deftest execute-many-always-carries-one-outer-result-bound
+  (let [input
+        {::protocol/request-id "many/cljs"
+         ::protocol/database-name "default"
+         ::protocol/attachment attachment
+         ::protocol/coordinate point
+         ::protocol/members
+         [{::protocol/operation protocol/pull-operation
+           ::protocol/selector [:db/id]
+           ::protocol/entity-id 1}]}
+        default-request (protocol/execute-many-request input)
+        smaller-request
+        (protocol/execute-many-request
+         (assoc input :datahike.resource/max-result-weight 1024))]
+    (is (protocol/valid-request? default-request))
+    (is (= protocol/maximum-frame-bytes
+           (:datahike.resource/max-result-weight default-request)))
+    (is (= 1024 (:datahike.resource/max-result-weight smaller-request)))
+    (is (false? (protocol/valid-request?
+                 (dissoc default-request
+                         :datahike.resource/max-result-weight))))))
+
 (deftest generated-candidate-manifests-have-one-portable-shape
   (let [candidate
         {:seon.db.id/key :allocation/agent

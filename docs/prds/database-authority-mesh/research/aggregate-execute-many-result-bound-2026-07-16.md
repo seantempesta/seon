@@ -29,7 +29,7 @@ a second cache, result language, serializer, or scheduler.
 
 ## Dependency ledger
 
-- Datahike `a53158582dd2d8ba12e8bfc0843125d246b573c6`:
+- Datahike `d21abadb9412f1b828b02ddb3c08ddc81d57c595`:
   `resource.cljc:95-168` owns scalar weight, bounded eager traversal, and the
   existing `:datahike.resource/max-result-weight` error semantics.
 - Seon protocol v6 at `e9a9a793`:
@@ -130,3 +130,52 @@ the compute/memory bounds; the outer value is composition and delivery policy.
 - Cancellation, database release, response-delivery failure, and aggregate
   exhaustion leave zero writer requests, executor jobs, Datahike query callers,
   database values, response slots, and output bytes.
+
+## Implementation evidence
+
+The dependency seam is implemented and pushed at Datahike `d21abadb`. The CLJ
+host API exposes the existing `shallow-weight-within` traversal unchanged;
+there is no wrapper, copied weight algorithm, remote capability, or generated
+binding. Persistent-set, hitchhiker-tree, and specification proof passes 18
+tests/153 assertions. The canonical Node ClojureScript dependency gate passes
+137/945 and proves that the host-only operation does not leak into CLJS.
+
+The authority wire now requires one outer result weight, while the request
+constructor supplies the existing 4 MiB frame ceiling by default. Admission
+certifies the minimum response before resolving a database value. Parallel
+members may finish in any order, but only the contiguous vector prefix replaces
+reserved fixed errors. The first member that cannot fit preserves the accepted
+prefix, fills that position and the suffix with the fixed bounded error, stops
+refill, cancels queued or cooperative work, drains running work, and releases
+the containing value once.
+
+The implementation falsifier exposed a separate retained-memory defect in the
+old refill rule. Counting only active executor jobs allowed a slow early member
+to retain every later completed result as finished jobs continually opened new
+slots. Refill now counts `next-position - next-result-position`: running jobs,
+yielded query callers, and completed out-of-order values all occupy the same
+existing eight-member per-database window. No second queue or registry was
+added.
+
+Adversarial review then found two bounds that the first implementation did not
+close. Every member without a narrower explicit result limit now inherits the
+outer limit before Datahike execution. The complete member response—not only a
+successful value—is certified before either an executor completion or query
+callback can retain it in batch state, so an arbitrarily large exception
+message becomes the same fixed error. The aggregate cutoff is also checked
+under the active-request lock before submission and immediately after a racing
+submission; reserved suffix jobs are removed and a job that crossed the race
+is canceled. A final independent re-review found no remaining aggregate-bound
+defect.
+
+Focused protocol, writer integration, and query-admission proof passes 31
+tests/298 assertions. Executor, protocol, UDS delivery, and query-admission
+passes 71/936; the UDS gate alone passes 32/153. The inverted-order
+proof accepts the same prefix, the slow-position proof admits no member beyond
+the eight-position window before overflow, oversized success and failure
+results are replaced before retention, both sides of the submission race are
+fenced, and too-small admission performs no database work. The focused CLJS
+protocol source compiled successfully, then the cold test bundle stopped in
+the already-superseded `seon.db.replica` because its removed Node UDS symbols
+remain until the atomic Unit 9 deletion. That runtime failure is
+consumer-migration evidence, not an alternate protocol path.

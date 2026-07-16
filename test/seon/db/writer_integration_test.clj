@@ -523,14 +523,27 @@
                       (repeat 64
                               {::protocol/operation protocol/pull-operation
                                ::protocol/selector [:reader/id]
-                               ::protocol/entity-id [:reader/id "alice"]}))}))]
+                               ::protocol/entity-id [:reader/id "alice"]}))}))
+            too-small-many
+            (call! request-channel
+                   (protocol/execute-many-request
+                    {::protocol/request-id "read/many-too-small"
+                     ::protocol/database-name database-name
+                     ::protocol/attachment attachment
+                     ::protocol/coordinate frozen
+                     ::protocol/members
+                     [{::protocol/operation protocol/pull-operation
+                       ::protocol/selector [:reader/id]
+                       ::protocol/entity-id [:reader/id "alice"]}]
+                     :datahike.resource/max-result-weight 1}))]
         (is (every? protocol/valid-response?
                     [owner hit pull pulls schema-response first-page second-page
                      wrong-prefix-page
                      reverse-page current-query history-query history-page
                      temporal-query temporal-history temporal-page
                      temporal-reverse-page
-                     temporal-schema future-query temporal-many many large-many]))
+                     temporal-schema future-query temporal-many many large-many
+                     too-small-many]))
         (is (= #{{:id "alice" :score 1} {:id "bob" :score 2}}
                (set (:datahike.query/result owner))
                (set (:datahike.query/result hit))))
@@ -615,6 +628,9 @@
                      (get-in many [::protocol/results 4 ::protocol/datoms]))))
         (is (= 64 (count (::protocol/results large-many))))
         (is (every? ::protocol/success? (::protocol/results large-many)))
+        (is (false? (::protocol/success? too-small-many)))
+        (is (= protocol/database-error
+               (::protocol/error-kind too-small-many)))
         (is (= frozen (::protocol/coordinate owner)
                (::protocol/coordinate hit)
                (::protocol/coordinate pull)
@@ -647,6 +663,61 @@
             ::protocol/query-form
             [:find '?value :where ['?entity :value '?value]]
            ::protocol/arguments []})))))
+
+(deftest execute-many-result-weight-is-position-deterministic
+  (let [point {::coordinate/database-id (random-uuid)
+               ::coordinate/branch :main
+               ::coordinate/commit-id (random-uuid)
+               ::coordinate/t 536870912}
+        request
+        (protocol/execute-many-request
+         {::protocol/request-id "many/weight-order"
+          ::protocol/database-name "default"
+          ::protocol/attachment (coordinate/attachment point)
+          ::protocol/coordinate point
+          ::protocol/members
+          [{::protocol/operation protocol/pull-operation
+            ::protocol/selector [:db/id]
+            ::protocol/entity-id 1}
+           {::protocol/operation protocol/pull-operation
+            ::protocol/selector [:db/id]
+            ::protocol/entity-id 2}]})
+        initial (#'writer/execute-many-result-state request)
+        placeholder-weight (::writer/result-placeholder-weight initial)
+        small (protocol/success {::protocol/result "small"})
+        large (protocol/success {::protocol/result (apply str (repeat 1024 "x"))})
+        small-weight (d/shallow-weight-within small protocol/maximum-frame-bytes)
+        tight-limit
+        (max (::writer/result-weight initial)
+             (+ (- (::writer/result-weight initial) placeholder-weight)
+                small-weight 8))
+        tight-request
+        (assoc request :datahike.resource/max-result-weight tight-limit)
+        initial (#'writer/execute-many-result-state tight-request)
+        ordered
+        (#'writer/accept-contiguous-execute-many-results
+         (assoc initial ::writer/request tight-request
+                ::writer/results [small large]))
+        waiting
+        (#'writer/accept-contiguous-execute-many-results
+         (assoc-in (assoc initial ::writer/request tight-request)
+                   [::writer/results 1] large))
+        inverted
+        (#'writer/accept-contiguous-execute-many-results
+         (assoc-in waiting [::writer/results 0] small))]
+    (is (= 0 (::writer/next-result-position waiting)))
+    (is (= (select-keys ordered
+                        [::writer/results ::writer/next-result-position
+                         ::writer/result-weight
+                         ::writer/result-limit-position])
+           (select-keys inverted
+                        [::writer/results ::writer/next-result-position
+                         ::writer/result-weight
+                         ::writer/result-limit-position])))
+    (is (= 1 (::writer/result-limit-position ordered)))
+    (is (= small (first (::writer/results ordered))))
+    (is (= (var-get #'writer/execute-many-result-limit)
+           (second (::writer/results ordered))))))
 
 (deftest semantic-search-transitions-from-provider-to-coordinate-pinned-knn
   (let [database-name (str "writer-knn-" (random-uuid))

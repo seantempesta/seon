@@ -597,7 +597,9 @@
   [::database-name ::database-name]
   [::attachment ::attachment]
   [::coordinate ::coordinate]
-  [::members ::members]])
+  [::members ::members]
+  [:datahike.resource/max-result-weight
+   :datahike.resource/max-result-weight]])
 (schema/register!
  ::cancel-request
  [:map {:closed true}
@@ -1133,7 +1135,9 @@
   [::database-name ::database-name]
   [::attachment ::attachment]
   [::coordinate ::coordinate]
-  [::members ::members]])
+  [::members ::members]
+  [:datahike.resource/max-result-weight {:optional true}
+   :datahike.resource/max-result-weight]])
 (schema/register!
  ::cancel-request-input
  [:map {:closed true}
@@ -1281,7 +1285,11 @@
   {:malli/schema [:=> [:cat ::execute-many-request-input]
                   ::execute-many-request]}
   [input]
-  (assoc input ::operation execute-many-operation))
+  (assoc input
+         ::operation execute-many-operation
+         :datahike.resource/max-result-weight
+         (or (:datahike.resource/max-result-weight input)
+             maximum-frame-bytes)))
 
 (defn cancel-request
   "Construct one request to cancel another request by its existing identity."

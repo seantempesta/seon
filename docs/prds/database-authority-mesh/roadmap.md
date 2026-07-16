@@ -92,8 +92,9 @@ Rust, cloud, Tauri, and mobile hosts conform to the same data fixtures.
 
 ## Dependency ledger
 
-- Datahike `f3776b720c700525d650159e0561c813b8b42bce` (direct numeric
-  earlier-as-of query sharing over ordered temporal index-page, ordered
+- Datahike `d21abadb9412f1b828b02ddb3c08ddc81d57c595` (bounded JVM-host
+  structural weight over direct numeric earlier-as-of query sharing, ordered
+  temporal index-page, ordered
   pull-many, and two-phase host query
   admission atop fair report batching at `d9765276`; graduated Units 1–3 at
   `940810f5`, plus attached
@@ -970,10 +971,10 @@ protocol and database APIs do not change.
 The implementation is ordered by semantic dependency, while independent proof
 and consumer inventory may run in parallel:
 
-- Spine: implement the grounded ordered `pull-many`, strict temporal read, and
-  deterministic aggregate `execute-many` result boundaries; query
-  single-flight pre-admission and process-global committed-report readiness are
-  complete.
+- Spine: migrate the remote `seon.db` consumers against the settled ordered
+  `pull-many`, strict temporal read, temporal query sharing, and deterministic
+  aggregate `execute-many` result boundaries. Query single-flight
+  pre-admission and process-global committed-report readiness are complete.
 - Slot 2: exact addressed-delivery accounting is complete: response slots
   bound unencoded work, fixed codec workers bound transient copies, and only
   exact framed bytes consume retained global/session output capacity.
@@ -1131,10 +1132,10 @@ cut;
 [[../../seon/issues/temporal-knn-embeds-before-rejection]] owns the provider-work
 optimization without retaining a database value across the slow call.
 
-The earliest unsettled Unit 7 contract is deterministic aggregate
-`execute-many` result weight. It strengthens Datahike's existing structural
-resource mechanism before remote consumer migration; it adds no Seon cache,
-another coordinate, or another scheduler.
+The earliest unsettled Unit 7 contract is the async `seon.db` consumer cut:
+core render/context/route/turn acquisition first, then agent-authored reads in
+their owning Bun children. The dependency and protocol contracts are settled;
+no consumer may preserve a replica or invent another cache while migrating.
 
 Datahike's existing `pull-many` already parses once, owns one pull frame
 machine and resource budget, and certifies one eager result. Its dependency
@@ -1154,13 +1155,24 @@ has active connections; the exact evidence is retained in
 pull boundary is Seon's writer/protocol integration and consumer deletion, not
 another Datahike mechanism.
 
-The aggregate `execute-many` result bound is deterministic by member position,
-not completion timing. Admission reserves the outer response plus one fixed
-bounded error per position. Contiguous completed positions replace those
-reservations in vector order using Datahike's existing structural-weight
-semantics. The first result that cannot fit stops refill and cancels later work;
-earlier successes remain, already-running work drains, and exact Transit frame
-bytes remain the final independent fence.
+The aggregate `execute-many` result bound is implemented using Datahike's
+unchanged bounded structural-weight traversal, exposed only to CLJ hosts at
+`d21abadb`. The wire requires one outer bound and the constructor supplies the
+4 MiB default. Admission reserves the complete response plus one fixed error
+per member; contiguous positions replace those reservations deterministically.
+Overflow preserves the accepted prefix, stops refill, cancels queued work,
+drains running work, and leaves exact Transit bytes as the independent final
+fence. Refill now counts admitted-but-not-accepted positions rather than only
+jobs, so a slow early member bounds running, yielded-query, and completed
+out-of-order retention in the existing eight-position window. Members inherit
+the outer limit unless they declare a narrower one, and complete success or
+failure responses are certified before batch-state retention. The cutoff also
+fences reserved and racing submissions. Focused protocol/writer proof passes
+31 tests/298 assertions; executor/protocol/UDS/query-admission proof passes
+71/936, and UDS alone passes 32/153. Independent adversarial review is clean.
+The focused CLJS protocol source compiles, while the cold bundle still stops in
+the superseded replica's removed Node UDS imports; the Unit 7/9 consumer cut
+owns that deletion.
 
 Integrated proof that closes it:
 Schema/index/history/selective-interest conformance, including forward/reverse

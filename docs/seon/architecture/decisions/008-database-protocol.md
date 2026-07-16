@@ -29,9 +29,12 @@ send closures or database handles; transaction functions such as CAS cross only
 in their data form. One persistent multiplexed session carries independently
 correlated requests, responses, cancellation, and selective database
 interests. Reads require an exact coordinate, and `execute-many` resolves one
-immutable database value for independent members. Successful writes wake only
-matching interests with committed ordinary data; a gap causes current-coordinate
-resynchronization, never transaction replay into a replica. Durable request
+immutable database value for independent members. Its required outer result
+bound is accepted in member position order, while member work may finish in
+parallel; exact encoded frame bytes remain a separate delivery fence.
+Successful writes wake only matching interests with committed ordinary data; a
+gap causes current-coordinate resynchronization, never transaction replay into
+a replica. Durable request
 receipts provide same-request mutation recovery without a second write path.
 
 Datahike owns connection/index lifetime, exact committed-value identity,

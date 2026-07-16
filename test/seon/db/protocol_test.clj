@@ -170,12 +170,21 @@
                               ::protocol/complete? false
                               ::protocol/cursor cursor})]})]
     (is (protocol/valid-request? request))
+    (is (= protocol/maximum-frame-bytes
+           (:datahike.resource/max-result-weight request)))
     (is (protocol/valid-response? response))
     (is (= response (transit-roundtrip response)))
     (is (false? (protocol/valid-request?
                  (assoc-in request
                            [::protocol/members 1 ::protocol/direction]
                            :reverse))))
+    (is (false? (protocol/valid-request?
+                 (dissoc request :datahike.resource/max-result-weight))))
+    (is (= 1024
+           (:datahike.resource/max-result-weight
+            (protocol/execute-many-request
+             (assoc (dissoc request ::protocol/operation)
+                    :datahike.resource/max-result-weight 1024)))))
     (doseq [operation [protocol/listen-operation
                        protocol/unlisten-operation]]
       (is (false?

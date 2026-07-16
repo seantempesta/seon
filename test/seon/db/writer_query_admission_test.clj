@@ -200,9 +200,9 @@
                  ::protocol/members (vec (repeat 33 query-member))}))]
           (is (.await entered 2 TimeUnit/SECONDS))
           (wait-until!
-           #(= 33 (:datahike.single-flight/active-callers
+           #(= 8 (:datahike.single-flight/active-callers
                     (d/query-cache-evidence)))
-           "execute-many query members did not all join")
+           "execute-many did not fill its bounded admitted-member window")
           (wait-until!
            #(let [evidence (executor/evidence (::writer/executor server))]
               (and (= 1 (get-in evidence [::executor/running-by-class :read]))
@@ -225,7 +225,9 @@
               (is (every? ::protocol/success? results))
               (is (= 1 (count (filter #{:datahike.cache.outcome/miss-owner}
                                       outcomes))))
-              (is (= 32 (count (filter #{:datahike.cache.outcome/miss-joined}
+              (is (= 7 (count (filter #{:datahike.cache.outcome/miss-joined}
+                                      outcomes))))
+              (is (= 25 (count (filter #{:datahike.cache.outcome/hit}
                                        outcomes))))
               (wait-until!
                #(and (empty? @(::writer/active-requests runtime))
@@ -240,6 +242,154 @@
         (writer/stop! server)
         (.delete (File. request-path))
         (.delete (File. publish-path))))))
+
+(deftest execute-many-result-limit-bounds-a-slow-position-gap
+  (let [database-name (str "many-result-limit-" (random-uuid))
+        request-path (socket-path "mlr")
+        publish-path (socket-path "mlp")
+        server (writer/start! {::writer/dependencies (dependencies)
+                               ::writer/database-name database-name
+                               ::writer/backend :memory
+                               ::writer/selected-processors 3
+                               ::writer/request-socket-path request-path
+                               ::writer/publish-socket-path publish-path})
+        runtime (::writer/runtime server)
+        transport (#'writer/transport-connection
+                   {::uds/close! (fn [] nil) ::uds/send! (fn [_] nil)})
+        head (ensure-and-acquire! runtime transport database-name)
+        slow-entered (CountDownLatch. 1)
+        large-completed (CountDownLatch. 1)
+        release-slow (CountDownLatch. 1)
+        calls (atom [])
+        members
+        (mapv (fn [position]
+                (cond->
+                 {::protocol/operation protocol/pull-operation
+                  ::protocol/selector [:db/id]
+                  ::protocol/entity-id position}
+                  (= position 1)
+                  (assoc :datahike.resource/max-result-weight
+                         protocol/maximum-frame-bytes)))
+              (range 16))
+        request
+        (protocol/execute-many-request
+         {::protocol/request-id "many/result-limit"
+          ::protocol/database-name database-name
+          ::protocol/attachment (::protocol/attachment head)
+          ::protocol/coordinate (::protocol/coordinate head)
+          ::protocol/members members})
+        initial (#'writer/execute-many-result-state request)
+        placeholder-weight (::writer/result-placeholder-weight initial)
+        small-value {:position 0 :payload "small"}
+        small-result (protocol/success {::protocol/result small-value})
+        small-weight
+        (d/shallow-weight-within small-result protocol/maximum-frame-bytes)
+        max-result-weight
+        (max (::writer/result-weight initial)
+             (+ (- (::writer/result-weight initial) placeholder-weight)
+                small-weight 8))
+        request
+        (assoc request :datahike.resource/max-result-weight max-result-weight)
+        original-pull d/pull]
+    (try
+      (with-redefs [d/pull
+                    (fn [_db-value options]
+                      (let [position (:eid options)]
+                        (swap! calls conj position)
+                        (case position
+                          0 (do
+                              (.countDown slow-entered)
+                              (when-not (.await release-slow 5 TimeUnit/SECONDS)
+                                (throw (ex-info "slow member was not released" {})))
+                              small-value)
+                          1 (let [value
+                                  {:position position
+                                   :payload (apply str (repeat 2048 "x"))}]
+                              (.countDown large-completed)
+                              value)
+                          (original-pull _db-value options))))]
+        (let [response (request! runtime transport request)]
+          (is (.await slow-entered 2 TimeUnit/SECONDS))
+          (is (.await large-completed 2 TimeUnit/SECONDS))
+          (wait-until!
+           #(let [entry (get @(::writer/active-requests runtime)
+                             "many/result-limit")]
+              (and (= 8 (::writer/next-position entry))
+                   (some? (get-in entry [::writer/results 1]))))
+           "the bounded admitted suffix did not settle behind position zero")
+          (is (every? #(< % 8) @calls))
+          (.countDown release-slow)
+          (let [response (deref response 5000 ::timeout)
+                results (::protocol/results response)]
+            (is (not= ::timeout response))
+            (is (::protocol/success? response))
+            (is (= small-result (first results)))
+            (is (every? #{(var-get #'writer/execute-many-result-limit)}
+                        (subvec results 1)))
+            (is (every? #(< % 8) @calls))
+            (wait-until!
+             #(and (empty? @(::writer/active-requests runtime))
+                   (zero? (::executor/retained-identities
+                           (executor/evidence (::writer/executor server)))))
+             "result-limited grouped read retained authority work"))))
+      (finally
+        (.countDown release-slow)
+        (#'writer/close-transport-connection! runtime transport)
+        (writer/stop! server)
+        (.delete (File. request-path))
+        (.delete (File. publish-path))))))
+
+(deftest execute-many-members-inherit-and-enforce-the-outer-result-limit
+  (let [request-id "many/member-bound"
+        owner (Object.)
+        member-limit 32
+        request
+        {::protocol/request-id request-id
+         ::protocol/operation protocol/pull-operation
+         ::protocol/selector [:db/id]
+         ::protocol/entity-id 1
+         :datahike.resource/max-result-weight member-limit}
+        oversized-success
+        (protocol/success
+         {::protocol/result {:payload (apply str (repeat 256 "x"))}})
+        oversized-failure
+        (#'writer/member-failure
+         (ex-info (apply str (repeat 256 "x")) {}))]
+    (is (= (var-get #'writer/execute-many-result-limit)
+           (#'writer/bounded-execute-many-member-result
+            request oversized-success)))
+    (is (= (var-get #'writer/execute-many-result-limit)
+           (#'writer/bounded-execute-many-member-result
+            request oversized-failure)))
+    (let [active (atom {request-id {::writer/owner owner
+                                    ::writer/jobs #{[request-id 0]}
+                                    ::writer/result-limit-position 0}})
+          submitted (atom [])
+          runtime {::writer/active-requests active
+                   ::writer/executor ::executor}]
+      (with-redefs [executor/try-submit! #(swap! submitted conj %)]
+        (#'writer/submit-execute-many-members!
+         runtime request-id owner
+         [{::executor/job-id [request-id 0]}]))
+      (is (empty? @submitted))
+      (is (empty? (get-in @active [request-id ::writer/jobs]))))
+    (let [active (atom {request-id {::writer/owner owner
+                                    ::writer/jobs #{[request-id 0]}}})
+          submitted (atom [])
+          canceled (atom [])
+          runtime {::writer/active-requests active
+                   ::writer/executor ::executor}]
+      (with-redefs [executor/try-submit!
+                    (fn [submission]
+                      (swap! submitted conj submission)
+                      (swap! active assoc-in
+                             [request-id ::writer/result-limit-position] 0))
+                    executor/cancel! #(swap! canceled conj %)]
+        (#'writer/submit-execute-many-members!
+         runtime request-id owner
+         [{::executor/job-id [request-id 0]}]))
+      (is (= 1 (count @submitted)))
+      (is (= [[request-id 0]] (mapv ::executor/job-id @canceled))))))
 
 (deftest final-unstarted-cancel-removes-the-exact-owner-job
   (let [database-name (str "query-cancel-" (random-uuid))

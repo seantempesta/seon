@@ -2532,14 +2532,32 @@
 
 (declare complete-executor! drive-execute-many!)
 
+(defn- execute-many-member-request
+  [request position]
+  (let [member (nth (::protocol/members request) position)]
+    (if (nil? (:datahike.resource/max-result-weight member))
+      (assoc member
+             :datahike.resource/max-result-weight
+             (:datahike.resource/max-result-weight request))
+      member)))
+
 (defn- submit-execute-many-members!
   [runtime request-id owner submissions]
   (doseq [{job-id ::executor/job-id :as submission} submissions]
     (let [active (::active-requests runtime)
           reserved?
           (locking active
-            (and (identical? owner (get-in @active [request-id ::owner]))
-                 (contains? (get-in @active [request-id ::jobs]) job-id)))]
+            (let [{::keys [jobs result-limit-position] :as entry}
+                  (get @active request-id)
+                  position (second job-id)]
+              (when (and entry (identical? owner (::owner entry))
+                         (contains? jobs job-id))
+                (if (and result-limit-position
+                         (>= position result-limit-position))
+                  (do
+                    (swap! active update-in [request-id ::jobs] disj job-id)
+                    false)
+                  true))))]
       (when reserved?
         (try
           (executor/try-submit! submission)
@@ -2550,7 +2568,11 @@
               ::executor/request-id request-id
               ::executor/outcome [::executor/throwable throwable]})))
         (when (locking active
-                (true? (get-in @active [request-id ::canceled?])))
+                (let [{::keys [canceled? result-limit-position]}
+                      (get @active request-id)]
+                  (or canceled?
+                      (and result-limit-position
+                           (>= (second job-id) result-limit-position)))))
           (executor/cancel!
            {::executor/executor (::executor runtime)
             ::executor/job-id job-id}))))))
@@ -2561,25 +2583,28 @@
         dispatcher (::executor runtime)]
     (locking active
       (let [{::keys [request scope database-value containing-database-value
-                     temporal? next-position jobs canceled?]
+                     temporal? next-position next-result-position jobs canceled?]
              :as entry}
             (get @active request-id)]
         (when (and entry (identical? owner (::owner entry)) database-value
-                   (not canceled?) (not (::finishing? entry)))
+                   (not canceled?) (not (::result-limit-position entry))
+                   (not (::finishing? entry)))
           (let [members (::protocol/members request)
                 member-count (count members)
                 active-limit
                 (get-in dispatcher
                         [::executor/capacity ::executor/classes :read
                          ::executor/maximum-queued-by-database])
+                admitted-not-accepted (- next-position next-result-position)
                 count-to-reserve
-                (min (- active-limit (count jobs))
-                     (- member-count next-position))
+                (max 0
+                     (min (- active-limit admitted-not-accepted)
+                          (- member-count next-position)))
                 positions (range next-position (+ next-position count-to-reserve))
                 submissions
                 (mapv
                  (fn [position]
-                   (let [member (nth members position)
+                   (let [member (execute-many-member-request request position)
                          job-id [request-id position]
                          caller-id (str "execute-many/"
                                         (hasch/uuid [request-id position]))
@@ -2615,17 +2640,109 @@
                            (update ::jobs into (map ::executor/job-id submissions))))))
             submissions))))))
 
+(def ^:private execute-many-result-limit
+  (protocol/failure
+   {::protocol/error-kind protocol/database-error
+    ::protocol/error
+    "The grouped database result exceeded its resource limit."}))
+
+(defn- bounded-execute-many-member-result
+  [request result]
+  (if (d/shallow-weight-within
+       result (:datahike.resource/max-result-weight request))
+    result
+    execute-many-result-limit))
+
 (defn- execute-many-canceled-result []
   (member-failure
    (ex-info "The database request was canceled."
             {::failure-kind protocol/database-error})))
+
+(defn- execute-many-result-state
+  "Reserve one fixed bounded result at every member position."
+  [request]
+  (let [member-count (count (::protocol/members request))
+        result-limit execute-many-result-limit
+        results (vec (repeat member-count result-limit))
+        response
+        (protocol/success
+         (assoc (read-response-base request) ::protocol/results results))
+        max-result-weight (:datahike.resource/max-result-weight request)
+        result-weight (d/shallow-weight-within response max-result-weight)
+        placeholder-weight
+        (d/shallow-weight-within result-limit max-result-weight)]
+    (when (and result-weight placeholder-weight)
+      {::results (vec (repeat member-count nil))
+       ::next-result-position 0
+       ::result-weight result-weight
+       ::result-placeholder-weight placeholder-weight})))
+
+(defn- accept-contiguous-execute-many-results
+  "Charge completed member results in vector position order."
+  [{::keys [request results next-result-position result-weight
+            result-placeholder-weight result-limit-position]
+    :as entry}]
+  (if result-limit-position
+    entry
+    (let [member-count (count (::protocol/members request))
+          max-result-weight (:datahike.resource/max-result-weight request)
+          result-limit execute-many-result-limit]
+      (loop [entry entry
+             position next-result-position
+             result-weight result-weight]
+        (if (>= position member-count)
+          (assoc entry
+                 ::next-result-position position
+                 ::result-weight result-weight)
+          (if-let [result (nth (::results entry) position)]
+            (let [remaining-result-weight
+                  (+ (- max-result-weight result-weight)
+                     result-placeholder-weight)
+                  member-weight
+                  (d/shallow-weight-within result remaining-result-weight)]
+              (if member-weight
+                (recur entry (inc position)
+                       (+ (- result-weight result-placeholder-weight)
+                          member-weight))
+                (assoc entry
+                       ::next-position member-count
+                       ::next-result-position member-count
+                       ::result-limit-position position
+                       ::result-weight result-weight
+                       ::results
+                       (into (subvec results 0 position)
+                             (repeat (- member-count position)
+                                     result-limit)))))
+            (assoc entry
+                   ::next-result-position position
+                   ::result-weight result-weight)))))))
+
+(defn- cancel-execute-many-result-limit!
+  [runtime request-id owner]
+  (let [active (::active-requests runtime)
+        target
+        (locking active
+          (let [entry (get @active request-id)]
+            (when (and entry
+                       (identical? owner (::owner entry))
+                       (::result-limit-position entry)
+                       (not (::result-limit-canceled? entry)))
+              (swap! active assoc-in
+                     [request-id ::result-limit-canceled?] true)
+              entry)))]
+    (when target
+      (handle-cancel
+       runtime
+       {::protocol/request-id request-id
+        ::protocol/target-request-id request-id}
+       target))))
 
 (defn- finalize-execute-many!
   [runtime request-id owner]
   (let [active (::active-requests runtime)
         final
         (locking active
-          (let [{::keys [request jobs pending-queries canceled? next-position results]
+          (let [{::keys [request jobs pending-queries canceled? next-position]
                  :as entry}
                 (get @active request-id)
                 member-count (count (::protocol/members request))]
@@ -2634,9 +2751,17 @@
                        (empty? jobs)
                        (empty? pending-queries)
                        (or canceled? (= next-position member-count)))
-              (let [results (if canceled?
-                              (mapv #(or % (execute-many-canceled-result)) results)
-                              results)
+              (let [entry
+                    (if canceled?
+                      (-> entry
+                          (update ::results
+                                  #(mapv (fn [result]
+                                           (or result
+                                               (execute-many-canceled-result)))
+                                         %))
+                          (accept-contiguous-execute-many-results))
+                      entry)
+                    results (::results entry)
                     response
                     (protocol/success
                      (assoc (read-response-base request)
@@ -2663,6 +2788,7 @@
 
 (defn- drive-execute-many!
   [runtime request-id owner]
+  (cancel-execute-many-result-limit! runtime request-id owner)
   (when-let [submissions
              (reserve-execute-many-members! runtime request-id owner)]
     (submit-execute-many-members! runtime request-id owner submissions))
@@ -2688,20 +2814,30 @@
                           (update ::jobs disj job-id)
                           (merge (second outcome)))))
             (let [position (second job-id)
+                  member (execute-many-member-request (::request entry) position)
                   query? (= protocol/query-operation
                             (::protocol/operation
                              (nth (::protocol/members (::request entry))
                                   position)))
                   callback? (contains? (::pending-queries entry) job-id)
-                  result (if (= ::executor/throwable (first outcome))
-                           (member-failure (second outcome))
-                           (second outcome))]
+                  result
+                  (bounded-execute-many-member-result
+                   member
+                   (if (= ::executor/throwable (first outcome))
+                     (member-failure (second outcome))
+                     (second outcome)))]
               (swap! active update request-id
-                     #(cond-> (update % ::jobs disj job-id)
-                        (and (not callback?)
-                             (or (not query?)
-                                 (= ::executor/throwable (first outcome))))
-                        (assoc-in [::results position] result))))))))
+                     (fn [current]
+                       (->
+                        (cond-> (update current ::jobs disj job-id)
+                          (and (or (nil? (::result-limit-position current))
+                                   (< position
+                                      (::result-limit-position current)))
+                               (not callback?)
+                               (or (not query?)
+                                   (= ::executor/throwable (first outcome))))
+                          (assoc-in [::results position] result))
+                        (accept-contiguous-execute-many-results)))))))))
     (if (and resolution? (= ::executor/throwable (first outcome)))
       (let [entry (locking active (get @active request-id))
             response (::failure-response entry)]
@@ -2717,16 +2853,30 @@
         (when (and entry (identical? owner (::owner entry))
                    (contains? (::pending-queries entry) job-id))
           (swap! active update request-id
-                 #(-> %
-                      (update ::pending-queries disj job-id)
-                      (update ::query-callers dissoc job-id)
-                      (assoc-in [::results (second job-id)]
-                                (if (= :ok (:status completion))
-                                  (protocol/success
-                                   (update (:value completion)
-                                           :datahike.query/result
-                                           materialize-result))
-                                  (member-failure (:throwable completion)))))))))
+                 (fn [current]
+                   (let [position (second job-id)
+                         member
+                         (execute-many-member-request (::request current)
+                                                      position)
+                         current
+                         (-> current
+                             (update ::pending-queries disj job-id)
+                             (update ::query-callers dissoc job-id))]
+                     (->
+                      (if (or (nil? (::result-limit-position current))
+                              (< position (::result-limit-position current)))
+                        (assoc-in
+                         current [::results position]
+                         (bounded-execute-many-member-result
+                          member
+                          (if (= :ok (:status completion))
+                            (protocol/success
+                             (update (:value completion)
+                                     :datahike.query/result
+                                     materialize-result))
+                            (member-failure (:throwable completion)))))
+                        current)
+                      (accept-contiguous-execute-many-results))))))))
     (drive-execute-many! runtime request-id owner)))
 
 (defn- complete-executor!
@@ -2923,47 +3073,54 @@
 (defn- start-execute-many-request!
   [runtime transport-connection request request-id owner]
   (run! validate-read-input! (::protocol/members request))
-  (if-let [{::keys [scope connection]
-            attachment ::coordinate/attachment}
-           (scope-for-read transport-connection request)]
-    (let [active (::active-requests runtime)
-          resolution-id [request-id :resolve]
-          initialized?
-          (locking active
-            (when (identical? owner (get-in @active [request-id ::owner]))
-              (swap! active update request-id assoc
-                     ::execute-many? true
-                     ::scope scope
-                     ::jobs #{resolution-id}
-                     ::next-position 0
-                     ::results (vec (repeat (count (::protocol/members request))
-                                            nil)))
-              (get-in @active [request-id ::request-bytes] 0)))]
-      (when initialized?
-        (try
-          (executor/try-submit!
-           {::executor/executor (::executor runtime)
-            ::executor/work-class :read
-            ::executor/database-name (::protocol/database-name request)
-            ::executor/scope scope
-            ::executor/job-id resolution-id
-            ::executor/request-id request-id
-            ::executor/request-bytes initialized?
-            ::executor/request
-            {::database-name (::protocol/database-name request)
-             ::scope scope
-             ::connection connection
-             ::coordinate/attachment attachment
-             ::resolve-only? true
-             ::request request}})
-          (catch Throwable throwable
-            (complete-executor!
-             runtime
-             {::executor/job-id resolution-id
+  (if-let [result-state (execute-many-result-state request)]
+    (if-let [{::keys [scope connection]
+              attachment ::coordinate/attachment}
+             (scope-for-read transport-connection request)]
+      (let [active (::active-requests runtime)
+            resolution-id [request-id :resolve]
+            initialized?
+            (locking active
+              (when (identical? owner (get-in @active [request-id ::owner]))
+                (swap! active update request-id
+                       (fn [entry]
+                         (merge entry result-state
+                                {::execute-many? true
+                                 ::scope scope
+                                 ::jobs #{resolution-id}
+                                 ::next-position 0})))
+                (get-in @active [request-id ::request-bytes] 0)))]
+        (when initialized?
+          (try
+            (executor/try-submit!
+             {::executor/executor (::executor runtime)
+              ::executor/work-class :read
+              ::executor/database-name (::protocol/database-name request)
+              ::executor/scope scope
+              ::executor/job-id resolution-id
               ::executor/request-id request-id
-              ::executor/outcome [::executor/throwable throwable]})))))
-    (deliver-active-request! runtime request-id owner
-                             (stale-coordinate-response request))))
+              ::executor/request-bytes initialized?
+              ::executor/request
+              {::database-name (::protocol/database-name request)
+               ::scope scope
+               ::connection connection
+               ::coordinate/attachment attachment
+               ::resolve-only? true
+               ::request request}})
+            (catch Throwable throwable
+              (complete-executor!
+               runtime
+               {::executor/job-id resolution-id
+                ::executor/request-id request-id
+                ::executor/outcome [::executor/throwable throwable]})))))
+      (deliver-active-request! runtime request-id owner
+                               (stale-coordinate-response request)))
+    (deliver-active-request!
+     runtime request-id owner
+     (protocol/failure
+      {::protocol/error-kind protocol/database-error
+       ::protocol/error
+       "The grouped database result limit cannot hold its bounded response."}))))
 
 (defn- start-transact-request!
   [runtime transport-connection request request-id owner]
