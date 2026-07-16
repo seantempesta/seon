@@ -50,7 +50,12 @@ execution; protocol and persistent native sessions; asynchronous `seon.db`;
 isolated Bun children; atomic replica/feed removal; then density, packaging, and
 the measured one-versus-2/4-authority-shard decision. Its current earliest
 unsettled contract is coordinate-pinned authored source loading and compiled
-execution inside the now-supervised per-agent Bun child. Commit `551723fc`
+execution inside the now-supervised per-agent Bun child. Commit `86db045d`
+now owns deterministic target-plus-reachable loading, source/provenance
+verification, parent deadlines, timeout poisoning, and cross-agent isolation;
+the unsettled boundary has moved to replacing every outer authored
+render/action/prompt caller while keeping recursive rendering synchronous.
+Commit `551723fc`
 moves recovery, generated-ID allocation, and resumable-agent acquisition onto
 the settled authority session; its remaining MCP-membership freshness
 falsifier must close before that cohort is accepted. Parent-owned deadlines,
