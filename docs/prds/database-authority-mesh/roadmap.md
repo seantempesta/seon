@@ -130,7 +130,9 @@ compatibility and the smallest Bun-only launcher cut are grounded in
 deletion inventory is
 [[research/exhaustive-read-consumer-and-deletion-inventory-2026-07-15]], and
 the zero-copy persistent-result boundary is
-[[research/read-materialization-contract-2026-07-16]].
+[[research/read-materialization-contract-2026-07-16]]. The one-host capacity
+and oversubscription contract is
+[[research/single-jvm-host-capacity-2026-07-16]].
 
 ## Ordered implementation spine
 
@@ -376,6 +378,16 @@ protocol keys stay qualified. A historical-coordinate UDS fixture advances the
 head, then proves the old coordinate returns old query/pull data, two identical
 queries produce miss-then-hit cache evidence, `:keys` result maps retain their
 shape, and pull-many preserves input order.
+
+Cancellation is a control operation with its own request ID and one target
+request ID. Queued reads are removed before execution. A running query uses
+Datahike's existing request-addressed detach/cooperative signal; the authority
+briefly closes the executor-to-Datahike registration race without retaining a
+second cancellation record. Running pull remains truthfully reported as
+running and uncanceled because Datahike has no cooperative pull cancellation
+yet. Mutation cancellation never claims rollback. Executor and real UDS
+fixtures cover queued/running/absent distinctions and the canonical correlated
+response; the focused gate passes 36 tests and 229 assertions.
 
 Exit proof: transport-neutral fixtures cover schemas, values, identity,
 query/pull/history, branches, fencing, batching, member errors, cancellation,

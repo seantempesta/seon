@@ -617,6 +617,51 @@
       ::protocol/body
       {::protocol/request-id (::protocol/request-id request)}})))
 
+(defn- cancel-running-query
+  [read-executor target-request-id]
+  (let [deadline (+ (System/nanoTime) 100000000)]
+    (loop []
+      (let [result (d/cancel-query! target-request-id)]
+        (if (or (:datahike.query.cancel/found? result)
+                (>= (System/nanoTime) deadline))
+          result
+          (let [cancel-outcome
+                (executor/cancel!
+                 {::executor/executor read-executor
+                  ::executor/job-id target-request-id})
+                cancellation (::executor/cancellation cancel-outcome)
+                protocol-request
+                (::request (::executor/request cancel-outcome))]
+            (if (and (= :running cancellation)
+                     (= protocol/query-operation
+                        (::protocol/operation protocol-request)))
+              (do (Thread/sleep 1) (recur))
+              result)))))))
+
+(defn- handle-cancel
+  [runtime request]
+  (let [target-request-id (::protocol/target-request-id request)
+        read-executor (::read-executor runtime)
+        cancel-outcome
+        (executor/cancel!
+         {::executor/executor read-executor
+          ::executor/job-id target-request-id})
+        cancellation (::executor/cancellation cancel-outcome)
+        protocol-request (::request (::executor/request cancel-outcome))
+        query-cancellation
+        (when (and (= :running cancellation)
+                   (= protocol/query-operation
+                      (::protocol/operation protocol-request)))
+          (cancel-running-query read-executor target-request-id))]
+    (protocol/success
+     {::protocol/request-id (::protocol/request-id request)
+      ::protocol/target-request-id target-request-id
+      ::protocol/canceled?
+      (boolean
+       (or (= :queued cancellation)
+           (:datahike.query.cancel/detached? query-cancellation)))
+      ::protocol/running? (= :running cancellation)})))
+
 (defn- resolve-exact-connection
   [{::keys [database-name scope]}]
   (let [{::registry/keys [conn attachment]}
@@ -1470,6 +1515,9 @@
 
          :seon.db.protocol.operation/pull-many
          (handle-read runtime request)
+
+         :seon.db.protocol.operation/cancel
+         (handle-cancel runtime request)
 
          :seon.db.protocol.operation/ensure-database
          (handle-ensure-database runtime request)

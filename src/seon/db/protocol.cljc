@@ -24,6 +24,7 @@
 (def query-operation :seon.db.protocol.operation/query)
 (def pull-operation :seon.db.protocol.operation/pull)
 (def pull-many-operation :seon.db.protocol.operation/pull-many)
+(def cancel-operation :seon.db.protocol.operation/cancel)
 (def ensure-database-operation
   :seon.db.protocol.operation/ensure-database)
 (def observe-database-lifecycle-operation
@@ -100,6 +101,7 @@
   query-operation
   pull-operation
   pull-many-operation
+  cancel-operation
   ensure-database-operation
   observe-database-lifecycle-operation
   create-branch-operation
@@ -170,6 +172,9 @@
 (schema/register! ::datoms-retracted [:int {:min 0}])
 (schema/register! ::request-id
                   [:string {:min 1 :seon.db/identity true}])
+(schema/register! ::target-request-id ::request-id)
+(schema/register! ::canceled? :boolean)
+(schema/register! ::running? :boolean)
 (schema/register! ::request-hash :uuid)
 (schema/register! ::version [:int {:min 1}])
 (schema/register! ::transaction-data [:vector :any])
@@ -335,6 +340,12 @@
   [:datahike.resource/max-result-weight {:optional true}
    :datahike.resource/max-result-weight]])
 (schema/register!
+ ::cancel-request
+ [:map {:closed true}
+  [::operation [:= cancel-operation]]
+  [::request-id ::request-id]
+  [::target-request-id ::target-request-id]])
+(schema/register!
  ::ensure-database-request
  [:map
   [::operation [:= ensure-database-operation]]
@@ -413,6 +424,7 @@
   [query-operation ::query-request]
   [pull-operation ::pull-request]
   [pull-many-operation ::pull-many-request]
+  [cancel-operation ::cancel-request]
   [ensure-database-operation ::ensure-database-request]
   [observe-database-lifecycle-operation
    ::observe-database-lifecycle-request]
@@ -471,6 +483,14 @@
   [::attachment ::attachment]
   [::coordinate ::coordinate]
   [::result ::result]])
+(schema/register!
+ ::cancel-response
+ [:map {:closed true}
+  [::success? [:= true]]
+  [::request-id ::request-id]
+  [::target-request-id ::target-request-id]
+  [::canceled? ::canceled?]
+  [::running? ::running?]])
 (schema/register!
  ::ensure-database-response
  [:map
@@ -563,6 +583,7 @@
   ::resolve-head-response
   ::query-response
   ::read-response
+  ::cancel-response
   ::ensure-database-response
   ::observe-database-lifecycle-response
   ::create-branch-response
@@ -641,6 +662,11 @@
    :datahike.resource/max-results]
   [:datahike.resource/max-result-weight {:optional true}
    :datahike.resource/max-result-weight]])
+(schema/register!
+ ::cancel-request-input
+ [:map {:closed true}
+  [::request-id ::request-id]
+  [::target-request-id ::target-request-id]])
 (schema/register!
  ::observe-database-lifecycle-request-input
  [:map {:closed true}
@@ -733,6 +759,12 @@
   {:malli/schema [:=> [:cat ::pull-many-request-input] ::pull-many-request]}
   [input]
   (assoc input ::operation pull-many-operation))
+
+(defn cancel-request
+  "Construct one request to cancel another request by its existing identity."
+  {:malli/schema [:=> [:cat ::cancel-request-input] ::cancel-request]}
+  [input]
+  (assoc input ::operation cancel-operation))
 
 (defn ensure-database-request
   "Construct one idempotent database-open request."

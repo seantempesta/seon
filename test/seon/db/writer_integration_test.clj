@@ -69,6 +69,11 @@
               ::protocol/database-name database-name})
             capabilities (call! request-channel capability-request)
             head (call! request-channel head-request)
+            cancellation
+            (call! request-channel
+                   (protocol/cancel-request
+                    {::protocol/request-id "control/cancel"
+                     ::protocol/target-request-id "control/not-running"}))
             unknown
             (call! request-channel
                    (protocol/resolve-head-request
@@ -77,13 +82,19 @@
         (is (every? protocol/valid-request?
                     [capability-request head-request]))
         (is (every? protocol/valid-response?
-                    [capabilities head unknown]))
+                    [capabilities head cancellation unknown]))
         (is (= "control/capabilities" (::protocol/request-id capabilities)))
         (is (= (d/capabilities) (::protocol/capabilities capabilities)))
         (is (= "control/head" (::protocol/request-id head)))
         (is (= database-name (::protocol/database-name head)))
         (is (= (coordinate/attachment (::protocol/coordinate head))
                (::protocol/attachment head)))
+        (is (= {::protocol/success? true
+                ::protocol/request-id "control/cancel"
+                ::protocol/target-request-id "control/not-running"
+                ::protocol/canceled? false
+                ::protocol/running? false}
+               cancellation))
         (is (= "control/unknown" (::protocol/request-id unknown)))
         (is (= protocol/not-found-error (::protocol/error-kind unknown)))
         (is (not-any? #(or (instance? clojure.lang.IDeref %)

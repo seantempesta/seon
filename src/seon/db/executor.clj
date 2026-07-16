@@ -50,6 +50,13 @@
  ::remove-database-request
  [:map [::executor ::executor] [::scope ::scope]])
 (schema/register! ::cancel 'fn?)
+(schema/register! ::cancellation [:enum :not-found :queued :running])
+(schema/register! ::cancel-request
+                  [:map [::executor ::executor] [::job-id ::job-id]])
+(schema/register! ::cancel-response
+                  [:map
+                   [::cancellation ::cancellation]
+                   [::request {:optional true} ::request]])
 (schema/register!
  ::fence-and-drain-request
  [:map [::executor ::executor] [::scope ::scope] [::cancel ::cancel]])
@@ -266,6 +273,7 @@
               (reset! (::state executor)
                       (assoc-in next-state [::jobs job-id]
                                 {::scope scope ::status :queued
+                                 ::request request
                                  ::result result}))
               (.notifyAll ^Object (::lock executor))
               [{::accepted? true ::joined? false} result])
@@ -409,6 +417,36 @@
           (.wait ^Object (::lock executor))
           (recur))))
     {::abandoned-count abandoned-count}))
+
+(defn cancel!
+  "Cancel one queued job or report that its worker is already running."
+  {:malli/schema [:=> [:cat ::cancel-request] ::cancel-response]}
+  [{::keys [executor job-id]}]
+  (locking (::lock executor)
+    (if-let [{::keys [status result request]}
+             (get-in @(::state executor) [::jobs job-id])]
+      (if (= :queued status)
+        (let [next-ready
+              (into {}
+                    (map (fn [[database-name queue]]
+                           [database-name
+                            (into empty-queue
+                                  (remove #(identical? result (::result %)))
+                                  queue)]))
+                    (::ready @(::state executor)))]
+          (swap! (::state executor)
+                 #(-> %
+                      (assoc ::ready next-ready)
+                      (update ::jobs dissoc job-id)))
+          (swap! (::counts executor) update ::fenced inc)
+          (deliver
+           result
+           [::throwable
+            (ex-info "The database request was canceled before execution."
+                     {::job-id job-id})])
+          {::cancellation :queued})
+        {::cancellation :running ::request request})
+      {::cancellation :not-found})))
 
 (defn evidence
   "Return bounded executor counts without retaining requests or results."
