@@ -53,13 +53,21 @@ Rust, cloud, Tauri, and mobile hosts conform to the same data fixtures.
   durable request record.
 - Datahike writes order and may batch per connection. A request receipt is not
   a promise of one distinct commit ID per transaction request.
-- No global authority request FIFO exists. Per-database ready queues are
-  selected fairly before acquiring shared work-class capacity.
+- No global authority request FIFO exists. When shared capacity is saturated,
+  ordinary round robin selects a database before a worker starts. Equal-weight,
+  unit-cost weighted deficit round robin has the same trace and is therefore
+  not implemented until measured costs or an intentional unequal weight require
+  it.
 - `execute-many` resolves one immutable coordinate once and runs independent
   query/pull/index members under aggregate and member bounds. It is transport
   composition, not another query language.
 - Remote CLJS database operations are honestly asynchronous. Core paths batch;
   agent top-level eval auto-awaits; composed functions use `^:async`/`await`.
+- Embeddings are asynchronous derived data. Primary writes, exact reads, and
+  unrelated semantic searches never wait for a provider, retry, or backfill.
+  Current-document hash mismatch is the repair predicate; no pending flag is
+  stored. Background completion recomposes the full current document before a
+  separate derived commit and discards stale vectors.
 - Transit JSON is the first codec. Linear framing, semantic pages, and shared
   encoded bodies precede any codec replacement.
 - `babashka.process` owns outer JVM/Bun lifecycle. `Bun.spawn` owns Bun agent
@@ -72,8 +80,8 @@ Rust, cloud, Tauri, and mobile hosts conform to the same data fixtures.
 2. Compute and encode once per exact value and semantic request.
 3. Retain one owner for indexes, caches, listeners, and resource lifetimes.
 4. Maximize bounded parallel work across agents, values, and databases.
-5. Keep query CPU, provider/embedding, KNN/native, encoding/delivery, mutation,
-   and lifecycle/control as separately bounded work classes.
+5. Bound query workers, embedding calls, native KNN work, encoded response
+   bytes, mutation submission, and lifecycle requests independently.
 6. Avoid copies, broadcasts, brokers, adapter layers, event-loop hops, and fixed
    per-database threads/processes.
 7. Expose coordinates, request/job IDs, cancellation, queue/cache/resource
@@ -92,8 +100,12 @@ Rust, cloud, Tauri, and mobile hosts conform to the same data fixtures.
   cache/store lifecycle and selected backend source.
 - Bun `be77b652884b16a103cfaa4af3c1102f72f2dcd3`:
   native spawn, socket, stream, and server types/implementations.
-- Babashka process 0.4.14:
+- Babashka process `16a84e0a` (`v0.6.25`):
   `reference-code/babashka-process` and `script/seon/dev/process.clj`.
+- Superv.async `3e6ed755`, partial-cps `1e119b03`, and
+  persistent-sorted-set `e1a17bbe` (`0.4.137`) are now checked out at the exact
+  selected coordinates under `reference-code/`, rather than existing only as
+  dependency declarations.
 - First-party owners:
   `src/seon/db/protocol.cljc`, `db/writer.clj`, `db/registry.clj`,
   `db/transport/uds.{clj,cljs}`, `db.cljs`, `db/replica.cljs`,
@@ -103,7 +115,8 @@ Detailed evidence and falsifiers live in
 [[research/architecture-recommendation-2026-07-15]],
 [[research/exact-value-identity-proof-2026-07-15]],
 [[research/single-flight-proof-2026-07-15]], and
-[[research/multidb-execute-many-proof-2026-07-15]].
+[[research/multidb-execute-many-proof-2026-07-15]]. The reduced wire and host
+identity contract is [[research/authority-protocol-contract-2026-07-16]].
 
 ## Ordered implementation spine
 
@@ -203,15 +216,15 @@ ownership, transaction publication, query, pull, cancellation, cache/resource
 evidence, and release while recursively rejecting DBs, connections, Datoms,
 functions, IDeref values, threads, futures, and throwables from returned data.
 
-### Unit 4 — multi-database authority registry and fair work classes
+### Unit 4 — fair bounded multi-database execution
 
 Replace one-process/one-database assumptions with attachment-owned authority
-entries backed by real Datahike connection references. Each database owns ready
-queues and its writer. Weighted deficit round robin selects databases before
-shared permits. Start with equal per-database weight and aging; reserve a small
-lifecycle/cancellation lane and a background service floor.
+entries backed by real Datahike connection references. Each database retains
+its existing Datahike writer. When shared workers are full, per-database ready
+queues use ordinary work-conserving round robin. Reserve independent capacity
+for lifecycle and cancellation requests and retain background progress.
 
-Bound these classes independently:
+Bound these existing operations independently:
 
 - query CPU: Datalog, pull, history, index reads, execute-many members;
 - blocking provider: embeddings and remote object/provider calls;
@@ -220,9 +233,37 @@ Bound these classes independently:
 - ordered mutation: the existing writer per connection; and
 - lifecycle/control: cancel, health, capability, acquire, release.
 
-Safe idle capacity may be borrowed under global ceilings, but query, mutation,
-and control retain hard floors. Heavy database A cannot consume database B's
-query, mutation, delivery, or control ownership.
+Safe idle capacity may be borrowed under global ceilings, but queries,
+mutations, and control retain hard floors. Heavy database A cannot consume
+database B's query, mutation, delivery, or control progress.
+
+Current implementation evidence: `seon.db.executor` now has a pure bounded
+per-database FIFO selector and shared fixed workers. Eleven focused tests with
+62 assertions prove cyclic A/B/C service, hot-database starvation resistance,
+bounded rejection, exact-generation close, rejection after close, late-result
+fencing, replacement-generation safety, and zero retained job identities.
+
+Primary transactions no longer call the embedding provider. After a successful
+Datahike report, the writer submits only the committed numeric entity IDs and
+host-local exact generation to bounded per-database background execution.
+Provider work holds no registry or connection lock. Before a later derived
+transaction, the writer resolves the same exact generation and recomposes the
+complete current entity; changed documents are discarded and removed triggers
+retract both derived attributes. Datahike's existing per-connection writer
+admission is the release race fence, so no global Seon lifecycle lock was added.
+Boot backfill is admitted in bounded 256-entity batches after the connection is
+published instead of blocking database initialization.
+
+The focused executor, embedding, receipt, and writer integration gates pass 30
+tests and 200 assertions. A deterministic provider latch proves the primary
+response and an unrelated same-database write complete before provider release.
+The same proof fills the per-database embedding queue and shows another primary
+write still returns. That falsifier exposed per-message Malli schema
+recompilation; retained recursively resolved protocol validators reduce a
+warmed 10,000-response probe from 621.69 ms to 2.38 ms (about 261 times) while
+preserving validation.
+This is not Unit 4 graduation because query, KNN, encode/delivery, mutation, and
+control capacity are not all wired and 2/4/8-database adversarial proof remains.
 
 Exit proof: real 2/4/8-database adversarial workloads show independent writes,
 bounded query progress, no global gate, truthful cancellation, queue evidence,
@@ -340,29 +381,30 @@ protocol and database APIs do not change.
 The implementation is ordered by semantic dependency, while independent proof
 and consumer inventory may run in parallel:
 
-- Spine: Unit 2 Datahike single-flight and cancellation.
-- Slot 2: Unit 3 capability fixture and protocol-schema design against the
-  settled exact-identity contract, without implementing the unsettled Unit 2
-  coordinator.
-- Slot 3: convert the completed remote-consumer classification into retained
-  execute-many request fixtures without editing the database mechanism.
-- Slot 4: retain transport fragmentation/backpressure and heavy-class
-  adversarial fixtures against the settled data envelopes.
+- Spine: Unit 4 phase-aware bounded execution and fair database selection.
+- Slot 2: Unit 5 protocol and execute-many fixtures against graduated Datahike
+  capabilities, without implementing the unsettled Unit 4 execution owner.
+- Slot 3: retain Bun persistent-session fragmentation and backpressure fixtures
+  against the settled protocol envelopes.
+- Slot 4: retain consumer migration batches and deletion inventory without
+  editing the database mechanism.
 
 After each unit, integrate its retained proof before refilling. A build/restart
 checkpoint freezes all artifact inputs; lifecycle remains operator-owned.
 
 ## Current boundary and final graduation gate
 
-Earliest unsettled implementation contract: Unit 2 identical-query
-single-flight, waiter cancellation, bounded admission, and exact-generation
-cleanup inside Datahike.
+Earliest unsettled implementation contract: Unit 4 phase-aware bounded
+execution. Provider waits must consume only embedding capacity; native KNN,
+queries, mutation submission, response encoding, and lifecycle requests each
+retain their own bounded workers or bytes. Database selection precedes shared
+worker acquisition, while each Datahike connection remains the only ordered
+writer for its database.
 
 Integrated proof that closes it:
-[[research/single-flight-proof-2026-07-15]] plus retained identical/different
-key-value-database contention, waiter cancellation, failure/retry, reentrancy,
-overflow, propagation, release, and shutdown tests with zero retained in-flight
-state.
+[[research/authority-heavy-class-proof-plan-2026-07-15]] plus retained 2/4/8
+database saturation, cancellation, failure/retry, encoding pressure, release,
+and shutdown tests with bounded threads, queues, bytes, and zero retained work.
 
 Final graduation requires all ten units, deletion of the replica/feed/Node
 transport mechanisms, clean protocol conformance, real browser and agent

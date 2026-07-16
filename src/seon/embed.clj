@@ -97,7 +97,10 @@
            [java.io File]
            [java.security MessageDigest]
            [java.util UUID]
-           [java.util.concurrent Callable Executors Future]))
+           [java.util.concurrent ArrayBlockingQueue Callable ExecutorService
+            Future ThreadFactory ThreadPoolExecutor
+            ThreadPoolExecutor$AbortPolicy TimeUnit]
+           [java.util.concurrent.atomic AtomicLong]))
 
 ;;; --- Locked constants ------------------------------------------------------
 
@@ -518,9 +521,15 @@
    key-less database server boots fine."
   ^Client []
   (or @!client
-      (let [k (System/getenv "GEMINI_API_KEY")]
-        (when-not (str/blank? k)
-          (reset! !client (-> (Client/builder) (.apiKey ^String k) (.build)))))))
+      (locking !client
+        (or @!client
+            (let [k (System/getenv "GEMINI_API_KEY")]
+              (when-not (str/blank? k)
+                (let [client (-> (Client/builder)
+                                 (.apiKey ^String k)
+                                 (.build))]
+                  (reset! !client client)
+                  client)))))))
 
 (defn- doc-config ^EmbedContentConfig []
   ;; outputDimensionality 1536; no taskType (v2). Same config object every
@@ -588,6 +597,88 @@
    huge corpus never spawns thousands of threads."
   6)
 
+(def ^:private embed-queue-capacity
+  "Maximum Gemini batches waiting behind the process-wide active requests."
+  64)
+
+(def ^:private embed-shutdown-timeout-ms
+  "Bound for graceful embedding-executor shutdown before interruption."
+  1000)
+
+(defonce ^:private !embedding-executor (atom nil))
+(defonce ^:private embedding-thread-sequence (AtomicLong. 0))
+
+(defn- embedding-thread-factory
+  []
+  (reify ThreadFactory
+    (newThread [_ runnable]
+      (doto (Thread. ^Runnable runnable
+                     (str "seon-embedding-"
+                          (.incrementAndGet embedding-thread-sequence)))
+        (.setDaemon true)))))
+
+(defn- new-embedding-executor
+  []
+  (ThreadPoolExecutor.
+   max-embed-concurrency max-embed-concurrency
+   0 TimeUnit/MILLISECONDS
+   (ArrayBlockingQueue. embed-queue-capacity)
+   (embedding-thread-factory)
+   (ThreadPoolExecutor$AbortPolicy.)))
+
+(defn- embedding-executor
+  "Return the one lazily constructed process-wide embedding executor."
+  ^ThreadPoolExecutor []
+  (or @!embedding-executor
+      (locking !embedding-executor
+        (or @!embedding-executor
+            (let [executor (new-embedding-executor)]
+              (reset! !embedding-executor executor)
+              executor)))))
+
+(defn- shutdown-embedding-executor!
+  "Boundedly stop and forget the current embedding executor. Private lifecycle
+   and test seam; database release never owns this process-wide resource."
+  ([] (shutdown-embedding-executor! embed-shutdown-timeout-ms))
+  ([timeout-ms]
+   (when-let [^ExecutorService executor
+              (locking !embedding-executor
+                (let [executor @!embedding-executor]
+                  (reset! !embedding-executor nil)
+                  executor))]
+     (.shutdown executor)
+     (when-not (.awaitTermination executor timeout-ms TimeUnit/MILLISECONDS)
+       (.shutdownNow executor)
+       (.awaitTermination executor timeout-ms TimeUnit/MILLISECONDS)))
+   nil))
+
+(defn- reset-embedding-executor!
+  "Boundedly reset the private process-wide executor for hermetic tests."
+  []
+  (shutdown-embedding-executor! 100))
+
+(schema/register! :seon.embed/stopped? :boolean)
+(schema/register! :seon.embed/stop-request [:map])
+(schema/register! :seon.embed/stop-response
+                  [:map [:seon.embed/stopped? :boolean]])
+
+(defn stop!
+  "Stop process-wide embedding resources.
+
+   Normal database-server shutdown calls this only after accepted requests
+   finish. Releasing one database never stops resources shared by the others."
+  {:malli/schema [:=> [:cat :seon.embed/stop-request]
+                  :seon.embed/stop-response]}
+  [_]
+  (shutdown-embedding-executor!)
+  (when-let [^Client client
+             (locking !client
+               (let [client @!client]
+                 (reset! !client nil)
+                 client))]
+    (.close client))
+  {:seon.embed/stopped? true})
+
 (def ^:const embed-max-retries
   "Max RETRIES for one batch request on a retryable (429 / 5xx) error before
    surfacing a clear error. Total attempts = this + 1."
@@ -652,7 +743,11 @@
   (let [base   (* embed-base-backoff-ms (long (Math/pow 2 attempt)))
         capped (min base 30000)
         jitter (long (* (rand) 0.5 capped))]
-    (Thread/sleep (+ capped jitter))))
+    (try
+      (Thread/sleep (+ capped jitter))
+      (catch InterruptedException interrupted
+        (.interrupt (Thread/currentThread))
+        (throw interrupted)))))
 
 (defn- embed-batch!
   "Embed ONE batch of (already-truncated) `texts` in a single Gemini request,
@@ -662,6 +757,8 @@
   [^Client client texts]
   (let [jtexts (java.util.ArrayList. ^java.util.Collection (vec texts))]
     (loop [attempt 0]
+      (when (.isInterrupted (Thread/currentThread))
+        (throw (InterruptedException. "Embedding request interrupted.")))
       (let [outcome (try
                       (let [^EmbedContentResponse resp
                             (.embedContent (.models client) embedding-model
@@ -674,19 +771,66 @@
           vs
           (let [^Throwable t (:error outcome)
                 retryable    (retryable-embed-error? t)]
-            (if (and retryable (< attempt embed-max-retries))
-              (do (log/warn "embed: retryable error on batch (attempt"
-                            (inc attempt) "of" (inc embed-max-retries) ") —"
-                            (.getMessage t) "— backing off")
-                  (backoff-sleep! attempt)
-                  (recur (inc attempt)))
-              (throw (ex-info (str "seon.embed/embed-batch!: Gemini request failed"
-                                   (when retryable
-                                     (str " after " (inc embed-max-retries) " attempts")))
-                              {:seon.embed/error      :seon.embed/embed-request-failed
-                               :seon.embed/batch-size (count texts)
-                               :seon.embed/retryable  retryable}
-                              t)))))))))
+            (if (or (instance? InterruptedException t)
+                    (.isInterrupted (Thread/currentThread)))
+              (do
+                (.interrupt (Thread/currentThread))
+                (throw (if (instance? InterruptedException t)
+                         t
+                         (InterruptedException. "Embedding request interrupted."))))
+              (if (and retryable (< attempt embed-max-retries))
+                (do (log/warn "embed: retryable error on batch (attempt"
+                              (inc attempt) "of" (inc embed-max-retries) ") —"
+                              (.getMessage t) "— backing off")
+                    (backoff-sleep! attempt)
+                    (recur (inc attempt)))
+                (throw (ex-info (str "seon.embed/embed-batch!: Gemini request failed"
+                                     (when retryable
+                                       (str " after " (inc embed-max-retries) " attempts")))
+                                {:seon.embed/error      :seon.embed/embed-request-failed
+                                 :seon.embed/batch-size (count texts)
+                                 :seon.embed/retryable  retryable}
+                                t))))))))))
+
+(defn- cancel-embedding-futures!
+  [^ThreadPoolExecutor executor futures]
+  (doseq [^Future future futures]
+    (.cancel future true))
+  (.purge executor))
+
+(defn- embed-batches!
+  [^ThreadPoolExecutor executor client batches out]
+  (doseq [batch-window (partition-all max-embed-concurrency batches)]
+    (let [futures
+          (reduce
+           (fn [accepted batch]
+             (try
+               (conj accepted
+                     [batch
+                      (.submit executor
+                               ^Callable
+                               (reify Callable
+                                 (call [_]
+                                   (embed-batch! client (mapv second batch)))) )])
+               (catch Throwable throwable
+                 (cancel-embedding-futures! executor (mapv second accepted))
+                 (throw throwable))))
+           [] batch-window)]
+      (try
+        (doseq [[batch ^Future future] futures]
+          (let [vectors (.get future)]
+            (dorun
+             (map (fn [[index _] vector]
+                    (aset out (int index) vector))
+                  batch vectors))))
+        (catch InterruptedException interrupted
+          (cancel-embedding-futures! executor (mapv second futures))
+          (.interrupt (Thread/currentThread))
+          (throw interrupted))
+        (catch Throwable throwable
+          (cancel-embedding-futures! executor (mapv second futures))
+          (throw throwable)))))
+  out)
 
 (defn embed-texts
   "Embed document strings with Gemini, returning normalized `:seon.embed/vectors`
@@ -710,20 +854,13 @@
       (let [truncated (mapv truncate-to-token-cap texts)
             indexed   (vec (map-indexed vector truncated))
             batches   (plan-batches indexed)
-            pool      (Executors/newFixedThreadPool
-                       (min max-embed-concurrency (count batches)))
+            ^ThreadPoolExecutor executor (embedding-executor)
             out       (object-array (count truncated))]
         (try
-          (let [tasks   (mapv (fn [batch]
-                                (reify Callable
-                                  (call [_] (embed-batch! client (mapv second batch)))))
-                              batches)
-                futures (vec (.invokeAll pool ^java.util.Collection tasks))]
-            (dotimes [b (count batches)]
-              (let [batch (nth batches b)
-                    vecs  (.get ^Future (nth futures b))]
-                (dorun (map (fn [[idx _] v] (aset out (int idx) v)) batch vecs)))))
-          (finally (.shutdown pool)))
+          (embed-batches! executor client batches out)
+          (catch InterruptedException interrupted
+            (.interrupt (Thread/currentThread))
+            (throw interrupted)))
         {:seon.embed/vectors (vec out)}))))
 
 (defn embed-text
@@ -863,53 +1000,182 @@
     (:seon.embed/source-hash (d/pull db [:seon.embed/source-hash] id-ref))
     (catch Throwable _ nil)))
 
-(defn augment-tx-with-embeddings
-  "Return `tx-data` with embedding assertions APPENDED for every entity-map item
-   carrying a configured trigger-attr whose composed-document hash differs from
-   the entity's stored hash. Embeds via Gemini BEFORE the caller's `d/transact`
-   (never inside a listener / under the conn). No-op (returns `tx-data`
-   unchanged, no Gemini call) when no item carries a trigger attr.
+(schema/register! :seon.embed/db-value :any)
+(schema/register! :seon.embed/transaction-data [:vector :any])
+(schema/register! :seon.embed/eids [:vector :int])
+(schema/register! :seon.embed/id-ref :any)
+(schema/register! :seon.embed/source-hash [:string {:min 64 :max 64}])
+(schema/register!
+ :seon.embed/input
+ [:map
+  [:seon.embed/id-ref :seon.embed/id-ref]
+  [:seon.embed/text :seon.embed/text]
+  [:seon.embed/source-hash :seon.embed/source-hash]])
+(schema/register! :seon.embed/inputs [:vector :seon.embed/input])
+(schema/register!
+ :seon.embed/embedding-inputs-request
+ [:map
+  [:seon.embed/embeddables :seon.embed/embeddables]
+  [:seon.embed/db-value :seon.embed/db-value]
+  [:seon.embed/transaction-data :seon.embed/transaction-data]])
+(schema/register!
+ :seon.embed/embedding-inputs-response
+ [:map [:seon.embed/inputs :seon.embed/inputs]])
+(schema/register!
+ :seon.embed/eid-embedding-inputs-request
+ [:map
+  [:seon.embed/embeddables :seon.embed/embeddables]
+  [:seon.embed/db-value :seon.embed/db-value]
+  [:seon.embed/eids :seon.embed/eids]])
+(schema/register! :seon.embed/assertions [:vector :any])
+(schema/register!
+ :seon.embed/embedding-assertions-request
+ [:map [:seon.embed/inputs :seon.embed/inputs]])
+(schema/register!
+ :seon.embed/embedding-assertions-response
+ [:map [:seon.embed/assertions :seon.embed/assertions]])
+(schema/register!
+ :seon.embed/revalidate-embedding-assertions-request
+ [:map
+  [:seon.embed/embeddables :seon.embed/embeddables]
+  [:seon.embed/db-value :seon.embed/db-value]
+  [:seon.embed/assertions :seon.embed/assertions]])
 
-   `db` is the conn's CURRENT db value (for the schema + stored-hash lookups).
-   `tx-data` is the raw incoming tx-data vector."
+(defn embedding-inputs-for-eids
+  "Prepare current embedding mismatches for committed numeric entity ids.
+
+   Each entity is pulled in full because a configured compose function may use
+   attributes beyond its trigger. The result is pure input data for
+   `embedding-assertions`; it performs no provider work and no transaction."
+  {:malli/schema
+   [:=> [:cat :seon.embed/eid-embedding-inputs-request]
+    :seon.embed/embedding-inputs-response]}
+  [{:seon.embed/keys [embeddables db-value eids]}]
+  {:seon.embed/inputs
+   (->> eids
+        distinct
+        (keep
+         (fn [eid]
+           (when-let [entity (d/pull db-value '[*] eid)]
+             (when-let [attribute (entity-with-trigger embeddables entity)]
+               (when-let [text (compose-doc embeddables attribute entity)]
+                 (let [source-hash (sha-256-hex text)]
+                   (when (not= source-hash
+                               (:seon.embed/source-hash entity))
+                     {:seon.embed/id-ref eid
+                      :seon.embed/text text
+                      :seon.embed/source-hash source-hash})))))))
+        vec)})
+
+(defn revalidate-embedding-assertions
+  "Return transaction data for vector rows that still match the current entity.
+
+   The caller supplies assertion rows after provider work and invokes this pure
+   function against the latest immutable database value immediately before
+   committing its result. A changed composed document discards the stale row;
+   an already-installed equal hash is a no-op. If the configured trigger was
+   removed, both derived embedding attributes are retracted."
+  {:malli/schema
+   [:=> [:cat :seon.embed/revalidate-embedding-assertions-request]
+    :seon.embed/embedding-assertions-response]}
+  [{:seon.embed/keys [embeddables db-value assertions]}]
+  {:seon.embed/assertions
+   (->> assertions
+        (mapcat
+         (fn [{:db/keys [id] :seon.embed/keys [source-hash] :as assertion}]
+           (when (int? id)
+             (when-let [entity (d/pull db-value '[*] id)]
+               (let [cleanup [[:db.fn/retractAttribute id :seon/embedding]
+                              [:db.fn/retractAttribute
+                               id :seon.embed/source-hash]]]
+                 (if-let [attribute (entity-with-trigger embeddables entity)]
+                   (if-let [text (compose-doc embeddables attribute entity)]
+                     (let [current-hash (sha-256-hex text)]
+                       (when (and (= source-hash current-hash)
+                                  (not= source-hash
+                                        (:seon.embed/source-hash entity)))
+                         [assertion]))
+                     cleanup)
+                   cleanup))))))
+        vec)})
+
+(defn embedding-inputs
+  "Derive the embedding inputs for one transaction.
+
+   This performs only immutable database reads. It neither creates a Gemini
+   client nor calls the provider, so the writer may invoke it while preserving
+   one database's transaction order."
+  {:malli/schema
+   [:=> [:cat :seon.embed/embedding-inputs-request]
+    :seon.embed/embedding-inputs-response]}
+  [{:seon.embed/keys [embeddables db-value transaction-data]}]
+  (let [triggers (set (keys embeddables))
+        key-configured? (not (str/blank? (System/getenv "GEMINI_API_KEY")))]
+    {:seon.embed/inputs
+     (if (or (not (embed-feature-enabled?))
+             (not key-configured?)
+             (empty? triggers))
+       []
+       (->> transaction-data
+            (keep
+             (fn [item]
+               (when-let [attribute (map-trigger-attr triggers item)]
+                 (when-let [text (compose-doc embeddables attribute item)]
+                   (let [source-hash (sha-256-hex text)
+                         id-ref (resolve-id-ref db-value item)]
+                     (when (and id-ref
+                                (not= source-hash
+                                      (current-hash-for db-value id-ref)))
+                       {:seon.embed/id-ref id-ref
+                        :seon.embed/text text
+                        :seon.embed/source-hash source-hash}))))))
+            vec))}))
+
+(defn embedding-assertions
+  "Build matching embedding assertions.
+
+   All blocking provider work happens here, outside database transaction
+   ownership. The caller commits the returned source hash and vector atomically
+   with its original source data."
+  {:malli/schema
+   [:=> [:cat :seon.embed/embedding-assertions-request]
+    :seon.embed/embedding-assertions-response]}
+  [{:seon.embed/keys [inputs]}]
+  (if (or (empty? inputs)
+          (not (embed-feature-enabled?))
+          (nil? (gemini-client)))
+    {:seon.embed/assertions []}
+    (let [{:seon.embed/keys [vectors]}
+          (embed-texts {:seon.embed/texts (mapv :seon.embed/text inputs)})
+          assertions
+          (mapv
+           (fn [{:seon.embed/keys [id-ref source-hash]} vector]
+             {:db/id id-ref
+              :seon/embedding vector
+              :seon.embed/source-hash source-hash})
+           inputs vectors)]
+      {:seon.embed/assertions assertions})))
+
+(defn augment-tx-with-embeddings
+  "Return transaction data with current embedding assertions.
+
+   This ordinary composition remains useful to direct callers. The database
+   writer calls `embedding-inputs` and `embedding-assertions` separately so
+   blocking provider work never holds transaction ownership."
   {:malli/schema [:=> [:catn
                        [:seon.embed/embeddables :seon.embed/embeddables]
                        [:db :any]
                        [:tx-data [:vector :any]]]
                   [:vector :any]]}
   [embeddables db tx-data]
-  (let [triggers (set (keys embeddables))]
-    ;; Feature OFF (SEON_EMBED unset) OR no triggers OR no GEMINI_API_KEY →
-    ;; embedding inactive: pass the tx through UNTOUCHED (byte-identical). Writes
-    ;; never fail, and never call Gemini, just because embedding is unavailable.
-    (if (or (not (embed-feature-enabled?))
-            (empty? triggers)
-            (nil? (gemini-client)))
-      tx-data
-      (let [;; collect {:id-ref :text :hash} for items that need (re)embedding
-            pending
-            (->> tx-data
-                 (keep (fn [item]
-                         (when-let [attr (map-trigger-attr triggers item)]
-                           (when-let [text (compose-doc embeddables attr item)]
-                             (let [hash    (sha-256-hex text)
-                                   id-ref  (resolve-id-ref db item)]
-                               (when (and id-ref
-                                          (not= hash (current-hash-for db id-ref)))
-                                 {:id-ref id-ref :text text :hash hash}))))))
-                 vec)]
-        (if (empty? pending)
-          tx-data
-          ;; ONE batch Gemini request for all changed docs (BEFORE transact).
-          (let [{:seon.embed/keys [vectors]}
-                (embed-texts {:seon.embed/texts (mapv :text pending)})
-                assertions
-                (mapv (fn [{:keys [id-ref hash]} v]
-                        {:db/id                  id-ref
-                         :seon/embedding         v
-                         :seon.embed/source-hash hash})
-                      pending vectors)]
-            (into (vec tx-data) assertions)))))))
+  (let [{:seon.embed/keys [inputs]}
+        (embedding-inputs
+         {:seon.embed/embeddables embeddables
+          :seon.embed/db-value db
+          :seon.embed/transaction-data tx-data})]
+    (into (vec tx-data)
+          (:seon.embed/assertions
+           (embedding-assertions {:seon.embed/inputs inputs})))))
 
 ;;; --- Bounded backfill (boot) -----------------------------------------------
 ;;;
@@ -930,24 +1196,32 @@
                    [:seon.embed/embedded :int]
                    [:seon.embed/deferred :int]])
 
-(defn- needs-embedding-eids
-  "Entity-ids carrying `trigger-attr` whose stored `:seon.embed/source-hash`
-   does NOT match the current composed-document hash (covers both never-embedded
-   and stale). Returns a vector of `[eid text hash]` for the rows that need work."
-  [embeddables db trigger-attr]
-  (let [rows (d/q '[:find ?e
-                    :in $ ?attr
-                    :where [?e ?attr]]
-                  db trigger-attr)]
-    (->> rows
-         (keep (fn [[eid]]
-                 (let [ent  (d/pull db '[*] eid)
-                       text (compose-doc embeddables trigger-attr ent)]
-                   (when text
-                     (let [hash (sha-256-hex text)]
-                       (when (not= hash (:seon.embed/source-hash ent))
-                         [eid text hash]))))))
-         vec)))
+(schema/register! :seon.embed/embedding-entity-ids-request
+                  [:map
+                   [:seon.embed/embeddables :seon.embed/embeddables]
+                   [:seon.embed/db-value :any]])
+(schema/register! :seon.embed/embedding-entity-ids-response
+                  [:map [:seon.embed/eids [:vector :int]]])
+
+(defn embedding-entity-ids
+  "Return entity IDs carrying configured embedding attributes."
+  {:malli/schema
+   [:=> [:cat :seon.embed/embedding-entity-ids-request]
+    :seon.embed/embedding-entity-ids-response]}
+  [{:seon.embed/keys [embeddables db-value]}]
+  {:seon.embed/eids
+   (if-not (embed-feature-enabled?)
+     []
+     (->> (keys embeddables)
+          (mapcat
+           (fn [trigger-attr]
+             (map first
+                  (d/q '[:find ?e
+                         :in $ ?attr
+                         :where [?e ?attr]]
+                       db-value trigger-attr))))
+          distinct
+          vec))})
 
 (defn backfill!
   "Embed a bounded batch across the configured trigger attributes.
@@ -966,8 +1240,18 @@
   (if-not (embed-feature-enabled?)
     {:seon.embed/embedded 0 :seon.embed/deferred 0}
     (let [db      (d/db conn)
-          triggers (keys embeddables)
-          all     (vec (mapcat #(needs-embedding-eids embeddables db %) triggers))
+          eids    (:seon.embed/eids
+                   (embedding-entity-ids
+                    {:seon.embed/embeddables embeddables
+                     :seon.embed/db-value db}))
+          inputs  (:seon.embed/inputs
+                   (embedding-inputs-for-eids
+                    {:seon.embed/embeddables embeddables
+                     :seon.embed/db-value db
+                     :seon.embed/eids eids}))
+          all     (mapv (fn [{:seon.embed/keys [id-ref text source-hash]}]
+                          [id-ref text source-hash])
+                        inputs)
           total   (count all)
           batch   (vec (take backfill-cap all))
           deferred (max 0 (- total (count batch)))]
@@ -1142,11 +1426,4 @@
     {:seon.embed/initialized? false}
     (do
       (install! conn)
-      (try
-        ;; Static seed functions are written once; drain bounded passes so
-        ;; deferred rows do not stay invisible forever.
-        (drain-backfill! embeddables conn)
-        (catch Throwable throwable
-          (log/warn throwable
-                    "embedding backfill failed during database initialization; rows will embed on a later write")))
       {:seon.embed/initialized? true})))

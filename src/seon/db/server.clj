@@ -284,8 +284,33 @@
     {::writer/database-initializer
      (fn [connection _database-name]
        (embed/initialize-database! embeddables connection))
-     ::writer/transaction-transform
-     (partial embed/augment-tx-with-embeddings embeddables)
+     ::writer/embedding-enabled? (embed/embed-feature-enabled?)
+     ::writer/embedding-entity-ids
+     (fn [db-value]
+       (:seon.embed/eids
+        (embed/embedding-entity-ids
+         {:seon.embed/embeddables embeddables
+          :seon.embed/db-value db-value})))
+     ::writer/embedding-inputs-for-eids
+     (fn [db-value entity-ids]
+       (if (embed/embed-feature-enabled?)
+         (:seon.embed/inputs
+          (embed/embedding-inputs-for-eids
+           {:seon.embed/embeddables embeddables
+            :seon.embed/db-value db-value
+            :seon.embed/eids entity-ids}))
+         []))
+     ::writer/embedding-assertions
+     (fn [inputs]
+       (:seon.embed/assertions
+        (embed/embedding-assertions {:seon.embed/inputs inputs})))
+     ::writer/revalidate-embedding-assertions
+     (fn [db-value assertions]
+       (:seon.embed/assertions
+        (embed/revalidate-embedding-assertions
+         {:seon.embed/embeddables embeddables
+          :seon.embed/db-value db-value
+          :seon.embed/assertions assertions})))
      ::writer/knn-search embed/knn-search}))
 
 (defn- resolve-repl-port-file
@@ -362,8 +387,10 @@
          (catch Throwable _)))
   (when-let [port-file (::repl-port-file server)]
     (try (.delete (io/file port-file)) (catch Throwable _)))
-  (let [result (writer/stop! (::writer-server server))]
-    {::stopped? (::writer/stopped? result)
+  (let [result (writer/stop! (::writer-server server))
+        embedding (embed/stop! {})]
+    {::stopped? (and (::writer/stopped? result)
+                     (:seon.embed/stopped? embedding))
      ::release-results (::writer/release-results result)}))
 
 (defn- run-shutdown!

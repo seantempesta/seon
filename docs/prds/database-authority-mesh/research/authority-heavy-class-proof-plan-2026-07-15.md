@@ -12,10 +12,12 @@ This plan defines the retained adversarial fixture for Unit 4. It does not pick
 production permit counts. It proves whether six separately bounded work classes
 and database-first fairness are real before those policy values are approved.
 
-The proposed default is weighted deficit round robin over database-ready queues,
-equal initial database weights, aging, hard global/per-database bounds, reserved
-query/mutation/control floors, and borrowable idle capacity. Owner-selected
-weights, queue limits, deadlines, and background shares remain explicit policy
+The first implementation uses ordinary work-conserving round robin over
+per-database ready queues. With equal weights, quantum one, and unit request
+cost, weighted deficit round robin produces exactly the same selection trace
+while adding counters and normalization rules. Deficits remain an explicit
+later option only if measured request shapes or product policy require unequal
+weights. Queue limits, deadlines, and background shares remain explicit policy
 decisions.
 
 ## Exact current owners

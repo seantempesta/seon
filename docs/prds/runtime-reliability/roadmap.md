@@ -147,7 +147,7 @@ dependency spine and independent evidence consumers:
 | Lane | Current boundary | Why it can run now | Refill when complete |
 |---|---|---|---|
 | Top-level integration | **Closed caller/readiness is complete; operator undo and deterministic crash cuts block destructive graduation** | `2e58e8d1` allocates the database completion id atomically and makes plan digest the unique adoption key; `1b08597e` migrates fresh operator intent to UUID and keys completion coordinates by the generated id. `1ec29778` keeps restore startup nonautonomous, and `0968a240` closes routed readiness, replica drift, attached refresh ordering, and disposable fault writes. Launch/client/web/database restore proof passes 62 tests/396 assertions; focused operator passes 29/171, full operator 220/1,263, and focused writer restore-admin plus registry 25/152. Live-proof audit found that undo remains a pure selector with no completion-selected CLI path and the coordinator has no deterministic invocation-local crash cut | Implement completion-selected undo through the existing coordinator, add derived-command proof cuts, then execute the source-frozen destructive matrix |
-| Native secondary force | **COMPLETE through the selected Seon artifacts** | Both manifests bind Datahike `9ada755087228e10cfb179fa5779ce227a6ed220`, Konserve `b5c99bc02a7175652a610324215288b78551801f`, Proximum `9846d3e79e1aee48474bc876d3d563d7137209c6`, Shadow CLJS `4e72595f57618f5c43388ad13d5136cd3bede566`, superv.async `3e6ed755f83634c9e9bbb58707f9446420d32ce9`, and partial-cps `1e119b03ea908ad925b98f9ba0a26371c65441e3` | Consume the frozen closure in destructive restore; do not reopen dependency publication absent a new falsifier |
+| Native secondary force | **COMPLETE through the selected Seon artifacts** | Both manifests bind Datahike `940810f5ebbf3eec2d135ea8e7821b2b7647194f`, Konserve `b5c99bc02a7175652a610324215288b78551801f`, Proximum `9846d3e79e1aee48474bc876d3d563d7137209c6`, Shadow CLJS `4e72595f57618f5c43388ad13d5136cd3bede566`, superv.async `3e6ed755f83634c9e9bbb58707f9446420d32ce9`, and partial-cps `1e119b03ea908ad925b98f9ba0a26371c65441e3` | Consume the frozen closure in destructive restore; do not reopen dependency publication absent a new falsifier |
 | Restore inverse/planner | **Pure completion-derived selection is complete; effectful operator integration is missing** | `6351790a` derives the exact retained undo head and `9a60761f` closes the intervening pure-data config/schema source collision. Audit proved that `restore_state/plan!` and CLI dispatch still hardcode ordinary branch-name restore, so using the retained undo branch directly would bypass completion authority | Add completion-id plan/apply through the same artifact freeze, confirmation, and converge mechanism; then run undo after nominal restore |
 | Inspect/agent evidence | **PATH identity and P0b evidence are closed; namespace/tool refinement is active** | `74530d90` makes process identity depend on the selected executable, and `901be2a9` records the admitted local-model P0b result. The external lane owns only its declared config/agent/Inspect paths and keeps ACME lifecycle untouched until the next source freeze | Review the bounded namespace/tool return after the retained-head source freeze; ACME rebuild remains downstream of default proof |
 
@@ -355,7 +355,7 @@ isolation evidence and are not claimed by these tests.
 
 That paragraph records the bounded test-only slice at the time it ran. The
 current publication descendant is now public at
-`9ada755087228e10cfb179fa5779ce227a6ed220`; it retains the dependency proof,
+`940810f5ebbf3eec2d135ea8e7821b2b7647194f`; it retains the dependency proof,
 current upstream delete/GC fixes, guarded secondary force, and cold
 `src-secondary` availability. Seon's root selection and artifact proof are the
 active gate.
@@ -453,7 +453,7 @@ Datahike `6f90b339…`, Konserve `df6818d4…`, superv.async `3e6ed755…`, and
 partial-cps `1e119b03…`; both writer artifacts used the same root `:writer`
 Datahike/Konserve basis. That dated checkpoint is superseded by root cutover
 `be30f420`: current default and ACME manifest-v4 dependency vectors are
-byte-equal at public Datahike `9ada7550…`, Konserve `b5c99bc0…`, Proximum
+byte-equal at public Datahike `940810f5…`, Konserve `b5c99bc0…`, Proximum
 `9846d3e7…`, and the other three maintained coordinates.
 
 A later concurrent default restart and ACME start exposed one remaining shared

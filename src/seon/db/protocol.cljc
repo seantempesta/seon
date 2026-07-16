@@ -621,35 +621,52 @@
          ::error-kind error-kind
          ::error error))
 
+(defonce ^:private request-schema
+  (delay (m/deref-recursive ::request)))
+(defonce ^:private response-schema
+  (delay (m/deref-recursive ::response)))
+(defonce ^:private writer-terminal-result-schema
+  (delay (m/deref-recursive ::writer-terminal-result)))
+(defonce ^:private request-validator
+  (delay (m/validator @request-schema)))
+(defonce ^:private request-explainer
+  (delay (m/explainer @request-schema)))
+(defonce ^:private response-validator
+  (delay (m/validator @response-schema)))
+(defonce ^:private response-explainer
+  (delay (m/explainer @response-schema)))
+(defonce ^:private writer-terminal-result-validator
+  (delay (m/validator @writer-terminal-result-schema)))
+
 (defn valid-request?
   "True when `request` is one complete canonical protocol request."
   {:malli/schema [:=> [:cat :any] :boolean]}
   [request]
-  (m/validate ::request request))
+  (@request-validator request))
 
 (defn explain-request
   "Malli explanation for an invalid request, or nil when valid."
   {:malli/schema [:=> [:cat :any] [:maybe :map]]}
   [request]
-  (m/explain ::request request))
+  (@request-explainer request))
 
 (defn valid-response?
   "True when `response` is one complete canonical protocol response."
   {:malli/schema [:=> [:cat :any] :boolean]}
   [response]
-  (m/validate ::response response))
+  (@response-validator response))
 
 (defn valid-writer-terminal-result?
   "True when `result` is one complete writer terminal value."
   {:malli/schema [:=> [:cat :any] :boolean]}
   [result]
-  (m/validate ::writer-terminal-result result))
+  (@writer-terminal-result-validator result))
 
 (defn explain-response
   "Malli explanation for an invalid response, or nil when valid."
   {:malli/schema [:=> [:cat :any] [:maybe :map]]}
   [response]
-  (m/explain ::response response))
+  (@response-explainer response))
 
 ;;; Durable idempotency receipt
 

@@ -2,10 +2,12 @@
   "Durable transaction request receipt and recovery tests."
   (:require [clojure.test :refer [deftest is use-fixtures]]
             [datahike.api :as d]
+            [seon.db.executor :as executor]
             [seon.db.protocol :as protocol]
             [seon.db.registry :as registry]
             [seon.db.transport.uds :as uds]
-            [seon.db.writer :as writer]))
+            [seon.db.writer :as writer])
+  (:import [java.util.concurrent CountDownLatch TimeUnit]))
 
 (defn- isolate-registry
   [test-fn]
@@ -20,8 +22,12 @@
 (defn- runtime
   []
   {::writer/database-initializer (fn [_connection _database-name] nil)
-   ::writer/transaction-transform (fn [_db-value transaction-data]
-                                    transaction-data)
+   ::writer/embedding-enabled? false
+   ::writer/embedding-entity-ids (fn [_db-value] [])
+   ::writer/embedding-inputs-for-eids (fn [_db-value _entity-ids] [])
+   ::writer/embedding-assertions (fn [_inputs] [])
+   ::writer/revalidate-embedding-assertions
+   (fn [_db-value _assertions] [])
    ::writer/knn-search (fn [_db-value _request] {:seon.embed/hits []})
    ::writer/publisher
    {::uds/channel (Object.)
@@ -131,6 +137,71 @@
                (d/q '[:find (count ?entity) .
                       :where [?entity :receipt/value "parallel"]]
                     (d/db connection))))))))
+
+(deftest primary-transaction-does-not-wait-for-the-embedding-provider
+  (let [base-runtime (runtime)
+        database-name (str "receipt-provider-" (random-uuid))
+        provider-entered (CountDownLatch. 1)
+        release-provider (CountDownLatch. 1)
+        provider-runtime
+        (assoc base-runtime
+               ::writer/embedding-inputs-for-eids
+               (fn [_db-value entity-ids]
+                 (mapv (fn [entity-id] {:db/id entity-id}) entity-ids))
+               ::writer/embedding-assertions
+               (fn [_inputs]
+                 (.countDown provider-entered)
+                 (.await release-provider)
+                 [])
+               ::writer/revalidate-embedding-assertions
+               (fn [_db-value assertions] assertions))]
+    (ensure-database! base-runtime database-name)
+    (install-schema! base-runtime database-name)
+    (let [execute (var-get (ns-resolve 'seon.db.writer 'execute-embedding!))
+          worker (executor/start!
+                   {::executor/name :embedding-test
+                    ::executor/workers 1
+                   ::executor/maximum-queued 1
+                   ::executor/execute (partial execute provider-runtime)})
+          provider-runtime (assoc provider-runtime
+                                  ::writer/embedding-enabled? true
+                                  ::writer/embedding-executor worker)]
+      (try
+        (let [blocked
+              (future
+                (transact! provider-runtime database-name "provider/blocked"
+                           [{:receipt/value "blocked"}]))
+              response (deref blocked 5 ::timed-out)]
+          (is (not= ::timed-out response)
+              "the primary commit returns before background provider work")
+          (is (true? (::protocol/success? response))))
+        (is (.await provider-entered 5 TimeUnit/SECONDS)
+            "the committed entity is handed to background embedding")
+        (let [independent
+              (future
+                (transact! provider-runtime database-name "provider/independent"
+                           [{:receipt/value "independent"}]))
+              response (deref independent 5 ::timed-out)]
+          (is (not= ::timed-out response)
+              "an unrelated same-database write commits during provider wait")
+          (is (true? (::protocol/success? response))))
+        (let [overflow
+              (future
+                (transact! provider-runtime database-name "provider/overflow"
+                           [{:receipt/value "overflow"}]))
+              response (deref overflow 5 ::timed-out)]
+          (is (not= ::timed-out response)
+              "a full embedding queue cannot delay the primary transaction")
+          (is (true? (::protocol/success? response))))
+        (finally
+          (.countDown release-provider)
+          (executor/stop! {::executor/executor worker})))
+      (is (= #{"blocked" "independent" "overflow"}
+             (set
+              (map first
+                   (d/q '[:find ?value
+                          :where [_ :receipt/value ?value]]
+                        (d/db (connection database-name))))))))))
 
 (deftest request-id-reuse-with-different-data-is-rejected
   (let [runtime (runtime)

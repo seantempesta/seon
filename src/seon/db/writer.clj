@@ -15,6 +15,7 @@
             [konserve.core :as k]
             [seon.db.coordinate :as coordinate]
             [seon.db.datahike.schema :as datahike.schema]
+            [seon.db.executor :as executor]
             [seon.db.id :as id]
             [seon.db.protocol :as protocol]
             [seon.db.registry :as registry]
@@ -31,21 +32,35 @@
 
 (schema/register! ::connection :any)
 (schema/register! ::database-initializer 'fn?)
-(schema/register! ::transaction-transform 'fn?)
+(schema/register! ::embedding-enabled? :boolean)
+(schema/register! ::embedding-entity-ids 'fn?)
+(schema/register! ::embedding-inputs-for-eids 'fn?)
+(schema/register! ::embedding-assertions 'fn?)
+(schema/register! ::revalidate-embedding-assertions 'fn?)
+(schema/register! ::embedding-executor ::executor/executor)
 (schema/register! ::knn-search 'fn?)
 (schema/register! ::publisher :seon.db.transport.uds/publisher)
 (schema/register!
  ::dependencies
- [:map
+  [:map
   [::database-initializer ::database-initializer]
-  [::transaction-transform ::transaction-transform]
+  [::embedding-enabled? ::embedding-enabled?]
+  [::embedding-entity-ids ::embedding-entity-ids]
+  [::embedding-inputs-for-eids ::embedding-inputs-for-eids]
+  [::embedding-assertions ::embedding-assertions]
+  [::revalidate-embedding-assertions ::revalidate-embedding-assertions]
   [::knn-search ::knn-search]])
 (schema/register!
  ::runtime
- [:map
+  [:map
   [::database-initializer ::database-initializer]
-  [::transaction-transform ::transaction-transform]
+  [::embedding-enabled? ::embedding-enabled?]
+  [::embedding-entity-ids ::embedding-entity-ids]
+  [::embedding-inputs-for-eids ::embedding-inputs-for-eids]
+  [::embedding-assertions ::embedding-assertions]
+  [::revalidate-embedding-assertions ::revalidate-embedding-assertions]
   [::knn-search ::knn-search]
+  [::embedding-executor ::embedding-executor]
   [::publisher ::publisher]])
 (schema/register! ::request-server :seon.db.transport.uds/request-server)
 (schema/register! ::database-name :seon.db.protocol/database-name)
@@ -414,16 +429,99 @@
     ((::database-initializer runtime) connection database-name))
   {::database-initialized? true})
 
-(defn- transform-transaction
-  [runtime connection transaction-data]
+(defn- committed-scope
+  [database-name attachment db-value]
+  (when-let [identity (d/committed-value-identity db-value)]
+    {::executor/database-name database-name
+     ::coordinate/attachment attachment
+     ::executor/connection-id (:datahike.value/connection-id identity)
+     ::executor/generation (:datahike.value/generation identity)}))
+
+(defn- resolve-exact-connection
+  [{::keys [database-name scope]}]
+  (let [{::registry/keys [conn attachment]}
+        (registry/resolve-connection
+         {::registry/database-name (keyword database-name)})]
+    (when (and conn
+               (= scope (committed-scope database-name attachment (d/db conn))))
+      conn)))
+
+(defn- execute-embedding!
+  [dependencies {::keys [database-name scope entity-ids]}]
   (try
-    ((::transaction-transform runtime)
-     (d/db connection)
-     (vec transaction-data))
+    (when-let [connection (resolve-exact-connection
+                           {::database-name database-name ::scope scope})]
+      (let [inputs
+            ((::embedding-inputs-for-eids dependencies)
+             (d/db connection) entity-ids)]
+        (when (seq inputs)
+          (let [assertions ((::embedding-assertions dependencies) inputs)]
+            (when-let [current-connection
+                       (resolve-exact-connection
+                        {::database-name database-name ::scope scope})]
+              (let [current-assertions
+                    ((::revalidate-embedding-assertions dependencies)
+                     (d/db current-connection) assertions)]
+                (when (seq current-assertions)
+                  ;; Datahike writer admission is the release fence. A write on
+                  ;; this captured generation is accepted and drained before
+                  ;; release returns, or rejected after admission closes.
+                  (d/transact current-connection current-assertions))))))))
     (catch Throwable throwable
-      (log/error throwable
-                 "database transaction transform failed; committing primary facts")
-      transaction-data)))
+      (log/warn throwable "asynchronous embedding update failed"
+                {::database-name database-name}))))
+
+(defn- embedding-entity-ids
+  [report]
+  (into []
+        (comp (map (fn [^datahike.datom.Datom datom] (.-e datom)))
+              (distinct))
+        (public-transaction-datoms (:tx-data report))))
+
+(defn- submit-embedding!
+  [runtime database-name scope request-id entity-ids]
+  (when (and (::embedding-enabled? runtime)
+             (::embedding-executor runtime)
+             scope
+             (seq entity-ids))
+    (executor/try-submit!
+     {::executor/executor (::embedding-executor runtime)
+      ::executor/database-name database-name
+      ::executor/scope scope
+      ::executor/job-id request-id
+      ::executor/request {::database-name database-name
+                          ::scope scope
+                          ::entity-ids entity-ids}})))
+
+(defn- enqueue-embedding!
+  [runtime database-name attachment request-id report]
+  (try
+    (let [db-after (:db-after report)
+          scope (committed-scope database-name attachment db-after)
+          entity-ids (embedding-entity-ids report)]
+      (submit-embedding! runtime database-name scope request-id entity-ids))
+    (catch Throwable throwable
+      ;; Derived work admission can be repaired from current hash mismatch and
+      ;; therefore must never change the primary transaction result.
+      (log/warn throwable "asynchronous embedding admission failed"
+                {::database-name database-name
+                 ::protocol/request-id request-id}))))
+
+(defn- enqueue-embedding-backfill!
+  [runtime database-name attachment connection]
+  (try
+    (let [db-value (d/db connection)
+          scope (committed-scope database-name attachment db-value)
+          entity-ids ((::embedding-entity-ids runtime) db-value)]
+      (doseq [[batch-index batch] (map-indexed vector (partition-all 256 entity-ids))]
+        (submit-embedding!
+         runtime database-name scope
+         (str "embedding/backfill/" (::executor/generation scope)
+              "/" batch-index)
+         (vec batch))))
+    (catch Throwable throwable
+      (log/warn throwable "asynchronous embedding backfill admission failed"
+                {::database-name database-name}))))
 
 (defn- response-from-report-data
   [data]
@@ -540,74 +638,83 @@
       (recovered-response db transaction request-id candidates)
       (throw (request-conflict request-id expected-hash actual-hash)))))
 
+(defn- recover-current
+  [connection request-id fingerprint candidates]
+  (let [db-value (d/db connection)]
+    (when-let [transaction (committed-transaction db-value request-id)]
+      (recover-committed db-value transaction request-id fingerprint
+                         candidates))))
+
+(defn- assert-current-coordinate!
+  [db-value expected-coordinate]
+  (when (and expected-coordinate
+             (not= expected-coordinate (coordinate/resolved db-value)))
+    (throw
+     (ex-info "The database coordinate changed before commit."
+              {::failure-kind protocol/stale-coordinate-error
+               ::protocol/expected-coordinate expected-coordinate
+               ::protocol/current-coordinate
+               (coordinate/resolved db-value)}))))
+
 (defn- transact-once!
-  [runtime connection request]
-  (locking connection
-    (let [transaction-data (::protocol/transaction-data request)
-          transaction-meta (::protocol/transaction-meta request)
-          expected-coordinate (::protocol/expected-coordinate request)
-          request-id (::protocol/request-id request)
-          candidates (::protocol/generated-candidates request)
-          generated? (contains? request ::protocol/generated-candidates)
-          _ (assert-protocol-attributes-free! transaction-data transaction-meta)
-          db-value (d/db connection)
-          coerced-data
-          (coerce-transaction-data (:schema db-value) transaction-data)
-          fingerprint (protocol/logical-transaction-hash request)
-          recover-current
-          (fn []
-            (let [db (d/db connection)]
-              (when-let [transaction
-                         (committed-transaction db request-id)]
-                (recover-committed db transaction request-id fingerprint
-                                   candidates))))]
-      (or
-       (recover-current)
-       (let [_ (when (and expected-coordinate
-                          (not= expected-coordinate
-                                (coordinate/resolved db-value)))
-                 (throw
-                  (ex-info "The database coordinate changed before commit."
-                           {::failure-kind
-                            protocol/stale-coordinate-error
-                            ::protocol/expected-coordinate
-                            expected-coordinate
-                            ::protocol/current-coordinate
-                            (coordinate/resolved db-value)})))
-             caller-tempids
-             (id/transaction-tempids
-              {::id/db-value db-value
-               ::id/transaction-data coerced-data})
-             transformed-data
-             (transform-transaction runtime connection coerced-data)
-             data-with-receipts
-             (into (vec transformed-data)
-                   (protocol/tempid-receipts request-id caller-tempids))
-             transaction-meta*
-             (assoc (or transaction-meta {})
-                    ::protocol/request-id request-id
-                    ::protocol/request-hash fingerprint
-                    ::protocol/version protocol/current-version)
-             transaction
-             (cond-> {:tx-data data-with-receipts
-                      :tx-meta transaction-meta*}
-               generated?
-               (assoc ::id/generated-candidates candidates))]
-         (try
-           (let [report (d/transact connection transaction)
-                 response
-                 (response-from-report-data
-                  (transaction-report-data report request-id))
-                 generated-entity-ids (::id/generated-eids report)]
-             (cond-> response
-               (some? generated-entity-ids)
-               (assoc ::protocol/generated-entity-ids
-                      generated-entity-ids)))
-           (catch Throwable throwable
-             ;; A commit can win before the acknowledgement is lost. The
-             ;; durable receipt, not the delivery failure, is authoritative.
-             (or (recover-current)
-                 (throw throwable)))))))))
+  [runtime connection database-name attachment request]
+  (let [transaction-data (::protocol/transaction-data request)
+        transaction-meta (::protocol/transaction-meta request)
+        expected-coordinate (::protocol/expected-coordinate request)
+        request-id (::protocol/request-id request)
+        candidates (::protocol/generated-candidates request)
+        generated? (contains? request ::protocol/generated-candidates)
+        fingerprint (protocol/logical-transaction-hash request)
+        _ (assert-protocol-attributes-free! transaction-data transaction-meta)
+        outcome
+        (locking connection
+          (if-let [response
+                   (recover-current connection request-id fingerprint candidates)]
+            {::response response}
+           (let [db-value (d/db connection)
+                 _ (assert-current-coordinate! db-value expected-coordinate)
+                 coerced-data
+                 (coerce-transaction-data (:schema db-value) transaction-data)
+                 caller-tempids
+                 (id/transaction-tempids
+                  {::id/db-value db-value
+                   ::id/transaction-data coerced-data})
+                 data-with-receipts
+                 (into (vec coerced-data)
+                       (protocol/tempid-receipts request-id caller-tempids))
+                 transaction-meta*
+                 (assoc (or transaction-meta {})
+                        ::protocol/request-id request-id
+                        ::protocol/request-hash fingerprint
+                        ::protocol/version protocol/current-version)
+                 transaction
+                 (cond-> {:tx-data data-with-receipts
+                          :tx-meta transaction-meta*}
+                   generated?
+                   (assoc ::id/generated-candidates candidates))]
+             (try
+               (let [report (d/transact connection transaction)
+                     response
+                     (response-from-report-data
+                      (transaction-report-data report request-id))
+                     generated-entity-ids (::id/generated-eids report)]
+                 {::response
+                  (cond-> response
+                    (some? generated-entity-ids)
+                    (assoc ::protocol/generated-entity-ids
+                           generated-entity-ids))
+                  ::report report})
+               (catch Throwable throwable
+                 ;; A commit can win before the acknowledgement is lost. The
+                 ;; durable receipt, not the delivery failure, is authoritative.
+                 (if-let [response
+                          (recover-current connection request-id fingerprint
+                                           candidates)]
+                   {::response response}
+                   (throw throwable)))))))]
+    (when-let [report (::report outcome)]
+      (enqueue-embedding! runtime database-name attachment request-id report))
+    (::response outcome)))
 
 ;;; Transaction-history replay
 
@@ -895,6 +1002,9 @@
           (connection-initializer runtime)))
         backend-kind (::registry/backend entry)
         database-path (::registry/path entry)]
+    (enqueue-embedding-backfill! runtime database-name
+                                 (::registry/attachment entry)
+                                 (::registry/conn entry))
     (protocol/success
      (cond->
        {::protocol/database-name database-name
@@ -949,8 +1059,24 @@
       ::protocol/restore-completion-coordinates
       (::registry/restore-completion-coordinates observation)})))
 
+(defn- fence-embedding!
+  [runtime database-name expected-attachment]
+  (let [{::registry/keys [conn attachment]}
+        (registry/resolve-connection
+         {::registry/database-name (keyword database-name)})]
+    (when (and (::embedding-executor runtime)
+               conn
+               (= expected-attachment attachment))
+      (when-let [scope (committed-scope database-name attachment (d/db conn))]
+        (executor/remove-database!
+         {::executor/executor (::embedding-executor runtime)
+          ::executor/scope scope})))))
+
 (defn- handle-release-database
-  [request]
+  [runtime request]
+  (fence-embedding! runtime
+                    (::protocol/target-database-name request)
+                    (::protocol/target-attachment request))
   (let [result
         (registry/release-attachment!
          {::registry/target-database-name
@@ -965,7 +1091,10 @@
       ::protocol/released? (::registry/released? result)})))
 
 (defn- handle-delete-branch
-  [request]
+  [runtime request]
+  (fence-embedding! runtime
+                    (::protocol/target-database-name request)
+                    (::protocol/target-attachment request))
   (let [result
         (registry/delete-branch!
          {::registry/source-database-name
@@ -1003,13 +1132,14 @@
     ::protocol/body {::protocol/generated-candidate candidate}}))
 
 (defn- handle-transact
-  [runtime connection request]
+  [runtime connection database-name attachment request]
   (let [candidates (::protocol/generated-candidates request)
         generated? (contains? request ::protocol/generated-candidates)]
     (try
       (when generated?
         (id/assert-allocation-writer! connection))
-      (protocol/success (transact-once! runtime connection request))
+      (protocol/success
+       (transact-once! runtime connection database-name attachment request))
       (catch Throwable throwable
         (let [failure-kind (::failure-kind (ex-data throwable))]
           (cond
@@ -1134,16 +1264,17 @@
          (handle-create-branch runtime request)
 
          :seon.db.protocol.operation/release-database
-         (handle-release-database request)
+         (handle-release-database runtime request)
 
          :seon.db.protocol.operation/delete-branch
-         (handle-delete-branch request)
+         (handle-delete-branch runtime request)
 
-         (if-let [{::keys [connection database-name]}
+         (if-let [{::keys [connection database-name]
+                   attachment ::coordinate/attachment}
                   (connection-for-request request)]
            (case (::protocol/operation request)
              :seon.db.protocol.operation/transact
-             (handle-transact runtime connection request)
+             (handle-transact runtime connection database-name attachment request)
 
              :seon.db.protocol.operation/replay-transactions
              (handle-replay-transactions connection database-name request)
@@ -1187,7 +1318,15 @@
   [{::keys [dependencies database-name backend database-path
             request-socket-path publish-socket-path]}]
   (let [publisher (uds/start-publisher! publish-socket-path)
-        runtime (assoc dependencies ::publisher publisher)]
+        embedding-executor
+        (executor/start!
+         {::executor/name :embedding
+          ::executor/workers 6
+          ::executor/maximum-queued 64
+          ::executor/execute (partial execute-embedding! dependencies)})
+        runtime (assoc dependencies
+                       ::publisher publisher
+                       ::embedding-executor embedding-executor)]
     (try
       (let [ensure-response
             (handle-request
@@ -1207,12 +1346,14 @@
           {::uds/socket-path request-socket-path
            ::uds/handler (partial handle-request runtime)})
          ::publisher publisher
+         ::embedding-executor embedding-executor
          ::database-name database-name})
       (catch Throwable throwable
         (let [release
               (registry/release-database!
                {::registry/database-name (keyword database-name)})]
           (uds/close-publisher! publisher)
+          (executor/stop! {::executor/executor embedding-executor})
           (if (::registry/release-error release)
             (throw
              (ex-info "Writer start failed and database release was unproved."
@@ -1226,6 +1367,7 @@
   {:malli/schema [:=> [:catn [::server ::server]] ::stop-response]}
   [server]
   (uds/close-request-server! (::request-server server))
+  (executor/stop! {::executor/executor (::embedding-executor server)})
   (let [{::registry/keys [databases]} (registry/list-databases {})
         release-results
         (mapv

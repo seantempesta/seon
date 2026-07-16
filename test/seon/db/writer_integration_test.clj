@@ -26,8 +26,11 @@
    (dependencies (fn [_connection _database-name] nil)))
   ([database-initializer]
    {::writer/database-initializer database-initializer
-    ::writer/transaction-transform (fn [_db-value transaction-data]
-                                     transaction-data)
+    ::writer/embedding-enabled? false
+    ::writer/embedding-entity-ids (fn [_db-value] [])
+    ::writer/embedding-inputs-for-eids (fn [_db-value _entity-ids] [])
+    ::writer/embedding-assertions (fn [_inputs] [])
+    ::writer/revalidate-embedding-assertions (fn [_db-value _assertions] [])
     ::writer/knn-search (fn [_db-value _request] {:seon.embed/hits []})}))
 
 (defn- wait-for-subscriber!
