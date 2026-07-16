@@ -1717,18 +1717,18 @@
 
 (defn- drain-database-scope!
   [runtime scope]
-  (let [active (::active-requests runtime)
-        caller-ids
-        (locking active
-          (let [request-ids
-                (into [] (keep (fn [[request-id entry]]
-                                 (when (= scope (::scope entry)) request-id)))
-                      @active)]
-            (doseq [request-id request-ids]
-              (swap! active assoc-in [request-id ::canceled?] true))
-            (into [] (mapcat #(vals (get-in @active [% ::query-callers])))
-                  request-ids)))]
-    (run! #(cancel-query-caller! runtime %) caller-ids))
+  (when-let [active (::active-requests runtime)]
+    (let [caller-ids
+          (locking active
+            (let [request-ids
+                  (into [] (keep (fn [[request-id entry]]
+                                   (when (= scope (::scope entry)) request-id)))
+                        @active)]
+              (doseq [request-id request-ids]
+                (swap! active assoc-in [request-id ::canceled?] true))
+              (into [] (mapcat #(vals (get-in @active [% ::query-callers])))
+                    request-ids)))]
+      (run! #(cancel-query-caller! runtime %) caller-ids)))
   (when-let [dispatcher (::executor runtime)]
     (executor/fence-and-drain!
      {::executor/executor dispatcher

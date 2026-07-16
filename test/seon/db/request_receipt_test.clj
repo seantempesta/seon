@@ -352,6 +352,14 @@
                  ::protocol/expected-target-head coordinate}))]
           (is (true? (::protocol/success? release-response)))
           (is (true? (::protocol/released? release-response)))
+          (is (= {::executor/queued 0
+                  ::executor/retained-identities 0
+                  ::executor/fenced-scopes 0}
+                 (select-keys (executor/evidence worker)
+                              [::executor/queued
+                               ::executor/retained-identities
+                               ::executor/fenced-scopes]))
+              "released scope retains no dispatcher authority")
           (is (true?
                (::protocol/success?
                 (writer/handle-request
@@ -371,7 +379,35 @@
             (is (nil?
                  (d/q '[:find ?value .
                         :where [_ :receipt/derived ?value]] db-value))
-                "the old generation cannot commit after reopen")))
+                "the old generation cannot commit after reopen"))
+          (let [{::registry/keys [attachment coordinate]}
+                (registry/resolve-connection
+                 {::registry/database-name (keyword database-name)})
+                final-release
+                (writer/handle-request
+                 embedding-runtime
+                 (protocol/release-database-request
+                  {::protocol/request-id "receipt/final-release"
+                   ::protocol/target-database-name database-name
+                   ::protocol/target-attachment attachment
+                   ::protocol/expected-target-head coordinate}))]
+            (is (true? (::protocol/success? final-release)))
+            (is (true? (::protocol/released? final-release)))
+            (is (nil?
+                 (::registry/conn
+                  (registry/resolve-connection
+                   {::registry/database-name (keyword database-name)})))
+                "the direct runtime retains no final connection")
+            (is (= {::executor/queued 0
+                    ::executor/running 0
+                    ::executor/retained-identities 0
+                    ::executor/fenced-scopes 0}
+                   (select-keys (executor/evidence worker)
+                                [::executor/queued
+                                 ::executor/running
+                                 ::executor/retained-identities
+                                 ::executor/fenced-scopes]))
+                "final release leaves the dispatcher resource-zero")))
         (finally
           (.countDown release-provider)
           (executor/stop! {::executor/executor worker}))))))
