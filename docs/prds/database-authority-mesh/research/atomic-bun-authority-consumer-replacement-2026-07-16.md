@@ -32,11 +32,13 @@ Two contracts must be settled before the deletion commit:
    async execution boundary, naturally supplied by the isolated Bun agent
    child, rather than a synchronous compatibility shim in the web host.
 2. Generated-ID transactions currently pass a CLJS transaction-builder
-   function around a local database value. Functions cannot cross the wire,
-   and moving the existing loop client-side would add round trips. The writer
-   should accept an ordinary declarative transaction template, read generator
-   policy, generate and substitute candidates, retry, and commit in one
-   authority operation.
+   function around a local database value. Functions cannot cross the wire.
+   A focused caller audit must choose between keeping candidate generation and
+   the pure builder in Bun with rare collision-retry round trips, or defining a
+   small ordinary declarative template that lets the authority generate,
+   substitute, retry, and commit in one operation. The latter is justified only
+   if it is genuinely smaller across every current builder; it must not become
+   a remote code interpreter.
 
 These are semantic prerequisites, not reasons to preserve the replica. Once
 they are closed, the migration should replace the old reachability atomically:
@@ -54,7 +56,7 @@ reads.
 | Datahike pull | `src/datahike/pull_api.cljc:328-359` | `pull-many` parses one pattern once and shares its resource budget; use it rather than N remote pulls. |
 | Datahike query evidence | `src/datahike/query.cljc:124-152,2654-2670` | `q-with-evidence` already returns query result and conservative attribute dependencies; unknown dependencies become `:all`. |
 | Datahike temporal values | `src/datahike/api/impl.cljc:148-194` | `as-of`, `since`, and `history` are host-local wrappers over immutable database values. |
-| Datahike listener | `src/datahike/core.cljc:199-217` | Keyed connection-local callbacks are the correct authority-internal primitive, not a Bun-facing callback API. |
+| Datahike listener | `src/datahike/core.cljc:199-217` | Keyed callbacks remain a process-local API but are not installed beside the selected committed-report source; doing both would duplicate commit delivery. |
 | Datahike index pages | `src/datahike/index_page.cljc:104-145` | Datahike owns eager bounded ordering and cursors; Seon must not reconstruct index ordering in Bun. |
 | Committed-report readiness | `src/datahike/committed_report.cljc:175-278` at Datahike `d9765276` | The selected commit owns bounded `poll-batch!`, identity-fenced idempotent `requeue-ready!`, and blocking `take-ready!`; JVM selective-interest integration remains the prerequisite. |
 | Datastar sharing | `src/seon/web/view_unit.cljs`, `src/seon/web/datastar.cljs` | Keep one rendered unit and serialized output shared by browser consumers; replace local read replay with authority dependency evidence and coarse reads. |
@@ -93,14 +95,16 @@ The surviving operation families are:
 `listen!` should accept ordinary data describing the relevant query or
 attribute set. The callback remains process-local and is registered with the
 session owner. No function crosses the protocol. The authority uses Datahike's
-connection-local listener internally, computes committed dependency evidence,
-and addresses only interested sessions.
+one generation-fenced committed-report source, computes committed dependency
+evidence, and addresses only interested sessions.
 
-An interest event contains the database identity, committed coordinate,
-changed attributes or conservative `:all`, and enough transaction data for
-the owner to decide whether to run its coarse read plan. It never contains a
-Datahike database value. A gap or bounded-queue overflow causes one explicit
-resync from a known coordinate; it does not revive full-feed replay.
+An interest event contains the existing interest request ID, committed
+coordinate, and matching ordinary datoms. The physical session already owns
+the database attachment, so the event does not repeat a parallel database
+identity or dependency envelope. A query interest uses the authority-derived
+attribute set only for routing. It never receives a Datahike database value. A
+gap or bounded-queue overflow causes one explicit resync with the interest ID
+and known coordinate; it does not revive full-feed replay.
 
 ### One immutable value per coarse operation
 
@@ -377,7 +381,8 @@ fresh local Datahike setup must be updated in the same documentation cut.
    batch/requeue proofs at `d9765276`.
 2. Implement JVM selective interests with direct session ownership, ordered
    coordinates, bounded queues, explicit gap/resync, and final release.
-3. Finish native Bun session event demultiplexing and backpressure proof.
+3. Retain the completed native Bun session event demultiplexing and bounded
+   backpressure proof.
 
 Exit: the JVM can address one of many sessions without a publisher, and the
 Bun owner can receive interleaved responses/events without loss or unbounded
@@ -397,8 +402,9 @@ API without a local connection or compatibility namespace.
 
 ### Gate 3 — Close the two risky semantic seams
 
-1. Replace generated-ID builder functions with the declarative writer
-   operation and migrate all allocation callers.
+1. Audit every generated-ID builder and measure the two honest shapes: Bun-side
+   pure builder with bounded collision retries, or one declarative writer
+   operation. Select one mechanism and migrate all allocation callers.
 2. Make core render/context acquisition async and rendering pure over ordinary
    data.
 3. Put open-ended agent-authored render execution behind the async isolated
@@ -485,8 +491,8 @@ executable and no local Datahike code reachable from Bun.
 ## Final recommendation
 
 Proceed with the native Bun session and selective JVM authority design. Freeze
-the final `seon.db` ordinary-data contract only after the generated-ID and
-render execution probes pass. Then migrate computations bottom-up and make one
+the final `seon.db` ordinary-data contract only after the generated-ID tradeoff
+and render execution probes pass. Then migrate computations bottom-up and make one
 atomic reachability cut that deletes the replica, full feed, publisher, local
 Datahike, and Node web adapters together.
 
