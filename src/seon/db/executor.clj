@@ -49,6 +49,10 @@
 (schema/register!
  ::remove-database-request
  [:map [::executor ::executor] [::scope ::scope]])
+(schema/register! ::cancel 'fn?)
+(schema/register!
+ ::fence-and-drain-request
+ [:map [::executor ::executor] [::scope ::scope] [::cancel ::cancel]])
 (schema/register!
  ::remove-database-response
  [:map [::abandoned-count ::abandoned-count]])
@@ -194,7 +198,8 @@
              (if (identical? result (get-in state [::jobs job-id ::result]))
                (update state ::jobs dissoc job-id)
                state)))
-    (swap! (::counts executor) decrement-running database-name)))
+    (swap! (::counts executor) decrement-running database-name)
+    (.notifyAll ^Object (::lock executor))))
 
 (defn- run-worker!
   [executor]
@@ -337,6 +342,73 @@
           (ex-info "The database scope closed before request completion."
                    {::scope scope})]))
       {::abandoned-count abandoned})))
+
+(defn fence-and-drain!
+  "Fence one exact scope, reject queued work, cancel running work, and wait.
+   until every worker has relinquished the scope."
+  {:malli/schema
+   [:=> [:cat ::fence-and-drain-request] ::remove-database-response]}
+  [{::keys [executor scope cancel]}]
+  (let [{::keys [running-job-ids abandoned-count]}
+        (locking (::lock executor)
+          (let [state @(::state executor)
+                matching-jobs
+                (into {}
+                      (filter (fn [[_ job]] (= scope (::scope job))))
+                      (::jobs state))
+                queued-job-ids
+                (into #{}
+                      (keep (fn [[job-id {::keys [status]}]]
+                              (when (= :queued status) job-id)))
+                      matching-jobs)
+                running-job-ids
+                (into []
+                      (keep (fn [[job-id {::keys [status]}]]
+                              (when (= :running status) job-id)))
+                      matching-jobs)
+                queued-results
+                (into #{}
+                      (keep (fn [[job-id {::keys [result]}]]
+                              (when (contains? queued-job-ids job-id) result)))
+                      matching-jobs)
+                next-ready
+                (into {}
+                      (map (fn [[database-name queue]]
+                             [database-name
+                              (into empty-queue
+                                    (remove #(contains? queued-results
+                                                        (::result %)))
+                                    queue)]))
+                      (::ready state))
+                [next-state _]
+                (remove-database
+                 (-> state
+                     (assoc ::ready next-ready)
+                     (update ::closed-scopes conj scope)
+                     (update ::jobs #(apply dissoc % queued-job-ids)))
+                 (::database-name scope))]
+            (reset! (::state executor) next-state)
+            (swap! (::counts executor) update ::fenced +
+                   (count matching-jobs))
+            (doseq [result queued-results]
+              (deliver
+               result
+               [::throwable
+                (ex-info "The database scope closed before request execution."
+                         {::scope scope})]))
+            {::running-job-ids running-job-ids
+             ::abandoned-count (count queued-job-ids)}))]
+    (doseq [job-id running-job-ids]
+      (try
+        (cancel job-id)
+        (catch Throwable _)))
+    (locking (::lock executor)
+      (loop []
+        (when (some (fn [[_ job]] (= scope (::scope job)))
+                    (::jobs @(::state executor)))
+          (.wait ^Object (::lock executor))
+          (recur))))
+    {::abandoned-count abandoned-count}))
 
 (defn evidence
   "Return bounded executor counts without retaining requests or results."

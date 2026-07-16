@@ -126,7 +126,11 @@ construction, cancellation, and filter seams are grounded in
 direct-stream backpressure/compression constraints are grounded in
 [[research/bun-serve-datastar-internals-2026-07-16]]. Shadow artifact/runtime
 compatibility and the smallest Bun-only launcher cut are grounded in
-[[research/shadow-bun-runtime-internals-2026-07-16]].
+[[research/shadow-bun-runtime-internals-2026-07-16]]. The exact consumer and
+deletion inventory is
+[[research/exhaustive-read-consumer-and-deletion-inventory-2026-07-15]], and
+the zero-copy persistent-result boundary is
+[[research/read-materialization-contract-2026-07-16]].
 
 ## Ordered implementation spine
 
@@ -299,6 +303,23 @@ preserving validation. Further proofs change an entity while its old provider
 call is blocked and show only the later document installs a derived value, then
 release and reopen the same attachment while a provider is blocked and prove
 the old generation cannot install into the replacement.
+
+Query, pull, and pull-many now enter one shared read executor after database
+selection. Its worker count follows available processors with a bounded ceiling
+and leaves at least one processor for other JVM work. Jobs retain only ordinary
+request data and exact scope, never a DB or connection. Final release cancels
+active Datahike queries, rejects queued reads, and waits for running readers to
+relinquish the exact generation before closing its indexes and storage. Derived
+embedding work remains abandonable and does not acquire read-drain semantics.
+
+A retained executor proof cancels a running reader, abandons its queued sibling,
+waits for worker release, and retains no identity. A real writer proof blocks a
+pull, starts final release concurrently, and shows release cannot complete until
+the read relinquishes the generation. The combined executor, writer, and UDS
+gate passes 35 tests and 222 assertions.
+The broader embedding, receipt, replay, generated-ID, and transaction-coordinate
+gate passes 58 tests and 345 assertions.
+
 This is not Unit 4 graduation because query, KNN, encode/delivery, mutation, and
 control capacity are not all wired and 2/4/8-database adversarial proof remains.
 
@@ -342,6 +363,19 @@ instead of recomputing after the head advances. The full versioning namespace
 passes 18 tests and 153 assertions across specification, persistent-set, and
 hitchhiker-tree configurations; the focused identity/cache proof contributes
 3 tests and 30 assertions.
+
+Query, pull, and pull-many are now coordinate-pinned protocol operations. The
+authority injects the one resolved DB into query arguments, preserves Datahike's
+native relation, collection, tuple, scalar, and pull shapes, and merges
+`q-with-evidence` fields directly into the response without a second result
+wrapper or shape tag. One recursive validation walk returns the identical
+persistent result and rejects DB, connection, Entity, Datom, record, function,
+derefable, Future, Throwable, lazy, and unsupported host values before Transit.
+Embedded Datalog and database values retain legitimate bare keys while outer
+protocol keys stay qualified. A historical-coordinate UDS fixture advances the
+head, then proves the old coordinate returns old query/pull data, two identical
+queries produce miss-then-hit cache evidence, `:keys` result maps retain their
+shape, and pull-many preserves input order.
 
 Exit proof: transport-neutral fixtures cover schemas, values, identity,
 query/pull/history, branches, fencing, batching, member errors, cancellation,

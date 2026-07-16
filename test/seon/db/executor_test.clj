@@ -245,6 +245,48 @@
         (.countDown release)
         (executor/stop! {::executor/executor worker})))))
 
+(deftest exact-scope-drain-cancels-running-and-waits-for-worker-release
+  (let [entered (CountDownLatch. 1)
+        release (CountDownLatch. 1)
+        canceled (atom [])
+        worker
+        (executor/start!
+         {::executor/name :read
+          ::executor/workers 1
+          ::executor/maximum-queued 4
+          ::executor/execute
+          (fn [request]
+            (.countDown entered)
+            (.await release)
+            (:request/value request))})
+        scope (scope "a" (random-uuid) (random-uuid))
+        running (executor/submit-async!
+                 (request worker "a" scope "read/running" :value))]
+    (try
+      (is (.await entered 5 TimeUnit/SECONDS))
+      (let [queued (executor/submit-async!
+                    (request worker "a" scope "read/queued" :queued))
+            _ (is (await-queued worker 1))
+            drained
+            (future
+              (executor/fence-and-drain!
+               {::executor/executor worker
+                ::executor/scope scope
+                ::executor/cancel
+                (fn [job-id]
+                  (swap! canceled conj job-id)
+                  (.countDown release))}))]
+        (is (= {::executor/abandoned-count 1} @drained))
+        (is (= ["read/running"] @canceled))
+        (is (= [::executor/value :value] @running))
+        (is (= ::executor/throwable (first @queued)))
+        (is (zero? (::executor/running (executor/evidence worker))))
+        (is (zero? (::executor/retained-identities
+                    (executor/evidence worker)))))
+      (finally
+        (.countDown release)
+        (executor/stop! {::executor/executor worker})))))
+
 (deftest real-independent-database-reads-use-the-shared-workers-in-parallel
   (let [{::registry/keys [snapshot]} (registry/snapshot-registry {})
         database-names (mapv #(str "executor-real-" % "-" (random-uuid))

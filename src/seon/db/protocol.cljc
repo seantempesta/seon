@@ -21,6 +21,9 @@
 (def ping-operation :seon.db.protocol.operation/ping)
 (def capabilities-operation :seon.db.protocol.operation/capabilities)
 (def resolve-head-operation :seon.db.protocol.operation/resolve-head)
+(def query-operation :seon.db.protocol.operation/query)
+(def pull-operation :seon.db.protocol.operation/pull)
+(def pull-many-operation :seon.db.protocol.operation/pull-many)
 (def ensure-database-operation
   :seon.db.protocol.operation/ensure-database)
 (def observe-database-lifecycle-operation
@@ -94,6 +97,9 @@
  [:enum ping-operation
   capabilities-operation
   resolve-head-operation
+  query-operation
+  pull-operation
+  pull-many-operation
   ensure-database-operation
   observe-database-lifecycle-operation
   create-branch-operation
@@ -106,6 +112,21 @@
 (schema/register! ::success? :boolean)
 (schema/register! ::pong? :boolean)
 (schema/register! ::capabilities :map)
+;; Datahike query and pull values are intentionally polymorphic EDN. The JVM
+;; authority performs the stricter recursive host-value/laziness check before
+;; encoding while preserving native result shapes and legitimate bare keys.
+(schema/register! ::result :any)
+(schema/register! ::arguments [:vector :any])
+(schema/register! ::selector :any)
+(schema/register! ::entity-id :any)
+(schema/register! ::query-form
+                  [:or [:vector :any] :map [:string {:min 1}]])
+(schema/register! :datahike.resource/max-work [:int {:min 1}])
+(schema/register! :datahike.resource/max-results [:int {:min 1}])
+(schema/register! :datahike.resource/max-result-weight [:int {:min 1}])
+(schema/register! :datahike.query/result :any)
+(schema/register! :datahike.query/cache-evidence :map)
+(schema/register! :datahike.query/resource-evidence :map)
 (schema/register! ::database-name [:string {:min 1}])
 (schema/register! ::database-path [:string {:min 1}])
 (schema/register! ::backend [:enum :memory :file])
@@ -161,7 +182,8 @@
 (schema/register! ::event [:enum transaction-event])
 (schema/register! ::query [:string {:min 1}])
 (schema/register! ::limit [:int {:min 1}])
-(schema/register! ::entity-ids [:vector :int])
+(schema/register! ::entity-ids [:vector :any])
+(schema/register! ::knn-entity-ids [:vector :int])
 (schema/register! ::hits [:vector :map])
 (schema/register!
  ::error-kind
@@ -265,6 +287,54 @@
   [::request-id ::request-id]
   [::database-name ::database-name]])
 (schema/register!
+ ::query-request
+ [:map {:closed true}
+  [::operation [:= query-operation]]
+  [::request-id ::request-id]
+  [::database-name ::database-name]
+  [::attachment ::attachment]
+  [::coordinate ::coordinate]
+  [::query-form ::query-form]
+  [::arguments ::arguments]
+  [:datahike.resource/max-work {:optional true}
+   :datahike.resource/max-work]
+  [:datahike.resource/max-results {:optional true}
+   :datahike.resource/max-results]
+  [:datahike.resource/max-result-weight {:optional true}
+   :datahike.resource/max-result-weight]])
+(schema/register!
+ ::pull-request
+ [:map {:closed true}
+  [::operation [:= pull-operation]]
+  [::request-id ::request-id]
+  [::database-name ::database-name]
+  [::attachment ::attachment]
+  [::coordinate ::coordinate]
+  [::selector ::selector]
+  [::entity-id ::entity-id]
+  [:datahike.resource/max-work {:optional true}
+   :datahike.resource/max-work]
+  [:datahike.resource/max-results {:optional true}
+   :datahike.resource/max-results]
+  [:datahike.resource/max-result-weight {:optional true}
+   :datahike.resource/max-result-weight]])
+(schema/register!
+ ::pull-many-request
+ [:map {:closed true}
+  [::operation [:= pull-many-operation]]
+  [::request-id ::request-id]
+  [::database-name ::database-name]
+  [::attachment ::attachment]
+  [::coordinate ::coordinate]
+  [::selector ::selector]
+  [::entity-ids ::entity-ids]
+  [:datahike.resource/max-work {:optional true}
+   :datahike.resource/max-work]
+  [:datahike.resource/max-results {:optional true}
+   :datahike.resource/max-results]
+  [:datahike.resource/max-result-weight {:optional true}
+   :datahike.resource/max-result-weight]])
+(schema/register!
  ::ensure-database-request
  [:map
   [::operation [:= ensure-database-operation]]
@@ -332,7 +402,7 @@
   [::database-name ::database-name]
   [::query ::query]
   [::limit ::limit]
-  [::entity-ids {:optional true} ::entity-ids]])
+  [::entity-ids {:optional true} ::knn-entity-ids]])
 
 (schema/register!
  ::request
@@ -340,6 +410,9 @@
   [ping-operation ::ping-request]
   [capabilities-operation ::capabilities-request]
   [resolve-head-operation ::resolve-head-request]
+  [query-operation ::query-request]
+  [pull-operation ::pull-request]
+  [pull-many-operation ::pull-many-request]
   [ensure-database-operation ::ensure-database-request]
   [observe-database-lifecycle-operation
    ::observe-database-lifecycle-request]
@@ -378,6 +451,26 @@
   [::database-name ::database-name]
   [::attachment ::attachment]
   [::coordinate ::coordinate]])
+(schema/register!
+ ::query-response
+ [:map {:closed true}
+  [::success? [:= true]]
+  [::request-id ::request-id]
+  [::database-name ::database-name]
+  [::attachment ::attachment]
+  [::coordinate ::coordinate]
+  [:datahike.query/result :datahike.query/result]
+  [:datahike.query/cache-evidence :datahike.query/cache-evidence]
+  [:datahike.query/resource-evidence :datahike.query/resource-evidence]])
+(schema/register!
+ ::read-response
+ [:map {:closed true}
+  [::success? [:= true]]
+  [::request-id ::request-id]
+  [::database-name ::database-name]
+  [::attachment ::attachment]
+  [::coordinate ::coordinate]
+  [::result ::result]])
 (schema/register!
  ::ensure-database-response
  [:map
@@ -468,6 +561,8 @@
   ::ping-response
   ::capabilities-response
   ::resolve-head-response
+  ::query-response
+  ::read-response
   ::ensure-database-response
   ::observe-database-lifecycle-response
   ::create-branch-response
@@ -501,6 +596,51 @@
  [:map {:closed true}
   [::request-id ::request-id]
   [::database-name ::database-name]])
+(schema/register!
+ ::query-request-input
+ [:map {:closed true}
+  [::request-id ::request-id]
+  [::database-name ::database-name]
+  [::attachment ::attachment]
+  [::coordinate ::coordinate]
+  [::query-form ::query-form]
+  [::arguments ::arguments]
+  [:datahike.resource/max-work {:optional true}
+   :datahike.resource/max-work]
+  [:datahike.resource/max-results {:optional true}
+   :datahike.resource/max-results]
+  [:datahike.resource/max-result-weight {:optional true}
+   :datahike.resource/max-result-weight]])
+(schema/register!
+ ::pull-request-input
+ [:map {:closed true}
+  [::request-id ::request-id]
+  [::database-name ::database-name]
+  [::attachment ::attachment]
+  [::coordinate ::coordinate]
+  [::selector ::selector]
+  [::entity-id ::entity-id]
+  [:datahike.resource/max-work {:optional true}
+   :datahike.resource/max-work]
+  [:datahike.resource/max-results {:optional true}
+   :datahike.resource/max-results]
+  [:datahike.resource/max-result-weight {:optional true}
+   :datahike.resource/max-result-weight]])
+(schema/register!
+ ::pull-many-request-input
+ [:map {:closed true}
+  [::request-id ::request-id]
+  [::database-name ::database-name]
+  [::attachment ::attachment]
+  [::coordinate ::coordinate]
+  [::selector ::selector]
+  [::entity-ids ::entity-ids]
+  [:datahike.resource/max-work {:optional true}
+   :datahike.resource/max-work]
+  [:datahike.resource/max-results {:optional true}
+   :datahike.resource/max-results]
+  [:datahike.resource/max-result-weight {:optional true}
+   :datahike.resource/max-result-weight]])
 (schema/register!
  ::observe-database-lifecycle-request-input
  [:map {:closed true}
@@ -553,7 +693,7 @@
   [::database-name ::database-name]
   [::query ::query]
   [::limit ::limit]
-  [::entity-ids {:optional true} ::entity-ids]])
+  [::entity-ids {:optional true} ::knn-entity-ids]])
 
 ;;; Pure constructors and validation
 
@@ -575,6 +715,24 @@
                   ::resolve-head-request]}
   [input]
   (assoc input ::operation resolve-head-operation))
+
+(defn query-request
+  "Construct one coordinate-pinned Datahike query request."
+  {:malli/schema [:=> [:cat ::query-request-input] ::query-request]}
+  [input]
+  (assoc input ::operation query-operation))
+
+(defn pull-request
+  "Construct one coordinate-pinned Datahike pull request."
+  {:malli/schema [:=> [:cat ::pull-request-input] ::pull-request]}
+  [input]
+  (assoc input ::operation pull-operation))
+
+(defn pull-many-request
+  "Construct one coordinate-pinned Datahike pull-many request."
+  {:malli/schema [:=> [:cat ::pull-many-request-input] ::pull-many-request]}
+  [input]
+  (assoc input ::operation pull-many-operation))
 
 (defn ensure-database-request
   "Construct one idempotent database-open request."

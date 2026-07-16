@@ -11,7 +11,11 @@
             [clojure.string :as str]
             [datahike.api :as d]
             [datahike.constants :as datahike.constants]
+            [datahike.connector :as datahike.connector]
+            [datahike.datom :as datahike.datom]
             [datahike.db.interface :as dbi]
+            [datahike.db.utils :as datahike.db]
+            [datahike.impl.entity :as datahike.entity]
             [konserve.core :as k]
             [seon.db.coordinate :as coordinate]
             [seon.db.datahike.schema :as datahike.schema]
@@ -38,6 +42,7 @@
 (schema/register! ::embedding-assertions 'fn?)
 (schema/register! ::revalidate-embedding-assertions 'fn?)
 (schema/register! ::embedding-executor ::executor/executor)
+(schema/register! ::read-executor ::executor/executor)
 (schema/register! ::knn-search 'fn?)
 (schema/register! ::publisher :seon.db.transport.uds/publisher)
 (schema/register!
@@ -60,6 +65,7 @@
   [::embedding-assertions ::embedding-assertions]
   [::revalidate-embedding-assertions ::revalidate-embedding-assertions]
   [::knn-search ::knn-search]
+  [::read-executor ::read-executor]
   [::embedding-executor ::embedding-executor]
   [::publisher ::publisher]])
 (schema/register! ::request-server :seon.db.transport.uds/request-server)
@@ -82,6 +88,8 @@
  [:map
   [::request-server ::request-server]
   [::publisher ::publisher]
+  [::read-executor ::read-executor]
+  [::embedding-executor ::embedding-executor]
   [::database-name ::database-name]])
 (schema/register! ::stopped? :boolean)
 (schema/register! ::release-result :seon.db.protocol/writer-release-result)
@@ -436,6 +444,178 @@
      ::coordinate/attachment attachment
      ::executor/connection-id (:datahike.value/connection-id identity)
      ::executor/generation (:datahike.value/generation identity)}))
+
+(def ^:private byte-array-class (Class/forName "[B"))
+
+(defn- forbidden-host-value?
+  [value]
+  (or (datahike.db/db? value)
+      (datahike.connector/connection? value)
+      (datahike.datom/datom? value)
+      (datahike.entity/entity? value)
+      (fn? value)
+      (instance? clojure.lang.IDeref value)
+      (instance? java.lang.Thread value)
+      (instance? java.util.concurrent.Future value)
+      (instance? Throwable value)))
+
+(defn- ordinary-data?
+  [allow-list? value]
+  (cond
+    (or (forbidden-host-value? value) (record? value)) false
+    (map? value) (and (every? #(ordinary-data? allow-list? %) (keys value))
+                      (every? #(ordinary-data? allow-list? %) (vals value)))
+    (vector? value) (every? #(ordinary-data? allow-list? %) value)
+    (set? value) (every? #(ordinary-data? allow-list? %) value)
+    (list? value) (and allow-list?
+                       (every? #(ordinary-data? allow-list? %) value))
+    (sequential? value) false
+    :else
+    (or (nil? value) (boolean? value) (number? value) (string? value)
+        (keyword? value) (symbol? value) (uuid? value) (inst? value)
+        (instance? java.net.URI value)
+        (instance? byte-array-class value))))
+
+(defn- materialize-result
+  "Validate an eager database result without copying its persistent shape."
+  [value]
+  (when-not (ordinary-data? false value)
+    (throw
+     (ex-info "A database result contained a host-owned or lazy value."
+              {::failure-kind protocol/protocol-error
+               ::host-value-class (some-> value class str)})))
+  value)
+
+(defn- validate-read-input!
+  [request]
+  (let [values
+        (case (::protocol/operation request)
+          :seon.db.protocol.operation/query
+          [(::protocol/query-form request) (::protocol/arguments request)]
+
+          :seon.db.protocol.operation/pull
+          [(::protocol/selector request) (::protocol/entity-id request)]
+
+          :seon.db.protocol.operation/pull-many
+          [(::protocol/selector request) (::protocol/entity-ids request)])]
+    (when-not (every? #(ordinary-data? true %) values)
+      (throw
+       (ex-info "A database read request contained a host-owned or lazy value."
+                {::failure-kind protocol/protocol-error})))
+    request))
+
+(defn- pinned-database
+  [{::keys [database-name scope] request ::request}]
+  (let [{::registry/keys [conn attachment]}
+        (registry/resolve-connection
+         {::registry/database-name (keyword database-name)})
+        expected-attachment (::protocol/attachment request)
+        expected-coordinate (::protocol/coordinate request)]
+    (when-not (and conn (= attachment expected-attachment))
+      (throw
+       (ex-info "The database attachment is no longer current."
+                {::failure-kind protocol/stale-coordinate-error
+                 ::protocol/expected-coordinate expected-coordinate})))
+    (let [head (d/db conn)
+          head-coordinate (coordinate/resolved head)
+          db-value
+          (if (= expected-coordinate head-coordinate)
+            head
+            (d/commit-as-db conn
+                            (::coordinate/commit-id expected-coordinate)))]
+      (when-not (and db-value
+                     (= expected-coordinate (coordinate/resolved db-value))
+                     (= scope
+                        (committed-scope database-name attachment db-value)))
+        (throw
+         (ex-info "The requested database coordinate is unavailable."
+                  {::failure-kind protocol/stale-coordinate-error
+                   ::protocol/expected-coordinate expected-coordinate
+                   ::protocol/current-coordinate head-coordinate})))
+      db-value)))
+
+(defn- resource-options
+  [request]
+  (cond-> {}
+    (:datahike.resource/max-work request)
+    (assoc :max-work (:datahike.resource/max-work request))
+    (:datahike.resource/max-results request)
+    (assoc :max-results (:datahike.resource/max-results request))
+    (:datahike.resource/max-result-weight request)
+    (assoc :max-result-weight
+           (:datahike.resource/max-result-weight request))))
+
+(defn- read-response-base
+  [request]
+  {::protocol/request-id (::protocol/request-id request)
+   ::protocol/database-name (::protocol/database-name request)
+   ::protocol/attachment (::protocol/attachment request)
+   ::protocol/coordinate (::protocol/coordinate request)})
+
+(defn- execute-read!
+  [{request ::request :as work}]
+  (let [db-value (pinned-database work)
+        options (resource-options request)]
+    (case (::protocol/operation request)
+      :seon.db.protocol.operation/query
+      (merge
+       (read-response-base request)
+       (update
+        (d/q-with-evidence
+         (merge
+          {:query (::protocol/query-form request)
+           :args (into [db-value] (::protocol/arguments request))
+           :request-id (::protocol/request-id request)}
+          options))
+        :datahike.query/result materialize-result))
+
+      :seon.db.protocol.operation/pull
+      (assoc
+       (read-response-base request)
+       ::protocol/result
+       (materialize-result
+        (d/pull db-value
+                (merge {:selector (::protocol/selector request)
+                        :eid (::protocol/entity-id request)}
+                       options))))
+
+      :seon.db.protocol.operation/pull-many
+      (assoc
+       (read-response-base request)
+       ::protocol/result
+       (materialize-result
+        (d/pull-many db-value
+                     (merge {:selector (::protocol/selector request)
+                             :eids (::protocol/entity-ids request)}
+                            options)))))))
+
+(defn- scope-for-read
+  [request]
+  (let [database-name (::protocol/database-name request)
+        {::registry/keys [conn attachment]}
+        (registry/resolve-connection
+         {::registry/database-name (keyword database-name)})]
+    (when (and conn (= attachment (::protocol/attachment request)))
+      (committed-scope database-name attachment (d/db conn)))))
+
+(defn- handle-read
+  [runtime request]
+  (validate-read-input! request)
+  (if-let [scope (scope-for-read request)]
+    (protocol/success
+     (executor/submit!
+      {::executor/executor (::read-executor runtime)
+       ::executor/database-name (::protocol/database-name request)
+       ::executor/scope scope
+       ::executor/job-id (::protocol/request-id request)
+       ::executor/request {::database-name (::protocol/database-name request)
+                           ::scope scope
+                           ::request request}}))
+    (protocol/failure
+     {::protocol/error-kind protocol/stale-coordinate-error
+      ::protocol/error "The database attachment is no longer current."
+      ::protocol/body
+      {::protocol/request-id (::protocol/request-id request)}})))
 
 (defn- resolve-exact-connection
   [{::keys [database-name scope]}]
@@ -1059,24 +1239,28 @@
       ::protocol/restore-completion-coordinates
       (::registry/restore-completion-coordinates observation)})))
 
-(defn- fence-embedding!
+(defn- fence-database-work!
   [runtime database-name expected-attachment]
   (let [{::registry/keys [conn attachment]}
         (registry/resolve-connection
          {::registry/database-name (keyword database-name)})]
-    (when (and (::embedding-executor runtime)
-               conn
-               (= expected-attachment attachment))
+    (when (and conn (= expected-attachment attachment))
       (when-let [scope (committed-scope database-name attachment (d/db conn))]
-        (executor/remove-database!
-         {::executor/executor (::embedding-executor runtime)
-          ::executor/scope scope})))))
+        (when-let [read-executor (::read-executor runtime)]
+          (executor/fence-and-drain!
+           {::executor/executor read-executor
+            ::executor/scope scope
+            ::executor/cancel d/cancel-query!}))
+        (when-let [embedding-executor (::embedding-executor runtime)]
+          (executor/remove-database!
+           {::executor/executor embedding-executor
+            ::executor/scope scope}))))))
 
 (defn- handle-release-database
   [runtime request]
-  (fence-embedding! runtime
-                    (::protocol/target-database-name request)
-                    (::protocol/target-attachment request))
+  (fence-database-work! runtime
+                        (::protocol/target-database-name request)
+                        (::protocol/target-attachment request))
   (let [result
         (registry/release-attachment!
          {::registry/target-database-name
@@ -1092,9 +1276,9 @@
 
 (defn- handle-delete-branch
   [runtime request]
-  (fence-embedding! runtime
-                    (::protocol/target-database-name request)
-                    (::protocol/target-attachment request))
+  (fence-database-work! runtime
+                        (::protocol/target-database-name request)
+                        (::protocol/target-attachment request))
   (let [result
         (registry/delete-branch!
          {::registry/source-database-name
@@ -1278,6 +1462,15 @@
                ::protocol/body
                {::protocol/request-id (::protocol/request-id request)}})))
 
+         :seon.db.protocol.operation/query
+         (handle-read runtime request)
+
+         :seon.db.protocol.operation/pull
+         (handle-read runtime request)
+
+         :seon.db.protocol.operation/pull-many
+         (handle-read runtime request)
+
          :seon.db.protocol.operation/ensure-database
          (handle-ensure-database runtime request)
 
@@ -1336,12 +1529,25 @@
 
 ;;; Explicit server lifecycle
 
+(defn- read-worker-count
+  []
+  (-> (.availableProcessors (Runtime/getRuntime))
+      dec
+      (max 1)
+      (min 8)))
+
 (defn start!
   "Start the request and publication sockets for one writer runtime."
   {:malli/schema [:=> [:cat ::start-request] ::server]}
   [{::keys [dependencies database-name backend database-path
             request-socket-path publish-socket-path]}]
   (let [publisher (uds/start-publisher! publish-socket-path)
+        read-executor
+        (executor/start!
+         {::executor/name :read
+          ::executor/workers (read-worker-count)
+          ::executor/maximum-queued 64
+          ::executor/execute execute-read!})
         embedding-executor
         (executor/start!
          {::executor/name :embedding
@@ -1350,6 +1556,7 @@
           ::executor/execute (partial execute-embedding! dependencies)})
         runtime (assoc dependencies
                        ::publisher publisher
+                       ::read-executor read-executor
                        ::embedding-executor embedding-executor)]
     (try
       (let [ensure-response
@@ -1370,6 +1577,7 @@
           {::uds/socket-path request-socket-path
            ::uds/handler (partial handle-request runtime)})
          ::publisher publisher
+         ::read-executor read-executor
          ::embedding-executor embedding-executor
          ::database-name database-name})
       (catch Throwable throwable
@@ -1377,6 +1585,7 @@
               (registry/release-database!
                {::registry/database-name (keyword database-name)})]
           (uds/close-publisher! publisher)
+          (executor/stop! {::executor/executor read-executor})
           (executor/stop! {::executor/executor embedding-executor})
           (if (::registry/release-error release)
             (throw
@@ -1391,6 +1600,7 @@
   {:malli/schema [:=> [:catn [::server ::server]] ::stop-response]}
   [server]
   (uds/close-request-server! (::request-server server))
+  (executor/stop! {::executor/executor (::read-executor server)})
   (executor/stop! {::executor/executor (::embedding-executor server)})
   (let [{::registry/keys [databases]} (registry/list-databases {})
         release-results

@@ -96,6 +96,192 @@
         (.delete (File. request-path))
         (.delete (File. publish-path))))))
 
+(deftest coordinate-pinned-reads-share-old-commit-and-preserve-datahike-shapes
+  (let [database-name (str "writer-read-" (random-uuid))
+        request-path (socket-path "read-request")
+        publish-path (socket-path "read-publish")
+        server
+        (writer/start!
+         {::writer/dependencies (dependencies)
+          ::writer/database-name database-name
+          ::writer/backend :memory
+          ::writer/request-socket-path request-path
+          ::writer/publish-socket-path publish-path})
+        ^SocketChannel request-channel (uds/connect! request-path)]
+    (try
+      (call! request-channel
+             (protocol/transaction-request
+              {::protocol/database-name database-name
+               ::protocol/request-id "read/schema-and-data"
+               ::protocol/transaction-data
+               [{:db/ident :reader/id
+                 :db/valueType :db.type/string
+                 :db/cardinality :db.cardinality/one
+                 :db/unique :db.unique/identity}
+                {:db/ident :reader/score
+                 :db/valueType :db.type/long
+                 :db/cardinality :db.cardinality/one}
+                {:reader/id "alice" :reader/score 1}
+                {:reader/id "bob" :reader/score 2}]}))
+      (let [head
+            (call! request-channel
+                   (protocol/resolve-head-request
+                    {::protocol/request-id "read/head"
+                     ::protocol/database-name database-name}))
+            attachment (::protocol/attachment head)
+            frozen (::protocol/coordinate head)
+            _
+            (call! request-channel
+                   (protocol/transaction-request
+                    {::protocol/database-name database-name
+                     ::protocol/request-id "read/advance"
+                     ::protocol/transaction-data
+                     [[:db/add [:reader/id "alice"] :reader/score 9]]}))
+            query-input
+            {::protocol/database-name database-name
+             ::protocol/attachment attachment
+             ::protocol/coordinate frozen
+             ::protocol/query-form
+             [:find '?id '?score
+              :keys 'id 'score
+              :where ['?e :reader/id '?id]
+              ['?e :reader/score '?score]]
+             ::protocol/arguments []}
+            owner
+            (call! request-channel
+                   (protocol/query-request
+                    (assoc query-input ::protocol/request-id "read/query-1")))
+            hit
+            (call! request-channel
+                   (protocol/query-request
+                    (assoc query-input ::protocol/request-id "read/query-2")))
+            pull
+            (call! request-channel
+                   (protocol/pull-request
+                    {::protocol/request-id "read/pull"
+                     ::protocol/database-name database-name
+                     ::protocol/attachment attachment
+                     ::protocol/coordinate frozen
+                     ::protocol/selector [:reader/id :reader/score]
+                     ::protocol/entity-id [:reader/id "alice"]}))
+            pulls
+            (call! request-channel
+                   (protocol/pull-many-request
+                    {::protocol/request-id "read/pull-many"
+                     ::protocol/database-name database-name
+                     ::protocol/attachment attachment
+                     ::protocol/coordinate frozen
+                     ::protocol/selector [:reader/id :reader/score]
+                     ::protocol/entity-ids [[:reader/id "alice"]
+                                            [:reader/id "bob"]]}))]
+        (is (every? protocol/valid-response? [owner hit pull pulls]))
+        (is (= #{{:id "alice" :score 1} {:id "bob" :score 2}}
+               (set (:datahike.query/result owner))
+               (set (:datahike.query/result hit))))
+        (is (= :datahike.cache.outcome/miss-owner
+               (get-in owner [:datahike.query/cache-evidence
+                              :datahike.cache/outcome])))
+        (is (= :datahike.cache.outcome/hit
+               (get-in hit [:datahike.query/cache-evidence
+                            :datahike.cache/outcome])))
+        (is (= {:reader/id "alice" :reader/score 1}
+               (::protocol/result pull)))
+        (is (= [{:reader/id "alice" :reader/score 1}
+                {:reader/id "bob" :reader/score 2}]
+               (::protocol/result pulls)))
+        (is (= frozen (::protocol/coordinate owner)
+               (::protocol/coordinate hit)
+               (::protocol/coordinate pull)
+               (::protocol/coordinate pulls))))
+      (finally
+        (try (.close request-channel) (catch Throwable _))
+        (writer/stop! server)
+        (.delete (File. request-path))
+        (.delete (File. publish-path))))))
+
+(deftest database-result-validation-rejects-host-owners-and-lazy-values
+  (is (thrown? clojure.lang.ExceptionInfo
+               (#'writer/materialize-result (future :host))))
+  (is (thrown? clojure.lang.ExceptionInfo
+               (#'writer/materialize-result (map identity [1 2]))))
+  (let [value [{:bare-key "preserved"}]]
+    (is (identical? value (#'writer/materialize-result value))))
+  (is (thrown?
+       clojure.lang.ExceptionInfo
+       (#'writer/validate-read-input!
+        {::protocol/operation protocol/query-operation
+         ::protocol/query-form [:find '?value :in '$ '?input
+                                :where ['?entity :value '?value]]
+         ::protocol/arguments [(future :host)]})))
+  (is (= [:find '?value :where ['?entity :value '?value]]
+         (::protocol/query-form
+          (#'writer/validate-read-input!
+           {::protocol/operation protocol/query-operation
+            ::protocol/query-form
+            [:find '?value :where ['?entity :value '?value]]
+            ::protocol/arguments []})))))
+
+(deftest release-waits-until-a-running-read-relinquishes-the-generation
+  (let [database-name (str "writer-read-release-" (random-uuid))
+        request-path (socket-path "read-release-request")
+        publish-path (socket-path "read-release-publish")
+        entered (java.util.concurrent.CountDownLatch. 1)
+        finish (java.util.concurrent.CountDownLatch. 1)
+        server
+        (writer/start!
+         {::writer/dependencies (dependencies)
+          ::writer/database-name database-name
+          ::writer/backend :memory
+          ::writer/request-socket-path request-path
+          ::writer/publish-socket-path publish-path})
+        ^SocketChannel read-channel (uds/connect! request-path)
+        ^SocketChannel control-channel (uds/connect! request-path)]
+    (try
+      (let [head
+            (call! control-channel
+                   (protocol/resolve-head-request
+                    {::protocol/request-id "read-release/head"
+                     ::protocol/database-name database-name}))
+            attachment (::protocol/attachment head)
+            coordinate (::protocol/coordinate head)]
+        (with-redefs [d/pull
+                      (fn [_db-value _request]
+                        (.countDown entered)
+                        (.await finish)
+                        {:read/value :finished})]
+          (let [read-result
+                (future
+                  (call! read-channel
+                         (protocol/pull-request
+                          {::protocol/request-id "read-release/pull"
+                           ::protocol/database-name database-name
+                           ::protocol/attachment attachment
+                           ::protocol/coordinate coordinate
+                           ::protocol/selector [:read/value]
+                           ::protocol/entity-id 1})))]
+            (is (.await entered 5 java.util.concurrent.TimeUnit/SECONDS))
+            (let [release-result
+                  (future
+                    (call! control-channel
+                           (protocol/release-database-request
+                            {::protocol/target-database-name database-name
+                             ::protocol/target-attachment attachment
+                             ::protocol/expected-target-head coordinate})))]
+              (Thread/sleep 100)
+              (is (not (realized? release-result))
+                  "Datahike resources remain open while a read owns them")
+              (.countDown finish)
+              (is (= {:read/value :finished}
+                     (::protocol/result @read-result)))
+              (is (true? (::protocol/released? @release-result)))))))
+      (finally
+        (.countDown finish)
+        (try (.close read-channel) (catch Throwable _))
+        (try (.close control-channel) (catch Throwable _))
+        (writer/stop! server)
+        (.delete (File. request-path))
+        (.delete (File. publish-path))))))
+
 (deftest writer-stop-surfaces-release-failure-and-retains-database-identity
   (let [{::registry/keys [snapshot]} (registry/snapshot-registry {})
         database-name (str "writer-release-failure-" (random-uuid))
