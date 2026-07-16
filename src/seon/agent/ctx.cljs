@@ -1705,6 +1705,17 @@
   [s]
   (or (some-> s read-schema-form schema-form-refs) #{}))
 
+(schema/register! ::schema-sources [:vector :string])
+(schema/register! ::schema-keys [:set :keyword])
+
+(defn schema-refs
+  "Direct qualified schema keys referenced by persisted schema strings."
+  {:malli/schema [:=> [:catn [::schema-sources ::schema-sources]] ::schema-keys]}
+  [schema-sources]
+  (reduce (fn [refs source] (into refs (schema-str-refs source)))
+          #{}
+          schema-sources))
+
 (defn normalize-schema-form
   "Read one persisted Malli form, unwrapping a canonical register call."
   {:malli/schema [:=> [:catn [:seon.schema/form :string]] :any]}
@@ -1737,12 +1748,12 @@
 
 (defn- schema-ref-closure
   "Transitive closure of registered schema keys reachable from `seed`, resolved
-   over the db's `:seon.schema/form`. `own-keys` are TRAVERSED (so their
+   through `definition-for`. `own-keys` are TRAVERSED (so their
    cross-ns children still surface) but never EMITTED — the ns already shows them
    as its own `register!` block / in its source. Cycle-safe via a `seen` set;
    bounded at [[referenced-schema-cap]]. Returns
    `{::closure-keys [<kw>…] ::capped? bool}`, keys sorted."
-  [db seed own-keys]
+  [definition-for seed own-keys]
   (loop [queue (vec (sort seed)), seen #{}, out #{}, definitions {}]
     (if (or (empty? queue) (>= (count out) referenced-schema-cap))
       {::closure-keys (vec (sort out))
@@ -1752,7 +1763,7 @@
             queue (subvec queue 1)]
         (if (contains? seen k)
           (recur queue seen out definitions)
-          (let [definition (schema-definition-in-db db k)
+          (let [definition (definition-for k)
                 definitions' (cond-> definitions definition (assoc k definition))
                 child      (or (some-> definition ::schema-form schema-form-refs) #{})
                 out'       (if (or (contains? own-keys k) (nil? definition))
@@ -1763,7 +1774,46 @@
                    out'
                    definitions')))))))
 
-(schema/register! ::seed-specs [:vector :string])
+(defn- schema-definitions-from-rows
+  "Normalized schema definitions indexed by their existing persisted keys."
+  [schema-rows]
+  (into {}
+        (keep (fn [{k :seon.schema/key source :seon.schema/form}]
+                (when (and (keyword? k) (string? source))
+                  [k {::schema-source source
+                      ::schema-form (normalize-schema-form source)}])))
+        schema-rows))
+
+(defn- referenced-schema-block*
+  "Render a referenced-schema block using one definition lookup function."
+  [definition-for seed-specs own-keys]
+  (let [seed        (reduce (fn [a s] (into a (schema-str-refs s))) #{} seed-specs)
+        closure     (schema-ref-closure definition-for seed own-keys)
+        definitions (::definitions closure)
+        lines       (mapv (fn [k]
+                            (str "(register! " (pr-str k) " "
+                                 (schema-definition-text (get definitions k)) ")"))
+                          (::closure-keys closure))
+        lines       (cond-> lines
+                      (::capped? closure)
+                      (conj (str "; … " referenced-schema-cap "+ referenced schemas"
+                                 " — capped; more reachable via the db")))]
+    (when (seq lines)
+      (str/join "\n" lines))))
+
+(defn- referenced-schema-rows-in-db
+  "Persisted schema rows needed by one referenced-schema block."
+  [db seed-specs own-keys]
+  (let [seed        (reduce (fn [a s] (into a (schema-str-refs s))) #{} seed-specs)
+        closure     (schema-ref-closure #(schema-definition-in-db db %)
+                                        seed own-keys)]
+    (->> (::definitions closure)
+         (sort-by key)
+         (mapv (fn [[k definition]]
+                 {:seon.schema/key k
+                  :seon.schema/form (::schema-source definition)})))))
+
+(schema/register! ::seed-specs ::schema-sources)
 (schema/register! ::own-keys   [:set :keyword])
 (schema/register! ::referenced-schema-request
   [:map
@@ -1782,19 +1832,9 @@
    Map-in: `{:seon.db/db <db> ::seed-specs [<spec-str>…] ::own-keys #{<kw>…}}`."
   {:malli/schema [:=> [:cat ::referenced-schema-request] [:maybe :string]]}
   [{db :seon.db/db seed-specs ::seed-specs own-keys ::own-keys}]
-  (let [seed    (reduce (fn [a s] (into a (schema-str-refs s))) #{} seed-specs)
-        closure (schema-ref-closure db seed own-keys)
-        definitions (::definitions closure)
-        lines   (mapv (fn [k]
-                        (str "(register! " (pr-str k) " "
-                             (schema-definition-text (get definitions k)) ")"))
-                      (::closure-keys closure))
-        lines   (cond-> lines
-                  (::capped? closure)
-                  (conj (str "; … " referenced-schema-cap "+ referenced schemas"
-                             " — capped; more reachable via the db")))]
-    (when (seq lines)
-      (str/join "\n" lines))))
+  (let [schema-rows (referenced-schema-rows-in-db db seed-specs own-keys)
+        definitions (schema-definitions-from-rows schema-rows)]
+    (referenced-schema-block* #(get definitions %) seed-specs own-keys)))
 
 (defn- schema-block-ai
   "One schema rendered from the supplied database row."
@@ -1840,8 +1880,8 @@
 
 (defn- render-one-ns-ai
   "Render a single namespace block to text, FULL — `ns-kw` is the namespace
-   keyword; `data` is the `pull-ns-data` result (or nil = not in db); `db` is
-   the db value (threaded for the referenced-schema closure below).
+   keyword; `data` is an eager namespace row (or nil = not in db), and
+   `ref-blk` is its already-derived referenced-schema text.
 
    Every block is delimited by the per-ns `;;; ┌─ namespace X ─` /
    `;;; └─ end namespace X ─` brackets ([[ns-demarc]]) — the runtime-
@@ -1863,19 +1903,13 @@
    is load-bearing for the on-demand `render-namespace` capability the system
    prompt teaches by name: without it, rendering a dropped framework ns (e.g.
    :seon.warn) would yield just `(ns x)`, erasing its whole API."
-  [db ns-kw data]
+  [ns-kw data ref-blk]
   (if (nil? data)
     (str "; requires: " (name ns-kw) " (not in db)")
     (let [src     (:seon.ns/source data)
           fns     (->> (:seon.fn/_ns data)     (sort-by :seon.fn/sym))
           schemas (->> (:seon.schema/_ns data) (sort-by (comp str :seon.schema/key)))
-          tests   (->> (:seon.test/_ns data)   (sort-by :seon.test/sym))
-          ;; The cross-ns schema definitions this ns's fns reference (its OWN
-          ;; schemas are already in the source / the per-member schema blocks).
-          ref-blk (referenced-schema-block
-                    {:seon.db/db  db
-                     ::seed-specs (into [] (keep :seon.fn/spec) fns)
-                     ::own-keys   (into #{} (map :seon.schema/key) schemas)})]
+          tests   (->> (:seon.test/_ns data)   (sort-by :seon.test/sym))]
       (if (and src (not (str/blank? src))
                (not= (str/trim src) (str "(ns " (name ns-kw) ")")))
         (let [notes (concat
@@ -1899,6 +1933,54 @@
                      (seq tests)   (into (map test-block-ai tests)))]
           (ns-demarc ns-kw
                      (if (seq body) (str/join "\n\n" body) "; (no recorded source/fns/schemas)")))))))
+
+(schema/register! ::namespace-row
+  [:map
+   [:seon.ns/name :seon.ns/name]
+   [:seon.ns/source {:optional true} :string]
+   [:seon.fn/_ns {:optional true} [:vector [:map]]]
+   [:seon.schema/_ns {:optional true} [:vector [:map]]]
+   [:seon.test/_ns {:optional true} [:vector [:map]]]])
+(schema/register! ::namespace-rows [:vector ::namespace-row])
+(schema/register! ::schema-row
+  [:map
+   [:seon.schema/key :keyword]
+   [:seon.schema/form :string]])
+(schema/register! ::schema-rows [:vector ::schema-row])
+(schema/register! ::render-namespace-ai-request
+  [:map
+   [:seon.ns/name :seon.ns/name]
+   [::namespace-rows ::namespace-rows]
+   [::schema-rows ::schema-rows]])
+
+(defn render-namespace-ai
+  "Render one eager namespace row and persisted schema rows to AI text."
+  {:malli/schema [:=> [:cat ::render-namespace-ai-request] :string]}
+  [{ns-kw :seon.ns/name namespace-rows ::namespace-rows schema-rows ::schema-rows}]
+  (let [data        (some (fn [row]
+                            (when (= ns-kw (:seon.ns/name row)) row))
+                          namespace-rows)
+        fns         (:seon.fn/_ns data)
+        schemas     (:seon.schema/_ns data)
+        seed-specs  (into [] (keep :seon.fn/spec) fns)
+        own-keys    (into #{} (map :seon.schema/key) schemas)
+        definitions (schema-definitions-from-rows schema-rows)
+        ref-blk     (referenced-schema-block* #(get definitions %)
+                                              seed-specs own-keys)]
+    (render-one-ns-ai ns-kw data ref-blk)))
+
+(defn- render-namespace-ai-from-db
+  "Acquire persisted schema rows, then use the ordinary-data AI formatter."
+  [db ns-kw data]
+  (let [fns         (:seon.fn/_ns data)
+        schemas     (:seon.schema/_ns data)
+        seed-specs  (into [] (keep :seon.fn/spec) fns)
+        own-keys    (into #{} (map :seon.schema/key) schemas)
+        schema-rows (referenced-schema-rows-in-db db seed-specs own-keys)]
+    (render-namespace-ai
+      {:seon.ns/name ns-kw
+       ::namespace-rows (cond-> [] data (conj (assoc data :seon.ns/name ns-kw)))
+       ::schema-rows schema-rows})))
 
 (defn- render-one-ns-html
   "Render a single namespace block to hiccup. Reuses the per-kind
@@ -2075,7 +2157,8 @@
                    (render-one-ns-html db k (data-by-kw k))))}
           {:seon.render/text
            (str/join "\n\n" (for [k order]
-                              (render-one-ns-ai db k (data-by-kw k))))})))))
+                              (render-namespace-ai-from-db
+                                db k (data-by-kw k))))})))))
 
 ;; The HTML TWIN of a rendered section (debug-view-section-twins-2026-06-18):
 ;; the dormant `:seon.render/html` slot, resolved through
