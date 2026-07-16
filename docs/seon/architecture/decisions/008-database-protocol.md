@@ -9,40 +9,56 @@ tags: [decision, architecture, database, cljs]
 
 ## Context
 
-The local cluster has a JVM Datahike writer and a CLJS pod replica. Reads remain
-local to the pod's immutable database value; writes, administration, heavy
-database calls, committed transaction frames, and bounded replay cross the
-process boundary. Transport details may differ locally and remotely without
-changing database semantics.
+One database authority owns each database's ordered writes, immutable indexed
+values, shared query computation, and committed-report source. The first
+authority implementation is the JVM/Datahike service and may host many isolated
+cluster databases concurrently. Bun agent children and the Bun web host are
+clients: they issue direct coordinate-pinned operations and never reconstruct a
+Datahike database, index, cache, or transaction feed. Transport details may
+differ locally and remotely without changing database semantics.
 
 ## Decision
 
-`seon.db.protocol` is the one semantic protocol. Messages are pure, fully
-namespaced data encoded with Transit. Request and response envelopes name their
-operation, request identity, database attachment/coordinate, and typed result or
-error. Transport adapters carry those envelopes and do not reinterpret them.
+`seon.db.protocol` is the one semantic protocol. Messages are eager ordinary
+data encoded with Transit. Request and response values name their operation,
+one request identity, database attachment/coordinate, and typed result or error.
+Transport owners carry those values and do not reinterpret them.
 
-The JVM server is the sole durable writer. The pod never sends closures or raw
-database handles; transaction functions such as CAS cross only in their
-data form. Successful writes publish committed transaction frames, and a
-replica repairs a gap through bounded ordered replay from a verified attachment
-coordinate. Durable request receipts provide same-request recovery without a
-second write path.
+The authority is the sole durable writer and indexed-read owner. Clients never
+send closures or database handles; transaction functions such as CAS cross only
+in their data form. One persistent multiplexed session carries independently
+correlated requests, responses, cancellation, and selective database
+interests. Reads require an exact coordinate, and `execute-many` resolves one
+immutable database value for independent members. Successful writes wake only
+matching interests with committed ordinary data; a gap causes current-coordinate
+resynchronization, never transaction replay into a replica. Durable request
+receipts provide same-request mutation recovery without a second write path.
+
+Datahike owns connection/index lifetime, exact committed-value identity,
+completed query caching, identical-query single-flight, and native read
+semantics. Seon owns protocol validation, session acquisition, fair
+multi-database admission, paging, delivery bytes, and errors-as-values. Native
+Datahike, Bun socket, stream, process, Future, and Promise values remain inside
+their host owners.
 
 ## Consequences
 
 - Unix-domain sockets are the local transport, not the protocol definition.
-- A future remote adapter reuses the same envelopes and state machine.
+- A future remote or non-JVM authority conforms to the same data fixtures and
+  state machine.
 - Nippy is not a wire contract; any use inside Konserve remains private storage
   encoding.
-- The writer does not persist query subscriptions, changed-row summaries, or a
-  second invalidation bus.
-- Remote bootstrap, cancellation, reconnect, backpressure, and state-transfer
-  algorithms require their own PRD and proof.
+- There is no client-side Datahike replica, global transaction broadcast,
+  replay cursor, database broker, or duplicate query cache/listener.
+- Interests are connection-owned and ephemeral; the database does not persist
+  active subscriptions, changed-row summaries, or a second invalidation bus.
+- Backpressure is bounded independently at database admission, encoding, and
+  each session's exact retained output bytes. A slow client loses only its own
+  session.
 
 ## Related
 
-- [[architecture]] — the two-process topology.
+- [[architecture]] — the authority, Bun host, and isolated-child topology.
 - [[data-model]] — transaction provenance and complete coordinates.
 - [[agent-runtime]] — CAS fences and lifecycle transitions.
 - [[observability]] — replay and forensic coordinates.
