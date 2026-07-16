@@ -252,6 +252,7 @@
         (-> (@#'execution/invoke-selected!
               state invocation
               [{::execution/function-symbol 'seon.test/compiled
+                ::execution/invoke-selected? true
                 ::execution/arguments [41]}])
             (.then
               (fn [results]
@@ -262,6 +263,27 @@
             (.catch
               (fn [error]
                 (is false (str "compiled selection rejected: " error))
+                (done))))))))
+
+(deftest nested-compiled-selection-keeps-its-declared-arity
+  (async done
+    (let [state (atom {::execution/startup startup})]
+      (with-redefs [seval/lookup-value
+                    (fn [sym]
+                      (when (= 'seon.test/renderer sym)
+                        (fn [value] (inc value))))]
+        (-> (@#'execution/invoke-selected!
+              state invocation
+              [{::execution/function-symbol 'seon.test/renderer
+                ::execution/arguments [41]}])
+            (.then
+              (fn [results]
+                (is (= [{::execution/ok? true ::execution/value 42}]
+                       results))
+                (done)))
+            (.catch
+              (fn [error]
+                (is false (str "nested compiled selection rejected: " error))
                 (done))))))))
 
 (deftest ordinary-namespace-source-preserves-one-compile-unit

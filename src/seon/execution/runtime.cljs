@@ -36,6 +36,7 @@
 (defn- block-call
   [id entity block]
   {::execution/function-symbol (:seon.render/ai block)
+   ::execution/invoke-selected? true
    ::execution/arguments
    [{:seon.agent/id id
      :seon.agent/entity entity

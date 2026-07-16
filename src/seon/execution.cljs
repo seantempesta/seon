@@ -479,11 +479,11 @@
 (declare invoke-selected!)
 
 (defn- call-selected!
-  [state invocation {::keys [function-symbol arguments]}]
+  [state invocation {::keys [function-symbol arguments invoke-selected?]}]
   (if-let [function-value (eval/lookup-value function-symbol)]
     (let [authored? (contains? (::authored-symbols @state) function-symbol)
           arguments (cond-> arguments
-                      (not authored?)
+                      (and invoke-selected? (not authored?))
                       (conj (partial invoke-selected! state invocation)))]
       (try
         (-> (js/Promise.resolve (apply function-value arguments))
