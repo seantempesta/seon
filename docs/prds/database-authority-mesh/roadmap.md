@@ -1439,6 +1439,12 @@ is prohibited.
   none dereferences `seon.db/*conn*`. `bench-client` compiles with the same 40
   remaining warnings, so this removes a hidden local database dependency
   without adding a compatibility projection path.
+- Immutable process launch decoding and environment fallback now belong to
+  `seon.launch`, the existing descriptor owner. Client runtime, advertisement,
+  reload, blob, and entrypoint consumers read that one value directly; the
+  replica no longer owns configuration needed after its deletion. This ports
+  the previously proven `068c41a3` seam without restoring its stale bootstrap
+  call shapes.
 - **Next refill:** finish the remaining startup/web synchronous consumers,
   move launch-descriptor ownership out of the replica, switch client open
   atomically, and

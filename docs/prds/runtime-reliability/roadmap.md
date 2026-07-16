@@ -58,7 +58,9 @@ remaining startup/web synchronous consumers and launch-descriptor ownership.
 Program admission is also session-native: it acquires schema forms and function
 contracts together at one authority coordinate and publishes only after the
 ordinary projection verifies. Atomic client session open and replica/feed
-deletion follow.
+deletion follow. The one immutable process descriptor is now decoded and owned
+by `seon.launch`; client consumers no longer depend on the replica for launch
+configuration.
 Autocomplete/export and the debug feed already consume the same coordinate-
 pinned compiled child result; the obsolete synchronous AI composer is deleted.
 Stale debug completions cannot install candidate catalogs, and raw AI

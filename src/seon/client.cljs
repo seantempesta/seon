@@ -341,7 +341,7 @@
      [::launch/writer-cluster ::launch/writer-cluster]
      [::launch/writer-repl-port-file ::launch/writer-repl-port-file]]]}
   []
-  (let [descriptor replica/process-launch-descriptor
+  (let [descriptor launch/process-launch-descriptor
         runtime (::launch/runtime descriptor)
         writer-owner (::launch/writer-owner descriptor)]
     (merge
@@ -549,7 +549,7 @@
   [message]
   (when (and (db/attached?)
              (nil? (::launch/restore-startup
-                    replica/process-launch-descriptor)))
+                    launch/process-launch-descriptor)))
     (case (:type message)
       :build-start
       (admission/begin-publication!)
@@ -985,7 +985,7 @@
   {:malli/schema
    [:=> [:cat ::open-database-connection-request] :any]}
   [{::keys [prepare-writes?]}]
-  (let [descriptor replica/process-launch-descriptor
+  (let [descriptor launch/process-launch-descriptor
         writer-owner (::launch/writer-owner descriptor)
         database-selection (::launch/database descriptor)]
     (await (replica/ping! {::launch/descriptor descriptor}))
@@ -2843,7 +2843,7 @@
         _ (claim-launch-capability! capability)
         autonomous? (true? (::autonomous? capability))
         descriptor (launch/validate-descriptor
-                     replica/process-launch-descriptor)
+                     launch/process-launch-descriptor)
         attached? (db/attached?)
         restore-startup
         (validate-restore-launch! descriptor capability)
@@ -3568,7 +3568,7 @@
   ;; opens the store.
   (log/quiet-library-logs!)
   (claim-blob-storage-view!
-   (::launch/blob-storage-view replica/process-launch-descriptor))
+   (::launch/blob-storage-view launch/process-launch-descriptor))
   (install-process-safety-net!)
   (log/info-console! "seon.client" "-main boot" {:boot-at (:boot-at @!state)})
   ;; Malli instrumentation is installed from the validated PROGRAM projection
@@ -3601,7 +3601,7 @@
       (-> (start-runtime!
            {::llm-fn llm-fn
             ::launch-capability
-            (get-in replica/process-launch-descriptor
+            (get-in launch/process-launch-descriptor
                     [::launch/runtime :seon.client/launch-capability])})
           (.then (fn [{:seon.agent/keys [id ns]
                        :seon.client/keys [resumed-ids created-ids]
