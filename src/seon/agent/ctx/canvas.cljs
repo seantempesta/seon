@@ -14,11 +14,9 @@
     [seon.ai.tokens :as tokens]
     [seon.agent.ctx :as ctx]
     [seon.agent.ctx.render-fns :as render-fns]
-    [seon.config :as config]
     [seon.db :as db]
     [seon.db.protocol :as protocol]
     [seon.error :as err]
-    [seon.render :as render]
     [seon.render.canvas :as canvas]))
 
 (def ^:private candidate-query
@@ -183,26 +181,6 @@
   (str "\n…⟨" what " clipped at " budget " of " total
        " tokens — narrow the canvas render⟩"))
 
-;; TEMPORARY LOCAL BRANCH: current prompt callers still supply a Datahike value
-;; to [[canvas-block]]. Delete this lookup with that branch when the compiled
-;; coordinator wires [[acquire-canvas!]] and the shared ordinary-data invocation
-;; seam; do not adapt this synchronous path to remote reads.
-(defn- wired-fn-source
-  "The program-graph source of the qualified fn `sym` driving the agent's
-   canvas, or nil. Code-as-data: read the seeded `:seon.fn/source` row
-   (keyed by the string `:seon.fn/sym` identity), NOT a file re-read — the
-   same corpus the namespaces block renders from. Lets the agent see and
-   edit the exact code behind its canvas, inline in this section."
-  [db sym]
-  (when (symbol? sym)
-    (ffirst (db/query
-              {:seon.db/db    db
-               :seon.db/query '[:find ?src :in $ ?sym
-                                :where
-                                [?e :seon.fn/sym ?sym]
-                                [?e :seon.fn/source ?src]]
-               :seon.db/args  [(str sym)]}))))
-
 (defn- rendered-canvas-text
   "Format one acquired canvas response from ordinary values only."
   [{:seon.render/keys [hiccup ai error]
@@ -249,11 +227,38 @@
                     (ctx/quote-lines fn-src) "\n"))
              ";\n"
              "; Change: (my.canvas/show! {:my.canvas/content <hiccup-or-qualified-fn>})\n"
-             "; Live fn: :seon.render/system-input → my.canvas/view; query its :seon.db/db.\n"
+             "; Live fn: ordinary :seon.render/system-input → my.canvas/view; use seon.db functions for reads.\n"
              "; Actions: my.canvas controls call schema'd home-ns handlers; writes redraw.\n"
              "; Inspect/auto: (my.canvas/pinned {}) / (my.canvas/clear! {}).")))))
 
-(defn canvas-block
+(defn- selected-canvas-response
+  [wired result]
+  (let [value (::canvas/value wired)
+        response (:seon.execution/value result)]
+    (cond
+      (not (:seon.execution/ok? result))
+      (assoc (canvas/error-response
+               {:seon.db/error (:seon.execution/error result)
+                ::canvas/content value})
+             ::canvas/wired wired)
+
+      (nil? response)
+      {::canvas/wired wired}
+
+      (map? response)
+      (assoc response ::canvas/wired wired)
+
+      :else
+      (assoc (canvas/error-response
+               {:seon.db/error
+                {:seon.error/message
+                 "A canvas function must return a render response map."
+                 :seon.error/kind :agent
+                 :seon.error/data {:seon.render.canvas/content value}}
+                ::canvas/content value})
+             ::canvas/wired wired))))
+
+(defn ^:async canvas-block
   "Show and explain the agent's current live canvas.
 
    The `:canvas` section — what your human currently sees and the compact
@@ -261,10 +266,10 @@
    independently bounded by the one render-fn token cap; a canvas cannot
    consume an unbounded share of every later turn.
 
-   Invokes the agent's wired canvas value against this turn's db
-   value through `seon.render/render-agent-canvas` (the one canvas entry
-   point — same resolution, same render the human surfaces use) and
-   renders:
+   Acquires the wired canvas at this turn's exact database coordinate and
+   invokes a selected renderer inside the execution child. Renderer input is
+   ordinary data; database work uses the asynchronous `seon.db` API rather
+   than receiving a Datahike value.
 
      header — the wired identity (`seon.render.canvas/wired-label`:
               fn name, or \"literal hiccup on your entity\") so the
@@ -288,20 +293,29 @@
    missing) — every created agent is welcome-wired, so in practice
    the section is always present; the unwired branch is the
    correctness floor."
-  {:malli/schema [:=> [:cat :seon.render/section-request] :string]}
-  [{:seon.db/keys [db] :seon.agent/keys [id]}]
+  {:malli/schema [:=> [:cat :seon.render/section-request :any] :string]}
+  [{:seon.agent/keys [id entity]} invoke-selected!]
   (try
-    (let [{wired :seon.render.canvas/wired :as response}
-          ;; The one canvas entry point — SCI wall-clock-bounded for
-          ;; agent-authored canvas fns, and on any throw it returns the
-          ;; legible `error-response` (never throws past here). This is
-          ;; the safety the canvas rides; the body below is always a
-          ;; clean twin, an error twin, or the welcome card — never raw.
-          (render/render-agent-canvas {:seon.agent/id id :seon.db/db db})
-          source (when (err/agent-authored-sym?
-                         (:seon.render.canvas/value wired))
-                   (wired-fn-source db (:seon.render.canvas/value wired)))]
-      (rendered-canvas-text response source (config/render-fn-token-cap)))
+    (let [{wired ::canvas/wired :as acquired}
+          (await (acquire-canvas! id entity))
+          value (::canvas/value wired)
+          result (when (symbol? value)
+                   (first
+                     (await
+                       (invoke-selected!
+                         [{:seon.execution/function-symbol value
+                           :seon.execution/arguments
+                           [{:seon.agent/id id
+                             :seon.render/entity
+                             (:seon.render/entity acquired)}]}]))))
+          response (cond
+                     (nil? wired) {:seon.render/hiccup nil}
+                     (symbol? value) (selected-canvas-response wired result)
+                     :else {:seon.render/hiccup value
+                            ::canvas/wired wired})
+          source (when (and result (err/agent-authored-sym? value))
+                   (:seon.execution/source result))]
+      (rendered-canvas-text response source 2000))
     ;; CONTRACT: this section NEVER vanishes and NEVER surfaces a bare
     ;; ⚠/malli code. `render-agent-canvas` is already throw-safe, so this
     ;; backstop only fires on an UNEXPECTED failure (e.g. a db read) —
