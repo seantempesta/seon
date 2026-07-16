@@ -1230,14 +1230,14 @@ is prohibited.
   acquired data. No compatibility connection, query-result replay map, public
   namespace alias, or second database facade may make old local-Datahike call
   shapes appear synchronous.
-- **Earliest unsettled contract:** every async outer render, interaction, eval,
-  and prompt owner acquires one coordinate-pinned invocation and calls the one
-  supervised child interface. The compiled prompt composition root and its
-  literal ordinary-data formatter are settled; the next boundary is resolving
-  the symbol-backed namespace and transcript blocks inside that same child.
-  Recursive render/context functions receive only ordinary precomputed results
-  and remain synchronous. No caller invokes SCI, discovers a local database
-  value, or introduces a render-only executor.
+- **Earliest unsettled contract:** wire one complete remotely acquired prompt
+  result into the turn/debug callers. The compiled prompt composition root and
+  the namespace, transcript, plan, and canvas async owners are settled at one
+  inherited coordinate; their local prompt-time database adapters are deleted.
+  Warnings, subagent, menu/typeahead, and authored slots still need block-owned
+  acquisition before the caller cut. Recursive formatting receives only
+  ordinary precomputed results and remains synchronous. No caller invokes SCI,
+  discovers a local database value, or introduces a render-only executor.
 - **Integrated proof that closes it:** commit `86db045d` supplies deterministic
   authored-program identity, target-plus-reachable `cljs.js` loading, exact
   symbol/source/agent/REPL verification, one compiler state per child, fresh
@@ -1349,13 +1349,22 @@ is prohibited.
   returns only the eight-row ready frontier plus its overflow witness. Active
   evaluation/wedge evidence and the conditional escalation request remain
   unsettled, so the public plan block is not switched yet.
-- **Next refill:** implement the namespace and transcript acquisitions through
-  the compiled prompt coordinator. Namespace and transcript acquisition are
-  now settled; first complete plan escalation/wedge acquisition and canvas
-  invocation/source/pure formatting at their existing owners. Then migrate
-  warnings, subagent, menu/typeahead, and authored slots through their
-  block-owned acquisitions before wiring one complete prompt result into
-  turn/debug. In parallel, finish restore/readiness,
+  Commit `5d644e47` completes plan escalation with bounded conditional
+  acquisition at the same coordinate, and `143cae9b` extracts the canvas's
+  ordinary-data formatter. Commit `f5646f46` loads selected authored targets
+  once, while `da90c65e` invokes selected functions inside the execution child.
+  Commits `6ff02c0a` and `60d9582e` make that nested capability lexical and
+  explicit: compiled prompt owners receive it; authored functions and nested
+  renderers do not. Commit `5347ea7d` makes namespace, transcript, and plan
+  their final async public owners and deletes 148 lines of local prompt
+  acquisition. Commit `2366590a` moves canvas prompt selection, renderer
+  invocation, authored source, and error rendering through the same child and
+  removes its local `render-agent-canvas`/source-query branch. Both execution
+  artifact flavors compile with the same 20 pre-existing synchronous-consumer
+  warnings, now the explicit deletion/migration inventory.
+- **Next refill:** migrate warnings, subagent, menu/typeahead, and authored slots
+  through their block-owned acquisitions, then wire one complete prompt result
+  into turn/debug. In parallel, finish restore/readiness,
   quiescence, and session close. Only then switch client open atomically and
   delete replica, publisher/replay, Node adapters, SCI render reconstruction,
   synchronous database-value arities, and compatibility reachability.

@@ -49,18 +49,17 @@ order: exact Datahike identity and capability ownership; fair multi-database
 execution; protocol and persistent native sessions; asynchronous `seon.db`;
 isolated Bun children; atomic replica/feed removal; then density, packaging, and
 the measured one-versus-2/4-authority-shard decision. Its current earliest
-unsettled contract is coordinate-pinned prompt acquisition inside the
-now-supervised per-agent Bun child. Authored source loading, compiled execution
-identity, and the static prompt composition root are settled. Commit `9ff4b1a1`
-now owns the default/downstream entrypoint, one inherited-coordinate `seon.db`
-acquisition, and the pure ordinary-data formatting tail; the unsettled boundary
-has moved past completed namespace and transcript acquisition to finishing the
-plan escalation and canvas invocation/source owners, then resolving the
-remaining symbol-backed blocks before one complete result can replace the
-turn/debug caller. Commits `159e16c4`, `f8f718d4`, and `ec1d1b37` retain pure
-formatting while bounding namespace schema closure, canvas selection, and the
-normal plan frontier respectively; canvas and plan are explicitly incomplete
-until their dependent acquisitions land. The public integration point remains
+unsettled contract is wiring one complete remotely acquired prompt result into
+the turn/debug callers. Authored source loading, compiled execution identity,
+the static prompt composition root, and the namespace, transcript, plan, and
+canvas async owners are settled. Commits `6ff02c0a` and `60d9582e` keep the
+child-local selected-function capability lexical and append it only to compiled
+prompt owners; authored functions and nested renderers receive ordinary
+declared arguments. Commits `5347ea7d` and `2366590a` delete the four owners'
+local prompt acquisition fallbacks and route their reads through the inherited
+coordinate. The remaining symbol-backed warnings, subagent, menu/typeahead,
+and authored slots must cross the same seam before the caller cut. The public
+integration point remains
 the stable asynchronous `seon.db` facade; Datahike APIs and values remain
 JVM-internal.
 Commit `551723fc`
