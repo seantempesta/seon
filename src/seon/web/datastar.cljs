@@ -418,7 +418,10 @@
       (assoc ::catalog (::catalog transition))
 
       (contains? transition ::view-id)
-      (assoc ::view-id (::view-id transition)))))
+      (assoc ::view-id (::view-id transition))
+
+      (::render-full? transition)
+      (assoc ::render-full? true))))
 
 (defn- render-request-result [subscription request]
   (try
@@ -465,7 +468,8 @@
 (defn- record-complete-event
   "Retain one complete serialized render inside its live subscription."
   [subscription active rendered]
-  (let [event (::event rendered)
+  (let [complete? (or (::render-full? active) (::render-full? rendered))
+        event (when complete? (::event rendered))
         coordinate (or (:seon.db/coordinate rendered)
                        (get-in active [::change :seon.db/coordinate]))]
     (cond-> subscription
@@ -473,7 +477,7 @@
       (assoc ::full-event event
              ::full-event-committed? true)
 
-      (and coordinate (or event (::full-event subscription)))
+      (and coordinate event)
       (assoc ::full-event-coordinate coordinate))))
 
 (defn- finish-render!
@@ -1502,7 +1506,9 @@
     :seon.web.feed/render-change
     (fn [_subscription change]
       (-> (render-agent-view-at! id (:seon.db/coordinate change))
-          (.then (fn [element] {::elements [element]}))))}
+          (.then (fn [element]
+                   {::elements [element]
+                    ::render-full? true}))))}
    view-id (assoc ::view-id view-id)))
 
 (defn ^:async open-agent-feed!

@@ -10,7 +10,7 @@
    ::coordinate/commit-id #uuid "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
    ::coordinate/t 42})
 
-(deftest transaction-events-become-coordinate-only-render-evidence
+(deftest addressed-interest-events-become-coordinate-only-render-evidence
   (let [change (@#'datastar/event-change
                 {::protocol/event protocol/datoms-event
                  ::protocol/request-id "views"
@@ -84,8 +84,20 @@
         recorded (@#'datastar/record-complete-event
                   {::datastar/full-event "old"
                    ::datastar/full-event-committed? true}
-                  {::datastar/change {:seon.db/coordinate point}}
+                  {::datastar/render-full? true
+                   ::datastar/change {:seon.db/coordinate point}}
                   {::datastar/event event})]
     (is (= event (::datastar/full-event recorded)))
     (is (= point (::datastar/full-event-coordinate recorded)))
     (is (true? (::datastar/full-event-committed? recorded)))))
+
+(deftest partial-patch-never-replaces-the-complete-reconnect-event
+  (let [recorded (@#'datastar/record-complete-event
+                  {::datastar/full-event "complete"
+                   ::datastar/full-event-coordinate point
+                   ::datastar/full-event-committed? true}
+                  {::datastar/change
+                   {:seon.db/coordinate (assoc point ::coordinate/t 43)}}
+                  {::datastar/event "partial"})]
+    (is (= "complete" (::datastar/full-event recorded)))
+    (is (= point (::datastar/full-event-coordinate recorded)))))
