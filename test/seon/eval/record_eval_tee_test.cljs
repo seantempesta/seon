@@ -391,6 +391,66 @@
              :seon.ns/require-edges]]
            (seval/ns-require-edges-tx :my.agent #{})))))
 
+(deftest bare-require-declaration-compiles-from-ordinary-authority-facts
+  (is (= [{:seon.ns/name :my.agent
+           :seon.ns/source "(ns my.agent (:require [clojure.string :as str]))"}]
+         (seval/require-decl-tx
+          :my.agent
+          "(require '[clojure.string :as str])"
+          "(ns my.agent)"
+          :seon.db.process/repl)))
+  (is (= []
+         (seval/require-decl-tx
+          :seon.core
+          "(require '[clojure.string :as str])"
+          "(ns seon.core)"
+          :seon.db.process/boot))))
+
+(deftest eval-tee-acquisition-groups-the-two-read-dependent-facts
+  (async done
+    (let [point {:seon.db.coordinate/database-id
+                 #uuid "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+                 :seon.db.coordinate/branch :db
+                 :seon.db.coordinate/commit-id
+                 #uuid "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+                 :seon.db.coordinate/t 8}
+          original db/execute-many
+          !request (atom nil)]
+      (set! db/execute-many
+            (fn [request]
+              (reset! !request request)
+              (js/Promise.resolve
+               {::db/coordinate point
+                ::db/results
+                [{::protocol/success? true
+                  :datahike.query/result ["seon.core/f"]}
+                 {::protocol/success? true
+                  :datahike.query/result
+                  #{["(ns my.agent)" :seon.db.process/repl]}}]})))
+      (-> (js/Promise.resolve
+           (@#'seval/acquire-eval-tee-inputs!
+            {:seon.eval/function-symbols ["seon.core/f"]
+             :seon.eval/ending-ns 'my.agent
+             :seon.eval/source
+             "(require '[clojure.string :as str])"}))
+          (.then
+           (fn [acquired]
+             (is (= 2 (count (::db/members @!request))))
+             (is (= point (::db/coordinate acquired)))
+             (is (= #{"seon.core/f"}
+                    (:seon.eval/core-boot-function-symbols acquired)))
+             (is (= "(ns my.agent)"
+                    (:seon.eval/stored-source acquired)))
+             (is (= :seon.db.process/repl
+                    (:seon.eval/source-process acquired)))))
+          (.catch
+           (fn [error]
+             (is false (str "eval tee acquisition threw: " error))))
+          (.finally
+           (fn []
+             (set! db/execute-many original)
+             (done)))))))
+
 (deftest ambiguous-wire-result-never-starts-a-second-allocation
   (async done
     (let [!calls (atom 0)

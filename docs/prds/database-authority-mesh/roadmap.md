@@ -1589,10 +1589,14 @@ second owner.
   used to compile its program transaction. A stale coordinate writes nothing
   and returns immediately before receipt inspection, logging, or the
   transcript-without-tee fallback, so the caller can reacquire and recompile
-  frozen data without rerunning agent code. Focused proof passes 1 test/3
-  assertions. The next slice supplies that retry loop and the remaining two
-  authority-dependent facts; unfenced local snapshot reads are not accepted as
-  the completed design.
+  frozen data without rerunning agent code. The matching acquisition groups the
+  only two remaining read-dependent facts—boot-owned changed functions and a
+  bare-require namespace declaration/provenance—into one bounded authority
+  request, while declaration merging is pure over its ordinary result. Focused
+  fence/acquisition/merge proof passes 3 tests/10 assertions. The next slice
+  moves the inline transaction compiler into the acquire/compile/record retry
+  loop and deletes the old local calls; unwired helpers or unfenced local
+  snapshot reads are not accepted as the completed design.
 - Cold authored-program reconstruction now uses one seven-member
   coordinate-pinned authority request for the agent's namespace sources,
   require-edge links, functions, tests, home namespace, schemas, and function

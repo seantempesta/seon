@@ -3887,20 +3887,94 @@
    source (a sourceless ns — the home ns — already persists via its
    require-edges + [[synthesized-ns-head]]), the stored declaration is
    core-seeded, or the merge is a no-op (idempotent)."
-  {:malli/schema [:=> [:catn [::db :any] [::ns-kw :keyword]
-                       [::source [:maybe :string]]]
+  {:malli/schema [:=> [:catn [::ns-kw :keyword]
+                       [::source [:maybe :string]]
+                       [::stored-source [:maybe :string]]
+                       [::source-process [:maybe :keyword]]]
                   [:vector :any]]}
-  [db ns-kw source]
+  [ns-kw source stored-source source-process]
   (let [form  (first (or (try (read-all-forms source) (catch :default _ nil)) []))
         specs (require-form-specs form)]
     (if-not (seq specs)
       []
-      (let [ns-src (stored-ns-source db ns-kw)]
-        (if (or (nil? ns-src) (ns-source-core-boot? db ns-kw))
-          []
-          (if-some [new-src (merge-requires-into-ns-source ns-src specs)]
-            [{:seon.ns/name ns-kw :seon.ns/source new-src}]
-            []))))))
+      (if (or (nil? stored-source)
+              (= :seon.db.process/boot source-process))
+        []
+        (if-some [new-src (merge-requires-into-ns-source stored-source specs)]
+          [{:seon.ns/name ns-kw :seon.ns/source new-src}]
+          [])))))
+
+(def ^:private eval-core-function-query
+  '[:find [?sym ...]
+    :in $ [?requested ...]
+    :where
+    [?function :seon.fn/sym ?sym]
+    [(= ?sym ?requested)]
+    [?function :seon.fn/source _ ?tx]
+    [?tx :seon.db/process ?process]
+    [?process :seon.db.process/id :seon.db.process/boot]])
+
+(def ^:private eval-namespace-source-query
+  '[:find ?source ?process-id
+    :in $ ?name
+    :where
+    [?namespace :seon.ns/name ?name]
+    [?namespace :seon.ns/source ?source ?tx]
+    [?tx :seon.db/process ?process]
+    [?process :seon.db.process/id ?process-id]])
+
+(defn- eval-query-member
+  [query arguments]
+  {::db.protocol/operation db.protocol/query-operation
+   ::db.protocol/query-form query
+   ::db.protocol/arguments arguments
+   :datahike.resource/max-results 2048
+   :datahike.resource/max-result-weight (* 1024 1024)})
+
+(defn- eval-query-result
+  [member]
+  (if (::db.protocol/success? member)
+    (:datahike.query/result member)
+    (throw (ex-info "Eval program acquisition failed."
+                    {:seon.db/error member :seon.error/kind :core-bug}))))
+
+(defn- ^:async acquire-eval-tee-inputs!
+  "Acquire the two facts that make an eval program transaction read-dependent."
+  [{::keys [function-symbols ending-ns source]}]
+  (let [require? (seq (require-form-specs
+                       (first (or (try (read-all-forms source)
+                                       (catch :default _ nil))
+                                  []))))
+        namespace (when (and require?
+                             (symbol? ending-ns)
+                             (not (contains? transient-ns-syms ending-ns)))
+                    (keyword (str ending-ns)))
+        requests (cond-> []
+                   (seq function-symbols)
+                   (conj [::core-boot-function-symbols
+                          (eval-query-member eval-core-function-query
+                                             [(vec function-symbols)])])
+                   namespace
+                   (conj [::namespace-source
+                          (eval-query-member eval-namespace-source-query
+                                             [namespace])]))]
+    (if (empty? requests)
+      {::core-boot-function-symbols #{}}
+      (let [response (await
+                       (db/execute-many
+                        {::db/members (mapv second requests)
+                         ::db/max-result-weight (* 2 1024 1024)}))
+            results (into {}
+                          (map (fn [[[label _] member]]
+                                 [label (eval-query-result member)]))
+                          (map vector requests (::db/results response)))
+            [stored-source source-process]
+            (first (::namespace-source results))]
+        {::db/coordinate (::db/coordinate response)
+         ::core-boot-function-symbols
+         (set (::core-boot-function-symbols results))
+         ::stored-source stored-source
+         ::source-process source-process}))))
 
 (defn- unalias-decl-tx
   "Tx upserting `ns-kw`'s stored `:seon.ns/source` with `alias-sym`
@@ -4703,9 +4777,14 @@
               req-decl-tx (when (and (::ok? result) ending-ns db/*conn*
                                      (not (contains? transient-ns-syms
                                                      ending-ns)))
-                            (require-decl-tx @db/*conn*
-                                             (keyword (str ending-ns))
-                                             source))
+                            (let [ns-kw (keyword (str ending-ns))]
+                              (require-decl-tx
+                               ns-kw
+                               source
+                               (stored-ns-source @db/*conn* ns-kw)
+                               (if (ns-source-core-boot? @db/*conn* ns-kw)
+                                 :seon.db.process/boot
+                                 :seon.db.process/repl))))
               tee (vec (concat tee-entities req-tx req-decl-tx read-attr-tx))
               ;; Durable record — always. Identity allocation and accepted tee
               ;; commit before a process-local result handle can exist.
