@@ -311,7 +311,7 @@
   [value]
   (let [crypto (js/require "node:crypto")]
     (-> (.createHash crypto "sha256")
-        (.update (pr-str value) "utf8")
+        (.update (if (string? value) value (pr-str value)) "utf8")
         (.digest "hex"))))
 
 (defn invocation-plan
@@ -393,65 +393,136 @@
                     ::function-identity identity))))
      invocation-plans)))
 
-(defn- ^:async acquire-program! [invocation]
-  (let [coordinate (::coordinate invocation)
-        result (await
+(defn- ^:async acquire-program!
+  [coordinate agent-id]
+  (let [result (await
                 (db/execute-many
                  {::db/coordinate coordinate
                   ::db/max-result-weight maximum-program-bytes
                   ::db/members
                   [(query-member authored-function-query
-                                 [(::agent-id invocation)])
+                                 [agent-id])
                    (query-member schema-query [])
                    (query-member function-contract-query [])]}))
         [functions schemas contracts] (mapv query-result (::db/results result))
         program (canonical-program functions schemas contracts)
-        target (get-in invocation [::function-identity
-                                   ::function-symbol])
-        source (some (fn [[sym source & _]]
-                       (when (= target (symbol sym)) source))
-                     functions)]
+        source-by-symbol (into {}
+                               (map (fn [[sym source & _]]
+                                      [(symbol sym) source]))
+                               functions)]
     (when-not (= coordinate (::db/coordinate result))
       (throw (ex-info "Authored program acquisition moved coordinates."
                       {:seon.error/kind :core-bug})))
+    (assoc program
+           ::digest (source-digest program)
+           ::source-by-symbol source-by-symbol)))
+
+(defn- verify-authored-identity!
+  [program invocation]
+  (let [identity (::function-identity invocation)
+        target (::function-symbol identity)
+        source (get (::source-by-symbol program) target)]
     (when-not source
       (throw (ex-info "The requested current agent function does not exist."
                       {::function-symbol target :seon.error/kind :agent})))
-    (when-not (= (source-digest source)
-                 (get-in invocation [::function-identity
-                                     ::source-digest]))
+    (when-not (= (source-digest source) (::source-digest identity))
       (throw (ex-info "The requested function source is no longer current."
-                      {::function-symbol target :seon.error/kind :agent})))
-    (assoc program ::digest (source-digest program))))
+                      {::function-symbol target :seon.error/kind :agent}))))
+  program)
 
-(defn- ^:async ensure-program! [state invocation]
-  (let [program (await (acquire-program! invocation))
-        loaded (::program @state)]
+(defn- ^:async ensure-program!
+  [state invocation function-symbols verify-identity?]
+  (let [program (await (acquire-program! (::coordinate invocation)
+                                         (::agent-id invocation)))
+        _ (when verify-identity?
+            (verify-authored-identity! program invocation))
+        loaded (::program @state)
+        function-symbols
+        (filterv #(contains? (::source-by-symbol program) %) function-symbols)
+        load-request (assoc program ::function-symbols function-symbols)]
     (cond
+      (empty? function-symbols)
+      program
+
       (nil? loaded)
       (let [compile-state
-            (await (eval/load-authored-program!
-                    (assoc program ::function-symbols
-                           [(get-in invocation [::function-identity
-                                                ::function-symbol])])))]
-        (swap! state assoc ::program program ::compile-state compile-state)
-          program)
+            (await (eval/load-authored-program! load-request))]
+        (swap! state assoc
+               ::program program
+               ::compile-state compile-state
+               ::authored-symbols (set function-symbols))
+        program)
 
       (= (::digest loaded) (::digest program))
-      (do
-        (await
-         (eval/load-authored-program!
-          (assoc program
-                 ::function-symbols
-                 [(get-in invocation [::function-identity
-                                      ::function-symbol])]
-                 ::compile-state (::compile-state @state))))
+      (let [compile-state
+            (await
+             (eval/load-authored-program!
+              (assoc load-request ::compile-state (::compile-state @state))))]
+        (swap! state
+               (fn [current]
+                 (-> current
+                     (assoc ::compile-state compile-state)
+                     (update ::authored-symbols into function-symbols))))
         program)
 
       :else
       (throw (ex-info "Authored source changed; a fresh child is required."
                       {::reload-required? true
                        :seon.error/kind :core-bug})))))
+
+(declare exception-value)
+
+(defn- selected-call-error
+  [exception]
+  {::ok? false ::error (exception-value exception)})
+
+(defn- call-selected!
+  [state {::keys [function-symbol arguments]}]
+  (if-let [function-value (eval/lookup-value function-symbol)]
+    (try
+      (-> (js/Promise.resolve (apply function-value arguments))
+          (.then (fn [value]
+                   (cond-> {::ok? true ::value value}
+                     (contains? (::authored-symbols @state) function-symbol)
+                     (assoc ::source
+                            (get-in @state [::program ::source-by-symbol
+                                            function-symbol])))))
+          (.catch selected-call-error))
+      (catch :default exception
+        (js/Promise.resolve (selected-call-error exception))))
+    (js/Promise.resolve
+     {::ok? false
+      ::error {:seon.error/message
+               "The selected function is not loaded in the execution child."
+               :seon.error/kind :core-bug
+               :seon.error/data {::function-symbol function-symbol}}})))
+
+(defn- ^:async invoke-selected!
+  "Invoke selected compiled or authored functions inside the active child."
+  [state invocation calls]
+  (let [authored (::authored-symbols @state)
+        unresolved
+        (->> calls
+             (map ::function-symbol)
+             distinct
+             (remove #(or (contains? authored %)
+                          (some? (eval/lookup-value %))))
+             vec)
+        load-error (atom nil)]
+    (when (seq unresolved)
+      (try
+        (await (ensure-program! state invocation unresolved false))
+        (catch :default exception
+          (reset! load-error exception))))
+    (-> (js/Promise.all
+         (into-array
+          (mapv (fn [{::keys [function-symbol] :as call}]
+                  (if (and @load-error
+                           (nil? (eval/lookup-value function-symbol)))
+                    (js/Promise.resolve (selected-call-error @load-error))
+                    (call-selected! state call)))
+                calls)))
+        (.then #(vec (array-seq %))))))
 
 ;;; Child owner
 
@@ -580,7 +651,8 @@
         (-> (ensure-session! state)
             (.then (fn [_]
                      (when-not compiled?
-                       (ensure-program! state invocation))))
+                       (ensure-program! state invocation
+                                        [function-symbol] true))))
             (.then
              (fn [_]
                (if-let [function-value
@@ -595,7 +667,12 @@
                        (db/with-tx-context
                         (assoc (or (::run-fence invocation) {})
                                ::db/coordinate (::coordinate invocation))
-                        (fn [] (apply function-value (::arguments invocation)))))))
+                        (fn []
+                          (apply function-value
+                                 (cond-> (::arguments invocation)
+                                   compiled?
+                                   (conj (partial invoke-selected!
+                                                  state invocation)))))))))
                    (catch :default exception
                      (js/Promise.reject exception)))
                  (js/Promise.reject

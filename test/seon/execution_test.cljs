@@ -103,7 +103,8 @@
                        (js/Error. "compiled dispatch read authored program")))
                     seval/lookup-value
                     (fn [_]
-                      (fn [value]
+                      (fn [value invoke-selected!]
+                        (is (fn? invoke-selected!))
                         {:seon.execution-test/value value}))]
         (@#'execution/receive! state (execution/encode-message request)
          (decoded-sender messages) (fn [_]) 0)
@@ -162,6 +163,13 @@
     (is (= first-value second-value))
     (is (= (execution/source-digest first-value)
            (execution/source-digest second-value)))))
+
+(deftest source-identity-hashes-exact-utf8-bytes
+  (let [source "(defn view [_] :ok)\n"
+        expected (-> (.createHash (js/require "node:crypto") "sha256")
+                     (.update source "utf8")
+                     (.digest "hex"))]
+    (is (= expected (execution/source-digest source)))))
 
 (deftest authored-loader-loads-each-selected-namespace-once
   (async done
@@ -225,6 +233,34 @@
               (set! schema/build-projection original-build)
               (set! schema/activate-projection! original-activate)
               (done)))))))
+
+(deftest selected-compiled-functions-skip-authored-acquisition
+  (async done
+    (let [reads (atom 0)
+          state (atom {::execution/startup startup})]
+      (with-redefs [db/execute-many
+                    (fn [_]
+                      (swap! reads inc)
+                      (js/Promise.reject
+                        (js/Error. "compiled selection acquired a program")))
+                    seval/lookup-value
+                    (fn [sym]
+                      (when (= 'seon.test/compiled sym)
+                        (fn [value] (inc value))))]
+        (-> (@#'execution/invoke-selected!
+              state invocation
+              [{::execution/function-symbol 'seon.test/compiled
+                ::execution/arguments [41]}])
+            (.then
+              (fn [results]
+                (is (zero? @reads))
+                (is (= [{::execution/ok? true ::execution/value 42}]
+                       results))
+                (done)))
+            (.catch
+              (fn [error]
+                (is false (str "compiled selection rejected: " error))
+                (done))))))))
 
 (deftest ordinary-namespace-source-preserves-one-compile-unit
   (let [source (seval/namespace-source

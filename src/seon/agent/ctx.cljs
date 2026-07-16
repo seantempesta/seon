@@ -2707,17 +2707,28 @@
 (schema/register! ::acquired-context-request
   [:map {:closed true}
    [:seon.agent/entity :map]
+   [::selected-blocks {:optional true} [:vector :map]]
+   [::whole-prompt {:optional true} [:or :string :symbol]]
    [:seon.agent.ctx/profile {:optional true} :seon.agent.ctx/profile]])
 
-(defn- unresolved-prompt-slot
-  [block]
-  (if-let [function-symbol (when (symbol? (:seon.render/ai block))
-                             (:seon.render/ai block))]
-    (assoc block :seon.render/ai
-           (str "[" (name (:seon.agent.ctx/name block))
-                "] render failed: fn " function-symbol
-                " is not available in compiled prompt execution yet"))
-    block))
+(defn selected-agent-blocks
+  "Select stored context blocks or a requested profile from an agent entity."
+  {:malli/schema [:=> [:cat :map [:maybe :seon.agent.ctx/profile]]
+                  [:vector :map]]}
+  [entity profile]
+  (let [stored (agent-blocks entity)]
+    (if (seq profile)
+      (let [by-name (into {} (map (juxt :seon.agent.ctx/name identity))
+                          stored)]
+        (->> profile
+             (mapv (fn [patch]
+                     (merge (get by-name
+                                 (:seon.agent.ctx/name patch) {})
+                            patch)))
+             (sort-by (juxt :seon.agent.ctx/priority
+                            (comp str :seon.agent.ctx/name)))
+             vec))
+      stored)))
 
 (defn rendered-context-from-entity
   "Render literal prompt data from one already-acquired agent entity.
@@ -2725,34 +2736,24 @@
    This is the synchronous tail for the compiled prompt owner. It selects the
    entity's complete stored block set or the requested profile, preserves the
    existing omission, cap, order, bracket, and cache-boundary behavior, and
-   returns the ordinary [[rendered-context]] shape. Symbol slots remain
-   explicit block-local errors until their asynchronous owning cohorts supply
-   resolved literal values."
+   returns the ordinary [[rendered-context]] shape. The asynchronous owner may
+   supply an already-selected block vector whose symbol slots have become
+   literal results or block-local error strings."
   {:malli/schema [:=> [:cat ::acquired-context-request] ::rendered-context]}
-  [{:seon.agent/keys [entity] profile :seon.agent.ctx/profile}]
-  (let [stored (agent-blocks entity)
-        children
-        (if (seq profile)
-          (let [by-name (into {} (map (juxt :seon.agent.ctx/name identity))
-                              stored)]
-            (->> profile
-                 (mapv (fn [patch]
-                         (merge (get by-name
-                                     (:seon.agent.ctx/name patch) {})
-                                patch)))
-                 (sort-by (juxt :seon.agent.ctx/priority
-                                (comp str :seon.agent.ctx/name)))
-                 vec))
-          stored)
-        whole-prompt (when-not (seq profile)
-                       (some->> (:seon.render/ai entity)
-                                (db/decode-edn-value :seon.render/ai)))]
+  [{:seon.agent/keys [entity]
+    selected ::selected-blocks
+    resolved-whole-prompt ::whole-prompt
+    profile :seon.agent.ctx/profile
+    :as request}]
+  (let [children (or selected (selected-agent-blocks entity profile))
+        whole-prompt
+        (when-not (seq profile)
+          (if (contains? request ::whole-prompt)
+            resolved-whole-prompt
+            (some->> (:seon.render/ai entity)
+                     (db/decode-edn-value :seon.render/ai))))]
     (if (or (string? whole-prompt) (symbol? whole-prompt))
-      (let [prompt (unresolved-prompt-slot
-                    {:seon.agent.ctx/name :prompt
-                     :seon.agent.ctx/priority 0
-                     :seon.render/ai whole-prompt})
-            text (:seon.render/ai prompt)
+      (let [text whole-prompt
             blocks (cond-> []
                      (and (string? text) (not (str/blank? text)))
                      (conj {:seon.agent.ctx/name :prompt
@@ -2769,7 +2770,7 @@
                         default-cache-breakpoint)
                     :seon.agent/entity entity
                     :seon.agent.ctx/children
-                    (mapv unresolved-prompt-slot children)}
+                    children}
                    (seq profile)
                    (assoc :seon.agent.ctx/profile-render? true))
             blocks (rendered-child-blocks

@@ -14,23 +14,36 @@
    ::coordinate/t 42})
 
 (defn- call-with-pull-result
-  [result request observed]
-  (let [original db/pull]
-    (set! db/pull
-          (fn
-            ([pull-request]
-             (reset! observed
-                     {:seon.execution.runtime-test/request pull-request
-                      :seon.execution.runtime-test/context
-                      (db/current-tx-context)})
-             (js/Promise.resolve result))
-            ([_ _]
-             (js/Promise.reject
-              (js/Error. "runtime prompt used positional pull")))))
-    (-> (db/with-tx-context
-          {::db/coordinate point}
-          #(runtime/render-prompt! request))
-        (.finally (fn [] (set! db/pull original))))))
+  ([result request observed]
+   (call-with-pull-result
+     result request observed
+     (fn [calls]
+       (swap! observed assoc :seon.execution.runtime-test/calls calls)
+       (js/Promise.resolve
+         (mapv (fn [call]
+                 {:seon.execution/ok? false
+                  :seon.execution/error
+                  {:seon.error/message
+                   (str (:seon.execution/function-symbol call)
+                        " is not loaded")}})
+               calls)))))
+  ([result request observed invoke-selected!]
+   (let [original db/pull]
+     (set! db/pull
+           (fn
+             ([pull-request]
+              (reset! observed
+                      {:seon.execution.runtime-test/request pull-request
+                       :seon.execution.runtime-test/context
+                       (db/current-tx-context)})
+              (js/Promise.resolve result))
+             ([_ _]
+              (js/Promise.reject
+               (js/Error. "runtime prompt used positional pull")))))
+     (-> (db/with-tx-context
+           {::db/coordinate point}
+           #(runtime/render-prompt! request invoke-selected!))
+         (.finally (fn [] (set! db/pull original)))))))
 
 (deftest literal-whole-prompt-uses-the-inherited-coordinate
   (async done
@@ -54,6 +67,8 @@
                                [:seon.execution.runtime-test/request
                                 ::db/coordinate]))
                  "the read inherits C rather than resolving or restating it")
+             (is (nil? (:seon.execution.runtime-test/calls @observed))
+                 "a literal whole prompt invokes no selected function")
              (is (= [:seon.agent/id "agent-1"]
                     (get-in @observed
                             [:seon.execution.runtime-test/request ::db/ref])))
@@ -155,6 +170,52 @@
            (fn [error]
              (is false (str "local-error render rejected: " error))
              (done)))))))
+
+(deftest selected-symbol-blocks-share-one-child-local-invocation
+  (async done
+    (let [observed (atom nil)
+          calls (atom [])
+          entity
+          {:seon.agent/id "agent-1"
+           :seon.agent/ctx
+           [{:seon.agent.ctx/name :literal
+             :seon.agent.ctx/priority 1
+             :seon.render/ai (pr-str "literal sibling")}
+            {:seon.agent.ctx/name :first
+             :seon.agent.ctx/priority 2
+             :seon.render/ai (pr-str 'my.prompt/first)}
+            {:seon.agent.ctx/name :second
+             :seon.agent.ctx/priority 3
+             :seon.render/ai (pr-str 'seon.prompt/second)}]}
+          invoke-selected!
+          (fn [selected]
+            (swap! calls conj selected)
+            (js/Promise.resolve
+              [{:seon.execution/ok? true
+                :seon.execution/value "first result"
+                :seon.execution/source "(defn first [_] \"first result\")"}
+               {:seon.execution/ok? true
+                :seon.execution/value {:seon.render/ai "second result"}}]))]
+      (-> (call-with-pull-result
+            entity {:seon.agent/id "agent-1"} observed invoke-selected!)
+          (.then
+            (fn [rendered]
+              (is (= 1 (count @calls))
+                  "all selected symbols use one child-local call")
+              (is (= ['my.prompt/first 'seon.prompt/second]
+                     (mapv :seon.execution/function-symbol (first @calls))))
+              (is (every?
+                    #(nil? (get-in % [:seon.execution/arguments 0 :seon.db/db]))
+                    (first @calls))
+                  "selected functions receive ordinary input, never a db value")
+              (is (= ["literal sibling" "first result" "second result"]
+                     (mapv :seon.render/text
+                           (:seon.agent.ctx/rendered-blocks rendered))))
+              (done)))
+          (.catch
+            (fn [error]
+              (is false (str "selected invocation rejected: " error))
+              (done)))))))
 
 (deftest empty-and-missing-agents-render-the-empty-existing-shape
   (async done
