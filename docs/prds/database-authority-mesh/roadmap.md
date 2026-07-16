@@ -1017,6 +1017,11 @@ executor checkpoint passes 78 tests and 1,002 assertions. Its expected injected
 pressure, release-failure, forced-shutdown, and completion-callback logs remain
 structured test evidence rather than uncaught failures.
 
+The retained fanout falsifier registers 1,000 exact datom-pattern interests on
+one committed scope and proves one matching transaction addresses exactly one
+physical session. Filtering may inspect the changed attribute's candidates,
+but unrelated sessions perform no send or Transit encode.
+
 Integrated proof that closes it:
 Schema/index/history/selective-interest conformance, including forward/reverse
 cursor continuity, register/commit/unlisten ordering, addressed one-of-1,000

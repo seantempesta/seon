@@ -261,6 +261,82 @@
     (is (true? (deref closed 1000 false)))
     (is (.get ^AtomicBoolean (::writer/closing? connection)))))
 
+(deftest one-exact-pattern-addresses-one-of-one-thousand-interests
+  (let [configuration {:store {:backend :memory :id (random-uuid)}
+                       :schema-flexibility :read}
+        sent (atom [])]
+    (d/create-database configuration)
+    (let [connection (d/connect configuration)]
+      (try
+        (d/transact connection
+                    [{:db/ident :fanout/value
+                      :db/valueType :db.type/string
+                      :db/cardinality :db.cardinality/one}])
+        (let [report (d/transact connection [{:fanout/value "target"}])
+              target-eid
+              (some (fn [datom]
+                      (when (= :fanout/value (.-a ^datahike.datom.Datom datom))
+                        (.-e ^datahike.datom.Datom datom)))
+                    (:tx-data report))
+              identity (d/committed-value-identity (:db-after report))
+              scope {::executor/database-name "fanout"
+                     ::coordinate/attachment
+                     (coordinate/attachment
+                      (coordinate/resolved (:db-after report)))
+                     ::executor/connection-id
+                     (:datahike.value/connection-id identity)
+                     ::executor/generation (:datahike.value/generation identity)}
+              interests
+              (mapv
+               (fn [index]
+                 (let [owner (Object.)
+                       request-id (str "fanout/" index)
+                       connection-sent (atom [])
+                       transport
+                       (fake-transport-connection connection-sent (promise))
+                       interest
+                       {::writer/owner owner
+                        ::writer/scope scope
+                        ::writer/dependencies nil
+                        ::writer/patterns
+                        [{:seon.db/a :fanout/value
+                          :seon.db/e (if (zero? index)
+                                       target-eid
+                                       (+ target-eid index))}]}
+                       reference [transport request-id owner]]
+                   (swap! (::writer/interests transport) assoc request-id interest)
+                   [reference interest connection-sent]))
+               (range 1000))
+              entry
+              (reduce (fn [entry [reference interest _connection-sent]]
+                        (#'writer/add-interest-to-entry
+                         entry reference interest))
+                      {::writer/scope scope
+                       ::writer/interest-count 0
+                       ::writer/all #{}
+                       ::writer/by-attribute {}}
+                      interests)
+              runtime
+              {::writer/interest-lock (Object.)
+               ::writer/interest-state
+               (atom {::writer/by-scope {scope entry}
+                      ::writer/by-source {}})}]
+          (#'writer/deliver-report! runtime scope report)
+          (reset! sent
+                  (into []
+                        (mapcat (fn [[[_transport request-id _owner]
+                                      _interest connection-sent]]
+                                  (map (fn [event] [request-id event])
+                                       @connection-sent)))
+                        interests))
+          (is (= 1 (count @sent)))
+          (is (= "fanout/0" (ffirst @sent)))
+          (is (= target-eid
+                 (get-in @sent [0 1 ::protocol/datoms 0 :seon.db/e]))))
+        (finally
+          (d/release connection)
+          (d/delete-database configuration))))))
+
 (deftest query-interests-require-a-usable-database-dependency
   (let [failure
         (try
