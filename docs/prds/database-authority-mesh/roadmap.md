@@ -116,7 +116,12 @@ Detailed evidence and falsifiers live in
 [[research/exact-value-identity-proof-2026-07-15]],
 [[research/single-flight-proof-2026-07-15]], and
 [[research/multidb-execute-many-proof-2026-07-15]]. The reduced wire and host
-identity contract is [[research/authority-protocol-contract-2026-07-16]].
+identity contract is [[research/authority-protocol-contract-2026-07-16]]. Read
+and delivery capacity are grounded in
+[[research/datahike-parallel-read-internals-2026-07-16]] and
+[[research/transit-bun-delivery-internals-2026-07-16]]. Proximum search,
+construction, cancellation, and filter seams are grounded in
+[[research/proximum-native-capacity-2026-07-16]].
 
 ## Ordered implementation spine
 
@@ -226,7 +231,7 @@ for lifecycle and cancellation requests and retain background progress.
 
 Bound these existing operations independently:
 
-- query CPU: Datalog, pull, history, index reads, execute-many members;
+- read CPU: Datalog, pull, history, index reads, execute-many members;
 - blocking provider: embeddings and remote object/provider calls;
 - secondary/KNN/native: vector search and index construction;
 - encode/delivery: Transit, compression when configured, queued bytes;
@@ -236,6 +241,27 @@ Bound these existing operations independently:
 Safe idle capacity may be borrowed under global ceilings, but queries,
 mutations, and control retain hard floors. Heavy database A cannot consume
 database B's query, mutation, delivery, or control progress.
+
+Query, pull, and index access share one fair read executor. Their Datahike
+implementations are synchronous caller-thread work over the same immutable
+indexes; separate pools would add nested blocking and oversubscription without
+an independent dependency seam. The first measured read limits are the global
+query-result-cache LRU atom under hot hits and per-connection cold storage I/O.
+
+Delivery retains the existing JVM publisher's encode-once shared-frame model
+but adds per-session and global byte bounds. Frame count alone is insufficient.
+Loopback compression remains off; remote compression is configured and selected
+only after encode/compress CPU, wire bytes, latency, and retained memory cross
+over on representative results.
+
+KNN search and index construction retain separate capacity. The selected
+Proximum build path currently uses a physical-core-sized static ForkJoinPool
+even when its public batch parallelism is one, so construction begins with one
+process-wide permit. Running search is not interrupt-cancellable yet; the fork
+already owns timeout, maximum-distance-computation, and patience controls that
+must be passed through before the protocol claims bounded native cancellation.
+The current scoped-search predicate path also scans the full index before HNSW;
+direct existing ID/bitset input is the next dependency-level optimization.
 
 Current implementation evidence: `seon.db.executor` now has a pure bounded
 per-database FIFO selector and shared fixed workers. Eleven focused tests with
