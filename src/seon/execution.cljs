@@ -2,6 +2,7 @@
   "Data-only protocol and Bun entry point for one agent execution child."
   (:require
    [cognitect.transit :as transit]
+   [clojure.walk :as walk]
    [shadow.cljs.devtools.client.env :as shadow-env]
    [seon.db :as db]
    [seon.db.coordinate]
@@ -37,7 +38,6 @@
                   [:map {:closed true}
                    [::function-symbol ::function-symbol]
                    [::source-digest ::digest]])
-(schema/register! ::capabilities [:set ::function-symbol])
 (schema/register! ::input [:map-of :qualified-keyword :any])
 (schema/register! ::deadline-ms [:int {:min 0}])
 (schema/register! ::result-limit-bytes
@@ -66,7 +66,6 @@
   [::invocation-id ::invocation-id]
   [::coordinate ::coordinate]
   [::function-source-identity ::function-source-identity]
-  [::capabilities ::capabilities]
   [::input ::input]
   [::deadline-ms ::deadline-ms]
   [::result-limit-bytes ::result-limit-bytes]
@@ -169,6 +168,7 @@
   "Return an ordinary result or a bounded execution error value."
   {:malli/schema [:=> [:cat :any ::result-limit-bytes] :map]}
   [value result-limit]
+  (let [value (walk/postwalk identity value)]
   (cond
     (not (db.protocol/ordinary-wire-value? value))
     {::ok? false
@@ -187,7 +187,158 @@
                   :seon.error/kind :agent
                   :seon.error/data
                   {::result-bytes byte-count
-                   ::result-limit-bytes result-limit}}}))))
+                   ::result-limit-bytes result-limit}}})))))
+
+;;; Coordinate-pinned authored program
+
+(def ^:private maximum-program-rows 2048)
+(def ^:private maximum-program-bytes (* 3 1024 1024))
+
+(def ^:private authored-function-query
+  '[:find ?sym ?source ?ns-name ?ns-source
+           (pull ?namespace [{:seon.ns/require-edges [*]}])
+    :in $ ?agent-id
+    :where
+    [?function :seon.fn/sym ?sym]
+    [?function :seon.fn/source ?source ?tx]
+    [?tx :seon.db/user ?author]
+    [?author :seon.agent/id ?agent-id]
+    [?tx :seon.db/process ?process]
+    [?process :seon.db.process/id :seon.db.process/repl]
+    [?function :seon.fn/ns ?namespace]
+    [?namespace :seon.ns/name ?ns-name]
+    [(get-else $ ?namespace :seon.ns/source "") ?ns-source]])
+
+(def ^:private schema-query
+  '[:find ?key ?form
+    :where
+    [?schema :seon.schema/key ?key]
+    [?schema :seon.schema/form ?form]])
+
+(def ^:private function-contract-query
+  '[:find ?sym ?form
+    :where
+    [?function :seon.fn/sym ?sym]
+    [?function :seon.fn/spec ?form]])
+
+(defn- query-member [query arguments]
+  {::db.protocol/operation db.protocol/query-operation
+   ::db.protocol/query-form query
+   ::db.protocol/arguments arguments
+   :datahike.resource/max-results maximum-program-rows
+   :datahike.resource/max-result-weight maximum-program-bytes})
+
+(defn- query-result [member]
+  (if (::db.protocol/success? member)
+    (:datahike.query/result member)
+    (throw (ex-info "Authored program acquisition failed."
+                    {:seon.db/error member :seon.error/kind :core-bug}))))
+
+(defn- normalize-require-edges [pulled]
+  (->> (:seon.ns/require-edges pulled)
+       (map (fn [edge]
+              (cond-> (dissoc edge :db/id)
+                (seq (:seon.ns.require/refers edge))
+                (update :seon.ns.require/refers
+                        #(vec (sort-by str %))))))
+       (sort-by pr-str)
+       vec))
+
+(defn canonical-program
+  "Canonicalize unordered database rows before source identity hashing."
+  {:malli/schema [:=> [:cat [:sequential :any]
+                       [:sequential :any]
+                       [:sequential :any]] :map]}
+  [function-rows schema-rows contract-rows]
+  (let [namespace-rows
+        (->> function-rows
+             (group-by #(nth % 2))
+             (map
+              (fn [[ns-name rows]]
+                (let [rows (sort-by (comp str first) rows)
+                      [_ _ _ ns-source pulled] (first rows)]
+                  {:seon.ns/name ns-name
+                   :seon.ns/source ns-source
+                   :seon.ns/require-edges (normalize-require-edges pulled)
+                   :seon.fn/symbols (mapv (comp symbol first) rows)
+                   :seon.fn/sources (->> rows (map second) distinct sort vec)})))
+             (sort-by (comp str :seon.ns/name))
+             vec)]
+    {::namespace-rows namespace-rows
+     ::schema-forms (->> schema-rows (map vec) (sort-by (comp str first)) vec)
+     ::function-contracts (->> contract-rows
+                               (map vec)
+                               (sort-by (comp str first))
+                               vec)}))
+
+(defn source-digest
+  "Return the canonical SHA-256 identity of one authored source value."
+  {:malli/schema [:=> [:cat :any] ::digest]}
+  [value]
+  (let [crypto (js/require "node:crypto")]
+    (-> (.createHash crypto "sha256")
+        (.update (pr-str value) "utf8")
+        (.digest "hex"))))
+
+(defn- ^:async acquire-program! [invocation]
+  (let [coordinate (::coordinate invocation)
+        result (await
+                (db/execute-many
+                 {::db/coordinate coordinate
+                  ::db/max-result-weight maximum-program-bytes
+                  ::db/members
+                  [(query-member authored-function-query
+                                 [(::agent-id invocation)])
+                   (query-member schema-query [])
+                   (query-member function-contract-query [])]}))
+        [functions schemas contracts] (mapv query-result (::db/results result))
+        program (canonical-program functions schemas contracts)
+        target (get-in invocation [::function-source-identity
+                                   ::function-symbol])
+        source (some (fn [[sym source & _]]
+                       (when (= target (symbol sym)) source))
+                     functions)]
+    (when-not (= coordinate (::db/coordinate result))
+      (throw (ex-info "Authored program acquisition moved coordinates."
+                      {:seon.error/kind :core-bug})))
+    (when-not source
+      (throw (ex-info "The requested current agent function does not exist."
+                      {::function-symbol target :seon.error/kind :agent})))
+    (when-not (= (source-digest source)
+                 (get-in invocation [::function-source-identity
+                                     ::source-digest]))
+      (throw (ex-info "The requested function source is no longer current."
+                      {::function-symbol target :seon.error/kind :agent})))
+    (assoc program ::digest (source-digest program))))
+
+(defn- ^:async ensure-program! [state invocation]
+  (let [program (await (acquire-program! invocation))
+        loaded (::program @state)]
+    (cond
+      (nil? loaded)
+      (let [compile-state
+            (await (eval/load-authored-program!
+                    (assoc program ::function-symbol
+                           (get-in invocation [::function-source-identity
+                                               ::function-symbol]))))]
+        (swap! state assoc ::program program ::compile-state compile-state)
+          program)
+
+      (= (::digest loaded) (::digest program))
+      (do
+        (await
+         (eval/load-authored-program!
+          (assoc program
+                 ::function-symbol
+                 (get-in invocation [::function-source-identity
+                                     ::function-symbol])
+                 ::compile-state (::compile-state @state))))
+        program)
+
+      :else
+      (throw (ex-info "Authored source changed; a fresh child is required."
+                      {::reload-required? true
+                       :seon.error/kind :core-bug})))))
 
 ;;; Child owner
 
@@ -248,8 +399,22 @@
 (defn- ensure-session! [state]
   (db/open-session! (get-in @state [::startup ::database-selection])))
 
+(defn- timeout-invocation!
+  [state token invocation send-message! exit!]
+  (db/close-session!)
+  (swap! state assoc ::poisoned? true)
+  (settle-active!
+   state token send-message!
+   {::message error-message
+    ::protocol-version protocol-version
+    ::invocation-id (::invocation-id invocation)
+    ::coordinate (::coordinate invocation)
+    ::error {:seon.error/message "The invocation timed out."
+             :seon.error/kind :agent}})
+  (exit! 1))
+
 (defn- begin-invocation!
-  [state invocation send-message! now-ms]
+  [state invocation send-message! exit! now-ms]
   (let [current @state
         function-symbol (get-in invocation
                                 [::function-source-identity ::function-symbol])
@@ -259,6 +424,10 @@
       (fail-invocation! state invocation send-message!
                         "The execution child is shutting down." :core-bug)
 
+      (::poisoned? current)
+      (fail-invocation! state invocation send-message!
+                        "The execution child is retiring." :core-bug)
+
       (::active current)
       (fail-invocation! state invocation send-message!
                         "The execution child already has an active invocation."
@@ -267,10 +436,6 @@
       (not= (get-in current [::startup ::agent-id]) (::agent-id invocation))
       (fail-invocation! state invocation send-message!
                         "The invocation names another agent." :core-bug)
-
-      (not (contains? (::capabilities invocation) function-symbol))
-      (fail-invocation! state invocation send-message!
-                        "The requested function is not granted." :agent)
 
       (not (pos? remaining))
       (fail-invocation! state invocation send-message!
@@ -282,22 +447,13 @@
             timer
             (js/setTimeout
              (fn []
-               ;; This child owns only one invocation and one authority
-               ;; session, so closing it cancels every request for that work.
-               (db/close-session!)
-               (settle-active!
-                state token send-message!
-                {::message error-message
-                 ::protocol-version protocol-version
-                 ::invocation-id (::invocation-id invocation)
-                 ::coordinate (::coordinate invocation)
-                 ::error {:seon.error/message "The invocation timed out."
-                          :seon.error/kind :agent}}))
+               (timeout-invocation! state token invocation send-message! exit!))
              timeout-ms)]
         (swap! state assoc ::active {::token token
                                      ::invocation invocation
                                      ::timer timer})
         (-> (ensure-session! state)
+            (.then (fn [_] (ensure-program! state invocation)))
             (.then
              (fn [_]
                (if-let [function-value (eval/lookup-value function-symbol)]
@@ -371,10 +527,15 @@
                          :seon.error/kind :core-bug}})
         (case (::message message)
           :seon.execution.message/invoke
-          (begin-invocation! state message send-message! now-ms)
+          (begin-invocation! state message send-message! exit! now-ms)
 
           :seon.execution.message/cancel
-          (cancel-active! state (::invocation-id message) send-message!)
+          (do
+            (cancel-active! state (::invocation-id message) send-message!)
+            ;; A canceled cljs.js evaluation may still mutate compiler/global
+            ;; state after Promise settlement. Never reuse that process.
+            (swap! state assoc ::poisoned? true)
+            (exit! 1))
 
           :seon.execution.message/shutdown
           (shutdown! state send-message! exit!))))

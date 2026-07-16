@@ -109,7 +109,7 @@
     (and (= generation (::generation current))
          (identical? process (::process current)))))
 
-(declare stop-child! settle-active!)
+(declare cancel! stop-child! settle-active!)
 
 (defn- remove-child!
   [agent-id generation process]
@@ -379,8 +379,8 @@
               ::children {}}))
     true))
 
-(defn invoke!
-  "Run one granted invocation in its agent's supervised Bun child."
+(defn- invoke-once!
+  "Run one invocation in its agent's supervised Bun child."
   {:malli/schema [:=> [:cat :seon.execution/invoke] :any]}
   [invocation]
   (let [agent-id (::execution/agent-id invocation)]
@@ -435,6 +435,53 @@
                  (host-error invocation
                              "The execution child is no longer current.")))))))))
 
+(defn- reload-required? [message]
+  (true? (get-in message [::execution/error :seon.error/data
+                          ::execution/reload-required?])))
+
+(defn invoke!
+  "Run once, replacing a source-stale child and retrying exactly once."
+  {:malli/schema [:=> [:cat :seon.execution/invoke] :any]}
+  [invocation]
+  (let [agent-id (::execution/agent-id invocation)
+        invocation-id (::execution/invocation-id invocation)
+        remaining (min execution/maximum-invocation-ms
+                       (max 0 (- (::execution/deadline-ms invocation)
+                                 (.now js/Date))))
+        completion (deferred)
+        timer (js/setTimeout
+               (fn []
+                 ;; The parent owns the deadline even while a child is still
+                 ;; spawning. If no active invocation can be canceled yet,
+                 ;; retire the pending child so its later readiness cannot
+                 ;; claim and send already-expired work.
+                 (when-not (cancel! agent-id invocation-id)
+                   (stop-child! agent-id))
+                 ((::resolve! completion) (canceled-error invocation)))
+               remaining)]
+    (-> (invoke-once! invocation)
+        (.then
+         (fn [message]
+           (if-not (reload-required? message)
+             message
+             (let [current (child agent-id)]
+               (when current
+                 (kill-process! (::process current))
+                 (remove-child! agent-id (::generation current)
+                                (::process current)))
+               (invoke-once! invocation)))))
+        (.then (fn [message]
+                 (js/clearTimeout timer)
+                 ((::resolve! completion) message)))
+        (.catch
+         (fn [exception]
+           (js/clearTimeout timer)
+           ((::resolve! completion)
+            (host-error invocation
+                        "The execution host invocation failed."
+                        {:seon.error/cause (ex-message exception)})))))
+    (::promise completion)))
+
 (defn cancel!
   "Cancel one active invocation and bound non-cooperative shutdown."
   {:malli/schema [:=> [:cat ::execution/agent-id ::execution/invocation-id]
@@ -477,6 +524,7 @@
   (if-let [current (child agent-id)]
     (let [process (::process current)
           generation (::generation current)]
+      (swap! !host assoc-in [::children agent-id ::retiring?] true)
       (when-not
        (send-message!
         process

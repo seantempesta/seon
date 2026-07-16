@@ -34,19 +34,20 @@
     ::launch/execution-output "out/execution/main.js"
     ::launch/execution-digest digest}))
 
-(defn invocation [invocation-id]
-  {::execution/message execution/invoke-message
-   ::execution/protocol-version execution/protocol-version
-   ::execution/agent-id "agent-1"
-   ::execution/invocation-id invocation-id
-   ::execution/coordinate point
-   ::execution/function-source-identity
-   {::execution/function-symbol 'my.render/view
-    ::execution/source-digest digest}
-   ::execution/capabilities #{'my.render/view}
-   ::execution/input {:my.render/value 1}
-   ::execution/deadline-ms 9999999999999
-   ::execution/result-limit-bytes 4096})
+(defn invocation
+  ([invocation-id] (invocation "agent-1" invocation-id))
+  ([agent-id invocation-id]
+   {::execution/message execution/invoke-message
+    ::execution/protocol-version execution/protocol-version
+    ::execution/agent-id agent-id
+    ::execution/invocation-id invocation-id
+    ::execution/coordinate point
+    ::execution/function-source-identity
+    {::execution/function-symbol 'my.render/view
+     ::execution/source-digest digest}
+    ::execution/input {:my.render/value 1}
+    ::execution/deadline-ms 9999999999999
+    ::execution/result-limit-bytes 4096}))
 
 (defn ready-message []
   {::execution/message execution/ready-message
@@ -122,8 +123,17 @@
       (-> (js/Promise.resolve nil)
           (.then
            (fn [_]
+             (js/Promise.
+              (fn [resolve-promise _]
+                (js/setTimeout resolve-promise 5)))))
+          (.then
+           (fn [_]
              (is (= execution/invoke-message
                     (::execution/message (first @(:sent child)))))
+             (is (not-any? #(= execution/cancel-message
+                                (::execution/message %))
+                           @(:sent child))
+                 "a far-future deadline is bounded without firing early")
              (feed! @options (:process child)
                     (result-message "invoke-1" {:my.render/value 1}))
              first-completion))
@@ -275,3 +285,134 @@
          (fn [error]
            (is false (str "spawn failure rejected: " error))
            (done))))))
+
+(deftest parent-deadline-retires-a-non-settling-child
+  (async done
+    (let [options (atom [])
+          first-child (fake-process 106)
+          sibling-child (fake-process 107)
+          children (atom [first-child sibling-child])
+          _ (configure
+             (fn [value]
+               (swap! options conj value)
+               (:process (first (first (swap-vals! children subvec 1))))))
+          timed (assoc (invocation "non-settling")
+                       ::execution/deadline-ms (+ (.now js/Date) 10))
+          completion (host/invoke! timed)]
+      (feed! (first @options) (:process first-child) (ready-message))
+      (-> completion
+          (.then
+           (fn [result]
+             (is (= execution/error-message (::execution/message result)))
+             (is (= "The invocation was canceled."
+                    (get-in result [::execution/error
+                                    :seon.error/message])))
+             (feed! (first @options) (:process first-child)
+                    (result-message "non-settling" {:my.render/value :late}))
+             (is (nil? (::execution/result result))
+                 "a late success cannot settle the timed-out invocation")
+             (js/Promise.
+              (fn [resolve-promise _]
+                (js/setTimeout resolve-promise 15)))))
+          (.then
+           (fn [_]
+             (is (= ["SIGKILL"] @(:kills first-child)))
+             ((:resolve-exit! first-child) 1)
+             (js/Promise.resolve nil)))
+          (.then
+           (fn [_]
+             (let [replacement (host/invoke! (invocation "replacement"))]
+               (feed! (second @options) (:process sibling-child)
+                      (ready-message))
+               (-> (js/Promise.resolve nil)
+                   (.then
+                    (fn [_]
+                      (feed! (second @options) (:process sibling-child)
+                             (result-message "replacement"
+                                             {:my.render/value :ok}))))
+                   (.then (fn [_] replacement))))))
+          (.then
+           (fn [result]
+             (is (= {:my.render/value :ok} (::execution/result result)))
+             ((:resolve-exit! sibling-child) 0)
+             (done)))
+          (.catch
+           (fn [error]
+             (is false (str "deadline supervision rejected: " error))
+             (done)))))))
+
+(deftest one-agent-deadline-does-not-block-another-agent-child
+  (async done
+    (let [options (atom {})
+          children {"agent-1" (fake-process 109)
+                    "agent-2" (fake-process 110)}
+          _ (configure
+             (fn [value]
+               (let [startup (execution/decode-message (last (::host/cmd value)))
+                     agent-id (::execution/agent-id startup)]
+                 (swap! options assoc agent-id value)
+                 (:process (get children agent-id)))))
+          stuck (host/invoke! (invocation "agent-1" "stuck"))
+          healthy (host/invoke! (invocation "agent-2" "healthy"))]
+      (doseq [agent-id ["agent-1" "agent-2"]]
+        (feed! (get @options agent-id)
+               (:process (get children agent-id))
+               (assoc (ready-message) ::execution/agent-id agent-id)))
+      (-> (js/Promise.resolve nil)
+          (.then
+           (fn [_]
+             (feed! (get @options "agent-2")
+                    (:process (get children "agent-2"))
+                    (result-message "healthy" {:my.render/value :parallel}))
+             healthy))
+          (.then
+           (fn [result]
+             (is (= {:my.render/value :parallel}
+                    (::execution/result result)))
+             (is (host/cancel! "agent-1" "stuck"))
+             stuck))
+          (.then
+           (fn [result]
+             (is (= execution/error-message (::execution/message result)))
+             ((:resolve-exit! (get children "agent-1")) 1)
+             ((:resolve-exit! (get children "agent-2")) 0)
+             (done)))
+          (.catch
+           (fn [error]
+             (is false (str "cross-agent isolation rejected: " error))
+             (done)))))))
+
+(deftest deadline-before-ready-never-sends-expired-work
+  (async done
+    (let [options (atom nil)
+          child (fake-process 108)
+          _ (configure (fn [value]
+                         (reset! options value)
+                         (:process child)))
+          request (assoc (invocation "before-ready")
+                         ::execution/deadline-ms (+ (.now js/Date) 5))]
+      (-> (host/invoke! request)
+          (.then
+           (fn [result]
+             (is (= "The invocation was canceled."
+                    (get-in result [::execution/error
+                                    :seon.error/message])))
+             (is (= [execution/shutdown-message]
+                    (mapv ::execution/message @(:sent child)))
+                 "pending readiness is retired without sending invocation")
+             (feed! @options (:process child) (ready-message))
+             (js/Promise.
+              (fn [resolve-promise _]
+                (js/setTimeout resolve-promise 10)))))
+          (.then
+           (fn [_]
+             (is (not-any? #(= execution/invoke-message
+                                (::execution/message %))
+                           @(:sent child)))
+             (is (= ["SIGKILL"] @(:kills child)))
+             ((:resolve-exit! child) 1)
+             (done)))
+          (.catch
+           (fn [error]
+             (is false (str "pre-ready deadline rejected: " error))
+             (done)))))))

@@ -904,6 +904,41 @@
 
 (declare persisted-require-edges)
 
+(defn namespace-head
+  "Build one namespace form from its persisted ordinary require-edge rows."
+  {:malli/schema [:=> [:cat :keyword [:sequential :map]] :string]}
+  [ns-kw edges]
+  (let [specs (map (fn [{:seon.ns.require/keys [target alias refers refer-all?
+                                                as-alias?]}]
+                     (cond-> [(symbol (name target))]
+                       (and (symbol? alias) as-alias?) (conj :as-alias alias)
+                       (and (symbol? alias) (not as-alias?)) (conj :as alias)
+                       (seq refers) (conj :refer (vec (sort refers)))
+                       refer-all? (conj :refer :all)))
+                   (sort-by :seon.ns.require/target edges))
+        n (symbol (name ns-kw))]
+    (pr-str (if (seq specs)
+              (list 'ns n (apply list :require specs))
+              (list 'ns n)))))
+
+(defn namespace-source
+  "Return one loadable source string from an ordinary namespace row.
+
+   The row contains `:seon.ns/name`, optional `:seon.ns/source`, optional
+   `:seon.ns/require-edges`, and `:seon.fn/sources`. This is deliberately a
+   pure database-row projection so execution children need no Datahike value."
+  {:malli/schema [:=> [:cat :map] :string]}
+  [{:seon.ns/keys [name source require-edges]
+    :seon.fn/keys [sources]}]
+  (let [head (or (when-not (str/blank? source) source)
+                 (when (seq sources)
+                   (namespace-head name require-edges)))]
+    (->> (concat [head] sources)
+         (remove str/blank?)
+         (map str/trim)
+         distinct
+         (str/join "\n\n"))))
+
 (defn- synthesized-ns-head
   "An `(ns …)` head string rebuilt from `ns-kw`'s persisted require edges.
 
@@ -916,24 +951,9 @@
    2026-07-03: the first `::db/tx-data` home-ns fn to survive the C37
    gate failed the whole unit's replay). The persisted edge facts carry
    exactly the needed facts — rebuild the `(:require …)` clause from
-   `:seon.ns/require-edges` datoms."
+  `:seon.ns/require-edges` datoms."
   [db ns-kw]
-  (let [specs (map (fn [{:seon.ns.require/keys [target alias refers refer-all?
-                                                as-alias?]}]
-                     (cond-> [(symbol (name target))]
-                       ;; `:as-alias` edges MUST round-trip as `:as-alias` —
-                       ;; a plain `:as` would LOAD the (possibly nonexistent)
-                       ;; target on resume.
-                       (and (symbol? alias) as-alias?)       (conj :as-alias alias)
-                       (and (symbol? alias) (not as-alias?)) (conj :as alias)
-                       (seq refers)    (conj :refer (vec (sort refers)))
-                       refer-all?      (conj :refer :all)))
-                   (sort-by :seon.ns.require/target
-                            (persisted-require-edges db ns-kw)))
-        n     (symbol (name ns-kw))]
-    (pr-str (if (seq specs)
-              (list 'ns n (apply list :require specs))
-              (list 'ns n)))))
+  (namespace-head ns-kw (persisted-require-edges db ns-kw)))
 
 (defn reconstitute-ns-source
   "One loadable source STRING for agent-authored namespace `ns-kw`.
@@ -993,7 +1013,7 @@
          (distinct)
          (str/join "\n\n"))))
 
-(defn- guarded-load
+(defn- guarded-load*
   "`:load` fn for cljs.js — `boot/load` plus a post-load invariant
    re-assert and a host-bundle fallback. The bootstrap bundle's per-ns
    JS is goog.globalEval'd into the SHARED host runtime, so a load can
@@ -1041,7 +1061,7 @@
    is idempotent + cheap, so keep it uniform). Macro loads (`:macros` rc)
    and genuinely-absent nses rethrow, preserving the legible
    `Could not require X <- ns X not available` error."
-  [compile-state rc cb]
+  [compile-state authored-sources rc cb]
   (let [relink-cb (fn [result] (schema/relink-registry!) (cb result))]
     (try
       (boot/load compile-state rc relink-cb)
@@ -1066,12 +1086,65 @@
             (ns-live-on-globalthis? nm)
             (cb {:lang :js :source ""})
 
+            (contains? authored-sources (keyword nm))
+            (relink-cb {:lang :clj
+                        :source (get authored-sources (keyword nm))})
+
             (and (some? conn) (ns-rows-in-db? @conn nm))
             (relink-cb {:lang   :clj
                         :source (reconstitute-ns-source @conn (keyword nm))})
 
             :else
             (throw e)))))))
+
+(defn- guarded-load [compile-state rc cb]
+  (guarded-load* compile-state {} rc cb))
+
+(defn ^:async load-authored-program!
+  "Load one target and its reachable authored dependencies through cljs.js."
+  {:malli/schema [:=> [:cat :map] :any]}
+  [{:seon.execution/keys [schema-forms function-contracts namespace-rows
+                          function-symbol compile-state]}]
+  (let [compile-state (or compile-state (await (init-bootstrap!)))
+        sources (into {}
+                      (keep (fn [row]
+                              (let [source (namespace-source row)]
+                                (when-not (str/blank? source)
+                                  [(:seon.ns/name row) source]))))
+                      namespace-rows)
+        target-row (some (fn [row]
+                           (when (some #{function-symbol}
+                                       (:seon.fn/symbols row))
+                             row))
+                         namespace-rows)
+        target-ns (:seon.ns/name target-row)
+        target-source (get sources target-ns)]
+    (when-not target-source
+      (throw (ex-info "The target authored namespace has no source."
+                      {:seon.execution/function-symbol function-symbol
+                       :seon.error/kind :core-bug})))
+    (schema/activate-projection!
+     (schema/build-projection
+      (into {} (map (fn [[key form]] [key (reader/read-string form)]))
+            schema-forms)
+      (into {} (map (fn [[sym form]]
+                      [(symbol sym) (reader/read-string form)]))
+            function-contracts)))
+    (when-not (lookup-value function-symbol)
+      (await
+       (js/Promise.
+        (fn [resolve reject]
+          (cljs/eval-str
+           compile-state target-source (symbol (name target-ns))
+           {:eval cljs/js-eval
+            :load (partial guarded-load* compile-state sources)
+            :ns (symbol (name target-ns))
+            :context :statement
+            :def-emits-var true
+            :analyze-deps true}
+           (fn [{:keys [error]}]
+             (if error (reject error) (resolve nil))))))))
+    compile-state))
 
 ;; ============================================================
 ;; Transient eval-scaffolding ns names — the SINGLE defs. Every site

@@ -2,6 +2,7 @@
   (:require
    [cljs.test :refer [deftest is testing]]
    [seon.db :as db]
+   [seon.eval :as seval]
    [seon.execution :as execution]))
 
 (def digest (apply str (repeat 64 "a")))
@@ -20,7 +21,6 @@
    ::execution/function-source-identity
    {::execution/function-symbol 'my.render/view
     ::execution/source-digest digest}
-   ::execution/capabilities #{'my.render/view}
    ::execution/input {:my.render/value 1}
    ::execution/deadline-ms 9999999999999
    ::execution/result-limit-bytes 4096})
@@ -47,8 +47,7 @@
   (is (false? (execution/valid-parent-message?
                (assoc invocation ::execution/input
                       {:my.render/value (js/Promise.resolve 1)}))))
-  (is (execution/valid-parent-message?
-       (assoc invocation ::execution/capabilities #{}))))
+  (is (execution/valid-parent-message? invocation)))
 
 (deftest bounded-results-are-settled-ordinary-data
   (let [result (execution/bounded-result {:my.render/value 1} 4096)]
@@ -67,6 +66,42 @@
       (is (false? (::execution/ok? result)))
       (is (< 16 (get-in result [::execution/error :seon.error/data
                                 ::execution/result-bytes]))))))
+
+(deftest authored-program-identity-is-order-independent
+  (let [edge-a {:db/id 1
+                :seon.ns.require/target :my.dep
+                :seon.ns.require/refers #{'z 'a}}
+        edge-b {:db/id 2 :seon.ns.require/target :seon.db
+                :seon.ns.require/alias 'db}
+        row-a ["my.render/view" "(defn view [_] :ok)" :my.render ""
+               {:seon.ns/require-edges #{edge-a edge-b}}]
+        row-b ["my.render/helper" "(defn helper [] 1)" :my.render ""
+               {:seon.ns/require-edges #{edge-b edge-a}}]
+        first-value (execution/canonical-program
+                     [row-a row-b]
+                     [[:z/schema ":string"] [:a/schema ":int"]]
+                     [["my.render/view" "[:=> [:cat :map] :any]"]])
+        second-value (execution/canonical-program
+                      [row-b row-a]
+                      [[:a/schema ":int"] [:z/schema ":string"]]
+                      [["my.render/view" "[:=> [:cat :map] :any]"]])]
+    (is (= first-value second-value))
+    (is (= (execution/source-digest first-value)
+           (execution/source-digest second-value)))))
+
+(deftest ordinary-namespace-source-preserves-one-compile-unit
+  (let [source (seval/namespace-source
+                {:seon.ns/name :my.render
+                 :seon.ns/source ""
+                 :seon.ns/require-edges
+                 [{:seon.ns.require/target :my.dep
+                   :seon.ns.require/alias 'dep}]
+                 :seon.fn/sources
+                 ["(def shared 1)\n(defn view [_] (dep/show shared))"
+                  "(defn other [_] shared)"]})]
+    (is (.startsWith source "(ns my.render (:require [my.dep :as dep]))"))
+    (is (= 1 (count (re-seq #"\(def shared 1\)" source)))
+        "a batch source is deduplicated rather than split per function")))
 
 (deftest every-control-message-is-versioned-and-closed
   (is (execution/valid-parent-message?
@@ -125,6 +160,39 @@
          ::execution/invocation-id "invoke-1"})
        (decoded-sender messages) (fn [_]) 0)
       (is (= 2 (count @messages)))
+      (is (= 1 @closes)))))
+
+(deftest child-timeout-poisons-the-process-before-a-late-invocation
+  (let [token (js-obj)
+        messages (atom [])
+        exits (atom [])
+        closes (atom 0)
+        state (atom {::execution/startup startup
+                     ::execution/active
+                     {::execution/token token
+                      ::execution/invocation invocation}})
+        send-message! (decoded-sender messages)
+        exit! #(swap! exits conj %)]
+    (with-redefs [db/close-session! (fn [] (swap! closes inc) true)]
+      (@#'execution/timeout-invocation!
+       state token invocation send-message! exit!)
+      (is (true? (::execution/poisoned? @state)))
+      (is (nil? (::execution/active @state)))
+      (is (= [1] @exits))
+      (is (= "The invocation timed out."
+             (get-in (first @messages)
+                     [::execution/error :seon.error/message])))
+
+      ;; Even before the injected event-loop-flush exit runs, a late parent
+      ;; message cannot enter work in this compiler/global process.
+      (@#'execution/receive!
+       state
+       (execution/encode-message
+        (assoc invocation ::execution/invocation-id "after-timeout"))
+       send-message! exit! 0)
+      (is (= "The execution child is retiring."
+             (get-in (second @messages)
+                     [::execution/error :seon.error/message])))
       (is (= 1 @closes)))))
 
 (deftest shutdown-closes-the-session-before-exit
