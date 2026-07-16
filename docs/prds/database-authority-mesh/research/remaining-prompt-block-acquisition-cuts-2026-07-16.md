@@ -31,7 +31,7 @@ acquisition are owned by their separate audits.
 |---|---|---|
 | Seon | `65d8c62c`, with prompt entrypoint work visible in `src/seon/execution/runtime.cljs` | `seon.db` remains the application API; the child inherits one coordinate and returns ordinary data. |
 | Datahike | `670cd1ada40462cb5927f0dc687f6b3a95f9e13f` | Query maps support `:order-by`, `:offset`, and `:limit`; `pull-many` parses one selector and returns input-aligned eager values, including nil for missing well-formed refs. |
-| Seon database protocol | current protocol version 6 in `src/seon/db/protocol.cljc` | `execute-many` accepts 1–64 independent query, pull, pull-many, schema, or index-page members at one coordinate, with a 4 MiB aggregate result bound. |
+| Seon database protocol | current protocol version 7 in `src/seon/db/protocol.cljc` | `execute-many` accepts 1–64 independent query, pull, pull-many, schema, or index-page members at one coordinate, with a 4 MiB aggregate result bound. |
 | ClojureScript | `946d75f3483c0c8e784e6668bff2c71a25619a77` | `^:async` plus `await` is the honest child-side composition seam; synchronous formatting continues over ordinary values. |
 
 First-party owners read for this audit:

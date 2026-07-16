@@ -166,6 +166,11 @@ The first two data-dependent prompt cohorts are grounded in
 existing namespace/transcript formatting owners, replace repeated lazy local
 traversal with bounded coordinate-pinned acquisition, and retain the dependent
 second request where later inputs cannot exist before discovery.
+The corresponding canvas, menu/typeahead, subagent, warning, plan, and authored
+slot cuts are [[research/remaining-prompt-block-acquisition-cuts-2026-07-16]].
+They keep query definitions with each block owner, run selected owners
+concurrently, and reject both a global prompt planner and per-entity remote
+traversal.
 The final ordinary-data async database surface and its eight concrete closure
 gaps are [[research/remote-seon-db-contract-freeze-2026-07-16]]. The exact Bun
 child lifecycle, zero-process dormant-agent wake seam, and density proof are
