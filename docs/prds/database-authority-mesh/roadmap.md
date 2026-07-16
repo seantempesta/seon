@@ -952,9 +952,9 @@ and consumer inventory may run in parallel:
   exact framed bytes consume retained global/session output capacity.
 - Slot 3: the remote `seon.db` contract is frozen. Refill with its protocol and
   dependency gaps: strict temporal `t`, aggregate execute-many weight,
-  nonthrowing ordered pull-many, generated-manifest schema, duplicate live
-  interest rejection, recursive wire values, compact transaction replies, and
-  truthful resolved async schemas.
+  nonthrowing ordered pull-many, compact transaction replies, and truthful
+  resolved async schemas. Generated-manifest schema, duplicate live interest
+  rejection, and recursive ordinary-wire validation are complete.
 - Slot 4: Bun child supervision is source-grounded. Refill after the database
   facade with a dedicated child artifact and the zero-process dormant-agent
   trigger falsifier; IPC never becomes a database broker.
@@ -1034,6 +1034,17 @@ The retained fanout falsifier registers 1,000 exact datom-pattern interests on
 one committed scope and proves one matching transaction addresses exactly one
 physical session. Filtering may inspect the changed attribute's candidates,
 but unrelated sessions perform no send or Transit encode.
+
+Protocol v6 now applies one recursive ordinary-wire predicate at the canonical
+request and response seam. It preserves eager persistent maps, vectors, sets,
+lists, bytes, and Transit scalars while rejecting lazy sequences, records,
+functions, derefables, futures/Promises, throwables/errors, and unsupported host
+objects before encoding. The generated-ID manifest is one closed portable
+shape with qualified identity/result keys, canonical Seon IDs, nonempty
+dependent lookup refs when present, and unique result keys. Commit `e9a9a793`
+passes 12 CLJ protocol/generated-ID tests with 86 assertions and 3 focused CLJS
+tests with 13 assertions. The writer's older private ordinary-data walk is now
+duplicate policy to delete during the remote-facade cut, not a second contract.
 
 Integrated proof that closes it:
 Schema/index/history/selective-interest conformance, including forward/reverse
