@@ -160,6 +160,12 @@ agent child is [[research/async-render-authority-seam-2026-07-16]].
 The data-driven correction that selects one trusted compiled child prompt
 owner, rejects the fixed seed-count batch, and preserves the stable `seon.db`
 facade is [[research/compiled-child-prompt-owner-2026-07-16]].
+The first two data-dependent prompt cohorts are grounded in
+[[research/namespaces-remote-acquisition-cut-2026-07-16]] and
+[[research/transcript-remote-acquisition-cut-2026-07-16]]. They preserve the
+existing namespace/transcript formatting owners, replace repeated lazy local
+traversal with bounded coordinate-pinned acquisition, and retain the dependent
+second request where later inputs cannot exist before discovery.
 The final ordinary-data async database surface and its eight concrete closure
 gaps are [[research/remote-seon-db-contract-freeze-2026-07-16]]. The exact Bun
 child lifecycle, zero-process dormant-agent wake seam, and density proof are
@@ -1221,9 +1227,12 @@ is prohibited.
   shapes appear synchronous.
 - **Earliest unsettled contract:** every async outer render, interaction, eval,
   and prompt owner acquires one coordinate-pinned invocation and calls the one
-  supervised child interface. Recursive render/context functions receive only
-  ordinary precomputed results and remain synchronous. No caller invokes SCI,
-  discovers a local database value, or introduces a render-only executor.
+  supervised child interface. The compiled prompt composition root and its
+  literal ordinary-data formatter are settled; the next boundary is resolving
+  the symbol-backed namespace and transcript blocks inside that same child.
+  Recursive render/context functions receive only ordinary precomputed results
+  and remain synchronous. No caller invokes SCI, discovers a local database
+  value, or introduces a render-only executor.
 - **Integrated proof that closes it:** commit `86db045d` supplies deterministic
   authored-program identity, target-plus-reachable `cljs.js` loading, exact
   symbol/source/agent/REPL verification, one compiler state per child, fresh
@@ -1283,10 +1292,22 @@ is prohibited.
   that value across release retry. Its focused artifact compiles; runtime
   assertions remain blocked before namespace startup by the intentional legacy
   replica import.
-- **Next refill:** migrate the outer authored render owners first, then
-  interaction and eval through that same child owner and land the smallest
-  data-dependent prompt acquisition with immutable retry inputs. In parallel, finish
-  restore/readiness,
+  Commit `9ff4b1a1` adds the one static execution composition root for the
+  default and downstream artifacts and the fixed compiled prompt function. It
+  performs one inherited-coordinate `seon.db/pull` of database-owned prompt
+  inputs, then preserves the existing pure omission, ordering, caps, brackets,
+  and cache-boundary formatting over ordinary data. Database failures remain
+  explicit block errors and unresolved symbol slots remain local errors until
+  their owning acquisition lands. The focused execution gate passes 26 tests
+  and 115 assertions; both execution artifacts compile and include the shipped
+  symbol-backed block owners through ordinary Shadow reachability. It adds no
+  production caller or compatibility route.
+- **Next refill:** implement the namespace and transcript acquisitions through
+  the stable asynchronous `seon.db` facade, retaining their existing pure
+  formatting owners and data-dependent two-stage reads. Then migrate the
+  remaining canvas, menu/typeahead, plan, warnings, subagent, and authored
+  slots before wiring one complete prompt result into turn/debug. In parallel,
+  finish restore/readiness,
   quiescence, and session close. Only then switch client open atomically and
   delete replica, publisher/replay, Node adapters, SCI render reconstruction,
   synchronous database-value arities, and compatibility reachability.

@@ -49,12 +49,15 @@ order: exact Datahike identity and capability ownership; fair multi-database
 execution; protocol and persistent native sessions; asynchronous `seon.db`;
 isolated Bun children; atomic replica/feed removal; then density, packaging, and
 the measured one-versus-2/4-authority-shard decision. Its current earliest
-unsettled contract is coordinate-pinned authored source loading and compiled
-execution inside the now-supervised per-agent Bun child. Commit `86db045d`
-now owns deterministic target-plus-reachable loading, source/provenance
-verification, parent deadlines, timeout poisoning, and cross-agent isolation;
-the unsettled boundary has moved to replacing every outer authored
-render/action/prompt caller while keeping recursive rendering synchronous.
+unsettled contract is coordinate-pinned prompt acquisition inside the
+now-supervised per-agent Bun child. Authored source loading, compiled execution
+identity, and the static prompt composition root are settled. Commit `9ff4b1a1`
+now owns the default/downstream entrypoint, one inherited-coordinate `seon.db`
+acquisition, and the pure ordinary-data formatting tail; the unsettled boundary
+has moved to resolving its database-driven namespace, transcript, and remaining
+symbol-backed blocks before one complete result can replace the turn/debug
+caller. The public integration point remains the stable asynchronous `seon.db`
+facade; Datahike APIs and values remain JVM-internal.
 Commit `551723fc`
 moves recovery, generated-ID allocation, and resumable-agent acquisition onto
 the settled authority session. Commit `6ccd25df` closes its post-boot
