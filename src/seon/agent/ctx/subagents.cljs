@@ -25,6 +25,7 @@
     [seon.ai.tokens :as tokens]
     [seon.config :as config]
     [seon.db :as db]
+    [seon.db.protocol :as protocol]
     [seon.derive :as derive]))
 
 ;; ============================================================
@@ -150,23 +151,40 @@
 ;; Piece 4 — orphaned-agents (ROOT-ONLY, wired in :seon.config/root-context).
 ;; ============================================================
 
-(defn- orphan-rows
-  "[child-id parent-id] pairs in `db`: LIVE agents (not terminated) whose
-   `:seon.agent/parent` IS terminated. Sorted for a stable render."
-  [db]
-  (->> (db/query {:seon.db/db db
-                  :seon.db/query
-                  '[:find ?cid ?pid
-                    :where
-                    [?c :seon.agent/parent ?p]
-                    [?p :seon.agent/id ?pid]
-                    [?p :seon.agent/terminated-at _]
-                    [?c :seon.agent/id ?cid]
-                    (not [?c :seon.agent/terminated-at _])]})
-       (sort-by first)
-       vec))
+(def ^:private orphan-query
+  '[:find ?cid ?pid ?purpose
+    :where
+    [?c :seon.agent/parent ?p]
+    [?p :seon.agent/id ?pid]
+    [?p :seon.agent/terminated-at _]
+    [?c :seon.agent/id ?cid]
+    (not [?c :seon.agent/terminated-at _])
+    [(get-else $ ?c :seon.agent/purpose "") ?purpose]])
 
-(defn orphaned-agents-block
+(def ^:private orphan-open-run-query
+  '[:find ?cid ?paused
+    :where
+    [?c :seon.agent/parent ?p]
+    [?p :seon.agent/terminated-at _]
+    [?c :seon.agent/id ?cid]
+    (not [?c :seon.agent/terminated-at _])
+    [?c :seon.agent/run ?run]
+    [?run :seon.agent.run/status :open]
+    [(get-else $ ?run :seon.agent.run/paused-at :running) ?paused]])
+
+(defn- orphan-member [query-form]
+  {::protocol/operation protocol/query-operation
+   ::protocol/query-form query-form
+   :datahike.resource/max-work 2000000
+   :datahike.resource/max-results 4096
+   :datahike.resource/max-result-weight 524288})
+
+(defn- orphan-member-result [member]
+  (when (true? (::protocol/success? member))
+    (or (::protocol/result member)
+        (:datahike.query/result member))))
+
+(defn ^:async orphaned-agents-block
   "LIVE agents whose parent is TERMINATED — root cluster only (Piece 4).
 
    One line each: id · derived state · purpose · parent id. Empty → absent
@@ -174,12 +192,26 @@
    per case with the existing functions (no cascade-terminate, no reparenting:
    observe first). Root-only by config wiring (rides `:seon.config/root-context`,
    like `:core-faults`). Pure read of the db."
-  {:malli/schema [:=> [:cat :seon.render/section-request] :string]}
-  [{:seon.db/keys [db]}]
-  (let [db   (or db @db/*conn*)
-        rows (orphan-rows db)]
-    (if (empty? rows)
+  {:malli/schema [:=> [:cat :seon.render/section-request :any] :string]}
+  [_input _invoke-selected!]
+  (let [acquired (await (db/execute-many
+                          {::db/members
+                           [(orphan-member orphan-query)
+                            (orphan-member orphan-open-run-query)]
+                           ::db/max-result-weight 1048576}))
+        [orphan-member-result* run-member-result*] (::db/results acquired)
+        rows (orphan-member-result orphan-member-result*)
+        open-runs (orphan-member-result run-member-result*)
+        open-by-id (into {} open-runs)]
+    (cond
+      (or (nil? rows) (nil? open-runs))
+      (str "[orphaned-agents] render failed: "
+           (pr-str (::db/results acquired)))
+
+      (empty? rows)
       ""
+
+      :else
       (str ";;; ORPHANED AGENTS — " (count rows)
            " live agent" (when (> (count rows) 1) "s")
            " whose parent is TERMINATED (root-only)\n"
@@ -187,11 +219,12 @@
            "(terminate / re-task / leave).\n"
            (str/join
              "\n"
-             (map (fn [[cid pid]]
-                    (let [ent     (db/entity {:seon.db/db db
-                                              :seon.db/ref [:seon.agent/id cid]})
-                          purpose (:seon.agent/purpose ent)
-                          state   (derive/derive-state db cid)]
+             (map (fn [[cid pid purpose]]
+                    (let [paused (get open-by-id cid ::absent)
+                          state (cond
+                                  (= ::absent paused) :idle
+                                  (= :running paused) :running
+                                  :else :paused)]
                       (str "; - " (state-dot state) " " cid " [" (name state) "]"
                            (when (and (string? purpose) (seq purpose))
                              (str " " (clip purpose 30)))
