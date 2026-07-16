@@ -102,7 +102,7 @@
                   ::protocol/attachment attachment
                   ::protocol/coordinate point
                   ::protocol/members members})]
-    (is (= 4 protocol/current-version))
+    (is (= 5 protocol/current-version))
     (is (protocol/valid-request? request))
     (is (= request (uds/decode (uds/encode request))))
     (is (false? (protocol/valid-request?
@@ -123,6 +123,34 @@
                  (assoc request ::protocol/members (vec (repeat 65
                                                               (first members))))))
         "the semantic member bound is enforced before admission")))
+
+(deftest database-acquisition-is-closed-correlated-and-transit-stable
+  (let [point {::coordinate/database-id (random-uuid)
+               ::coordinate/branch :db
+               ::coordinate/commit-id (random-uuid)
+               ::coordinate/t 42}
+        attachment (coordinate/attachment point)
+        request (protocol/acquire-database-request
+                 {::protocol/request-id "acquire/alpha"
+                  ::protocol/database-name "alpha"})
+        response (protocol/success
+                  {::protocol/request-id "acquire/alpha"
+                   ::protocol/database-name "alpha"
+                   ::protocol/attachment attachment
+                   ::protocol/coordinate point
+                   ::protocol/acquired? true})]
+    (is (protocol/valid-request? request))
+    (is (protocol/valid-response? response))
+    (is (= request (uds/decode (uds/encode request))))
+    (is (= response (uds/decode (uds/encode response))))
+    (is (false? (protocol/valid-request?
+                 (assoc request :unexpected/field true)))
+        "acquisition requests reject transport-private or unknown fields")
+    (is (false? (protocol/valid-response?
+                 (assoc response :unexpected/field true)))
+        "acquisition responses reject transport-private or unknown fields")
+    (is (false? (protocol/valid-response?
+                 (assoc response ::protocol/acquired? :yes))))))
 
 (deftest transaction-coordinate-request-and-response-are-transit-stable
   (let [head

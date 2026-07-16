@@ -28,6 +28,8 @@
 (def cancel-operation :seon.db.protocol.operation/cancel)
 (def ensure-database-operation
   :seon.db.protocol.operation/ensure-database)
+(def acquire-database-operation
+  :seon.db.protocol.operation/acquire-database)
 (def observe-database-lifecycle-operation
   :seon.db.protocol.operation/observe-database-lifecycle)
 (def create-branch-operation :seon.db.protocol.operation/create-branch)
@@ -88,7 +90,7 @@
 (def unknown-status :seon.db.protocol.status/unknown)
 (def feed-behind-status :seon.db.protocol.status/feed-behind)
 
-(def current-version 4)
+(def current-version 5)
 
 (def writer-process :seon.dev.process/writer)
 
@@ -105,6 +107,7 @@
   execute-many-operation
   cancel-operation
   ensure-database-operation
+  acquire-database-operation
   observe-database-lifecycle-operation
   create-branch-operation
   release-database-operation
@@ -166,6 +169,7 @@
 (schema/register! ::target-database-name ::database-name)
 (schema/register! ::created? :boolean)
 (schema/register! ::adopted? :boolean)
+(schema/register! ::acquired? :boolean)
 (schema/register! ::released? :boolean)
 (schema/register! ::deleted? :boolean)
 (schema/register! ::complete? :boolean)
@@ -405,6 +409,12 @@
   [::coordinate/attachment {:optional true} ::coordinate/attachment]
   [::database-path {:optional true} ::database-path]])
 (schema/register!
+ ::acquire-database-request
+ [:map {:closed true}
+  [::operation [:= acquire-database-operation]]
+  [::request-id ::request-id]
+  [::database-name ::database-name]])
+(schema/register!
  ::observe-database-lifecycle-request
  [:map {:closed true}
   [::operation [:= observe-database-lifecycle-operation]]
@@ -487,6 +497,7 @@
   [execute-many-operation ::execute-many-request]
   [cancel-operation ::cancel-request]
   [ensure-database-operation ::ensure-database-request]
+  [acquire-database-operation ::acquire-database-request]
   [observe-database-lifecycle-operation
    ::observe-database-lifecycle-request]
   [create-branch-operation ::create-branch-request]
@@ -595,6 +606,15 @@
   [::backend ::backend]
   [::database-path {:optional true} ::database-path]])
 (schema/register!
+ ::acquire-database-response
+ [:map {:closed true}
+  [::success? [:= true]]
+  [::request-id ::request-id]
+  [::database-name ::database-name]
+  [::attachment ::attachment]
+  [::coordinate ::coordinate]
+  [::acquired? ::acquired?]])
+(schema/register!
  ::observe-database-lifecycle-response
  [:map {:closed true}
   [::success? [:= true]]
@@ -691,6 +711,7 @@
   ::execute-many-response
   ::cancel-response
   ::ensure-database-response
+  ::acquire-database-response
   ::observe-database-lifecycle-response
   ::create-branch-response
   ::release-database-response
@@ -715,6 +736,11 @@
   [::backend ::backend]
   [::coordinate/attachment {:optional true} ::coordinate/attachment]
   [::database-path {:optional true} ::database-path]])
+(schema/register!
+ ::acquire-database-request-input
+ [:map {:closed true}
+  [::request-id ::request-id]
+  [::database-name ::database-name]])
 (schema/register!
  ::request-id-input
  [:map {:closed true}
@@ -909,6 +935,13 @@
            ::backend backend}
     attachment (assoc ::coordinate/attachment attachment)
     database-path (assoc ::database-path database-path)))
+
+(defn acquire-database-request
+  "Construct one database acquisition for the current transport connection."
+  {:malli/schema [:=> [:cat ::acquire-database-request-input]
+                  ::acquire-database-request]}
+  [input]
+  (assoc input ::operation acquire-database-operation))
 
 (defn observe-database-lifecycle-request
   "Construct one exact native database-lifecycle observation request."
