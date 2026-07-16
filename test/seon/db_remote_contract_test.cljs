@@ -43,24 +43,20 @@
                         ::protocol/acquired? true})
 
       :seon.db.protocol.operation/resolve-head
-      (success request {::protocol/database-name name
-                        ::db/db current})
+      (success request {::db/db current})
 
       :seon.db.protocol.operation/query
-      (success request {::protocol/database-name name
-                        :datahike.query/result
+      (success request {:datahike.query/result
                         (get query-results (::protocol/query-form request))
                         :datahike.query/attribute-dependencies #{}
                         :datahike.query/cache-evidence {}
                         :datahike.query/resource-evidence {}})
 
       :seon.db.protocol.operation/pull
-      (success request {::protocol/database-name name
-                        ::protocol/result {:example/id 1}})
+      (success request {::protocol/result {:example/id 1}})
 
       :seon.db.protocol.operation/pull-many
-      (success request {::protocol/database-name name
-                        ::protocol/result [{:example/id 1} nil]})
+      (success request {::protocol/result [{:example/id 1} nil]})
 
       :seon.db.protocol.operation/index-page
       (success request
@@ -79,8 +75,7 @@
                 :tx-meta {:seon.db/user [:seon.agent/id "root"]}})
 
       :seon.db.protocol.operation/listen
-      (success request {::protocol/database-name name
-                        ::protocol/listening? true})
+      (success request {::protocol/listening? true})
 
       :seon.db.protocol.operation/unlisten
       (success request {::protocol/target-request-id
@@ -94,9 +89,7 @@
                         ::protocol/running? false})
 
       :seon.db.protocol.operation/release-database
-      (success request {::protocol/target-database-name
-                        (::protocol/target-database-name request)
-                        ::protocol/released? true})
+      (success request {::protocol/released? true})
 
       (success request {}))))
 
@@ -179,11 +172,11 @@
                           (fn [secondary]
                             (is (= "experiment-17" (:db-name secondary)))
                             (is (= (:datahike/commit-id database)
-                                   (:datahike/commit-id secondary)))))))))))
+                                   (:datahike/commit-id secondary))))))))))))
         (.then (fn [_] (done)))
         (.catch (fn [error]
                   (is false (str "database-value contract rejected: " error))
-                  (done)))))))
+                  (done))))))
 
 (deftest positional-and-namespaced-map-arities-form-the-same-requests
   (async done
@@ -211,7 +204,7 @@
                                 (is (= [database 4]
                                        (::protocol/arguments positional)))
                                 (is (= (dissoc positional ::protocol/request-id)
-                                       (dissoc mapped ::protocol/request-id)))))))))
+                                       (dissoc mapped ::protocol/request-id))))))))))
                   (.then (fn [_] (db/pull database '[*] 1)))
                   (.then (fn [value] (is (= {:example/id 1} value))
                            (db/pull {::db/db database
@@ -231,14 +224,14 @@
                            (db/index-page
                             database
                             {::db/index :eavt ::db/direction :forward
-                             ::db/index-limit 2})))
+                             ::db/limit 2})))
                   (.then
                    (fn [page]
                      (is (= [[1 :example/id "one" 536870913 true]]
                             (:datahike.index-page/datoms page)))
                      (db/index-page
                       {::db/db database ::db/index :eavt
-                       ::db/direction :forward ::db/index-limit 2})))
+                       ::db/direction :forward ::db/limit 2})))
                   (.then
                    (fn [page]
                      (is (true? (:datahike.index-page/complete? page))))))))
@@ -308,10 +301,11 @@
   (async done
     (-> (with-recording-authority
           {'[:find ?e :where [?e :example/id]] #{[1]}}
-          (fn [_]
+          (fn [{::keys [requests]}]
             (-> (open!)
                 (.then
                  (fn [_]
+                   (reset! requests [])
                    (let [query-result
                          (db/query '[:find ?e :where [?e :example/id]])
                          pull-result (db/pull '[*] 1)
@@ -320,27 +314,30 @@
                      (is (every? #(instance? js/Promise %)
                                  [query-result pull-result transact-result]))
                      (js/Promise.all #js [query-result pull-result
-                                          transact-result]))))))
-        (.then
-         (fn [values]
-           (let [report (aget values 2)]
-             (is (= #{:db-before :db-after :tx-data :tempids :tx-meta}
-                    (set (keys report))))
-             (is (= database (:db-after report)))
-             (is (= [[1 :example/id "one" 536870913 true]]
-                    (:tx-data report))))
-           (db/transact! {::db/tx-data [{:db/ident :example/id}]
-                          ::db/tx-meta
-                          {:seon.db/user [:seon.agent/id "root"]}})))
-        (.then
-         (fn [report]
-           (is (= #{:db-before :db-after :tx-data :tempids :tx-meta}
-                  (set (keys report))))
-           (done)))
+                                          transact-result]))))
+                (.then
+                 (fn [values]
+                   (let [report (aget values 2)]
+                     (is (= #{:db-before :db-after :tx-data :tempids :tx-meta}
+                            (set (keys report))))
+                     (is (= database (:db-after report)))
+                     (is (= [[1 :example/id "one" 536870913 true]]
+                            (:tx-data report))))
+                   (db/transact! {::db/tx-data [{:db/ident :example/id}]
+                                  ::db/tx-meta
+                                  {:seon.db/user [:seon.agent/id "root"]}})))
+                (.then
+                 (fn [report]
+                   (is (= #{:db-before :db-after :tx-data :tempids :tx-meta}
+                          (set (keys report))))
+                   (is (empty? (operation-requests
+                                @requests protocol/resolve-head-operation))
+                       "the cached latest database adds no read-before-call hop"))))))
+        (.then (fn [_] (done)))
         (.catch (fn [error]
                   (is false (str "authority operation rejected instead of resolving: "
                                  error))
-                  (done)))))))
+                  (done))))))
 
 (deftest listener-registration-replacement-and-unlisten-are-session-owned
   (async done
@@ -372,7 +369,7 @@
         (.then (fn [_] (done)))
         (.catch (fn [error]
                   (is false (str "listener lifecycle contract rejected: " error))
-                  (done)))))))
+                  (done))))))
 
 (deftest cancel-and-release-use-public-request-and-database-values
   (async done
@@ -402,8 +399,8 @@
                      (let [[cancel release] @requests]
                        (is (= "query-17" (::protocol/target-request-id cancel)))
                        (is (= "experiment-17"
-                              (::protocol/target-database-name release)))))))))
+                              (get-in release [::db/db :db-name]))))))))))
         (.then (fn [_] (done)))
         (.catch (fn [error]
                   (is false (str "cancel/release contract rejected: " error))
-                  (done)))))))
+                  (done))))))

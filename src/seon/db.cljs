@@ -20,36 +20,25 @@
 (schema/register! ::opts :map)
 (schema/register! ::tx-meta :map)
 (schema/register! ::coordinate :seon.db.coordinate/coordinate)
-(schema/register! ::expected-coordinate ::coordinate)
 (schema/register! ::query-form [:or [:vector :any] :map :string])
 (schema/register! ::query :any)
 (schema/register! ::args [:vector :any])
-(schema/register! ::pull-pattern [:vector :any])
-(schema/register! ::ref :any)
-(schema/register! ::refs [:vector :any])
+(schema/register! ::selector [:vector :any])
+(schema/register! ::eid :any)
+(schema/register! ::eids [:vector :any])
 (schema/register! ::max-work [:int {:min 1}])
 (schema/register! ::max-results [:int {:min 1}])
 (schema/register! ::max-result-weight [:int {:min 1}])
-(schema/register! ::history? :boolean)
 (schema/register! ::members :seon.db.protocol/members)
 (schema/register! ::results :seon.db.protocol/results)
 (schema/register! ::index [:enum :eavt :aevt :avet])
 (schema/register! ::components [:vector :any])
-(schema/register! ::index-limit [:int {:min 1 :max 200}])
+(schema/register! ::limit [:int {:min 1 :max 200}])
 (schema/register! ::direction :seon.db.protocol/direction)
 (schema/register! ::cursor :seon.db.protocol/cursor)
-(schema/register! ::complete? :boolean)
-(schema/register! ::datoms :seon.db.protocol/datoms)
 (schema/register! ::installed-schema :seon.db.protocol/schema)
 (schema/register! ::user :seon.db/ref)
 (schema/register! ::process :seon.db/ref)
-(schema/register! ::ok? :boolean)
-(schema/register! ::tempids :map)
-(schema/register! ::tx :int)
-(schema/register! ::tx-count [:int {:min 0}])
-(schema/register! ::added [:int {:min 0}])
-(schema/register! ::retracted [:int {:min 0}])
-(schema/register! ::error :map)
 (schema/register! ::key :any)
 (schema/register! ::handler 'fn?)
 (schema/register! ::datom-patterns :seon.db.protocol/datom-patterns)
@@ -57,7 +46,6 @@
 (schema/register! ::database-name :seon.db.protocol/database-name)
 (schema/register! ::backend :seon.db.protocol/backend)
 (schema/register! ::database-path :seon.db.protocol/database-path)
-(schema/register! ::attachment :seon.db.coordinate/attachment)
 (schema/register! ::capabilities :seon.db.protocol/capabilities)
 (schema/register! ::session :seon.db.transport.uds/session)
 (schema/register! ::thunk 'fn?)
@@ -67,57 +55,62 @@
  ::transact-request
  [:map {:closed true}
   [::tx-data ::tx-data]
+  [::db {:optional true} :seon.db/db]
+  [::expected-db {:optional true} :seon.db/expected-db]
+  [::tx-meta {:optional true} ::tx-meta]
   [::opts {:optional true} ::opts]
-  [::expected-coordinate {:optional true} ::expected-coordinate]
   [:seon.db.id/generated-candidates {:optional true}
    :seon.db.id/generated-candidates]])
 (schema/register!
  ::transact-response
- [:or
-  [:map {:closed false}
-   [::ok? [:= true]]
-   [::coordinate ::coordinate]
-   [::tempids ::tempids]
-   [::tx ::tx]
-   [::tx-count ::tx-count]
-   [::added ::added]
-   [::retracted ::retracted]]
-  [:map {:closed true}
-   [::ok? [:= false]]
-   [::error ::error]]])
+ [:map {:closed true}
+  [:db-before :db-before]
+  [:db-after :db-after]
+  [:tx-data :tx-data]
+  [:tempids :tempids]
+  [:tx-meta :tx-meta]
+  [:seon.db.id/eids {:optional true} :seon.db.id/eids]
+  [:seon.db.id/recovered-commit?
+   {:optional true} :seon.db.id/recovered-commit?]])
 (schema/register!
  ::query-request
  [:map {:closed true}
   [::query ::query-form]
+  [::db {:optional true} :seon.db/db]
   [::args {:optional true} ::args]
   [::max-work {:optional true} ::max-work]
   [::max-results {:optional true} ::max-results]
-  [::max-result-weight {:optional true} ::max-result-weight]
-  [::history? {:optional true} ::history?]
-  [::coordinate {:optional true} ::coordinate]])
+  [::max-result-weight {:optional true} ::max-result-weight]])
 (schema/register!
  ::pull-request
  [:map {:closed true}
-  [::pull-pattern ::pull-pattern]
-  [::ref ::ref]
+  [::selector ::selector]
+  [::eid ::eid]
+  [::db {:optional true} :seon.db/db]
   [::max-work {:optional true} ::max-work]
   [::max-results {:optional true} ::max-results]
-  [::max-result-weight {:optional true} ::max-result-weight]
-  [::coordinate {:optional true} ::coordinate]])
+  [::max-result-weight {:optional true} ::max-result-weight]])
 (schema/register!
  ::pull-many-request
  [:map {:closed true}
-  [::pull-pattern ::pull-pattern]
-  [::refs ::refs]
+  [::selector ::selector]
+  [::eids ::eids]
+  [::db {:optional true} :seon.db/db]
   [::max-work {:optional true} ::max-work]
   [::max-results {:optional true} ::max-results]
-  [::max-result-weight {:optional true} ::max-result-weight]
-  [::coordinate {:optional true} ::coordinate]])
+  [::max-result-weight {:optional true} ::max-result-weight]])
+(schema/register!
+ ::entity-request
+ [:map {:closed true}
+  [::eid ::eid]
+  [::db {:optional true} :seon.db/db]
+  [::max-work {:optional true} ::max-work]
+  [::max-results {:optional true} ::max-results]
+  [::max-result-weight {:optional true} ::max-result-weight]])
 (schema/register!
  ::execute-many-request
  [:map {:closed true}
   [::members ::members]
-  [::coordinate {:optional true} ::coordinate]
   [::max-result-weight {:optional true} ::max-result-weight]])
 (schema/register!
  ::index-page-request
@@ -125,32 +118,27 @@
   [::index ::index]
   [::components {:optional true} ::components]
   [::direction ::direction]
-  [::index-limit ::index-limit]
+  [::limit ::limit]
   [::cursor {:optional true} ::cursor]
-  [::history? {:optional true} ::history?]
   [::max-result-weight {:optional true} ::max-result-weight]
-  [::coordinate {:optional true} ::coordinate]])
+  [::db {:optional true} :seon.db/db]])
 (schema/register!
  ::knn-search-request
  [:map {:closed true}
   [::protocol/query ::protocol/query]
   [::protocol/limit ::protocol/limit]
   [::protocol/entity-ids {:optional true} ::protocol/entity-ids]
-  [::coordinate {:optional true} ::coordinate]])
+  [::db {:optional true} :seon.db/db]])
 (schema/register!
  ::listen-request
  [:map {:closed true}
   [::handler ::handler]
+  [::db {:optional true} :seon.db/db]
   [::key {:optional true} ::key]
   [::query {:optional true} ::query-form]
   [::datom-patterns {:optional true} ::datom-patterns]])
-(schema/register!
- ::listen-response
- [:map {:closed true}
-  [::key ::key]
-  [::coordinate {:optional true} ::coordinate]])
 (schema/register! ::unlisten-request [:map {:closed true} [::key ::key]])
-(schema/register! ::unlisten-response [:map {:closed true} [::ok? :boolean]])
+(schema/register! ::unlisten-response :boolean)
 (schema/register!
  ::open-session-request
  [:map {:closed true}
@@ -158,13 +146,12 @@
   [::database-name ::database-name]
   [::backend ::backend]
   [::database-path {:optional true} ::database-path]
-  [::attachment {:optional true} ::attachment]])
+  [::attachment {:optional true} :seon.db.coordinate/attachment]])
 (schema/register!
  ::open-session-response
- [:map {:closed true}
+  [:map {:closed true}
   [::database-name ::database-name]
-  [::attachment ::attachment]
-  [::coordinate ::coordinate]
+  [::db :seon.db/db]
   [::capabilities ::capabilities]])
 
 ;;; Process session
@@ -178,6 +165,9 @@
 
 (defn- error-value? [value]
   (and (map? value) (string? (:seon.error/message value))))
+
+(defn- db-value? [value]
+  (protocol/database-value? value))
 
 (defn- response-error [response]
   {:seon.error/message (::protocol/error response)
@@ -221,11 +211,22 @@
                      (assoc :seon.error/ex-data (ex-data exception)))))))))
 
 (defn- session-event! [event]
+  (when-let [database (:db-after event)]
+    (swap! !session
+           (fn [state]
+             (if (= (::database-name state) (:db-name database))
+               (assoc state ::opened-db database)
+               state))))
   (when-let [handler (get-in @!session
                              [::interest-handlers
                               (::protocol/request-id event) ::handler])]
     (try
-      (let [result (handler event)]
+      (let [value (if (= protocol/datoms-event (::protocol/event event))
+                    (select-keys event
+                                 [:db-before :db-after :tx-data
+                                  :tempids :tx-meta])
+                    event)
+            result (handler value)]
         (when (instance? js/Promise result)
           (.catch result
                   (fn [exception]
@@ -241,12 +242,11 @@
 
 (defn- session-result [state]
   {::database-name (::database-name state)
-   ::attachment (::attachment state)
-   ::coordinate (::opened-coordinate state)
+   ::db (::opened-db state)
    ::capabilities (::capabilities state)})
 
 (defn- ^:async connect-selection! [selection owner]
-  (let [{::keys [socket-path database-name backend database-path attachment]}
+  (let [{::keys [socket-path database-name backend database-path]}
         selection
         opened (atom nil)]
     (try
@@ -279,21 +279,17 @@
                (cond-> {::protocol/request-id (str (random-uuid))
                         ::protocol/database-name database-name
                         ::protocol/backend backend}
-                 database-path (assoc ::protocol/database-path database-path)
-                 attachment (assoc ::db.coordinate/attachment attachment)))
+                 database-path (assoc ::protocol/database-path database-path)))
               15000))
             _ (when-not (::protocol/success? ensure-response)
                 (throw (ex-info "Opening the database failed." ensure-response)))
-            point (::db.coordinate/coordinate ensure-response)
-            attachment (db.coordinate/attachment point)
             acquire-response
             (await
              (request-on-session!
               session
               (protocol/acquire-database-request
                {::protocol/request-id (str (random-uuid))
-                ::protocol/database-name database-name
-                ::protocol/attachment attachment})
+                ::protocol/database-name database-name})
               15000))
             _ (when-not (::protocol/success? acquire-response)
                 (throw (ex-info "Acquiring the database failed." acquire-response)))
@@ -301,9 +297,8 @@
                    ::selection selection
                    ::session session
                    ::database-name database-name
-                   ::attachment attachment
                    ::capabilities (::protocol/capabilities capabilities-response)
-                   ::opened-coordinate (::protocol/coordinate acquire-response)
+                   ::opened-db (::db acquire-response)
                    ::interest-handlers {}}]
         (swap! !session
                (fn [current]
@@ -375,7 +370,7 @@
     (js/Promise.resolve
      (session-error "This process has no open database session." {}))))
 
-;;; Fiber-local attribution and immutable read coordinates
+;;; Fiber-local attribution and immutable database values
 
 (defn current-tx-context
   "Return this async fiber's transaction context, if one is active."
@@ -402,26 +397,38 @@
   [tx-context thunk]
   (internal/run-with-tx-context tx-context thunk))
 
-(defn- ^:async read-coordinate! [request]
-  (if-let [point (or (::coordinate request)
-                     (::coordinate (current-tx-context)))]
-    point
-    (let [response (await (resolve-head-response!))]
-      (cond
-        (error-value? response) response
-        (not (::protocol/success? response)) (response-error response)
-        :else (::protocol/coordinate response)))))
-
-(defn- ^:async read-request-base! [request]
-  (if-let [{::keys [database-name attachment]} (active-session)]
-    (let [point (await (read-coordinate! request))]
-      (if (error-value? point)
-        point
-        {::protocol/request-id (str (random-uuid))
-         ::protocol/database-name database-name
-         ::protocol/attachment attachment
-         ::protocol/coordinate point}))
+(defn- ^:async resolve-db! [database-name acquire?]
+  (if-let [{current-name ::database-name opened-db ::opened-db}
+           (active-session)]
+    (let [name (or database-name current-name)]
+      (if (and (not acquire?) (= name current-name))
+        opened-db
+        (let [request-id (str (random-uuid))
+              request (if acquire?
+                        (protocol/acquire-database-request
+                         {::protocol/request-id request-id
+                          ::protocol/database-name name})
+                        (protocol/resolve-head-request
+                         {::protocol/request-id request-id
+                          ::protocol/database-name name}))
+              response (await (send-request! request 15000))]
+          (cond
+            (error-value? response) response
+            (not (::protocol/success? response)) (response-error response)
+            :else (::db response)))))
     (session-error "This process has no open database session." {})))
+
+(defn- ^:async read-db! [request]
+  (if-let [database (or (::db request) (::db (current-tx-context)))]
+    database
+    (await (resolve-db! (::database-name request) false))))
+
+(defn- ^:async request-db! [request]
+  (let [database (await (read-db! request))]
+    (if (error-value? database)
+      database
+      {::protocol/request-id (or (::request-id request) (str (random-uuid)))
+       ::db database})))
 
 (defn- read-resource-options [request]
   (cond-> {}
@@ -432,12 +439,36 @@
     (::max-result-weight request)
     (assoc :datahike.resource/max-result-weight (::max-result-weight request))))
 
-(defn ^{:async true :seon.fn/agent-facing? true} head-coordinate []
-  (let [response (await (resolve-head-response!))]
-    (cond
-      (error-value? response) response
-      (not (::protocol/success? response)) (response-error response)
-      :else (::protocol/coordinate response))))
+(defn ^{:async true :seon.fn/agent-facing? true} db
+  "Return the latest immutable database value for this process's session."
+  {:malli/schema
+   [:function
+    [:=> [:cat] :seon.db/db]
+    [:=> [:cat [:map {:closed true}
+                 [::database-name ::database-name]]] :seon.db/db]]}
+  ([] (await (resolve-db! nil false)))
+  ([request]
+   (await (resolve-db! (::database-name request) true))))
+
+(defn ^:seon.fn/agent-facing? as-of
+  "Return a database value containing facts through `point`."
+  {:malli/schema
+   [:=> [:catn [::db :seon.db/db] [::point [:or :int :inst]]] :seon.db/db]}
+  [database point]
+  (assoc database :as-of point :since nil))
+
+(defn ^:seon.fn/agent-facing? since
+  "Return a database value containing facts added after `point`."
+  {:malli/schema
+   [:=> [:catn [::db :seon.db/db] [::point [:or :int :inst]]] :seon.db/db]}
+  [database point]
+  (assoc database :as-of nil :since point))
+
+(defn ^:seon.fn/agent-facing? history
+  "Return a database value containing assertions and retractions."
+  {:malli/schema [:=> [:catn [::db :seon.db/db]] :seon.db/db]}
+  [database]
+  (assoc database :history true))
 
 (defn ^:seon.fn/agent-facing? cas-assert [ref attr value]
   [:db.fn/cas ref attr value value])
@@ -445,39 +476,36 @@
 ;;; Writes
 
 (defn- ^:async submit-transaction! [arg tx-data tx-meta]
-  (if-let [{::keys [database-name]} (active-session)]
-    (let [request
-          (protocol/transaction-request
-           (cond-> {::protocol/request-id (str (random-uuid))
-                    ::protocol/database-name database-name
-                    ::protocol/transaction-data
-                    (internal/encode-edn-slot-values tx-data)}
-             (seq tx-meta) (assoc ::protocol/transaction-meta tx-meta)
-             (::expected-coordinate arg)
-             (assoc ::protocol/expected-coordinate (::expected-coordinate arg))
-             (contains? arg :seon.db.id/generated-candidates)
-             (assoc ::protocol/generated-candidates
-                    (:seon.db.id/generated-candidates arg))))
-          response (await (send-request! request 120000))]
-      (cond
-        (error-value? response) {::ok? false ::error response}
-        (not (::protocol/success? response))
-        {::ok? false ::error (response-error response)}
-        :else
-        (let [point (::protocol/coordinate response)]
-          (cond-> {::ok? true
-                   ::coordinate point
-                   ::tempids (::protocol/temporary-ids response)
-                   ::tx (::db.coordinate/t point)
-                   ::tx-count (count (::protocol/transaction-data response))
-                   ::added (::protocol/datoms-added response)
-                   ::retracted (::protocol/datoms-retracted response)}
-            (seq (::protocol/generated-entity-ids response))
-            (assoc :seon.db.id/eids (::protocol/generated-entity-ids response))
-            (::protocol/recovered? response)
-            (assoc :seon.db.id/recovered-commit? true)))))
-    {::ok? false
-     ::error (session-error "This process has no open database session." {})}))
+  (let [database (await (read-db! arg))]
+    (if (error-value? database)
+      database
+      (let [request
+            (protocol/transaction-request
+             (cond-> {::protocol/request-id
+                      (or (::request-id arg) (str (random-uuid)))
+                      ::db database
+                      ::protocol/transaction-data
+                      (internal/encode-edn-slot-values tx-data)}
+               (::expected-db arg) (assoc ::expected-db (::expected-db arg))
+               (seq tx-meta) (assoc ::protocol/transaction-meta tx-meta)
+               (contains? arg :seon.db.id/generated-candidates)
+               (assoc ::protocol/generated-candidates
+                      (:seon.db.id/generated-candidates arg))))
+            response (await (send-request! request 120000))]
+        (cond
+          (error-value? response) response
+          (not (::protocol/success? response)) (response-error response)
+          :else
+          (let [report (select-keys response
+                                    [:db-before :db-after :tx-data
+                                     :tempids :tx-meta])]
+            (when (= (:db-name database) (:db-name (:db-after report)))
+              (swap! !session assoc ::opened-db (:db-after report)))
+            (cond-> report
+              (seq (::protocol/generated-entity-ids response))
+              (assoc :seon.db.id/eids (::protocol/generated-entity-ids response))
+              (::protocol/recovered? response)
+              (assoc :seon.db.id/recovered-commit? true))))))))
 
 (defn ^{:async true :seon.fn/agent-facing? true} transact!
   "Commit ordinary transaction data through the authoritative writer."
@@ -488,16 +516,23 @@
   [& call-args]
   (try
     (let [arg (cond
-                (and (= 1 (count call-args)) (map? (first call-args)))
+                (and (= 1 (count call-args))
+                     (map? (first call-args))
+                     (contains? (first call-args) ::tx-data))
                 (first call-args)
-                (and (= 1 (count call-args)) (vector? (first call-args)))
-                {::tx-data (first call-args)}
-                :else {::tx-data (vec call-args)})
+                (= 1 (count call-args)) {::tx-data (vec (first call-args))}
+                (and (= 2 (count call-args)) (db-value? (first call-args)))
+                {::db (first call-args) ::tx-data (vec (second call-args))}
+                :else
+                (throw (ex-info "`seon.db/transact!` expects transaction data or a database value and transaction data."
+                                {:seon.error/kind :user-input})))
           _ (internal/assert-invocation-shape! arg)
           tx-data (-> (::tx-data arg)
                       internal/coerce-identity-symbol-idents
                       internal/normalize-entity-ref-keys)
-          opts (internal/merge-tx-context-into-opts (::opts arg))
+          opts (internal/merge-tx-context-into-opts
+                (cond-> (::opts arg)
+                  (::tx-meta arg) (assoc :tx-meta (::tx-meta arg))))
           tx-meta (:tx-meta opts)
           attrs (into (internal/extract-tx-attrs tx-data) (keys tx-meta))]
       (internal/validate-attrs! attrs)
@@ -505,30 +540,50 @@
       (internal/validate-values! [tx-meta])
       (await (submit-transaction! arg tx-data tx-meta)))
     (catch :default exception
-      (internal/commit-error-envelope exception))))
+      (let [value (error/->map exception)]
+        (cond-> value
+          (nil? (:seon.error/kind value))
+          (assoc :seon.error/kind :core-bug))))))
 
 ;;; Coordinate-pinned reads
 
+(defn- explicit-query-source? [arguments]
+  (some db-value? arguments))
+
+(defn- ^:async query-wire-request! [request]
+  (let [arguments (vec (or (::args request) []))
+        database (or (::db request)
+                     (::db (current-tx-context))
+                     (when-not (explicit-query-source? arguments)
+                       (await (read-db! request))))]
+    (if (error-value? database)
+      database
+      (protocol/query-request
+       (cond->
+         (merge {::protocol/request-id
+                 (or (::request-id request) (str (random-uuid)))
+                 ::protocol/query-form (::query request)
+                 ::protocol/arguments arguments}
+                (read-resource-options request))
+         database (assoc ::db database))))))
+
+(defn- ^:async query-response! [request]
+  (let [wire-request (await (query-wire-request! request))]
+    (if (error-value? wire-request)
+      wire-request
+      (let [response (await (send-request! wire-request 30000))]
+        (if (or (error-value? response) (::protocol/success? response))
+          response
+          (response-error response))))))
+
 (defn- ^:async query-result! [request]
-  (let [base (await (read-request-base! request))]
-    (if (error-value? base)
-      base
-      (let [wire-request
-            (protocol/query-request
-             (cond->
-              (merge base
-                     {::protocol/query-form (::query request)
-                      ::protocol/arguments (vec (or (::args request) []))}
-                     (read-resource-options request))
-               (::history? request) (assoc ::protocol/history? true)))
-            response (await (send-request! wire-request 30000))]
-        (cond
-          (error-value? response) response
-          (not (::protocol/success? response)) (response-error response)
-          :else (:datahike.query/result response))))))
+  (let [response (await (query-response! request))]
+    (if (or (error-value? response) (not (::protocol/success? response)))
+      response
+      (:datahike.query/result response))))
 
 (defn ^{:async true :seon.fn/agent-facing? true} query
-  "Run one Datalog query against an explicit or current coordinate."
+  "Run one Datalog query with source arguments in their declared positions."
   {:malli/schema
    [:function
     [:=> [:catn [::request [:or ::query-request ::query-form]]] :any]
@@ -542,30 +597,17 @@
   ([query-form & inputs]
    (await (query-result! {::query query-form ::args (vec inputs)}))))
 
-(defn ^{:async true :seon.fn/agent-facing? true} query-with-evidence [request]
-  (let [base (await (read-request-base! request))]
-    (if (error-value? base)
-      base
-      (let [wire-request
-            (protocol/query-request
-             (cond->
-              (merge base
-                     {::protocol/query-form (::query request)
-                      ::protocol/arguments (vec (or (::args request) []))}
-                     (read-resource-options request))
-               (::history? request) (assoc ::protocol/history? true)))
-            response (await (send-request! wire-request 30000))]
-        (cond
-          (error-value? response) response
-          (not (::protocol/success? response)) (response-error response)
-          :else
-          {::coordinate (::protocol/coordinate response)
-           :datahike.query/result (:datahike.query/result response)
-           :datahike.query/attribute-dependencies
-           (:datahike.query/attribute-dependencies response)
-           :datahike.query/cache-evidence (:datahike.query/cache-evidence response)
-           :datahike.query/resource-evidence
-           (:datahike.query/resource-evidence response)})))))
+(defn ^{:async true :seon.fn/agent-facing? true} query-with-evidence
+  "Run a query and return its result plus Datahike cache/resource evidence."
+  [request]
+  (let [response (await (query-response! request))]
+    (if (or (error-value? response) (not (::protocol/success? response)))
+      response
+      (select-keys response
+                   [:datahike.query/result
+                    :datahike.query/attribute-dependencies
+                    :datahike.query/cache-evidence
+                    :datahike.query/resource-evidence]))))
 
 (defn ^{:async true :seon.fn/agent-facing? true} pull
   "Pull one entity as ordinary data."
@@ -574,7 +616,7 @@
     [:=> [:cat ::pull-request] :any]
     [:=> [:catn [::selector [:vector :any]] [::eid :any]] :any]]}
   ([request]
-   (let [base (await (read-request-base! request))]
+   (let [base (await (request-db! request))]
      (if (error-value? base)
        base
        (let [response
@@ -582,8 +624,8 @@
               (send-request!
                (protocol/pull-request
                 (merge base
-                       {::protocol/selector (::pull-pattern request)
-                        ::protocol/entity-id (::ref request)}
+                       {::protocol/selector (::selector request)
+                        ::protocol/entity-id (::eid request)}
                        (read-resource-options request)))
                30000))]
          (cond
@@ -591,30 +633,54 @@
            (not (::protocol/success? response)) (response-error response)
            :else (::protocol/result response))))))
   ([selector entity-id]
-   (await (pull {::pull-pattern selector ::ref entity-id}))))
+   (await (pull {::selector selector ::eid entity-id})))
+  ([database selector entity-id]
+   (await (pull {::db database
+                 ::selector selector
+                 ::eid entity-id}))))
 
-(defn ^{:async true :seon.fn/agent-facing? true} pull-many [request]
-  (let [base (await (read-request-base! request))]
-    (if (error-value? base)
-      base
-      (let [response
-            (await
-             (send-request!
-              (protocol/pull-many-request
-               (merge base
-                      {::protocol/selector (::pull-pattern request)
-                       ::protocol/entity-ids (::refs request)}
-                      (read-resource-options request)))
-              30000))]
-        (cond
-          (error-value? response) response
-          (not (::protocol/success? response)) (response-error response)
-          :else (::protocol/result response))))))
+(defn ^{:async true :seon.fn/agent-facing? true} pull-many
+  "Pull several entities as eager ordinary maps in input order."
+  ([request]
+   (let [base (await (request-db! request))]
+     (if (error-value? base)
+       base
+       (let [response
+             (await
+              (send-request!
+               (protocol/pull-many-request
+                (merge base
+                       {::protocol/selector (::selector request)
+                        ::protocol/entity-ids (::eids request)}
+                       (read-resource-options request)))
+               30000))]
+         (cond
+           (error-value? response) response
+           (not (::protocol/success? response)) (response-error response)
+           :else (::protocol/result response))))))
+  ([selector entity-ids]
+   (await (pull-many {::selector selector ::eids (vec entity-ids)})))
+  ([database selector entity-ids]
+   (await (pull-many {::db database
+                      ::selector selector
+                      ::eids (vec entity-ids)}))))
+
+(defn ^{:async true :seon.fn/agent-facing? true} entity
+  "Pull every attribute of one entity as eager ordinary data."
+  ([request-or-entity-id]
+   (if (and (map? request-or-entity-id)
+            (contains? request-or-entity-id ::eid))
+     (await (pull (assoc request-or-entity-id ::selector '[*])))
+     (await (pull '[*] request-or-entity-id))))
+  ([database entity-id]
+   (await (pull database '[*] entity-id))))
 
 (defn ^{:async true :seon.fn/agent-facing? true} installed-schema
+  "Return Datahike's installed schema map for an explicit or current database."
   ([] (await (installed-schema {})))
   ([request]
-   (let [base (await (read-request-base! request))]
+   (let [request (if (db-value? request) {::db request} request)
+         base (await (request-db! request))]
      (if (error-value? base)
        base
        (let [response (await (send-request! (protocol/schema-request base) 15000))]
@@ -623,54 +689,57 @@
            (not (::protocol/success? response)) (response-error response)
            :else (::protocol/schema response)))))))
 
-(defn ^{:async true :seon.fn/agent-facing? true} execute-many [request]
-  (let [base (await (read-request-base! request))]
-    (if (error-value? base)
-      base
-      (let [response
-            (await
-             (send-request!
-              (protocol/execute-many-request
-               (cond-> (assoc base ::protocol/members (::members request))
-                 (::max-result-weight request)
-                 (assoc :datahike.resource/max-result-weight
-                        (::max-result-weight request))))
-              60000))]
-        (cond
-          (error-value? response) response
-          (not (::protocol/success? response)) (response-error response)
-          :else {::coordinate (::protocol/coordinate response)
-                 ::results (::protocol/results response)})))))
+(defn ^{:async true :seon.fn/agent-facing? true} execute-many
+  "Run bounded independent database operations and preserve result positions."
+  [request]
+  (let [wire-request
+        (protocol/execute-many-request
+         (cond-> {::protocol/request-id
+                  (or (::request-id request) (str (random-uuid)))
+                  ::protocol/members (::members request)}
+           (::max-result-weight request)
+           (assoc :datahike.resource/max-result-weight
+                  (::max-result-weight request))))
+        response (await (send-request! wire-request 60000))]
+    (cond
+      (error-value? response) response
+      (not (::protocol/success? response)) (response-error response)
+      :else {::results (::protocol/results response)})))
 
-(defn ^{:async true :seon.fn/agent-facing? true} index-page [request]
-  (let [base (await (read-request-base! request))]
-    (if (error-value? base)
-      base
-      (let [wire-request
-            (protocol/index-page-request
-             (cond-> (assoc base
-                            ::protocol/index (::index request)
-                            ::protocol/prefix (vec (or (::components request) []))
-                            ::protocol/direction (::direction request)
-                            ::protocol/limit (::index-limit request))
-               (::history? request) (assoc ::protocol/history? true)
-               (::cursor request) (assoc ::protocol/cursor (::cursor request))
-               (::max-result-weight request)
-               (assoc :datahike.resource/max-result-weight
-                      (::max-result-weight request))))
-            response (await (send-request! wire-request 30000))]
-        (cond
-          (error-value? response) response
-          (not (::protocol/success? response)) (response-error response)
-          :else
-          (cond-> {::coordinate (::protocol/coordinate response)
-                   ::datoms (::protocol/datoms response)
-                   ::complete? (::protocol/complete? response)}
-            (::protocol/cursor response)
-            (assoc ::cursor (::protocol/cursor response))))))))
+(defn ^{:async true :seon.fn/agent-facing? true} index-page
+  "Return one eager bounded page in native Datahike index order."
+  ([request]
+   (let [base (await (request-db! request))]
+     (if (error-value? base)
+       base
+       (let [wire-request
+             (protocol/index-page-request
+              (cond-> (assoc base
+                             ::protocol/index (::index request)
+                             ::protocol/prefix
+                             (vec (or (::components request) []))
+                             ::protocol/direction (::direction request)
+                             ::protocol/limit (::limit request))
+                (::cursor request) (assoc ::protocol/cursor (::cursor request))
+                (::max-result-weight request)
+                (assoc :datahike.resource/max-result-weight
+                       (::max-result-weight request))))
+             response (await (send-request! wire-request 30000))]
+         (cond
+           (error-value? response) response
+           (not (::protocol/success? response)) (response-error response)
+           :else
+           (select-keys response
+                        [:datahike.index-page/datoms
+                         :datahike.index-page/complete?
+                         :datahike.index-page/cursor]))))))
+  ([database options]
+   (await (index-page (assoc options ::db database)))))
 
-(defn ^:async knn-search! [request]
-  (let [base (await (read-request-base! request))]
+(defn ^:async knn-search!
+  "Search the selected database's native semantic index."
+  [request]
+  (let [base (await (request-db! request))]
     (if (error-value? base)
       base
       (let [response
@@ -717,41 +786,63 @@
 
 ;;; Transaction interests
 
-(declare unlisten!)
+(def ^:private all-datoms-query
+  '[:find ?e :where [?e ?attribute ?value]])
 
-(defn ^:async listen! [{::keys [handler key query datom-patterns]}]
-  (if-let [{::keys [session database-name attachment] :as state}
-           (active-session)]
-    (let [request-id (if key (str key) (str (random-uuid)))
-          prior (get-in state [::interest-handlers request-id])
-          _ (when prior (await (unlisten! {::key request-id})))
-          owner (js-obj)
-          request
-          (protocol/listen-request
-           (cond-> {::protocol/request-id request-id
-                    ::protocol/database-name database-name
-                    ::protocol/attachment attachment}
-             query (assoc ::protocol/query-form query)
-             datom-patterns (assoc ::protocol/datom-patterns datom-patterns)))]
-      (swap! !session assoc-in [::interest-handlers request-id]
-             {::owner owner ::handler handler})
-      (let [response (await (request-on-session! session request 15000))]
-        (if (and (not (error-value? response)) (::protocol/success? response))
-          {::key request-id ::coordinate (::protocol/coordinate response)}
-          (do
-            (swap! !session
-                   (fn [current]
-                     (if (identical?
-                          owner
-                          (get-in current
-                                  [::interest-handlers request-id ::owner]))
-                       (update current ::interest-handlers dissoc request-id)
-                       current)))
-            (if (error-value? response) response (response-error response))))))
+(defn- ^:async listen-request! [{::keys [handler key query datom-patterns]
+                                 :as input}]
+  (if-let [{::keys [session]} (active-session)]
+    (let [database (await (read-db! input))]
+      (if (error-value? database)
+        database
+        (let [public-key (or key (str (random-uuid)))
+              request-id (str public-key)
+              owner (js-obj)
+              request
+              (protocol/listen-request
+               (cond-> {::protocol/request-id request-id
+                        ::db database}
+                 datom-patterns
+                 (assoc ::protocol/datom-patterns datom-patterns)
+                 (not datom-patterns)
+                 (assoc ::protocol/query-form (or query all-datoms-query))))]
+          (swap! !session assoc-in [::interest-handlers request-id]
+                 {::owner owner ::handler handler ::key public-key})
+          (let [response (await (request-on-session! session request 15000))]
+            (if (and (not (error-value? response))
+                     (::protocol/success? response))
+              public-key
+              (do
+                (swap! !session
+                       (fn [current]
+                         (if (identical?
+                              owner
+                              (get-in current
+                                      [::interest-handlers request-id ::owner]))
+                           (update current ::interest-handlers dissoc request-id)
+                           current)))
+                (if (error-value? response)
+                  response
+                  (response-error response))))))))
     (session-error "This process has no open database session." {})))
 
-(defn ^:async unlisten! [{::keys [key]}]
-  (let [request-id (str key)]
+(defn ^:async listen!
+  "Register or atomically replace a session-owned transaction listener."
+  ([input-or-handler]
+   (await (listen-request!
+           (if (map? input-or-handler)
+             input-or-handler
+             {::handler input-or-handler}))))
+  ([key handler]
+   (await (listen-request! {::key key ::handler handler})))
+  ([database key handler]
+   (await (listen-request! {::db database ::key key ::handler handler}))))
+
+(defn ^:async unlisten!
+  "Remove a listener by key and report whether this session owned it."
+  [input]
+  (let [key (if (and (map? input) (contains? input ::key)) (::key input) input)
+        request-id (str key)]
     (if-let [{::keys [session]} (active-session)]
       (if-let [entry (get-in @!session [::interest-handlers request-id])]
         (let [response
@@ -772,10 +863,40 @@
                                     [::interest-handlers request-id ::owner]))
                          (update current ::interest-handlers dissoc request-id)
                          current)))
-              {::ok? true})
+              true)
             (if (error-value? response) response (response-error response))))
-        {::ok? true})
-      {::ok? true})))
+        false)
+      false)))
+
+(defn ^:async cancel!
+  "Request cancellation by the existing public request identity."
+  [request-id]
+  (let [response
+        (await
+         (send-request!
+          (protocol/cancel-request
+           {::protocol/request-id (str (random-uuid))
+            ::protocol/target-request-id (str request-id)})
+          15000))]
+    (cond
+      (error-value? response) response
+      (not (::protocol/success? response)) (response-error response)
+      :else (::protocol/canceled? response))))
+
+(defn ^:async release
+  "Release this session's acquisition of a named database value."
+  [database]
+  (let [response
+        (await
+         (send-request!
+          (protocol/release-database-request
+           {::protocol/request-id (str (random-uuid))
+            ::db database})
+          15000))]
+    (cond
+      (error-value? response) response
+      (not (::protocol/success? response)) (response-error response)
+      :else (::protocol/released? response))))
 
 ;;; Pure schema/transaction transforms
 

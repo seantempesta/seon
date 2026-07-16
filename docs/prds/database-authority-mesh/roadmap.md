@@ -1323,22 +1323,26 @@ for a one-key tagged-map approximation. This is not a whole-request benchmark;
 the architecture win remains shared indexes and computation rather than tens
 of descriptor bytes.
 
-Current ordered boundary: replace the legacy coordinate-shaped protocol and
-writer resolver with ordinary database values, then turn the two selective
-compatibility namespaces green before migrating consumers. Commits `74953530`,
-`ae43154c`, and `022c09ef`
-settle the always-current database-value architecture, explicit secondary-
-database lifetime, and selective upstream compatibility proof. Commit
-`97f9d6bb` adds the six exact-var-selectable CLJS facade contracts using only
-ordinary database values; they intentionally reject the legacy coordinate
-handshake and remain red until the canonical protocol/facade cut. Commit
-`dd10db08` adds the matching real JVM writer/UDS contract. The top level owns
-that protocol/facade implementation and integration judgment. The stopped
-plan-consumer draft remains an explicit uncommitted
-handoff because its pure row transformations are reusable but its coordinate
-and compact-envelope transport is not. After the dependency proof, refill that
-slot with protocol-consumer deletion proof after the public contract turns
-green. Replace protocol, resolver, reports/listeners, and consumers in one
+Current ordered boundary: the ordinary database-value protocol, writer, and
+public facade contracts are green; migrate consumers in dependency order and
+delete their coordinate/compact-envelope assumptions rather than preserving a
+compatibility path. Commits `74953530`, `ae43154c`, and `022c09ef` settle the
+always-current database-value architecture, explicit secondary-database
+lifetime, and selective upstream compatibility proof. Commit `97f9d6bb` adds
+the six exact-var-selectable CLJS facade contracts, and `dd10db08` adds the
+matching real JVM writer/UDS contract. The canonical facade now uses ordinary
+database maps for queries, pulls, entities, native index pages, transactions,
+listeners, cancellation, and release; it returns native Datahike result and
+transaction-report shapes. Its session retains the latest database map from
+initial acquisition, accepted transactions, and committed transaction events,
+so omitted-database operations add no preliminary head-resolution hop while
+explicit database maps remain immutable snapshot fences. Focused facade proof
+passes 6 tests/41 assertions and the real writer/UDS proof passes 14/94.
+
+The stopped plan-consumer draft remains an explicit uncommitted handoff because
+its pure row transformations are reusable but its coordinate and
+compact-envelope transport is not. Refill that slot with protocol-consumer
+deletion proof now that the public contract is green. Replace consumers in one
 dependency-ordered cut; the final graduation gate remains the full focused,
 integrated, live, Bun, and modest-hardware density proof.
 

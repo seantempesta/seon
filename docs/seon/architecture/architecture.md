@@ -40,7 +40,11 @@ writes concurrently while preserving one write order per database. Agent
 processes exchange ordinary protocol data rather than rebuilding Datahike
 indexes in every process. Agent children and the web UI issue requests carrying
 ordinary database values; no Bun process retains a Datahike replica. The work
-fence is arbitrated at that authority. A remote request resolves the complete
+fence is arbitrated at that authority. Each persistent client session retains
+the latest complete database value received from acquisition, an accepted
+transaction, or a committed-transaction interest; omitted-database operations
+use that value without a preliminary authority round trip. Explicit values
+remain immutable snapshot fences. A remote request resolves the complete
 `{:db-name :t :as-of :since :history :datahike/commit-id}` value before
 executing. Database acquisition,
 capabilities, paging, cancellation, selective interests, and retention are
