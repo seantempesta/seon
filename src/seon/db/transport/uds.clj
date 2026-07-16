@@ -11,18 +11,27 @@
             DataInputStream DataOutputStream InputStream OutputStream]
            [java.net StandardProtocolFamily UnixDomainSocketAddress]
            [java.nio ByteBuffer]
-           [java.nio.channels Channels ServerSocketChannel SocketChannel]
-           [java.util.concurrent ArrayBlockingQueue BlockingQueue]))
+           [java.nio.channels Channels SelectionKey Selector ServerSocketChannel
+            SocketChannel]
+           [java.util ArrayDeque]
+           [java.util.concurrent ArrayBlockingQueue BlockingQueue
+            ConcurrentLinkedQueue RejectedExecutionException ThreadFactory
+            ThreadPoolExecutor ThreadPoolExecutor$AbortPolicy TimeUnit]
+           [java.util.concurrent.atomic AtomicBoolean]))
 
 (set! *warn-on-reflection* true)
 
 (schema/register! ::socket-path [:string {:min 1}])
 (schema/register! ::message :map)
 (schema/register! ::handler 'fn?)
+(schema/register! ::open-connection! 'fn?)
+(schema/register! ::close-connection! 'fn?)
 (schema/register! ::channel 'some?)
 (schema/register! ::output-stream 'some?)
 (schema/register! ::subscribers 'some?)
 (schema/register! ::connections 'some?)
+(schema/register! ::selector 'some?)
+(schema/register! ::workers 'some?)
 (schema/register! ::closed? 'some?)
 (schema/register! ::queue 'some?)
 (schema/register! ::worker 'some?)
@@ -39,10 +48,16 @@
   [::channel ::channel]
   [::connections ::connections]
   [::worker ::worker]
+  [::selector ::selector]
+  [::workers ::workers]
   [::closed? ::closed?]])
 (schema/register!
  ::request-server-input
- [:map [::socket-path ::socket-path] [::handler ::handler]])
+ [:map
+  [::socket-path ::socket-path]
+  [::handler ::handler]
+  [::open-connection! ::open-connection!]
+  [::close-connection! ::close-connection!]])
 (schema/register!
  ::call-input
  [:map [::channel ::channel] [::message ::message]])
@@ -52,6 +67,9 @@
 
 (def ^:private maximum-frame-bytes (* 16 1024 1024))
 (def ^:private subscriber-queue-capacity 16)
+(def ^:private codec-worker-queue-capacity 256)
+(def ^:private maximum-queued-output-bytes (* 32 1024 1024))
+(def ^:private maximum-queued-output-frames 64)
 (def ^:private asynchronous-close-class
   (Class/forName "java.nio.channels.AsynchronousCloseException"))
 
@@ -142,119 +160,415 @@
     (write-frame! output message)
     (read-frame input)))
 
-(defn- admit-request!
-  "Mark one decoded request as admitted while the server remains open."
-  [connections closed? channel]
-  (locking connections
-    (when (and (not @closed?) (contains? @connections channel))
-      (swap! connections assoc-in [channel ::active?] true)
-      true)))
+(defn- codec-workers
+  "Create the bounded off-selector codec and admission executor."
+  ^ThreadPoolExecutor []
+  (let [thread-number (atom 0)
+        thread-factory
+        (reify ThreadFactory
+          (newThread [_ runnable]
+            (doto (Thread. ^Runnable runnable
+                           (str "database-request-codec-"
+                                (swap! thread-number inc)))
+              (.setDaemon true))))
+        worker-count (max 2 (min 8 (.availableProcessors
+                                    (Runtime/getRuntime))))]
+    (ThreadPoolExecutor.
+     worker-count worker-count 0 TimeUnit/MILLISECONDS
+     (ArrayBlockingQueue. codec-worker-queue-capacity)
+     thread-factory
+     (ThreadPoolExecutor$AbortPolicy.))))
 
-(defn- finish-request!
-  "Finish one response and report whether this connection may read again."
-  [connections closed? channel]
-  (locking connections
-    (when-not @closed?
-      (swap! connections assoc-in [channel ::active?] false)
-      true)))
+(defn- enqueue-selector!
+  [^Selector selector ^ConcurrentLinkedQueue commands command]
+  (.offer commands command)
+  (.wakeup selector)
+  nil)
 
-(defn- serve-connection!
-  "Serve admitted requests on one connection until EOF or lifecycle close."
-  [connections closed? channel input output handler]
+(defn- key-interests!
+  [session add remove]
+  (when-let [^SelectionKey key @(::key session)]
+    (when (.isValid key)
+      (.interestOps key
+                    (bit-and (bit-or (.interestOps key) add)
+                             (bit-not remove))))))
+
+(defn- notify-connection-close!
+  [^ThreadPoolExecutor workers close-connection! session]
+  (when (and (not= ::unopened @(::owner session))
+             (compare-and-set! (::close-notified? session) false true))
+    (try
+      (.execute workers
+                ^Runnable
+                #(try
+                   (close-connection! @(::owner session))
+                   (catch Throwable throwable
+                     (binding [*out* *err*]
+                       (println "[database-request] connection close failed:"
+                                (.getMessage throwable))))))
+      (catch RejectedExecutionException _
+        ;; Saturation must not move writer cleanup onto the selector. This
+        ;; daemon exists only for the exceptional rejected-cleanup path; the
+        ;; steady state has one bounded worker pool, not a thread per session.
+        (doto
+          (Thread.
+           ^Runnable
+           #(try
+              (close-connection! @(::owner session))
+              (catch Throwable throwable
+                (binding [*out* *err*]
+                  (println "[database-request] connection close failed:"
+                           (.getMessage throwable)))))
+           "database-request-rejected-close")
+          (.setDaemon true)
+          (.start))))))
+
+(defn- close-session!
+  [connections workers close-connection! session]
+  (when (.compareAndSet ^AtomicBoolean (::closed? session) false true)
+    (when-let [^SelectionKey key @(::key session)]
+      (.cancel key))
+    (try (.close ^SocketChannel (::channel session)) (catch Throwable _))
+    (swap! connections dissoc (::channel session))
+    (notify-connection-close! workers close-connection! session))
+  nil)
+
+(defn- drained-session?
+  [session]
+  (and (zero? @(::outstanding session))
+       (not @(::decoding? session))
+       (not @(::encoding? session))
+       (.isEmpty ^ArrayDeque (::response-candidates session))
+       (.isEmpty ^ArrayDeque (::outputs session))))
+
+(defn- close-drained-session!
+  [connections workers close-connection! shutting-down? session]
+  (when (and @shutting-down? (drained-session? session))
+    (close-session! connections workers close-connection! session)))
+
+(declare start-next-encode!)
+
+(defn- accept-encoded-response!
+  [connections workers close-connection! shutting-down? session frame]
+  (reset! (::encoding? session) false)
+  (when-not (.get ^AtomicBoolean (::closed? session))
+    (let [queued-bytes (+ @(::queued-output-bytes session)
+                          (.remaining ^ByteBuffer frame))]
+      (if (> queued-bytes maximum-queued-output-bytes)
+        (close-session! connections workers close-connection! session)
+        (do
+          (reset! (::queued-output-bytes session) queued-bytes)
+          (.addLast ^ArrayDeque (::outputs session) frame)
+          (key-interests! session SelectionKey/OP_WRITE 0)
+          (start-next-encode! connections workers close-connection!
+                              shutting-down? session))))))
+
+(defn- start-next-encode!
+  [connections ^ThreadPoolExecutor workers close-connection! shutting-down?
+   session]
+  (when (and (not @(::encoding? session))
+             (not (.get ^AtomicBoolean (::closed? session))))
+    (when-let [response (.pollFirst ^ArrayDeque
+                                    (::response-candidates session))]
+      (reset! (::encoding? session) true)
+      (try
+        (.execute
+         workers
+         ^Runnable
+         (fn []
+           (try
+             (let [frame (message-frame response)]
+               (enqueue-selector!
+                (::selector session) (::commands session)
+                #(accept-encoded-response!
+                  connections workers close-connection! shutting-down?
+                  session frame)))
+             (catch Throwable _
+               (enqueue-selector!
+                (::selector session) (::commands session)
+                #(close-session! connections workers close-connection!
+                                 session))))))
+        (catch RejectedExecutionException _
+          (close-session! connections workers close-connection! session))))))
+
+(defn- queue-response!
+  [connections workers close-connection! shutting-down? session response]
+  (when-not (.get ^AtomicBoolean (::closed? session))
+    (enqueue-selector!
+     (::selector session) (::commands session)
+     (fn []
+       (when-not (.get ^AtomicBoolean (::closed? session))
+         (if (>= (+ (.size ^ArrayDeque (::response-candidates session))
+                    (.size ^ArrayDeque (::outputs session)))
+                 maximum-queued-output-frames)
+           (close-session! connections workers close-connection! session)
+           (do
+             (.addLast ^ArrayDeque (::response-candidates session) response)
+             (start-next-encode! connections workers close-connection!
+                                 shutting-down? session)))))))
+  nil)
+
+(defn- admit-payload!
+  [connections ^ThreadPoolExecutor workers close-connection! shutting-down?
+   handler session payload]
   (try
+    (.execute
+     workers
+     ^Runnable
+     (fn []
+       (try
+         (let [request (decode payload)
+               completed? (AtomicBoolean. false)
+               complete!
+               (fn [response]
+                 (when (.compareAndSet completed? false true)
+                   (queue-response! connections workers close-connection!
+                                    shutting-down? session response)))]
+           (handler @(::owner session) request complete!))
+         (catch Throwable _
+           (enqueue-selector!
+            (::selector session) (::commands session)
+            #(close-session! connections workers close-connection! session)))
+         (finally
+           (enqueue-selector!
+            (::selector session) (::commands session)
+            (fn []
+              (reset! (::decoding? session) false)
+              (if @shutting-down?
+                (close-drained-session! connections workers close-connection!
+                                        shutting-down? session)
+                (key-interests! session SelectionKey/OP_READ 0))))))))
+    (catch RejectedExecutionException _
+      (close-session! connections workers close-connection! session)))
+  nil)
+
+(defn- read-session!
+  [connections workers close-connection! shutting-down? handler session]
+  (let [^SocketChannel channel (::channel session)]
     (loop []
-      (when-let [request (read-frame input)]
-        (when (admit-request! connections closed? channel)
-          (write-frame! output (handler request))
-          (when (finish-request! connections closed? channel)
-            (recur)))))
-    (catch Throwable throwable
-      (when-not @closed?
-        (binding [*out* *err*]
-          (println "[database-request] connection closed:"
-                   (.getMessage throwable)))))
-    (finally
-      (locking connections
-        (swap! connections dissoc channel))
-      (try (.close ^SocketChannel channel) (catch Throwable _)))))
+      (let [^ByteBuffer target (or @(::payload session) (::header session))
+            read-count (.read channel target)]
+        (cond
+          (neg? read-count)
+          (close-session! connections workers close-connection! session)
+
+          (zero? read-count)
+          nil
+
+          (.hasRemaining target)
+          nil
+
+          (nil? @(::payload session))
+          (let [length (.getInt ^ByteBuffer (doto target .flip))]
+            (.clear target)
+            (if (or (not (pos? length)) (> length maximum-frame-bytes))
+              (close-session! connections workers close-connection! session)
+              (do
+                (reset! (::payload session) (ByteBuffer/allocate length))
+                (recur))))
+
+          :else
+          (let [^ByteBuffer payload-buffer @(::payload session)
+                payload (.array payload-buffer)]
+            (reset! (::payload session) nil)
+            (reset! (::decoding? session) true)
+            (swap! (::outstanding session) inc)
+            (key-interests! session 0 SelectionKey/OP_READ)
+            (admit-payload! connections workers close-connection!
+                            shutting-down? handler session payload)))))))
+
+(defn- write-session!
+  [connections workers close-connection! shutting-down? session]
+  (let [^SocketChannel channel (::channel session)
+        ^ArrayDeque outputs (::outputs session)]
+    (loop []
+      (if-let [^ByteBuffer frame (.peekFirst outputs)]
+        (do
+          (.write channel frame)
+          (when-not (.hasRemaining frame)
+            (.removeFirst outputs)
+            (swap! (::queued-output-bytes session) - (.limit frame))
+            (swap! (::outstanding session) dec)
+            (recur)))
+        (do
+          (key-interests! session 0 SelectionKey/OP_WRITE)
+          (close-drained-session! connections workers close-connection!
+                                  shutting-down? session))))))
+
+(defn- accept-session!
+  [^ServerSocketChannel server ^Selector selector commands connections
+   ^ThreadPoolExecutor workers
+   close-connection! shutting-down? open-connection!]
+  (when-let [^SocketChannel channel (.accept server)]
+    (.configureBlocking channel false)
+    (let [session-holder (atom nil)
+          close!
+          (fn []
+            (when-let [session @session-holder]
+              (enqueue-selector!
+               selector commands
+               #(close-session! connections workers close-connection! session))))
+          session
+          {::channel channel
+           ::selector selector
+           ::commands commands
+           ::key (atom nil)
+           ::header (ByteBuffer/allocate Integer/BYTES)
+           ::payload (atom nil)
+           ::response-candidates (ArrayDeque.)
+           ::encoding? (atom false)
+           ::outputs (ArrayDeque.)
+           ::queued-output-bytes (atom 0)
+           ::decoding? (atom false)
+           ::outstanding (atom 0)
+           ::owner (atom ::unopened)
+           ::closed? (AtomicBoolean. false)
+           ::close-notified? (atom false)
+           ::close! close!}]
+      (reset! session-holder session)
+      (reset! (::key session) (.register channel selector 0 session))
+      (swap! connections assoc channel session)
+      (try
+        (.execute
+         workers
+         ^Runnable
+         (fn []
+           (try
+             (let [owner (open-connection! close!)]
+               (reset! (::owner session) owner)
+               (if (.get ^AtomicBoolean (::closed? session))
+                 (notify-connection-close! workers close-connection! session)
+                 (enqueue-selector!
+                  selector commands
+                  (fn []
+                    (if (.get ^AtomicBoolean (::closed? session))
+                      (notify-connection-close! workers close-connection! session)
+                      (key-interests! session SelectionKey/OP_READ 0))))))
+             (catch Throwable _
+               (enqueue-selector!
+                selector commands
+                #(close-session! connections workers close-connection! session))))))
+        (catch RejectedExecutionException _
+          (close-session! connections workers close-connection! session))))))
+
+(defn- drain-commands!
+  [^ConcurrentLinkedQueue commands]
+  (loop []
+    (when-let [command (.poll commands)]
+      (command)
+      (recur))))
+
+(defn- begin-shutdown!
+  [^ServerSocketChannel server connections workers close-connection!
+   shutting-down?]
+  (reset! shutting-down? true)
+  (try (.close server) (catch Throwable _))
+  (doseq [session (vals @connections)]
+    (key-interests! session 0 SelectionKey/OP_READ)
+    (close-drained-session! connections workers close-connection!
+                            shutting-down? session)))
+
+(defn- process-selected!
+  [^ServerSocketChannel server ^Selector selector commands connections workers
+   close-connection! shutting-down? open-connection! handler]
+  (let [selected (.selectedKeys selector)
+        iterator (.iterator selected)]
+    (while (.hasNext iterator)
+      (let [^SelectionKey key (.next iterator)]
+        (.remove iterator)
+        (when (.isValid key)
+          (try
+            (if (.isAcceptable key)
+              (accept-session! server selector commands connections workers
+                               close-connection! shutting-down? open-connection!)
+              (let [session (.attachment key)]
+                (when (.isReadable key)
+                  (read-session! connections workers close-connection!
+                                 shutting-down? handler session))
+                (when (and (.isValid key) (.isWritable key))
+                  (write-session! connections workers close-connection!
+                                  shutting-down? session))))
+            (catch Throwable _
+              (when-let [session (.attachment key)]
+                (close-session! connections workers close-connection!
+                                session)))))))))
 
 (defn start-request-server!
-  "Start a concurrent request server whose handler maps request to response."
+  "Start one selector server with callback-complete request delivery."
   {:malli/schema [:=> [:cat ::request-server-input] ::request-server]}
-  [{::keys [socket-path handler]}]
+  [{::keys [socket-path handler open-connection! close-connection!]}]
   (try (.delete (java.io.File. ^String socket-path)) (catch Throwable _))
   (let [^UnixDomainSocketAddress address
         (UnixDomainSocketAddress/of ^String socket-path)
         ^ServerSocketChannel server
         (ServerSocketChannel/open StandardProtocolFamily/UNIX)
-        ;; {channel {::worker Thread ::active? boolean}}. A request is admitted
-        ;; only when its decoded frame changes `::active?` under this atom's
-        ;; lock. Close shuts idle readers to unblock them, leaves active
-        ;; responses intact, and joins every admitted connection worker.
+        selector (Selector/open)
+        commands (ConcurrentLinkedQueue.)
+        workers (codec-workers)
         connections (atom {})
-        closed? (atom false)]
+        closed? (AtomicBoolean. false)
+        shutting-down? (atom false)]
     (.bind server address)
-    (let [accept-worker
+    (.configureBlocking server false)
+    (.register server selector SelectionKey/OP_ACCEPT)
+    (let [selector-worker
           (Thread.
            ^Runnable
            (fn []
              (try
                (loop []
-                 (let [channel (.accept server)
-                       input (Channels/newInputStream channel)
-                       output (Channels/newOutputStream channel)
-                       worker
-                       (Thread.
-                        ^Runnable
-                        #(serve-connection! connections closed? channel input
-                                            output handler)
-                        "database-request-connection")]
-                   (locking connections
-                     (if @closed?
-                       (try (.close ^SocketChannel channel) (catch Throwable _))
-                       (do
-                         (swap! connections assoc channel
-                                {::worker worker ::active? false})
-                         (.setDaemon worker true)
-                         (.start worker))))
+                 (drain-commands! commands)
+                 (when-not (and @shutting-down? (empty? @connections))
+                   (.select selector)
+                   (process-selected! server selector commands connections
+                                      workers close-connection! shutting-down?
+                                      open-connection! handler)
                    (recur)))
                (catch Throwable throwable
-                 (when-not (or @closed? (asynchronous-close? throwable))
+                 (when-not (.get closed?)
                    (binding [*out* *err*]
-                     (println "[database-request] accept loop stopped:"
-                              (.getMessage throwable)))))))
-           "database-request-accept")]
-      (.setDaemon accept-worker true)
-      (.start accept-worker)
+                     (println "[database-request] selector stopped:"
+                              (.getMessage throwable)))))
+               (finally
+                 (try (.close server) (catch Throwable _))
+                 (doseq [session (vals @connections)]
+                   (close-session! connections workers close-connection!
+                                   session)))))
+           "database-request-selector")]
+      (.setDaemon selector-worker true)
+      (.start selector-worker)
       {::channel server
        ::connections connections
-       ::worker accept-worker
+       ::worker selector-worker
+       ::selector selector
+       ::commands commands
+       ::workers workers
+       ::shutting-down? shutting-down?
+       ::close-connection! close-connection!
        ::closed? closed?})))
 
 (defn close-request-server!
-  "Close request admission and join every admitted connection worker."
+  "Stop admission, drain admitted responses, and close every connection."
   {:malli/schema [:=> [:catn [::request-server ::request-server]]
                   ::nil-result]}
   [request-server]
-  (let [connections (::connections request-server)
-        closed? (::closed? request-server)
-        accept-worker ^Thread (::worker request-server)
-        workers
-        (locking connections
-          (reset! closed? true)
-          (try (.close ^ServerSocketChannel (::channel request-server))
-               (catch Throwable _))
-          (let [entries (vals @connections)]
-            ;; Idle workers may be blocked in read-frame; close only those
-            ;; channels. An active handler keeps its channel until its complete
-            ;; response is flushed, then exits because admission is closed.
-            (doseq [[channel {::keys [active?]}] @connections
-                    :when (not active?)]
-              (try (.close ^SocketChannel channel) (catch Throwable _)))
-            (mapv ::worker entries)))]
-    (.join accept-worker)
-    (doseq [^Thread worker workers]
-      (.join worker)))
+  (let [closed? ^AtomicBoolean (::closed? request-server)
+        selector ^Selector (::selector request-server)
+        selector-worker ^Thread (::worker request-server)
+        workers ^ThreadPoolExecutor (::workers request-server)]
+    (when (.compareAndSet closed? false true)
+      (enqueue-selector!
+       selector (::commands request-server)
+       #(begin-shutdown!
+         (::channel request-server)
+         (::connections request-server)
+         workers
+         (::close-connection! request-server)
+         (::shutting-down? request-server))))
+    (.join selector-worker)
+    (.close selector)
+    (.shutdown workers)
+    (.awaitTermination workers 30 TimeUnit/SECONDS))
   nil)
 
 (defn- close-subscriber!

@@ -5,6 +5,7 @@
             [seon.db.protocol :as protocol]
             [seon.db.transport.uds :as uds])
   (:import [java.io File]
+           [java.nio ByteBuffer]
            [java.nio.channels Channels SocketChannel]
            [java.util Date UUID]))
 
@@ -24,6 +25,52 @@
         (> (System/currentTimeMillis) deadline)
         (throw (ex-info "publisher did not accept its subscriber" {}))
         :else (do (Thread/sleep 10) (recur))))))
+
+(defn- wait-until!
+  [description predicate]
+  (let [deadline (+ (System/currentTimeMillis) 2000)]
+    (loop []
+      (cond
+        (predicate) true
+        (> (System/currentTimeMillis) deadline)
+        (throw (ex-info (str "timed out waiting for " description) {}))
+        :else (do (Thread/sleep 5) (recur))))))
+
+(defn- request-server!
+  [path handler close-connection!]
+  (uds/start-request-server!
+   {::uds/socket-path path
+    ::uds/open-connection!
+    (fn [close!]
+      {::connection-id (random-uuid) ::close! close!})
+    ::uds/close-connection! close-connection!
+    ::uds/handler handler}))
+
+(defn- frame-bytes
+  [message]
+  (let [payload (uds/encode message)]
+    (.array
+     (doto (ByteBuffer/allocate (+ Integer/BYTES (alength payload)))
+       (.putInt (alength payload))
+       (.put payload)))))
+
+(defn- joined-bytes
+  [& frames]
+  (let [buffer (ByteBuffer/allocate (reduce + (map alength frames)))]
+    (run! #(.put buffer ^bytes %) frames)
+    (.array buffer)))
+
+(defn- write-bytes!
+  [^SocketChannel channel ^bytes bytes chunk-size]
+  (loop [offset 0]
+    (when (< offset (alength bytes))
+      (let [length (min chunk-size (- (alength bytes) offset))
+            buffer (ByteBuffer/wrap bytes offset length)]
+        (loop []
+          (when (.hasRemaining buffer)
+            (.write channel buffer)
+            (recur)))
+        (recur (+ offset length))))))
 
 (deftest canonical-request-validation-is-structural
   (let [ping (protocol/ping-request {::protocol/request-id "canonical/ping"})
@@ -277,11 +324,12 @@
           ::protocol/adopted? false})
         seen (atom [])
         server
-        (uds/start-request-server!
-         {::uds/socket-path path
-          ::uds/handler (fn [message]
-                          (swap! seen conj message)
-                          response)})]
+        (request-server!
+         path
+         (fn [_owner message complete!]
+           (swap! seen conj message)
+           (complete! response))
+         (constantly nil))]
     (try
       (with-open [channel (uds/connect! path)]
         (let [actual
@@ -297,12 +345,12 @@
   (let [path (socket-path "transport-request")
         seen (atom [])
         server
-        (uds/start-request-server!
-         {::uds/socket-path path
-          ::uds/handler
-          (fn [request]
-            (swap! seen conj request)
-            (protocol/success {::protocol/pong? true}))})]
+        (request-server!
+         path
+         (fn [_owner request complete!]
+           (swap! seen conj request)
+           (complete! (protocol/success {::protocol/pong? true})))
+         (constantly nil))]
     (try
       (with-open [channel (uds/connect! path)]
         (let [request (protocol/ping-request
@@ -322,13 +370,14 @@
         entered (promise)
         release-handler (promise)
         server
-        (uds/start-request-server!
-         {::uds/socket-path path
-          ::uds/handler
-          (fn [message]
-            (deliver entered message)
-            @release-handler
-            {:transport-drain/response "committed"})})
+        (request-server!
+         path
+         (fn [_owner message complete!]
+           (deliver entered message)
+           (future
+             @release-handler
+             (complete! {:transport-drain/response "committed"})))
+         (constantly nil))
         client
         (future
           (with-open [channel (uds/connect! path)]
@@ -347,6 +396,113 @@
             "a closed request server accepts no later connection"))
       (finally
         (deliver release-handler true)
+        (uds/close-request-server! server)
+        (.delete (File. path))))))
+
+(deftest request-server-admits-fragmented-and-coalesced-frames-in-order
+  (let [path (socket-path "transport-linear-input")
+        seen (atom [])
+        owners (atom [])
+        server
+        (request-server!
+         path
+         (fn [owner request complete!]
+           (swap! owners conj owner)
+           (swap! seen conj (::request request))
+           (complete! {::response (::request request)}))
+         (constantly nil))]
+    (try
+      (with-open [channel (uds/connect! path)]
+        (write-bytes! channel (frame-bytes {::request :fragmented}) 1)
+        (write-bytes!
+         channel
+         (joined-bytes (frame-bytes {::request :coalesced-a})
+                       (frame-bytes {::request :coalesced-b}))
+         Integer/MAX_VALUE)
+        (let [input (Channels/newInputStream channel)
+              responses (repeatedly 3 #(uds/read-frame input))]
+          (is (= #{:fragmented :coalesced-a :coalesced-b}
+                 (set (map ::response responses))))
+          (is (= [:fragmented :coalesced-a :coalesced-b] @seen)
+              "decode and admission preserve one connection's byte order")
+          (is (every? #(identical? (first @owners) %) (rest @owners))
+              "every request receives the exact owner returned at open")))
+      (finally
+        (uds/close-request-server! server)
+        (.delete (File. path))))))
+
+(deftest request-server-writes-responses-when-they-complete
+  (let [path (socket-path "transport-out-of-order")
+        completions (atom {})
+        server
+        (request-server!
+         path
+         (fn [_owner request complete!]
+           (swap! completions assoc (::request request) complete!))
+         (constantly nil))]
+    (try
+      (with-open [channel (uds/connect! path)]
+        (write-bytes!
+         channel
+         (joined-bytes (frame-bytes {::request :first})
+                       (frame-bytes {::request :second}))
+         Integer/MAX_VALUE)
+        (wait-until! "both request admissions" #(= 2 (count @completions)))
+        ((get @completions :second) {::response :second})
+        (is (= {::response :second}
+               (uds/read-frame (Channels/newInputStream channel))))
+        ((get @completions :first) {::response :first})
+        (is (= {::response :first}
+               (uds/read-frame (Channels/newInputStream channel)))))
+      (finally
+        (run! #(% {::response :cleanup}) (vals @completions))
+        (uds/close-request-server! server)
+        (.delete (File. path))))))
+
+(deftest request-server-retains-large-response-suffix-until-writable
+  (let [path (socket-path "transport-partial-write")
+        response {::large-payload (apply str (repeat (* 4 1024 1024) "x"))}
+        server
+        (request-server!
+         path
+         (fn [_owner _request complete!] (complete! response))
+         (constantly nil))]
+    (try
+      (with-open [channel (uds/connect! path)]
+        (write-bytes! channel (frame-bytes {::request :large})
+                      Integer/MAX_VALUE)
+        (Thread/sleep 100)
+        (is (= response (uds/read-frame (Channels/newInputStream channel)))
+            "a response larger than the socket buffer is resumed exactly"))
+      (finally
+        (uds/close-request-server! server)
+        (.delete (File. path))))))
+
+(deftest request-server-closes-one-owner-exactly-once
+  (let [path (socket-path "transport-owner-close")
+        opened (promise)
+        closed (atom [])
+        server
+        (uds/start-request-server!
+         {::uds/socket-path path
+          ::uds/open-connection!
+          (fn [close!]
+            (let [owner {::connection-id (random-uuid) ::close! close!}]
+              (deliver opened owner)
+              owner))
+          ::uds/close-connection! #(swap! closed conj %)
+          ::uds/handler (fn [_owner _request _complete!] nil)})
+        channel (uds/connect! path)
+        owner (deref opened 2000 ::not-opened)]
+    (try
+      ((::close! owner))
+      ((::close! owner))
+      (.close channel)
+      (wait-until! "connection close callback" #(= 1 (count @closed)))
+      (is (identical? owner (first @closed)))
+      (is (= 1 (count @closed)))
+      (finally
+        (.close channel)
         (uds/close-request-server! server)
         (.delete (File. path))))))
 
