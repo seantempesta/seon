@@ -514,6 +514,50 @@
         (.countDown release)
         (executor/stop! {::executor/executor worker})))))
 
+(deftest every-owned-scope-fences-multi-database-work
+  (let [entered (CountDownLatch. 1)
+        release (CountDownLatch. 1)
+        worker
+        (start-worker
+         {:read (fn [request]
+                  (when (:request/block? request)
+                    (.countDown entered)
+                    (.await release))
+                  (:request/value request))})
+        a (scope "a" (random-uuid) (random-uuid))
+        b (scope "b" (random-uuid) (random-uuid))
+        multi
+        (-> (request worker "a" a "multi/running" :multi)
+            (assoc ::executor/scopes #{a b})
+            (assoc-in [::executor/request :request/block?] true))
+        running (submit-async! multi)]
+    (try
+      (is (.await entered 5 TimeUnit/SECONDS))
+      (let [drained
+            (future
+              (executor/fence-and-drain!
+               {::executor/executor worker
+                ::executor/scope b
+                ::executor/cancel (fn [_job-id] (.countDown release))}))]
+        (is (= {::executor/abandoned-count 0} @drained))
+        (is (= [::executor/value :multi] @running))
+        (is (= {::executor/accepted? false ::executor/joined? false}
+               (executor/try-submit!
+                (assoc (request worker "a" a "multi/fenced" :fenced)
+                       ::executor/scopes #{a b})))
+            "closing either participating database fences the whole job")
+        (is (= :a-only
+               (submit! (request worker "a" a "single/open" :a-only))))
+        (is (nil? (executor/release-scope!
+                   {::executor/executor worker ::executor/scope b})))
+        (is (= :reopened
+               (submit!
+                (assoc (request worker "a" a "multi/reopened" :reopened)
+                       ::executor/scopes #{a b})))))
+      (finally
+        (.countDown release)
+        (executor/stop! {::executor/executor worker})))))
+
 (deftest released-database-scope-does-not-retain-its-fence
   (let [worker (start-worker {:read :request/value})
         closed-scope (scope "a" (random-uuid) (random-uuid))]

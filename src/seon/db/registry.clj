@@ -93,6 +93,7 @@
 (schema/register! ::restore-completion-coordinates
                   [:map-of ::db.restore/id ::coordinate])
 (schema/register! ::transaction-id ::coordinate/t)
+(schema/register! ::commit-id :uuid)
 (schema/register! ::pre-restore-main-coordinate ::coordinate)
 (schema/register! ::selected-target-coordinate ::coordinate)
 (schema/register! ::prepared-target-coordinate ::coordinate)
@@ -204,6 +205,11 @@
   [::conn ::conn]
   [::main-coordinate ::main-coordinate]
   [::transaction-id ::transaction-id]])
+(schema/register!
+ ::commit-reachable?-request
+ [:map {:closed true}
+  [::conn ::conn]
+  [::commit-id ::commit-id]])
 
 (schema/register!
  ::create-branch!-request
@@ -915,6 +921,27 @@
        :seon.db.protocol.error/unsupported-history
        "Transaction-coordinate ancestry is incomplete."
        {::coordinate/commit-id commit-id})))
+
+(defn commit-reachable?
+  "True when `commit-id` is retained on the connection's current lineage."
+  {:malli/schema [:=> [:cat ::commit-reachable?-request] :boolean]}
+  [{::keys [conn commit-id]}]
+  (let [db-value (d/db conn)
+        store (:store db-value)
+        head (d/commit-id db-value)]
+    (loop [pending [head]
+           visited #{}]
+      (if-let [candidate (first pending)]
+        (cond
+          (= candidate commit-id) true
+          (contains? visited candidate) (recur (next pending) visited)
+          :else
+          (if-let [stored (k/get store candidate nil {:sync? true})]
+            (recur (into (vec (next pending))
+                         (get-in stored [:meta :datahike/parents]))
+                   (conj visited candidate))
+            false))
+        false))))
 
 (defn- stored-coordinate
   [stored]

@@ -68,6 +68,30 @@
                    (registry/release-database!
                    {::registry/database-name database-name})))))))
 
+(deftest retained-commit-reachability-follows-the-current-lineage
+  (let [opened
+        (ensure-database!
+         {::registry/database-name :registry/reachable
+          ::registry/backend :memory})
+        connection (::registry/conn opened)
+        _
+        (d/transact
+         connection
+         [{:db/ident :registry.reachable/value
+           :db/valueType :db.type/long
+           :db/cardinality :db.cardinality/one}
+          {:db/id -1 :registry.reachable/value 1}])
+        ancestor (d/commit-id (d/db connection))
+        _ (d/transact connection [[:db/add 1 :registry.reachable/value 2]])
+        head (d/commit-id (d/db connection))]
+    (is (true? (registry/commit-reachable?
+                {::registry/conn connection ::registry/commit-id head})))
+    (is (true? (registry/commit-reachable?
+                {::registry/conn connection ::registry/commit-id ancestor})))
+    (is (false? (registry/commit-reachable?
+                 {::registry/conn connection
+                  ::registry/commit-id (random-uuid)})))))
+
 (deftest transport-connections-share-datahike-reference-lifetime
   (let [database-name :registry/shared-transport
         unrelated-name :registry/unrelated-release

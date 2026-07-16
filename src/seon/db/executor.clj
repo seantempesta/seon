@@ -2,6 +2,7 @@
   "One bounded capacity and fairness owner for JVM database work."
   (:require [clojure.core.async :as async]
             [clojure.core.async.impl.protocols :as async-protocols]
+            [clojure.set :as set]
             [seon.db.coordinate :as coordinate]
             [seon.db.protocol :as protocol]
             [seon.schema :as schema]
@@ -20,6 +21,7 @@
                    [::coordinate/attachment ::coordinate/attachment]
                    [::connection-id ::connection-id]
                    [::generation ::generation]])
+(schema/register! ::scopes [:set {:min 1} ::scope])
 (schema/register! ::job-id
                   [:or ::scope
                    :seon.db.protocol/request-id
@@ -55,6 +57,7 @@
                    [::work-class ::work-class]
                    [::database-name ::database-name]
                    [::scope ::scope]
+                   [::scopes {:optional true} ::scopes]
                    [::job-id ::job-id]
                    [::request-id {:optional true} ::request-id]
                    [::request ::request]
@@ -358,7 +361,7 @@
 (defn- continue-work!
   [executor work continuation]
   (locking (::lock executor)
-    (let [{::keys [job-id owner scope reserved-work-class
+    (let [{::keys [job-id owner scopes reserved-work-class
                    reserved-request-bytes]} work
           next-class (::continue-work-class continuation)
           continue? (::continue? continuation)
@@ -367,7 +370,7 @@
       (when (and (= next-class reserved-work-class)
                  (identical? owner (::owner current))
                  (not (::canceled? current))
-                 (not (contains? (::closed-scopes state) scope))
+                 (empty? (set/intersection (::closed-scopes state) scopes))
                  (continue?))
         (let [next-work (-> current
                             (assoc ::work-class next-class
@@ -490,12 +493,16 @@
                                        ::work-class work-class})]]
     [{::accepted? false ::joined? false} outcome]))
 
-(defn- admit! [{::keys [executor work-class database-name scope job-id request-id
+(defn- admit! [{::keys [executor work-class database-name scope scopes job-id request-id
                         request request-bytes reserved-work-class
                         reserved-request-bytes]
                  :or {request-bytes 0 reserved-request-bytes 0}
                  :as submission}]
-  (let [admission
+  (let [scopes (or scopes #{scope})
+        _ (when-not (contains? scopes scope)
+            (throw (ex-info "The scheduled database scope must be owned by the job."
+                            {::scope scope ::scopes scopes})))
+        admission
         (locking (::lock executor)
           (let [state @(::state executor)]
       (if-let [existing (get-in state [::jobs job-id])]
@@ -524,7 +531,8 @@
                                       (::maximum-queued-by-database
                                        reserved-capacity))))
                           (not @(::stopped executor))
-                          (not (contains? (::closed-scopes state) scope))
+                          (empty? (set/intersection (::closed-scopes state)
+                                                    scopes))
                           (<= request-bytes (::maximum-request-bytes (::capacity executor)))
                           (< class-count (::maximum-queued class-capacity))
                           (< database-count (::maximum-queued-by-database class-capacity))
@@ -536,6 +544,7 @@
             (let [work {::work-class work-class
                         ::database-name database-name
                         ::scope scope
+                        ::scopes scopes
                         ::job-id job-id
                         ::request-id request-id
                         ::request request
@@ -558,11 +567,15 @@
   "Try to admit work and return ordinary admission evidence."
   [request] (admit! request))
 
+(defn- owns-scope?
+  [scope job]
+  (contains? (or (::scopes job) #{(::scope job)}) scope))
+
 (defn- fence-scope! [executor scope abandon-work-classes]
   (let [{::keys [removed] :as fenced}
         (locking (::lock executor)
           (let [state @(::state executor)
-                matching (into {} (filter (fn [[_ job]] (= scope (::scope job))))
+                matching (into {} (filter (fn [[_ job]] (owns-scope? scope job)))
                                (::jobs state))
                 queued (into {} (filter (fn [[_ job]] (= :queued (::status job))))
                              matching)
@@ -606,7 +619,7 @@
   [{::keys [executor scope]}]
   (locking (::lock executor)
     (when (let [state @(::state executor)]
-            (some (fn [[_ job]] (= scope (::scope job))) (::jobs state)))
+            (some (fn [[_ job]] (owns-scope? scope job)) (::jobs state)))
       (throw (ex-info "Cannot release a scope while work still owns it."
                       {::scope scope})))
     (swap! (::state executor) update ::closed-scopes disj scope))
@@ -632,7 +645,7 @@
     (locking (::lock executor)
       (loop []
         (when (let [state @(::state executor)]
-                (some (fn [[_ job]] (= scope (::scope job))) (::jobs state)))
+                (some (fn [[_ job]] (owns-scope? scope job)) (::jobs state)))
           (.wait ^Object (::lock executor))
           (recur))))
     {::abandoned-count (count queued)}))
