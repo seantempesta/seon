@@ -341,15 +341,10 @@
    :seon.eval/tee              tee})
 
 (deftest omitted-optional-function-facts-become-explicit-retractions
-  (let [query-rows #{["probe.user/f" :seon.fn/spec]
-                     ["probe.user/f" :seon.fn/schema-error]
-                     ["probe.user/f" :seon.fn/agent-facing?]}
-        retractions
-        (with-redefs [db/query (fn [& _] query-rows)]
-          ((deref #'seval/omitted-fn-projection-retractions)
-            ::db
-            [{:seon.fn/sym "probe.user/f"
-              :seon.fn/source "(defn f [x] x)"}]))]
+  (let [retractions
+        ((deref #'seval/omitted-fn-projection-retractions)
+         [{:seon.fn/sym "probe.user/f"
+           :seon.fn/source "(defn f [x] x)"}])]
     (is (= #{[:db.fn/retractAttribute
               [:seon.fn/sym "probe.user/f"] :seon.fn/spec]
              [:db.fn/retractAttribute
@@ -359,20 +354,26 @@
            (set retractions))))
   (testing "an asserted replacement is retained while only omissions retract"
     (let [retractions
-          (with-redefs [db/query
-                        (fn [& _]
-                          #{["probe.user/f" :seon.fn/spec]
-                            ["probe.user/f" :seon.fn/schema-error]
-                            ["probe.user/f" :seon.fn/agent-facing?]})]
-            ((deref #'seval/omitted-fn-projection-retractions)
-              ::db
-              [{:seon.fn/sym "probe.user/f"
-                :seon.fn/source "(defn f [x] x)"
-                :seon.fn/agent-facing? true
-                :seon.fn/spec "[:=> [:cat :int] :int]"}]))]
+          ((deref #'seval/omitted-fn-projection-retractions)
+           [{:seon.fn/sym "probe.user/f"
+             :seon.fn/source "(defn f [x] x)"
+             :seon.fn/agent-facing? true
+             :seon.fn/spec "[:=> [:cat :int] :int]"}])]
       (is (= [[:db.fn/retractAttribute
                [:seon.fn/sym "probe.user/f"] :seon.fn/schema-error]]
              retractions)))))
+
+(deftest declared-function-reads-replace-the-cardinality-many-value
+  (is (= [[:db.fn/retractAttribute
+           [:seon.fn/sym "probe.user/f"] :seon.fn/read-attrs]
+          [:db/add [:seon.fn/sym "probe.user/f"]
+           :seon.fn/read-attrs :a/id]
+          [:db/add [:seon.fn/sym "probe.user/f"]
+           :seon.fn/read-attrs :z/id]]
+         (seval/fn-read-attrs-tx "probe.user/f" #{:z/id :a/id})))
+  (is (= [[:db.fn/retractAttribute
+           [:seon.fn/sym "probe.user/f"] :seon.fn/read-attrs]]
+         (seval/fn-read-attrs-tx "probe.user/f" #{}))))
 
 (deftest ambiguous-wire-result-never-starts-a-second-allocation
   (async done
@@ -1392,7 +1393,7 @@
 ;; require edges for the ending ns (:seon.ns/require-edges — alias/refer
 ;; facts from the ANALYZER, seon.analyzer-info/ns-require-edges) and the
 ;; declared read-set for every teed fn (:seon.fn/read-attrs — qualified
-;; keyword literals walked off the READ form), and a REDEF diffs both
+;; keyword literals walked off the READ form), and a REDEF replaces both
 ;; (stale keywords are retracted, never accumulated).
 ;; ---------------------------------------------------------------------------
 

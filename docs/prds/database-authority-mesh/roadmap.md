@@ -1577,6 +1577,13 @@ second owner.
   A losing terminal receipt CAS whose authority status read also fails now
   stops as database error data instead of entering transcript fallback. Two
   connection-free regressions pass 2 tests/6 assertions.
+- Eval program projection no longer reads a database value merely to compute
+  optional function-field and declared-read-attribute diffs. Idempotent
+  attribute retraction followed by the exact current values expresses both
+  replacements directly in the one serialized transaction. This deletes two
+  local snapshot dependencies from every accepted function definition and
+  removes stale-diff code without adding a remote read. Focused pure
+  transaction proof passes 2 tests/4 assertions.
 - **Next refill:** move the remaining parent eval/schedule/test/authored-route
   consumers onto the existing per-agent child execution owner, delete global
   pod replay rather than adapting it, finish the remaining web synchronous

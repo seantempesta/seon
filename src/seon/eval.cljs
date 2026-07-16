@@ -50,7 +50,6 @@
             [cljs.reader :as reader]
             [cljs.tools.reader :as tools-reader]
             [cljs.tools.reader.reader-types :as reader-types]
-            [clojure.set :as set]
             [clojure.string :as str]
             [goog.object :as gobj]
             [malli.core :as m]
@@ -2752,29 +2751,18 @@
    A Datahike identity upsert replaces asserted card-one values but omission
    is not a retraction. Without these ops, removing a contract or fixing a
    schema error leaves the old fact durable and cold reconstruction revives
-   behavior the source no longer declares."
-  [db-value tee-entities]
-  (let [rows-by-sym
-        (into {}
-              (keep (fn [row]
-                      (when-let [sym (and (map? row) (:seon.fn/sym row))]
-                        [sym row])))
-              tee-entities)
-        syms (vec (sort (keys rows-by-sym)))]
-    (if (empty? syms)
-      []
-      (->> (db/query
-             '[:find ?sym ?attr
-               :in $ [?sym ...] [?attr ...]
-               :where
-               [?entity :seon.fn/sym ?sym]
-               [?entity ?attr _]]
-             db-value syms (vec (sort optional-fn-projection-attrs)))
-           (keep (fn [[sym attr]]
-                   (when-not (contains? (get rows-by-sym sym) attr)
-                     [:db.fn/retractAttribute [:seon.fn/sym sym] attr])))
-           (sort-by pr-str)
-           vec))))
+   behavior the source no longer declares. Retraction is already idempotent,
+   so emit the exact omissions directly instead of reading the old database
+   merely to avoid no-op transaction data."
+  [tee-entities]
+  (->> tee-entities
+       (keep (fn [row]
+               (when-let [sym (and (map? row) (:seon.fn/sym row))]
+                 (for [attr (sort optional-fn-projection-attrs)
+                       :when (not (contains? row attr))]
+                   [:db.fn/retractAttribute [:seon.fn/sym sym] attr]))))
+       (apply concat)
+       vec))
 
 (defn- function-contract-transition
   "Apply accepted function tee rows to a projection's contract population.
@@ -2986,38 +2974,28 @@
                        :seon.ns/require-edges (vec new-edges)}]))))))
 
 (defn fn-read-attrs-tx
-  "Diff-upsert tx ops making `:seon.fn/read-attrs` for `sym-str` EXACTLY
-   `new-kws`.
+  "Return tx ops making `:seon.fn/read-attrs` exactly `new-kws`.
 
-   Diff discipline (cardinality-many
-   accumulates on plain upsert): additions and removals are explicit
-   scalar ops, `[]` when unchanged. Scalar adds avoid Datahike's entity-map
+   Cardinality-many accumulates on plain upsert, so first retract the old
+   attribute and then assert the exact current values. Retraction is
+   idempotent and the owning function entity precedes these operations in the
+   same transaction; no database read or stale diff is required. Scalar adds
+   avoid Datahike's entity-map
    ambiguity where an exactly-two-value collection beginning with an identity
    attr is read as ONE lookup ref rather than two cardinality-many values.
-   Emitted after the owning fn entity at the tee site, so the lookup-ref is
-   resolvable even on the first definition. A REDEF that drops a keyword
-   literal sheds the stale watch."
+   A redefinition that drops a keyword literal sheds the stale watch."
   {:malli/schema
-   [:=> [:catn [::db :any] [::sym-str :string]
+   [:=> [:catn [::sym-str :string]
          [::new-kws [:set :qualified-keyword]]]
         [:vector :any]]}
-  [db sym-str new-kws]
-  (let [current   (into #{}
-                        (map first)
-                        (db/query '[:find ?k
-                                    :in $ ?s
-                                    :where
-                                    [?f :seon.fn/sym ?s]
-                                    [?f :seon.fn/read-attrs ?k]]
-                                  db sym-str))
-        additions (set/difference new-kws current)
-        removals  (set/difference current new-kws)]
-    (vec (concat (for [k (sort-by str additions)]
-                   [:db/add [:seon.fn/sym sym-str]
-                    :seon.fn/read-attrs k])
-                 (for [k (sort-by str removals)]
-                   [:db/retract [:seon.fn/sym sym-str]
-                    :seon.fn/read-attrs k])))))
+  [sym-str new-kws]
+  (into [[:db.fn/retractAttribute
+          [:seon.fn/sym sym-str]
+          :seon.fn/read-attrs]]
+        (map (fn [k]
+               [:db/add [:seon.fn/sym sym-str]
+                :seon.fn/read-attrs k]))
+        (sort-by str new-kws)))
 
 ;; Namespaces the requires-tee SKIPS — transient eval scaffolding, never
 ;; a real program-graph ns: the REPL default home ([[user-ns-sym]]), the
@@ -4616,9 +4594,7 @@
                     (core-boot-fn-syms @db/*conn* fn-syms))
                   tee-entities))
               omitted-fn-tx
-              (when db/*conn*
-                (omitted-fn-projection-retractions
-                  @db/*conn* tee-entities))
+              (omitted-fn-projection-retractions tee-entities)
               tee-entities (into (vec tee-entities) omitted-fn-tx)
               changed-schemas (schema/changed-keys schemas-before)
               old-projection (schema/current-projection)
@@ -4676,8 +4652,8 @@
                             (keyword (str ending-ns))
                             (analyzer-info/ns-require-edges
                               compile-state ending-ns)))
-              ;; Declared read-set diff (C28) for every teed :seon.fn
-              ;; row — scalar additions and stale-keyword retractions
+              ;; Declared read-set replacement (C28) for every teed :seon.fn
+              ;; row — scalar additions and whole-attribute retraction
               ;; follow the owning fn entity in this same ordered tx.
               ;; Scalar adds avoid Datahike's two-item collection /
               ;; lookup-ref ambiguity; diffing avoids cardinality-many
@@ -4693,17 +4669,16 @@
                               (analyzer-info/ns-require-edges
                                 compile-state ending-ns)))})
               read-attr-tx
-              (when db/*conn*
-                (into []
-                      (mapcat (fn [ent]
-                                (when-let [s (and (map? ent)
-                                                  (:seon.fn/sym ent))]
-                                  (fn-read-attrs-tx
-                                    @db/*conn* s
-                                    (source-qualified-kws
-                                      (:seon.fn/source ent)
-                                      kw-resolve)))))
-                      tee-entities))
+              (into []
+                    (mapcat (fn [ent]
+                              (when-let [s (and (map? ent)
+                                                (:seon.fn/sym ent))]
+                                (fn-read-attrs-tx
+                                  s
+                                  (source-qualified-kws
+                                    (:seon.fn/source ent)
+                                    kw-resolve)))))
+                    tee-entities)
               ;; Durable-by-default (owner ruling 2026-07-10): a bare
               ;; top-level `(require …)` — incl. the `alias` rewrite —
               ;; persists its specs into the CURRENT ns's
