@@ -1230,10 +1230,13 @@ is prohibited.
   acquired data. No compatibility connection, query-result replay map, public
   namespace alias, or second database facade may make old local-Datahike call
   shapes appear synchronous.
-- **Earliest unsettled contract:** complete the remaining optional warning,
-  subagent, menu, and typeahead owners, then let the live debug feed consume the
-  same coordinate-pinned child result without adding a synchronous cache or a
-  second renderer. Commit `43645eaa` closes the production turn caller: one
+- **Earliest unsettled contract:** let the live debug feed consume the same
+  coordinate-pinned child result without adding a synchronous cache or a second
+  renderer. The optional prompt owners are complete: `2dc9b44a` feeds the one
+  existing warning-check registry shared ordinary acquisition, `0602b8a0`
+  replaces per-child subagent reads with two bounded batches, and `93d8e0b0`
+  acquires menu/typeahead data without a local database value. Commit `43645eaa`
+  closes the production turn caller: one
   trusted compiled invocation returns the complete rendered-context value, the
   pod validates its exact coordinate, and only the returned text reaches the
   LLM turn. Commit `e5556524` restores derived auto-run blocks from namespace
@@ -1374,9 +1377,19 @@ is prohibited.
   with the unchanged 20-warning inventory. Commit `43645eaa` wires that complete
   child result into real turn execution and converts outer child/coordinate
   failure to turn error data.
-- **Next refill:** finish warnings, subagent, and menu/typeahead through their
-  block-owned acquisitions, then make the existing Datastar debug transition
-  owner honestly asynchronous and consume the same child result. In parallel,
+- `2dc9b44a` preserves the single warning registry and per-check isolation while
+  sharing acquired function, schema, provenance, count, and runtime rows across
+  all checks. `0602b8a0` preserves the derived subagent state and breaker rules
+  without N child reads. `93d8e0b0` preserves one menu numbering and provider
+  gating through bounded direct/required-symbol acquisition. The integrated
+  bench-client and both execution artifact flavors compile; execution warnings
+  fall from 20 to 18 because the menu/typeahead prompt-local arities are gone.
+  The six focused test namespaces compile in a 527-file artifact, then the
+  runner stops before any namespace starts on the intentionally broken legacy
+  `seon.db.replica.js` import.
+- **Next refill:** make the existing Datastar debug transition owner honestly
+  asynchronous and consume the same child result, then move the coordinate-
+  pinned system prompt through capture and provider delivery. In parallel,
   finish restore/readiness,
   quiescence, and session close. Only then switch client open atomically and
   delete replica, publisher/replay, Node adapters, SCI render reconstruction,

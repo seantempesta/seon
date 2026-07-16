@@ -49,10 +49,11 @@ order: exact Datahike identity and capability ownership; fair multi-database
 execution; protocol and persistent native sessions; asynchronous `seon.db`;
 isolated Bun children; atomic replica/feed removal; then density, packaging, and
 the measured one-versus-2/4-authority-shard decision. Its current earliest
-unsettled contract is completing the remaining optional prompt owners and
-letting the synchronous Datastar debug transition consume the same async child
-result without a prompt-specific cache. The real turn caller is closed at
-`43645eaa`; derived auto-run rendering is closed at `e5556524`. Authored source
+unsettled contract is letting the synchronous Datastar debug transition consume
+the same async child result without a prompt-specific cache. The remaining
+optional prompt owners are closed at `2dc9b44a`, `0602b8a0`, and `93d8e0b0`.
+The real turn caller is closed at `43645eaa`; derived auto-run rendering is
+closed at `e5556524`. Authored source
 loading, compiled execution identity, the static prompt composition root, and
 the namespace, transcript, plan, and canvas async owners are settled. Commits
 `6ff02c0a` and `60d9582e` keep the
@@ -60,8 +61,7 @@ child-local selected-function capability lexical and append it only to compiled
 prompt owners; authored functions and nested renderers receive ordinary
 declared arguments. Commits `5347ea7d` and `2366590a` delete the four owners'
 local prompt acquisition fallbacks and route their reads through the inherited
-coordinate. The remaining symbol-backed warnings, subagent, and menu/typeahead
-slots must cross the same seam before the debug caller cut. The public
+coordinate. The public
 integration point remains
 the stable asynchronous `seon.db` facade; Datahike APIs and values remain
 JVM-internal.
