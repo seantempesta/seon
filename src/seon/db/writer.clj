@@ -1692,17 +1692,23 @@
                 (mapv #(dissoc % :value) errors))))))
 
 (defn- canonical-response
-  [response]
-  (if (protocol/valid-response? response)
-    response
-    (let [explanation
-          (compact-explanation (protocol/explain-response response))]
-      (log/error "database writer constructed an invalid response"
-                 {::response-explanation explanation})
-      (protocol/failure
-       {::protocol/error-kind protocol/internal-error
-        ::protocol/error
-        "The database writer constructed an invalid response."}))))
+  [request response]
+  (let [correlated (assoc response ::protocol/request-id
+                          (or (::protocol/request-id request)
+                              "invalid-request"))]
+    (if (protocol/valid-response? correlated)
+      correlated
+      (let [explanation
+            (compact-explanation (protocol/explain-response correlated))]
+        (log/error "database writer constructed an invalid response"
+                   {::response-explanation explanation})
+        (protocol/failure
+         {::protocol/error-kind protocol/internal-error
+          ::protocol/error
+          "The database writer constructed an invalid response."
+          ::protocol/body
+          {::protocol/request-id (or (::protocol/request-id request)
+                                     "invalid-request")}})))))
 
 (defn handle-request
   "Interpret one complete canonical database protocol request."
@@ -1710,7 +1716,7 @@
                             [:seon.db.writer/request :map]]
                   :seon.db.protocol/response]}
   [runtime request]
-  (canonical-response
+  (canonical-response request
    (if-not (protocol/valid-request? request)
      (let [explanation
            (compact-explanation (protocol/explain-request request))]
@@ -1727,7 +1733,9 @@
          :seon.db.protocol.operation/capabilities
          (protocol/success
           {::protocol/request-id (::protocol/request-id request)
-           ::protocol/capabilities (d/capabilities)})
+           ::protocol/capabilities
+           (assoc (d/capabilities)
+                  ::protocol/version protocol/current-version)})
 
          :seon.db.protocol.operation/resolve-head
          (let [{::registry/keys [conn database-name attachment coordinate]}
@@ -1848,6 +1856,7 @@
              (protocol/ensure-database-request
               (cond->
                {::protocol/database-name database-name
+                ::protocol/request-id "writer/start"
                 ::protocol/backend backend}
                 database-path
                 (assoc ::protocol/database-path database-path))))]

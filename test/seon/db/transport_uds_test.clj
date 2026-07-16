@@ -26,9 +26,10 @@
         :else (do (Thread/sleep 10) (recur))))))
 
 (deftest canonical-request-validation-is-structural
-  (let [ping (protocol/ping-request)
+  (let [ping (protocol/ping-request {::protocol/request-id "canonical/ping"})
         ensure (protocol/ensure-database-request
-                {::protocol/database-name "alpha"
+                {::protocol/request-id "canonical/ensure"
+                 ::protocol/database-name "alpha"
                  ::protocol/backend :memory})
         transact (protocol/transaction-request
                   {::protocol/database-name "alpha"
@@ -101,7 +102,7 @@
                   ::protocol/attachment attachment
                   ::protocol/coordinate point
                   ::protocol/members members})]
-    (is (= 3 protocol/current-version))
+    (is (= 4 protocol/current-version))
     (is (protocol/valid-request? request))
     (is (= request (uds/decode (uds/encode request))))
     (is (false? (protocol/valid-request?
@@ -138,10 +139,13 @@
                ::coordinate/t 536870920)
         request
         (protocol/resolve-transaction-coordinate-request
-         {::protocol/database-name "default"
+         {::protocol/request-id "coordinate/resolve"
+          ::protocol/database-name "default"
           ::protocol/head-coordinate head
           ::protocol/transaction-id (::coordinate/t original)})
-        response (protocol/success {::protocol/coordinate original})]
+        response (protocol/success
+                  {::protocol/request-id "coordinate/resolve"
+                   ::protocol/coordinate original})]
     (is (protocol/valid-request? request))
     (is (protocol/valid-response? response))
     (is (= request (uds/decode (uds/encode request))))
@@ -154,7 +158,8 @@
          ::coordinate/branch :experiment/cold}
         request
         (protocol/ensure-database-request
-         {::protocol/database-name "experiment-cold"
+         {::protocol/request-id "ensure/attachment"
+          ::protocol/database-name "experiment-cold"
           ::protocol/backend :file
           ::protocol/database-path "data/clusters/default/db"
           ::coordinate/attachment attachment})
@@ -177,17 +182,20 @@
         target-head (merge source target-attachment)
         requests
         [(protocol/create-branch-request
-          {::protocol/source-database-name "default"
+          {::protocol/request-id "lifecycle/create"
+           ::protocol/source-database-name "default"
            ::protocol/target-database-name "default-lifecycle"
            ::protocol/source-coordinate source
            ::protocol/expected-source-head source
            ::protocol/target-branch :experiment/lifecycle})
          (protocol/release-database-request
-          {::protocol/target-database-name "default-lifecycle"
+          {::protocol/request-id "lifecycle/release"
+           ::protocol/target-database-name "default-lifecycle"
            ::protocol/target-attachment target-attachment
            ::protocol/expected-target-head target-head})
          (protocol/delete-branch-request
-          {::protocol/source-database-name "default"
+          {::protocol/request-id "lifecycle/delete"
+           ::protocol/source-database-name "default"
            ::protocol/target-database-name "default-lifecycle"
            ::protocol/target-attachment target-attachment
            ::protocol/expected-target-head target-head})]]
@@ -219,14 +227,16 @@
                ::coordinate/branch :experiment/portable-call)
         request
         (protocol/create-branch-request
-         {::protocol/source-database-name "default"
+         {::protocol/request-id "lifecycle/call"
+          ::protocol/source-database-name "default"
           ::protocol/target-database-name "default-portable-call"
           ::protocol/source-coordinate source
           ::protocol/expected-source-head source
           ::protocol/target-branch :experiment/portable-call})
         response
         (protocol/success
-         {::protocol/target-database-name "default-portable-call"
+         {::protocol/request-id "lifecycle/call"
+          ::protocol/target-database-name "default-portable-call"
           ::protocol/target-attachment target-attachment
           ::protocol/coordinate (merge source target-attachment)
           ::protocol/backend :file
@@ -263,7 +273,8 @@
             (protocol/success {::protocol/pong? true}))})]
     (try
       (with-open [channel (uds/connect! path)]
-        (let [request (protocol/ping-request)
+        (let [request (protocol/ping-request
+                       {::protocol/request-id "transport/ping"})
               response (uds/call! {::uds/channel channel
                                    ::uds/message request})]
           (is (= [request] @seen))

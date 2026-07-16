@@ -85,7 +85,9 @@
         (is (every? protocol/valid-response?
                     [capabilities head cancellation unknown]))
         (is (= "control/capabilities" (::protocol/request-id capabilities)))
-        (is (= (d/capabilities) (::protocol/capabilities capabilities)))
+        (is (= (assoc (d/capabilities)
+                      ::protocol/version protocol/current-version)
+               (::protocol/capabilities capabilities)))
         (is (= "control/head" (::protocol/request-id head)))
         (is (= database-name (::protocol/database-name head)))
         (is (= (coordinate/attachment (::protocol/coordinate head))
@@ -386,7 +388,8 @@
                   (future
                     (call! control-channel
                            (protocol/release-database-request
-                            {::protocol/target-database-name database-name
+                            {::protocol/request-id "release/running-read"
+                             ::protocol/target-database-name database-name
                              ::protocol/target-attachment attachment
                              ::protocol/expected-target-head coordinate})))]
               (Thread/sleep 100)
@@ -547,7 +550,8 @@
         (let [ensure-response
               (call! channel
                      (protocol/ensure-database-request
-                      {::protocol/database-name branch-name
+                      {::protocol/request-id "branch/ensure-first"
+                       ::protocol/database-name branch-name
                        ::protocol/backend :memory
                        ::coordinate/attachment attachment}))
               transaction-response
@@ -607,7 +611,8 @@
           (let [response
                 (call! channel
                        (protocol/ensure-database-request
-                        {::protocol/database-name branch-name
+                        {::protocol/request-id "branch/ensure-second"
+                         ::protocol/database-name branch-name
                          ::protocol/backend :file
                          ::protocol/database-path database-path
                          ::coordinate/attachment attachment}))
@@ -661,7 +666,8 @@
               stale
               (call! channel
                      (protocol/create-branch-request
-                      {::protocol/source-database-name source-name
+                      {::protocol/request-id "branch/create-first"
+                       ::protocol/source-database-name source-name
                        ::protocol/target-database-name target-name
                        ::protocol/source-coordinate source-head
                        ::protocol/expected-source-head initial-head
@@ -669,7 +675,8 @@
               created
               (call! channel
                      (protocol/create-branch-request
-                      {::protocol/source-database-name source-name
+                      {::protocol/request-id "branch/create-second"
+                       ::protocol/source-database-name source-name
                        ::protocol/target-database-name target-name
                        ::protocol/source-coordinate source-head
                        ::protocol/expected-source-head source-head
@@ -698,7 +705,8 @@
                 observation
                 (call! channel
                        (protocol/observe-database-lifecycle-request
-                        {::protocol/database-name source-name}))]
+                        {::protocol/request-id "branch/observe"
+                         ::protocol/database-name source-name}))]
             (is (::protocol/success? observation))
             (is (= source-head (::protocol/main-coordinate observation)))
             (is (= (set (or (d/parent-commit-ids (d/db source-connection)) []))
@@ -731,13 +739,15 @@
           (let [released
                 (call! channel
                        (protocol/release-database-request
-                        {::protocol/target-database-name target-name
+                        {::protocol/request-id "branch/release"
+                         ::protocol/target-database-name target-name
                          ::protocol/target-attachment target-attachment
                          ::protocol/expected-target-head target-head}))
                 deleted
                 (call! channel
                        (protocol/delete-branch-request
-                        {::protocol/source-database-name source-name
+                        {::protocol/request-id "branch/delete"
+                         ::protocol/source-database-name source-name
                          ::protocol/target-database-name target-name
                          ::protocol/target-attachment target-attachment
                          ::protocol/expected-target-head target-head}))]
@@ -769,11 +779,14 @@
       (wait-for-subscriber! (::writer/publisher server))
       (let [publish-input (Channels/newInputStream publish-channel)
             ping-response
-            (call! request-channel (protocol/ping-request))
+            (call! request-channel
+                   (protocol/ping-request
+                    {::protocol/request-id "invalid/ping"}))
             ensure-response
             (call! request-channel
                    (protocol/ensure-database-request
-                    {::protocol/database-name database-name
+                    {::protocol/request-id "invalid/ensure"
+                     ::protocol/database-name database-name
                      ::protocol/backend :memory}))
             initial-coordinate (::coordinate/coordinate ensure-response)
             writer-connection
@@ -788,7 +801,8 @@
             ensure-after-invalid
             (call! request-channel
                    (protocol/ensure-database-request
-                    {::protocol/database-name database-name
+                    {::protocol/request-id "invalid/reensure"
+                     ::protocol/database-name database-name
                      ::protocol/backend :memory}))
             unknown-response
             (call! request-channel
@@ -835,7 +849,9 @@
             stored
             (d/pull (d/db connection) '[*]
                     [:writer.person/id "alice"])]
-        (is (= {::protocol/success? true ::protocol/pong? true}
+        (is (= {::protocol/success? true
+                ::protocol/request-id "invalid/ping"
+                ::protocol/pong? true}
                ping-response))
         (is (every? protocol/valid-response?
                     [ensure-response invalid-response ensure-after-invalid
@@ -914,7 +930,8 @@
       (let [opened
             (call! request-channel
                    (protocol/ensure-database-request
-                    {::protocol/database-name database-name
+                    {::protocol/request-id "invalid/ensure-after"
+                     ::protocol/database-name database-name
                      ::protocol/backend :memory}))
             schema
             (call! request-channel

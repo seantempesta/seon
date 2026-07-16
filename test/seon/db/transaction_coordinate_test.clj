@@ -38,7 +38,8 @@
   (writer/handle-request
    runtime
    (protocol/ensure-database-request
-    {::protocol/database-name database-name
+    {::protocol/request-id (str "coordinate/ensure/" database-name)
+     ::protocol/database-name database-name
      ::protocol/backend :memory})))
 
 (defn- transact!
@@ -62,7 +63,8 @@
   (writer/handle-request
    runtime
    (protocol/resolve-transaction-coordinate-request
-    {::protocol/database-name database-name
+    {::protocol/request-id (str "coordinate/resolve/" database-name "/" transaction)
+     ::protocol/database-name database-name
      ::protocol/head-coordinate head-coordinate
      ::protocol/transaction-id transaction})))
 
@@ -151,7 +153,8 @@
         (writer/handle-request
          runtime
          (protocol/ensure-database-request
-          {::protocol/database-name branch-name
+          {::protocol/request-id "coordinate/ensure-branch"
+           ::protocol/database-name branch-name
            ::protocol/backend :memory
            ::coordinate/attachment
            (assoc (coordinate/attachment main-coordinate)

@@ -91,7 +91,8 @@
         (writer/handle-request
          runtime
          (protocol/ensure-database-request
-          {::protocol/database-name database-name
+          {::protocol/request-id "generated/ensure"
+           ::protocol/database-name database-name
            ::protocol/backend :memory}))]
     (is (true? (::protocol/success? response)))
     {::runtime runtime

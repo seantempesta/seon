@@ -50,7 +50,8 @@
         (writer/handle-request
          runtime
          (protocol/ensure-database-request
-          {::protocol/database-name database-name
+          {::protocol/request-id "replay/ensure"
+           ::protocol/database-name database-name
            ::protocol/backend :memory}))
         connection
         (::registry/conn
@@ -172,13 +173,15 @@
         (writer/handle-request
          runtime
          (protocol/replay-transactions-request
-          {::protocol/database-name "missing-database"
+          {::protocol/request-id "replay/missing"
+           ::protocol/database-name "missing-database"
            ::protocol/since-coordinate current-coordinate}))
         impossible-watermark
         (writer/handle-request
          runtime
          (protocol/replay-transactions-request
-          {::protocol/database-name database-name
+          {::protocol/request-id "replay/page"
+           ::protocol/database-name database-name
            ::protocol/since-coordinate current-coordinate
            ::protocol/through-coordinate
            (update current-coordinate ::coordinate/t inc)}))]

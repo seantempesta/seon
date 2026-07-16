@@ -248,7 +248,8 @@
            (fn [socket-path request _]
              (is (= (::launch/request-socket-path writer-owner) socket-path))
              (is (= (protocol/ensure-database-request
-                     (::launch/database descriptor))
+                     (assoc (::launch/database descriptor)
+                            ::protocol/request-id (::protocol/request-id request)))
                     request))
              (js/Promise.resolve expected-response))
            #(replica/ensure-database! {::launch/descriptor descriptor}))

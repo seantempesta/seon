@@ -237,7 +237,8 @@
     (writer-call!
      descriptor
      (protocol/observe-database-lifecycle-request
-      {::protocol/database-name (::protocol/database-name database)})
+      {::protocol/request-id (str (random-uuid))
+       ::protocol/database-name (::protocol/database-name database)})
      ::protocol/observe-database-lifecycle-response)))
 
 (defn- post-edn! [url request response-schema]
@@ -575,7 +576,8 @@
         (writer-call!
          descriptor
          (protocol/ensure-database-request
-          (cond-> {::protocol/database-name
+          (cond-> {::protocol/request-id (str (random-uuid))
+                   ::protocol/database-name
                    (::protocol/database-name database)
                    ::protocol/backend (::protocol/backend database)}
             (::coordinate/attachment database)
@@ -616,7 +618,8 @@
         (writer-call!
          source-descriptor
          (protocol/create-branch-request
-          {::protocol/source-database-name
+          {::protocol/request-id (str (random-uuid))
+           ::protocol/source-database-name
            (::protocol/database-name source-database)
            ::protocol/target-database-name target-database-name
            ::protocol/source-coordinate source-coordinate

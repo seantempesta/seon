@@ -210,7 +210,8 @@
         database (::launch/database descriptor)
         request
         (protocol/ensure-database-request
-         (cond-> {::protocol/database-name (::protocol/database-name database)
+         (cond-> {::protocol/request-id (str (random-uuid))
+                  ::protocol/database-name (::protocol/database-name database)
                   ::protocol/backend (::protocol/backend database)}
            (::coordinate/attachment database)
            (assoc ::coordinate/attachment
@@ -288,7 +289,8 @@
         (get-in source-descriptor [::launch/database ::coordinate/coordinate])
         create-request
         (protocol/create-branch-request
-         {::protocol/source-database-name
+         {::protocol/request-id (str (random-uuid))
+          ::protocol/source-database-name
           (get-in source-descriptor [::launch/database
                                      ::protocol/database-name])
           ::protocol/target-database-name (::target-database-name request)
@@ -628,7 +630,8 @@
         target-database (::launch/database descriptor)
         ensure-request
         (protocol/ensure-database-request
-         (cond-> {::protocol/database-name
+         (cond-> {::protocol/request-id (str (random-uuid))
+                  ::protocol/database-name
                   (::protocol/database-name target-database)
                   ::protocol/backend (::protocol/backend target-database)
                   ::coordinate/attachment
@@ -678,7 +681,8 @@
           target-database (::launch/database descriptor)
           ensure-request
           (protocol/ensure-database-request
-           {::protocol/database-name (::protocol/database-name target-database)
+           {::protocol/request-id (str (random-uuid))
+            ::protocol/database-name (::protocol/database-name target-database)
             ::protocol/backend (::protocol/backend target-database)
             ::coordinate/attachment (::coordinate/attachment target-database)
             ::protocol/database-path (::protocol/database-path target-database)})
@@ -697,7 +701,8 @@
               attachment (::coordinate/attachment target-database)
               release-request
               (protocol/release-database-request
-               {::protocol/target-database-name
+               {::protocol/request-id (str (random-uuid))
+                ::protocol/target-database-name
                 (::protocol/database-name target-database)
                 ::protocol/target-attachment attachment
                 ::protocol/expected-target-head current-head})
@@ -707,7 +712,8 @@
                (writer-call! descriptor release-request))
               delete-request
               (protocol/delete-branch-request
-               {::protocol/source-database-name
+               {::protocol/request-id (str (random-uuid))
+                ::protocol/source-database-name
                 (::protocol/source-database-name (::create-request closing))
                 ::protocol/target-database-name
                 (::protocol/database-name target-database)

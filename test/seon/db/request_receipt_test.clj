@@ -41,7 +41,8 @@
   (writer/handle-request
    runtime
    (protocol/ensure-database-request
-    {::protocol/database-name database-name
+    {::protocol/request-id (str "receipt/ensure/" database-name)
+     ::protocol/database-name database-name
      ::protocol/backend :memory})))
 
 (defn- transact!
@@ -339,7 +340,8 @@
               (writer/handle-request
                embedding-runtime
                (protocol/release-database-request
-                {::protocol/target-database-name database-name
+                {::protocol/request-id "receipt/release"
+                 ::protocol/target-database-name database-name
                  ::protocol/target-attachment attachment
                  ::protocol/expected-target-head coordinate}))]
           (is (true? (::protocol/success? release-response)))
@@ -349,7 +351,8 @@
                 (writer/handle-request
                  embedding-runtime
                  (protocol/ensure-database-request
-                  {::protocol/database-name database-name
+                  {::protocol/request-id "receipt/reensure"
+                   ::protocol/database-name database-name
                    ::protocol/backend :memory
                    ::coordinate/attachment attachment})))))
           (.countDown release-provider)

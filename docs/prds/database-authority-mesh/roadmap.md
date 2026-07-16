@@ -514,6 +514,22 @@ out-of-order responses, linear chunk/cursor decoding, exact partial-write
 suffixes, `drain`, bounded in-flight work/bytes, semantic cancel, and independent
 page delivery. Keep four-byte length framing and Transit JSON initially.
 
+Protocol version 4 closes the correlation prerequisite: every request,
+successful response, and failed response carries the existing request ID,
+including ping, database lifecycle, replay, transaction-coordinate, and KNN
+operations. The writer attaches that identity at its one canonical response
+boundary, and capability discovery reports the protocol version. A future
+selector therefore needs no transport correlation envelope; a frame without a
+usable request ID is a session protocol failure.
+
+The atomic-cut audit exposed two additional prerequisites. Writer admission
+must become callback-complete rather than blocking selector or waiter threads,
+and database attachment ownership must be counted per live internal session so
+one child disconnect cannot release a database still acquired by siblings.
+Exact `4 + payload` input bytes must be reserved from the frame header before
+allocation, handed into semantic admission, and retained until that handoff
+settles. These are part of the replacement, not compatibility layers.
+
 [[research/selector-session-source-proof-2026-07-16]] validates the replacement
 against exact Bun and JDK 26 source. A disposable fragmented-frame probe
 delivered 10,000 multiplexed requests at about 164,862 requests per second,

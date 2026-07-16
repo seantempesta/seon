@@ -227,7 +227,9 @@
         (get-in descriptor [::launch/writer-owner
                             ::launch/request-socket-path])
         resp (await (uds/rpc {::uds/socket-path request-socket-path
-                              ::uds/message (protocol/ping-request)
+                              ::uds/message
+                              (protocol/ping-request
+                               {::protocol/request-id (str (random-uuid))})
                               ::uds/timeout-ms ping-timeout-ms}))]
     (when-not (::protocol/success? resp)
       (throw (ex-info "Database writer ping failed."
@@ -334,7 +336,8 @@
           {::uds/socket-path (::launch/request-socket-path writer-owner)
            ::uds/message
            (protocol/ensure-database-request
-            database-selection)
+            (assoc database-selection
+                   ::protocol/request-id (str (random-uuid))))
            ::uds/timeout-ms ensure-database-timeout-ms}))]
     (validate-ensure-response
      {::launch/descriptor descriptor ::response resp})))
@@ -400,7 +403,8 @@
       {::uds/socket-path request-socket-path
        ::uds/message
        (protocol/resolve-transaction-coordinate-request
-        {::protocol/database-name routed-database-name
+        {::protocol/request-id (str (random-uuid))
+         ::protocol/database-name routed-database-name
          ::protocol/head-coordinate head-coordinate
          ::protocol/transaction-id transaction-id})
        ::uds/timeout-ms coordinate-resolution-timeout-ms}))))
@@ -1271,7 +1275,8 @@
               (let [replay-request
                     (protocol/replay-transactions-request
                      (cond->
-                      {::protocol/database-name expected-database-name
+                      {::protocol/request-id (str (random-uuid))
+                       ::protocol/database-name expected-database-name
                        ::protocol/since-coordinate cursor}
                        (some? through)
                        (assoc ::protocol/through-coordinate through)))

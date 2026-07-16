@@ -88,7 +88,7 @@
 (def unknown-status :seon.db.protocol.status/unknown)
 (def feed-behind-status :seon.db.protocol.status/feed-behind)
 
-(def current-version 3)
+(def current-version 4)
 
 (def writer-process :seon.dev.process/writer)
 
@@ -281,7 +281,9 @@
 
 (schema/register!
  ::ping-request
- [:map [::operation [:= ping-operation]]])
+ [:map {:closed true}
+  [::operation [:= ping-operation]]
+  [::request-id ::request-id]])
 (schema/register!
  ::capabilities-request
  [:map {:closed true}
@@ -395,8 +397,9 @@
   [::target-request-id ::target-request-id]])
 (schema/register!
  ::ensure-database-request
- [:map
+ [:map {:closed true}
   [::operation [:= ensure-database-operation]]
+  [::request-id ::request-id]
   [::database-name ::database-name]
   [::backend ::backend]
   [::coordinate/attachment {:optional true} ::coordinate/attachment]
@@ -405,11 +408,13 @@
  ::observe-database-lifecycle-request
  [:map {:closed true}
   [::operation [:= observe-database-lifecycle-operation]]
+  [::request-id ::request-id]
   [::database-name ::database-name]])
 (schema/register!
  ::create-branch-request
  [:map {:closed true}
   [::operation [:= create-branch-operation]]
+  [::request-id ::request-id]
   [::source-database-name ::source-database-name]
   [::target-database-name ::target-database-name]
   [::source-coordinate ::source-coordinate]
@@ -419,6 +424,7 @@
  ::release-database-request
  [:map {:closed true}
   [::operation [:= release-database-operation]]
+  [::request-id ::request-id]
   [::target-database-name ::target-database-name]
   [::target-attachment ::target-attachment]
   [::expected-target-head ::expected-target-head]])
@@ -426,6 +432,7 @@
  ::delete-branch-request
  [:map {:closed true}
   [::operation [:= delete-branch-operation]]
+  [::request-id ::request-id]
   [::source-database-name ::source-database-name]
   [::target-database-name ::target-database-name]
   [::target-attachment ::target-attachment]
@@ -442,8 +449,9 @@
   [::generated-candidates {:optional true} ::generated-candidates]])
 (schema/register!
   ::replay-transactions-request
-  [:map
+  [:map {:closed true}
   [::operation [:= replay-transactions-operation]]
+  [::request-id ::request-id]
   [::database-name ::database-name]
   [::since-coordinate ::since-coordinate]
   [::through-coordinate {:optional true} ::through-coordinate]])
@@ -451,6 +459,7 @@
  ::resolve-transaction-coordinate-request
  [:map {:closed true}
   [::operation [:= resolve-transaction-coordinate-operation]]
+  [::request-id ::request-id]
   [::database-name ::database-name]
   [::head-coordinate ::head-coordinate]
   [::transaction-id ::transaction-id]])
@@ -492,14 +501,16 @@
  ::failed-response
  [:map
   [::success? [:= false]]
+  [::request-id ::request-id]
   [::error-kind ::error-kind]
   [::error ::error]
   [::expected-coordinate {:optional true} ::expected-coordinate]
   [::current-coordinate {:optional true} ::current-coordinate]])
 (schema/register!
  ::ping-response
- [:map
+ [:map {:closed true}
   [::success? [:= true]]
+  [::request-id ::request-id]
   [::pong? ::pong?]])
 (schema/register!
  ::capabilities-response
@@ -547,8 +558,14 @@
  [:map {:closed true}
   [::success? [:= true]]
   [::result ::result]])
+(schema/register!
+ ::failed-member-response
+ [:map {:closed true}
+  [::success? [:= false]]
+  [::error-kind ::error-kind]
+  [::error ::error]])
 (schema/register! ::member-response
-                  [:or ::failed-response ::query-member-response
+                  [:or ::failed-member-response ::query-member-response
                    ::read-member-response])
 (schema/register! ::results [:vector ::member-response])
 (schema/register!
@@ -570,8 +587,9 @@
   [::running? ::running?]])
 (schema/register!
  ::ensure-database-response
- [:map
+ [:map {:closed true}
   [::success? [:= true]]
+  [::request-id ::request-id]
   [::database-name ::database-name]
   [::coordinate/coordinate ::coordinate/coordinate]
   [::backend ::backend]
@@ -580,6 +598,7 @@
  ::observe-database-lifecycle-response
  [:map {:closed true}
   [::success? [:= true]]
+  [::request-id ::request-id]
   [::database-name ::database-name]
   [::main-coordinate ::main-coordinate]
   [::main-parent-commit-ids [:set :uuid]]
@@ -593,6 +612,7 @@
  ::create-branch-response
  [:map {:closed true}
   [::success? [:= true]]
+  [::request-id ::request-id]
   [::target-database-name ::target-database-name]
   [::target-attachment ::target-attachment]
   [::coordinate ::coordinate]
@@ -604,6 +624,7 @@
  ::release-database-response
  [:map {:closed true}
   [::success? [:= true]]
+  [::request-id ::request-id]
   [::target-database-name ::target-database-name]
   [::target-attachment ::target-attachment]
   [::released? ::released?]])
@@ -611,6 +632,7 @@
  ::delete-branch-response
  [:map {:closed true}
   [::success? [:= true]]
+  [::request-id ::request-id]
   [::target-database-name ::target-database-name]
   [::target-attachment ::target-attachment]
   [::source-head ::source-head]
@@ -632,8 +654,9 @@
   [::recovered? {:optional true} ::recovered?]])
 (schema/register!
  ::replay-transactions-response
- [:map
+ [:map {:closed true}
   [::success? [:= true]]
+  [::request-id ::request-id]
   [::database-name ::database-name]
   [::since-coordinate ::since-coordinate]
   [::through-coordinate ::through-coordinate]
@@ -645,6 +668,7 @@
  ::resolve-transaction-coordinate-response
  [:map {:closed true}
   [::success? [:= true]]
+  [::request-id ::request-id]
   [::coordinate ::coordinate]])
 (schema/register!
  ::knn-search-response
@@ -685,7 +709,8 @@
   [::body {:optional true} ::body]])
 (schema/register!
  ::ensure-request-input
- [:map
+ [:map {:closed true}
+  [::request-id ::request-id]
   [::database-name ::database-name]
   [::backend ::backend]
   [::coordinate/attachment {:optional true} ::coordinate/attachment]
@@ -760,10 +785,12 @@
 (schema/register!
  ::observe-database-lifecycle-request-input
  [:map {:closed true}
+  [::request-id ::request-id]
   [::database-name ::database-name]])
 (schema/register!
  ::create-branch-request-input
  [:map {:closed true}
+  [::request-id ::request-id]
   [::source-database-name ::source-database-name]
   [::target-database-name ::target-database-name]
   [::source-coordinate ::source-coordinate]
@@ -772,12 +799,14 @@
 (schema/register!
  ::release-database-request-input
  [:map {:closed true}
+  [::request-id ::request-id]
   [::target-database-name ::target-database-name]
   [::target-attachment ::target-attachment]
   [::expected-target-head ::expected-target-head]])
 (schema/register!
  ::delete-branch-request-input
  [:map {:closed true}
+  [::request-id ::request-id]
   [::source-database-name ::source-database-name]
   [::target-database-name ::target-database-name]
   [::target-attachment ::target-attachment]
@@ -793,13 +822,15 @@
   [::generated-candidates {:optional true} ::generated-candidates]])
 (schema/register!
   ::replay-request-input
-  [:map
+  [:map {:closed true}
+  [::request-id ::request-id]
   [::database-name ::database-name]
   [::since-coordinate ::since-coordinate]
   [::through-coordinate {:optional true} ::through-coordinate]])
 (schema/register!
  ::resolve-transaction-coordinate-request-input
  [:map {:closed true}
+  [::request-id ::request-id]
   [::database-name ::database-name]
   [::head-coordinate ::head-coordinate]
   [::transaction-id ::transaction-id]])
@@ -818,9 +849,9 @@
 
 (defn ping-request
   "Construct the writer readiness request."
-  {:malli/schema [:=> [:cat] ::ping-request]}
-  []
-  {::operation ping-operation})
+  {:malli/schema [:=> [:cat ::request-id-input] ::ping-request]}
+  [input]
+  (assoc input ::operation ping-operation))
 
 (defn capabilities-request
   "Construct one correlated Datahike capability-discovery request."
@@ -870,9 +901,10 @@
   "Construct one idempotent database-open request."
   {:malli/schema [:=> [:cat ::ensure-request-input]
                   ::ensure-database-request]}
-  [{::keys [database-name backend database-path]
+  [{::keys [request-id database-name backend database-path]
     attachment ::coordinate/attachment}]
   (cond-> {::operation ensure-database-operation
+           ::request-id request-id
            ::database-name database-name
            ::backend backend}
     attachment (assoc ::coordinate/attachment attachment)
@@ -927,8 +959,9 @@
   "Construct one bounded transaction-history page request."
   {:malli/schema [:=> [:cat ::replay-request-input]
                   ::replay-transactions-request]}
-  [{::keys [database-name since-coordinate through-coordinate]}]
+  [{::keys [request-id database-name since-coordinate through-coordinate]}]
   (cond-> {::operation replay-transactions-operation
+           ::request-id request-id
            ::database-name database-name
            ::since-coordinate since-coordinate}
     (some? through-coordinate)
@@ -957,13 +990,13 @@
 
 (defn success
   "Add the canonical successful response fact to `body`."
-  {:malli/schema [:=> [:catn [::body ::body]] ::response]}
+  {:malli/schema [:=> [:catn [::body ::body]] :map]}
   [body]
   (assoc body ::success? true))
 
 (defn failure
   "Construct the canonical failed response."
-  {:malli/schema [:=> [:cat ::failure-request] ::response]}
+  {:malli/schema [:=> [:cat ::failure-request] :map]}
   [{::keys [error-kind error body]}]
   (assoc (or body {})
          ::success? false
