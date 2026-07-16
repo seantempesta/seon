@@ -48,7 +48,7 @@
   (uds/start-request-server!
    {::uds/socket-path path
     ::uds/open-connection!
-    (fn [close!]
+    (fn [{close! ::uds/close!}]
       {::connection-id (random-uuid) ::close! close!})
     ::uds/close-connection! close-connection!
     ::uds/handler handler}))
@@ -156,7 +156,7 @@
                   ::protocol/attachment attachment
                   ::protocol/coordinate point
                   ::protocol/members members})]
-    (is (= 5 protocol/current-version))
+    (is (= 6 protocol/current-version))
     (is (protocol/valid-request? request))
     (is (= request (uds/decode (uds/encode request))))
     (is (false? (protocol/valid-request?
@@ -381,7 +381,7 @@
            Throwable
            (uds/start-request-server!
             {::uds/socket-path path
-             ::uds/open-connection! (fn [_close!] (Object.))
+             ::uds/open-connection! (fn [_control] (Object.))
              ::uds/close-connection! (constantly nil)
              ::uds/handler
              (fn [_owner _request _frame-bytes _complete!] nil)}))))
@@ -398,7 +398,7 @@
         (uds/start-request-server!
          {::uds/socket-path path
           ::uds/maximum-input-bytes frame-size
-          ::uds/open-connection! (fn [_close!] (Object.))
+          ::uds/open-connection! (fn [_control] (Object.))
           ::uds/close-connection! (constantly nil)
           ::uds/handler
           (fn [_owner _request frame-bytes complete!]
@@ -480,7 +480,7 @@
         (uds/start-request-server!
          {::uds/socket-path path
           ::uds/shutdown-timeout-ms 50
-          ::uds/open-connection! (fn [_close!] (Object.))
+          ::uds/open-connection! (fn [_control] (Object.))
           ::uds/close-connection! (fn [_owner] (swap! closed inc))
           ::uds/handler
           (fn [_owner request _frame-bytes _complete!]
@@ -564,6 +564,125 @@
         (uds/close-request-server! server)
         (.delete (File. path))))))
 
+(deftest physical-session-send-uses-bounded-response-delivery
+  (let [path (socket-path "transport-addressed-send")
+        control (promise)
+        server
+        (uds/start-request-server!
+         {::uds/socket-path path
+          ::uds/open-connection!
+          (fn [connection-control]
+            (deliver control connection-control)
+            (Object.))
+          ::uds/close-connection! (constantly nil)
+          ::uds/handler
+          (fn [_owner _request _frame-bytes _complete!] nil)})
+        channel (uds/connect! path)
+        {close! ::uds/close! send! ::uds/send!}
+        (deref control 2000 ::not-opened)]
+    (try
+      (is (true? (send! {::event 1})))
+      (is (true? (send! {::event 2})))
+      (let [input (Channels/newInputStream channel)]
+        (is (= [{::event 1} {::event 2}]
+               [(uds/read-frame input) (uds/read-frame input)])))
+      (wait-until! "addressed response slots"
+                   #(zero? @(::uds/authority-response-slot-count server)))
+      (close!)
+      (is (false? (send! {::event :after-close-request})))
+      (wait-until! "addressed session close"
+                   #(empty? @(::uds/connections server)))
+      (is (false? (send! {::event :after-close})))
+      (finally
+        (.close channel)
+        (uds/close-request-server! server)
+        (.delete (File. path))))))
+
+(deftest addressed-send-does-not-replace-a-partial-requests-response-slot
+  (let [path (socket-path "transport-send-during-request")
+        control (promise)
+        request {::request :partial}
+        payload (uds/encode request)
+        server
+        (uds/start-request-server!
+         {::uds/socket-path path
+          ::uds/open-connection!
+          (fn [connection-control]
+            (deliver control connection-control)
+            (Object.))
+          ::uds/close-connection! (constantly nil)
+          ::uds/handler
+          (fn [_owner message _frame-bytes complete!]
+            (complete! {::response (::request message)}))})
+        channel (uds/connect! path)
+        {send! ::uds/send!} (deref control 2000 ::not-opened)
+        input (Channels/newInputStream channel)]
+    (try
+      (write-bytes! channel
+                    (.array (doto (ByteBuffer/allocate Integer/BYTES)
+                              (.putInt (alength payload))))
+                    Integer/MAX_VALUE)
+      (wait-until! "partial request slot"
+                   #(= 1 @(::uds/authority-response-slot-count server)))
+      (is (true? (send! {::event :while-partial})))
+      (is (= {::event :while-partial} (uds/read-frame input)))
+      (write-bytes! channel payload Integer/MAX_VALUE)
+      (is (= {::response :partial} (uds/read-frame input)))
+      (wait-until! "event and request slots released"
+                   #(and (zero? @(::uds/authority-response-slot-count server))
+                         (zero? @(::uds/authority-output-bytes server))))
+      (finally
+        (.close channel)
+        (uds/close-request-server! server)
+        (.delete (File. path))))))
+
+(deftest codec-workers-currently-bound-control-entry
+  (let [path (socket-path "transport-control-progress")
+        release-heavy (java.util.concurrent.CountDownLatch. 1)
+        heavy-entered-holder (atom nil)
+        control-entered (promise)
+        server
+        (uds/start-request-server!
+         {::uds/socket-path path
+          ::uds/open-connection!
+          (fn [_control] (Object.))
+          ::uds/close-connection! (constantly nil)
+          ::uds/handler
+          (fn [_owner request _frame-bytes complete!]
+            (if (= :control (::request request))
+              (do
+                (deliver control-entered true)
+                (complete! {::response :control}))
+              (do
+                (.countDown ^java.util.concurrent.CountDownLatch
+                            @heavy-entered-holder)
+                (.await release-heavy)
+                (complete! {::response (::request request)}))))})
+        worker-count (.getCorePoolSize
+                      ^java.util.concurrent.ThreadPoolExecutor
+                      (::uds/workers server))
+        heavy-entered (java.util.concurrent.CountDownLatch. worker-count)
+        _ (reset! heavy-entered-holder heavy-entered)
+        channels (mapv (fn [_] (uds/connect! path))
+                       (range (inc worker-count)))]
+    (try
+      (doseq [[channel n] (map vector (take worker-count channels)
+                               (range worker-count))]
+        (write-bytes! channel (frame-bytes {::request n})
+                      Integer/MAX_VALUE))
+      (is (.await heavy-entered 2 java.util.concurrent.TimeUnit/SECONDS))
+      (write-bytes! (peek channels) (frame-bytes {::request :control})
+                    Integer/MAX_VALUE)
+      (is (= ::blocked (deref control-entered 100 ::blocked))
+          "control cannot enter while heavy handlers own every codec worker")
+      (.countDown release-heavy)
+      (is (= true (deref control-entered 2000 ::control-did-not-enter)))
+      (finally
+        (.countDown release-heavy)
+        (run! #(try (.close ^SocketChannel %) (catch Throwable _)) channels)
+        (uds/close-request-server! server)
+        (.delete (File. path))))))
+
 (deftest request-server-retains-large-response-suffix-until-writable
   (let [path (socket-path "transport-partial-write")
         response {::large-payload (apply str (repeat (* 3 1024 1024) "x"))}
@@ -592,7 +711,7 @@
         (uds/start-request-server!
          {::uds/socket-path path
           ::uds/open-connection!
-          (fn [close!]
+          (fn [{close! ::uds/close!}]
             (let [owner {::connection-id (random-uuid) ::close! close!}]
               (deliver opened owner)
               owner))
@@ -622,7 +741,7 @@
         (uds/start-request-server!
          {::uds/socket-path path
           ::uds/maximum-connections 8
-          ::uds/open-connection! (fn [_close!] (Object.))
+          ::uds/open-connection! (fn [_control] (Object.))
           ::uds/close-connection!
           (fn [_owner]
             (let [current (swap! active inc)]
@@ -668,7 +787,7 @@
         (uds/start-request-server!
          {::uds/socket-path path
           ::uds/shutdown-timeout-ms 25
-          ::uds/open-connection! (fn [_close!] (Object.))
+          ::uds/open-connection! (fn [_control] (Object.))
           ::uds/close-connection! (constantly nil)
           ::uds/handler
           (fn [_owner _request _frame-bytes complete!]

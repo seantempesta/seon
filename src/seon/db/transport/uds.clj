@@ -27,6 +27,11 @@
 (schema/register! ::handler 'fn?)
 (schema/register! ::open-connection! 'fn?)
 (schema/register! ::close-connection! 'fn?)
+(schema/register! ::close! 'fn?)
+(schema/register! ::send! 'fn?)
+(schema/register!
+ ::connection-control
+ [:map {:closed true} [::close! ::close!] [::send! ::send!]])
 (schema/register! ::shutdown-timeout-ms [:int {:min 1}])
 (schema/register! ::maximum-input-bytes [:int {:min 1}])
 (schema/register! ::maximum-response-slots [:int {:min 1}])
@@ -282,26 +287,28 @@
             (swap! authority-output-bytes - reserved)
             (swap! (::session-output-bytes session) - reserved)
             (reset! output-reservation 0)))))
-    (swap! (::response-slots session) disj slot)
-    (swap! (::authority-response-slot-count session) dec)
-    (swap! (::outstanding session) dec))
+    (let [authority-count (::authority-response-slot-count session)]
+      (locking authority-count
+        (swap! (::response-slots session) disj slot)
+        (swap! authority-count dec)
+        (swap! (::outstanding session) dec))))
   nil)
 
 (defn- reserve-response-slot!
   [session]
   (let [session-slots (::response-slots session)
         authority-count (::authority-response-slot-count session)]
-    (when (and (< (count @session-slots)
-                  (::maximum-session-response-slots session))
-               (< @authority-count (::maximum-response-slots session)))
-      (let [slot {::released? (AtomicBoolean. false)
-                  ::encoding? (AtomicBoolean. false)
-                  ::output-reservation (atom 0)}]
-        (swap! session-slots conj slot)
-        (swap! authority-count inc)
-        (swap! (::outstanding session) inc)
-        (reset! (::current-response-slot session) slot)
-        slot))))
+    (locking authority-count
+      (when (and (< (count @session-slots)
+                    (::maximum-session-response-slots session))
+                 (< @authority-count (::maximum-response-slots session)))
+        (let [slot {::released? (AtomicBoolean. false)
+                    ::encoding? (AtomicBoolean. false)
+                    ::output-reservation (atom 0)}]
+          (swap! session-slots conj slot)
+          (swap! authority-count inc)
+          (swap! (::outstanding session) inc)
+          slot)))))
 
 (defn- reserve-output-allowance!
   [session slot]
@@ -412,7 +419,8 @@
   (if (.get ^AtomicBoolean (::closed? session))
     (do
       (release-response-slot! session slot)
-      (remove-finished-session! connections session))
+      (remove-finished-session! connections session)
+      false)
     (do
       (swap! (::queued-output-bytes session) + (.remaining ^ByteBuffer frame))
       (.addLast ^ArrayDeque (::outputs session)
@@ -439,22 +447,24 @@
              (::selector session) (::commands session)
              #(accept-encoded-response!
                connections workers close-connection! shutting-down?
-               session frame slot)))
+               session frame slot))
+            true)
           (catch Throwable _
             (.set ^AtomicBoolean (::encoding? slot) false)
             (release-response-slot! session slot)
             (remove-finished-session! connections session)
             (enqueue-selector!
              (::selector session) (::commands session)
-             #(close-session! connections workers close-connection! session))))
+             #(close-session! connections workers close-connection! session))
+            false))
         (do
           (.set ^AtomicBoolean (::encoding? slot) false)
           (release-response-slot! session slot)
           (remove-finished-session! connections session)
           (enqueue-selector!
            (::selector session) (::commands session)
-           #(close-session! connections workers close-connection! session))))))
-  nil)
+           #(close-session! connections workers close-connection! session))
+          false)))))
 
 (defn- admit-payload!
   [connections ^ThreadPoolExecutor workers close-connection! shutting-down?
@@ -520,6 +530,7 @@
                                     (reserve-response-slot! session))]
                 (if (and input-reservation response-slot)
                   (do
+                    (reset! (::current-response-slot session) response-slot)
                     (reset! (::payload session) (ByteBuffer/allocate length))
                     (recur))
                   (do
@@ -575,10 +586,37 @@
               close!
               (fn []
                 (when-let [session @session-holder]
-                  (enqueue-selector!
-                   selector commands
-                   #(close-session! connections workers close-connection!
-                                    session))))
+                  (locking (::send-lock session)
+                    (when (.compareAndSet ^AtomicBoolean (::closing? session)
+                                          false true)
+                      (enqueue-selector!
+                       selector commands
+                       #(close-session! connections workers close-connection!
+                                        session))))))
+              send!
+              (fn [message]
+                (if-let [session @session-holder]
+                  (locking (::send-lock session)
+                    (if (or (.get ^AtomicBoolean (::closing? session))
+                            (.get ^AtomicBoolean (::closed? session))
+                            @shutting-down?)
+                      false
+                      (if-let [slot (reserve-response-slot! session)]
+                        (let [sent?
+                              (queue-response!
+                               connections workers close-connection!
+                               shutting-down? session message slot)]
+                          (when-not sent?
+                            (.set ^AtomicBoolean (::closing? session) true))
+                          sent?)
+                        (do
+                          (.set ^AtomicBoolean (::closing? session) true)
+                          (enqueue-selector!
+                           selector commands
+                           #(close-session! connections workers
+                                            close-connection! session))
+                          false))))
+                  false))
               session
               {::channel channel
                ::selector selector
@@ -611,8 +649,10 @@
                ::owner (atom ::unopened)
                ::opening? (AtomicBoolean. true)
                ::cleanup-complete? (AtomicBoolean. false)
+               ::closing? (AtomicBoolean. false)
                ::closed? (AtomicBoolean. false)
                ::close-notified? (atom false)
+               ::send-lock (Object.)
                ::close! close!}]
           (reset! session-holder session)
           (reset! (::key session) (.register channel selector 0 session))
@@ -623,7 +663,8 @@
              ^Runnable
              (fn []
                (try
-                 (let [owner (open-connection! close!)]
+                 (let [owner (open-connection!
+                              {::close! close! ::send! send!})]
                    (reset! (::owner session) owner)
                    (.set ^AtomicBoolean (::opening? session) false)
                    (if (.get ^AtomicBoolean (::closed? session))
