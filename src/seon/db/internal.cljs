@@ -1,1970 +1,419 @@
 (ns seon.db.internal
-  "Plumbing behind `seon.db` — validation gate, invocation normalization,
-   error envelopes, the Malli→datahike schema bridge, tx-meta machinery,
-   AsyncLocalStorage core, and listener wrapping.
-
-   This namespace is INTERNAL: it is never rendered into agent context
-   (the `*.internal` ns name IS the filter — context-v3 convention,
-   2026-06-10). Agents call the public face in `seon.db`; nothing here
-   is part of the taught surface. Everything is a plain `defn` — the ns
-   boundary is the privacy boundary, so `seon.db` (and tests) can call
-   across without `#'` gymnastics.
-
-   All map keys remain in the `:seon.db/*` namespace (via `:as-alias`):
-   the keyword namespace tracks the OWNING DATA namespace (`seon.db`),
-   not the file the code happens to live in."
+  "Pure transaction and schema transformations behind `seon.db`."
   (:require
-    [clojure.string :as str]
-    [datahike.api :as d]
-    [datahike.db.interface :as dbi]
-    [datahike.impl.entity :as dentity]
-    [seon.ai.tokens :as tokens]
-    [seon.db :as-alias db]
-    [seon.db.coordinate :as coordinate]
-    [seon.error :as error]
-    [seon.schema :as schema]))
+   [clojure.string :as str]
+   [seon.ai.tokens :as tokens]
+   [seon.db :as-alias db]
+   [seon.error :as error]
+   [seon.schema :as schema]))
 
-;; ---------------------------------------------------------------------------
-;; AsyncLocalStorage core — fiber-local execution context + agent-id.
-;;
-;; We DO NOT use a CLJS `^:dynamic` Var here, even though that's the
-;; idiomatic Clojure spelling. CLJS `binding` macroexpands to
-;; `(set! var :new)` + `(try … (finally (set! var orig)))` against ONE
-;; global slot — it survives single-binder cases but silently clobbers
-;; under overlapping awaits when two `^:async` fns each bind it (see
-;; `research/impl-finding-tx-context-promise-2026-05-22.md` Probe 13).
-;; v1 supports concurrent agents in one pod, so a fiber-local primitive
-;; is required.
-;;
-;; `node:async_hooks/AsyncLocalStorage` IS fiber-local: V8 instruments
-;; the async context propagation at the engine level so a `.run`-scoped
-;; store survives across any `await`s (real timers, microtasks,
-;; rejections, nested ^:async calls) AND does not interfere with
-;; concurrent `.run`s in other fibers. Probe 14 verified this under the
-;; same adversarial interleaving that broke Probe 13.
-;;
-;; The require is at top-level so a pod missing `node:async_hooks`
-;; fails loudly at ns load instead of silently at first transact.
-;;
-;; `agent-id-als` is distinct from `als-instance` (tx-context) so non-DB
-;; code paths (web UI, section fns, web handlers) can read the active
-;; agent-id without depending on tx-context machinery.
-;; ---------------------------------------------------------------------------
+;;; Process-local execution context. Database values never enter these scopes.
 
-(defonce als-instance
-  (let [AsyncLocalStorage (.-AsyncLocalStorage (js/require "node:async_hooks"))]
-    (AsyncLocalStorage.)))
+(defonce ^:private tx-context
+  (let [ctor (.-AsyncLocalStorage (js/require "node:async_hooks"))]
+    (ctor.)))
 
-(defonce agent-id-als
-  (let [AsyncLocalStorage (.-AsyncLocalStorage (js/require "node:async_hooks"))]
-    (AsyncLocalStorage.)))
-
-(defonce operation-capture-als
-  ;; Runtime-only stack of `[captured-db bucket-atom]` pairs. Separate from
-  ;; transaction/agent context: operation capture is runtime evidence, not
-  ;; durable provenance or identity. AsyncLocalStorage makes nested scopes
-  ;; compositional and keeps awaited and concurrent eval fibers isolated.
-  (let [AsyncLocalStorage (.-AsyncLocalStorage (js/require "node:async_hooks"))]
-    (AsyncLocalStorage.)))
+(defonce ^:private agent-context
+  (let [ctor (.-AsyncLocalStorage (js/require "node:async_hooks"))]
+    (ctor.)))
 
 (defn current-tx-context
-  "Raw ALS read for the tx-context store. nil outside a scope.
-   `seon.db/current-tx-context` is the public face."
+  "The current fiber-local transaction context."
   []
-  (let [store (.getStore als-instance)]
-    ;; Outside a `.run` scope the JS getStore returns undefined; CLJS
-    ;; treats that as nil in `when`-position. Be explicit anyway —
-    ;; callers downstream `merge` on the result.
-    (when (some? store) store)))
+  (some-> tx-context .getStore))
 
 (defn current-agent-id
-  "Raw ALS read for the agent-id store. nil outside a scope.
-   `seon.db/current-agent-id` is the public face."
+  "The current fiber-local agent id."
   []
-  (let [store (.getStore agent-id-als)]
-    (when (some? store) store)))
+  (some-> agent-context .getStore))
 
 (defn run-with-tx-context
-  "Impl of `seon.db/with-tx-context`. Nested calls MERGE: `ctx-map`
-   merges on top of any already-active context. Returns whatever `f`
-   returns — including a Promise, in which case the context propagates
-   across `await` points inside `f`."
-  [ctx-map f]
-  (let [current (current-tx-context)
-        merged  (merge current ctx-map)]
-    (.run als-instance merged f)))
+  "Run `f` with `context` merged into the current transaction context."
+  [context f]
+  (.run tx-context (merge (current-tx-context) context) f))
 
 (defn run-with-agent
-  "Impl of `seon.db/with-agent`. Inside `f`, `(current-agent-id)`
-   returns `agent-id`; the inner scope wins under nesting."
+  "Run `f` with `agent-id` as the current agent."
   [agent-id f]
-  (.run agent-id-als agent-id f))
+  (.run agent-context agent-id f))
 
 (defn run-without-agent
-  "Impl of `seon.db/without-agent`. Inside `f` — including across
-   `await`s and any async work `f` starts — `(current-agent-id)` is nil
-   (ALS `.exit`). The outer scope restores on return."
+  "Run `f` without an inherited agent id."
   [f]
-  (.exit agent-id-als f))
+  (.exit agent-context f))
 
-(defn current-operation-captures
-  "The active database-operation capture stack, or nil outside a scope.
+;;; Malli to Datahike schema data. The authority installs the returned maps.
 
-   Kept internal so an unobserved `seon.db` read pays one `getStore` and
-   allocates no request/event data."
-  []
-  (let [captures (.getStore operation-capture-als)]
-    (when (some? captures) captures)))
-
-(defn run-with-operation-capture
-  "Run `f` with a fresh operation bucket relative to `captured-db`.
-
-   Nested scopes append to the active stack. An operation is therefore
-   recorded in both the inner bucket and every enclosing bucket. A returned
-   Promise remains inside the ALS scope until it settles."
-  [captured-db bucket f]
-  (.run operation-capture-als
-        (conj (vec (or (current-operation-captures) []))
-              [captured-db bucket])
-        f))
-
-(defn ^:async capture-operations!
-  "Await `f` and return its value with ordered database observations."
-  [captured-db f]
-  (let [bucket (atom [])
-        result (await
-                 (run-with-operation-capture captured-db bucket f))]
-    {::db/result result
-     ::db/read-observations @bucket}))
-
-;; ---------------------------------------------------------------------------
-;; Persisted transaction provenance. The generic ALS map remains useful to
-;; runtime control (turn/eval/replay/test state), but only these two facts cross
-;; the transaction boundary. Protocol request correlation is stamped separately
-;; by the sole writer under `:seon.db.protocol/*`.
-;; ---------------------------------------------------------------------------
-
-(def tx-meta-attrs
-  "The complete application-provenance whitelist for normal transactions."
-  #{::db/user ::db/process})
-
-;; ---------------------------------------------------------------------------
-;; Malli → datahike schema bridge.
-;;
-;; Datahike requires every attribute have a declared `:db/valueType` +
-;; `:db/cardinality` before its first transact. seon.schema (Malli) is
-;; our source of truth for attr shape; this bridge derives the datahike
-;; declaration from the Malli registration so the two layers can't
-;; drift.
-;;
-;; Currently handles the type surface v1 needs (string, keyword,
-;; boolean, inst, int, uuid, enum, vector/set cardinality, ref,
-;; component refs, identity attrs). Anything else throws — caller
-;; decides whether to hand-write the entry or extend the bridge.
-;; ---------------------------------------------------------------------------
+(def tx-meta-attrs #{::db/user ::db/process})
 
 (defn form-properties
-  "Extract the Malli properties map from a schema form, or nil. Returns
-   the first map-typed child.
-
-   Malli's canonical placement is index 1 (after the head):
-   `[:string {:min 12} …]` → `{:min 12}`. But some authors put bridge
-   markers after the child schema for readability:
-   `[:vector :seon.db/ref {:seon.db/component true}]`. The bridge
-   accepts either — there's at most one props map per schema form."
+  "The property map in one Malli form, when present."
   [form]
   (when (vector? form)
-    (some (fn [x] (when (map? x) x)) (rest form))))
+    (some #(when (map? %) %) (rest form))))
 
 (defn form-children
-  "The non-property children of a schema form. For
-   `[:vector {:min 1} :int]` returns `[:int]`; for `[:vector :int]` also
-   `[:int]`; for `:string` returns `[]`."
+  "The non-property children of one Malli form."
   [form]
   (if (vector? form)
-    (let [body (rest form)
-          body (if (and (seq body) (map? (first body))) (rest body) body)]
-      (vec body))
+    (into [] (remove map?) (rest form))
     []))
 
 (defn resolve-malli-form
-  "Follow a Malli schema form through seon.schema-registered keyword
-   indirections until it reaches a non-keyword form OR a keyword whose
-   resolved schema is a built-in `IntoSchema` (not a raw Malli form).
-
-   Malli built-ins like `:inst`/`:string`/`:int` ARE present in the
-   registry (they have to be — Malli looks them up too), but their
-   `schema-definition` returns an `IntoSchema` instance rather than a
-   reducible Malli form (keyword or vector). The bridge maps the
-   built-in heads directly via `form->datahike-value-type`; recursing
-   into the IntoSchema would lose the head and break the mapping.
-
-   So: only recurse when the resolved definition is itself a Malli
-   form (keyword or vector). Anything else (IntoSchema, compiled
-   schema) means we've hit a built-in — return the form unchanged.
-
-   `:seon.db/ref` is special: even though it's registered, the bridge
-   maps it directly to `:db.type/ref` rather than following its
-   `[:or ...]` registration (which describes valid value shapes, not
-   the underlying datahike type)."
+  "Resolve registered Malli aliases without crossing into compiled schemas."
   [form]
   (cond
-    (= :seon.db/ref form)
-    :seon.db/ref
-
+    (= :seon.db/ref form) form
     (and (keyword? form) (schema/registered? form))
-    (let [def (schema/schema-definition form)]
-      (if (or (keyword? def) (vector? def))
-        (resolve-malli-form def)
+    (let [definition (schema/schema-definition form)]
+      (if (or (keyword? definition) (vector? definition))
+        (resolve-malli-form definition)
         form))
-
-    :else
-    form))
+    :else form))
 
 (def malli-type->datahike-type
-  "Mapping from Malli base types to datahike `:db.type/*` keywords.
-   Lookup is by the *head* of a resolved Malli form (or the form
-   itself when it's a bare keyword)."
-  {:string  :db.type/string
-   :int     :db.type/long
-   :double  :db.type/double
-   :float   :db.type/float
+  {:string :db.type/string
+   :int :db.type/long
+   :double :db.type/double
+   :float :db.type/float
    :keyword :db.type/keyword
-   ;; The qualified variants narrow Malli VALIDATION only — datahike has
-   ;; one keyword/symbol type. (:seon.fn/read-attrs is [:set
-   ;; :qualified-keyword]; MIRRORED in the CLJ bridge leaf-type-map,
-   ;; seon.db.datahike.schema — keep the two lanes in lockstep.)
    :qualified-keyword :db.type/keyword
    :boolean :db.type/boolean
-   :inst    :db.type/instant
-   :uuid    :db.type/uuid
-   :symbol  :db.type/symbol
+   :inst :db.type/instant
+   :uuid :db.type/uuid
+   :symbol :db.type/symbol
    :qualified-symbol :db.type/symbol})
 
-(def bridge-supported-types
-  "Human-readable list of the attr types the Malli→datahike bridge can
-   store. Surfaced in the ensure-datahike-attrs! error so an agent that
-   registered an unstorable type sees exactly what IS storable."
-  (str ":string :int :double :float :boolean :keyword :qualified-keyword "
-       ":inst :uuid :symbol :qualified-symbol :seon.db/ref, [:enum :a :b], "
-       "or a container [:vector|:set|:sequential <one of those>]"))
-
 (defn form-head
-  "The head of a Malli form. For `[:string {:min 1}]` returns `:string`;
-   for `:boolean` returns `:boolean`; for `[:enum :a :b]` returns
-   `:enum`; for `:seon.db/ref` returns itself (special case)."
+  "The head of one Malli form."
   [form]
-  (cond
-    (vector? form)  (first form)
-    :else           form))
+  (if (vector? form) (first form) form))
+
+(declare form->datahike-value-type)
 
 (defn form->datahike-value-type
-  "Given a resolved (no more keyword refs) Malli form, return the
-   matching datahike `:db.type/*` keyword. Throws on unmappable
-   shapes — caller extends the bridge or hand-writes the entry."
-  [resolved-form]
-  (let [head (form-head resolved-form)]
+  "The Datahike value-type keyword represented by a Malli form."
+  [form]
+  (let [resolved (resolve-malli-form form)
+        head (form-head resolved)]
     (cond
-      (= head :seon.db/ref)
-      :db.type/ref
-
-      (= head :enum)
-      ;; All current v1 enum schemas hold keyword values
-      ;; (`:user`/`:agent`/`:system`/etc). Verify before mapping so a
-      ;; non-keyword enum (e.g. enum of strings) doesn't silently land
-      ;; as :keyword. If we add string-enums later, branch here.
-      (if (every? keyword? (form-children resolved-form))
+      (= :seon.db/ref head) :db.type/ref
+      (= :enum head)
+      (if (every? keyword? (form-children resolved))
         :db.type/keyword
-        (throw (ex-info (str "Malli :enum with non-keyword values not "
-                             "supported by the v1 bridge: "
-                             (pr-str resolved-form))
-                        {::db/error :seon.db/unbridgeable-malli-form
-                         ::db/form resolved-form})))
-
-      ;; [:maybe X] — a stored value is never nil in seon (absent = the key
-      ;; is omitted), so a nilable attr cannot map to a datahike value type.
-      ;; Fail DIRECTIVE (not the generic :else "cannot map"): name the base
-      ;; type + optional-field fix. seon.schema/register! rejects the common
-      ;; case up front; this catches a nilable that reached storage.
-      (= head :maybe)
-      (let [inner (first (form-children resolved-form))]
-        (throw (ex-info
-                 (str "a stored value is never nil in seon (absent = the key is "
-                      "simply omitted), so a nilable/[:maybe …] attr cannot be "
-                      "stored: " (pr-str resolved-form) ". Register the BASE type "
-                      "(" (pr-str inner) ") and mark the FIELD optional at its "
-                      ":map site ([<attr> {:optional true} " (pr-str inner)
-                      "]), or omit the key when there is no value.")
-                 {::db/error :seon.db/nilable-attr
-                  ::db/form  resolved-form
-                  :seon.error/kind :user-input})))
-
-      ;; [:and base extra-constraints] — bridge on the base.
-      (= head :and)
-      (form->datahike-value-type (resolve-malli-form (first (form-children resolved-form))))
-
-      ;; [:or alt-1 alt-2] — when every alt maps to ONE datahike type,
-      ;; bridge on it. MIXED-type :or (e.g. the relaxed render slots
-      ;; `[:or :string :symbol]` / `[:or :symbol <hiccup>]`, self-context
-      ;; spec 2026-06-10) stores as `:db.type/string` carrying the
-      ;; pr-str'd EDN of the value — datahike's typed schema cannot hold
-      ;; a scalar union, so the bridge owns ONE representation:
-      ;; `transact!*` encodes such attrs ([[encode-edn-slot-values]]),
-      ;; `seon.db/decode-edn-value` is the read-side inverse. Unmappable
-      ;; alts (`[:fn …]` predicates like the hiccup shape) count as
-      ;; mixed.
-      (= head :or)
-      (let [child-types (set (map #(try (form->datahike-value-type
-                                          (resolve-malli-form %))
-                                        (catch :default _ ::unmappable))
-                                  (form-children resolved-form)))]
-        (if (and (= 1 (count child-types))
-                 (not (contains? child-types ::unmappable)))
-          (first child-types)
+        (throw (ex-info "Only keyword Malli enums are storable."
+                        {::db/form resolved :seon.error/kind :user-input})))
+      (= :and head)
+      (form->datahike-value-type (first (form-children resolved)))
+      (= :or head)
+      (let [types (into #{} (map #(try
+                                    (form->datahike-value-type %)
+                                    (catch :default _ ::unmappable)))
+                        (form-children resolved))]
+        (if (and (= 1 (count types)) (not (contains? types ::unmappable)))
+          (first types)
           :db.type/string))
-
+      (= :maybe head)
+      (throw (ex-info "Stored attributes cannot use `:maybe`; omit absent values."
+                      {::db/form resolved :seon.error/kind :user-input}))
       :else
       (or (malli-type->datahike-type head)
-          (throw (ex-info (str "Cannot map Malli type to datahike type: "
-                               (pr-str resolved-form))
-                          {::db/error :seon.db/unbridgeable-malli-form
-                           ::db/form resolved-form
-                           ::db/head head}))))))
+          (throw (ex-info "The Malli form has no Datahike value type."
+                          {::db/form resolved :seon.error/kind :user-input}))))))
 
 (defn form->cardinality
-  "`:db.cardinality/many` if the form is a vector/set/sequential
-   container; `:db.cardinality/one` otherwise. The CHILD is the value
-   type — caller resolves it separately."
+  "The Datahike cardinality represented by one Malli form."
   [form]
-  (if (and (vector? form)
-           (#{:vector :sequential :set} (first form)))
+  (if (and (vector? form) (#{:vector :set :sequential} (first form)))
     :db.cardinality/many
     :db.cardinality/one))
 
 (defn form->child-form
-  "For container forms (`:vector`/`:set`/`:sequential`), the child
-   value form. For scalar forms, returns the form unchanged."
+  "The stored child form for a collection schema, or the scalar form."
   [form]
-  (if (and (vector? form)
-           (#{:vector :sequential :set} (first form)))
+  (if (and (vector? form) (#{:vector :set :sequential} (first form)))
     (first (form-children form))
     form))
 
 (defn malli->datahike-attr
-  "Translate a single attr keyword from the seon.schema Malli registry
-   into a datahike attribute declaration map (the shape datahike's
-   bootstrap schema vector wants).
-
-   Returns:
-     {:db/ident       <attr-key>
-      :db/valueType   <:db.type/*>
-      :db/cardinality <:db.cardinality/one|many>
-      :db/unique      <optional :db.unique/identity>
-      :db/isComponent <optional true>}
-
-   Properties on the Malli registration drive the optional fields:
-     - `{:seon.db/identity true}` → `:db/unique :db.unique/identity`
-     - `{:seon.db/component true}` → `:db/isComponent true`
-
-   Throws on unregistered attrs or Malli forms the bridge can't map."
-  [attr-key]
-  (let [raw-form    (or (schema/schema-definition attr-key)
-                        (throw (ex-info (str "Attr not registered in seon.schema: "
-                                             (pr-str attr-key))
-                                        {::db/error :seon.db/unregistered-attr
-                                         ::db/attr attr-key})))
-        props       (form-properties raw-form)
-        outer-form  raw-form
-        ;; For vectors/sets, the child is the value form; for scalars,
-        ;; same as outer.
-        value-form  (-> outer-form
-                        resolve-malli-form
-                        form->child-form
-                        resolve-malli-form)
-        value-type  (form->datahike-value-type value-form)
-        ;; A `:db.secondary/only true` attr is a single tuple value (the
-        ;; whole vector lives ONLY in the secondary/vector index, never in
-        ;; the primary datahike indices). The vector wrapper that would
-        ;; otherwise read as cardinality/many is a tuple here, NOT a
-        ;; cardinality-many scalar. Keyed off the `:db.secondary/only`
-        ;; property + a vector-of-FLOAT shape → tuple, cardinality/one.
-        ;; (Locked use: `:seon/embedding`, embeddings-fn-retrieval PRD.)
-        ;; This MIRRORS the CLJ bridge `seon.db.datahike.schema/schema->attr-partial`
-        ;; (the `:vector` float-inner branch) — keep the two lanes in lockstep.
-        float-inner? (let [vt (cond
-                                (keyword? value-form) value-form
-                                (vector? value-form)  (first value-form)
-                                :else                 value-form)]
-                       (contains? #{:float :double 'float? 'double?} vt))
-        secondary-only? (boolean (:db.secondary/only props))
-        _ (when (and secondary-only? (not float-inner?))
-            (throw (ex-info
-                    (str ":db.secondary/only attr " attr-key
-                         " must be a vector of :float/:double; got value form "
-                         (pr-str value-form))
-                    {::db/error :seon.db/secondary-only-non-float
-                     ::db/attr attr-key
-                     ::db/value-form value-form})))
-        cardinality (if secondary-only?
-                      :db.cardinality/one
-                      (form->cardinality (resolve-malli-form outer-form)))]
-    (cond-> {:db/ident       attr-key
-             :db/valueType   value-type
-             :db/cardinality cardinality}
-      secondary-only?            (assoc :db/valueType :db.type/tuple
-                                        :db.secondary/only true)
-      (:seon.db/identity props)  (assoc :db/unique :db.unique/identity)
+  "Derive one ordinary Datahike attribute declaration."
+  [attr]
+  (let [raw (or (schema/schema-definition attr)
+                (throw (ex-info "The attribute has no registered schema."
+                                {::db/attr attr :seon.error/kind :user-input})))
+        props (form-properties raw)
+        value-form (-> raw resolve-malli-form form->child-form resolve-malli-form)
+        secondary? (boolean (:db.secondary/only props))]
+    (when (and secondary?
+               (not (contains? #{:float :double} (form-head value-form))))
+      (throw (ex-info "A secondary-only attribute must contain floats."
+                      {::db/attr attr :seon.error/kind :user-input})))
+    (cond-> {:db/ident attr
+             :db/valueType (if secondary?
+                             :db.type/tuple
+                             (form->datahike-value-type value-form))
+             :db/cardinality (if secondary?
+                               :db.cardinality/one
+                               (form->cardinality (resolve-malli-form raw)))}
+      secondary? (assoc :db.secondary/only true)
+      (:seon.db/identity props) (assoc :db/unique :db.unique/identity)
       (:seon.db/component props) (assoc :db/isComponent true))))
 
 (defn malli->datahike-schema
-  "Vector form of [[malli->datahike-attr]]. Pass a sequence of attr
-   keywords; get a vector of datahike-ready attr declarations.
-
-   The vector ordering preserves the input ordering — when a
-   datahike conn boot-transacts the result, attrs land in the order
-   given (matters for forward references between schema entities)."
-  [attr-keys]
-  (mapv malli->datahike-attr attr-keys))
-
-(defn edn-encoded-attr?
-  "True when `attr`'s registered Malli form is a MIXED-type `:or` — the
-   shapes the bridge stores as `:db.type/string` carrying pr-str'd EDN
-   (see the `:or` branch of [[form->datahike-value-type]]). The two
-   live cases are the relaxed render slots `:seon.render/ai`
-   `[:or :string :symbol]` and `:seon.render/html`
-   `[:or :symbol <hiccup>]` (self-context spec 2026-06-10)."
-  [attr]
-  (boolean
-    (when (and (keyword? attr) (schema/registered? attr))
-      (let [resolved (resolve-malli-form (schema/schema-definition attr))]
-        (when (and (vector? resolved) (= :or (first resolved)))
-          (let [child-types (set (map #(try (form->datahike-value-type
-                                              (resolve-malli-form %))
-                                            (catch :default _ ::unmappable))
-                                      (form-children resolved)))]
-            (or (> (count child-types) 1)
-                (contains? child-types ::unmappable))))))))
-
-(defn encode-edn-slot-values
-  "Encode the values of EDN-string-bridged attrs ([[edn-encoded-attr?]])
-   in `tx-data` to their pr-str'd form — the write half of the mixed-:or
-   representation (`seon.db/decode-edn-value` is the read half). Walks
-   map entities (including nested component maps) and `[:db/add e a v]`
-   vector forms. ALWAYS pr-str's (strings included — `\"x\"` stores as
-   `\"\\\"x\\\"\"`), so decode by `read-string` is unambiguous. Callers
-   re-transacting a PULLED value must decode first (the section functions
-   do) — double-encoding is on them."
-  [tx-data]
-  (letfn [(encode-map [m]
-            (reduce-kv
-              (fn [acc k v]
-                (assoc acc k
-                       (cond
-                         (edn-encoded-attr? k) (pr-str v)
-                         (map? v)              (encode-map v)
-                         (and (vector? v) (some map? v))
-                         (mapv #(if (map? %) (encode-map %) %) v)
-                         :else v)))
-              {} m))]
-    (mapv (fn [form]
-            (cond
-              (map? form) (encode-map form)
-              (and (vector? form)
-                   (= :db/add (first form))
-                   (edn-encoded-attr? (nth form 2 nil)))
-              (update form 3 pr-str)
-              :else form))
-          tx-data)))
+  "Derive ordered Datahike attribute declarations."
+  [attrs]
+  (mapv malli->datahike-attr attrs))
 
 (defn tx-meta-datahike-schema
-  "The datahike schema entries for the two transaction-provenance attrs.
-   Built by running `tx-meta-attrs` through the bridge. Called by
-   `seon.client/agent-bootstrap-schema` so the entries are derived
-   from Malli, never hand-written."
+  "Derive the two transaction-provenance declarations."
   []
   (malli->datahike-schema (sort tx-meta-attrs)))
 
-;; ---------------------------------------------------------------------------
-;; Validation gate — mirrors `seon.db/transact!` 60–135 on JVM byte-for-byte
-;; so the eventual .cljc merge is mechanical. Any change here must mirror
-;; into the JVM file (and vice versa) until convergence.
-;; ---------------------------------------------------------------------------
+(defn edn-encoded-attr?
+  "True when a mixed Malli union is stored as an EDN string."
+  [attr]
+  (when (and (keyword? attr) (schema/registered? attr))
+    (let [form (resolve-malli-form (schema/schema-definition attr))]
+      (and (vector? form)
+           (= :or (first form))
+           (= :db.type/string (form->datahike-value-type form))))))
+
+(defn encode-edn-slot-values
+  "Encode mixed-union attribute values before transport."
+  [tx-data]
+  (letfn [(encode-entity [entity]
+            (reduce-kv (fn [result attr value]
+                         (assoc result attr
+                                (cond
+                                  (edn-encoded-attr? attr) (pr-str value)
+                                  (map? value) (encode-entity value)
+                                  (and (vector? value) (some map? value))
+                                  (mapv #(if (map? %) (encode-entity %) %) value)
+                                  :else value)))
+                       {} entity))]
+    (mapv (fn [item]
+            (cond
+              (map? item) (encode-entity item)
+              (and (vector? item) (= :db/add (first item))
+                   (edn-encoded-attr? (nth item 2 nil)))
+              (update item 3 pr-str)
+              :else item))
+          tx-data)))
+
+;;; Pure transaction normalization and validation.
 
 (defn system-attr?
-  "True for datahike's own system attributes — the `:db/*` family AND the
-   `:db.*` sub-namespaces (`:db.secondary/*`, `:db.entity/*`, `:db.valid/*`,
-   …). These drive datahike's schema/secondary-index layer and are NOT
-   validated against the seon Malli registry (see datahike's
-   `schema.cljc` ::schema-attribute / ::secondary-index-attribute sets)."
-  [k]
-  (let [n (and (keyword? k) (namespace k))]
-    (boolean (and n (or (= n "db") (str/starts-with? n "db."))))))
-
-(declare ref-attr-arity)
-
-(defn ref-slot?
-  "True when `k` is a registered non-system attr whose Malli schema
-   describes a ref slot (single or many — see [[ref-attr-arity]]).
-   The tx-data walkers ([[extract-tx-attrs]],
-   [[normalize-entity-ref-keys]]) recurse ONLY into ref-slot values:
-   nested entity maps legally appear only under ref attrs, and maps
-   under non-ref attrs (e.g. hiccup attribute maps inside the
-   EDN-encoded render slots) must NOT be mistaken for entities."
-  [k]
-  (and (keyword? k)
-       (not (system-attr? k))
-       (schema/registered? k)
-       (some? (ref-attr-arity (schema/schema-definition k)))))
-
-(defn extract-tx-attrs
-  "Walk tx-data and collect every attribute keyword that appears,
-   INCLUDING attrs that only occur in NESTED entity maps (datahike's
-   nested-map shorthand under ref attrs) — those reach the store too,
-   so the runtime auto-installer ([[ensure-datahike-attrs!]]) must see
-   them; collecting only top-level keys made register!-then-transact of
-   a nested-only attr die on datahike's \"not defined in current
-   schema\" (fix-everything A1, 2026-06-11). Handles entity-map forms
-   (`{:attr v ...}`, recursing into [[ref-slot?]] values) and vector
-   tuple forms (`[:db/add e a v]`, `[:db/retract e a v]`). Tempids and
-   metadata not keyed by a true attribute are filtered out (lookup-ref
-   tuples are walked but contribute no keys — only entity-map KEYS are
-   collected)."
-  [tx-data]
-  (letfn [(collect-entity [acc ent]
-            (reduce-kv
-              (fn [acc k v]
-                (cond-> (conj acc k)
-                  (ref-slot? k) (collect-ref-value v)))
-              acc ent))
-          (collect-ref-value [acc v]
-            (cond
-              (map? v)        (collect-entity acc v)
-              (sequential? v) (reduce collect-ref-value acc v)
-              :else           acc))]
-    (reduce (fn [acc datum]
-              (cond
-                (map? datum)
-                (collect-entity acc datum)
-
-                (and (vector? datum) (>= (count datum) 3))
-                (let [a   (nth datum 2)
-                      acc (conj acc a)]
-                  (cond-> acc
-                    (ref-slot? a) (collect-ref-value (nth datum 3 nil))))
-
-                :else acc))
-            #{}
-            tx-data)))
-
-(defn validate-attrs!
-  "Ensure every non-`:db/*` attribute appearing in `tx-data` is registered
-   in `seon.schema`. Throws `ex-info` with `{:unregistered [...]}` listing
-   the offenders. Caller is expected to register schemas first."
-  [attrs]
-  (let [domain-attrs (remove system-attr? attrs)
-        unregistered (into [] (remove schema/registered?) domain-attrs)]
-    (when (seq unregistered)
-      (throw (ex-info (str "Unregistered attributes in transaction: "
-                           (pr-str unregistered)
-                           ". Register them with seon.schema/register! first.")
-                      {::db/error            :seon.db/unregistered-attrs
-                       ::db/unregistered     unregistered
-                       :seon.error/kind      :user-input})))))
-
-(defn truncate-value
-  "Bounded `pr-str` of `v` (~25 tokens) for quoting in error messages.
-
-   `seon.ai.tokens/bounded-pr-str` with this file's error-payload budget —
-   keeps error payloads readable when a malformed value is large (e.g. a
-   stringified pull pattern)."
-  {:malli/schema [:=> [:catn [::value :any]] :string]}
-  [v]
-  (tokens/bounded-pr-str v 25))
-
-(defn normalize-entity-ref-keys
-  "Rewrite `:seon.db/ref`-keyed entity maps into datahike `:db/id` slots.
-
-   The taught entity-identity shorthand — an entity map keyed by
-   `:seon.db/ref` (`{:seon.db/ref [:seon.agent/id \"…\"] :attr v}`, the
-   transact-onto-your-own-entity pattern) — becomes datahike's native
-   `:db/id` slot, recursively through nested entity maps and tx vectors.
-
-   `:seon.db/ref` is a registered Malli SHAPE, not an installed datahike
-   attribute. Left in the entity map it reaches the store as a junk attr
-   — the wire store rejects the
-   whole tx (\"Bad entity attribute :seon.db/ref …\"), and a conn that
-   somehow had it installed would silently assert a junk datom on a
-   junk entity. Datahike already resolves eids / tempids / lookup-refs
-   natively in the `:db/id` slot, so the normalizer's whole job is the
-   rename + DISSOC of `:seon.db/ref`.
-
-   Throws `:user-input` ex-info (converted to the failure envelope by
-   `transact!*`'s catch) when the ref value isn't a valid
-   `:seon.db/ref` shape, or when the map carries BOTH `:db/id` and a
-   conflicting `:seon.db/ref`."
-  [tx-data]
-  (letfn [(norm-entity [x]
-            ;; Recurse ONLY into ref-slot values (see [[ref-slot?]]) —
-            ;; maps under non-ref attrs (e.g. hiccup attribute maps in
-            ;; the EDN-encoded render slots) are opaque VALUES, not
-            ;; entities.
-            (let [ent (reduce-kv (fn [acc k v]
-                                   (assoc acc k (if (ref-slot? k)
-                                                  (norm-ref-value v)
-                                                  v)))
-                                 {} x)]
-              (if-not (contains? ent ::db/ref)
-                ent
-                (let [r (get ent ::db/ref)]
-                  (when-not (schema/valid-candidate-value? :seon.db/ref r)
-                    (throw (ex-info
-                             (str "seon.db/transact!: `:seon.db/ref` names "
-                                  "the entity a map transacts ONTO — its "
-                                  "value must be an eid, a string tempid, "
-                                  "or a lookup-ref like [:seon.agent/id "
-                                  "\"…\"]. Got: " (truncate-value r))
-                             {::db/error             :seon.db/invalid-value
-                              ::db/attr              ::db/ref
-                              ::db/actual-value      r
-                              ::db/malli-explanation (schema/explain-candidate-value :seon.db/ref r)
-                              :seon.error/kind       :user-input})))
-                  (when (and (contains? ent :db/id)
-                             (not= (:db/id ent) r))
-                    (throw (ex-info
-                             (str "seon.db/transact!: entity map carries "
-                                  "BOTH :db/id " (truncate-value (:db/id ent))
-                                  " and :seon.db/ref " (truncate-value r)
-                                  " — they name different entities. Keep "
-                                  "exactly one.")
-                             {::db/error        :seon.db/conflicting-entity-refs
-                              ::db/actual-value {:db/id  (:db/id ent)
-                                                 ::db/ref r}
-                              :seon.error/kind  :user-input})))
-                  (-> ent (dissoc ::db/ref) (assoc :db/id r))))))
-          (norm-ref-value [v]
-            (cond
-              (map? v)        (norm-entity v)
-              (sequential? v) (mapv norm-ref-value v)
-              :else           v))]
-    (mapv (fn [datum]
-            (cond
-              (map? datum)
-              (norm-entity datum)
-
-              ;; `[:db/add e a v]` — normalize a nested entity map in
-              ;; the value slot when `a` is a ref slot.
-              (and (vector? datum)
-                   (>= (count datum) 4)
-                   (ref-slot? (nth datum 2)))
-              (update datum 3 norm-ref-value)
-
-              :else datum))
-          tx-data)))
-
-;; ---------------------------------------------------------------------------
-;; Identity-ident symbol→keyword coercion (#48).
-;;
-;; The documented/prompted "persist a tool" path leads an agent to write a
-;; namespace identity as a QUOTED SYMBOL — `{:seon.ns/name 'my.agent.foo …}`
-;; — because a namespace IS a symbol everywhere else in Clojure. But the
-;; attr's registered schema is `[:keyword {:seon.db/identity true}]`, so the
-;; natural shape fails the value-validation gate ([[validate-values!]]) and
-;; the fn is defined-in-session but NEVER persisted. The system's own tee
-;; (eval.cljs) always writes the keyword `(keyword (str ns))`; only the
-;; hand-written agent path hits the symbol footgun.
-;;
-;; FIX (precise scope, per the asks triage 2026-06-22): coerce symbol→keyword
-;; ONLY for KEYWORD-TYPED IDENTITY idents — the `:seon.ns/name`-class attrs.
-;; A symbol arriving at a keyword-typed identity slot is unambiguously this
-;; footgun (there is no legitimate symbol value for a keyword identity attr),
-;; so the coercion is conservative AND data-driven: it fires for whatever
-;; keyword-typed identity attrs the registry holds (today `:seon.ns/name`
-;; and `:seon.schema/key`), never for string-identity attrs (`:seon.fn/sym`),
-;; ref-identity attrs (`:seon.agent/id` → `:seon.db/id`), or non-identity
-;; keyword attrs (`:seon.agent.ctx/name`). The KEYWORD stays the stored canonical
-;; value — we coerce on the way IN and never loosen the stored schema — so
-;; datahike lookup-refs / identity resolution keep working.
-;;
-;; The coercion mirrors [[normalize-entity-ref-keys]]: same entity-map +
-;; ref-slot recursion + `[:db/add|:db/retract e a v]` tuple handling, and it
-;; ALSO rewrites lookup-ref tuples `[ident-attr 'sym]` (in `:db/id`, ref
-;; values, and tuple e-/v-slots) since a symbol there fails `:seon.db/ref`
-;; the same way. Runs BEFORE the ref-key normalizer + the validation gate.
-;; ---------------------------------------------------------------------------
-
-(defn keyword-identity-ident?
-  "True when `attr` is a registered, non-system IDENTITY attr whose
-   resolved value type is `:keyword` — the `:seon.ns/name`-class idents
-   an agent naturally writes as a quoted symbol (#48). These are the ONLY
-   attrs [[coerce-identity-symbol-idents]] coerces symbol→keyword for."
+  "True for Datahike's `:db/*` and `:db.*/*` attributes."
   [attr]
-  (and (keyword? attr)
-       (not (system-attr? attr))
-       (schema/registered? attr)
-       (schema/identity-attr? attr)
-       (let [base (-> (schema/schema-definition attr)
-                      resolve-malli-form
-                      form->child-form
-                      resolve-malli-form
-                      form-head)]
-         (= :keyword base))))
-
-(defn coerce-lookup-ref-symbol
-  "If `v` is a lookup-ref tuple `[ident-attr value]` whose `ident-attr` is
-   a [[keyword-identity-ident?]] and whose `value` is a symbol, coerce the
-   value to a keyword. Anything else passes through unchanged."
-  [v]
-  (if (and (vector? v)
-           (= 2 (count v))
-           (keyword-identity-ident? (first v))
-           (symbol? (second v)))
-    [(first v) (keyword (second v))]
-    v))
-
-(defn coerce-identity-symbol-idents
-  "Walk `tx-data` and coerce symbol values to keywords for every
-   [[keyword-identity-ident?]] slot — entity-map values, nested entities
-   under ref slots, lookup-ref tuples (in `:db/id`, ref values, and the
-   e-/v-slots of `[:db/add|:db/retract e a v]` tuples). The KEYWORD is the
-   stored canonical value (#48)."
-  [tx-data]
-  (letfn [(coerce-entity [ent]
-            (reduce-kv
-              (fn [acc k v]
-                (assoc acc k
-                       (cond
-                         ;; The footgun: a symbol where a keyword identity
-                         ;; value is required → coerce to keyword.
-                         (and (keyword-identity-ident? k) (symbol? v))
-                         (keyword v)
-                         ;; A `:db/id` lookup-ref carrying a symbol value.
-                         (= :db/id k) (coerce-lookup-ref-symbol v)
-                         ;; Recurse only into ref-slot values (entity maps
-                         ;; / lookup-refs legally appear there); other map
-                         ;; values are opaque (mirrors the ref-key walker).
-                         (ref-slot? k) (coerce-ref-value v)
-                         :else v)))
-              {} ent))
-          (coerce-ref-value [v]
-            (cond
-              (map? v)        (coerce-entity v)
-              (vector? v)     (coerce-lookup-ref-symbol v)
-              (sequential? v) (mapv coerce-ref-value v)
-              :else           v))]
-    (mapv (fn [datum]
-            (cond
-              (map? datum)
-              (coerce-entity datum)
-
-              ;; `[:db/add|:db/retract e a v]` — coerce a lookup-ref symbol
-              ;; in the e-slot, and the v-slot when `a` is a ref slot
-              ;; (nested entity / lookup-ref) OR `a` is itself a
-              ;; keyword-identity ident written with a symbol value.
-              (and (vector? datum)
-                   (>= (count datum) 3)
-                   (#{:db/add :db/retract} (first datum)))
-              (let [a (nth datum 2)]
-                (cond-> (update datum 1 coerce-lookup-ref-symbol)
-                  (and (>= (count datum) 4) (ref-slot? a))
-                  (update 3 coerce-ref-value)
-                  (and (>= (count datum) 4)
-                       (keyword-identity-ident? a)
-                       (symbol? (nth datum 3)))
-                  (update 3 keyword)))
-
-              :else datum))
-          tx-data)))
+  (let [n (and (keyword? attr) (namespace attr))]
+    (boolean (and n (or (= "db" n) (str/starts-with? n "db."))))))
 
 (defn ref-attr-arity
-  "If the attr's resolved Malli schema describes a ref slot, returns
-   `:one` (single ref) or `:many` (container of refs). Returns `nil`
-   if the schema isn't a ref slot.
-
-   Arity matters because the validation gate's nested-map-shorthand
-   path branches differently:
-
-   - `:one` — value may be a single map (validate as nested entity),
-     OR a single ref-shape (eid, lookup tuple). A lookup tuple is
-     itself a 2-element vector — we MUST NOT iterate it as a
-     container or we'd validate the keyword + string separately.
-   - `:many` — value is a sequential of mixed (maps + refs); iterate
-     and validate each child."
-  [schema-form]
-  (let [resolved (resolve-malli-form schema-form)
-        head     (form-head resolved)]
+  "The registered ref cardinality, or nil for a non-ref attribute."
+  [form]
+  (let [resolved (resolve-malli-form form)
+        head (form-head resolved)]
     (cond
-      (= resolved :seon.db/ref) :one
-
+      (= :seon.db/ref resolved) :one
       (and (#{:vector :set :sequential} head)
-           (when-let [child (first (form-children resolved))]
-             (= :seon.db/ref (resolve-malli-form child))))
-      :many
-
+           (= :seon.db/ref
+              (some-> resolved form-children first resolve-malli-form))) :many
       :else nil)))
+
+(defn ref-slot?
+  "True when `attr` names a registered ref attribute."
+  [attr]
+  (and (qualified-keyword? attr)
+       (not (system-attr? attr))
+       (schema/registered? attr)
+       (some? (ref-attr-arity (schema/schema-definition attr)))))
+
+(defn extract-tx-attrs
+  "Collect every attribute named by transaction data."
+  [tx-data]
+  (letfn [(entity-attrs [attrs entity]
+            (reduce-kv (fn [result attr value]
+                         (cond-> (conj result attr)
+                           (and (ref-slot? attr) (map? value))
+                           (entity-attrs value)
+                           (and (ref-slot? attr) (sequential? value))
+                           (into (mapcat #(when (map? %) (entity-attrs #{} %)) value))))
+                       attrs entity))]
+    (reduce (fn [attrs item]
+              (cond
+                (map? item) (entity-attrs attrs item)
+                (and (vector? item) (<= 3 (count item))) (conj attrs (nth item 2))
+                :else attrs))
+            #{} tx-data)))
+
+(defn validate-attrs!
+  "Reject transaction attributes absent from the schema registry."
+  [attrs]
+  (let [unknown (into [] (remove #(or (system-attr? %) (schema/registered? %))) attrs)]
+    (when (seq unknown)
+      (throw (ex-info "Transaction data names unregistered attributes."
+                      {::db/unregistered unknown :seon.error/kind :user-input}))))
+  nil)
+
+(defn truncate-value
+  "A bounded printable transaction value."
+  [value]
+  (tokens/bounded-pr-str value 25))
 
 (declare validate-entity-values!)
 
-(defn validate-ref-child!
-  "Validate one entry inside a ref-typed slot. A map is treated as
-   datahike's nested-entity shorthand (recursively validated against
-   the children's own per-attr schemas); anything else must satisfy
-   `:seon.db/ref` (eid, lookup tuple, or temp-id keyword)."
-  [parent-attr child]
+(defn- validate-ref! [attr value]
   (cond
-    (map? child)
-    (validate-entity-values! child)
-
-    (schema/valid-candidate-value? :seon.db/ref child)
-    nil
-
-    :else
-    (throw (ex-info (str "Malli validation failed for " parent-attr
-                         " child: expected map or :seon.db/ref, got "
-                         (truncate-value child))
-                    {::db/error              :seon.db/invalid-ref-child
-                     ::db/attr               parent-attr
-                     ::db/actual-value       child
-                     ::db/malli-explanation  (schema/explain-candidate-value :seon.db/ref child)
-                     :seon.error/kind        :user-input}))))
+    (map? value) (validate-entity-values! value)
+    (schema/valid-candidate-value? :seon.db/ref value) nil
+    :else (throw (ex-info "A ref attribute contains an invalid reference."
+                          {::db/attr attr ::db/actual-value value
+                           :seon.error/kind :user-input}))))
 
 (defn validate-entity-values!
-  "Validate each `[attr v]` pair in an entity map against its registered
-   Malli schema. Skips system attrs and unregistered attrs (the latter
-   should have been caught by `validate-attrs!`).
-
-   Special-cases ref-typed attrs (see [[ref-attr-arity]]): accepts
-   datahike's nested-map shorthand in place of explicit refs. A map
-   value is recursively validated against the children's own per-attr
-   schemas; the outer ref-type check is skipped because datahike will
-   turn the map into an entity at write time.
-
-   Arity matters: a single-ref slot whose value is a 2-element vector
-   like `[:seon.agent/id \"seon\"]` is a LOOKUP REF, not a container
-   of refs. We must dispatch on schema-declared arity, not on the
-   value's `sequential?` shape, or we'd iterate the lookup tuple's
-   keyword + string and validate them as separate refs."
+  "Validate one transaction entity using registered Malli forms."
   [entity]
-  (doseq [[attr val] entity]
-    (when (and (not (system-attr? attr))
-               (schema/registered? attr))
-      (let [schema-form (schema/schema-definition attr)
-            arity       (ref-attr-arity schema-form)]
-        (cond
-          ;; Single-card ref slot.
-          (= arity :one)
-          (cond
-            ;; Nested-map shorthand → recurse as entity.
-            (map? val)
-            (validate-entity-values! val)
-            ;; Anything else (eid, lookup tuple, ident) → validate as ref.
-            :else
-            (when-not (schema/valid-candidate-value? :seon.db/ref val)
-              (throw (ex-info (str "Malli validation failed for " attr
-                                   ": expected :seon.db/ref (eid, lookup "
-                                   "tuple, or nested entity map), got "
-                                   (truncate-value val))
-                              {::db/error             :seon.db/invalid-value
-                               ::db/attr              attr
-                               ::db/expected-schema   schema-form
-                               ::db/actual-value      val
-                               ::db/malli-explanation (schema/explain-candidate-value :seon.db/ref val)
-                               :seon.error/kind       :user-input}))))
-
-          ;; Many-card ref slot — iterate children, each may be a
-          ;; map (nested entity), eid, or lookup tuple.
-          (= arity :many)
-          (when (sequential? val)
-            (doseq [child val]
-              (validate-ref-child! attr child)))
-
-          ;; Normal scalar / non-ref path — validate against the schema.
-          :else
-          (when-not (schema/valid-candidate-value? attr val)
-            (throw (ex-info (str "Malli validation failed for " attr
-                                 ": expected " (pr-str schema-form)
-                                 ", got " (truncate-value val))
-                            {::db/error              :seon.db/invalid-value
-                             ::db/attr               attr
-                             ::db/expected-schema    schema-form
-                             ::db/actual-value       val
-                             ::db/malli-explanation  (schema/explain-candidate-value attr val)
-                             :seon.error/kind        :user-input}))))))))
+  (doseq [[attr value] entity
+          :when (and (not (system-attr? attr)) (schema/registered? attr))]
+    (case (ref-attr-arity (schema/schema-definition attr))
+      :one (validate-ref! attr value)
+      :many (doseq [child value] (validate-ref! attr child))
+      (when-not (schema/valid-candidate-value? attr value)
+        (throw (ex-info "Transaction data fails its registered schema."
+                        {::db/attr attr ::db/actual-value value
+                         ::db/expected-schema (schema/schema-definition attr)
+                         :seon.error/kind :user-input})))))
+  nil)
 
 (defn validate-values!
-  "Walk tx-data and validate every entity map. Vector tuple forms
-   (`[:db/add ...]`, `[:db/retract ...]`) carry only one attribute and
-   are best validated through their declared Malli schema by the caller;
-   this gate doesn't try to type-check vector tuples (the JVM impl makes
-   the same call)."
+  "Validate every entity map in transaction data."
   [tx-data]
-  (doseq [datum tx-data]
-    (when (map? datum)
-      (validate-entity-values! datum))))
+  (doseq [item tx-data :when (map? item)]
+    (validate-entity-values! item))
+  nil)
 
-(defn resolve-conn
-  "Resolve a caller-supplied or default `*conn*`. Throws a clear error if
-   neither is set — that almost always means `seon.db/*conn*` hasn't been
-   bound at the session-flow boundary yet, or you're calling from outside
-   a session scope."
-  [conn]
-  (or conn
-      (throw (ex-info
-               (str "seon.db: *conn* is unbound and no :seon.db/conn was "
-                    "passed. Bind via session-flow setup, or pass "
-                    "::db/conn explicitly.")
-               {::db/error       :seon.db/no-conn
-                :seon.error/kind :core-bug}))))
+(defn keyword-identity-ident?
+  "True for a keyword-valued identity attribute."
+  [attr]
+  (and (qualified-keyword? attr)
+       (schema/registered? attr)
+       (schema/identity-attr? attr)
+       (= :keyword
+          (-> attr schema/schema-definition resolve-malli-form
+              form->child-form resolve-malli-form form-head))))
 
-;; ---------------------------------------------------------------------------
-;; Invocation normalization + shape guard for the write path.
-;; ---------------------------------------------------------------------------
-
-(defn conn?
-  "A datahike conn is an `IDeref` that is NOT a map (verified live
-   2026-06-08: `(map? conn)` => false, `(satisfies? IDeref conn)` =>
-   true; a db VALUE is `map?`-true). Used by `normalize-transact-args` to
-   tell a positional conn slot apart from a stray request map / db value."
-  [x]
-  (and (satisfies? IDeref x) (not (map? x))))
-
-(defn db-value?
-  "True for a datahike db VALUE — any of DB / FilteredDB / HistoricalDB /
-   AsOfDB / SinceDB, all of which implement
-   `datahike.db.interface/IDB`. The read-path positional arities use this
-   to tell an explicit `db` argument apart from a Datalog `:in` input, so
-   the db can be auto-injected from `*conn*` when omitted (the read-side
-   sibling of `conn?`).
-
-   The STRICT runtime face of the `:seon.db/db-val` schema (db.cljs):
-   that schema is `'map?` (the only clean pure-data form, and enough at a
-   positional :db slot where the arity already guarantees a db); THIS
-   predicate is `satisfies? IDB`, which additionally rejects a plain
-   request/input map (`map?`-true but not a db) — needed where db and
-   input are disambiguated at runtime. `satisfies?` is not expressible as
-   a clean malli form, so the two faces are intentionally distinct."
-  [x]
-  (satisfies? dbi/IDB x))
-
-;; ---------------------------------------------------------------------------
-;; Runtime read capture — normalized request/result facts, never db handles.
-;; ---------------------------------------------------------------------------
-
-(def ^:private read-value-tags
-  #{:seon.db.read.value/instant
-    :seon.db.read.value/uuid
-    :seon.db.read.value/bigint
-    :seon.db.read.value/bytes
-    :seon.db.read.value/literal-vector
-    :seon.db.read.value/literal-keyword})
-
-(def ^:private read-value-sentinels
-  #{:seon.db.read.value/captured-db
-    :seon.db.read.value/foreign-db
-    :seon.db.read.value/opaque})
-
-(defn normalize-read-value
-  "Normalize a captured request/result value relative to `captured-db`.
-
-   Returns `[immutable-value replayable?]`. Database handles become source
-   sentinels, Datahike Entities become lookup-neutral `{:db/id ...}` facts,
-   and unknown host objects become an opaque sentinel that forces a cache miss.
-   No observation can retain a DB, Entity cache, function, or mutable JS
-   object."
-  [captured-db value]
-  (letfn [(normalize-coll [empty-value values add]
-            (reduce (fn [[acc replayable?] item]
-                      (let [[item' item-replayable?] (normalize item)]
-                        [(add acc item')
-                         (and replayable? item-replayable?)]))
-                    [empty-value true]
-                    values))
-          (normalize [x]
-            (cond
-              (db-value? x)
-              [(if (identical? captured-db x)
-                 :seon.db.read.value/captured-db
-                 :seon.db.read.value/foreign-db)
-               ;; A DB sentinel documents what was observed but cannot be
-               ;; reconstructed from immutable request data. This is false
-               ;; even for the captured db when it appears as an explicit
-               ;; multi-source query input; replay receives the current db
-               ;; separately and must never invent an opaque handle argument.
-               false]
-
-              (dentity/entity? x)
-              ;; A touched entity can still contain lazy non-component ref
-              ;; Entities. Keep only the immutable identity fact and force a
-              ;; conservative miss until the caller uses an explicit pull.
-              [{:db/id (:db/id x)} false]
-
-              (inst? x)
-              (let [millis (inst-ms x)]
-                [[:seon.db.read.value/instant millis]
-                 (js/Number.isFinite millis)])
-
-              (uuid? x)
-              [[:seon.db.read.value/uuid (str x)] true]
-
-              (= js/BigInt (type x))
-              [[:seon.db.read.value/bigint (str x)] true]
-
-              ;; Datahike's CLJS bytes value is a Uint8Array. Other typed
-              ;; views have a buffer too, but restoring them as Uint8Array
-              ;; would silently change their element width and semantics.
-              (instance? js/Uint8Array x)
-              [[:seon.db.read.value/bytes (vec (array-seq x))] true]
-
-              (map? x)
-              (let [[normalized replayable?]
-                    (reduce-kv
-                      (fn [[m replayable?] k v]
-                        (let [[k' key-replayable?] (normalize k)
-                              [v' value-replayable?] (normalize v)]
-                          [(assoc m k' v')
-                           (and replayable?
-                                key-replayable?
-                                value-replayable?)]))
-                      [{} true]
-                      x)]
-                [normalized
-                 (and replayable?
-                      (not (record? x))
-                      (not (sorted? x))
-                      (nil? (meta x))
-                      ;; Distinct host keys can normalize to the same value.
-                      ;; Losing one would make replay claim a false cache hit.
-                      (= (count x) (count normalized)))])
-
-              (vector? x)
-              (let [[items replayable?] (normalize-coll [] x conj)]
-                [(if (contains? read-value-tags (first x))
-                   [:seon.db.read.value/literal-vector items]
-                   items)
-                 (and replayable? (nil? (meta x)))])
-
-              (set? x)
-              (let [[normalized replayable?] (normalize-coll #{} x conj)]
-                [normalized
-                 (and replayable?
-                      (not (sorted? x))
-                      (nil? (meta x))
-                      ;; Content-equal Dates/bytes are identity-distinct JS
-                      ;; values but share one normalized representation.
-                      (= (count x) (count normalized)))])
-
-              (seq? x)
-              (let [[items replayable?] (normalize-coll [] x conj)]
-                [(apply list items)
-                 (and replayable? (list? x) (nil? (meta x)))])
-
-              ;; These keywords are otherwise indistinguishable from the
-              ;; sentinels emitted for opaque runtime values and db handles.
-              (contains? read-value-sentinels x)
-              [[:seon.db.read.value/literal-keyword x] true]
-
-              ;; Preserve simple immutable EDN scalars exactly. Other CLJS
-              ;; collection implementations are normalized to a vector but
-              ;; conservatively non-replayable because their concrete
-              ;; semantics changed. Mutable/host objects never escape.
-              (or (nil? x) (string? x) (number? x) (boolean? x)
-                  (keyword? x) (symbol? x))
-              [x true]
-
-              (coll? x)
-              (let [[items _] (normalize-coll [] x conj)]
-                [items false])
-
-              :else
-              [:seon.db.read.value/opaque false]))]
-    (normalize value)))
-
-(defn denormalize-read-value
-  "Restore observer-owned immutable request tags to Datahike input values.
-
-   Returns `[value safe?]`. Only the exact instant, UUID, bigint, and bytes
-   tags emitted by `normalize-read-value` are restored. Database/opaque
-   sentinels, functions, host objects, malformed tags, and collection shapes
-   outside the observer's normalized data vocabulary return `safe? false` so
-   replay can conservatively invalidate without passing them to Datahike."
+(defn coerce-lookup-ref-symbol
+  "Coerce a symbol value in a keyword identity lookup ref."
   [value]
-  (letfn [(restore-coll [empty-value values add]
-            (reduce (fn [[acc safe?] item]
-                      (let [[item' item-safe?] (restore item)]
-                        [(add acc item') (and safe? item-safe?)]))
-                    [empty-value true]
-                    values))
-          (owned-tag [x]
-            (when (and (vector? x) (= 2 (count x)))
-              (let [[tag payload] x]
-                (case tag
-                  :seon.db.read.value/instant
-                  (when (number? payload)
-                    [(js/Date. payload) true])
+  (if (and (vector? value) (= 2 (count value))
+           (keyword-identity-ident? (first value)) (symbol? (second value)))
+    [(first value) (keyword (second value))]
+    value))
 
-                  :seon.db.read.value/uuid
-                  (when (string? payload)
-                    (try
-                      [(uuid payload) true]
-                      (catch :default _ nil)))
-
-                  :seon.db.read.value/bigint
-                  (when (string? payload)
-                    (try
-                      [(js/BigInt payload) true]
-                      (catch :default _ nil)))
-
-                  :seon.db.read.value/bytes
-                  (when (and (vector? payload)
-                             (every? #(and (int? %) (<= 0 % 255)) payload))
-                    [(js/Uint8Array. (clj->js payload)) true])
-
-                  :seon.db.read.value/literal-vector
-                  (when (vector? payload)
-                    (restore-coll [] payload conj))
-
-                  :seon.db.read.value/literal-keyword
-                  (when (contains? read-value-sentinels payload)
-                    [payload true])
-
-                  nil))))
-          (restore [x]
-            (if-let [tagged (owned-tag x)]
-              tagged
-              (cond
-                (#{:seon.db.read.value/captured-db
-                   :seon.db.read.value/foreign-db
-                   :seon.db.read.value/opaque} x)
-                [nil false]
-
-                (map? x)
-                (let [[restored safe?]
-                      (reduce-kv
-                        (fn [[m safe?] k v]
-                          (let [[k' key-safe?] (restore k)
-                                [v' value-safe?] (restore v)]
-                            [(assoc m k' v')
-                             (and safe? key-safe? value-safe?)]))
-                        [{} true]
-                        x)]
-                  [restored
-                   (and safe?
-                        (not (record? x))
-                        (not (sorted? x))
-                        (nil? (meta x))
-                        (= (count x) (count restored)))])
-
-                (vector? x)
-                ;; A vector beginning with an observer-owned tag but carrying
-                ;; a malformed payload must not fall through as ordinary query
-                ;; data. It could otherwise invoke Datahike with a value the
-                ;; capture mechanism never emitted.
-                (if (contains? read-value-tags (first x))
-                  [nil false]
-                  (restore-coll [] x conj))
-
-                (set? x)
-                (let [[restored safe?] (restore-coll #{} x conj)]
-                  [restored
-                   (and safe?
-                        (not (sorted? x))
-                        (nil? (meta x))
-                        (= (count x) (count restored)))])
-
-                (seq? x)
-                (let [[items safe?] (restore-coll [] x conj)]
-                  [(apply list items)
-                   (and safe? (list? x) (nil? (meta x)))])
-
-                (or (nil? x) (string? x) (number? x) (boolean? x)
-                    (keyword? x) (symbol? x))
-                [x true]
-
-                :else
-                [nil false])))]
-    (restore value)))
-
-(defn normalized-read-value?
-  "True when `value` is an unambiguous observer-owned normalized value.
-
-   The predicate validates the normalized representation without rebuilding
-   host values. Reserved tags must have their exact payload shapes; arbitrary
-   vectors beginning with a reserved tag are represented by `literal-vector`.
-   Runtime sentinels are never valid inside a replayable observation."
-  [value]
-  (letfn [(valid-bigint? [payload]
-            (and (string? payload)
-                 (try
-                   (js/BigInt payload)
-                   true
-                   (catch :default _ false))))
-          (valid-tag? [tag payload]
-            (case tag
-              :seon.db.read.value/instant
-              (and (number? payload) (js/Number.isFinite payload))
-
-              :seon.db.read.value/uuid
-              (string? payload)
-
-              :seon.db.read.value/bigint
-              (valid-bigint? payload)
-
-              :seon.db.read.value/bytes
-              (and (vector? payload)
-                   (every? #(and (int? %) (<= 0 % 255)) payload))
-
-              :seon.db.read.value/literal-vector
-              (and (vector? payload) (every? valid? payload))
-
-              :seon.db.read.value/literal-keyword
-              (contains? read-value-sentinels payload)
-
-              false))
-          (valid? [x]
+(defn coerce-identity-symbol-idents
+  "Coerce symbols only in keyword-valued identity positions."
+  [tx-data]
+  (letfn [(ref-value [value]
             (cond
-              (contains? read-value-sentinels x) false
+              (map? value) (entity value)
+              (vector? value) (coerce-lookup-ref-symbol value)
+              (sequential? value) (mapv ref-value value)
+              :else value))
+          (entity [value]
+            (reduce-kv (fn [result attr item]
+                         (assoc result attr
+                                (cond
+                                  (and (keyword-identity-ident? attr) (symbol? item))
+                                  (keyword item)
+                                  (= :db/id attr) (coerce-lookup-ref-symbol item)
+                                  (ref-slot? attr) (ref-value item)
+                                  :else item)))
+                       {} value))]
+    (mapv (fn [item]
+            (cond
+              (map? item) (entity item)
+              (and (vector? item) (#{:db/add :db/retract} (first item)))
+              (let [attr (nth item 2 nil)]
+                (cond-> (update item 1 coerce-lookup-ref-symbol)
+                  (and (<= 4 (count item)) (ref-slot? attr)) (update 3 ref-value)
+                  (and (<= 4 (count item)) (keyword-identity-ident? attr)
+                       (symbol? (nth item 3))) (update 3 keyword)))
+              :else item))
+          tx-data)))
 
-              (map? x)
-              (and (not (record? x))
-                   (not (sorted? x))
-                   (nil? (meta x))
-                   (every? (fn [[k v]] (and (valid? k) (valid? v))) x))
-
-              (vector? x)
-              (if (contains? read-value-tags (first x))
-                (and (= 2 (count x))
-                     (valid-tag? (first x) (second x)))
-                (and (nil? (meta x)) (every? valid? x)))
-
-              (set? x)
-              (and (not (sorted? x))
-                   (nil? (meta x))
-                   (every? valid? x))
-
-              (seq? x)
-              (and (list? x) (nil? (meta x)) (every? valid? x))
-
-              (or (nil? x) (string? x) (number? x) (boolean? x)
-                  (keyword? x) (symbol? x))
-              true
-
-              :else false))]
-    (boolean (valid? value))))
-
-(defn record-operation!
-  "Append one normalized database operation to every active capture bucket.
-
-   `captures` is the already-read ALS stack, so an unbound read never calls
-   this function or allocates request/event data. Reads derive their complete
-   coordinate from `actual-db`; writes pass the committed coordinate returned
-   by the writer. `operation-replayable?` remains false for writes and for
-   lazy/temporal reads."
-  ([captures operation actual-db request result operation-replayable?]
-   (record-operation! captures operation actual-db request result
-                      operation-replayable?
-                      (try
-                        (coordinate/resolved actual-db)
-                        (catch :default _ nil))))
-  ([captures operation actual-db request result operation-replayable?
-    operation-coordinate]
-  (doseq [[captured-db bucket] captures]
-    (let [captured-coordinate
-          (try (coordinate/resolved captured-db) (catch :default _ nil))
-          actual-coordinate
-          (try (coordinate/resolved actual-db) (catch :default _ nil))
-          captured-source?
-          (or (identical? captured-db actual-db)
-              (and captured-coordinate
-                   actual-coordinate
-                   (coordinate/same-attachment? captured-coordinate
-                                                actual-coordinate)
-                   (<= (::coordinate/t captured-coordinate)
-                       (::coordinate/t actual-coordinate))))
-          [request' request-replayable?]
-          (normalize-read-value captured-db request)
-          [result' result-replayable?]
-          (normalize-read-value captured-db result)
-          position (count @bucket)]
-      (swap! bucket conj
-             (cond->
-               {::db/read-operation operation
-                ::db/operation-position position
-                ::db/operation-ok?
-                (if (= operation :seon.db.read.operation/transact)
-                  (true? (::db/ok? result))
-                  true)
-                ::db/read-source
-                (if captured-source?
-                  :seon.db.read.source/captured
-                  :seon.db.read.source/foreign)
-                ::db/read-request request'
-                ::db/read-result result'
-                ::db/read-replayable?
-                (boolean (and operation-replayable?
-                              captured-source?
-                              request-replayable?
-                              result-replayable?))}
-               operation-coordinate
-               (assoc ::db/operation-coordinate operation-coordinate)))))))
-
-(defn normalize-transact-args
-  "Normalize `transact!`'s variadic args into the canonical map-in
-   request map `{::tx-data … ::opts … ::conn …}` that the rest of the
-   body and `assert-invocation-shape!` already understand. T15: the
-   public surface accepts BOTH shapes.
-
-   Dispatch (the chunk-1 finding — a db/conn value must never be mistaken
-   for a request map): the FIRST arg decides.
-     - a map containing `::tx-data`  -> map-in (passed through verbatim).
-     - otherwise                     -> positional, first arg is the conn.
-   A conn is `map?`-false and tx-data is a vector, so a positional first
-   arg never collides with a `::tx-data`-bearing request map.
-
-   Positional forms (mirror datahike `(d/transact! conn tx-data)`; seon
-   adds a 3-arity tx-meta convenience since it nests tx-meta under
-   `::opts {:tx-meta …}`):
-     (transact! conn tx-data)          ==> {::conn c ::tx-data td}
-     (transact! conn tx-data tx-meta)  ==> {::conn c ::tx-data td
-                                            ::opts {:tx-meta tm}}
-
-   Throws `:user-input` ex-info (caught upstream into an envelope, never
-   into agent eval) for a malformed positional call — non-conn first arg,
-   missing tx-data, or non-map tx-meta. A malformed map-in call is left
-   to `assert-invocation-shape!`, which already produces a clear message."
-  [args]
-  (let [a0 (first args)]
-    (cond
-      ;; map-in: one request map carrying `::tx-data`. Pass through; the
-      ;; existing guard validates the rest.
-      (and (map? a0) (contains? a0 ::db/tx-data))
-      a0
-
-      ;; A lone map WITHOUT `::tx-data` is a malformed map-in call — let
-      ;; the guard name the missing key / unqualified-key hint.
-      (and (= 1 (count args)) (map? a0))
-      a0
-
-      ;; 1-arg tx-data shape: `(transact! [{…} …])` — the taught
-      ;; transact form. The conn defaults to `*conn*` at the face.
-      ;; Unambiguous: tx-data is sequential, a conn is a non-map IDeref,
-      ;; a request map is `map?` — no shape collides.
-      (and (= 1 (count args)) (sequential? a0))
-      {::db/tx-data a0}
-
-      ;; Positional: first arg must be a conn.
-      (not (conn? a0))
-      (throw (ex-info
-               (str "seon.db/transact!: positional call expects a datahike "
-                    "CONN as the first argument (an IDeref, not a map). Got: "
-                    (truncate-value a0)
-                    " — call `(transact! conn tx-data)` or `(transact! conn "
-                    "tx-data tx-meta)`, or use the map-in shape "
-                    "`{::db/tx-data […] ::db/conn conn}`.")
-               {::db/error       :seon.db/invalid-invocation-shape
-                ::db/actual-shape (type a0)
-                ::db/actual-value a0
-                :seon.error/kind :user-input}))
-
-      :else
-      (let [[conn tx-data tx-meta & extra] args]
-        (when (seq extra)
-          (throw (ex-info
-                   (str "seon.db/transact!: positional call takes 2 or 3 "
-                        "arguments `(conn tx-data [tx-meta])`. Got "
-                        (count args) " arguments.")
-                   {::db/error        :seon.db/invalid-invocation-shape
-                    ::db/actual-value (vec args)
-                    :seon.error/kind  :user-input})))
-        (when (and (some? tx-meta) (not (map? tx-meta)))
-          (throw (ex-info
-                   (str "seon.db/transact!: positional tx-meta (3rd arg) "
-                        "must be a map. Got: " (truncate-value tx-meta))
-                   {::db/error        :seon.db/invalid-invocation-shape
-                    ::db/actual-value tx-meta
-                    ::db/actual-shape (type tx-meta)
-                    :seon.error/kind  :user-input})))
-        (cond-> {::db/conn conn ::db/tx-data tx-data}
-          (some? tx-meta) (assoc ::db/opts {:tx-meta tx-meta}))))))
+(defn normalize-entity-ref-keys
+  "Translate entity-map `:seon.db/ref` keys to native `:db/id` keys."
+  [tx-data]
+  (letfn [(ref-value [value]
+            (cond
+              (map? value) (entity value)
+              (sequential? value) (mapv ref-value value)
+              :else value))
+          (entity [value]
+            (let [normalized (reduce-kv (fn [result attr item]
+                                          (assoc result attr
+                                                 (if (ref-slot? attr)
+                                                   (ref-value item)
+                                                   item)))
+                                        {} value)]
+              (if-not (contains? normalized ::db/ref)
+                normalized
+                (let [ref (::db/ref normalized)]
+                  (when-not (schema/valid-candidate-value? :seon.db/ref ref)
+                    (throw (ex-info "`:seon.db/ref` contains an invalid entity reference."
+                                    {::db/actual-value ref
+                                     :seon.error/kind :user-input})))
+                  (when (and (contains? normalized :db/id)
+                             (not= (:db/id normalized) ref))
+                    (throw (ex-info "An entity map names two different entities."
+                                    {::db/actual-value normalized
+                                     :seon.error/kind :user-input})))
+                  (-> normalized (dissoc ::db/ref) (assoc :db/id ref))))))]
+    (mapv (fn [item]
+            (cond
+              (map? item) (entity item)
+              (and (vector? item) (<= 4 (count item)) (ref-slot? (nth item 2)))
+              (update item 3 ref-value)
+              :else item))
+          tx-data)))
 
 (defn assert-invocation-shape!
-  "KI-1 guard. `transact!` is map-in / map-out — every key namespaced
-   under `:seon.db/*`. Positional invocations are normalized to this map
-   shape by `normalize-transact-args` BEFORE this guard runs; an
-   unqualified-key map (`{:tx-data […]}`) or a map missing `::tx-data`
-   silently destructured to nil/empty and used to crash deep inside
-   datahike with cryptic errors. This precondition catches that at the
-   boundary with a clear message.
-
-   Run BEFORE destructuring so the error message can name the actual
-   shape received."
-  [arg]
-  (cond
-    (not (map? arg))
-    (throw (ex-info
-             (str "seon.db/transact! expects ONE map argument with "
-                  "`:seon.db/tx-data`. Got: " (truncate-value arg)
-                  " — did you call positionally? "
-                  "Use {::db/tx-data […]} or {:seon.db/tx-data […]}.")
-             {::db/error        :seon.db/invalid-invocation-shape
-              ::db/actual-shape (type arg)
-              ::db/actual-value arg
-              :seon.error/kind  :user-input}))
-
-    (not (contains? arg ::db/tx-data))
-    (let [unqualified-tx-data (get arg :tx-data ::db/not-present)
-          hint                (if (not= unqualified-tx-data ::db/not-present)
-                                " — Hint: keys must be namespaced. Use `:seon.db/tx-data`, not bare `:tx-data`."
-                                "")]
-      (throw (ex-info
-               (str "seon.db/transact!: missing `:seon.db/tx-data` key."
-                    hint
-                    " Got keys: " (pr-str (vec (keys arg))))
-               {::db/error       :seon.db/invalid-invocation-shape
-                ::db/missing     :seon.db/tx-data
-                ::db/actual-keys (vec (keys arg))
-                :seon.error/kind :user-input})))
-
-    ;; tx-data must be a sequential collection. Strings, JS objects,
-    ;; numbers, nil — anything non-sequential — is a caller fault
-    ;; (LLM hallucination, wrong-shape eval). Catch it here at the
-    ;; shape guard so it's classified `:user-input`. Without this
-    ;; check, the value flows into `extract-tx-attrs`/`mapcat` which
-    ;; throws an opaque "X is not ISeqable" → outer catch tags it
-    ;; `:core-bug`. That misclassification was task-9b finding 2.
-    (not (sequential? (::db/tx-data arg)))
-    (throw (ex-info
-             (str "seon.db/transact!: `:seon.db/tx-data` must be a "
-                  "sequential collection (vector or seq) of entity "
-                  "maps or [:db/add ...] tuples. Got: "
-                  (truncate-value (::db/tx-data arg)))
-             {::db/error        :seon.db/invalid-invocation-shape
-              ::db/actual-value (::db/tx-data arg)
-              ::db/actual-shape (type (::db/tx-data arg))
-              :seon.error/kind  :user-input}))))
-
-;; ---------------------------------------------------------------------------
-;; Execution context → durable transaction provenance.
-;; ---------------------------------------------------------------------------
+  "Require one namespaced transaction request with sequential data."
+  [request]
+  (when-not (and (map? request)
+                 (contains? request ::db/tx-data)
+                 (sequential? (::db/tx-data request)))
+    (throw (ex-info "`seon.db/transact!` requires `:seon.db/tx-data`."
+                    {::db/actual-value request :seon.error/kind :user-input})))
+  nil)
 
 (defn selected-provenance
-  "Select the two durable refs from the current fiber-local context.
-
-   Explicit `:seon.db/user` / `:seon.db/process` values win. Otherwise an active
-   agent is its own database user through the REPL process; an unscoped host
-   operation belongs to the stable human through REPL. Boot/config callers must
-   establish their root/process pair explicitly. Runtime turn/eval/test/replay
-   values have no role in this selection and are never persisted."
-  [ctx agent-id]
-  (let [process-ref   (or (::db/process ctx)
-                          [:seon.db.process/id :seon.db.process/repl])
-        user-ref      (or (::db/user ctx)
-                          (if agent-id
-                            [:seon.agent/id agent-id]
-                            [:seon.user/id "user"]))]
-    {::db/user user-ref ::db/process process-ref}))
+  "Select the two durable provenance references."
+  [context agent-id]
+  {::db/user (or (::db/user context)
+                 (if agent-id [:seon.agent/id agent-id] [:seon.user/id "user"]))
+   ::db/process (or (::db/process context)
+                    [:seon.db.process/id :seon.db.process/repl])})
 
 (defn merge-tx-context-into-opts
-  "Attach only selected user/process refs to ordinary transaction metadata.
-
-   The AsyncLocalStorage map is execution context, not persisted provenance:
-   turn, eval, replay, and test values never
-   cross this boundary. Explicit caller tx metadata may carry a genuine custom
-   transaction fact outside `:seon.db`; the selected provenance refs always
-   replace caller claims in the database namespace."
+  "Merge selected provenance into transaction metadata."
   [opts]
-  (let [ctx        (or (current-tx-context) {})
-        provenance (selected-provenance ctx (current-agent-id))
-        explicit   (into {}
-                         (remove (fn [[k _]] (= "seon.db" (namespace k))))
-                         (or (:tx-meta opts) {}))
-        tx-meta    (merge explicit provenance)]
-    (assoc (or opts {}) :tx-meta tx-meta)))
-
-(defn validate-provenance-refs!
-  "Require transaction user/process refs to resolve to their real entities."
-  [db-value tx-meta]
-  (let [user-ref    (::db/user tx-meta)
-        process-ref (::db/process tx-meta)
-        user        (try (d/entity db-value user-ref)
-                         (catch :default _ nil))
-        process     (try (d/entity db-value process-ref)
-                         (catch :default _ nil))]
-    (when-not (or (:seon.agent/id user) (:seon.user/id user))
-      (throw (ex-info
-               (str "Transaction user ref does not resolve to an existing "
-                    "root, human, or agent entity: " (pr-str user-ref))
-               {::db/error       :seon.db/unresolved-transaction-user
-                ::db/user        user-ref
-                :seon.error/kind :core-bug})))
-    (when-not (:seon.db.process/id process)
-      (throw (ex-info
-               (str "Transaction process ref does not resolve to a stable "
-                    "database process entity: " (pr-str process-ref))
-               {::db/error       :seon.db/unresolved-transaction-process
-                ::db/process     process-ref
-                :seon.error/kind :core-bug})))
-    true))
-
-;; ---------------------------------------------------------------------------
-;; Error envelopes — every failure path in the write pipeline resolves to
-;; `{::db/ok? false ::db/error …}` data, never a throw into agent eval.
-;; ---------------------------------------------------------------------------
+  (let [provenance (selected-provenance (or (current-tx-context) {})
+                                        (current-agent-id))
+        explicit (into {} (remove #(= "seon.db" (namespace (key %))))
+                       (or (:tx-meta opts) {}))]
+    (assoc (or opts {}) :tx-meta (merge explicit provenance))))
 
 (defn error-envelope
-  "Build a `{::ok? false ::error <error-map>}` failure envelope from a
-   thrown error. Ensures the envelope carries a top-level
-   `:seon.error/kind` tag (`error/->map` lifts a thrown ex-data kind
-   there — C45; `:core-bug` when the throw didn't ship one).
-   `:user-input` is reserved for caller-fault paths — invocation shape,
-   unregistered attr, value Malli failure. Anything else (datahike
-   internals, store I/O, schema bridge bug) defaults to `:core-bug`."
-  [e]
-  (let [emap (error/->map e)
-        emap (cond-> emap
-               (nil? (:seon.error/kind emap))
-               (assoc :seon.error/kind :core-bug))]
-    {::db/ok? false ::db/error emap}))
-
-(def ^:private verbose-data-keys
-  "Keys dropped from the failure envelope's `:seon.error/data` (#46). The
-   surviving message ALREADY states attr/expected/got in one line, so the
-   full Malli explanation is pure duplication; the expected-schema /
-   actual-value structured fields stay (short, machine-readable — they
-   name WHICH attr/value failed). `:seon.db/malli-explanation` is the
-   `{:schema … :value … :errors …}` blob that ballooned the envelope to
-   ~3600 chars and re-stated message content a third time."
-  [:seon.db/malli-explanation])
-
-(defn compact-error-map
-  "Collapse a `(error/->map e)` failure into ONE concise envelope (#46).
-   A downstream-reported transact! validation failure echoed the SAME
-   explanation across four keys — `:seon.error/message`,
-   `:seon.error/ex-data`, `:seon.error/data`, and the embedded
-   `:seon.db/malli-explanation` — plus a multi-kb `:seon.error/stack` and
-   the opaque `:seon.error/raw` error instance (which re-prints
-   message+ex-data on pr-str), tripping the 1500-char agent-display
-   truncation on a trivial type mismatch.
-
-   This keeps exactly what an agent needs to act — the guiding
-   `:seon.error/message`, and a SHORT `:seon.error/data` carrying
-   `:seon.error/kind`, the `:seon.db/error` tag, plus the
-   attr / expected-schema / (truncated) actual-value naming WHICH attr
-   and value failed — and drops the redundant copies:
-
-     - `:seon.error/ex-data`  — byte-identical to `:seon.error/data`.
-     - `:seon.error/raw`      — opaque error object; pr-str re-emits the
-                                whole message + ex-data again.
-     - `:seon.error/stack`    — a JS stack is noise for a `:user-input`
-                                fault; the message says what to fix.
-     - `:seon.db/malli-explanation` (inside data) — the
-                                `{:schema/:value/:errors}` blob the
-                                message already summarizes in one line.
-
-   `:seon.db/actual-value` is truncated to its `pr-str` (it can be an
-   arbitrarily large bad value — a giant string, a deep map — and the
-   validators store it UN-truncated; the message already carries the
-   truncated form). Other keys pass through, so cryptic-error translation
-   ([[translate-cryptic-error]]) — which reads message + ex-data BEFORE
-   this runs — and the `:seon.db/raw-error` it sets are unaffected."
-  [error-map]
-  (let [data  (:seon.error/data error-map)
-        data' (when (map? data)
-                (cond-> (apply dissoc data verbose-data-keys)
-                  (contains? data :seon.db/actual-value)
-                  (update :seon.db/actual-value truncate-value)))]
-    (cond-> (dissoc error-map
-                    :seon.error/ex-data
-                    :seon.error/raw
-                    :seon.error/stack)
-      (some? data') (assoc :seon.error/data data'))))
-
-(defn translate-cryptic-error
-  "A4: rewrite the two known cryptic datahike commit errors inside a
-   failure envelope into guiding, agent-actionable messages. The raw
-   message is preserved verbatim under `:seon.db/raw-error`. Both are
-   caller-fixable, so `:seon.error/kind` is retagged `:user-input`
-   (datahike throws them from its internals, which the generic
-   classifier would mislabel `:core-bug`). Non-matching envelopes
-   pass through unchanged."
-  [{::db/keys [error] :as envelope}]
-  (let [msg  (:seon.error/message error)
-        exd  (:seon.error/ex-data error)
-        rewrite (fn [guiding]
-                  (-> envelope
-                      (assoc ::db/raw-error msg)
-                      (assoc-in [::db/error :seon.error/message] guiding)
-                      (assoc-in [::db/error :seon.error/kind] :user-input)))]
-    (cond
-      (not (string? msg))
-      envelope
-
-      ;; "Bad entity attribute :x at {...}, not defined in current schema"
-      (re-find #"not defined in current schema" msg)
-      (let [attr (:attribute exd)]
-        (rewrite
-          (str "attr " (pr-str attr) " is not installed in the database "
-               "schema — register it with (seon.schema/register! "
-               (pr-str attr) " <type>) BEFORE transacting. If you "
-               "registered it earlier this turn and still see this "
-               "error, report a core bug.")))
-
-      ;; "Lookup ref attribute should be marked as :db/unique"
-      (re-find #"Lookup ref attribute should be marked as :db/unique" msg)
-      (rewrite
-        (str "lookup-ref failed: a lookup-ref [attr v] only works when "
-             "attr is an IDENTITY attr. Usually the fix is NOT identity: "
-             "query for the entity's eid and use that, or transact the "
-             "entity first (or via a tempid in the same tx). Do NOT "
-             "re-register an EXISTING attr just to add "
-             "{:seon.db/identity true} — that mutates a shared data "
-             "model others already query. Only a NEW attr that is "
-             "genuinely the kind's natural key (rows upsert by it) "
-             "should be registered as an identity attr."))
-
-      :else envelope)))
+  "Convert an exception to the canonical transaction failure envelope."
+  [exception]
+  (let [value (error/->map exception)]
+    {::db/ok? false
+     ::db/error (cond-> value
+                  (nil? (:seon.error/kind value))
+                  (assoc :seon.error/kind :core-bug))}))
 
 (defn commit-error-envelope
-  "Failure envelope + cryptic-message translation, then COMPACTION (#46).
-   Every catch in the transact path routes through this so the agent
-   always sees the guiding message (with the raw one preserved at
-   `:seon.db/raw-error`). Order is load-bearing: translation runs on the
-   FULL error map (it reads `:seon.error/message` + `:seon.error/ex-data`),
-   THEN [[compact-error-map]] drops the duplicated/verbose keys so the
-   final envelope stays well under the agent-display truncation limit."
-  [e]
-  (let [envelope (translate-cryptic-error (error-envelope e))]
-    (update envelope ::db/error compact-error-map)))
-
-;; ---------------------------------------------------------------------------
-;; Runtime datahike-schema install + the commit body.
-;; ---------------------------------------------------------------------------
-
-(defn ^:async ensure-datahike-attrs!
-  "Install the datahike attribute-declaration (`:db/valueType` +
-   `:db/cardinality` + identity/component flags) for any attr in `attrs`
-   that is registered in `seon.schema` but NOT yet present in the conn's
-   live datahike schema.
-
-   WHY this exists: datahike runs `:schema-flexibility :write`, so every
-   attr must have a datahike schema datom BEFORE its first transact —
-   otherwise `d/transact!` throws \"Bad entity attribute … not defined in
-   current schema\". At boot, `seon.client/open-agent-conn!` installs the
-   core's attrs from a fixed list. But when an AGENT registers a NEW
-   attr at runtime via `seon.schema/register!`, only the Malli registry
-   learns about it — the datahike conn does not. Without this step the
-   agent's register→transact flow ALWAYS failed at the datahike layer,
-   even after a correct `register!` (the second half of the Phase-1 demo
-   gap). This closes the loop so `register!` truly is 'register the type,
-   the system derives datahike storage' (CLAUDE.md).
-
-   Reads the conn's current schema map (`(:schema @conn)` — keyed by both
-   ident keywords and eids) to find which idents are missing, derives the
-   datahike entries via the Malli→datahike bridge, and transacts them in
-   their OWN tx (schema before data, like boot). `:db/*` system attrs and
-   `:seon.db/ref` (no standalone valueType — refs are declared via the
-   attrs that USE them) are skipped.
-
-   FAIL-LOUD (Run-5 / A4): a bridge failure here means the attr was
-   `register!`'d with a type datahike can't store. The old behavior
-   (console.warn + skip) silently dropped the install, and the data tx
-   then died on datahike's cryptic \"Bad entity attribute … not defined
-   in current schema\". Now the whole transact fails with a legible
-   `:user-input` error naming the attrs, their registered forms, and the
-   supported type list — which `transact!`'s catch turns into the
-   `{::ok? false}` envelope the agent can SEE and act on.
-
-   RE-REGISTER DIVERGENCE GATE (real-REPL semantics, 2026-07-10): a
-   `schema/register!` that changed an ALREADY-INSTALLED attr's derived
-   `:db/valueType` / `:db/cardinality` used to be silently IGNORED
-   here (the attr was skipped as installed) — the Malli registry and
-   the store diverged until a value crashed the writer. Datahike
-   constitutionally REJECTS altering those in place
-   (`datahike.schema/find-invalid-schema-updates` — even with zero
-   datoms), so the divergence is surfaced as the same legible
-   `:user-input` error, naming the installed vs registered shape, the
-   live datom count, and the migration move: register the new shape
-   under a NEW attribute name, copy the old attr's values across, then
-   retract the old datoms. A re-register with the SAME derived shape
-   (tightened Malli constraints, docs) passes untouched. `:db/unique`
-   is deliberately NOT gated: an identity-flag mismatch against a
-   hand-installed store entry is a pre-existing tolerated divergence
-   (test scaffolding installs identity out of band), and datahike can
-   legally ADD uniqueness later."
-  [conn attrs tx-meta]
-  (let [installed  (:schema @conn)
-        relevant   (->> attrs
-                        (remove system-attr?)
-                        (remove #(= :seon.db/ref %))
-                        (filter schema/registered?)
-                        distinct)
-        candidates (remove #(contains? installed %) relevant)
-        divergent  (into []
-                         (keep (fn [attr]
-                                 (when-some [cur (get installed attr)]
-                                   (let [derived (try (malli->datahike-attr attr)
-                                                      ;; unbridgeable NEW shape for an
-                                                      ;; installed attr — the divergence
-                                                      ;; message below names it too.
-                                                      (catch :default _ nil))
-                                         diff    (into {}
-                                                       (keep (fn [k]
-                                                               (let [o (get cur k)
-                                                                     n (get derived k)]
-                                                                 (when (and derived (not= o n))
-                                                                   [k [o n]]))))
-                                                       [:db/valueType
-                                                        :db/cardinality])]
-                                     (when (seq diff)
-                                       {::db/attr attr ::db/diff diff})))))
-                         (filter #(contains? installed %) relevant))
-        {:keys [entries failures]}
-        (reduce
-          (fn [acc attr]
-            (try
-              (update acc :entries conj (malli->datahike-attr attr))
-              (catch :default e
-                (update acc :failures conj
-                        {::db/attr   attr
-                         ::db/schema (schema/schema-definition attr)
-                         ::db/reason (or (.-message e) (str e))}))))
-          {:entries [] :failures []}
-          candidates)]
-    (when (seq divergent)
-      (let [with-counts
-            (mapv (fn [{attr ::db/attr :as d}]
-                    (assoc d ::db/datom-count
-                           (count (d/q '[:find ?e :in $ ?a :where [?e ?a _]]
-                                       @conn attr))))
-                  divergent)]
-        (throw (ex-info
-                 (str "Re-registering these attrs changed their stored shape, "
-                      "but they are already installed in datahike, which cannot "
-                      "alter :db/valueType / :db/cardinality in place: "
-                      (pr-str (mapv (fn [{attr ::db/attr diff ::db/diff
-                                          n ::db/datom-count}]
-                                      [attr diff {:datoms n}])
-                                    with-counts))
-                      " (per diff key: [installed registered-now]). Migration "
-                      "move: register the NEW shape under a NEW attribute name, "
-                      "copy the old attr's values across, then retract the old "
-                      "datoms — or re-register the original shape to converge.")
-                 {::db/error       :seon.db/schema-divergence
-                  ::db/divergent   with-counts
-                  :seon.error/kind :user-input}))))
-    (when (seq failures)
-      (throw (ex-info
-               (str "These attrs are registered in seon.schema but their "
-                    "types cannot be stored in datahike: "
-                    (pr-str (mapv (juxt ::db/attr ::db/schema) failures))
-                    ". Supported attr types: " bridge-supported-types
-                    ". Re-register each with a storable type (e.g. "
-                    "(seon.schema/register! "
-                    (pr-str (::db/attr (first failures)))
-                    " :double)) and transact again.")
-               {::db/error       :seon.db/unbridgeable-attrs
-                ::db/failures    failures
-                :seon.error/kind :user-input})))
-    (when (seq entries)
-      ;; This is a normal post-genesis transaction too. Reuse the selected
-      ;; provenance so a first write of a newly registered attr does not leave
-      ;; an unattributed schema-install transaction immediately before an
-      ;; attributed data transaction.
-      (await (d/transact! conn {:tx-data (vec entries)
-                                :tx-meta tx-meta})))))
-
-(defn transact-success-envelope
-  "Build the agent-visible success envelope from a raw datahike tx-report.
-   COMPACT BY DEFAULT: the agent sees a small data summary, never the raw
-   report's `:db-before`/`:db-after` db-value echo or the full per-datom
-   `:tx-data` (a bulk seed = thousands of datoms — dumping them into the
-   eval value bloats every past-eval render).
-
-     {:seon.db/ok? true
-      :seon.db/coordinate <complete committed database coordinate>
-      :seon.db/tempids   <report :tempids>   ; LOAD-BEARING — tempid→eid
-      :seon.db/tx        <max-tx of :db-after — the committed tx id>
-      :seon.db/tx-count  <count of :tx-data>
-      :seon.db/added     <datoms added>
-      :seon.db/retracted <datoms retracted>}
-
-   The writer success report's shape: `:db-after`
-   (a datahike DB value whose `:max-tx` IS the committed tx id), `:tx-data`
-   (a vector of Datoms, each `:added` true/false), `:tempids`, `:tx-meta`,
-   and — on the remote-writer path — `:datoms-added` /
-   `:datoms-retracted`, the
-   honest add/retract split the sole writer computed over the REAL `:added`
-   flags (`seon.db.writer/response-from-report-data`).
-
-   The counts are taken from `:datoms-added` / `:datoms-retracted` when the
-   report carries them (the remote-writer path), else counted directly off the
-   datoms' `:added` flags. NEVER inferred by `tx-count - added`
-   subtraction — a single `[:db/retract …]` adds tx-meta datoms whose count
-   masks the retraction, so subtraction reports retracted 0 (#16).
-
-   The FULL raw report is included at `:seon.db/tx-report` ONLY when the
-   caller passes `:seon.db/return-report? true` (escape hatch for code that
-   needs `:db-after` / `:db-before`). Listeners are UNAFFECTED — they
-   project off the raw report independently via [[build-handler-input]],
-   and the writer's transaction projection stays on the raw report."
-  [report return-report?]
-  (let [datoms    (:tx-data report)
-        added     (or (:datoms-added report)
-                      (count (filter :added datoms)))
-        retracted (or (:datoms-retracted report)
-                      (count (remove :added datoms)))]
-    (cond-> {::db/ok?        true
-             ::db/coordinate (or (::coordinate/coordinate report)
-                                 (coordinate/resolved (:db-after report)))
-             ::db/tempids    (or (:tempids report) {})
-             ::db/tx         (:max-tx (:db-after report))
-             ::db/tx-count   (count datoms)
-             ::db/added      added
-             ::db/retracted  retracted}
-      ;; Present only for `seon.db.id/allocate!`.  The sole writer assigned
-      ;; allocator tempids inside the serialized transaction and resolved the
-      ;; committed eids from Datahike's tx report; ordinary transacts retain
-      ;; the exact compact envelope they had before this extension.
-      (seq (:seon.db.id/generated-eids report))
-      (assoc :seon.db.id/eids (:seon.db.id/generated-eids report))
-      return-report? (assoc ::db/tx-report report))))
-
-(defn ^:async transact!*
-  "The map-in commit body. `seon.db/transact!` normalizes its variadic
-   args (map-in OR positional) into the canonical request map, runs the
-   invocation-shape guard, resolves the default `*conn*`, then delegates
-   here. `arg` is the canonical `{::tx-data … ::opts … ::conn …}` map
-   with `::conn` already defaulted.
-
-   THE ERROR CONTRACT, in one place: transact!* NEVER rejects/throws to
-   its caller. Every throw on the commit path — conn resolution, the
-   validation gate ([[validate-attrs!]] / [[validate-values!]] throw
-   ex-info on bad input), runtime schema install
-   ([[ensure-datahike-attrs!]]), and the datahike commit itself — is
-   caught HERE and converted by [[commit-error-envelope]] into the
-   `{::ok? false …}` failure envelope the agent reads as a VALUE.
-   Success returns the COMPACT envelope ([[transact-success-envelope]]).
-   The only failures the
-   `seon.db/transact!` face still catches are PRE-normalization ones
-   (malformed call shape, before this fn is reached)."
-  [arg]
-  (try
-    (let [{::db/keys [tx-data opts conn return-report? expected-coordinate]} arg
-          ;; Allocation metadata is internal request DATA owned by
-          ;; `seon.db.id`. It rides Datahike's ordinary arg-map to the active
-          ;; serialized writer: `:seon-wire` forwards it to the sole JVM
-          ;; writer, while `allocation-connect-config` installs the same
-          ;; preparation in a local self writer. Keeping it on the existing
-          ;; transaction path preserves the write-id ambiguity fence and one
-          ;; commit mechanism—there is no second allocation RPC.
-          generated? (contains? arg :seon.db.id/generated-candidates)
-          generated-candidates
-          (:seon.db.id/generated-candidates arg)
-          c           (resolve-conn conn)
-          ;; A symbol written where a keyword-typed IDENTITY value belongs
-          ;; (`{:seon.ns/name 'my.agent.foo …}`, the prompted fn-registration
-          ;; footgun) is coerced to the canonical keyword HERE, before the
-          ;; validation gate, so the natural agent shape persists instead of
-          ;; failing Malli (#48). The KEYWORD is the stored canonical value.
-          tx-data     (coerce-identity-symbol-idents tx-data)
-          ;; The taught `{:seon.db/ref <eid|lookup-ref> …}` entity-key
-          ;; shorthand becomes datahike's native `:db/id` slot HERE, so
-          ;; `:seon.db/ref` never reaches the store as a junk attr
-          ;; (throws :user-input on a malformed ref value — caught below).
-          tx-data     (normalize-entity-ref-keys tx-data)
-          merged-opts (merge-tx-context-into-opts opts)
-          tx-meta     (:tx-meta merged-opts)
-          attrs       (into (extract-tx-attrs tx-data) (keys tx-meta))]
-      ;; Validation gate — these THROW ex-info on bad input; the outer
-      ;; catch below converts every throw to the failure envelope.
-      (validate-attrs! attrs)
-      (validate-values! tx-data)
-      (validate-values! [tx-meta])
-      (validate-provenance-refs! @c tx-meta)
-      ;; Install datahike schema for any registered attr not yet in the
-      ;; conn (e.g. one the agent just `seon.schema/register!`'d at
-      ;; runtime). Schema-before-data in its own tx; skips attrs already
-      ;; present. See `ensure-datahike-attrs!` for the why.
-      (await (ensure-datahike-attrs! c attrs tx-meta))
-      ;; Datahike-cljs `d/transact!` takes one arg-map combining
-      ;; `:tx-data` + `:tx-meta` (see datahike.api.impl/transact! L29-41).
-      ;; The previous shape `(d/transact! c tx-data opts)` passed opts
-      ;; as a third arg that datahike silently ignored — so user tx-meta
-      ;; NEVER reached the db before this fix. The single arg-map shape
-      ;; is the only supported call path.
-      (let [arg-map (cond->
-                      (merge {:tx-data (encode-edn-slot-values tx-data)}
-                             merged-opts)
-                      expected-coordinate
-                      (assoc :datahike/expected-basis-t
-                             (::coordinate/t expected-coordinate)
-                             :seon.db/expected-coordinate
-                             expected-coordinate)
-                      generated?
-                      (assoc :seon.db.id/generated-candidates
-                             generated-candidates))
-            report  (await (d/transact! c arg-map))]
-        (transact-success-envelope report return-report?)))
-    (catch :default e
-      ;; Validation-gate / schema-install / datahike commit failure.
-      ;; Translation rewrites the known cryptic messages and retags
-      ;; them :user-input; anything else stays :core-bug.
-      (commit-error-envelope e))))
-
-;; ---------------------------------------------------------------------------
-;; Listener plumbing — the rich handler-input build + the safe wrapper.
-;;
-;; Datahike's native `listen!` stores callbacks in a per-conn atom keyed by
-;; an opaque key. Same key replaces (idempotent), distinct keys coexist as
-;; independent listeners that EACH receive every tx-report.
-;;
-;; We wrap user-supplied handlers with a transformer that pre-computes the
-;; common shape — decoded datoms, attr-grouped index, pre-resolved :db /
-;; :db-before — so handlers don't reach to `*conn*` and don't recompute
-;; the same group-by N times.
-;; ---------------------------------------------------------------------------
-
-(defn datom->map
-  "Decode a datahike Datom into a fully-namespaced plain map. We re-emit
-   under `:seon.db/*` rather than passing datahike's positional Datom
-   record through, so handler bodies destructure with the same
-   namespaced shape the rest of seon.db uses."
-  [datom]
-  {::db/e      (:e datom)
-   ::db/a      (:a datom)
-   ::db/v      (:v datom)
-   ::db/tx     (:tx datom)
-   ::db/added? (boolean (:added datom))})
-
-(defn build-handler-input
-  "Build the rich handler input map from a raw datahike tx-report. Called
-   once per listener invocation. Cheap: a single mapv + group-by over
-   :tx-data. Output keys are all `:seon.db/*` so handler code can
-   destructure with `::db/keys [...]`."
-  [raw-tx-report]
-  (let [datoms (mapv datom->map (:tx-data raw-tx-report))]
-    {::db/tx-report  raw-tx-report
-     ::db/db         (:db-after raw-tx-report)
-     ::db/db-before  (:db-before raw-tx-report)
-     ::db/datoms     datoms
-     ::db/attr-index (group-by ::db/a datoms)}))
-
-(defn wrap-listen-handler
-  "Wrap a user handler for `d/listen`: builds the rich input map and
-   guards both sync throws and async rejections (SAFE BY DEFAULT per
-   spec-02 §2.5 — neither takes down the pod; errors are logged via
-   `js/console.warn`). `k` is the listener key, used in log lines."
-  [k handler]
-  (fn [raw-tx-report]
-    (try
-      (let [input  (build-handler-input raw-tx-report)
-            result (handler input)]
-        (if (instance? js/Promise result)
-          (.catch result
-                  (fn [err]
-                    (js/console.warn "[seon.db/listen!" (pr-str k)
-                                     "] async-rejected:"
-                                     (error/->message err))))
-          result))
-      (catch :default e
-        (js/console.warn "[seon.db/listen!" (pr-str k) "] threw:"
-                         (error/->message e))
-        nil))))
+  "Convert a transaction failure to ordinary data."
+  [exception]
+  (error-envelope exception))

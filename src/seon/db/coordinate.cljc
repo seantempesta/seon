@@ -7,9 +7,10 @@
    not database identity."
   (:require
    #?@(:bb []
-       :default [[datahike.api :as d]
-                 [datahike.constants :as constants]
-                 [datahike.db.interface :as dbi]])
+       :clj [[datahike.api :as d]
+             [datahike.constants :as constants]
+             [datahike.db.interface :as dbi]]
+       :default [])
    [seon.schema :as schema]))
 
 (schema/register! ::database-id :uuid)
@@ -43,7 +44,7 @@
   [::target-t ::target-t]])
 
 #?(:bb nil
-   :default
+   :clj
    (defn resolved
      "Resolve one complete point from a committed Datahike database value.
 
@@ -82,7 +83,7 @@
   (= (attachment left) (attachment right)))
 
 #?(:bb nil
-   :default
+   :clj
    (defn at
      "Identify temporal cut `t` within one immutable containing commit."
      {:malli/schema [:=> [:cat ::at-request] ::coordinate]}

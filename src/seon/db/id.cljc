@@ -14,11 +14,11 @@
    [seon.db.id.schema :as id.schema]
    [seon.schema :as schema]
    #?@(:bb []
-       :default [[datahike.api :as d]
-                 [datahike.connector :as connector]
-                 [datahike.db.utils :as dbu]
-                 [datahike.writer :as writer]
-                 [datahike.writing :as writing]])
+       :clj [[datahike.api :as d]
+             [datahike.connector :as connector]
+             [datahike.db.utils :as dbu]
+             [datahike.writer :as writer]
+             [datahike.writing :as writing]])
    #?@(:cljs [[seon.db.internal :as db.internal]])
    #?@(:cljs [["@paralleldrive/cuid2" :as cuid2]
               ["human-id" :as human-id]]))
@@ -113,7 +113,7 @@
 ;;; ---------------------------------------------------------------------------
 
 #?(:bb nil
-   :default
+   :clj
    (do
 
      (defn- tempid?
@@ -1468,3 +1468,241 @@
                (or (:seon.error/kind (ex-data throwable)) :core-bug)
                (or (ex-data throwable)
                    {::error :seon.db.id.error/allocation-failed}))))))))
+
+#?(:cljs
+   (do
+     (def ^:private compact-length 12)
+     (def ^:private max-attempts 16)
+     (defonce ^:private compact-generator
+       (cuid2/init #js {:length compact-length}))
+
+     (def generator-policy-query
+       '[:find ?identity-attr ?generator
+         :in $ [?identity-attr ...]
+         :where
+         [?schema :seon.schema/key ?identity-attr]
+         [?schema :seon.db.id/generator ?generator]])
+
+     (defn- failure [message kind data]
+       {:seon.db/ok? false
+        :seon.db/error {:seon.error/message message
+                        :seon.error/kind kind
+                        :seon.error/data data}})
+
+     (defn- candidate-value [generator]
+       (case generator
+         :seon.db.id.generator/human-readable
+         (human-id/humanId #js {:separator "-" :capitalize false})
+
+         :seon.db.id.generator/compact
+         (compact-generator)
+
+         (throw
+          (ex-info "Identity attribute has no supported generator policy."
+                   {::generator generator
+                    ::error :seon.db.id.error/unsupported-generator
+                    :seon.error/kind :core-bug}))))
+
+     (defn- valid-candidate? [generator candidate]
+       (case generator
+         :seon.db.id.generator/human-readable
+         (boolean (and (string? candidate)
+                       (re-matches id.schema/word-pattern candidate)
+                       (not= "root" candidate)))
+
+         :seon.db.id.generator/compact
+         (boolean (and (string? candidate)
+                       (re-matches id.schema/compact-pattern candidate)))
+
+         false))
+
+     (defn- validate-request! [{::keys [allocations transaction-builder]
+                               :as request}]
+       (when-not (m/validate ::allocate-request request)
+         (throw
+          (ex-info "Invalid seon.db.id/allocate! request."
+                   {::error :seon.db.id.error/invalid-request
+                    :seon.error/kind :core-bug})))
+       (when-not (= (count allocations) (count (set (map ::key allocations))))
+         (throw
+          (ex-info "Allocation keys must be distinct within one request."
+                   {::error :seon.db.id.error/duplicate-allocation-key
+                    ::allocations allocations
+                    :seon.error/kind :core-bug})))
+       (when-not (fn? transaction-builder)
+         (throw
+          (ex-info "Allocation requires a transaction builder."
+                   {::error :seon.db.id.error/invalid-builder
+                    :seon.error/kind :core-bug}))))
+
+     (defn- validate-generator-policies! [allocations policies]
+       (let [required (set (map ::identity-attr allocations))]
+         (when-not (m/validate ::generator-policies policies)
+           (throw
+            (ex-info "Database returned invalid generated identity policies."
+                     {::error :seon.db.id.error/invalid-generator-policies
+                      ::generator-policies policies
+                      :seon.error/kind :core-bug})))
+         (doseq [identity-attr required]
+           (let [generator (get policies identity-attr)]
+             (when-not generator
+               (throw
+                (ex-info "Generated identity attribute has no stored generator policy."
+                         {::error :seon.db.id.error/missing-generator-policy
+                          ::identity-attr identity-attr
+                          :seon.error/kind :core-bug})))
+             (when (not= (= identity-attr :seon.agent/id)
+                         (= generator :seon.db.id.generator/human-readable))
+               (throw
+                (ex-info "Only :seon.agent/id uses the human-readable generator."
+                         {::error :seon.db.id.error/invalid-generator-policy
+                          ::identity-attr identity-attr
+                          ::generator generator
+                          :seon.error/kind :core-bug})))))
+         (select-keys policies required)))
+
+     (defn- ^:async acquire-generator-policies! [allocations]
+       (let [identity-attrs (->> allocations
+                                 (map ::identity-attr)
+                                 distinct
+                                 (sort-by str)
+                                 vec)
+             rows (await
+                   (db/query {::db/query generator-policy-query
+                              ::db/args [identity-attrs]}))]
+         (when (and (map? rows) (:seon.error/message rows))
+           (throw
+            (ex-info "Generated identity policy acquisition failed."
+                     {:seon.db/error rows :seon.error/kind :core-bug})))
+         (validate-generator-policies! allocations (into {} rows))))
+
+     (defn- candidate-round! [policies allocations]
+       (mapv
+        (fn [{allocation-key ::key identity-attr ::identity-attr}]
+          (let [generator (get policies identity-attr)
+                candidate (candidate-value generator)]
+            (when-not (valid-candidate? generator candidate)
+              (throw
+               (ex-info "Identity package emitted an invalid value."
+                        {::error :seon.db.id.error/invalid-package-output
+                         ::identity-attr identity-attr
+                         ::generator generator
+                         ::value candidate
+                         :seon.error/kind :core-bug})))
+            {::key allocation-key
+             ::identity-attr identity-attr
+             ::value candidate}))
+        allocations))
+
+     (defn- attach-dependent-identities! [manifest dependent-identities]
+       (if-not (seq dependent-identities)
+         manifest
+         (let [candidate-keys (set (map ::key manifest))]
+           (when-not (m/validate ::dependent-identities dependent-identities)
+             (throw
+              (ex-info "Allocation builder returned invalid dependent identities."
+                       {::error :seon.db.id.error/invalid-dependent-identities
+                        :seon.error/kind :core-bug})))
+           (doseq [{::keys [candidate-key]} dependent-identities]
+             (when-not (contains? candidate-keys candidate-key)
+               (throw
+                (ex-info "Dependent identity names an unknown candidate."
+                         {::error :seon.db.id.error/unknown-dependent-candidate
+                          ::candidate-key candidate-key
+                          :seon.error/kind :core-bug}))))
+           (reduce
+            (fn [candidates {::keys [candidate-key lookup-ref]}]
+              (mapv (fn [candidate]
+                      (if (= candidate-key (::key candidate))
+                        (update candidate ::dependent-lookup-refs
+                                (fnil conj []) lookup-ref)
+                        candidate))
+                    candidates))
+            manifest
+            dependent-identities))))
+
+     (defn- normalize-built! [manifest built]
+       (when-not (and (map? built) (vector? (:seon.db/tx-data built)))
+         (throw
+          (ex-info "Allocation builder must return a transaction request map."
+                   {::error :seon.db.id.error/invalid-builder-output
+                    :seon.error/kind :core-bug})))
+       (when (or (contains? built ::generated-candidates)
+                 (contains? built ::dependent-lookup-refs))
+         (throw
+          (ex-info "The allocation builder may not set allocator-owned fields."
+                   {::error :seon.db.id.error/reserved-request-field
+                    :seon.error/kind :core-bug})))
+       [(dissoc built ::dependent-identities)
+        (attach-dependent-identities! manifest (::dependent-identities built))])
+
+     (defn- exact-generated-conflict? [envelope manifest]
+       (let [data (get-in envelope [:seon.db/error :seon.error/data])
+             attr (::identity-attr data)
+             value (::value data)]
+         (boolean
+          (some #(and (= attr (::identity-attr %))
+                      (= value (::value %)))
+                manifest))))
+
+     (declare allocate-attempt!)
+
+     (defn- ^:async allocate-attempt! [{::keys [allocations
+                                                transaction-builder
+                                                generator-policies]
+                                        :as request}
+                                       attempt]
+       (let [manifest (candidate-round! generator-policies allocations)
+             ids (into {} (map (juxt ::key ::value)) manifest)
+             raw-built (transaction-builder ids)]
+         (when (instance? js/Promise raw-built)
+           (throw
+            (ex-info "The allocation transaction builder must be synchronous."
+                     {::error :seon.db.id.error/async-builder
+                      :seon.error/kind :core-bug})))
+         (let [[built manifest] (normalize-built! manifest raw-built)
+               transaction-request (assoc built ::generated-candidates manifest)
+               envelope (await (db/transact! transaction-request))]
+           (cond
+             (:seon.db/ok? envelope)
+             (let [eids (::eids envelope)]
+               (if (= (set (keys ids)) (set (keys eids)))
+                 (assoc envelope ::ids ids)
+                 (failure
+                  "The writer did not return every allocated entity id."
+                  :core-bug
+                  {::error :seon.db.id.error/incomplete-writer-response
+                   ::ids ids ::eids eids})))
+
+             (and (< attempt max-attempts)
+                  (exact-generated-conflict? envelope manifest))
+             (await (allocate-attempt! request (inc attempt)))
+
+             (exact-generated-conflict? envelope manifest)
+             (failure
+              "Generated identity allocation exhausted collision retries."
+              :core-bug
+              {::error :seon.db.id.error/exhausted
+               ::attempts attempt ::allocations allocations})
+
+             :else envelope))))
+
+     (defn ^:async allocate!
+       "Allocate persistent identities in the same authoritative transaction."
+       {:malli/schema [:=> [:cat ::allocate-request] ::allocate-response]}
+       [request]
+       (try
+         (validate-request! request)
+         (let [policies (or (::generator-policies request)
+                            (await
+                             (acquire-generator-policies!
+                              (::allocations request))))]
+           (validate-generator-policies! (::allocations request) policies)
+           (await
+            (allocate-attempt! (assoc request ::generator-policies policies) 1)))
+         (catch :default exception
+           (failure
+            (or (.-message exception) (str exception))
+            (or (:seon.error/kind (ex-data exception)) :core-bug)
+            (or (ex-data exception)
+                {::error :seon.db.id.error/allocation-failed})))))))

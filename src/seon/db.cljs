@@ -1,254 +1,135 @@
 (ns seon.db
-  "Database access. This is the only API you need to read, write, and
-   react to the database.
+  "The pod's asynchronous database API.
 
-   ## Your universe is one connection
-
-   You have exactly ONE database. `seon.db/*conn*` is bound for you
-   before your code runs; never thread it through your own calls, never
-   open another conn. Every fn here defaults `:seon.db/conn` to
-   `*conn*`. Alias `seon.db` as `db` and write `::db/foo`:
-
-     (require '[seon.db :as db])
-     (db/query     {::db/query '[:find ?n :where [_ ::name ?n]]})
-     (db/transact! {::db/tx-data [{::name \"Alpha\" ::rank 1}]})
-
-   Every map key in / out of seon.db is fully namespaced under
-   `:seon.db/*` — that's what lets one Datalog query join the data in
-   the database to the functions that operate on it.
-
-   ## Register schemas before you transact
-
-   `transact!` refuses any tx touching an attribute it doesn't
-   recognize — register first:
-
-     (require '[seon.schema :as schema])
-     (schema/register! ::name :string)
-     (schema/register! ::rank :int)
-     (db/transact! {::db/tx-data [{::name \"Alpha\" ::rank 1}]})
-
-   `:db/*` system attributes bypass the gate. Vector tuples
-   (`[:db/add e a v]`) get attribute checks only; entity maps get full
-   Malli value validation.
-
-   ## Reads are synchronous, writes return a Promise
-
-   `query`, `pull`, `entity` resolve against the current db value
-   (`@*conn*`) — compose them in straight-line code. `transact!` is
-   `^:async`; await it and you get an ENVELOPE, never a throw:
-
-     (let [{::db/keys [ok? tx-report error]}
-           (await (db/transact! {::db/tx-data [...]}))]
-       (if ok? (handle-success tx-report) (handle-failure error)))
-
-   ## Reactions: listen!/unlisten! by key
-
-   `listen!` installs a tx-listener under a key. Distinct keys coexist
-   and each receives every tx-report; the same key replaces; `unlisten!`
-   retracts by key. The handler gets one rich map (see [[listen!]])
-   including `:seon.db/db`, the exact post-commit db value — no reaching
-   back to `*conn*`, no stale reads.
-
-   The canonical reaction is the agent's own wake-up: a listener over
-   newly-added `:seon.agent.message/to` datoms targeting me (from ≠ me, so my
-   own replies never re-trigger me; agent↔agent chains are bounded by
-   `:seon.agent.message/hops`). `seon.trigger/register!` is the data-driven
-   layer over this primitive — triggers persisted as DB entities."
+   The JVM writer owns Datahike connections, immutable database values,
+   indexes, caches, and serialization. This namespace owns only ordinary
+   request/response data and one multiplexed transport session."
   (:require
-    [clojure.string :as str]
-    [cljs.reader :as reader]
-    [datahike.api :as d]
-    [datahike.connector :as connector]
-    [datahike.constants :as dconst]
-    [datahike.db :refer [AsOfDB]]
-    [datahike.db.interface :as dbi]
-    [datahike.db.utils :as dbu]
-    [datahike.index.interface :as di]
-    [datahike.impl.entity :as dentity]
-    [malli.core :as m]
-    [seon.config :as config]
-    [seon.db.coordinate :as db.coordinate]
-    [seon.db.id.schema]
-    [seon.db.internal :as internal]
-    [seon.db.protocol :as protocol]
-    [seon.db.process :as process]
-    [seon.db.transport.uds :as uds]
-    [seon.error :as error]
-    [seon.schema :as schema]))
+   [cljs.reader :as reader]
+   [seon.db.coordinate :as db.coordinate]
+   [seon.db.id.schema]
+   [seon.db.internal :as internal]
+   [seon.db.protocol :as protocol]
+   [seon.db.transport.uds :as uds]
+   [seon.error :as error]
+   [seon.schema :as schema]))
 
-;;; ──────────────────────────────────────────────────────────────────────
-;;; Datalog cheat sheet — the minimal idiom set. Copy a shape, swap attrs.
-;;; (`db` is OMITTED everywhere — it auto-injects from *conn*.)
-;;;
-;;; FIND shapes — pick by what you want back:
-;;;   relation    [:find ?n :where [?e ::name ?n]]            ; ⟹ #{["A"] ["B"]}
-;;;   scalar  `.` [:find (count ?e) . :where [?e ::name]]     ; ⟹ «one scalar — a count»
-;;;   collection  [:find [?n ...] :where [?e ::name ?n]]      ; ⟹ ["A" "B"]
-;;;   tuple       [:find [?n ?r] :where [?e ::name ?n] [?e ::rank ?r]] ; ⟹ ["A" 1]
-;;;
-;;; PREDICATE — filter inside :where:  [(> ?l 400)]
-;;;   [:find ?s :where [?e ::doc ?d] [(count ?d) ?l] [(> ?l 400)] [?e ::sym ?s]]
-;;;   (binding-expr `[(count ?d) ?l]` binds, predicate `[(> ?l 400)]` filters)
-;;;
-;;; :in PARAM — inputs come AFTER the query (db is implicit, $ is first):
-;;;   (query '[:find ?n :in $ ?min :where [?e ::rank ?r] [(>= ?r ?min)] [?e ::name ?n]] 5)
-;;;
-;;; REF-JOIN — a ref attr stores an EID, not the target's value. To match by
-;;; the target's name, JOIN through it; do NOT put the keyword in the ref slot:
-;;;   GOOD [:find (count ?e) . :where [?e :seon.fn/ns ?n] [?n :seon.ns/name :seon.db]]
-;;;   BAD  [:find ?e :where [?e :seon.fn/ns :seon.db]]   ;THROWS "Nothing found for entity id :seon.db"
-;;;
-;;; GROUPED AGGREGATE — pull the group's name in the SAME query (group var must
-;;; be a NAME, not a ref-eid, or you can't read the result):
-;;;   [:find ?nm (count ?t) :where [?t :seon.test/ns ?n] [?n :seon.ns/name ?nm]]
-;;;   ; ⟹ «set of [ns-name count] tuples»   (then sort/max in Clojure)
-;;;
-;;; LOOKUP-REF — address an entity by an identity attr instead of a raw eid.
-;;; The value must be the STORED type. :seon.fn/sym is a :string, so use the
-;;; STRING, never a quoted symbol ('seon.db/query THROWS String-vs-Symbol):
-;;;   (pull '[*] [:seon.fn/sym "seon.db/query"])
-;;;
-;;; UPSERT — re-transacting an entity with the SAME identity-attr value
-;;; UPDATES it in place; it does NOT create a duplicate. Add/overwrite a
-;;; field on an existing entity by addressing it via a lookup-ref:
-;;;   GOOD (transact! [{:my.kb.doc/id "d1" :my.kb.doc/title "New Title"}])
-;;;        ;; d1 already exists → :title is updated, no second :id "d1" row
-;;;   (omit attrs you don't want changed; absent ≠ retract — see retract above)
-;;;
-;;; Results are CLIPPED (~50 rows) for context. Want only a number? Use
-;;; (count …)/aggregate, not a list. Empty #{} on a query that should match?
-;;; The attr keyword is almost certainly misspelled — copy it exactly from a
-;;; rendered ns source or (keys (installed-schema @*conn*)).
-;;;
-;;; REPORT WHAT YOU COMPUTED. Every `; ⟹` below is a SHAPE, not an answer —
-;;; the numbers belong to a different db than yours. State only the value your
-;;; LAST eval returned; if a count matters, re-eval and read it back. Never
-;;; quote a number you remember or saw in source/an example.
-;;; ──────────────────────────────────────────────────────────────────────
-
-;; ---------------------------------------------------------------------------
-;; Schemas — every request/response shape, registered at namespace load.
-;; ---------------------------------------------------------------------------
+;;; Public data contracts
 
 (schema/register! ::tx-data [:vector :any])
 (schema/register! ::opts :map)
-;; LOAD-BEARING, registered early on purpose: `::transact-request` (just below)
-;; references `:seon.db/conn`, and the schema load-order guard needs the referent
-;; registered first. This is the CANONICAL `:seon.db/conn` registration; the
-;; db/conn handle block further down registers only `:seon.db/db`. Do NOT "dedup"
-;; this away — removing it breaks cold pod boot (the suite won't catch it; tests
-;; reload into a warm registry).
-(schema/register! ::conn :any)
-(schema/register! ::tx-meta :map)   ; positional 3-arity convenience slot
-(schema/register! ::return-report? :boolean)
+(schema/register! ::tx-meta :map)
 (schema/register! ::coordinate :seon.db.coordinate/coordinate)
 (schema/register! ::expected-coordinate ::coordinate)
-
-(schema/register!
-  ::transact-request
-  [:map
-   [::tx-data ::tx-data]
-   [::opts           {:optional true} ::opts]
-   [::conn           {:optional true} ::conn]
-   ;; Full-head precondition checked by the serialized database writer.
-   [::expected-coordinate {:optional true} ::expected-coordinate]
-   ;; Escape hatch: include the raw datahike tx-report at
-   ;; `::tx-report` in the success envelope. OFF by default — the
-   ;; agent value stays the compact data summary.
-   [::return-report? {:optional true} ::return-report?]])
-
-(schema/register!
-  ::error
-  [:map
-   [:seon.error/message :string]
-   [:seon.error/data    {:optional true} :map]
-   [:seon.error/ex-data {:optional true} :map]
-   [:seon.error/stack   {:optional true} :string]
-   [:seon.error/cause   {:optional true} :map]
-   [:seon.error/raw     {:optional true} :any]
-   [:seon.error/truncated {:optional true} :boolean]])
-
-;; The success envelope is COMPACT DATA: a small summary the agent
-;; reads as a value, never the raw datahike report (no `:db-before`/
-;; `:db-after` db-value echo, no full per-datom `:tx-data`). `::tempids`
-;; is load-bearing — callers resolve tempid→eid. The raw report rides at
-;; `::tx-report` ONLY when the request set `::return-report? true`.
-(schema/register!
-  ::transact-response
-  [:or
-   [:map
-    [::ok?        [:= true]]
-    [::coordinate ::coordinate]
-    [::tempids    [:map-of :any :int]]
-    [::tx         :int]
-    [::tx-count   :int]
-    [::added      :int]
-    [::retracted  :int]
-    ;; Escape hatch — present only under `::return-report? true`. `:any`
-    ;; because the raw report carries datahike db-value handles (a
-    ;; third-party boundary; the no-:any rule's documented exception).
-    [::tx-report  {:optional true} :any]]
-   [:map
-    [::ok?       [:= false]]
-    [::error     ::error]
-    ;; When the core translated a cryptic datahike message into a
-    ;; guiding one, the ORIGINAL message is preserved here verbatim.
-    [::raw-error {:optional true} :string]]])
-
-;; The shape of a Datalog query ITSELF: the standard quoted vector, the
-;; raw map form, or a string. ONE registered shape — `::query-request`'s
-;; `::query` key and both of [[query]]'s arities reference it (the
-;; shared-shape rule; it was inlined three times before).
 (schema/register! ::query-form [:or [:vector :any] :map :string])
+(schema/register! ::query :any)
+(schema/register! ::args [:vector :any])
+(schema/register! ::pull-pattern [:vector :any])
+(schema/register! ::ref :any)
+(schema/register! ::refs [:vector :any])
 (schema/register! ::max-work [:int {:min 1}])
 (schema/register! ::max-results [:int {:min 1}])
 (schema/register! ::max-result-weight [:int {:min 1}])
 (schema/register! ::history? :boolean)
-
-;; An entity ADDRESS as an agent writes one: a raw eid (int) or a
-;; lookup-ref `[identity-attr value]`. THE shape to pass in `::ref` /
-;; `::cas-ref` slots. (Core internals may thread live Entity handles
-;; through some of these slots — the fn arities that must accept that
-;; keep an `:any` escape; this registered shape is the taught contract.)
-(schema/register! ::entity-ref [:or :int [:tuple :qualified-keyword :any]])
-
-(schema/register!
-  ::query-request
-  [:map
-   [::query ::query-form]
-   [::args  {:optional true} [:vector :any]]
-   [::max-work {:optional true} ::max-work]
-   [::max-results {:optional true} ::max-results]
-   [::max-result-weight {:optional true} ::max-result-weight]
-   [::history? {:optional true} ::history?]
-   [::coordinate {:optional true} ::coordinate]
-   [::db    {:optional true} :any]
-   [::conn  {:optional true} ::conn]])
-
-(schema/register!
-  ::pull-request
-  [:map
-   [::pull-pattern [:vector :any]]
-   ;; `::ref` stays `:any` here: pull's map-in arity validates this map
-   ;; DIRECTLY (no :any escape), and core render paths thread nested
-   ;; Entity handles through it. Agents write [[::entity-ref]] shapes.
-   [::ref          :any]
-   [::max-work {:optional true} ::max-work]
-   [::max-results {:optional true} ::max-results]
-   [::max-result-weight {:optional true} ::max-result-weight]
-   [::coordinate {:optional true} ::coordinate]
-   [::db           {:optional true} :any]
-   [::conn         {:optional true} ::conn]])
-
-(schema/register! ::refs [:vector :any])
 (schema/register! ::members :seon.db.protocol/members)
 (schema/register! ::results :seon.db.protocol/results)
+(schema/register! ::index [:enum :eavt :aevt :avet])
+(schema/register! ::components [:vector :any])
+(schema/register! ::index-limit [:int {:min 1 :max 200}])
+(schema/register! ::direction :seon.db.protocol/direction)
+(schema/register! ::cursor :seon.db.protocol/cursor)
+(schema/register! ::complete? :boolean)
+(schema/register! ::datoms :seon.db.protocol/datoms)
+(schema/register! ::installed-schema :seon.db.protocol/schema)
+(schema/register! ::user :seon.db/ref)
+(schema/register! ::process :seon.db/ref)
+(schema/register! ::ok? :boolean)
+(schema/register! ::tempids :map)
+(schema/register! ::tx :int)
+(schema/register! ::tx-count [:int {:min 0}])
+(schema/register! ::added [:int {:min 0}])
+(schema/register! ::retracted [:int {:min 0}])
+(schema/register! ::error :map)
+(schema/register! ::key :any)
+(schema/register! ::handler 'fn?)
+(schema/register! ::datom-patterns :seon.db.protocol/datom-patterns)
+(schema/register! ::socket-path :seon.db.transport.uds/socket-path)
+(schema/register! ::database-name :seon.db.protocol/database-name)
+(schema/register! ::backend :seon.db.protocol/backend)
+(schema/register! ::database-path :seon.db.protocol/database-path)
+(schema/register! ::attachment :seon.db.coordinate/attachment)
+(schema/register! ::capabilities :seon.db.protocol/capabilities)
+(schema/register! ::session :seon.db.transport.uds/session)
+(schema/register! ::thunk 'fn?)
+(schema/register! ::tx-context :map)
+
+(schema/register!
+ ::transact-request
+ [:map {:closed true}
+  [::tx-data ::tx-data]
+  [::opts {:optional true} ::opts]
+  [::expected-coordinate {:optional true} ::expected-coordinate]
+  [:seon.db.id/generated-candidates {:optional true}
+   :seon.db.id.schema/generated-candidates]])
+(schema/register!
+ ::transact-response
+ [:or
+  [:map {:closed false}
+   [::ok? [:= true]]
+   [::coordinate ::coordinate]
+   [::tempids ::tempids]
+   [::tx ::tx]
+   [::tx-count ::tx-count]
+   [::added ::added]
+   [::retracted ::retracted]]
+  [:map {:closed true}
+   [::ok? [:= false]]
+   [::error ::error]]])
+(schema/register!
+ ::query-request
+ [:map {:closed true}
+  [::query ::query-form]
+  [::args {:optional true} ::args]
+  [::max-work {:optional true} ::max-work]
+  [::max-results {:optional true} ::max-results]
+  [::max-result-weight {:optional true} ::max-result-weight]
+  [::history? {:optional true} ::history?]
+  [::coordinate {:optional true} ::coordinate]])
+(schema/register!
+ ::pull-request
+ [:map {:closed true}
+  [::pull-pattern ::pull-pattern]
+  [::ref ::ref]
+  [::max-work {:optional true} ::max-work]
+  [::max-results {:optional true} ::max-results]
+  [::max-result-weight {:optional true} ::max-result-weight]
+  [::coordinate {:optional true} ::coordinate]])
+(schema/register!
+ ::pull-many-request
+ [:map {:closed true}
+  [::pull-pattern ::pull-pattern]
+  [::refs ::refs]
+  [::max-work {:optional true} ::max-work]
+  [::max-results {:optional true} ::max-results]
+  [::max-result-weight {:optional true} ::max-result-weight]
+  [::coordinate {:optional true} ::coordinate]])
 (schema/register!
  ::execute-many-request
  [:map {:closed true}
   [::members ::members]
   [::coordinate {:optional true} ::coordinate]
   [::max-result-weight {:optional true} ::max-result-weight]])
+(schema/register!
+ ::index-page-request
+ [:map {:closed true}
+  [::index ::index]
+  [::components {:optional true} ::components]
+  [::direction ::direction]
+  [::index-limit ::index-limit]
+  [::cursor {:optional true} ::cursor]
+  [::history? {:optional true} ::history?]
+  [::max-result-weight {:optional true} ::max-result-weight]
+  [::coordinate {:optional true} ::coordinate]])
 (schema/register!
  ::knn-search-request
  [:map {:closed true}
@@ -257,156 +138,19 @@
   [::protocol/entity-ids {:optional true} ::protocol/entity-ids]
   [::coordinate {:optional true} ::coordinate]])
 (schema/register!
- ::pull-many-request
- [:map
-  [::pull-pattern [:vector :any]]
-  [::refs ::refs]
-  [::max-work {:optional true} ::max-work]
-  [::max-results {:optional true} ::max-results]
-  [::max-result-weight {:optional true} ::max-result-weight]
+ ::listen-request
+ [:map {:closed true}
+  [::handler ::handler]
+  [::key {:optional true} ::key]
+  [::query {:optional true} ::query-form]
+  [::datom-patterns {:optional true} ::datom-patterns]])
+(schema/register!
+ ::listen-response
+ [:map {:closed true}
+  [::key ::key]
   [::coordinate {:optional true} ::coordinate]])
-
-(schema/register!
-  ::entity-request
-  [:map
-   [::ref  ::entity-ref]
-   [::coordinate {:optional true} ::coordinate]
-   [::db   {:optional true} :any]
-   [::conn {:optional true} ::conn]])
-
-;; The ONE canonical "a datahike db value" SHAPE — registered once and
-;; referenced by every positional :db slot below (shared-shape rule;
-;; never inline a map check). This is the BOUNDARY face of the same
-;; concept the runtime predicate `internal/db-value?` names: the schema
-;; slots use this; the runtime dispatch that must tell a db APART from a
-;; Datalog `:in` input (e.g. `query`'s positional path) uses the strict
-;; `db-value?`. They are deliberately TWO faces of one idea, not two
-;; competing predicates:
-;;
-;;   - This schema is `'map?` — the only form that is BOTH clean
-;;     pure-data (re-readable WITHOUT sci, no embedded fn object — the
-;;     pure-data platform law, see seon.render.canvas + the
-;;     `registered-forms-are-pure-data` test) AND true for every db
-;;     flavor (DB / FilteredDB / HistoricalDB / AsOfDB / SinceDB are all
-;;     `defrecord`s ⇒ `map?`-true). At these slots the arity has ALREADY
-;;     guaranteed the arg is a db, so a coarse presence check is correct.
-;;   - `db-value?` is `satisfies? IDB` — STRICTER (a plain request/input
-;;     map is `map?`-true but NOT a db). The strict logic CANNOT be
-;;     expressed as a clean pure-data malli form (sci can't resolve our
-;;     ns; `satisfies?`/`contains?` aren't safe on temporal dbs), so it
-;;     lives as the runtime predicate, not the schema.
-;;
-;; QUOTED — unquoted `map?` would embed the fn OBJECT (the exact poison
-;; the law bans); the quoted symbol is what the registry resolves.
-(schema/register! ::db-val 'map?)
-
-;; Datahike db snapshot + conn handle — both opaque to validation
-;; (genuinely runtime-opaque values; `:any` is the canonical Malli idiom
-;; for "I am a runtime handle, validate by presence only"). Registered
-;; HERE — `:seon.db/*` keywords live in their owning code ns — so they
-;; are available the moment `seon.db` loads, before any ns that references
-;; them (e.g. `seon.warn/check-request`'s `:seon.db/db` slot). `::db-val`
-;; (`'map?`) above is the STRICTER positional-arg shape; these looser
-;; `:any` handles are for request/response map slots that just carry a
-;; runtime db through. (`:seon.db/conn` is registered EARLIER — `::transact-request`
-;; references it and loads before this block — so only `:seon.db/db` is here.)
-(schema/register! :seon.db/db   :any)
-
-(schema/register!
-  ::datom
-  [:map
-   [::e      :int]
-   [::a      :keyword]
-   [::v      :any]
-   [::tx     :int]
-   [::added? :boolean]])
-
-(schema/register! ::datoms [:vector ::datom])
-(schema/register! ::changed-attrs [:set :qualified-keyword])
-(schema/register!
-  ::candidate-change
-  [:map {:closed true}
-   [::changed-attrs ::changed-attrs]
-   [::attr-index
-    [:map-of :qualified-keyword [:vector ::datom]]]])
-
-(schema/register!
-  ::handler-input
-  [:map
-   [::tx-report  :any]
-   [::db         :any]
-   [::db-before  :any]
-   [::datoms     ::datoms]
-   [::attr-index [:map-of :keyword [:vector ::datom]]]
-   [::trigger    {:optional true} :any]])
-
-(schema/register!
-  ::listen-request
-  [:map
-   ;; QUOTED `fn?` = malli default-registry predicate schema (pure-data
-   ;; form, registry lookup — never `[:fn ...]` or a bare fn object in
-   ;; a register! form).
-   [::handler 'fn?]
-   [::key     {:optional true} :any]
-   [::query   {:optional true} ::query-form]
-   [::datom-patterns {:optional true} :seon.db.protocol/datom-patterns]
-   [::conn    {:optional true} ::conn]])
-
-(schema/register!
-  ::listen-response
-  [:map
-   [::key :any]
-   [::coordinate {:optional true} ::coordinate]])
-
-(schema/register!
-  ::unlisten-request
-  [:map
-   [::key  :any]
-   [::conn {:optional true} ::conn]])
-
-(schema/register!
-  ::unlisten-response
-  [:map [::ok? :boolean]])
-
-;; Final transaction provenance. Each normal post-genesis transaction relates
-;; the submitted facts to one EXISTING database user (root, human, or agent)
-;; and one stable process identity. The refs are deliberately heterogeneous;
-;; there is no duplicate database-user entity.
-(schema/register! ::user            :seon.db/ref)
-(schema/register! ::process         :seon.db/ref)
-
-;; Retired scalar/origin attrs are deliberately NOT registered. Existing
-;; stores retain their immutable native schema/history, but no live source path
-;; reads or writes those datoms.
-
-;; ---------------------------------------------------------------------------
-;; The agent's universe + fiber-local context scopes
-;; ---------------------------------------------------------------------------
-
-(defonce ^{:dynamic true
-           :doc "The runtime's datahike connection. Bound at session start; never
-   threaded through agent call sites. Reads default to `@*conn*` (a db
-   value); writes route through this conn's writer. All sessions for
-   the same user share this conn — sessions are entities in it, not
-   partitions of it.
-
-   `defonce`, NOT `def`, is load-bearing: the conn is `set!` onto the
-   root at boot, and a reload of seon.db must NOT wipe it back to nil —
-   that orphans the live agent. Both reload paths re-evaluate top-level
-   forms (shadow hot-reload AND a manual `(require … :reload)`); `exists?`
-   makes defonce a no-op on every reload after the first, so the bound
-   conn survives. (seon.client/rearm-user-triggers! also re-asserts it on
-   `^:dev/after-load` as belt-and-suspenders.)"}
-  *conn*
-  nil)
-
-(schema/register! ::session :seon.db.transport.uds/session)
-(schema/register! ::socket-path :seon.db.transport.uds/socket-path)
-(schema/register! ::database-name :seon.db.protocol/database-name)
-(schema/register! ::backend :seon.db.protocol/backend)
-(schema/register! ::database-path :seon.db.protocol/database-path)
-(schema/register! ::attachment :seon.db.coordinate/attachment)
-(schema/register! ::capabilities :seon.db.protocol/capabilities)
+(schema/register! ::unlisten-request [:map {:closed true} [::key ::key]])
+(schema/register! ::unlisten-response [:map {:closed true} [::ok? :boolean]])
 (schema/register!
  ::open-session-request
  [:map {:closed true}
@@ -423,16 +167,19 @@
   [::coordinate ::coordinate]
   [::capabilities ::capabilities]])
 
+;;; Process session
+
 (defonce ^:private !session (atom nil))
 
-(defn- session-error
-  [message data]
+(defn- session-error [message data]
   {:seon.error/message message
    :seon.error/kind :core-bug
    :seon.error/data data})
 
-(defn- response-error
-  [response]
+(defn- error-value? [value]
+  (and (map? value) (string? (:seon.error/message value))))
+
+(defn- response-error [response]
   {:seon.error/message (::protocol/error response)
    :seon.error/kind (or (:seon.error/kind response) :core-bug)
    :seon.error/data
@@ -445,14 +192,12 @@
      (assoc ::protocol/current-coordinate
             (::protocol/current-coordinate response)))})
 
-(defn- valid-response-for?
-  [request response]
+(defn- valid-response-for? [request response]
   (and (protocol/valid-response? response)
        (= (::protocol/request-id request)
           (::protocol/request-id response))))
 
-(defn- request-on-session!
-  [session request timeout-ms]
+(defn- request-on-session! [session request timeout-ms]
   (if-not (protocol/valid-request? request)
     (js/Promise.resolve
      (session-error "The database request is invalid."
@@ -461,213 +206,166 @@
     (-> (uds/request! {::uds/session session
                        ::uds/message request
                        ::uds/timeout-ms timeout-ms})
-        (.then
-         (fn [response]
-           (if (valid-response-for? request response)
-             response
-             (session-error
-              "The database authority returned an invalid response."
-              {::protocol/request-id (::protocol/request-id request)
-               ::protocol/error (protocol/explain-response response)}))))
-        (.catch
-         (fn [exception]
-           (session-error
-            (or (.-message exception) "The database session failed.")
-            (cond-> {::protocol/request-id (::protocol/request-id request)}
-              (ex-data exception)
-              (assoc :seon.error/ex-data (ex-data exception)))))))))
+        (.then (fn [response]
+                 (if (valid-response-for? request response)
+                   response
+                   (session-error
+                    "The database authority returned an invalid response."
+                    {::protocol/request-id (::protocol/request-id request)
+                     ::protocol/error (protocol/explain-response response)}))))
+        (.catch (fn [exception]
+                  (session-error
+                   (or (.-message exception) "The database session failed.")
+                   (cond-> {::protocol/request-id (::protocol/request-id request)}
+                     (ex-data exception)
+                     (assoc :seon.error/ex-data (ex-data exception)))))))))
 
-(defn- session-event!
-  [event]
+(defn- session-event! [event]
   (when-let [handler (get-in @!session
                              [::interest-handlers
                               (::protocol/request-id event) ::handler])]
-    ;; The transport treats its owner callback as a process invariant and
-    ;; closes the physical session if that callback throws or rejects. Keep
-    ;; agent/application listener mistakes on the value side of this boundary
-    ;; so one bad interest cannot disconnect every database operation in the
-    ;; process.
     (try
       (let [result (handler event)]
         (when (instance? js/Promise result)
           (.catch result
                   (fn [exception]
-                    (js/console.warn
-                     "[seon.db/listen!" (pr-str (::protocol/request-id event))
-                     "] async-rejected:" (error/->message exception))))))
+                    (js/console.warn "[seon.db/listen!] async-rejected:"
+                                     (error/->message exception))))))
       (catch :default exception
-        (js/console.warn
-         "[seon.db/listen!" (pr-str (::protocol/request-id event))
-         "] threw:" (error/->message exception))))))
+        (js/console.warn "[seon.db/listen!] threw:"
+                         (error/->message exception))))))
 
-(defn ^:async open-session!
-  "Open and acquire this process's one multiplexed database session."
-  {:malli/schema [:=> [:cat ::open-session-request] ::open-session-response]}
-  [{::keys [socket-path database-name backend database-path attachment]
-    :as selection}]
-  (let [owner (js-obj)
-        claimed? (atom false)
-        published? (atom false)
-        opened-session (atom nil)]
-    ;; Same-selection callers share the complete connect/negotiate/ensure/
-    ;; acquire transition. The transport remains selection-agnostic; this is
-    ;; the one process-level owner of database session opening.
-    (let [resolve-opening (atom nil)
-          reject-opening (atom nil)
-          opening
-          (js/Promise.
-           (fn [resolve reject]
-             (reset! resolve-opening resolve)
-             (reset! reject-opening reject)))]
-      ;; Mark a failed opening as observed even when there was no joiner. A
-      ;; later same-selection caller still awaits the original Promise and sees
-      ;; the same rejection.
-      (.catch opening (fn [_] nil))
-    (swap! !session
-           (fn [current]
-             (cond
-               (nil? current)
-               (do (reset! claimed? true)
-                   {::owner owner ::selection selection
-                    ::opening opening
-                    ::interest-handlers {}})
+(defn- active-session []
+  (let [state @!session]
+    (when (and (::session state) (uds/connected? (::session state))) state)))
 
-               (and (= selection (::selection current))
-                    (::session current)
-                    (uds/connected? (::session current)))
-               current
+(defn- session-result [state]
+  {::database-name (::database-name state)
+   ::attachment (::attachment state)
+   ::coordinate (::opened-coordinate state)
+   ::capabilities (::capabilities state)})
 
-               :else current)))
-    (if-not @claimed?
-      (let [current @!session]
-        (cond
-          (and (= selection (::selection current))
-               (::session current)
-               (uds/connected? (::session current)))
-          {::database-name (::database-name current)
-           ::attachment (::attachment current)
-           ::coordinate (::opened-coordinate current)
-           ::capabilities (::capabilities current)}
-
-          (and (= selection (::selection current)) (::opening current))
-          (await (::opening current))
-
-          :else
-          (throw (ex-info "Another database session owns this process."
-                          {::selection selection
-                           :seon.error/kind :core-bug}))))
-      (try
-        (let [session
-              (await
-               (uds/connect!
-                {::uds/socket-path socket-path
-                 ::uds/on-event! session-event!
-                 ::uds/on-close!
-                 (fn [_]
-                   (swap! !session
-                          (fn [current]
-                            (if (identical? owner (::owner current))
-                              nil
-                              current))))}))
-              _ (reset! opened-session session)
-              capabilities-request
+(defn- ^:async connect-selection! [selection owner]
+  (let [{::keys [socket-path database-name backend database-path attachment]}
+        selection
+        opened (atom nil)]
+    (try
+      (let [session
+            (await
+             (uds/connect!
+              {::uds/socket-path socket-path
+               ::uds/on-event! session-event!
+               ::uds/on-close!
+               (fn [_]
+                 (swap! !session
+                        (fn [current]
+                          (if (identical? owner (::owner current)) nil current))))}))
+            _ (reset! opened session)
+            capabilities-response
+            (await
+             (request-on-session!
+              session
               (protocol/capabilities-request
                {::protocol/request-id (str (random-uuid))})
-              capabilities-response
-              (await (request-on-session! session capabilities-request 5000))
-              _ (when-not (::protocol/success? capabilities-response)
-                  (throw (ex-info "Database capability negotiation failed."
-                                  capabilities-response)))
-              ensure-request
+              5000))
+            _ (when-not (::protocol/success? capabilities-response)
+                (throw (ex-info "Database capability negotiation failed."
+                                capabilities-response)))
+            ensure-response
+            (await
+             (request-on-session!
+              session
               (protocol/ensure-database-request
                (cond-> {::protocol/request-id (str (random-uuid))
                         ::protocol/database-name database-name
                         ::protocol/backend backend}
                  database-path (assoc ::protocol/database-path database-path)
                  attachment (assoc ::db.coordinate/attachment attachment)))
-              ensure-response
-              (await (request-on-session! session ensure-request 15000))
-              _ (when-not (::protocol/success? ensure-response)
-                  (throw (ex-info "Opening the database failed."
-                                  ensure-response)))
-              coordinate (::db.coordinate/coordinate ensure-response)
-              attachment (db.coordinate/attachment coordinate)
-              acquire-request
+              15000))
+            _ (when-not (::protocol/success? ensure-response)
+                (throw (ex-info "Opening the database failed." ensure-response)))
+            point (::db.coordinate/coordinate ensure-response)
+            attachment (db.coordinate/attachment point)
+            acquire-response
+            (await
+             (request-on-session!
+              session
               (protocol/acquire-database-request
                {::protocol/request-id (str (random-uuid))
                 ::protocol/database-name database-name
                 ::protocol/attachment attachment})
-              acquire-response
-              (await (request-on-session! session acquire-request 15000))
-              _ (when-not (::protocol/success? acquire-response)
-                  (throw (ex-info "Acquiring the database failed."
-                                  acquire-response)))
-              opened-coordinate (::protocol/coordinate acquire-response)
-              result {::database-name database-name
-                      ::attachment attachment
-                      ::coordinate opened-coordinate
-                      ::capabilities (::protocol/capabilities
-                                      capabilities-response)}
-              state {::owner owner
-                     ::selection selection
-                     ::session session
-                     ::database-name database-name
-                     ::attachment attachment
-                     ::capabilities (::protocol/capabilities
-                                     capabilities-response)
-                     ::opened-coordinate opened-coordinate
-                     ::interest-handlers {}}]
-          (swap! !session
-                 (fn [current]
-                   (if (identical? owner (::owner current))
-                     (do (reset! published? true) state)
-                     current)))
-          (when-not @published?
-            (uds/close! session)
-            (throw (ex-info "Database session closed while opening."
-                            {::selection selection
-                             :seon.error/kind :core-bug})))
-          (@resolve-opening result)
-          result)
-        (catch :default exception
-          (when-let [session @opened-session]
-            (uds/close! session))
-          (swap! !session
-                 (fn [current]
-                   (if (identical? owner (::owner current)) nil current)))
-          (@reject-opening exception)
-          (throw exception)))))))
+              15000))
+            _ (when-not (::protocol/success? acquire-response)
+                (throw (ex-info "Acquiring the database failed." acquire-response)))
+            state {::owner owner
+                   ::selection selection
+                   ::session session
+                   ::database-name database-name
+                   ::attachment attachment
+                   ::capabilities (::protocol/capabilities capabilities-response)
+                   ::opened-coordinate (::protocol/coordinate acquire-response)
+                   ::interest-handlers {}}]
+        (swap! !session
+               (fn [current]
+                 (if (identical? owner (::owner current)) state current)))
+        (if (identical? owner (::owner @!session))
+          (session-result state)
+          (do (uds/close! session)
+              (throw (ex-info "Database session closed while opening."
+                              {::selection selection
+                               :seon.error/kind :core-bug})))))
+      (catch :default exception
+        (when-let [session @opened] (uds/close! session))
+        (swap! !session
+               (fn [current]
+                 (if (identical? owner (::owner current)) nil current)))
+        (throw exception)))))
+
+(defn ^:async open-session!
+  "Open and acquire this process's one multiplexed database session."
+  {:malli/schema [:=> [:cat ::open-session-request] ::open-session-response]}
+  [selection]
+  (let [current @!session]
+    (cond
+      (and (= selection (::selection current)) (active-session))
+      (session-result current)
+
+      (and (= selection (::selection current)) (::opening current))
+      (await (::opening current))
+
+      current
+      (throw (ex-info "Another database session owns this process."
+                      {::selection selection :seon.error/kind :core-bug}))
+
+      :else
+      (let [owner (js-obj)
+            opening (connect-selection! selection owner)]
+        (reset! !session {::owner owner ::selection selection
+                          ::opening opening ::interest-handlers {}})
+        (await opening)))))
 
 (defn close-session!
-  "Close this process's database session before settling pending work."
+  "Close this process's database session."
   {:malli/schema [:=> [:cat] :boolean]}
   []
   (let [closed (atom nil)]
     (swap! !session (fn [current] (reset! closed current) nil))
-    (if-let [session (::session @closed)]
-      (uds/close! session)
-      false)))
+    (if-let [session (::session @closed)] (uds/close! session) false)))
 
-(defn- error-value?
-  [value]
-  (and (map? value) (string? (:seon.error/message value))))
-
-(defn- active-session
+(defn attached?
+  "True when this process has one live database attachment."
+  {:malli/schema [:=> [:cat] :boolean]}
   []
-  (let [state @!session]
-    (when (and (::session state) (uds/connected? (::session state)))
-      state)))
+  (some? (active-session)))
 
-(defn- send-request!
-  [request timeout-ms]
+(defn- send-request! [request timeout-ms]
   (if-let [state (active-session)]
     (request-on-session! (::session state) request timeout-ms)
     (js/Promise.resolve
      (session-error "This process has no open database session."
                     {::protocol/request-id (::protocol/request-id request)}))))
 
-(defn- resolve-head-response!
-  []
+(defn- resolve-head-response! []
   (if-let [{::keys [database-name]} (active-session)]
     (send-request!
      (protocol/resolve-head-request
@@ -677,38 +375,55 @@
     (js/Promise.resolve
      (session-error "This process has no open database session." {}))))
 
-(declare current-tx-context)
+;;; Fiber-local attribution and immutable read coordinates
 
-(defn- read-coordinate!
-  [request]
-  (if-let [coordinate (or (::coordinate request)
-                          (::coordinate (current-tx-context)))]
-    (js/Promise.resolve coordinate)
-    (-> (resolve-head-response!)
-        (.then
-         (fn [response]
-           (if (or (error-value? response)
-                   (not (::protocol/success? response)))
-             (if (error-value? response) response (response-error response))
-             (::protocol/coordinate response)))))))
+(defn current-tx-context
+  "Return this async fiber's transaction context, if one is active."
+  []
+  (internal/current-tx-context))
 
-(defn- read-request-base!
-  [request]
+(defn ^:seon.fn/agent-facing? current-agent-id
+  "Return this async fiber's agent id, if one is active."
+  []
+  (internal/current-agent-id))
+
+(defn with-agent
+  "Run a zero-argument function in one async-fiber agent scope."
+  [agent-id thunk]
+  (internal/run-with-agent agent-id thunk))
+
+(defn without-agent
+  "Run a zero-argument function with no inherited agent scope."
+  [thunk]
+  (internal/run-without-agent thunk))
+
+(defn with-tx-context
+  "Run a zero-argument function in one async-fiber transaction context."
+  [tx-context thunk]
+  (internal/run-with-tx-context tx-context thunk))
+
+(defn- ^:async read-coordinate! [request]
+  (if-let [point (or (::coordinate request)
+                     (::coordinate (current-tx-context)))]
+    point
+    (let [response (await (resolve-head-response!))]
+      (cond
+        (error-value? response) response
+        (not (::protocol/success? response)) (response-error response)
+        :else (::protocol/coordinate response)))))
+
+(defn- ^:async read-request-base! [request]
   (if-let [{::keys [database-name attachment]} (active-session)]
-    (-> (read-coordinate! request)
-        (.then
-         (fn [coordinate]
-           (if (error-value? coordinate)
-             coordinate
-             {::protocol/request-id (str (random-uuid))
-              ::protocol/database-name database-name
-              ::protocol/attachment attachment
-              ::protocol/coordinate coordinate}))))
-    (js/Promise.resolve
-     (session-error "This process has no open database session." {}))))
+    (let [point (await (read-coordinate! request))]
+      (if (error-value? point)
+        point
+        {::protocol/request-id (str (random-uuid))
+         ::protocol/database-name database-name
+         ::protocol/attachment attachment
+         ::protocol/coordinate point}))
+    (session-error "This process has no open database session." {})))
 
-(defn- read-resource-options
-  [request]
+(defn- read-resource-options [request]
   (cond-> {}
     (::max-work request)
     (assoc :datahike.resource/max-work (::max-work request))
@@ -717,422 +432,55 @@
     (::max-result-weight request)
     (assoc :datahike.resource/max-result-weight (::max-result-weight request))))
 
-(defn attached?
-  "True when this process has one live database attachment."
-  {:malli/schema [:=> [:cat] :boolean]}
-  []
-  (some? (active-session)))
+(defn ^{:async true :seon.fn/agent-facing? true} head-coordinate []
+  (let [response (await (resolve-head-response!))]
+    (cond
+      (error-value? response) response
+      (not (::protocol/success? response)) (response-error response)
+      :else (::protocol/coordinate response))))
 
-(schema/register! ::released? :boolean)
-(schema/register! ::release-connection-request
-  [:map {:closed true}
-   [::conn ::conn]])
-(schema/register! ::release-connection-response
-  [:map {:closed true}
-   [::released? [:= true]]])
-
-(defn ^:async release-connection!
-  "Await release of one explicit pod-local Datahike connection.
-
-   This lifecycle inverse is deliberately not agent-facing: it has no
-   `:seon.fn/agent-facing?` metadata, so whole-surface indexing may document
-   it while the agent toolkit cannot invoke it."
-  {:malli/schema [:=> [:cat ::release-connection-request]
-                  ::release-connection-response]}
-  [{::keys [conn]}]
-  (await (d/release conn))
-  {::released? true})
-
-(defn current-tx-context
-  "The active tx-context map, or nil outside [[with-tx-context]].
-
-   Fiber-local across awaits (AsyncLocalStorage), safe under
-   concurrent agents. The map may carry runtime-only turn/eval/test/replay
-   values, but the transaction boundary persists only `::user` and
-   `::process`."
-  {:malli/schema [:=> [:cat] [:maybe :map]]}
-  []
-  (internal/current-tx-context))
-
-(defn ^:seon.fn/agent-facing? current-agent-id
-  "The active agent-id (string), or nil outside a [[with-agent]] scope.
-   Fiber-local across awaits. The standard accessor for any code that
-   needs to know whose universe it's running in.
-
-     (db/current-agent-id)   ; ⟹ \"iCg-2606101519\"   (your own id)"
-  {:malli/schema [:=> [:cat] [:maybe :string]]}
-  []
-  (internal/current-agent-id))
-
-;; Slot shapes for the two scope fns below (named-positional :catn slots
-;; reference a registered shape). `::thunk` is the 0-arg fn run within
-;; the scope (`'fn?` — the pure-data predicate form, like `::handler`).
-(schema/register! ::thunk      'fn?)
-(schema/register! ::tx-context :map)
-(schema/register! ::read-operation :qualified-keyword)
-(schema/register! ::read-source
-  [:enum :seon.db.read.source/captured :seon.db.read.source/foreign])
-;; `::read-request` stays broad at the observation envelope so a future or
-;; malformed operation reaches `read-observation-changed?` and conservatively
-;; misses instead of throwing at instrumentation. Known operations validate
-;; against the exact closed shapes below before replay.
-(schema/register! ::read-request :map)
-(schema/register! ::query-read-request
-  [:map {:closed true}
-   [::query ::query-form]
-   [::args [:vector :any]]
-   [::max-work ::max-work]
-   [::max-results ::max-results]
-   [::max-result-weight ::max-result-weight]
-   [::history? {:optional true} ::history?]])
-(schema/register! ::pull-read-request
-  [:map {:closed true}
-   [::pull-pattern [:vector :any]]
-   [::ref :any]
-   [::max-work ::max-work]
-   [::max-results ::max-results]
-   [::max-result-weight ::max-result-weight]])
-(schema/register! ::entity-read-request
-  [:map {:closed true}
-   [::ref :any]])
-(schema/register! ::index [:enum :eavt :aevt :avet])
-(schema/register! ::components [:vector :any])
-(schema/register! ::index-limit [:int {:min 1 :max 200}])
-(schema/register! ::direction :seon.db.protocol/direction)
-(schema/register! ::cursor :seon.db.protocol/cursor)
-(schema/register! ::complete? :boolean)
-(schema/register!
- ::index-page-request
- [:map {:closed true}
-  [::index ::index]
-  [::components {:optional true} ::components]
-  [::direction ::direction]
-  [::index-limit ::index-limit]
-  [::history? {:optional true} ::history?]
-  [::cursor {:optional true} ::cursor]
-  [::coordinate {:optional true} ::coordinate]
-  [::max-result-weight {:optional true} ::max-result-weight]])
-(schema/register! ::seek? :boolean)
-(schema/register! ::index-prefix? :boolean)
-(schema/register! ::index-read-request
-  [:map {:closed true}
-   [::index ::index]
-   [::components ::components]
-   [::index-limit ::index-limit]
-   [::seek? ::seek?]])
-(schema/register! ::rseek-read-request
-  [:map {:closed true}
-   [::index ::index]
-   [::components ::components]
-   [::index-limit ::index-limit]
-   [::index-prefix? ::index-prefix?]])
-(schema/register! ::index-datoms-request
-  [:map
-   [::db ::db-val]
-   [::index ::index]
-   [::components {:optional true} ::components]
-   [::index-limit ::index-limit]
-   [::seek? {:optional true} ::seek?]])
-(schema/register! ::rseek-datoms-request
-  [:map
-   [::db ::db-val]
-   [::index ::index]
-   [::components {:optional true} ::components]
-   [::index-limit ::index-limit]
-   [::index-prefix? {:optional true} ::index-prefix?]])
-(schema/register! ::empty-read-request [:map {:closed true}])
-(schema/register! ::read-result :any)
-(schema/register! ::read-replayable? :boolean)
-(schema/register! ::operation-position [:int {:min 0}])
-(schema/register! ::operation-ok? :boolean)
-(schema/register! ::operation-coordinate ::coordinate)
-(schema/register! ::read-observation
-  [:map
-   [::read-operation ::read-operation]
-   [::operation-position ::operation-position]
-   [::operation-ok? ::operation-ok?]
-   [::operation-coordinate {:optional true} ::operation-coordinate]
-   [::read-source ::read-source]
-   [::read-request ::read-request]
-   [::read-result ::read-result]
-   [::read-replayable? ::read-replayable?]])
-(schema/register! ::read-observations [:vector ::read-observation])
-(schema/register! ::result :any)
-(schema/register! ::capture-reads-request
-  [:map
-   [::db ::db-val]
-   [::thunk 'fn?]])
-(schema/register! ::capture-reads-response
-  [:map
-   [::result ::result]
-   [::read-observations ::read-observations]])
-(schema/register! ::read-observation-changed-request
-  [:map
-   [::db ::db-val]
-   [::read-observation ::read-observation]])
-(schema/register! ::read-observation-changed? :boolean)
-(schema/register! ::read-candidate-broad? :boolean)
-(schema/register! ::read-candidate-attributes
-  [:set :qualified-keyword])
-(schema/register!
-  ::read-candidate
-  [:map {:closed true}
-   [::read-candidate-broad? ::read-candidate-broad?]
-   [::read-candidate-attributes ::read-candidate-attributes]])
-(schema/register!
-  ::read-observation-candidate-request
-  [:map {:closed true}
-   [::read-observation ::read-observation]])
-
-(defn with-agent
-  "Establish an agent-id scope for the dynamic extent of `f`.
-
-   `f` is a 0-arg fn. Inside `f` — including across `await`s and any Promises it
-   returns — `(current-agent-id)` returns `agent-id`. Nesting: the
-   inner scope wins, the outer restores on exit. The loop sets this for
-   you; you rarely call it — your own writes are already tagged.
-
-     (db/with-agent agent-id
-       (fn [] (db/transact! {::db/tx-data [...]}))) ; user=agent, process=REPL"
-  {:malli/schema [:=> [:catn [::agent-id :string] [::thunk ::thunk]] :any]}
-  [agent-id f]
-  (internal/run-with-agent agent-id f))
-
-(defn without-agent
-  "Clear the agent-id scope for the dynamic extent of `f`.
-
-   `f` is a 0-arg fn. Inside `f` — including across `await`s —
-   `(current-agent-id)` is nil; the outer scope restores on exit. For
-   Core writers use this when they must not inherit an agent user. Clearing
-   the agent does not select root by itself: establish explicit `::user` and
-   `::process` facts with [[with-tx-context]].
-
-     (db/without-agent
-       (fn []
-         (db/with-tx-context
-           {::db/user [:seon.agent/id \"root\"]
-            ::db/process [:seon.db.process/id :seon.db.process/boot]}
-           (fn [] (db/transact! {::db/tx-data [...]})))))"
-  {:malli/schema [:=> [:catn [::thunk ::thunk]] :any]}
-  [f]
-  (internal/run-without-agent f))
-
-(defn with-tx-context
-  "Establish a tx-context for the dynamic extent of `f`.
-
-   `f` is a 0-arg fn; nested calls merge and context propagates across awaits.
-   Runtime code may carry its own fully namespaced execution values here.
-   Ordinary transaction provenance reads only `::user` and `::process`;
-   everything else remains process-local.
-
-     (db/with-tx-context
-       {::db/user [:seon.agent/id \"root\"]
-        ::db/process [:seon.db.process/id :seon.db.process/config]}
-       (fn [] (db/transact! {::db/tx-data [...]})))"
-  {:malli/schema [:=> [:catn [::tx-context ::tx-context] [::thunk ::thunk]] :any]}
-  [ctx-map f]
-  (internal/run-with-tx-context ctx-map f))
-
-(defn capture-reads
-  "Run a synchronous thunk and return its result plus actual database reads.
-
-   The captured `:seon.db/read-observations` contain normalized immutable
-   request/result facts and never retain a database handle. A read against
-   `:seon.db/db` is replayable; lazy, temporal, foreign-db, function-valued, or
-   opaque host reads are recorded conservatively with
-   `:seon.db/read-replayable? false`.
-
-   Nested captures compose: the inner scope records its extent and every outer
-   scope also sees those reads. Promise-returning thunks are rejected because
-   this boundary is deliberately synchronous; returning before reads finish
-   would make the capture incomplete."
-  {:malli/schema [:=> [:cat ::capture-reads-request]
-                  ::capture-reads-response]}
-  [{::keys [db thunk]}]
-  (let [bucket (atom [])
-        result (internal/run-with-operation-capture db bucket thunk)]
-    (when (instance? js/Promise result)
-      (throw (ex-info
-               "seon.db/capture-reads requires a synchronous thunk"
-               {::error :seon.db/asynchronous-read-capture
-                :seon.error/kind :user-input})))
-    {::result result
-     ::read-observations @bucket}))
-
-;; ---------------------------------------------------------------------------
-;; Write path
-;; ---------------------------------------------------------------------------
-
-(schema/register! ::cas-ref   ::entity-ref)   ; lookup-ref or eid
-(schema/register! ::cas-attr  :keyword)
-(schema/register! ::cas-value :any)   ; lookup-ref, eid, or ANY scalar value
-(schema/register! ::cas-op    [:vector :any])
-
-(defn ^:seon.fn/agent-facing? cas-assert
-  "Build a no-op compare-and-swap op asserting `ref`'s `attr` is `value`.
-
-   Pure DATA; `old == new == value`. LEAD a work-tx with this and the tx
-   commits IFF the assertion holds; if `attr` moved to another value or was
-   retracted the WHOLE tx aborts (`:transact/cas`) and the bundled work is
-   rejected — surfacing as the `{::ok? false …}` envelope (errors are values).
-
-   This is the in-tx WORK FENCE: the database, not a pre-read predicate, tells
-   the writer it has lost authority. `ref` / `value` may be lookup-refs (they
-   resolve against EXISTING entities in the same tx). The canonical fence is
-   the agent's run pointer:
-
-     (db/transact!
-       {::db/tx-data
-        (into [(db/cas-assert [:seon.agent/id id] :seon.agent/run
-                              [:seon.agent.run/id run-id])]
-              work-tx)})"
-  {:malli/schema [:=> [:catn [::cas-ref ::cas-ref] [::cas-attr ::cas-attr]
-                             [::cas-value ::cas-value]]
-                  ::cas-op]}
-  [ref attr value]
+(defn ^:seon.fn/agent-facing? cas-assert [ref attr value]
   [:db.fn/cas ref attr value value])
 
-(defn- ^:async submit-transaction!
-  "Submit already-normalized transaction data through the active session.
+;;; Writes
 
-   This is the one wire/envelope implementation used by ordinary attributed
-   transactions and the deliberately unattributed provenance genesis."
-  [arg tx-data tx-meta]
-  (let [request-id (str (random-uuid))
-        generated? (contains? arg :seon.db.id/generated-candidates)
-        request
-        (protocol/transaction-request
-         (cond-> {::protocol/request-id request-id
-                  ::protocol/database-name
-                  (::database-name (active-session))
-                  ::protocol/transaction-data
-                  (internal/encode-edn-slot-values tx-data)}
-           (seq tx-meta)
-           (assoc ::protocol/transaction-meta tx-meta)
-           (::expected-coordinate arg)
-           (assoc ::protocol/expected-coordinate
-                  (::expected-coordinate arg))
-           generated?
-           (assoc ::protocol/generated-candidates
-                  (:seon.db.id/generated-candidates arg))))
-        response (await (send-request! request 120000))]
-    (cond
-      (error-value? response)
-      {::ok? false ::error response}
-
-      (not (::protocol/success? response))
-      {::ok? false ::error (response-error response)}
-
-      :else
-      (let [point (::protocol/coordinate response)
-            transaction-data (::protocol/transaction-data response)]
-        (cond-> {::ok? true
-                 ::coordinate point
-                 ::tempids (::protocol/temporary-ids response)
-                 ::tx (::db.coordinate/t point)
-                 ::tx-count (count transaction-data)
-                 ::added (::protocol/datoms-added response)
-                 ::retracted (::protocol/datoms-retracted response)}
-          (seq (::protocol/generated-entity-ids response))
-          (assoc :seon.db.id/eids
-                 (::protocol/generated-entity-ids response))
-          (::protocol/recovered? response)
-          (assoc :seon.db.id/recovered-commit? true))))))
+(defn- ^:async submit-transaction! [arg tx-data tx-meta]
+  (if-let [{::keys [database-name]} (active-session)]
+    (let [request
+          (protocol/transaction-request
+           (cond-> {::protocol/request-id (str (random-uuid))
+                    ::protocol/database-name database-name
+                    ::protocol/transaction-data
+                    (internal/encode-edn-slot-values tx-data)}
+             (seq tx-meta) (assoc ::protocol/transaction-meta tx-meta)
+             (::expected-coordinate arg)
+             (assoc ::protocol/expected-coordinate (::expected-coordinate arg))
+             (contains? arg :seon.db.id/generated-candidates)
+             (assoc ::protocol/generated-candidates
+                    (:seon.db.id/generated-candidates arg))))
+          response (await (send-request! request 120000))]
+      (cond
+        (error-value? response) {::ok? false ::error response}
+        (not (::protocol/success? response))
+        {::ok? false ::error (response-error response)}
+        :else
+        (let [point (::protocol/coordinate response)]
+          (cond-> {::ok? true
+                   ::coordinate point
+                   ::tempids (::protocol/temporary-ids response)
+                   ::tx (::db.coordinate/t point)
+                   ::tx-count (count (::protocol/transaction-data response))
+                   ::added (::protocol/datoms-added response)
+                   ::retracted (::protocol/datoms-retracted response)}
+            (seq (::protocol/generated-entity-ids response))
+            (assoc :seon.db.id/eids (::protocol/generated-entity-ids response))
+            (::protocol/recovered? response)
+            (assoc :seon.db.id/recovered-commit? true)))))
+    {::ok? false
+     ::error (session-error "This process has no open database session." {})}))
 
 (defn ^{:async true :seon.fn/agent-facing? true} transact!
-  "Save records to the database, persisting new facts durably.
-
-   Commits `::db/tx-data` (entity maps and/or tx ops) through the one
-   writer and returns an envelope. Two call shapes:
-
-   - map-in / map-out (preferred):
-       (db/transact! {::db/tx-data [{::name \"A\"}]
-                      ::db/expected-coordinate (db/head-coordinate) ; optional fence
-                      ::db/opts {:tx-meta {…}}   ; optional
-                      ::db/conn <conn>})          ; optional, defaults *conn*
-   - positional, mirroring datahike `(d/transact! conn tx-data)` — conn
-     FIRST and explicit, with a 3-arity tx-meta convenience:
-       (db/transact! <conn> [{::name \"A\"}])
-       (db/transact! <conn> [{::name \"A\"}] {:source :import})
-
-   Both shapes resolve to the SAME envelope. SAFE BY DEFAULT: this
-   never throws into your eval — every failure (bad invocation shape,
-   unregistered attr, value fails its schema, datahike commit
-   explosion) returns as data. SUCCESS is COMPACT DATA, never the raw
-   datahike report:
-
-     {::db/ok? true                ; success — a small data summary:
-      ::db/tempids   {…}           ;   tempid→eid map (resolve your refs)
-      ::db/tx        <tx-id>       ;   the committed tx (max-tx)
-      ::db/tx-count  <n>           ;   datoms in the tx
-      ::db/added <n> ::db/retracted <m>}
-     {::db/ok? false ::db/error <error map>}             ; failure
-     ;; + ::db/raw-error <original message> when the core
-     ;; translated a cryptic datahike error into a guiding one
-
-   Pass `::db/return-report? true` to ALSO get the raw datahike report at
-   `::db/tx-report` (escape hatch — needs `:db-after`/`:db-before`); the
-   default omits it so the agent value stays small.
-
-   The error map carries a top-level `:seon.error/kind` —
-   `:user-input` (fix tx-data and retry) vs `:core-bug` (the pod
-   survived; report it, don't retry blindly).
-
-   `::db/expected-coordinate` is an optional whole-database precondition. The
-   serialized writer commits only when its current head still equals that full
-   database/branch/commit/t coordinate; otherwise the request resolves to an
-   error envelope and writes nothing. Freeze it AFTER any first-use schema
-   installation—the automatic installation of a newly registered attribute is
-   necessarily an earlier transaction. Desired-state reconcilers use this to
-   compile from one immutable db value and retry if another writer wins before
-   commit.
-
-   Before committing it validates shape, attrs, and values; installs
-   datahike schema for any newly-registered attr; and auto-merges the
-   active [[with-tx-context]] / [[with-agent]] context into `:tx-meta` as the
-   two resolvable refs `::user` and `::process`. Runtime execution values are
-   never copied to the transaction.
-
-   Worked examples — REGISTER your attrs first, then transact (every key
-   namespaced). NO `await`: an `^:async` call is auto-awaited for you, so
-   you get the ENVELOPE directly — writing `await` is an error.
-
-     ;; register what these examples store (an identity attr to upsert by,
-     ;; plus a plain field) — `::foo` here is your own home-ns kind:
-     (schema/register! ::doc-id [:string {:seon.db/identity true}])
-     (schema/register! ::title :string)
-
-     ;; ADD — and ALWAYS check the envelope: an eval can succeed yet the
-     ;; write did NOT happen (ok? false). Read it.
-     (let [{::db/keys [ok? error]}
-           (db/transact! {::db/tx-data [{::doc-id \"d1\" ::title \"Intro\"}]})]
-       (if ok? :saved error))
-
-     ;; UPSERT BY IDENTITY — same identity value ⇒ same entity, no
-     ;; duplicate. OMITTED keys are LEFT UNCHANGED (not cleared):
-     (db/transact! {::db/tx-data [{::doc-id \"d1\" ::title \"Intro v2\"}]})
-
-     ;; CLEAR one field — explicit retract, NOT omission:
-     (db/transact! {::db/tx-data [[:db/retract [::doc-id \"d1\"] ::title]]})
-     ;; verify by read-back — the title is gone, so this returns no rows:
-     (db/query {::db/query '[:find ?t :where [?e ::doc-id \"d1\"] [?e ::title ?t]]})
-
-     ;; DELETE the whole entity:
-     (db/transact! {::db/tx-data [[:db.fn/retractEntity [::doc-id \"d1\"]]]})
-
-     ;; LINK new entities in ONE tx via shared tempid strings (lookup-refs
-     ;; do NOT resolve against not-yet-committed entities). ::author is a
-     ;; REF, so the tempid \"p1\" in its slot resolves to the new person:
-     (schema/register! ::person-id [:string {:seon.db/identity true}])
-     (schema/register! ::author :seon.db/ref)
-     (db/transact! {::db/tx-data [{:db/id \"p1\" ::person-id \"alice\"}
-                                  {::doc-id \"d2\" ::author \"p1\"}]})"
-  ;; Opted OUT of instrumentation — caught by the computed predicate
-  ;; `seon.instrument/async-unwrappable?` (by SHAPE: variadic + :function
-  ;; schema — not by name). SAFE BY DEFAULT means a bad invocation shape
-  ;; returns an error ENVELOPE (`assert-invocation-shape!`), never throws;
-  ;; an instrumentation throw on bad input would break that tested
-  ;; contract. This schema stays the discoverable contract; guards enforce.
+  "Commit ordinary transaction data through the authoritative writer."
   {:malli/schema
    [:function
     [:=> [:catn [::request ::transact-request]] ::transact-response]
@@ -1140,308 +488,38 @@
   [& call-args]
   (try
     (let [arg (cond
-                (and (= 1 (count call-args))
-                     (map? (first call-args)))
+                (and (= 1 (count call-args)) (map? (first call-args)))
                 (first call-args)
-
-                (and (= 1 (count call-args))
-                     (vector? (first call-args)))
+                (and (= 1 (count call-args)) (vector? (first call-args)))
                 {::tx-data (first call-args)}
-
-                :else
-                {::tx-data (vec call-args)})
-          _ (when (or (::conn arg) (::return-report? arg))
-              (throw
-               (ex-info
-                "Remote transactions do not accept a connection or raw report."
-                {::request arg :seon.error/kind :user-input})))
+                :else {::tx-data (vec call-args)})
+          _ (internal/assert-invocation-shape! arg)
           tx-data (-> (::tx-data arg)
                       internal/coerce-identity-symbol-idents
                       internal/normalize-entity-ref-keys)
-          merged-opts (internal/merge-tx-context-into-opts (::opts arg))
-          tx-meta (:tx-meta merged-opts)
-          attrs (into (internal/extract-tx-attrs tx-data) (keys tx-meta))
-          _ (internal/validate-attrs! attrs)
-          _ (internal/validate-values! tx-data)
-          _ (internal/validate-values! [tx-meta])]
+          opts (internal/merge-tx-context-into-opts (::opts arg))
+          tx-meta (:tx-meta opts)
+          attrs (into (internal/extract-tx-attrs tx-data) (keys tx-meta))]
+      (internal/validate-attrs! attrs)
+      (internal/validate-values! tx-data)
+      (internal/validate-values! [tx-meta])
       (await (submit-transaction! arg tx-data tx-meta)))
     (catch :default exception
       (internal/commit-error-envelope exception))))
 
-;; ---------------------------------------------------------------------------
-;; Provenance genesis.
-;; ---------------------------------------------------------------------------
+;;; Coordinate-pinned reads
 
-(declare execute-many head-coordinate installed-schema query)
-(declare ^:private installed-schema-with-evidence)
-
-(schema/register! ::provenance-action
-                  [:enum :fresh-genesis :converged])
-(schema/register! ::genesis-tx :int)
-(schema/register! ::human-tx   :int)
-(schema/register! ::ensure-provenance-request
-  [:map {:closed true}])
-(schema/register! ::ensure-provenance-response
-  [:map
-   [::provenance-action ::provenance-action]
-   [::genesis-tx  {:optional true} :int]
-   [::human-tx    {:optional true} :int]])
-
-(def ^:private genesis-attrs
-  "The minimal native capabilities required before provenance can self-host."
-  [:seon.agent/id :seon.user/id ::user ::process ::process/id])
-
-(def ^:private canonical-schema-attrs
-  "The canonical schema facts that let the first transaction describe itself."
-  [:seon.schema/key :seon.schema/form])
-
-(def ^:private provenance-query
-  '[:find ?attr ?value
-    :where
-    (or-join [?entity ?attr ?value]
-      (and [?entity :seon.agent/id ?value]
-           [(ground :seon.agent/id) ?attr])
-      (and [?entity :seon.user/id ?value]
-           [(ground :seon.user/id) ?attr])
-      (and [?entity :seon.db.process/id ?value]
-           [(ground :seon.db.process/id) ?attr])
-      (and [?entity :seon.schema/key ?value]
-           [(ground :seon.schema/key) ?attr]))])
-
-(def ^:private human-query
-  '[:find ?entity .
-    :where [?entity :seon.user/id "user"]])
-
-(defn- canonical-schema-fact
-  [attr]
-  {:seon.schema/key attr
-   :seon.schema/form (schema/form-string attr)})
-
-(defn- assert-genesis-schemas!
-  []
-  (let [required (into genesis-attrs canonical-schema-attrs)
-        unregistered (into [] (remove schema/registered?) required)]
-    (when (seq unregistered)
-      (throw (ex-info
-               (str "Database genesis requires registered schemas for "
-                    (pr-str unregistered) ". Load their owning namespaces "
-                    "before opening the cluster store.")
-               {::error :seon.db/genesis-schema-unregistered
-                ::attrs unregistered
-                :seon.error/kind :core-bug}))))
-  true)
-
-(defn- operation-value!
-  [operation value]
-  (if (error-value? value)
-    (throw (ex-info (str "Database provenance " operation " failed.")
-                    {::error value :seon.error/kind :core-bug}))
-    value))
-
-(defn- schema-member-value!
-  [operation member]
-  (if (true? (::protocol/success? member))
-    (::protocol/schema member)
-    (throw (ex-info (str "Database provenance " operation " failed.")
-                    {::error member :seon.error/kind :core-bug}))))
-
-(defn- ^:async schema-evidence!
-  []
-  (operation-value! "schema acquisition"
-                    (await (installed-schema-with-evidence {}))))
-
-(defn- ^:async provenance-acquisition!
-  []
-  (let [result
-        (operation-value!
-         "bootstrap acquisition"
-         (await
-          (execute-many
-           {::members
-            [{::protocol/operation protocol/schema-operation}
-             {::protocol/operation protocol/query-operation
-              ::protocol/query-form provenance-query
-              ::protocol/arguments []}]})))
-        [schema-member query-member] (::results result)
-        installed (schema-member-value! "schema read" schema-member)
-        required (into genesis-attrs canonical-schema-attrs)
-        missing (into #{} (remove #(contains? installed %)) required)
-        query-complete? (true? (::protocol/success? query-member))
-        _ (when (and (not query-complete?) (empty? missing))
-            (throw (ex-info "Database provenance identity read failed."
-                            {::error query-member
-                             :seon.error/kind :core-bug})))]
-    {::coordinate (::coordinate result)
-     ::installed-schema installed
-     ::provenance-facts
-     (if query-complete?
-       (set (:datahike.query/result query-member))
-       #{})
-     ::provenance-query-complete? query-complete?}))
-
-(defn- ^:async human-present?!
-  [coordinate]
-  (boolean
-   (operation-value!
-    "human read"
-    (await (query {::query human-query ::coordinate coordinate})))))
-
-(defn- genesis-tx-data
-  [facts]
-  (let [schema-facts
-        (keep (fn [attr]
-                (when-not (contains? facts [:seon.schema/key attr])
-                  (canonical-schema-fact attr)))
-              (into genesis-attrs canonical-schema-attrs))
-        missing-root?
-        (not (contains? facts [:seon.agent/id "root"]))
-        missing-processes
-        (remove #(contains? facts [::process/id %]) process/ids)]
-    (into []
-          (concat schema-facts
-                  (when missing-root? [{:seon.agent/id "root"}])
-                  (map (fn [id] {::process/id id}) missing-processes)))))
-
-(defn- ^:async submit-genesis!
-  [tx-data coordinate]
-  (let [normalized (-> tx-data
-                       internal/coerce-identity-symbol-idents
-                       internal/normalize-entity-ref-keys)
-        attrs (internal/extract-tx-attrs normalized)]
-    (internal/validate-attrs! attrs)
-    (internal/validate-values! normalized)
-    (await (submit-transaction! {::expected-coordinate coordinate}
-                                normalized
-                                nil))))
-
-(defn ^:async ensure-provenance!
-  "Establish the minimal transaction-provenance genesis.
-
-   Call once immediately after connecting a store and before any ordinary
-   `transact!`. The minimal native capability/root/process transaction is
-   explicitly un-attributed because its own ref attrs and targets do not yet
-   exist. The following root/boot transaction ensures the stable human. A
-   converged store emits no transaction."
-  {:malli/schema
-   [:=> [:cat ::ensure-provenance-request] ::ensure-provenance-response]}
-  [_]
-  (assert-genesis-schemas!)
-  (let [{::keys [coordinate installed-schema provenance-facts
-                 provenance-query-complete?]}
-        (await (provenance-acquisition!))
-        facts provenance-facts
-        base-data (genesis-tx-data facts)
-        base-env (when (seq base-data)
-                   (await (submit-genesis! base-data coordinate)))
-        _ (when (and base-env (false? (::ok? base-env)))
-            (throw (ex-info "Database provenance genesis transaction failed."
-                            {::error (::error base-env)
-                             :seon.error/kind :core-bug})))
-        after-base (or (::coordinate base-env) coordinate)
-        human-missing?
-        (cond
-          provenance-query-complete?
-          (not (contains? facts [:seon.user/id "user"]))
-
-          (not (contains? installed-schema :seon.user/id))
-          true
-
-          :else
-          (not (await (human-present?! after-base))))
-        human-env
-        (when human-missing?
-          (await
-           (with-tx-context
-             {::user [:seon.agent/id "root"]
-              ::process (process/lookup-ref ::process/boot)}
-             (fn []
-               (transact! {::tx-data [{:seon.user/id "user"}]
-                           ::expected-coordinate after-base})))))
-        _ (when (and human-env (false? (::ok? human-env)))
-            (throw (ex-info
-                    "Database provenance genesis could not ensure the human user."
-                    {::error (::error human-env)
-                     :seon.error/kind :core-bug})))
-        action (if (or base-env human-env) :fresh-genesis :converged)]
-    (cond-> {::provenance-action action}
-      base-env     (assoc ::genesis-tx (::tx base-env))
-      human-env    (assoc ::human-tx (::tx human-env)))))
-
-;; ---------------------------------------------------------------------------
-;; Read path — synchronous over a db value. Each op has a map-in arity
-;; AND a datahike-shaped positional arity (dispatch is by arg count; the
-;; positional db slot is REQUIRED and explicit — no ambient *conn*).
-;; ---------------------------------------------------------------------------
-
-(declare assert-known-query-attrs!)
-
-(def ^:private query-budget-ceilings
-  "Hard synchronous resource ceilings for every application query.
-
-   Callers may lower these through the namespaced request keys or a raw query
-   map's Datahike option keys; no caller can raise them. Exhaustion is a
-   structured `:datahike/budget-exceeded` error, never a partial answer."
-  {::max-work 2000000
-   ::max-results 50000
-   ::max-result-weight (* 8 1024 1024)})
-
-(def ^:private pull-budget-ceilings
-  "Hard synchronous resource ceilings for every application pull."
-  {::max-work 250000
-   ::max-results 25000
-   ::max-result-weight (* 4 1024 1024)})
-
-(defn- clamp-budget
-  "Translate namespaced Seon or raw Datahike options into clamped options."
-  [ceilings request]
-  (reduce-kv
-    (fn [options seon-key ceiling]
-      (let [library-key (keyword (name seon-key))
-            requested (or (get request seon-key)
-                          (get request library-key)
-                          ceiling)]
-        (assoc options library-key (min ceiling requested))))
-    {}
-    ceilings))
-
-(defn- captured-budget
-  "Translate clamped Datahike options back to the namespaced read contract."
-  [options]
-  {::max-work (:max-work options)
-   ::max-results (:max-results options)
-   ::max-result-weight (:max-result-weight options)})
-
-(defn- raw-query
-  "Run one guarded query without crossing the read-observation boundary."
-  [db q inputs budget-request]
-  (assert-known-query-attrs! db q)
-  (d/q (merge {:query q :args (into [db] inputs)}
-              (clamp-budget query-budget-ceilings budget-request))))
-
-(defn- execute-query
-  "Run one normalized query and record it only when a capture scope is active."
-  [db q inputs budget-request]
-  (let [budget (clamp-budget query-budget-ceilings budget-request)
-        result (raw-query db q inputs budget)]
-    (when-let [captures (internal/current-operation-captures)]
-      (internal/record-operation!
-        captures :seon.db.read.operation/query db
-        (merge {::query q ::args (vec inputs)} (captured-budget budget))
-        result true))
-    result))
-
-(defn ^:async ^:private query-result!
-  [request]
+(defn- ^:async query-result! [request]
   (let [base (await (read-request-base! request))]
     (if (error-value? base)
       base
       (let [wire-request
             (protocol/query-request
              (cond->
-               (merge base
-                      {::protocol/query-form (::query request)
-                       ::protocol/arguments (vec (or (::args request) []))}
-                      (read-resource-options request))
+              (merge base
+                     {::protocol/query-form (::query request)
+                      ::protocol/arguments (vec (or (::args request) []))}
+                     (read-resource-options request))
                (::history? request) (assoc ::protocol/history? true)))
             response (await (send-request! wire-request 30000))]
         (cond
@@ -1450,74 +528,11 @@
           :else (:datahike.query/result response))))))
 
 (defn ^{:async true :seon.fn/agent-facing? true} query
-  "Ask the database a question: find, count, or sum stored facts.
-
-   Runs a Datalog query and returns the result set. Two call shapes:
-
-   - map-in:  (db/query {::db/query '[:find ?n :where [?e ::name ?n]]
-                         ::db/db <db> | ::db/conn <conn>   ; default *conn*
-                         ::db/args [...]})                  ; extra :in inputs
-   - positional, mirroring datahike `(d/q query db & inputs)`:
-       (db/query '[:find ?n :where [?e ::name ?n]] <db>)
-       (db/query '[:find ?n :in $ ?t :where …] <db> \"Alice\")
-   - positional, db OMITTED — auto-injects the db from `*conn*`
-     (the read-side sibling of [[transact!]]'s auto-conn form):
-       (db/query '[:find ?n :where [?e ::name ?n]])
-       (db/query '[:find ?n :in $ ?t :where …] \"Alice\")
-     The second arg is the explicit db only when it IS a db value
-     (`internal/db-value?`); otherwise it's the first `:in` input.
-
-   Worked examples (db omitted; see the cheat sheet at top of ns for the
-   full idiom set):
-
-     ;; scalar count — when you only need a number, COUNT, don't list
-     ;; (results are clipped ~50 rows). The `; ⟹` is a SHAPE; report the
-     ;; number YOUR eval returns, not the one written here:
-     (db/query '[:find (count ?e) . :where [?e :seon.fn/sym]])  ; ⟹ «a scalar count»
-     ;; CLIPPED results — when a render shows a banner like «N rows; showing
-     ;; first 50, +M more clipped», that N IS the total; READ it. Do NOT
-     ;; recount the printed rows, and do NOT re-narrow the query to fit. Need
-     ;; only the count? COUNT in the query (above), don't list-then-count.
-     ;; registered-schema count — ONE :seon.schema/key row per registered
-     ;; schema; this IS the count of registered schemas. Read it back live:
-     (db/query '[:find (count ?e) . :where [?e :seon.schema/key]]) ; ⟹ «a scalar count»
-     ;; collection — one value per row:
-     (db/query '[:find [?n ...] :where [?e :seon.ns/name ?n]]) ; ⟹ «vector of ns-name keywords»
-     ;; predicate + binding-expr:
-     (db/query '[:find ?s :where [?e :seon.fn/doc ?d] [(count ?d) ?l]
-                                 [(> ?l 400)] [?e :seon.fn/sym ?s]])
-     ;; REF-JOIN — :seon.fn/ns is a ref (stores an eid); match the target
-     ;; by joining through its name, NOT by putting the keyword in the slot:
-     (db/query '[:find (count ?e) . :where [?e :seon.fn/ns ?n]
-                                           [?n :seon.ns/name :seon.db]]) ; ⟹ «a scalar count»
-     ;;   (the keyword form [?e :seon.fn/ns :seon.db] THROWS.)
-     ;; GROUPED AGGREGATE with the name pulled in the SAME query, so the
-     ;; group is readable (a bare ref-eid is not):
-     (db/query '[:find ?nm (count ?t)
-                 :where [?t :seon.test/ns ?n] [?n :seon.ns/name ?nm]])
-     ;;   ; ⟹ «set of [ns-name count] tuples»   then (sort-by second > …) in Clojure
-
-   GUARDED against silent typos (the sibling of [[pull]]'s guard): a
-   `:where` clause naming an attribute that is neither installed on
-   the db nor registered in seon.schema throws a legible error naming
-   the attr(s) and the fix, instead of silently returning #{}.
-   Registered attrs with no data yet behave exactly as datahike
-   defines (empty result / get-else default)."
-  ;; Pure-variadic body so CLJS malli.instrument wraps every arity.
-  ;; Positional arities overlap (query[+db?][+inputs?]) so they can't be
-  ;; enumerated as distinct fixed `:=>` arities (Malli would throw
-  ;; ::duplicate-arities). Encoding: arity-1 accepts EITHER the request
-  ;; map OR a bare query (vector / raw map-form datalog / string), since
-  ;; `(query '[…])` (db omitted, no inputs) is a 1-arg call; arity ≥2 is
-  ;; the varargs `:=>` (`[:+ :any]` forces ≥1 trailing arg, so it never
-  ;; collides with arity-1). The body distinguishes request-map vs bare
-  ;; query (`contains? ::query`) and explicit-db vs `:in` input
-  ;; (`internal/db-value?`).
+  "Run one Datalog query against an explicit or current coordinate."
   {:malli/schema
    [:function
     [:=> [:catn [::request [:or ::query-request ::query-form]]] :any]
-    [:=> [:catn [::query ::query-form]
-                [::rest [:+ :any]]] :any]]}
+    [:=> [:catn [::query ::query-form] [::rest [:+ :any]]] :any]]}
   ([request]
    (await
     (query-result!
@@ -1527,20 +542,17 @@
   ([query-form & inputs]
    (await (query-result! {::query query-form ::args (vec inputs)}))))
 
-(defn ^{:async true :seon.fn/agent-facing? true} query-with-evidence
-  "Query one exact database coordinate and retain its execution evidence."
-  {:malli/schema [:=> [:cat ::query-request] :any]}
-  [request]
+(defn ^{:async true :seon.fn/agent-facing? true} query-with-evidence [request]
   (let [base (await (read-request-base! request))]
     (if (error-value? base)
       base
       (let [wire-request
             (protocol/query-request
              (cond->
-               (merge base
-                      {::protocol/query-form (::query request)
-                       ::protocol/arguments (vec (or (::args request) []))}
-                      (read-resource-options request))
+              (merge base
+                     {::protocol/query-form (::query request)
+                      ::protocol/arguments (vec (or (::args request) []))}
+                     (read-resource-options request))
                (::history? request) (assoc ::protocol/history? true)))
             response (await (send-request! wire-request 30000))]
         (cond
@@ -1551,498 +563,86 @@
            :datahike.query/result (:datahike.query/result response)
            :datahike.query/attribute-dependencies
            (:datahike.query/attribute-dependencies response)
-           :datahike.query/cache-evidence
-           (:datahike.query/cache-evidence response)
+           :datahike.query/cache-evidence (:datahike.query/cache-evidence response)
            :datahike.query/resource-evidence
            (:datahike.query/resource-evidence response)})))))
 
-(defn- raw-index-datoms
-  "Read and normalize one bounded Datahike index window without observing it."
-  [db index components limit seek?]
-  (let [read-fn (if seek? d/seek-datoms d/datoms)]
-    (->> (apply read-fn db index components)
-         (take limit)
-         (mapv internal/datom->map))))
-
-(defn ^:seon.fn/agent-facing? index-datoms
-  "Read at most `:seon.db/index-limit` datoms from one database index.
-
-   `:seon.db/components` are the ordinary Datahike index components.
-   `:seon.db/seek? true` starts at or after them; false selects their exact
-   prefix. The returned values are fully namespaced plain datom maps. Reads
-   participate in the same exact observation/replay mechanism as query and
-   pull, so a reactive surface rerenders only when its bounded window changes."
-  {:malli/schema [:=> [:cat ::index-datoms-request] ::datoms]}
-  [{::keys [db index components index-limit seek?]
-    :or {components [] seek? false}}]
-  (let [result (raw-index-datoms db index components index-limit seek?)]
-    (when-let [captures (internal/current-operation-captures)]
-      (internal/record-operation!
-        captures :seon.db.read.operation/index-datoms db
-        {::index index
-         ::components components
-         ::index-limit index-limit
-         ::seek? seek?}
-        result true))
-    result))
-
-(defn- datom-index-components
-  "Comparable component vector for one normalized Datahike index row."
-  [index datom]
-  (case index
-    :eavt [(::e datom) (::a datom) (::v datom) (::tx datom)]
-    :aevt [(::a datom) (::e datom) (::v datom) (::tx datom)]
-    :avet [(::a datom) (::v datom) (::e datom) (::tx datom)]))
-
-(defn- raw-rseek-datoms
-  "Read and normalize one bounded descending Datahike index window."
-  [db index components limit prefix?]
-  (let [rows (map internal/datom->map
-                  (apply d/rseek-datoms db index components))
-        rows (if (and prefix? (seq components))
-               (take-while #(= components
-                               (subvec (datom-index-components index %)
-                                       0 (count components)))
-                           rows)
-               rows)]
-    (vec (take limit rows))))
-
-(defn ^:seon.fn/agent-facing? rseek-datoms
-  "Read at most `:seon.db/index-limit` datoms descending from an index key.
-
-   This is the bounded public face of Datahike's lazy `rseek-datoms`: results
-   begin at or before `:seon.db/components` and walk toward the beginning of
-   the selected index. `:seon.db/index-prefix? true` stops at the first row
-   outside those concrete components. The bounded result participates in exact
-   reactive-read replay, so unchanged windows do not rerender their consumers."
-  {:malli/schema [:=> [:cat ::rseek-datoms-request] ::datoms]}
-  [{::keys [db index components index-limit index-prefix?]
-    :or {components [] index-prefix? false}}]
-  (let [result (raw-rseek-datoms db index components index-limit index-prefix?)]
-    (when-let [captures (internal/current-operation-captures)]
-      (internal/record-operation!
-        captures :seon.db.read.operation/rseek-datoms db
-         {::index index
-          ::components components
-         ::index-limit index-limit
-         ::index-prefix? index-prefix?}
-        result true))
-    result))
-
-(defn- installed-schema*
-  "Read installed schema without crossing the public observation boundary."
-  [db]
-  (or (when (some? db)
-        (try (dbi/-schema db) (catch :default _ nil)))
-      {}))
-
-(defn- ^:async installed-schema-with-evidence
-  "Read installed schema and retain the exact coordinate it describes."
-  [request]
-  (let [base (await (read-request-base! request))]
-    (if (error-value? base)
-      base
-      (let [wire-request (protocol/schema-request base)
-            response (await (send-request! wire-request 15000))]
-        (cond
-          (error-value? response) response
-          (not (::protocol/success? response)) (response-error response)
-          :else {::coordinate (::protocol/coordinate response)
-                 ::installed-schema (::protocol/schema response)})))))
-
-(defn ^{:async true :seon.fn/agent-facing? true} installed-schema
-  "The datahike schema map actually INSTALLED on `db`.
-
-   Attrs the conn has seen, keyed by ident keyword. FilteredDB-safe and nil-safe.
-
-   THE TRAP this fn exists to gate: datahike installs an attr's schema
-   lazily, at the attr's FIRST `transact!` — `seon.schema/register!`
-   alone only teaches the Malli registry. Querying or pulling an attr
-   the conn has never installed THROWS (`:transact/schema`,
-   resolve-datom: \"Bad entity attribute … not defined in current
-   schema\") under `:schema-flexibility :write`. So any code that
-   names an attr in a `d/datoms` scan, a Datalog where-clause, or an
-   explicit pull pattern must EITHER be sure data has landed OR gate
-   on `(contains? (db/installed-schema db) <attr>)` — load-bearing,
-   not defensive fluff. ([[pull]] gates its own patterns with this
-   automatically.)
-
-   The wrapper db values — FilteredDB (the web UI's per-agent view),
-   AsOfDB/SinceDB/HistoricalDB (the time-travel values) — don't
-   implement ILookup, so `(:schema db)` THROWS on them. Schema is
-   conn-level (a filter or time-point can't change which attrs are
-   installed), and every db type implements the `dbi/-schema` protocol
-   method, which reads through to the underlying current db. Use it
-   uniformly instead of the record field — that's what makes an
-   explicit-pattern [[pull]] on an as-of/since value see the same
-   installed attrs as the current db (otherwise it wrongly judged them
-   uninstalled and silently dropped them). Returns `{}` for a
-   nil/schema-less db. `:any` input — the db value is a datahike
-   runtime handle (third-party boundary).
-
-   This is the \"what attrs exist on this db, exactly?\" tool. It lists
-   EVERY installed attr, including registered attrs with no live values.
-   Check here before inventing a new attr — the attribute you need may
-   already exist with zero rows:
-
-     (filter #(= \"my.plan\" (namespace %))
-             (keys (db/installed-schema @db/*conn*)))
-     ; ⟹ «(:my.plan/id :my.plan/title :my.plan/status …)»
-     ;   — registered, queryable, just no rows yet. Reuse it; don't fork."
-  {:malli/schema
-   [:function
-    [:=> [:cat] :any]
-    [:=> [:catn [::request :map]] :any]]}
-  ([] (await (installed-schema {})))
-  ([request]
-   (let [evidence (await (installed-schema-with-evidence request))]
-     (if (error-value? evidence)
-       evidence
-       (::installed-schema evidence)))))
-
-;; --- pull-pattern guard -----------------------------------------------------
-;; datahike-cljs throws the cryptic resolve-datom error above when an
-;; explicit pull pattern names an attr the conn never installed.
-;; [[pull]] guards that boundary; helpers below walk/rewrite patterns.
-
-(defn- pattern-attr
-  "The attr keyword an explicit pull-pattern item names: a bare
-   keyword, or the head of an attr-with-opts seq like
-   `(:attr :limit 10)` / `[:attr :as :x]`. nil for wildcards (`*`),
-   recursion markers, and anything else."
-  [item]
-  (cond
-    (keyword? item) item
-    (and (sequential? item) (keyword? (first item))) (first item)
-    :else nil))
-
-(defn- forward-attr
-  "Normalize a reverse-ref attr (`:ns/_attr`) to its forward form —
-   the installed schema is keyed by forward idents only."
-  [attr]
-  (let [n (name attr)]
-    (if (str/starts-with? n "_")
-      (keyword (namespace attr) (subs n 1))
-      attr)))
-
-(defn- system-pull-attr?
-  "datahike's own attrs (`:db/id`, `:db/ident`, `:db.*/…`) are exempt
-   from schema-presence validation — mirror that exemption."
-  [attr]
-  (let [a-ns (namespace attr)]
-    (and a-ns (or (= a-ns "db") (str/starts-with? a-ns "db.")))))
-
-(defn- resolve-existing-eid
-  "Resolve a read ref without Datahike's strict missing-entity throw.
-
-   Datahike's public pull/entity paths call `entid-strict`, but Seon's public
-   contract treats an absent lookup ref as an ordinary absent value. Lookup
-   refs and idents already prove existence while resolving. A numeric eid is
-   syntax-valid without proving a row exists, so give it one bounded EAVT
-   existence probe. Malformed refs and non-unique lookup attrs still throw."
-  [db ref]
-  (when-let [eid (dbu/entid db ref)]
-    (when (or (not (number? ref))
-              (first (dbi/datoms db :eavt [eid])))
-      eid)))
-
-;; --- query attr guard --------------------------------------------------
-;; The sibling of the pull guard below, adapted to what
-;; datalog actually does: d/q NEVER throws on
-;; an uninstalled attr — a never-installed attr in any clause shape
-;; (pattern, get-else, or-join, not) yields the correct empty/default
-;; result. So the only failure mode at this boundary is the SILENT
-;; one: a typo'd attribute returns #{} and the caller concludes "no
-;; data". The guard makes that legible: an attr that is neither
-;; installed on the db NOR registered in seon.schema can never match
-;; anything and is almost certainly a typo — throw with the fix.
-;; Registered-but-uninstalled attrs pass through untouched (datahike's
-;; empty/default result is already the honest answer).
-
-(defn- where-clause-attrs
-  "Every attribute keyword a `:where` clause names, recursively through
-   `not`/`or`/`and`/`or-join`/`not-join` and the `get-else`/`missing?`
-   fn clauses. Conservative: anything unrecognized contributes nothing
-   (rules, predicates, bindings)."
-  [clause]
-  (cond
-    ;; compound: (not …) (or …) (and …) (or-join [vars] …) (not-join …)
-    (seq? clause)
-    (let [[op & body] clause]
-      (cond
-        (contains? '#{not or and} op)
-        (mapcat where-clause-attrs body)
-        (contains? '#{or-join not-join} op)
-        (mapcat where-clause-attrs (rest body))
-        :else []))
-
-    (vector? clause)
-    (if (seq? (first clause))
-      ;; fn/predicate clause — only the attr-naming builtins matter:
-      ;; [(get-else $ ?e :attr default) ?x] / [(missing? $ ?e :attr)].
-      (let [[f & fargs] (first clause)]
-        (if (contains? '#{get-else missing?} f)
-          (take 1 (filter keyword? fargs))
-          []))
-      ;; data pattern [e a v …] — skip a leading src symbol ($/$x);
-      ;; the attr is the second slot when it's a keyword.
-      (let [items (if (and (symbol? (first clause))
-                           (str/starts-with? (str (first clause)) "$"))
-                    (rest clause)
-                    clause)
-            a     (second items)]
-        (if (keyword? a) [a] [])))
-
-    :else []))
-
-(defn- query-where-clauses
-  "The `:where` clauses of a query in vector or map form; nil for
-   string queries (unguarded — third-party passthrough)."
-  [q]
-  (cond
-    (map? q)    (:where q)
-    (vector? q) (->> q (drop-while #(not= :where %)) rest seq)
-    :else       nil))
-
-(defn- assert-known-query-attrs!
-  "Throw the legible typo error when `q` names attrs that are neither
-   installed on `db` nor registered in seon.schema (`:db/*` system
-   attrs exempt). See the guard comment above — datalog returns a
-   SILENT #{} for these, which reads as \"no data\" when the truth is
-   \"no such attribute\"."
-  [db q]
-  (when-let [clauses (query-where-clauses q)]
-    (let [named     (distinct (mapcat where-clause-attrs clauses))
-          installed (installed-schema* db)
-          unknown   (->> named
-                         (remove system-pull-attr?)
-                         (remove #(contains? installed %))
-                         (remove schema/registered?)
-                         seq)]
-      (when unknown
-        (let [msg (str "Query names attribute(s) "
-                       (pr-str (vec (sort unknown)))
-                       " that this database has never seen — not installed "
-                       "in the datahike schema and not registered in "
-                       "seon.schema, so the query can only return empty. "
-                       "Most likely a typo: check spelling against "
-                       "(seon.db/installed-schema db). If the attr is new, "
-                       "(seon.schema/register! <attr> <type>) and transact "
-                       "data first.")]
-          ;; FLAT ex-data — `:seon.error/kind` at the top level, the ONE
-          ;; convention every kind-bearing throw uses (C43); ->map lifts
-          ;; it to the envelope top (the ONE read position, C45).
-          (throw (ex-info msg
-                          {:seon.error/kind :user-input
-                           ::missing-attrs  (vec (sort unknown))
-                           ::query          q})))))))
-
-(defn- pull-pattern-attrs
-  "Every attr keyword an explicit pull pattern names, recursively
-   through map specs (`{:ref-attr [subpattern]}`) and attr-with-opts.
-   Wildcards and recursion limits contribute nothing."
-  [pattern]
-  (letfn [(walk [acc spec]
-            (reduce
-              (fn [acc item]
-                (if (map? item)
-                  (reduce-kv
-                    (fn [acc k v]
-                      (let [acc (if-let [a (pattern-attr k)] (conj acc a) acc)]
-                        (if (sequential? v) (walk acc v) acc)))
-                    acc item)
-                  (if-let [a (pattern-attr item)] (conj acc a) acc)))
-              acc spec))]
-    (walk #{} pattern)))
-
-(defn- filter-pull-pattern
-  "Rewrite `pattern` without the items naming attrs in `drop-set`
-   (forward forms). Map-spec entries whose subpattern filters to empty
-   are dropped whole (their value could only have pulled nothing)."
-  [pattern drop-set]
-  (letfn [(drop-attr? [item]
-            (when-let [a (pattern-attr item)]
-              (contains? drop-set (forward-attr a))))
-          (walk [spec]
-            (into []
-                  (keep (fn [item]
-                          (cond
-                            (map? item)
-                            (let [m (reduce-kv
-                                      (fn [m k v]
-                                        (cond
-                                          (drop-attr? k) m
-                                          (sequential? v)
-                                          (let [v' (walk v)]
-                                            (if (seq v') (assoc m k v') m))
-                                          :else (assoc m k v)))
-                                      {} item)]
-                              (when (seq m) m))
-                            (drop-attr? item) nil
-                            :else item)))
-                  spec))]
-    (walk pattern)))
-
-(defn- guarded-pull
-  "[[pull]]'s body: d/pull behind the uninstalled-attr guard. Returns
-   the pulled map (or nil); throws the legible typo error. nil when
-   the guard filters the whole pattern away (no attr could have
-   matched ⇒ same result datahike returns for a pattern of
-   installed-but-absent attrs)."
-  [db pattern ref budget-request]
-  (let [named       (pull-pattern-attrs pattern)
-        installed   (installed-schema* db)
-        uninstalled (->> named
-                         (map forward-attr)
-                         (remove system-pull-attr?)
-                         (remove #(contains? installed %))
-                         distinct)
-        {registered   true
-         unregistered false} (group-by (comp boolean schema/registered?)
-                                       uninstalled)]
-    (when (seq unregistered)
-      (let [msg (str "Pull pattern names attribute(s) "
-                     (pr-str (vec (sort unregistered)))
-                     " that this database has never seen — not installed in "
-                     "the datahike schema and not registered in seon.schema. "
-                     "Most likely a typo: check spelling against "
-                     "(seon.db/installed-schema db). If the attr is new, "
-                     "(seon.schema/register! <attr> <type>) and transact "
-                     "data first — datahike installs attr schema lazily at "
-                     "first transact!.")]
-        ;; FLAT ex-data — same convention as the query guard above (C43).
-        (throw (ex-info msg
-                        {:seon.error/kind :user-input
-                         ::missing-attrs  (vec (sort unregistered))
-                         ::pull-pattern   pattern}))))
-    (when-let [eid (resolve-existing-eid db ref)]
-      (if (empty? registered)
-        (d/pull db (merge {:selector pattern :eid eid}
-                          (clamp-budget pull-budget-ceilings budget-request)))
-        (let [pattern' (filter-pull-pattern pattern (set registered))]
-          (when (seq pattern')
-            (d/pull db (merge {:selector pattern' :eid eid}
-                              (clamp-budget pull-budget-ceilings
-                                            budget-request)))))))))
-
-(defn- execute-pull
-  "Run one guarded pull and capture its normalized request/result when bound."
-  [db pattern ref budget-request]
-  (let [budget (clamp-budget pull-budget-ceilings budget-request)
-        result (guarded-pull db pattern ref budget)]
-    (when-let [captures (internal/current-operation-captures)]
-      (internal/record-operation!
-        captures :seon.db.read.operation/pull db
-        (merge {::pull-pattern pattern ::ref ref} (captured-budget budget))
-        result true))
-    result))
-
 (defn ^{:async true :seon.fn/agent-facing? true} pull
-  "Pull an entity by ref using a pull pattern (sync).
-
-   Returns the pulled map, or nil if the ref doesn't resolve.
-
-   - map-in:     (db/pull {::db/pull-pattern '[*] ::db/ref eid})
-   - positional, mirroring datahike: (db/pull <db> selector eid)
-   - positional, db OMITTED — auto-injects from `*conn*` (arity
-     disambiguates): (db/pull selector eid)
-
-   The `ref` is a raw eid OR a LOOKUP-REF `[identity-attr value]` — use
-   the lookup-ref so you never hand-find a numeric eid. The value must be
-   the attr's STORED type: :seon.fn/sym is a :string, so pass the STRING
-   — a quoted symbol THROWS (\"Cannot compare String to Symbol\"):
-
-     (db/pull '[:seon.fn/sym :seon.fn/arglists :seon.fn/doc]
-              [:seon.fn/sym \"seon.db/query\"])     ; STRING value, not 'sym
-     ;; wildcard everything: (db/pull '[*] [:seon.fn/sym \"seon.db/query\"])
-     ;; follow a ref and see the full story of what it points at — pull
-     ;; the whole entity AND expand its ref'd owner inline:
-     (db/pull '[* {:owner [*]}] id)   ; {:db/id N … :owner {:db/id M …}}
-
-   GUARDED against the lazy-install trap (see [[installed-schema]]):
-   datahike installs an attr's schema at its first transact!, and
-   raw `d/pull` THROWS a cryptic resolve-datom error when an explicit
-   pattern names a never-installed attr. Here, per uninstalled attr:
-
-   - REGISTERED in seon.schema → silently filtered from the pattern.
-     Provably equivalent to the result had the attr been installed
-     with zero rows (the key would be absent either way), so valid
-     pulls are unchanged and nothing is masked — \"no data yet\"
-     renders as no data.
-   - NOT registered → a legible throw naming the attr(s) and the fix,
-     because silently filtering an unknown attr would mask typos.
-     (`:db/*` system attrs are exempt, mirroring datahike.)
-
-   Valid pulls — every named attr installed — run exactly as before."
+  "Pull one entity as ordinary data."
   {:malli/schema
    [:function
     [:=> [:cat ::pull-request] :any]
     [:=> [:catn [::selector [:vector :any]] [::eid :any]] :any]]}
-  ([req]
-   (let [base (await (read-request-base! req))]
+  ([request]
+   (let [base (await (read-request-base! request))]
      (if (error-value? base)
        base
-       (let [wire-request
-             (protocol/pull-request
-              (merge base
-                     {::protocol/selector (::pull-pattern req)
-                      ::protocol/entity-id (::ref req)}
-                     (read-resource-options req)))
-             response (await (send-request! wire-request 30000))]
+       (let [response
+             (await
+              (send-request!
+               (protocol/pull-request
+                (merge base
+                       {::protocol/selector (::pull-pattern request)
+                        ::protocol/entity-id (::ref request)}
+                       (read-resource-options request)))
+               30000))]
          (cond
            (error-value? response) response
            (not (::protocol/success? response)) (response-error response)
            :else (::protocol/result response))))))
-  ([selector eid]
-   (await (pull {::pull-pattern selector ::ref eid}))))
+  ([selector entity-id]
+   (await (pull {::pull-pattern selector ::ref entity-id}))))
 
-(defn ^{:async true :seon.fn/agent-facing? true} pull-many
-  "Pull several entity refs in input order at one exact coordinate."
-  {:malli/schema [:=> [:cat ::pull-many-request] :any]}
-  [request]
+(defn ^{:async true :seon.fn/agent-facing? true} pull-many [request]
   (let [base (await (read-request-base! request))]
     (if (error-value? base)
       base
-      (let [wire-request
-            (protocol/pull-many-request
-             (merge base
-                    {::protocol/selector (::pull-pattern request)
-                     ::protocol/entity-ids (::refs request)}
-                    (read-resource-options request)))
-            response (await (send-request! wire-request 30000))]
+      (let [response
+            (await
+             (send-request!
+              (protocol/pull-many-request
+               (merge base
+                      {::protocol/selector (::pull-pattern request)
+                       ::protocol/entity-ids (::refs request)}
+                      (read-resource-options request)))
+              30000))]
         (cond
           (error-value? response) response
           (not (::protocol/success? response)) (response-error response)
           :else (::protocol/result response))))))
 
-(defn ^{:async true :seon.fn/agent-facing? true} execute-many
-  "Run independent database reads in parallel against one immutable point.
+(defn ^{:async true :seon.fn/agent-facing? true} installed-schema
+  ([] (await (installed-schema {})))
+  ([request]
+   (let [base (await (read-request-base! request))]
+     (if (error-value? base)
+       base
+       (let [response (await (send-request! (protocol/schema-request base) 15000))]
+         (cond
+           (error-value? response) response
+           (not (::protocol/success? response)) (response-error response)
+           :else (::protocol/schema response)))))))
 
-   Members are ordinary protocol query, pull, pull-many, schema, or index-page
-   maps and results retain their vector positions. The authority applies one
-   aggregate result bound in addition to every member's own resource bounds."
-  {:malli/schema [:=> [:cat ::execute-many-request] :any]}
-  [request]
+(defn ^{:async true :seon.fn/agent-facing? true} execute-many [request]
   (let [base (await (read-request-base! request))]
     (if (error-value? base)
       base
-      (let [wire-request
-            (protocol/execute-many-request
-             (cond-> (assoc base ::protocol/members (::members request))
-               (::max-result-weight request)
-               (assoc :datahike.resource/max-result-weight
-                      (::max-result-weight request))))
-            response (await (send-request! wire-request 60000))]
+      (let [response
+            (await
+             (send-request!
+              (protocol/execute-many-request
+               (cond-> (assoc base ::protocol/members (::members request))
+                 (::max-result-weight request)
+                 (assoc :datahike.resource/max-result-weight
+                        (::max-result-weight request))))
+              60000))]
         (cond
           (error-value? response) response
           (not (::protocol/success? response)) (response-error response)
           :else {::coordinate (::protocol/coordinate response)
                  ::results (::protocol/results response)})))))
 
-(defn ^{:async true :seon.fn/agent-facing? true} index-page
-  "Read one eager bounded page in Datahike's native index order."
-  {:malli/schema [:=> [:cat ::index-page-request] :any]}
-  [request]
+(defn ^{:async true :seon.fn/agent-facing? true} index-page [request]
   (let [base (await (read-request-base! request))]
     (if (error-value? base)
       base
@@ -2053,10 +653,8 @@
                             ::protocol/prefix (vec (or (::components request) []))
                             ::protocol/direction (::direction request)
                             ::protocol/limit (::index-limit request))
-               (::history? request)
-               (assoc ::protocol/history? true)
-               (::cursor request)
-               (assoc ::protocol/cursor (::cursor request))
+               (::history? request) (assoc ::protocol/history? true)
+               (::cursor request) (assoc ::protocol/cursor (::cursor request))
                (::max-result-weight request)
                (assoc :datahike.resource/max-result-weight
                       (::max-result-weight request))))
@@ -2071,173 +669,24 @@
             (::protocol/cursor response)
             (assoc ::cursor (::protocol/cursor response))))))))
 
-(defn ^:async knn-search!
-  "Run one coordinate-pinned semantic search through the database authority.
-
-   This is the database boundary used by `seon.embed`; agents use the higher
-   level embedding functions rather than this protocol-shaped operation."
-  {:malli/schema [:=> [:cat ::knn-search-request] :any]}
-  [request]
+(defn ^:async knn-search! [request]
   (let [base (await (read-request-base! request))]
     (if (error-value? base)
       base
-      (let [wire-request
-            (protocol/knn-search-request
-             (merge base
-                    (select-keys request
-                                 [::protocol/query ::protocol/limit
-                                  ::protocol/entity-ids])))
-            response (await (send-request! wire-request 60000))]
+      (let [response
+            (await
+             (send-request!
+              (protocol/knn-search-request
+               (merge base
+                      (select-keys request
+                                   [::protocol/query ::protocol/limit
+                                    ::protocol/entity-ids])))
+              60000))]
         (cond
           (error-value? response) response
           (not (::protocol/success? response)) (response-error response)
           :else (::protocol/hits response))))))
 
-(defn- raw-entity
-  "Resolve a Datahike Entity without crossing the public observation boundary."
-  [db ref]
-  (when-let [eid (resolve-existing-eid db ref)]
-    (d/entity db eid)))
-
-(defn- execute-entity-lazy
-  "Resolve a lazy Entity and record a deliberately non-replayable read."
-  [db ref]
-  (let [result (raw-entity db ref)]
-    (when-let [captures (internal/current-operation-captures)]
-      (internal/record-operation!
-        captures :seon.db.read.operation/entity-lazy db
-        {::ref ref} result false))
-    result))
-
-(defn entity-lazy
-  "INTERNAL: return the RAW datahike Entity for a ref (lazy, map-like).
-
-   Ref attrs navigate lazily to nested Entities — the render
-   hot-path (`seon.agent.ctx.transcript/session-turns` walks agent → sessions →
-   turns → evals) depends on this lazy traversal, so it MUST NOT touch.
-
-   Not part of the agent-taught surface — agents call [[entity]] (which
-   returns a plain touched map) or [[pull]]. Same call shapes as [[entity]]."
-  {:malli/schema
-   [:function
-    [:=> [:cat [:or ::entity-request :any]] :any]
-    [:=> [:catn [::db ::db-val] [::eid :any]] :any]]}
-  ([req]
-   (if (map? req)
-     (let [{::keys [ref db conn] :or {conn *conn*}} req
-           db (or db @(internal/resolve-conn conn))]
-       (execute-entity-lazy db ref))
-     (execute-entity-lazy @(internal/resolve-conn *conn*) req)))
-  ([db eid]
-   (execute-entity-lazy db eid)))
-
-(defn- touch->map
-  "Touch a datahike Entity and return a PLAIN map — `:db/id` plus every
-   loaded attr. nil-safe (an unresolved ref → nil). Ref values stay as
-   datahike's loaded form (nested Entity / set of Entities), which prints
-   as `{:db/id N}` — readable, and the agent drills via the eid + a
-   follow-up `entity`/`pull` rather than walking lazily."
-  [e]
-  (when e
-    (dentity/touch e)
-    (into {:db/id (:db/id e)} e)))
-
-(defn- execute-entity
-  "Resolve and touch an entity under one public read observation."
-  [db ref]
-  (let [result (touch->map (raw-entity db ref))]
-    (when-let [captures (internal/current-operation-captures)]
-      (internal/record-operation!
-        captures :seon.db.read.operation/entity db {::ref ref} result true))
-    result))
-
-(defn ^{:async true :seon.fn/agent-facing? true} entity
-  "Fetch one stored record by its id, with all its fields.
-
-   Looks up an entity by eid or lookup-ref, as a plain map (sync).
-   Returns `:db/id` plus every attr on the entity (a TOUCHED snapshot), nil if the
-   ref doesn't resolve. The agent reads data, never a lazy datahike handle
-   — a raw Entity prints opaquely and re-reads as `[object Object]`. Drill
-   into a ref attr with a follow-up `entity`/`pull` on its
-   `:db/id`.
-
-   - map-in:     (db/entity {::db/ref [::name \"Alpha\"]})
-   - positional, mirroring datahike: (db/entity <db> eid)
-   - positional, db OMITTED — a bare eid/lookup-ref auto-injects the
-     db from `*conn*`: (db/entity eid)
-
-   `ref` is a raw eid OR a LOOKUP-REF `[identity-attr value]` whose value
-   is the attr's STORED type. :seon.fn/sym is a :string ⇒ pass the STRING
-   (a quoted symbol THROWS \"Cannot compare String to Symbol\"):
-
-     (db/entity {::db/ref [:seon.fn/sym \"seon.db/transact!\"]})
-     ; ⟹ «map: :db/id N, :seon.fn/sym \"seon.db/transact!\", :seon.fn/arglists \"…\", …»"
-  ;; The 1-arg arity accepts EITHER a request map OR a bare eid/lookup-ref
-  ;; (auto-inject from *conn*) — one arity-1 `:=>` (the body branches on
-  ;; map?); a separate eid-only `:=>` would collide with the request arity.
-  {:malli/schema
-   [:=> [:cat [:or ::entity-request ::entity-ref]] :any]}
-  [request]
-  (await
-   (pull (if (map? request)
-           (assoc request ::pull-pattern '[*])
-           {::pull-pattern '[*] ::ref request}))))
-
-;; ---------------------------------------------------------------------------
-;; Temporal — derive a db VALUE at another point in time. Reads normally run
-;; against the db injected from *conn*; these let you make your OWN db value
-;; (history / as-of / since) and pass it positionally to query/pull/entity.
-;; Datomic/datahike shape: db in, db out.
-;; ---------------------------------------------------------------------------
-
-;; A datahike time-point: a tx-id (int), or a Date/txInstant (`inst?`).
-(schema/register! ::time-point [:or :int 'inst?])
-
-(defn ^:seon.fn/agent-facing? history
-  "A db value spanning ALL of time — assertions and retractions.
-
-   Every datom ever, not just the now-true view. Read it with a 5-tuple `:where` so the tx and
-   the add/retract flag bind. The db is injected from your one connection;
-   omit it:
-
-     (db/query '[:find ?v ?tx ?added
-                 :where [?e :seon.ns/name ?v ?tx ?added]]
-               (db/history))               ; ?added = true add, false retract
-
-   Pass an explicit db to branch history off a snapshot you already hold."
-  {:malli/schema [:function
-                  [:=> [:cat] :any]
-                  [:=> [:catn [::db ::db-val]] :any]]}
-  ([] (history @(internal/resolve-conn *conn*)))
-  ([db]
-   (let [result (d/history db)]
-     (when-let [captures (internal/current-operation-captures)]
-       (internal/record-operation!
-         captures :seon.db.read.operation/history db {} result false))
-     result)))
-
-(defn ^:seon.fn/agent-facing? as-of
-  "A db value as it was AT `t` — time-travel for reads.
-
-   `t` is a tx-id, Date, or txInstant. query/pull/entity against it see only what was true then:
-
-     (db/query '[:find ?title :where [?e ::doc-id \"d1\"] [?e ::title ?title]]
-               (db/as-of last-week-tx))    ; db omitted ⇒ your *conn* at t
-
-   2-arity rewinds an explicit db you already hold: (db/as-of db t)."
-  {:malli/schema [:function
-                  [:=> [:cat ::time-point] :any]
-                  [:=> [:catn [::db ::db-val] [::time-point ::time-point]] :any]]}
-  ([t] (as-of @(internal/resolve-conn *conn*) t))
-  ([db t]
-   (let [result (d/as-of db t)]
-     (when-let [captures (internal/current-operation-captures)]
-       (internal/record-operation!
-         captures :seon.db.read.operation/as-of db
-         {::time-point t} result false))
-     result)))
-
-(schema/register! ::at-coordinate-response [:or ::db-val ::error])
 (schema/register! ::head-coordinate ::coordinate)
 (schema/register! ::transaction-id :seon.db.protocol/transaction-id)
 (schema/register!
@@ -2245,372 +694,32 @@
  [:map {:closed true}
   [::head-coordinate ::head-coordinate]
   [::transaction-id ::transaction-id]])
-(schema/register!
- ::resolve-transaction-coordinate-response
- [:or ::coordinate ::error])
 
-(defn ^{:async true :seon.fn/agent-facing? false}
-  resolve-transaction-coordinate!
-  "Resolve a transaction's original immutable commit coordinate."
-  {:malli/schema
-   [:=> [:cat ::resolve-transaction-coordinate-request]
-    ::resolve-transaction-coordinate-response]}
+(defn ^:async resolve-transaction-coordinate!
   [{::keys [head-coordinate transaction-id]}]
   (try
-    (let [response
-          (await
-           (if-let [{::keys [database-name]} (active-session)]
+    (if-let [{::keys [database-name]} (active-session)]
+      (let [response
+            (await
              (send-request!
               (protocol/resolve-transaction-coordinate-request
                {::protocol/request-id (str (random-uuid))
                 ::protocol/database-name database-name
                 ::protocol/head-coordinate head-coordinate
                 ::protocol/transaction-id transaction-id})
-              30000)
-             (js/Promise.resolve
-              (session-error "This process has no open database session."
-                             {}))))]
-      (if (::protocol/success? response)
-        (let [resolved (::protocol/coordinate response)]
-          (if (and (= (db.coordinate/attachment head-coordinate)
-                      (db.coordinate/attachment resolved))
-                   (= transaction-id (::db.coordinate/t resolved)))
-            resolved
-            (error/->map
-             (ex-info
-              "The writer returned an invalid transaction coordinate."
-              {::head-coordinate head-coordinate
-               ::transaction-id transaction-id
-               ::coordinate resolved
-               :seon.error/kind :core-bug}))))
-        (if (error-value? response)
-          response
-          (response-error response))))
-    (catch :default exception
-      (error/->map exception))))
+              30000))]
+        (cond
+          (error-value? response) response
+          (not (::protocol/success? response)) (response-error response)
+          :else (::protocol/coordinate response)))
+      (session-error "This process has no open database session." {}))
+    (catch :default exception (error/->map exception))))
 
-(defn ^{:async true :seon.fn/agent-facing? true} at-coordinate
-  "Resolve an exact immutable historical database value.
-
-   A complete coordinate pins both the containing Datahike commit and the
-   temporal cut inside it. `commit-as-db` touches storage and is asynchronous
-   on CLJS, so this function is honestly `^:async`; agent eval awaits it.
-   A cut at the container's exact head returns the committed container with the
-   validated requested branch reattached; only a strict historical cut returns
-   Datahike's temporal wrapper.
-
-   Omit `conn` to use `*conn*`. The selected coordinate must name that
-   connection's database and branch. A missing retained commit, wrong
-   attachment, partial coordinate, or out-of-range t returns a structured
-   `:seon.error/*` value instead of throwing.
-
-     (db/at-coordinate
-       {:seon.db.coordinate/database-id #uuid \"...\"
-        :seon.db.coordinate/branch :db
-        :seon.db.coordinate/commit-id #uuid \"...\"
-        :seon.db.coordinate/t 536870914})"
-  {:malli/schema
-   [:function
-    [:=> [:catn [::coordinate ::coordinate]] ::at-coordinate-response]
-    [:=> [:catn [::conn ::conn] [::coordinate ::coordinate]]
-     ::at-coordinate-response]]}
-  ([coordinate]
-   (await (at-coordinate *conn* coordinate)))
-  ([conn coordinate]
-   (try
-     (when-not (schema/valid-candidate-value? ::coordinate coordinate)
-       (throw
-        (ex-info "at-coordinate requires one complete database coordinate."
-                 {::coordinate coordinate
-                  :seon.error/kind :user-input})))
-     (let [connection (internal/resolve-conn conn)
-           current-coordinate (db.coordinate/resolved @connection)]
-       (when-not (db.coordinate/same-attachment?
-                  current-coordinate coordinate)
-         (throw
-          (ex-info "The coordinate names a different database attachment."
-                   {::coordinate coordinate
-                    ::current-coordinate current-coordinate
-                    :seon.error/kind :user-input})))
-       (let [stored-container
-             (await
-              (d/commit-as-db
-               connection (::db.coordinate/commit-id coordinate)))]
-         (when-not stored-container
-           (throw
-            (ex-info "The coordinate's retained commit was not found."
-                     {::coordinate coordinate
-                      :seon.error/kind :user-input})))
-         (let [container
-               (assoc-in stored-container [:config :branch]
-                         (::db.coordinate/branch coordinate))
-               resolved
-               (db.coordinate/at
-                {::db.coordinate/db-value container
-                 ::db.coordinate/attachment
-                 (db.coordinate/attachment coordinate)
-                 ::db.coordinate/target-t (::db.coordinate/t coordinate)})]
-           (when-not (= coordinate resolved)
-             (throw
-              (ex-info "The retained commit does not resolve this coordinate."
-                       {::coordinate coordinate
-                        ::resolved-coordinate resolved
-                        :seon.error/kind :user-input})))
-           (if (= (::db.coordinate/t coordinate)
-                  (dbi/-max-tx container))
-             container
-             (d/as-of container (::db.coordinate/t coordinate))))))
-     (catch :default e
-       (error/->map e)))))
-
-(defn ^:seon.fn/agent-facing? since
-  "The complement of [[as-of]] — a db value of datoms added after `t`.
-
-   Diff \"what changed since\" a tx you remembered:
-
-     (db/query '[:find ?e :where [?e ::status :done]] (db/since last-seen-tx))
-
-   2-arity takes an explicit db: (db/since db t)."
-  {:malli/schema [:function
-                  [:=> [:cat ::time-point] :any]
-                  [:=> [:catn [::db ::db-val] [::time-point ::time-point]] :any]]}
-  ([t] (since @(internal/resolve-conn *conn*) t))
-  ([db t]
-   (let [result (d/since db t)]
-     (when-let [captures (internal/current-operation-captures)]
-       (internal/record-operation!
-         captures :seon.db.read.operation/since db
-         {::time-point t} result false))
-     result)))
-
-;; The two ENDS of a time-travel domain (the `as-of`/`since` `t` range).
-;; `basis-t` is the latest tx reflected in a db value — the \"now\" end of a
-;; scrubber. `origin-t` is datahike's origin tx (`tx0`) — the floor; the first
-;; user tx is `origin-t`+1, so an `as-of` below it is the empty/pre-seed database.
-;; Both are valid [[time-point]]s usable directly with `as-of`/`since`.
-
-(def ^{:doc "Datahike's origin tx-id (`tx0`) — the floor of any time-travel
-   domain. `(as-of … origin-t)` is the empty database before the first user tx."}
-  origin-t dconst/tx0)
-
-(defn- basis-t*
-  "Read a db coordinate without crossing the read-observation boundary."
-  [db]
-  (if (instance? AsOfDB db)
-    (dbi/-time-point db)
-    (dbi/-max-tx db)))
-
-(defn ^{:async true :seon.fn/agent-facing? true} head-coordinate
-  "The complete coordinate of one committed database value.
-
-   Omit db to identify the current immutable head. Temporal `as-of` wrappers
-   are not committed containers and fail; pin a complete coordinate before
-   constructing a filtered historical view."
-  {:malli/schema [:=> [:cat] :any]}
-  []
-  (let [response (await (resolve-head-response!))]
-    (cond
-      (error-value? response) response
-      (not (::protocol/success? response)) (response-error response)
-      :else (::protocol/coordinate response))))
-
-(defn ^:seon.fn/agent-facing? basis-t
-  "The selected tx coordinate of a db value.
-
-   For an [[as-of]] value this is its selected time point, not the later head
-   of its origin database. For current, history, and [[since]] values this is
-   the origin head. Omit db ⇒ your `*conn*`'s current basis. The result is a
-   [[time-point]] usable directly with `as-of`/`since`."
-  {:malli/schema [:function
-                  [:=> [:cat] ::time-point]
-                  [:=> [:catn [::db ::db-val]] ::time-point]]}
-  ([] (basis-t @(internal/resolve-conn *conn*)))
-  ([db]
-   (let [result (basis-t* db)]
-     (when-let [captures (internal/current-operation-captures)]
-       (internal/record-operation!
-         captures :seon.db.read.operation/basis-t db {} result true))
-     result)))
-
-(def ^:private replayable-read-operations
-  #{:seon.db.read.operation/query
-    :seon.db.read.operation/index-datoms
-    :seon.db.read.operation/rseek-datoms
-    :seon.db.read.operation/installed-schema
-    :seon.db.read.operation/pull
-    :seon.db.read.operation/entity
-    :seon.db.read.operation/basis-t})
-
-(def ^:private replayable-read-request-validators
-  ;; Malli's `validate` rebuilds a validator per call. Replay is a broadcast
-  ;; hot path, so compile each stable registered request shape once, lazily.
-  ;; A hot-reloaded namespace declares schemas into the replacement collector
-  ;; before the coordinator activates that complete projection. Eager
-  ;; top-level compilation would resolve a newly introduced reference against
-  ;; the still-active prior projection and transiently fail the module load.
-  {:seon.db.read.operation/query (delay (m/validator ::query-read-request))
-   :seon.db.read.operation/index-datoms (delay (m/validator ::index-read-request))
-   :seon.db.read.operation/rseek-datoms (delay (m/validator ::rseek-read-request))
-   :seon.db.read.operation/installed-schema (delay (m/validator ::empty-read-request))
-   :seon.db.read.operation/pull (delay (m/validator ::pull-read-request))
-   :seon.db.read.operation/entity (delay (m/validator ::entity-read-request))
-   :seon.db.read.operation/basis-t (delay (m/validator ::empty-read-request))})
-
-(defn- valid-replay-request?
-  "True when a known operation carries its exact normalized request shape."
-  [operation request]
-  (when-let [validator (get replayable-read-request-validators operation)]
-    ((force validator) request)))
-
-(defn- replayable-observation-request
-  "Return one safe denormalized request, or nil when replay must widen."
-  [{::keys [read-operation read-source read-request read-result
-            read-replayable?]}]
-  (when (and read-replayable?
-             (= :seon.db.read.source/captured read-source)
-             (contains? replayable-read-operations read-operation)
-             (valid-replay-request? read-operation read-request)
-             (internal/normalized-read-value? read-request)
-             (internal/normalized-read-value? read-result))
-    (let [[request request-safe?]
-          (internal/denormalize-read-value read-request)]
-      (when request-safe? request))))
-
-(def ^:private broad-read-candidate
-  {::read-candidate-broad? true
-   ::read-candidate-attributes #{}})
-
-(defn- attribute-read-candidate
-  [attributes]
-  {::read-candidate-broad? false
-   ::read-candidate-attributes attributes})
-
-(defn- exact-index-attribute
-  "Return the attribute from one exact AEVT/AVET prefix, or nil."
-  [request exact?]
-  (let [attribute (first (::components request))]
-    (when (and exact?
-               (contains? #{:aevt :avet} (::index request))
-               (qualified-keyword? attribute))
-      attribute)))
-
-(defn read-observation-candidate
-  "Project one captured read into conservative attribute routing data.
-
-   Literal query attributes and exact AEVT/AVET prefixes narrow to concrete
-   attributes. Every unsafe, opaque, or unproved observation remains broad.
-   Exact replay remains the final invalidation authority."
-  {:malli/schema [:=> [:cat ::read-observation-candidate-request]
-                  ::read-candidate]}
-  [{observation ::read-observation}]
-  (if-let [request (replayable-observation-request observation)]
-    (case (::read-operation observation)
-      :seon.db.read.operation/query
-      (let [attributes (d/query-attribute-dependencies (::query request))]
-        (if (and (set? attributes)
-                 (every? qualified-keyword? attributes))
-          (attribute-read-candidate attributes)
-          broad-read-candidate))
-
-      :seon.db.read.operation/index-datoms
-      (if-let [attribute (exact-index-attribute request (not (::seek? request)))]
-        (attribute-read-candidate #{attribute})
-        broad-read-candidate)
-
-      :seon.db.read.operation/rseek-datoms
-      (if-let [attribute (exact-index-attribute request (::index-prefix? request))]
-        (attribute-read-candidate #{attribute})
-        broad-read-candidate)
-
-      broad-read-candidate)
-    broad-read-candidate))
-
-(defn- replay-read-result
-  "Replay one known semantic read without recording another observation."
-  [db operation request]
-  (case operation
-    :seon.db.read.operation/query
-    (raw-query db (::query request) (or (::args request) []) request)
-
-    :seon.db.read.operation/index-datoms
-    (raw-index-datoms db
-                      (::index request)
-                      (::components request)
-                      (::index-limit request)
-                      (::seek? request))
-
-    :seon.db.read.operation/rseek-datoms
-    (raw-rseek-datoms db
-                      (::index request)
-                      (::components request)
-                      (::index-limit request)
-                      (::index-prefix? request))
-
-    :seon.db.read.operation/installed-schema
-    (installed-schema* db)
-
-    :seon.db.read.operation/pull
-    (guarded-pull db (::pull-pattern request) (::ref request) request)
-
-    :seon.db.read.operation/entity
-    (touch->map (raw-entity db (::ref request)))
-
-    :seon.db.read.operation/basis-t
-    (basis-t* db)))
-
-(defn read-observation-changed?
-  "True when a captured database read can no longer produce its result.
-
-   Replays the same normalized semantic read against the supplied current db
-   value. Query, guarded pull, touched entity, installed-schema, and basis-t
-   observations use their private raw helpers, so calling this function inside
-   [[capture-reads]] never creates observations of its own.
-
-   Returns true conservatively when the observation is foreign,
-   non-replayable, temporal, lazy, unknown, malformed, or produces a runtime
-   value the observer cannot normalize. No database or Entity handle is stored
-   or reconstructed from the observation. This is an invalidation predicate,
-   not a result cache."
-  {:malli/schema [:=> [:cat ::read-observation-changed-request]
-                  ::read-observation-changed?]}
-  [{::keys [db read-observation]}]
-  (let [{::keys [read-operation read-result]} read-observation]
-    (if-let [request (replayable-observation-request read-observation)]
-      (try
-        (let [current-result
-              (replay-read-result db read-operation request)
-              [normalized-current current-safe?]
-              (internal/normalize-read-value db current-result)]
-          (or (not current-safe?)
-              (not= read-result normalized-current)))
-        (catch :default _
-          true))
-      true)))
-
-;; ---------------------------------------------------------------------------
-;; Listeners
-;; ---------------------------------------------------------------------------
+;;; Transaction interests
 
 (declare unlisten!)
 
-(defn ^:async listen!
-  "Install a tx-listener; safe by default, never crashes the pod.
-
-   Handler throws / rejections are caught and logged. `::db/handler` is a fn
-   of one map:
-
-     {:seon.db/tx-report   <raw datahike report — escape hatch>
-      :seon.db/db          <post-commit db value, ready to query>
-      :seon.db/db-before   <pre-commit db value, for change-detection>
-      :seon.db/datoms      [{:seon.db/e :seon.db/a :seon.db/v
-                             :seon.db/tx :seon.db/added?} ...]
-      :seon.db/attr-index  {:my.ns/attr [datoms-touching-it ...] ...}}
-
-   Sync handler return blocks transact (back-pressure); Promise return
-   is fire-and-forget. Without `::db/key` a random-uuid is used; the
-   same key replaces. Returns `{:seon.db/key <key>}` for [[unlisten!]]."
-  {:malli/schema [:=> [:cat ::listen-request] :any]}
-  [{::keys [handler key query datom-patterns]}]
+(defn ^:async listen! [{::keys [handler key query datom-patterns]}]
   (if-let [{::keys [session database-name attachment] :as state}
            (active-session)]
     (let [request-id (if key (str key) (str (random-uuid)))
@@ -2623,13 +732,11 @@
                     ::protocol/database-name database-name
                     ::protocol/attachment attachment}
              query (assoc ::protocol/query-form query)
-             datom-patterns
-             (assoc ::protocol/datom-patterns datom-patterns)))]
+             datom-patterns (assoc ::protocol/datom-patterns datom-patterns)))]
       (swap! !session assoc-in [::interest-handlers request-id]
              {::owner owner ::handler handler})
       (let [response (await (request-on-session! session request 15000))]
-        (if (and (not (error-value? response))
-                 (::protocol/success? response))
+        (if (and (not (error-value? response)) (::protocol/success? response))
           {::key request-id ::coordinate (::protocol/coordinate response)}
           (do
             (swap! !session
@@ -2643,34 +750,22 @@
             (if (error-value? response) response (response-error response))))))
     (session-error "This process has no open database session." {})))
 
-(defn ^:async listen-sync!
-  "Intent-revealing alias for [[listen!]] (sync handler, back-pressure)."
-  {:malli/schema [:=> [:cat ::listen-request] ::listen-response]}
-  [request]
-  (await (listen! request)))
+(defn ^:async listen-sync! [request] (await (listen! request)))
+(defn ^:async listen-async! [request] (await (listen! request)))
 
-(defn ^:async listen-async!
-  "Alias of [[listen!]] for a Promise handler (fire-and-forget)."
-  {:malli/schema [:=> [:cat ::listen-request] ::listen-response]}
-  [request]
-  (await (listen! request)))
-
-(defn ^:async unlisten!
-  "Remove a listener by key; returns `{:seon.db/ok? true}`.
-
-   Idempotent — unknown keys are a silent no-op."
-  {:malli/schema [:=> [:cat ::unlisten-request] :any]}
-  [{::keys [key]}]
+(defn ^:async unlisten! [{::keys [key]}]
   (let [request-id (str key)]
     (if-let [{::keys [session]} (active-session)]
       (if-let [entry (get-in @!session [::interest-handlers request-id])]
-        (let [request
-              (protocol/unlisten-request
-               {::protocol/request-id (str (random-uuid))
-                ::protocol/target-request-id request-id})
-              response (await (request-on-session! session request 15000))]
-          (if (and (not (error-value? response))
-                   (::protocol/success? response))
+        (let [response
+              (await
+               (request-on-session!
+                session
+                (protocol/unlisten-request
+                 {::protocol/request-id (str (random-uuid))
+                  ::protocol/target-request-id request-id})
+                15000))]
+          (if (and (not (error-value? response)) (::protocol/success? response))
             (do
               (swap! !session
                      (fn [current]
@@ -2685,306 +780,15 @@
         {::ok? true})
       {::ok? true})))
 
-;; ---------------------------------------------------------------------------
-;; Schema-bridge + boot faces (impls in seon.db.internal)
-;; ---------------------------------------------------------------------------
+;;; Pure schema/transaction transforms
 
-(defn malli->datahike-schema
-  "Derive datahike attr declarations from seon.schema registrations.
-   You normally never need this — `transact!` installs schema for
-   registered attrs automatically."
-  {:malli/schema [:=> [:catn [::attr-keys [:sequential :keyword]]] [:vector :any]]}
-  [attr-keys]
+(defn malli->datahike-schema [attr-keys]
   (internal/malli->datahike-schema attr-keys))
 
-(defn tx-meta-datahike-schema
-  "Datahike schema entries for user/process transaction provenance."
-  {:malli/schema [:=> [:cat] [:vector :any]]}
-  []
+(defn tx-meta-datahike-schema []
   (internal/tx-meta-datahike-schema))
 
-(defn decode-edn-value
-  "Read-side inverse of the bridge's mixed-`:or` EDN-string storage.
-
-   See `seon.db.internal/encode-edn-slot-values`: attrs whose Malli
-   form is a mixed-type `:or` (the render slots `:seon.render/ai` /
-   `:seon.render/html`) store as pr-str'd EDN strings; this decodes a
-   pulled value back to its real shape. Values of other attrs — and
-   non-string values from pre-encoding stores — pass through unchanged."
-  {:malli/schema [:=> [:catn [::attr :keyword] [::value :any]] :any]}
-  [attr v]
-  (if (and (string? v) (internal/edn-encoded-attr? attr))
-    (try (reader/read-string v)
-         (catch :default _ v))
-    v))
-
-(schema/register! ::preconditions? [:= true])
-(schema/register! ::assert-preconditions-request
-  [:map {:closed true}
-   [::coordinate {:optional true} ::coordinate]])
-(schema/register! ::assert-preconditions-response
-  [:map {:closed true}
-   [::preconditions? ::preconditions?]
-   [::coordinate ::coordinate]
-   [::installed-schema :map]])
-
-(defn ^:async assert-preconditions!
-  "Prove the authority database is ready for attributed application writes.
-
-   The authority owns the database configuration and history policy. This
-   Bun-side proof checks the two facts the consumer depends on: provenance
-   schemas are registered in the running program and installed at one exact
-   database coordinate. Returns that ordinary schema/coordinate evidence for
-   later cold-start checks; throws a core precondition error when it is absent."
-  {:malli/schema
-   [:function
-    [:=> [:cat] ::assert-preconditions-response]
-    [:=> [:catn [::request ::assert-preconditions-request]]
-     ::assert-preconditions-response]]}
-  ([] (await (assert-preconditions! {})))
-  ([request]
-   (let [unregistered (into []
-                            (remove schema/registered?)
-                            internal/tx-meta-attrs)]
-     (when (seq unregistered)
-       (throw
-        (ex-info "Transaction provenance schemas are not registered."
-                 {:kind :seon.boot/precondition-failed
-                  :failure :tx-meta-schema-unregistered
-                  ::attrs unregistered
-                  ::error :seon.boot/precondition-failed})))
-     (let [{acquired-coordinate ::coordinate
-            installed ::installed-schema}
-           (if (::coordinate request)
-             {::coordinate (::coordinate request)
-              ::installed-schema
-              (operation-value!
-               "precondition schema read"
-               (await (installed-schema
-                       {::coordinate (::coordinate request)})))}
-             (await (schema-evidence!)))
-           coordinate acquired-coordinate
-           missing (into []
-                         (remove #(contains? installed %))
-                         internal/tx-meta-attrs)]
-       (when (seq missing)
-         (throw
-          (ex-info "Transaction provenance schemas are not installed."
-                   {:kind :seon.boot/precondition-failed
-                    :failure :tx-meta-schema-uninstalled
-                    ::attrs missing
-                    ::coordinate coordinate
-                    ::error :seon.boot/precondition-failed})))
-       {::preconditions? true
-        ::coordinate coordinate
-        ::installed-schema installed}))))
-
-;; ---------------------------------------------------------------------------
-;; Database counts and provenance-derived scopes.
-;; ---------------------------------------------------------------------------
-
-(schema/register! ::attr-ns      :keyword)
-(schema/register! ::row-ids      [:set :int])
-(schema/register! ::attr-ns-set  [:set ::attr-ns])
-(schema/register! ::datom-count   :int)
-
-(defn datom-count
-  "Count the current datoms in a database value.
-
-   The normal current-database path reads the persistent index's maintained
-   subtree count instead of walking its datoms. Temporal or filtered database
-   wrappers have no direct `:eavt` field, so they use Datahike's wrapper-aware
-   datom view for correctness. With no argument, reads the ambient database."
-  {:malli/schema
-   [:function
-    [:=> [:cat] ::datom-count]
-    [:=> [:catn [::db ::db-val]] ::datom-count]]}
-  ([] (datom-count @*conn*))
-  ([db]
-   (if-some [eavt (:eavt db)]
-     (di/-count eavt)
-     (count (d/datoms db :eavt)))))
-
-(defn bootstrap-row-ids
-  "Entity ids whose first assertion came through boot or config.
-
-   The IDENTITY datom was transacted through the boot process (the program
-   graph index + seed) or config process (the reconcile-managed
-   declarative set: routes + skills) — the rows the boot minted.
-   Everything else is data this cluster
-   added AFTER bootstrap. Per-ROW, never per-kind-name: an
-   agent-authored `:seon.fn` row is NOT in this set; a boot-indexed
-   one is. THE shared provenance derivation — [[core-attr-namespaces]],
-   findings, and the /data browser all read this one mechanism."
-  {:malli/schema [:=> [:catn [::db ::db-val]] ::row-ids]}
-  [db]
-  (let [seed-txs (into #{}
-                       (map first)
-                       (query {::db db
-                               ::query '[:find ?tx
-                                         :where
-                                         [?tx :seon.db/process ?process]
-                                         (or
-                                           [?process :seon.db.process/id
-                                            :seon.db.process/boot]
-                                           [?process :seon.db.process/id
-                                            :seon.db.process/config])]}))
-        triples  (query {::db db
-                         ::query '[:find ?e ?a ?tx :where [?e ?a _ ?tx]]})
-        first-tx (reduce (fn [m [e _ tx]]
-                           (update m e #(if % (min % tx) tx)))
-                         {} triples)]
-    (into #{}
-          (keep (fn [[e tx]]
-                  (when (contains? seed-txs tx) e)))
-          first-tx)))
-
-;; --- provenance-scoped managed population (the reconcile handle) ----------
-;; Generalizes [[bootstrap-row-ids]]'s boot/config first-tx derivation to an
-;; arbitrary set of stable database process ids and pairs each managed entity
-;; with the `:db.unique/identity`
-;; datom(s) it carries — the population `seon.state/reconcile!` diffs a
-;; desired set against. Same single `[?e ?a ?v ?tx]` scan + min-tx-process
-;; reduce; NEVER a per-kind / per-identity-attr AEVT loop.
-(schema/register! ::managed-scope [:set ::process/id])
-(schema/register! ::managed-identity-attrs [:set :keyword])
-;; `[identity-attr identity-value]`. The value spans heterogeneous registered
-;; id types (string ids, keyword route names), hence `:any` for the value.
-(schema/register! ::identity-pair [:tuple :keyword :any])
-(schema/register! ::managed-identities [:map-of :int [:set ::identity-pair]])
-(schema/register!
-  ::managed-identities-request
-   [:map
-   [::managed-scope ::managed-scope]
-   [::managed-identity-attrs {:optional true} ::managed-identity-attrs]
-   [:seon.db/db   {:optional true} :seon.db/db]
-   [::conn        {:optional true} ::conn]])
-
-(defn managed-identities
-  "Map each managed eid to its `[identity-attr identity-value]` set.
-
-   Every entity
-   whose FIRST-assertion (min-tx) process is in `:seon.db/managed-scope`,
-   paired with the `:db.unique/identity` datom(s) it carries. PURE
-   PROVENANCE — ONE `[?e ?a ?v ?tx]` scan + a min-tx-process reduce (the same
-   derivation as [[bootstrap-row-ids]], generalized to an arbitrary process
-   scope), never a per-kind / per-identity-attr
-   AEVT loop. Eids carrying NO identity attr (component children, tx /
-   schema-def rows) are OMITTED: they are removed via their parent's
-   component cascade, never directly. THE managed-population
-   [[seon.state/reconcile!]] diffs a desired set against. Optional
-   `:seon.db/managed-identity-attrs` limits the population to entities carrying
-   one of those identity attributes; this prevents a process that authors
-   several independent desired sets from sweeping facts outside the set being
-   reconciled. Reads default to `*conn*`; pass `:seon.db/db` or
-   `:seon.db/conn` for another store."
-  {:malli/schema [:=> [:cat ::managed-identities-request] ::managed-identities]}
-  [{::keys [managed-scope managed-identity-attrs conn]
-    db :seon.db/db :or {conn *conn*}}]
-  (let [db        (or db @(internal/resolve-conn conn))
-        triples   (query {::db db ::query '[:find ?e ?a ?v ?tx
-                                            :where [?e ?a ?v ?tx]]})
-        tx-process (into {} (query {::db db
-                                    ::query '[:find ?tx ?pid
-                                              :where
-                                              [?tx :seon.db/process ?process]
-                                              [?process :seon.db.process/id ?pid]]}))
-        first-tx  (reduce (fn [m [e _ _ tx]]
-                            (update m e #(if % (min % tx) tx)))
-                          {} triples)
-        managed   (into #{}
-                        (keep (fn [[e tx]]
-                                (when (contains? managed-scope (get tx-process tx)) e)))
-                        first-tx)]
-    (reduce (fn [m [e a v _]]
-              (if (and (contains? managed e)
-                       (schema/identity-attr? a)
-                       (or (nil? managed-identity-attrs)
-                           (contains? managed-identity-attrs a)))
-                (update m e (fnil conj #{}) [a v])
-                m))
-            {} triples)))
-
-(defn core-attr-namespaces
-  "Attr namespaces whose `:seon.schema/key` row is a bootstrap row.
-
-   ([[bootstrap-row-ids]].) The namespaces the compiled
-   core's boot index registered, as opposed to agent-registered ones.
-   The 2-arity takes a precomputed bootstrap set so one scan can serve
-   multiple consumers."
-  {:malli/schema
-   [:function
-    [:=> [:catn [::db ::db-val]] ::attr-ns-set]
-    [:=> [:catn [::db ::db-val] [::bootstrap-rows ::row-ids]] ::attr-ns-set]]}
-  ([db] (core-attr-namespaces db (bootstrap-row-ids db)))
-  ([db bootstrap-rows]
-   (into #{}
-         (keep (fn [[s k]]
-                 (when (contains? bootstrap-rows s)
-                   (some-> (namespace k) keyword))))
-         (query {::db db
-                 ::query '[:find ?s ?k :where [?s :seon.schema/key ?k]]}))))
-
-;; ---------------------------------------------------------------------------
-;; Error-persistence hooks — `seon.error/record!`'s write path, INJECTED here
-;; because the require direction is db→error (seon.db.internal requires
-;; seon.error, so seon.error can never require this ns). Runs at namespace
-;; load; a hot reload re-installs closures over the current fns. Both hooks
-;; are nil-safe pre-boot (no conn yet ⇒ record! buffers in memory).
-;; ---------------------------------------------------------------------------
-
-(error/set-db-hooks!
-  {:seon.error/transact! (fn [tx-data]
-                           (when *conn*
-                             (transact! {::tx-data tx-data})))
-   :seon.error/coordinate (fn []
-                            (when *conn*
-                              (db.coordinate/resolved @*conn*)))})
-
-;; ---------------------------------------------------------------------------
-;; Config-view seam — `seon.config`'s accessors read the `:seon.config`
-;; singleton through this INJECTED reader (require dir is db→config, so config
-;; can't require db; mirror the error-hook seam above). Returns the DECODED
-;; singleton map (the three mixed-`:or` collection knobs decoded) or nil when
-;; no conn / the singleton is not yet seeded — `seon.config/config-view` then
-;; falls back to the boot manifest resolve (the pre-conn sliver).
-;; ---------------------------------------------------------------------------
-
-;; Single-slot memo keyed on the immutable head's canonical coordinate — the config
-;; accessors are hot (value.cljs reads several caps per rendered node), and the
-;; conn's head is stable across a synchronous render stretch, so this collapses
-;; those reads to ONE entity lookup. The cache retains no database value and
-;; self-invalidates whenever database, branch, commit, or t changes. The key is
-;; the LIVE `@*conn*` head, not the turn's frozen db (the zero-arg accessors
-;; carry no db) — a transact landing mid-turn means later accessor reads see the
-;; newer singleton; acceptable for dials.
-(defonce ^:private !config-view-cache
-  (atom {::cached-config-coordinate nil ::cached-config-view nil}))
-
-(defn- read-config-singleton
-  "Decode the `:seon.config` singleton off `db`, or nil when unseeded."
-  [db]
-  (when (contains? (installed-schema db) :seon.config/id)
-    (let [ent (entity {::ref [:seon.config/id config/cluster-config-id] ::db db})]
-      (when (:seon.config/id ent)
-        (into {}
-              (map (fn [[k v]]
-                     [k (if (internal/edn-encoded-attr? k) (decode-edn-value k v) v)]))
-              ent)))))
-
-(config/set-db-config-view!
-  (fn config-singleton-view
-    ([]
-     (when *conn*
-       (let [db @*conn*
-             coordinate (db.coordinate/resolved db)
-             c  @!config-view-cache]
-         (if (= coordinate (::cached-config-coordinate c))
-           (::cached-config-view c)
-           (let [view (read-config-singleton db)]
-             (reset! !config-view-cache
-                     {::cached-config-coordinate coordinate
-                      ::cached-config-view view})
-             view)))))
-    ([database]
-     (read-config-singleton database))))
+(defn decode-edn-value [attr value]
+  (if (and (string? value) (internal/edn-encoded-attr? attr))
+    (reader/read-string value)
+    value))
