@@ -13,7 +13,7 @@
 
 ;;; Data contract
 
-(def protocol-version 1)
+(def protocol-version 2)
 (def maximum-invocation-ms (* 10 60 1000))
 (def maximum-result-bytes
   ;; Reserve room for the terminal envelope inside the database protocol's
@@ -27,6 +27,7 @@
 (def result-message :seon.execution.message/result)
 (def error-message :seon.execution.message/error)
 (def stopped-message :seon.execution.message/stopped)
+(def ^:private compiled-entrypoint 'seon.execution.runtime/render-prompt!)
 
 (schema/register! ::protocol-version [:= protocol-version])
 (schema/register! ::message :keyword)
@@ -34,10 +35,15 @@
 (schema/register! ::invocation-id [:string {:min 1}])
 (schema/register! ::function-symbol :qualified-symbol)
 (schema/register! ::digest [:re "^[0-9a-f]{64}$"])
-(schema/register! ::function-source-identity
-                  [:map {:closed true}
-                   [::function-symbol ::function-symbol]
-                   [::source-digest ::digest]])
+(schema/register! ::artifact-digest ::digest)
+(schema/register! ::function-identity
+                  [:or
+                   [:map {:closed true}
+                    [::function-symbol ::function-symbol]
+                    [::source-digest ::digest]]
+                   [:map {:closed true}
+                    [::function-symbol ::function-symbol]
+                    [::artifact-digest ::digest]]])
 (schema/register! ::arguments [:vector :any])
 (schema/register! ::deadline-ms [:int {:min 0}])
 (schema/register! ::result-limit-bytes
@@ -45,7 +51,6 @@
 (schema/register! ::run-fence [:map-of :qualified-keyword :any])
 (schema/register! ::coordinate :seon.db.coordinate/coordinate)
 (schema/register! ::database-attachment :seon.db.coordinate/attachment)
-(schema/register! ::artifact-digest ::digest)
 (schema/register! ::shadow-build-id [:string {:min 1}])
 (schema/register! ::bun-version [:string {:min 1}])
 (schema/register! ::database-selection :seon.db/open-session-request)
@@ -65,7 +70,7 @@
   [::agent-id ::agent-id]
   [::invocation-id ::invocation-id]
   [::coordinate ::coordinate]
-  [::function-source-identity ::function-source-identity]
+  [::function-identity ::function-identity]
   [::arguments ::arguments]
   [::deadline-ms ::deadline-ms]
   [::result-limit-bytes ::result-limit-bytes]
@@ -321,6 +326,22 @@
    ::deadline-ms (+ (.now js/Date) maximum-invocation-ms)
    ::result-limit-bytes maximum-result-bytes})
 
+(defn compiled-invocation
+  "Pin one parent-selected core call to the verified execution artifact."
+  {:malli/schema [:=> [:cat ::agent-id ::arguments ::coordinate
+                       ::artifact-digest]
+                  ::invoke]}
+  [agent-id arguments coordinate artifact-digest]
+  (let [plan (invocation-plan agent-id compiled-entrypoint arguments)]
+    (-> plan
+        (dissoc ::function-symbol)
+        (assoc ::message invoke-message
+               ::protocol-version protocol-version
+               ::coordinate coordinate
+               ::function-identity
+               {::function-symbol compiled-entrypoint
+                ::artifact-digest artifact-digest}))))
+
 (defn ^:async prepare-invocations!
   "Pin ordinary invocation plans to their authored source identities."
   {:malli/schema [:=> [:cat ::prepare-request] :any]}
@@ -369,7 +390,7 @@
              (assoc ::message invoke-message
                     ::protocol-version protocol-version
                     ::coordinate coordinate
-                    ::function-source-identity identity))))
+                    ::function-identity identity))))
      invocation-plans)))
 
 (defn- ^:async acquire-program! [invocation]
@@ -385,7 +406,7 @@
                    (query-member function-contract-query [])]}))
         [functions schemas contracts] (mapv query-result (::db/results result))
         program (canonical-program functions schemas contracts)
-        target (get-in invocation [::function-source-identity
+        target (get-in invocation [::function-identity
                                    ::function-symbol])
         source (some (fn [[sym source & _]]
                        (when (= target (symbol sym)) source))
@@ -397,7 +418,7 @@
       (throw (ex-info "The requested current agent function does not exist."
                       {::function-symbol target :seon.error/kind :agent})))
     (when-not (= (source-digest source)
-                 (get-in invocation [::function-source-identity
+                 (get-in invocation [::function-identity
                                      ::source-digest]))
       (throw (ex-info "The requested function source is no longer current."
                       {::function-symbol target :seon.error/kind :agent})))
@@ -411,7 +432,7 @@
       (let [compile-state
             (await (eval/load-authored-program!
                     (assoc program ::function-symbol
-                           (get-in invocation [::function-source-identity
+                           (get-in invocation [::function-identity
                                                ::function-symbol]))))]
         (swap! state assoc ::program program ::compile-state compile-state)
           program)
@@ -422,7 +443,7 @@
          (eval/load-authored-program!
           (assoc program
                  ::function-symbol
-                 (get-in invocation [::function-source-identity
+                 (get-in invocation [::function-identity
                                      ::function-symbol])
                  ::compile-state (::compile-state @state))))
         program)
@@ -508,8 +529,9 @@
 (defn- begin-invocation!
   [state invocation send-message! exit! now-ms]
   (let [current @state
-        function-symbol (get-in invocation
-                                [::function-source-identity ::function-symbol])
+        identity (::function-identity invocation)
+        function-symbol (::function-symbol identity)
+        compiled? (contains? identity ::artifact-digest)
         remaining (- (::deadline-ms invocation) now-ms)]
     (cond
       (::shutting-down? current)
@@ -529,12 +551,23 @@
       (fail-invocation! state invocation send-message!
                         "The invocation names another agent." :core-bug)
 
+      (and compiled?
+           (or (not= compiled-entrypoint function-symbol)
+               (not= (::artifact-digest identity)
+                     (get-in current [::startup ::artifact-digest]))))
+      (fail-invocation! state invocation send-message!
+                        "The compiled function identity is not trusted by this artifact."
+                        :core-bug)
+
       (not (pos? remaining))
       (fail-invocation! state invocation send-message!
                         "The invocation deadline has elapsed." :agent)
 
       :else
       (let [token (js-obj)
+            compiled-function-value
+            (when compiled?
+              (eval/lookup-value function-symbol))
             timeout-ms (min remaining maximum-invocation-ms)
             timer
             (js/setTimeout
@@ -545,10 +578,15 @@
                                      ::invocation invocation
                                      ::timer timer})
         (-> (ensure-session! state)
-            (.then (fn [_] (ensure-program! state invocation)))
+            (.then (fn [_]
+                     (when-not compiled?
+                       (ensure-program! state invocation))))
             (.then
              (fn [_]
-               (if-let [function-value (eval/lookup-value function-symbol)]
+               (if-let [function-value
+                        (if compiled?
+                          compiled-function-value
+                          (eval/lookup-value function-symbol))]
                  (try
                    (js/Promise.resolve
                     (db/with-agent

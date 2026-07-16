@@ -42,7 +42,7 @@
     ::execution/agent-id agent-id
     ::execution/invocation-id invocation-id
     ::execution/coordinate point
-    ::execution/function-source-identity
+    ::execution/function-identity
     {::execution/function-symbol 'my.render/view
      ::execution/source-digest digest}
     ::execution/arguments [{:my.render/value 1}]
@@ -485,3 +485,35 @@
                (set! execution/prepare-invocations! original-prepare)
                (set! host/invoke! original-invoke)
                (done))))))))
+
+(deftest compiled-call-is-pinned-to-the-configured-artifact
+  (async done
+    (let [captured (atom nil)
+          original-invoke host/invoke!
+          _ (configure (fn [_] (:process (fake-process 301))))]
+      (set! host/invoke!
+            (fn [request]
+              (reset! captured request)
+              (js/Promise.resolve
+               (result-message (::execution/invocation-id request) :ok))))
+      (-> (host/invoke-compiled!
+           point "agent-1" [:input])
+          (.then
+           (fn [result]
+             (is (= :ok (::execution/result result)))
+             (is (= point (::execution/coordinate @captured)))
+             (is (= digest
+                    (get-in @captured
+                            [::execution/function-identity
+                             ::execution/artifact-digest])))
+             (is (= 'seon.execution.runtime/render-prompt!
+                    (get-in @captured
+                            [::execution/function-identity
+                             ::execution/function-symbol])))))
+          (.catch
+           (fn [error]
+             (is false (str "compiled host call rejected: " error))))
+          (.finally
+           (fn []
+             (set! host/invoke! original-invoke)
+             (done)))))))

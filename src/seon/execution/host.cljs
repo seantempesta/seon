@@ -512,6 +512,21 @@
            (sort-by first)
            (mapv second)))))
 
+(defn ^:async invoke-compiled!
+  "Invoke one trusted function from the digest-verified execution artifact."
+  {:malli/schema [:=> [:cat :seon.db.coordinate/coordinate
+                       :seon.execution/agent-id
+                       :seon.execution/arguments]
+                  :map]}
+  [coordinate agent-id arguments]
+  (let [runtime (get-in (host-configuration)
+                        [::launch-descriptor ::launch/runtime])
+        invocation
+        (execution/compiled-invocation
+         agent-id arguments coordinate
+         (::launch/execution-digest runtime))]
+    (await (invoke! invocation))))
+
 (defn cancel!
   "Cancel one active invocation and bound non-cooperative shutdown."
   {:malli/schema [:=> [:cat ::execution/agent-id ::execution/invocation-id]

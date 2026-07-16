@@ -19,7 +19,7 @@
    ::execution/agent-id "agent-1"
    ::execution/invocation-id "invoke-1"
    ::execution/coordinate coordinate
-   ::execution/function-source-identity
+   ::execution/function-identity
    {::execution/function-symbol 'my.render/view
     ::execution/source-digest digest}
    ::execution/arguments [{:my.render/value 1}]
@@ -49,6 +49,77 @@
                (assoc invocation ::execution/arguments
                       [(js/Promise.resolve 1)]))))
   (is (execution/valid-parent-message? invocation)))
+
+(deftest compiled-identity-refuses-agent-authored-symbols
+  (let [messages (atom [])
+        state (atom {::execution/startup startup})
+        request (-> (execution/compiled-invocation
+                     "agent-1" [] coordinate digest)
+                    (assoc-in [::execution/function-identity
+                               ::execution/function-symbol]
+                              'my.render/view))]
+    (@#'execution/receive! state (execution/encode-message request)
+     (decoded-sender messages) (fn [_]) 0)
+    (is (= execution/error-message
+           (::execution/message (first @messages))))
+    (is (= :core-bug
+           (get-in (first @messages) [::execution/error
+                                      :seon.error/kind])))))
+
+(deftest child-rejects-a-compiled-identity-from-another-artifact
+  (let [messages (atom [])
+        opens (atom 0)
+        state (atom {::execution/startup startup})
+        wrong-digest (apply str (repeat 64 "b"))
+        request (execution/compiled-invocation
+                 "agent-1" [1] coordinate wrong-digest)]
+    (with-redefs [db/open-session!
+                  (fn [_]
+                    (swap! opens inc)
+                    (js/Promise.resolve nil))]
+      (@#'execution/receive! state (execution/encode-message request)
+       (decoded-sender messages) (fn [_]) 0))
+    (is (zero? @opens) "identity rejection happens before session/program work")
+    (is (= execution/error-message
+           (::execution/message (first @messages))))
+    (is (= :core-bug
+           (get-in (first @messages) [::execution/error
+                                      :seon.error/kind])))))
+
+(deftest compiled-dispatch-skips-authored-program-acquisition
+  (async done
+    (let [messages (atom [])
+          reads (atom 0)
+          state (atom {::execution/startup startup})
+          request (execution/compiled-invocation
+                   "agent-1" [7] coordinate digest)]
+      (with-redefs [db/open-session! (fn [_] (js/Promise.resolve nil))
+                    db/execute-many
+                    (fn [_]
+                      (swap! reads inc)
+                      (js/Promise.reject
+                       (js/Error. "compiled dispatch read authored program")))
+                    seval/lookup-value
+                    (fn [_]
+                      (fn [value]
+                        {:seon.execution-test/value value}))]
+        (@#'execution/receive! state (execution/encode-message request)
+         (decoded-sender messages) (fn [_]) 0)
+        (-> (js/Promise.
+             (fn [resolve _]
+               (js/setTimeout resolve 0)))
+            (.then
+             (fn [_]
+               (is (zero? @reads))
+               (is (= execution/result-message
+                      (::execution/message (first @messages))))
+               (is (= {:seon.execution-test/value 7}
+                      (::execution/result (first @messages))))
+               (done)))
+            (.catch
+             (fn [error]
+               (is false (str "compiled dispatch rejected: " error))
+               (done))))))))
 
 (deftest bounded-results-are-settled-ordinary-data
   (let [result (execution/bounded-result {:my.render/value 1} 4096)]
@@ -141,7 +212,7 @@
                    "prepared invocations retain caller position")
                (doseq [[plan invocation] (map vector plans prepared)]
                  (let [symbol (::execution/function-symbol plan)
-                       identity (::execution/function-source-identity invocation)]
+                       identity (::execution/function-identity invocation)]
                    (is (= symbol (::execution/function-symbol identity)))
                    (is (= (execution/source-digest
                            (get source-by-symbol (str symbol)))
