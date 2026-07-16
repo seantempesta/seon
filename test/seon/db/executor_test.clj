@@ -1,7 +1,9 @@
 (ns seon.db.executor-test
   (:require [clojure.test :refer [deftest is testing]]
+            [datahike.api :as d]
             [seon.db.coordinate :as coordinate]
-            [seon.db.executor :as executor])
+            [seon.db.executor :as executor]
+            [seon.db.registry :as registry])
   (:import [java.util.concurrent CountDownLatch TimeUnit]))
 
 (defn- call-private
@@ -136,6 +138,17 @@
    ::executor/connection-id [database-id :db]
    ::executor/generation generation})
 
+(defn- registry-scope
+  [database-name]
+  (let [{::registry/keys [conn attachment]}
+        (registry/resolve-connection
+         {::registry/database-name (keyword database-name)})
+        identity (d/committed-value-identity (d/db conn))]
+    {::executor/database-name database-name
+     ::coordinate/attachment attachment
+     ::executor/connection-id (:datahike.value/connection-id identity)
+     ::executor/generation (:datahike.value/generation identity)}))
+
 (deftest one-start-owned-execute-function-serves-data-only-jobs
   (let [worker (executor/start! {::executor/name :query
                                  ::executor/workers 1
@@ -231,3 +244,73 @@
       (finally
         (.countDown release)
         (executor/stop! {::executor/executor worker})))))
+
+(deftest real-independent-database-reads-use-the-shared-workers-in-parallel
+  (let [{::registry/keys [snapshot]} (registry/snapshot-registry {})
+        database-names (mapv #(str "executor-real-" % "-" (random-uuid))
+                             (range 8))
+        entered (CountDownLatch. 4)
+        release (CountDownLatch. 1)
+        running (atom 0)
+        peak (atom 0)
+        worker
+        (executor/start!
+         {::executor/name :read
+          ::executor/workers 4
+          ::executor/maximum-queued 8
+          ::executor/execute
+          (fn [{:request/keys [database-name]}]
+            (let [{::registry/keys [conn]}
+                  (registry/resolve-connection
+                   {::registry/database-name (keyword database-name)})
+                  active (swap! running inc)]
+              (swap! peak max active)
+              (.countDown entered)
+              (.await release)
+              (try
+                (d/q '[:find (count ?entity) .
+                       :where [?entity :executor.test/value]]
+                     (d/db conn))
+                (finally
+                  (swap! running dec)))))})]
+    (try
+      (doseq [[index database-name] (map-indexed vector database-names)]
+        (let [entry
+              (registry/ensure-database!
+               {::registry/database-name (keyword database-name)
+                ::registry/backend :memory
+                ::registry/initialize-connection!
+                (fn [{::registry/keys [conn]}]
+                  (d/transact
+                   conn
+                   [{:db/ident :executor.test/value
+                     :db/valueType :db.type/long
+                     :db/cardinality :db.cardinality/one}
+                    {:executor.test/value index}]))})]
+          (is (= (::registry/attachment entry)
+                 (::coordinate/attachment (registry-scope database-name))))))
+      (let [results
+            (mapv
+             (fn [database-name]
+               (executor/submit-async!
+                {::executor/executor worker
+                 ::executor/database-name database-name
+                 ::executor/scope (registry-scope database-name)
+                 ::executor/job-id (str "read/" database-name)
+                 ::executor/request {:request/database-name database-name}}))
+             database-names)]
+        (is (.await entered 5 TimeUnit/SECONDS)
+            "four immutable reads from independent databases start together")
+        (is (= 4 @peak)
+            "worker count, not database count, bounds parallel CPU work")
+        (.countDown release)
+        (is (= (repeat 8 [::executor/value 1]) (map deref results)))
+        (is (zero? (::executor/retained-identities
+                    (executor/evidence worker)))))
+      (finally
+        (.countDown release)
+        (executor/stop! {::executor/executor worker})
+        (doseq [database-name database-names]
+          (registry/release-database!
+           {::registry/database-name (keyword database-name)}))
+        (registry/restore-registry! {::registry/snapshot snapshot})))))

@@ -264,10 +264,13 @@ The current scoped-search predicate path also scans the full index before HNSW;
 direct existing ID/bitset input is the next dependency-level optimization.
 
 Current implementation evidence: `seon.db.executor` now has a pure bounded
-per-database FIFO selector and shared fixed workers. Eleven focused tests with
-62 assertions prove cyclic A/B/C service, hot-database starvation resistance,
+per-database FIFO selector and shared fixed workers. Twelve focused tests with
+74 assertions prove cyclic A/B/C service, hot-database starvation resistance,
 bounded rejection, exact-generation close, rejection after close, late-result
-fencing, replacement-generation safety, and zero retained job identities.
+fencing, replacement-generation safety, and zero retained job identities. A
+real eight-database fixture starts four immutable Datahike queries concurrently,
+returns all eight exact results, and proves worker count rather than database
+count bounds active CPU work without queueing DB values or connections.
 
 Primary transactions no longer call the embedding provider. After a successful
 Datahike report, the writer submits only the committed numeric entity IDs and
