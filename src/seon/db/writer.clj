@@ -1254,6 +1254,30 @@
          :seon.db.protocol.operation/ping
          (protocol/success {::protocol/pong? true})
 
+         :seon.db.protocol.operation/capabilities
+         (protocol/success
+          {::protocol/request-id (::protocol/request-id request)
+           ::protocol/capabilities (d/capabilities)})
+
+         :seon.db.protocol.operation/resolve-head
+         (let [{::registry/keys [conn database-name attachment coordinate]}
+               (registry/resolve-connection
+                {::registry/database-name
+                 (keyword (::protocol/database-name request))})]
+           (if conn
+             (protocol/success
+              {::protocol/request-id (::protocol/request-id request)
+               ::protocol/database-name (name database-name)
+               ::protocol/attachment attachment
+               ::protocol/coordinate coordinate})
+             (protocol/failure
+              {::protocol/error-kind protocol/not-found-error
+               ::protocol/error
+               (str "Unknown database: "
+                    (::protocol/database-name request))
+               ::protocol/body
+               {::protocol/request-id (::protocol/request-id request)}})))
+
          :seon.db.protocol.operation/ensure-database
          (handle-ensure-database runtime request)
 

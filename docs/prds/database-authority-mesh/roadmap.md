@@ -121,7 +121,9 @@ and delivery capacity are grounded in
 [[research/datahike-parallel-read-internals-2026-07-16]] and
 [[research/transit-bun-delivery-internals-2026-07-16]]. Proximum search,
 construction, cancellation, and filter seams are grounded in
-[[research/proximum-native-capacity-2026-07-16]].
+[[research/proximum-native-capacity-2026-07-16]]. The native web seam and its
+direct-stream backpressure/compression constraints are grounded in
+[[research/bun-serve-datastar-internals-2026-07-16]].
 
 ## Ordered implementation spine
 
@@ -314,6 +316,18 @@ Transaction responses retain durable request receipts and committed
 coordinates without claiming one unique commit per request. Once Datahike has
 accepted a mutation, disconnect/cancellation cannot claim rollback; its receipt
 remains recoverable through request identity.
+
+Current implementation evidence: capability discovery and head resolution are
+the first two control operations on the existing protocol. Both carry the one
+request ID needed by a future multiplexed session and bypass query admission.
+Capability discovery returns Datahike's ordinary bounded catalog unchanged,
+including the facts that identify host-returning APIs. Head resolution turns
+the registry's live connection into only the existing database name,
+attachment, and portable coordinate; Datahike's process-local connection ID
+and generation never cross the wire. A real UDS fixture proves correlation,
+the exact catalog, portable head identity, typed unknown-database failure, and
+no retained host owner in the returned values. The focused transport and
+writer gates pass 19 tests and 124 assertions.
 
 Exit proof: transport-neutral fixtures cover schemas, values, identity,
 query/pull/history, branches, fencing, batching, member errors, cancellation,

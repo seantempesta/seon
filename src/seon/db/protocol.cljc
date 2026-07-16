@@ -19,6 +19,8 @@
 ;;; Protocol vocabulary
 
 (def ping-operation :seon.db.protocol.operation/ping)
+(def capabilities-operation :seon.db.protocol.operation/capabilities)
+(def resolve-head-operation :seon.db.protocol.operation/resolve-head)
 (def ensure-database-operation
   :seon.db.protocol.operation/ensure-database)
 (def observe-database-lifecycle-operation
@@ -90,6 +92,8 @@
 (schema/register!
  ::operation
  [:enum ping-operation
+  capabilities-operation
+  resolve-head-operation
   ensure-database-operation
   observe-database-lifecycle-operation
   create-branch-operation
@@ -101,6 +105,7 @@
   knn-search-operation])
 (schema/register! ::success? :boolean)
 (schema/register! ::pong? :boolean)
+(schema/register! ::capabilities :map)
 (schema/register! ::database-name [:string {:min 1}])
 (schema/register! ::database-path [:string {:min 1}])
 (schema/register! ::backend [:enum :memory :file])
@@ -249,6 +254,17 @@
  ::ping-request
  [:map [::operation [:= ping-operation]]])
 (schema/register!
+ ::capabilities-request
+ [:map {:closed true}
+  [::operation [:= capabilities-operation]]
+  [::request-id ::request-id]])
+(schema/register!
+ ::resolve-head-request
+ [:map {:closed true}
+  [::operation [:= resolve-head-operation]]
+  [::request-id ::request-id]
+  [::database-name ::database-name]])
+(schema/register!
  ::ensure-database-request
  [:map
   [::operation [:= ensure-database-operation]]
@@ -322,6 +338,8 @@
  ::request
  [:multi {:dispatch ::operation}
   [ping-operation ::ping-request]
+  [capabilities-operation ::capabilities-request]
+  [resolve-head-operation ::resolve-head-request]
   [ensure-database-operation ::ensure-database-request]
   [observe-database-lifecycle-operation
    ::observe-database-lifecycle-request]
@@ -346,6 +364,20 @@
  [:map
   [::success? [:= true]]
   [::pong? ::pong?]])
+(schema/register!
+ ::capabilities-response
+ [:map {:closed true}
+  [::success? [:= true]]
+  [::request-id ::request-id]
+  [::capabilities ::capabilities]])
+(schema/register!
+ ::resolve-head-response
+ [:map {:closed true}
+  [::success? [:= true]]
+  [::request-id ::request-id]
+  [::database-name ::database-name]
+  [::attachment ::attachment]
+  [::coordinate ::coordinate]])
 (schema/register!
  ::ensure-database-response
  [:map
@@ -434,6 +466,8 @@
  [:or
   ::failed-response
   ::ping-response
+  ::capabilities-response
+  ::resolve-head-response
   ::ensure-database-response
   ::observe-database-lifecycle-response
   ::create-branch-response
@@ -458,6 +492,15 @@
   [::backend ::backend]
   [::coordinate/attachment {:optional true} ::coordinate/attachment]
   [::database-path {:optional true} ::database-path]])
+(schema/register!
+ ::request-id-input
+ [:map {:closed true}
+  [::request-id ::request-id]])
+(schema/register!
+ ::resolve-head-request-input
+ [:map {:closed true}
+  [::request-id ::request-id]
+  [::database-name ::database-name]])
 (schema/register!
  ::observe-database-lifecycle-request-input
  [:map {:closed true}
@@ -519,6 +562,19 @@
   {:malli/schema [:=> [:cat] ::ping-request]}
   []
   {::operation ping-operation})
+
+(defn capabilities-request
+  "Construct one correlated Datahike capability-discovery request."
+  {:malli/schema [:=> [:cat ::request-id-input] ::capabilities-request]}
+  [input]
+  (assoc input ::operation capabilities-operation))
+
+(defn resolve-head-request
+  "Construct one correlated request for a database's current portable value."
+  {:malli/schema [:=> [:cat ::resolve-head-request-input]
+                  ::resolve-head-request]}
+  [input]
+  (assoc input ::operation resolve-head-operation))
 
 (defn ensure-database-request
   "Construct one idempotent database-open request."

@@ -47,6 +47,55 @@
   [channel request]
   (uds/call! {::uds/channel channel ::uds/message request}))
 
+(deftest capability-discovery-and-head-resolution-return-only-portable-data
+  (let [database-name (str "writer-control-" (random-uuid))
+        request-path (socket-path "control-request")
+        publish-path (socket-path "control-publish")
+        server
+        (writer/start!
+         {::writer/dependencies (dependencies)
+          ::writer/database-name database-name
+          ::writer/backend :memory
+          ::writer/request-socket-path request-path
+          ::writer/publish-socket-path publish-path})
+        ^SocketChannel request-channel (uds/connect! request-path)]
+    (try
+      (let [capability-request
+            (protocol/capabilities-request
+             {::protocol/request-id "control/capabilities"})
+            head-request
+            (protocol/resolve-head-request
+             {::protocol/request-id "control/head"
+              ::protocol/database-name database-name})
+            capabilities (call! request-channel capability-request)
+            head (call! request-channel head-request)
+            unknown
+            (call! request-channel
+                   (protocol/resolve-head-request
+                    {::protocol/request-id "control/unknown"
+                     ::protocol/database-name "not-open"}))]
+        (is (every? protocol/valid-request?
+                    [capability-request head-request]))
+        (is (every? protocol/valid-response?
+                    [capabilities head unknown]))
+        (is (= "control/capabilities" (::protocol/request-id capabilities)))
+        (is (= (d/capabilities) (::protocol/capabilities capabilities)))
+        (is (= "control/head" (::protocol/request-id head)))
+        (is (= database-name (::protocol/database-name head)))
+        (is (= (coordinate/attachment (::protocol/coordinate head))
+               (::protocol/attachment head)))
+        (is (= "control/unknown" (::protocol/request-id unknown)))
+        (is (= protocol/not-found-error (::protocol/error-kind unknown)))
+        (is (not-any? #(or (instance? clojure.lang.IDeref %)
+                           (instance? Thread %)
+                           (instance? Throwable %))
+                      (tree-seq coll? seq [capabilities head unknown]))))
+      (finally
+        (try (.close request-channel) (catch Throwable _))
+        (writer/stop! server)
+        (.delete (File. request-path))
+        (.delete (File. publish-path))))))
+
 (deftest writer-stop-surfaces-release-failure-and-retains-database-identity
   (let [{::registry/keys [snapshot]} (registry/snapshot-registry {})
         database-name (str "writer-release-failure-" (random-uuid))
