@@ -1012,6 +1012,11 @@ exact framed bytes it retains. The focused UDS gate passes 32 tests and 153
 assertions, including 64 simultaneously admitted small sessions and
 session-local exact-byte pressure with a healthy sibling.
 
+The source-frozen integrated selector, selective-interest, writer, and fair
+executor checkpoint passes 78 tests and 1,002 assertions. Its expected injected
+pressure, release-failure, forced-shutdown, and completion-callback logs remain
+structured test evidence rather than uncaught failures.
+
 Integrated proof that closes it:
 Schema/index/history/selective-interest conformance, including forward/reverse
 cursor continuity, register/commit/unlisten ordering, addressed one-of-1,000
