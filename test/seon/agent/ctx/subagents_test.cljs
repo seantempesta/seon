@@ -1,205 +1,179 @@
 (ns seon.agent.ctx.subagents-test
-  "Piece 3 (subagents) + Piece 4 (orphaned-agents) derived sections — called
-   directly like the render engine does, on a hermetic :memory conn. Assert
-   presence/structure + the reactive vanish, never exact strings."
+  "Remote acquisition and pure formatting for child-agent context blocks."
   (:require
-    [cljs.test :refer [deftest is async]]
-    [datahike.api :as d]
+    [cljs.test :refer [async deftest is testing]]
+    [clojure.string :as str]
     [seon.agent.ctx.subagents :as sub]
-    [seon.agent.run :as run]
     [seon.ai.tokens :as tokens]
-    [seon.client :as client]
     [seon.db :as db]
-    [seon.db.id :as db.id]))
+    [seon.db.protocol :as protocol]))
 
-(def ^:dynamic ^:private parent-id nil)
-(def ^:dynamic ^:private child-id nil)
-(def ^:dynamic ^:private gchild-id nil)
+(def ^:private point
+  {:seon.db.coordinate/database-id #uuid "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+   :seon.db.coordinate/branch :db
+   :seon.db.coordinate/commit-id #uuid "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+   :seon.db.coordinate/t 42})
 
-(defn- fresh-conn []
-  (-> (client/open-agent-conn!)
-      (.then
-        (fn [conn]
-          (-> (db.id/allocate!
-                {::db.id/allocations
-                 [{::db.id/key ::parent
-                   ::db.id/identity-attr :seon.agent/id}]
-                 ::db.id/transaction-builder
-                 (fn [ids]
-                   {:seon.db/tx-data
-                    [{:seon.agent/id (::parent ids)}]})
-                 :seon.db/conn conn})
-              (.then
-                (fn [env]
-                  (when-not (:seon.db/ok? env)
-                    (throw (ex-info "parent agent allocation failed" env)))
-                  (set! parent-id (get-in env [::db.id/ids ::parent]))
-                  conn)))))))
+(def ^:private absent :seon.agent.ctx.subagents/absent)
+(def ^:private now (js/Date. 7200000))
 
-(defn- with-conn [body]
-  (-> (fresh-conn)
-      (.then (fn [conn]
-               (let [orig db/*conn*]
-                 (set! db/*conn* conn)
-                 (-> (js/Promise.resolve (body conn))
-                     (.finally (fn [] (set! db/*conn* orig)))))))))
+(defn- format-block [data]
+  ((deref #'sub/format-subagents-block)
+   (merge {:seon.agent/id "parent"
+           ::sub/children []
+           ::sub/overflow? false
+           ::sub/open-runs []
+           ::sub/turn-counts []
+           ::sub/closed-runs []
+           ::sub/crash-counts []
+           ::sub/now now
+           ::sub/breaker-n 3
+           ::sub/breaker-w 1800000}
+          data)))
 
-(defn- add-child! [conn allocation-key parent purpose]
-  (-> (db.id/allocate!
-        {::db.id/allocations
-         [{::db.id/key allocation-key
-           ::db.id/identity-attr :seon.agent/id}]
-         ::db.id/transaction-builder
-         (fn [ids]
-           {:seon.db/tx-data
-            [(cond-> {:seon.agent/id (get ids allocation-key)
-                      :seon.agent/parent [:seon.agent/id parent]}
-               purpose (assoc :seon.agent/purpose purpose))]})
-         :seon.db/conn conn})
-      (.then
-        (fn [env]
-          (case allocation-key
-            ::child (set! child-id (get-in env [::db.id/ids ::child]))
-            ::gchild (set! gchild-id (get-in env [::db.id/ids ::gchild]))
-            nil)
-          env))))
+(defn- success [result]
+  {::protocol/success? true ::protocol/result result})
 
-(defn- render [id]
-  (sub/subagents-block {:seon.db/db @db/*conn* :seon.agent/id id}))
+(deftest ordinary-child-data-renders-every-derived-state
+  (testing "no children vanish"
+    (is (= "" (format-block {}))))
+  (testing "an open run uses grouped turn and crash counts"
+    (let [out (format-block
+                {::sub/children [["running-child" "research duckdb" absent]]
+                 ::sub/open-runs
+                 [["running-child" "run-1" 8 (js/Date. 7195000) absent]]
+                 ::sub/turn-counts [["running-child" 2]]
+                 ::sub/crash-counts [["running-child" 3]]})]
+      (is (str/includes? out "running-child [running]"))
+      (is (str/includes? out "turn 2/8 · beat 5s ago"))
+      (is (str/includes? out "schedule-wake paused"))))
+  (testing "a paused run uses the one state rule"
+    (let [out (format-block
+                {::sub/children [["paused-child" "waiting" absent]]
+                 ::sub/open-runs
+                 [["paused-child" "run-2" 5 absent (js/Date. 7100000)]]})]
+      (is (str/includes? out "paused-child [paused]"))))
+  (testing "termination wins over an inconsistent open-run projection"
+    (let [out (format-block
+                {::sub/children
+                 [["terminated-child" "finished" (js/Date. 7150000)]]
+                 ::sub/open-runs
+                 [["terminated-child" "run-3" 5 absent absent]]})]
+      (is (str/includes? out "terminated-child [terminated]")))))
 
-(deftest subagents-childless-renders-nothing
+(deftest latest-closed-run-renders-result-reference-or-death
+  (let [out (format-block
+              {::sub/children
+               [["completed-child" "compute" absent]
+                ["failed-child" "risky" absent]]
+               ::sub/closed-runs
+               [["completed-child" "old" (js/Date. 1000) :error "" -1]
+                ["completed-child" "new" (js/Date. 2000) :completed
+                 "the answer is 42" 99]
+                ["failed-child" "failed" (js/Date. 3000) :error "" -1]]})]
+    (is (str/includes? out "completed: the answer is 42 [→ eid 99]"))
+    (is (str/includes? out "failed-child [idle] · ✗ error"))))
+
+(deftest child-formatting-is-bounded-and-overflow-is-truthful
+  (let [children (mapv (fn [i]
+                         [(str "child-" i) (apply str (repeat 300 "x")) absent])
+                       (range 20))
+        out (format-block {::sub/children children ::sub/overflow? true})]
+    (is (str/includes? out "the 20+ agents you spawned"))
+    (is (str/includes? out "more children"))
+    (is (<= (tokens/estimate out) 900))))
+
+(deftest prompt-acquisition-is-bounded-and-coordinate-pinned
   (async done
-    (-> (with-conn (fn [_] (is (= "" (render parent-id)) "childless -> reactive vanish")))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw " e)) (done))))))
+    (let [original db/execute-many
+          requests (atom [])
+          contexts (atom [])
+          responses
+          (atom
+            [{::db/coordinate point
+              ::db/results
+              [(success [["child" "compute" absent]])
+               (success {:seon.config.breaker/crash-count 4
+                         :seon.config.breaker/window-ms 60000})]}
+             {::db/coordinate point
+              ::db/results
+              [(success [["child" "run" 6 absent absent]])
+               (success [["child" 1]])
+               (success [])
+               (success [["child" 4]])]}])]
+      (set! db/execute-many
+            (fn [request]
+              (swap! requests conj request)
+              (swap! contexts conj (db/current-tx-context))
+              (let [response (first @responses)]
+                (swap! responses subvec 1)
+                (js/Promise.resolve response))))
+      (-> (db/with-tx-context
+            {::db/coordinate point}
+            #(sub/subagents-block {:seon.agent/id "parent"} nil))
+          (.then
+            (fn [out]
+              (is (str/includes? out "child [running]"))
+              (is (= [2 4] (mapv (comp count ::db/members) @requests)))
+              (is (nil? (::db/coordinate (first @requests)))
+                  "the first request inherits the active coordinate")
+              (is (= point (::db/coordinate (second @requests)))
+                  "dependent detail acquisition is pinned to the same coordinate")
+              (is (every? #(= point (::db/coordinate %)) @contexts)
+                  "both requests execute inside the inherited coordinate context")
+              (is (every? #(not (contains? % :seon.db/db)) @requests)
+                  "no Datahike value crosses the prompt owner")
+              (set! db/execute-many original)
+              (done)))
+          (.catch
+            (fn [error]
+              (is false (str "remote subagent acquisition rejected: " error))
+              (set! db/execute-many original)
+              (done)))))))
 
-(deftest subagents-running-child-shows-progress
+(deftest childless-acquisition-skips-the-detail-request
   (async done
-    (-> (with-conn
-          (fn ^:async af [conn]
-            (await (add-child! conn ::child parent-id "research duckdb"))
-            (await (run/open-run! {:seon.agent/id child-id :seon.agent.run/trigger :message}))
-            (let [out (render parent-id)]
-              (is (re-find (re-pattern child-id) out) "names the child")
-              (is (re-find #"running" out) "shows running state")
-              (is (re-find #"turn 0/" out) "shows turn i/limit"))))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw " e)) (done))))))
+    (let [original db/execute-many
+          calls (atom 0)]
+      (set! db/execute-many
+            (fn [_]
+              (swap! calls inc)
+              (js/Promise.resolve
+                {::db/coordinate point
+                 ::db/results [(success []) (success {})]})))
+      (-> (sub/subagents-block {:seon.agent/id "parent"} nil)
+          (.then (fn [out]
+                   (is (= "" out))
+                   (is (= 1 @calls))
+                   (set! db/execute-many original)
+                   (done)))
+          (.catch
+            (fn [error]
+              (is false (str "childless acquisition rejected: " error))
+              (set! db/execute-many original)
+              (done)))))))
 
-(deftest subagents-completed-child-shows-result
+(deftest orphaned-owner-still-uses-one-bounded-remote-request
   (async done
-    (-> (with-conn
-          (fn ^:async af [conn]
-            (await (add-child! conn ::child parent-id "compute"))
-            (let [snap (await (run/open-run! {:seon.agent/id child-id :seon.agent.run/trigger :message}))
-                  rid  (:seon.agent.run/id snap)]
-              (await (d/transact! conn {:tx-data [{:seon.agent.run/id rid :seon.agent.run/result "the answer is 42"}]}))
-              (await (run/close-run! {:seon.agent.run/id rid :seon.agent.run/closed-reason :completed}))
-              (let [out (render parent-id)]
-                (is (re-find #"completed" out) "shows completed")
-                (is (re-find #"answer is 42" out) "shows the result string")))))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw " e)) (done))))))
-
-(deftest subagents-completed-child-normalizes-result-reference
-  (async done
-    (-> (with-conn
-          (fn ^:async af [conn]
-            (await (add-child! conn ::child parent-id "compute with artifact"))
-            (await (d/transact! conn {:tx-data [{:my.kb.shared/id "result-note"}]}))
-            (let [result-eid (:db/id (db/entity {:seon.db/ref
-                                                 [:my.kb.shared/id "result-note"]}))
-                  snap (await (run/open-run!
-                                {:seon.agent/id child-id
-                                 :seon.agent.run/trigger :message}))
-                  rid (:seon.agent.run/id snap)]
-              (await (d/transact! conn
-                                  {:tx-data
-                                   [{:seon.agent.run/id rid
-                                     :seon.agent.run/result "artifact ready"
-                                     :seon.agent.run/result-ref result-eid}]}))
-              (await (run/close-run!
-                       {:seon.agent.run/id rid
-                        :seon.agent.run/closed-reason :completed}))
-              (let [out (render parent-id)]
-                (is (re-find (re-pattern (str "eid " result-eid)) out)
-                    "the shared closed-run projection emits the normalized eid")))))
-        (.then (fn [_] (done)))
-        (.catch (fn [e]
-                  (is false (str "result-ref projection threw " e))
-                  (done))))))
-
-(deftest subagents-error-closed-child-shows-death
-  (async done
-    (-> (with-conn
-          (fn ^:async af [conn]
-            (await (add-child! conn ::child parent-id "risky"))
-            (let [snap (await (run/open-run! {:seon.agent/id child-id :seon.agent.run/trigger :message}))
-                  rid  (:seon.agent.run/id snap)]
-              (await (run/close-run! {:seon.agent.run/id rid :seon.agent.run/closed-reason :error}))
-              (let [out (render parent-id)]
-                (is (re-find #"error" out) "a dead child is visible, not just a succeeded one")))))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw " e)) (done))))))
-
-(deftest subagents-direct-children-only
-  (async done
-    (-> (with-conn
-          (fn ^:async af [conn]
-            (await (add-child! conn ::child parent-id "child"))
-            (await (add-child! conn ::gchild child-id "grandchild"))
-            (let [out (render parent-id)]
-              (is (re-find (re-pattern child-id) out) "direct child present")
-              (is (not (re-find (re-pattern gchild-id) out)) "grandchild ABSENT (direct only)"))))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw " e)) (done))))))
-
-(deftest subagents-token-capped
-  (async done
-    (-> (with-conn
-          (fn ^:async af [conn]
-            (dotimes [i 5]
-              (await (add-child! conn
-                                 (keyword "seon.agent.ctx.subagents-test"
-                                          (str "kid-" i))
-                                 parent-id
-                                 (apply str (repeat 300 "x")))))
-            (let [out (render parent-id)]
-              (is (<= (tokens/estimate out) 900) "section bounded in TOKENS"))))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw " e)) (done))))))
-
-(deftest orphaned-agents-empty-normally
-  (async done
-    (-> (with-conn
-          (fn ^:async af [conn]
-            (await (add-child! conn ::child parent-id "alive"))
-            (is (= "" (sub/orphaned-agents-block {:seon.db/db @db/*conn*}))
-                "no orphans -> reactive vanish")))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw " e)) (done))))))
-
-(deftest orphaned-agents-shows-live-child-of-terminated-parent
-  (async done
-    (-> (with-conn
-          (fn ^:async af [conn]
-            (await (add-child! conn ::child parent-id "orphan"))
-            (await (d/transact! conn {:tx-data [{:seon.agent/id parent-id
-                                                 :seon.agent/terminated-at (js/Date.)}]}))
-            (let [out (sub/orphaned-agents-block {:seon.db/db @db/*conn*})]
-              (is (re-find (re-pattern child-id) out) "orphan child listed")
-              (is (re-find (re-pattern parent-id) out) "names the terminated parent"))))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw " e)) (done))))))
-
-(deftest orphaned-agents-excludes-terminated-child
-  (async done
-    (-> (with-conn
-          (fn ^:async af [conn]
-            (await (add-child! conn ::child parent-id "dead-orphan"))
-            (await (d/transact! conn {:tx-data [{:seon.agent/id parent-id :seon.agent/terminated-at (js/Date.)}
-                                                {:seon.agent/id child-id :seon.agent/terminated-at (js/Date.)}]}))
-            (is (= "" (sub/orphaned-agents-block {:seon.db/db @db/*conn*}))
-                "a terminated child of a terminated parent is NOT a live orphan")))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw " e)) (done))))))
+    (let [original db/execute-many
+          observed (atom nil)]
+      (set! db/execute-many
+            (fn [request]
+              (reset! observed request)
+              (js/Promise.resolve
+                {::db/coordinate point
+                 ::db/results
+                 [(success [["orphan" "dead-parent" "research"]])
+                  (success [["orphan" :running]])]})))
+      (-> (sub/orphaned-agents-block {} nil)
+          (.then (fn [out]
+                   (is (str/includes? out "orphan [running]"))
+                   (is (str/includes? out "parent dead-parent"))
+                   (is (= 2 (count (::db/members @observed))))
+                   (set! db/execute-many original)
+                   (done)))
+          (.catch
+            (fn [error]
+              (is false (str "orphan acquisition rejected: " error))
+              (set! db/execute-many original)
+              (done)))))))
