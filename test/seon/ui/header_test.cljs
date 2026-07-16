@@ -8,7 +8,6 @@
                 (header/system-header
                  {::header/brand-name "test"
                   ::header/agent-count 4
-                  ::header/running-count 2
-                  ::header/datom-count 99}))]
+                  ::header/running-count 2}))]
     (is (re-find #"id=\"system-header\"" markup))
-    (is (re-find #"99 ⛁ datoms" markup))))
+    (is (re-find #"⛁ data" markup))))

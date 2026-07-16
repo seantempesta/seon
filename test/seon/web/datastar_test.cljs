@@ -44,6 +44,33 @@
     (is (affected? {}
                    {:seon.db/changed-attrs #{:seon.message/text}}))))
 
+(deftest one-listener-unions-only-live-subscription-dependencies
+  (let [dependencies @#'datastar/live-listener-dependencies]
+    (is (= #{:seon.agent/id :seon.message/text}
+           (dependencies
+            {::datastar/subscriptions
+             {:agent {::datastar/live? true
+                      ::datastar/dependencies #{:seon.agent/id}}
+              :debug {::datastar/live? true
+                      ::datastar/dependencies #{:seon.message/text}}
+              :history {::datastar/live? false
+                        ::datastar/dependencies :all}}})))
+    (is (= :all
+           (dependencies
+            {::datastar/subscriptions
+             {:agent {::datastar/live? true}}})))
+    (is (nil? (dependencies
+               {::datastar/subscriptions
+                {:history {::datastar/live? false
+                           ::datastar/dependencies :all}}})))))
+
+(deftest listener-query-declares-the-exact-attribute-union
+  (is (= '[:find (count ?e) . :where
+           [?e :seon.agent/id _]
+           [?e :seon.message/text _]]
+         (@#'datastar/dependencies-query
+          #{:seon.message/text :seon.agent/id}))))
+
 (deftest complete-render-bytes-follow-the-coordinate-that-proved-them
   (let [next-point (assoc point ::coordinate/t 43)
         registry {::datastar/subscriptions

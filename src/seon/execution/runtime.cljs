@@ -259,13 +259,24 @@
     ::protocol/arguments []
     :datahike.resource/max-work 1000000
     :datahike.resource/max-results 1
-    :datahike.resource/max-result-weight 1024}
-   {::protocol/operation protocol/query-operation
-    ::protocol/query-form '[:find (count ?e) . :where [?e ?a ?v]]
-    ::protocol/arguments []
-    :datahike.resource/max-work 5000000
-    :datahike.resource/max-results 1
     :datahike.resource/max-result-weight 1024}])
+
+(def ^:private agent-view-fixed-dependencies
+  #{:seon.agent/id
+    :seon.agent/terminated-at
+    :seon.agent/run
+    :seon.agent/ctx
+    :seon.agent.run/status
+    :seon.agent.run/paused-at
+    :seon.agent.ctx/name
+    :seon.agent.ctx/priority
+    :seon.render/html
+    :seon.render.canvas/content
+    :seon.render.surface/selection
+    :seon.render.surface/label
+    :seon.render.surface/touch
+    :seon.render.surface/focus-touch
+    :seon.fn/read-attrs})
 
 (defn- query-member-value [member]
   (when (true? (::protocol/success? member))
@@ -300,7 +311,7 @@
                           [:seon.agent/id id])
         acquired (await (db/execute-many {::db/members members
                                           ::db/max-result-weight 3670016}))
-        [agent-member agent-count-member datom-count-member] (::db/results acquired)]
+        [agent-member agent-count-member] (::db/results acquired)]
     (if-not (every? #(true? (::protocol/success? %)) (::db/results acquired))
       (prompt-acquisition-error acquired (::db/results acquired))
       (let [entity (or (acquired-member agent-member) {})
@@ -349,11 +360,14 @@
         {:seon.agent/id id
          :seon.ui.agent-view/state (if (seq entity) (page-state entity) :unknown)
          ::surface/surfaces surfaces
+         :seon.web.datastar/dependencies
+         (into agent-view-fixed-dependencies
+               (mapcat ::surface/read-attrs)
+               surfaces)
          :seon.ui.header/projection
          {:seon.ui.header/brand-name "seon"
           :seon.ui.header/agent-count (or (query-member-value agent-count-member) 0)
-          :seon.ui.header/running-count (if (= :running (page-state entity)) 1 0)
-          :seon.ui.header/datom-count (or (query-member-value datom-count-member) 0)}}))))
+          :seon.ui.header/running-count (if (= :running (page-state entity)) 1 0)}}))))
 
 (defn ^:async eval-batch!
   "Evaluate one parsed batch in this agent's retained child compiler."

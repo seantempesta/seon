@@ -4,22 +4,20 @@
 
 (schema/register! ::brand-name [:string {:min 1}])
 (schema/register! ::agent-count [:int {:min 0}])
-(schema/register! ::datom-count [:int {:min 0}])
 (schema/register! ::running-count [:int {:min 0}])
 (schema/register! ::projection
   [:map {:closed true}
    [::brand-name ::brand-name]
    [::agent-count ::agent-count]
-   [::running-count ::running-count]
-   [::datom-count ::datom-count]])
+   [::running-count ::running-count]])
 
 (def default-projection
-  {::brand-name "seon" ::agent-count 0 ::running-count 0 ::datom-count 0})
+  {::brand-name "seon" ::agent-count 0 ::running-count 0})
 
 (defn system-header
   "Render the persistent header from eager ordinary data only."
   [projection]
-  (let [{::keys [brand-name agent-count running-count datom-count]}
+  (let [{::keys [brand-name agent-count running-count]}
         (merge default-projection projection)]
     [:header {:id "system-header"
               :data-agent-count agent-count
@@ -35,7 +33,7 @@
      [:span {:class "text-text-500"} (if (= 1 agent-count) "agent" "agents")]
      [:span {:class "text-text-700"} "│"]
      [:a {:href "/data" :class "text-text-400 hover:text-amber-300"}
-      (str datom-count " ⛁ datoms")]
+      "⛁ data"]
      [:span {:class "ml-auto flex items-center gap-3"}
       [:a {:href "/" :class "text-text-400 hover:text-amber-300"} "home"]
       [:span {:class (if (pos? running-count)

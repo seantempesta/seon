@@ -399,7 +399,8 @@
     (clear-heartbeat-interval! timer)
     (reset! !heartbeat-timer nil)))
 
-(declare merge-change start-render! reconcile-view-catalog!)
+(declare merge-change start-render! reconcile-view-catalog!
+         reconcile-listener!)
 
 (defn- transition-patch [transition serialized-elements-by-token]
   (when-not (map? transition)
@@ -534,6 +535,8 @@
           (keep #(get-in @!feeds [::views %]) consumer-view-ids))]
     (doseq [conn connections]
       (push-event! conn event))
+    (when (and completed? (contains? rendered ::dependencies))
+      (reconcile-listener!))
     (when (and promoted
                (not= render-id (::render-id promoted)))
       (start-render! subscription-key subscription-id))))
@@ -844,6 +847,40 @@
 ;; Lifecycle — db/listen! IS the refresh signal.
 ;; ============================================================
 
+(def ^:private all-datoms-query
+  '[:find (count ?e) . :where [?e ?a ?v]])
+
+(defonce ^{:private true
+           :doc "Serialized updates to the one authority database interest."}
+  !listener-updates (atom (js/Promise.resolve nil)))
+
+(defonce ^{:private true
+           :doc "Fence preventing an old interest update from surviving stop."}
+  !listener-generation (atom 0))
+
+(defn- live-listener-dependencies
+  "Union dependencies for every live normalized subscription."
+  [registry]
+  (let [dependencies
+        (into []
+              (comp (map val)
+                    (filter ::live?)
+                    (map #(get % ::dependencies ::unknown)))
+              (::subscriptions registry))]
+    (cond
+      (empty? dependencies) nil
+      (some #{:all ::unknown} dependencies) :all
+      :else (not-empty (apply set/union #{} dependencies)))))
+
+(defn- dependencies-query
+  "Datalog query whose analyzed attributes equal `dependencies`."
+  [dependencies]
+  (if (= :all dependencies)
+    all-datoms-query
+    (into '[:find (count ?e) . :where]
+          (map (fn [attribute] ['?e attribute '_]))
+          (sort dependencies))))
+
 (defn- advance-full-events
   "Invalidate affected renders and advance unchanged renders to the commit."
   [registry change]
@@ -876,19 +913,87 @@
                 (::subscriptions @!feeds))
       (schedule-broadcast! change))))
 
-(defn install!
-  "Install the view tx-listener. Idempotent — same key replaces."
+(defn- refresh-behind-listener! [listener-coordinate]
+  (doseq [[subscription-key subscription] (::subscriptions @!feeds)
+          :when (and (::live? subscription)
+                     (not= listener-coordinate
+                           (::full-event-coordinate subscription)))]
+    (enqueue-render! subscription-key {::render-full? true})))
+
+(defn- remove-listener! [generation]
+  (-> (db/unlisten! {::db/key ::views})
+      (.then
+       (fn [result]
+         (when (= generation @!listener-generation)
+           (swap! !feeds dissoc ::listener-dependencies))
+         result))))
+
+(defn- register-listener! [generation dependencies]
+  (-> (db/listen!
+       {::db/key ::views
+        ::db/handler on-tx
+        ::db/query (dependencies-query dependencies)})
+      (.then
+       (fn [result]
+         (when (= generation @!listener-generation)
+           (if-let [listener-coordinate (::db/coordinate result)]
+             (do
+               (swap! !feeds assoc ::listener-dependencies dependencies)
+               (refresh-behind-listener! listener-coordinate))
+             (do
+               (swap! !feeds dissoc ::listener-dependencies)
+               (log/error-console! "seon.web.datastar"
+                                   "database interest registration failed"
+                                   result))))
+         result))))
+
+(defn- apply-listener-dependencies! [generation]
+  (let [dependencies (live-listener-dependencies @!feeds)
+        installed (::listener-dependencies @!feeds)]
+    (cond
+      (= dependencies installed) nil
+      (nil? dependencies) (remove-listener! generation)
+      :else (register-listener! generation dependencies))))
+
+(defn- reconcile-listener!
+  "Make the one authority interest match all live subscription dependencies."
   []
-  (let [result (db/listen! {:seon.db/key ::views :seon.db/handler on-tx})]
-    (swap! !feeds assoc ::listener-installed? true)
-    result))
+  (let [generation @!listener-generation
+        prior @!listener-updates
+        update (-> prior
+                   (.catch (fn [_] nil))
+                   (.then
+                    (fn []
+                      (when (= generation @!listener-generation)
+                        (apply-listener-dependencies! generation)))))]
+    (reset! !listener-updates update)
+    update))
+
+(defn install!
+  "Reconcile the one selective database interest for all live views."
+  []
+  (swap! !feeds assoc ::listener-installed? true)
+  (reconcile-listener!))
 
 (defn- release-runtime!
   "Release listener and timer ownership from one prior runtime state."
   [listener-installed?]
   (try
     (when listener-installed?
-      (db/unlisten! {:seon.db/key ::views}))
+      (let [generation (swap! !listener-generation inc)
+            prior @!listener-updates
+            release
+            (-> prior
+                (.catch (fn [_] nil))
+                (.then
+                 (fn []
+                   (-> (db/unlisten! {::db/key ::views})
+                       (.then
+                        (fn [result]
+                          (when (= generation @!listener-generation)
+                            (swap! !feeds dissoc ::listener-dependencies))
+                          result))))))]
+        (reset! !listener-updates release)))
     (finally
       (clear-coalescer!)
       (stop-heartbeat!))))
@@ -1105,7 +1210,11 @@
   "Release a view only when `feed-id` still owns its current socket."
   [view-id feed-id]
   (if (= feed-id (:seon.web.feed/id (get-in @!feeds [::views view-id])))
-    (do (swap! !feeds detach-view view-id) true)
+    (do
+      (swap! !feeds detach-view view-id)
+      (when (seq (::views @!feeds))
+        (reconcile-listener!))
+      true)
     false))
 
 (defn- close-feed-socket!
@@ -1134,9 +1243,6 @@
 (defn- open-feed!
   "Open a long-lived gzip SSE stream from one derived-view descriptor."
   [^js req ^js res feed]
-  ;; Datahike owns listener membership. The stable key makes this idempotent
-  ;; and replaces a pre-reload callback with the current definition.
-  (install!)
   (.writeHead
     res 200
     (clj->js
@@ -1181,6 +1287,10 @@
     (.pipe gz res)
     (when-let [replaced (replace-feed! conn)]
       (close-feed-socket! replaced))
+    ;; Attach first so the one authority interest can be the exact union of
+    ;; live normalized subscription dependencies. A dependency-less first
+    ;; render starts broad, then narrows after returning its declared attrs.
+    (install!)
     (push-full! (get-in @!feeds [::views view-id]))
     (ensure-heartbeat!)
     (log/info-console! "seon.web.datastar" "FEED OPEN"
@@ -1481,33 +1591,32 @@
   (let [message (await (execution.host/invoke-compiled!
                        coordinate id agent-view-function [{:seon.agent/id id}]))]
     (if (= execution/result-message (::execution/message message))
-      (agent-view/render-agent-view (::execution/result message))
-      [:main {:id "app-view" :class "text-error text-xs font-mono"}
-       (str "render error: "
-            (or (get-in message [::execution/error :seon.error/message])
-                "execution child failed"))])))
+      (let [projection (::execution/result message)]
+        {::element (agent-view/render-agent-view projection)
+         ::dependencies (or (::dependencies projection) :all)})
+      {::element
+       [:main {:id "app-view" :class "text-error text-xs font-mono"}
+        (str "render error: "
+             (or (get-in message [::execution/error :seon.error/message])
+                 "execution child failed"))]
+       ::dependencies :all})))
 
 (defn- live-agent-feed-definition [id view-id]
   (cond->
    {:seon.web.feed/key [:seon.web.feed/agent id]
     :seon.web.feed/live? true
-    ;; The current page acquisition includes a global datom count. Until that
-    ;; value becomes its own independently derived stream, every commit can
-    ;; change this projection; claiming narrower surface attrs would be wrong.
-    ::dependencies :all
     :seon.web.feed/render-full
     (fn []
       (-> (db/head-coordinate)
           (.then (fn [coordinate]
                    (-> (render-agent-view-at! id coordinate)
-                       (.then (fn [element]
-                                {::element element
-                                 :seon.db/coordinate coordinate})))))))
+                       (.then #(assoc % :seon.db/coordinate coordinate)))))))
     :seon.web.feed/render-change
     (fn [_subscription change]
       (-> (render-agent-view-at! id (:seon.db/coordinate change))
-          (.then (fn [element]
-                   {::elements [element]
+          (.then (fn [rendered]
+                   {::elements [(::element rendered)]
+                    ::dependencies (::dependencies rendered)
                     ::render-full? true}))))}
    view-id (assoc ::view-id view-id)))
 
@@ -1545,9 +1654,7 @@
              :seon.web.feed/render-full
              (fn []
                (-> (render-agent-view-at! id selector)
-                   (.then (fn [element]
-                            {::element element
-                             :seon.db/coordinate selector}))))
+                   (.then #(assoc % :seon.db/coordinate selector))))
              :seon.web.feed/render-change
              (fn [_subscription _change] {::elements []})}
             view-id (assoc ::view-id view-id)))

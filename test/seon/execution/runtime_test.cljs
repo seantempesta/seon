@@ -443,9 +443,11 @@
 (deftest agent-view-projection-resolves-literal-and-async-authored-surfaces
   (async done
     (let [original db/execute-many
-          calls (atom nil)]
+          calls (atom nil)
+          acquisition (atom nil)]
       (set! db/execute-many
-            (fn [_]
+            (fn [request]
+              (reset! acquisition request)
               (js/Promise.resolve
                {::db/coordinate point
                 ::db/results
@@ -458,11 +460,10 @@
                      :seon.render/html (pr-str [:div "literal"])}
                     {:seon.agent.ctx/name :authored
                      :seon.agent.ctx/priority 2
-                     :seon.render/html (pr-str 'my.agent.agent-1/view)}]}}
+                     :seon.render/html (pr-str 'my.agent.agent-1/view)
+                     :seon.fn/read-attrs [:my.example/value]}]}}
                  {::protocol/success? true
-                  :datahike.query/result 3}
-                 {::protocol/success? true
-                  :datahike.query/result 42}]})))
+                  :datahike.query/result 3}]})))
       (-> (db/with-tx-context
            {::db/coordinate point}
            #(runtime/render-agent-view!
@@ -481,9 +482,12 @@
                     (into #{}
                           (map :seon.render.surface/label)
                           (:seon.render.surface/surfaces projection))))
-             (is (= 42 (get-in projection
-                               [:seon.ui.header/projection
-                                :seon.ui.header/datom-count])))
+             (is (= 2 (count (::db/members @acquisition)))
+                 "the page no longer queries the global datom count")
+             (is (contains? (:seon.web.datastar/dependencies projection)
+                            :my.example/value))
+             (is (contains? (:seon.web.datastar/dependencies projection)
+                            :seon.agent/id))
              (done)))
           (.catch (fn [error] (is false (str error)) (done)))
           (.finally (fn [] (set! db/execute-many original)))))))
