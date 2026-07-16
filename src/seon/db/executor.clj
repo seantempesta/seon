@@ -148,7 +148,7 @@
               ::maximum-queued-by-database 1}}})))
 
 (defn- empty-class-ready []
-  {::database-order [] ::database-cursor 0 ::by-database {}})
+  {::database-order empty-queue ::by-database {}})
 
 (defn- empty-state [classes]
   {::class-order (vec classes)
@@ -176,20 +176,26 @@
                    (update-in [::by-database database-name] conj work)))))
 
 (defn- take-database [ready eligible-database?]
-  (let [order (::database-order ready)
-        n (count order)]
-    (loop [offset 0]
-      (if (= offset n)
+  (let [ready-count (count (::database-order ready))]
+    (loop [remaining ready-count
+           ready ready]
+      (if (zero? remaining)
         [ready nil]
-        (let [index (mod (+ (::database-cursor ready) offset) n)
-              database-name (nth order index)
+        (let [database-name (peek (::database-order ready))
+              ready (update ready ::database-order pop)
               queue (get-in ready [::by-database database-name])]
           (if (and (seq queue) (eligible-database? database-name))
-            [(-> ready
-                 (assoc ::database-cursor (mod (inc index) n))
-                 (assoc-in [::by-database database-name] (pop queue)))
-             (peek queue)]
-            (recur (inc offset))))))))
+            (let [next-queue (pop queue)]
+              [(if (seq next-queue)
+                 (-> ready
+                     (update ::database-order conj database-name)
+                     (assoc-in [::by-database database-name] next-queue))
+                 (update ready ::by-database dissoc database-name))
+               (peek queue)])
+            (recur (dec remaining)
+                   (if (seq queue)
+                     (update ready ::database-order conj database-name)
+                     (update ready ::by-database dissoc database-name)))))))))
 
 (defn- eligible-class? [state capacity work-class]
   (let [active (get-in state [::running-by-class work-class] 0)
@@ -266,17 +272,26 @@
           (fn [ready]
             (into {}
                   (map (fn [[work-class class-ready]]
-                         [work-class
-                          (update class-ready ::by-database
-                                  (fn [by-database]
-                                    (into {}
-                                          (map (fn [[database-name queue]]
-                                                 [database-name
-                                                  (into empty-queue
-                                                        (remove #(contains? results
-                                                                            (::result %)))
-                                                        queue)]))
-                                          by-database)))])
+                         (let [by-database
+                               (into {}
+                                     (keep
+                                      (fn [[database-name queue]]
+                                        (let [remaining
+                                              (into empty-queue
+                                                    (remove
+                                                     #(contains? results
+                                                                 (::result %)))
+                                                    queue)]
+                                          (when (seq remaining)
+                                            [database-name remaining]))))
+                                     (::by-database class-ready))]
+                           [work-class
+                            (assoc class-ready
+                                   ::database-order
+                                   (into empty-queue
+                                         (filter #(contains? by-database %))
+                                         (::database-order class-ready))
+                                   ::by-database by-database)]))
                        ready)))))
 
 (defn- take-work! [executor allowed-classes]

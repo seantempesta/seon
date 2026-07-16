@@ -98,6 +98,26 @@
                   (executor/evidence worker))))
       (finally (executor/stop! {::executor/executor worker})))))
 
+(deftest completed-database-names-leave-the-ready-queue
+  (let [worker (start-worker {:read :request/value})]
+    (try
+      (doseq [index (range 512)
+              :let [database-name (str "churn-" index)
+                    exact-scope
+                    (scope database-name (random-uuid) (random-uuid))]]
+        (is (= index
+               (executor/submit!
+                (request worker database-name exact-scope
+                         (str "churn/job-" index) index)))))
+      (let [ready (get-in @(::executor/state worker)
+                          [::executor/ready :read])]
+        (is (empty? (::executor/database-order ready)))
+        (is (empty? (::executor/by-database ready))))
+      (is (zero? (::executor/queued (executor/evidence worker))))
+      (is (zero? (::executor/running (executor/evidence worker))))
+      (finally
+        (executor/stop! {::executor/executor worker})))))
+
 (deftest one-start-owned-completion-runs-once-outside-the-executor-lock
   (let [worker* (atom nil)
         completions (atom [])

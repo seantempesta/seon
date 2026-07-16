@@ -586,6 +586,24 @@ session cursors. A slow recipient counts the full body against its own byte
 budget and never retains query permits. A mmap body is an optional later
 capability only if 256 KiB–4 MiB shared-result evidence beats optimized UDS.
 
+[[research/optimal-integration-seams-2026-07-16]] rechecks the target against
+newer Bun and the maintained Datahike internals. Native UDS remains the database
+data plane; Bun child IPC is control-only because its public send API has no
+exact byte/drain contract and proxying would recreate a broker. Datahike already
+shares immutable index roots and connection-scoped storage caching across one
+captured DB value. Its existing `d/transact!` result supports nonblocking
+core.async `take!`, so the callback cut also removes parked mutation threads
+without bypassing public transaction, backfill, listener, or batching semantics.
+The final Bun child owner uses `onDisconnect`/`onExit` for normal lifecycle and
+evaluates `--no-orphans` only as Linux/macOS parent-loss containment.
+
+The executor ready structure now retains each database once only while that
+class has queued work, reappending it only when work remains. Completion and
+cancellation remove the final empty queue, so cluster churn cannot increase
+future selection scans. The retained 512-database churn regression plus the
+focused executor gate pass 23 tests/650 assertions; the changed writer boundary
+passes 69 tests/968 assertions.
+
 Exit proof: 1/8/32 children, multiplex limits, fragmented frames, partial
 writes, large pages, slow recipients, cancellation, child crash, reconnect,
 and release preserve bounded independent progress and outperform the removed
@@ -691,12 +709,15 @@ checkpoint freezes all artifact inputs; lifecycle remains operator-owned.
 
 ## Current boundary and final graduation gate
 
-Earliest unsettled implementation contract: Unit 4 phase-aware bounded
-execution. Provider waits must consume only embedding capacity; native KNN,
-queries, mutation submission, response encoding, and lifecycle requests each
-retain their own bounded workers or bytes. Database selection precedes shared
-worker acquisition, while each Datahike connection remains the only ordered
-writer for its database.
+Earliest unsettled implementation contract: the callback-complete writer closes
+the remaining Unit 4/Unit 6 execution boundary. Provider waits consume only
+embedding capacity; native KNN, queries, mutation completion, response encoding,
+and lifecycle requests retain their own bounded workers or bytes. `d/transact!`
+completion must hold its mutation admission without a parked thread. Database
+selection precedes shared worker acquisition, and the ready structure retains
+only databases with queued work so churn cannot make authority selection scan
+historical empty names. Each Datahike connection remains the only ordered writer
+for its database.
 
 Integrated proof that closes it:
 [[research/authority-heavy-class-proof-plan-2026-07-15]] plus retained 2/4/8
