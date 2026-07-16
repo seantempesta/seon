@@ -92,8 +92,9 @@ Rust, cloud, Tauri, and mobile hosts conform to the same data fixtures.
 
 ## Dependency ledger
 
-- Datahike `d9765276cd8d0778f39e93046c2d59b8c2fa8ff2` (graduated Units
-  1–3 at `940810f5`, plus attached
+- Datahike `8cb44a29d51e97b32f3f72bc7de48e9122ae79d8` (two-phase host query
+  admission atop fair report batching at `d9765276`; graduated Units 1–3 at
+  `940810f5`, plus attached
   exact-commit cache identity, atop
   `9ada755087228e10cfb179fa5779ce227a6ed220`):
   `db.cljc`, `connections.cljc`, `connector.cljc`, `core.cljc`,
