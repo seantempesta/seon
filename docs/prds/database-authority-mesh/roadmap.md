@@ -173,8 +173,12 @@ The exact Shadow reachability and launch-environment seam is
 [[research/execution-artifact-database-dependency-seam-2026-07-16]]: 81 heavy
 database implementation imports occupy 8,293,078 of 18,810,383 live
 unoptimized execution bytes (44.1%). The one public `seon.db` namespace selects
-a private build-role implementation; the child launch freezes absolute runtime
-root/cwd and an explicit environment instead of inheriting the host.
+a private build-role implementation only if an independently shipped execution
+artifact must precede the atomic consumer cut. The selected full-control plan
+instead deletes the final local CLJS consumers and Datahike implementation in
+that cut, leaving the remote implementation as canonical `seon.db` without a
+lasting alias layer. The child launch freezes absolute runtime root/cwd and an
+explicit environment instead of inheriting the host.
 Strict reads inside one containing commit are grounded in
 [[research/strict-temporal-coordinate-seam-2026-07-16]]. The dependency-native
 ordered/missing-value pull contract is
@@ -1228,10 +1232,11 @@ fallback is prohibited.
   abnormal post-ready exit runs exact fenced recovery without replay. A
   source-grounded remote-client dependency audit proves that the current child
   spends 44.1% of its live JS bytes on local database implementation code. Its
-  later slimming seam selects one private build-role implementation behind the
-  unchanged public `seon.db` interface and moves eval-limit environment reads
-  into closed startup/config data before enforcing the explicit child
-  environment.
+  audit proves a private build-role selection is possible, but the full-control
+  cut does not need that temporary dual implementation: it removes local CLJS
+  Datahike reachability and leaves the remote owner behind the unchanged public
+  `seon.db` interface. Eval-limit environment reads move into closed
+  startup/config data before enforcing the explicit child environment.
 - **Next refill:** migrate the outer authored render owners first, then
   interaction and eval through that same child owner and land the 13/16-member
   prompt acquisition with immutable retry inputs. In parallel, finish
