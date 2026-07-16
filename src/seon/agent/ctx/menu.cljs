@@ -35,8 +35,10 @@
   (:require
     [clojure.string :as str]
     [seon.agent.ctx :as ctx]
+    [seon.agent.home :as home]
     [seon.agent.ctx.namespaces :as ns-cards]
     [seon.db :as db]
+    [seon.db.protocol :as protocol]
     [seon.eval :as seval]
     [seon.repl.internal :as repl-internal]
     [seon.schema :as schema]))
@@ -357,9 +359,12 @@
                                    [?e :seon.fn/fn-var? true]
                                    [?e :seon.fn/agent-facing? true]]
                   :seon.db/args [ns-kw]})
-       (map #(db/pull db [:seon.fn/sym :seon.fn/private?
-                          :seon.fn/agent-facing? :seon.fn/spec
-                          :seon.fn/arglists :seon.fn/doc] %))
+       (map #(db/pull {:seon.db/db db
+                       :seon.db/pull-pattern
+                       [:seon.fn/sym :seon.fn/private?
+                        :seon.fn/agent-facing? :seon.fn/spec
+                        :seon.fn/arglists :seon.fn/doc]
+                       :seon.db/ref %}))
        (filter (fn [row] (and (not (:seon.fn/private? row))
                               (:seon.fn/spec row)
                               (:seon.fn/sym row))))
@@ -451,7 +456,231 @@
   (str "; " glyph " "
        (ns-cards/compact-fn-head (compact-row sym-str row))))
 
-(defn function-menu-block
+(def ^:private prompt-eval-query
+  {:find '[?at ?eval-tx ?source ?ns]
+   :in '[$ ?agent-id]
+   :where '[[?agent :seon.agent/id ?agent-id]
+            [?eval :seon.eval/agent ?agent]
+            [?eval :seon.eval/ok? true]
+            [?eval :seon.eval/at ?at ?eval-tx]
+            [?eval :seon.eval/source ?source]
+            [?eval :seon.eval/ns ?ns]]
+   :order-by '[?at :desc ?eval-tx :desc]
+   :limit eval-scan-window})
+
+(def ^:private cluster-eval-query
+  {:find '[?at ?eval-tx ?source ?ns]
+   :where '[[?eval :seon.eval/ok? true]
+            [?eval :seon.eval/at ?at ?eval-tx]
+            [?eval :seon.eval/source ?source]
+            [?eval :seon.eval/ns ?ns]]
+   :order-by '[?at :desc ?eval-tx :desc]
+   :limit global-eval-scan-window})
+
+(def ^:private prompt-fn-selector
+  '[:seon.fn/sym :seon.fn/fn-var? :seon.fn/agent-facing?
+    :seon.fn/private? :seon.fn/spec :seon.fn/arglists :seon.fn/doc])
+
+(def ^:private prompt-ns-selector
+  '[:seon.ns/name {:seon.ns/require-edges
+                   [:seon.ns.require/target :seon.ns.require/alias
+                    :seon.ns.require/refers :seon.ns.require/refer-all?
+                    :seon.ns.require/as-alias?]}])
+
+(defn- query-member [query arguments max-results max-weight]
+  (cond-> {::protocol/operation protocol/query-operation
+           ::protocol/query-form query
+           :datahike.resource/max-work 1000000
+           :datahike.resource/max-results max-results
+           :datahike.resource/max-result-weight max-weight}
+    (seq arguments) (assoc ::protocol/arguments arguments)))
+
+(defn- member-result [member]
+  (when (true? (::protocol/success? member))
+    (or (::protocol/result member)
+        (:datahike.query/result member))))
+
+(defn- eval-row [[at _ source ns-name]]
+  {:seon.eval/at at :seon.eval/source source :seon.eval/ns ns-name
+   :seon.eval/ok? true})
+
+(defn- namespace-info [rows]
+  (into {}
+        (map (fn [row]
+               [(:seon.ns/name row)
+                (seval/edges->require-info
+                  (set (:seon.ns/require-edges row)))]))
+        rows))
+
+(defn- acquired-called-symbols [rows infos]
+  (vec
+    (mapcat (fn [{src :seon.eval/source ns-name :seon.eval/ns}]
+              (keep #(or (resolve-call-sym (get infos ns-name) %)
+                         (when (and ns-name (nil? (namespace %)))
+                           (str (name ns-name) "/" (name %))))
+                    (call-syms src)))
+            rows)))
+
+(defn- directly-called-symbols [rows]
+  (->> rows
+       (mapcat (fn [{src :seon.eval/source ns-name :seon.eval/ns}]
+                 (keep (fn [sym]
+                         (cond
+                           (namespace sym) (str sym)
+                           ns-name (str (name ns-name) "/" (name sym))))
+                       (call-syms src))))
+       distinct
+       vec))
+
+(defn- rank-acquired [rows infos functions]
+  (let [occ (acquired-called-symbols rows infos)
+        freq (frequencies occ)
+        seen (reduce (fn [m [i s]] (if (contains? m s) m (assoc m s i)))
+                     {} (map-indexed vector occ))]
+    (->> (keys freq)
+         (sort-by (juxt #(- (freq %)) seen))
+         (keep (fn [s] (when-let [row (get functions s)] [s row])))
+         vec)))
+
+(defn- acquired-functions
+  [{:keys [agent-rows cluster-rows current-ns namespace-rows function-rows
+           policy-row]}]
+  (let [effective-policy (merge default-policy
+                                (select-keys policy-row (keys default-policy)))
+        infos (namespace-info namespace-rows)
+        functions (into {}
+                        (keep (fn [row]
+                                (when (and (:seon.fn/sym row)
+                                           (:seon.fn/fn-var? row)
+                                           (:seon.fn/agent-facing? row)
+                                           (not (:seon.fn/private? row)))
+                                  [(:seon.fn/sym row) row])))
+                        function-rows)
+        recent (->> (rank-acquired agent-rows infos functions)
+                    (take (-> (:seon.typeahead/menu-cap effective-policy)
+                              (min (count glyphs)) (max 0)))
+                    vec)
+        freq (frequencies (acquired-called-symbols cluster-rows infos))
+        targets (->> namespace-rows
+                     (some #(when (= current-ns (:seon.ns/name %)) %))
+                     :seon.ns/require-edges
+                     (map :seon.ns.require/target)
+                     (filter ns-cards/included-ns?) set)
+        exclude (into #{} (map first) recent)
+        per-ns (->> targets
+                    (map (fn [ns-name]
+                           (->> functions
+                                (keep (fn [[s row]]
+                                        (when (and (:seon.fn/spec row)
+                                                   (str/starts-with? s (str (name ns-name) "/"))
+                                                   (not (contains? exclude s)))
+                                          [s row])))
+                                (sort-by (fn [[s _]] [(- (freq s 0)) s]))
+                                vec)))
+                    (remove empty?)
+                    (sort-by (fn [entries]
+                               [(- (freq (ffirst entries) 0)) (ffirst entries)])))
+        max-len (apply max 0 (map count per-ns))
+        toolkit-cap (-> (:seon.typeahead/toolkit-cap effective-policy)
+                        (min (- (count glyphs) (count recent))) (max 0))
+        toolkit (->> (for [i (range max-len), entries per-ns
+                           :when (< i (count entries))]
+                       (nth entries i))
+                     (take toolkit-cap) vec)]
+    {::recent recent ::toolkit toolkit}))
+
+(defn- format-function-menu [{::keys [recent toolkit]}]
+  (let [lines (fn [offset entries]
+                (str/join "\n"
+                          (map-indexed
+                            (fn [i [s row]]
+                              (function-line (glyphs (+ offset i)) s row))
+                            entries)))]
+    (cond
+      (and (seq recent) (seq toolkit))
+      (str recent-functions-header "\n" (lines 0 recent) "\n"
+           toolkit-group-header "\n" (lines (count recent) toolkit))
+      (seq recent) (str recent-functions-header "\n" (lines 0 recent))
+      (seq toolkit) (str toolkit-only-header "\n" (lines 0 toolkit))
+      :else "")))
+
+(defn ^:async ^:private acquire-prompt-menu
+  [{agent-id :seon.agent/id :as input}]
+  (let [coordinate (or (::db/coordinate input)
+                       (::db/coordinate (db/current-tx-context)))
+        initial (when coordinate
+                  (await (db/execute-many
+                           {::db/coordinate coordinate
+                            ::db/members
+                            [{::protocol/operation protocol/pull-operation
+                              ::protocol/selector (vec (cons :seon.typeahead/id
+                                                             (keys default-policy)))
+                              ::protocol/entity-id [:seon.typeahead/id policy-row-id]
+                              :datahike.resource/max-work 10000
+                              :datahike.resource/max-results 32
+                              :datahike.resource/max-result-weight 4096}
+                             (query-member prompt-eval-query [agent-id] 32768 262144)
+                             (query-member cluster-eval-query [] 131072 1048576)]
+                            ::db/max-result-weight 1314816})))]
+    (if-not (and coordinate (= coordinate (::db/coordinate initial))
+                 (every? #(true? (::protocol/success? %)) (::db/results initial)))
+      {:seon.error/message "Function menu acquisition failed."
+       :seon.error/kind :core-bug :seon.error/data initial}
+      (let [[policy-member agent-member cluster-member] (::db/results initial)
+            agent-rows (mapv eval-row (member-result agent-member))
+            cluster-rows (mapv eval-row (member-result cluster-member))
+            current-ns (or (:seon.eval/ns (first agent-rows))
+                           (home/home-ns agent-id))
+            source-nses (->> (concat [current-ns]
+                                     (map :seon.eval/ns agent-rows)
+                                     (map :seon.eval/ns cluster-rows))
+                             (remove nil?) distinct vec)
+            direct-syms (directly-called-symbols
+                          (concat agent-rows cluster-rows))
+            selected (await (db/execute-many
+                              {::db/coordinate coordinate
+                               ::db/members
+                               [{::protocol/operation protocol/pull-many-operation
+                                 ::protocol/selector prompt-ns-selector
+                                 ::protocol/entity-ids
+                                 (mapv (fn [n] [:seon.ns/name n]) source-nses)
+                                 :datahike.resource/max-work 1000000
+                                 :datahike.resource/max-results 16384
+                                 :datahike.resource/max-result-weight 1048576}
+                                (query-member
+                                  {:find [(list 'pull '?fn prompt-fn-selector)]
+                                   :in '[$ [?source-name ...]]
+                                   :where '[[?source :seon.ns/name ?source-name]
+                                            [?source :seon.ns/require-edges ?edge]
+                                            [?edge :seon.ns.require/target ?target-name]
+                                            [?target :seon.ns/name ?target-name]
+                                            [?fn :seon.fn/ns ?target]
+                                            [?fn :seon.fn/fn-var? true]
+                                            [?fn :seon.fn/agent-facing? true]]}
+                                  [source-nses] 65536 2097152)
+                                {::protocol/operation protocol/pull-many-operation
+                                 ::protocol/selector prompt-fn-selector
+                                 ::protocol/entity-ids
+                                 (mapv (fn [sym] [:seon.fn/sym sym]) direct-syms)
+                                 :datahike.resource/max-work 1000000
+                                 :datahike.resource/max-results 32768
+                                 :datahike.resource/max-result-weight 1048576}]
+                               ::db/max-result-weight 3211264}))]
+        (if-not (and (= coordinate (::db/coordinate selected))
+                     (every? #(true? (::protocol/success? %))
+                             (::db/results selected)))
+          {:seon.error/message "Function menu selected acquisition failed."
+           :seon.error/kind :core-bug :seon.error/data selected}
+          (let [[ns-member fn-member direct-member] (::db/results selected)]
+            {:policy-row (member-result policy-member)
+             :agent-rows agent-rows :cluster-rows cluster-rows
+             :current-ns current-ns
+             :namespace-rows (remove nil? (member-result ns-member))
+             :function-rows (into (mapv first (member-result fn-member))
+                                  (remove nil?)
+                                  (member-result direct-member))}))))))
+
+(defn ^:async function-menu-block
   "The `:function-menu` section — recent + toolkit functions, glyph-listed.
 
    ONE menu, TWO derived groups under ONE glyph numbering (P6):
@@ -475,23 +704,13 @@
    owner 2026-07-12 — ctx rows seed-copied into agents BEFORE the rename
    keep the old name + fn symbol and are orphaned; a cluster reset
    re-seeds from the manifest)."
-  {:malli/schema [:=> [:cat :seon.render/section-request] :string]}
-  [{:seon.db/keys [db] :seon.agent/keys [id]}]
-  (let [db (or db (some-> db/*conn* deref))
-        {::keys [recent toolkit]} (combined-functions db id)
-        lines (fn [offset entries]
-                (str/join "\n"
-                          (map-indexed
-                            (fn [i [s row]] (function-line (glyphs (+ offset i)) s row))
-                            entries)))]
-    (cond
-      (and (seq recent) (seq toolkit))
-      (str recent-functions-header "\n" (lines 0 recent) "\n"
-           toolkit-group-header "\n" (lines (count recent) toolkit))
-
-      (seq recent)  (str recent-functions-header "\n" (lines 0 recent))
-      (seq toolkit) (str toolkit-only-header "\n" (lines 0 toolkit))
-      :else "")))
+  {:malli/schema [:=> [:cat :seon.render/section-request :any] :string]}
+  [input _invoke-selected!]
+  (let [acquired (await (acquire-prompt-menu input))]
+    (if (:seon.error/message acquired)
+      (str "[function-menu] render failed: "
+           (:seon.error/message acquired))
+      (format-function-menu (acquired-functions acquired)))))
 
 ;; ============================================================
 ;; Driver offers — the SAME capped function list as the rendered menu,

@@ -41,7 +41,8 @@
     [clojure.string :as str]
     [seon.ai :as ai]
     [seon.ai.tokens :as tokens]
-    [seon.db :as db]))
+    [seon.db :as db]
+    [seon.db.protocol :as protocol]))
 
 ;; ============================================================
 ;; The block — install explicitly, never seeded.
@@ -85,14 +86,48 @@
               [:seon.ai/resolved-config :seon.ai/provider]))
     (catch :default _ nil)))
 
-(defn- typeahead-provider?
-  "Whether agent `id`'s RESOLVED provider in db value `db` is
-   `:typeahead` — the agent's own `::agent-provider` overlay over the
-   global `:seon.ai/config` row over the shipped default."
-  [db id]
-  (= :typeahead (resolved-provider db id)))
+(defn- prompt-provider
+  "Resolve the prompt provider from already-acquired ordinary rows."
+  [agent-row config-row]
+  (let [override (some-> (:seon.ai/agent-provider agent-row)
+                         (db/decode-edn-value :seon.ai/agent-provider))]
+    (if (and override (not= :inherit override))
+      override
+      (or (:seon.ai/provider config-row) :deepseek))))
 
-(defn steps-ai
+(defn ^:async ^:private acquire-prompt-provider
+  [{agent-id :seon.agent/id :as input}]
+  (let [coordinate (or (::db/coordinate input)
+                       (::db/coordinate (db/current-tx-context)))
+        acquired (when coordinate
+                   (await
+                     (db/execute-many
+                       {::db/coordinate coordinate
+                        ::db/members
+                        [{::protocol/operation protocol/pull-operation
+                          ::protocol/selector [:seon.ai/agent-provider]
+                          ::protocol/entity-id [:seon.agent/id agent-id]
+                          :datahike.resource/max-work 10000
+                          :datahike.resource/max-results 8
+                          :datahike.resource/max-result-weight 1024}
+                         {::protocol/operation protocol/pull-operation
+                          ::protocol/selector [:seon.ai/provider]
+                          ::protocol/entity-id [:seon.ai/id "config"]
+                          :datahike.resource/max-work 10000
+                          :datahike.resource/max-results 8
+                          :datahike.resource/max-result-weight 1024}]
+                        ::db/max-result-weight 4096})))]
+    (if-not (and coordinate (= coordinate (::db/coordinate acquired))
+                 (every? #(true? (::protocol/success? %))
+                         (::db/results acquired)))
+      {:seon.error/message "Typeahead provider acquisition failed."
+       :seon.error/kind :core-bug
+       :seon.error/data acquired}
+      (let [[agent-member config-member] (::db/results acquired)]
+        (prompt-provider (::protocol/result agent-member)
+                         (::protocol/result config-member))))))
+
+(defn ^:async steps-ai
   "The typeahead provider's protocol instructions, provider-gated.
 
    Renders [[instructions]] only when the agent's RESOLVED provider is
@@ -100,10 +135,16 @@
    per-agent overlay applies, so one typeahead-routed agent sees it
    while its deepseek siblings don't). Any other provider → \"\" and
    the composer drops the section (reactive-context, zero token cost)."
-  {:malli/schema [:=> [:cat :seon.render/section-request] :string]}
-  [{db :seon.db/db id :seon.agent/id}]
-  (let [db (or db (some-> db/*conn* deref))]
-    (if (typeahead-provider? db id) instructions "")))
+  {:malli/schema [:=> [:cat :seon.render/section-request :any] :string]}
+  [input _invoke-selected!]
+  (let [provider (await (acquire-prompt-provider input))]
+    (cond
+      (:seon.error/message provider)
+      (str "[typeahead-steps] render failed: "
+           (:seon.error/message provider))
+
+      (= :typeahead provider) instructions
+      :else "")))
 
 ;; ============================================================
 ;; :seon.render/html — the step-trace surface, derived at render from the
@@ -138,7 +179,9 @@
                                                 [?a :seon.agent/id ?aid]
                                                 [?e :seon.typeahead/agent ?a]]
                                :seon.db/args  [id]})
-                    (map #(db/pull db '[*] %))
+                    (map #(db/pull {:seon.db/db db
+                                    :seon.db/pull-pattern '[*]
+                                    :seon.db/ref %}))
                     (filter :seon.typeahead/at))]
       (when (seq rows)
         (let [call (->> rows

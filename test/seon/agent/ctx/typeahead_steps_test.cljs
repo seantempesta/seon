@@ -20,7 +20,8 @@
     [seon.agent.ctx.typeahead-steps :as ts]
     [seon.ai.typeahead]
     [seon.client :as client]
-    [seon.db :as db]))
+    [seon.db :as db]
+    [seon.db.protocol :as protocol]))
 
 (def ^:private a-id "tsteststagentA")   ; 14 chars — the :seon.db/id shape
 
@@ -65,64 +66,49 @@
 ;; :seon.render/ai — the provider gate.
 ;; ============================================================
 
-(deftest ai-slot-empty-without-typeahead-provider
-  (async done
-    (-> (with-conn
-          (fn [conn]
-            (is (= "" (ts/steps-ai {:seon.db/db @conn :seon.agent/id a-id}))
-                "no config row → resolved provider :deepseek → empty")))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+(def ^:private prompt-coordinate
+  {:seon.db.coordinate/database-id
+   #uuid "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+   :seon.db.coordinate/branch :main
+   :seon.db.coordinate/commit-id
+   #uuid "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+   :seon.db.coordinate/t 7})
 
-(deftest ai-slot-renders-when-global-provider-is-typeahead
-  (async done
-    (-> (with-conn
-          (fn [conn]
-            (-> (db/transact! {:seon.db/tx-data [{:seon.ai/id "config"
-                                                  :seon.ai/provider :typeahead}]})
-                (.then
-                  (fn [res]
-                    (ok! res)
-                    (let [text (ts/steps-ai {:seon.db/db @conn
-                                             :seon.agent/id a-id})]
-                      (is (str/includes? text "⟹")
-                          "teaches the live result grammar")
-                      (is (str/includes? text ";; =>")
-                          "names the banned claim shape explicitly")
-                      (is (not (str/includes? text "①"))
-                          "glyph teaching stays with the menu headers")))))))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+(defn- render-ai [agent-provider global-provider]
+  (with-redefs
+    [db/current-tx-context (fn [] {::db/coordinate prompt-coordinate})
+     db/execute-many
+     (fn [request]
+       (is (= prompt-coordinate (::db/coordinate request)))
+       (js/Promise.resolve
+         {::db/coordinate prompt-coordinate
+          ::db/results
+          [{::protocol/success? true
+            ::protocol/result
+            (when agent-provider {:seon.ai/agent-provider (pr-str agent-provider)})}
+           {::protocol/success? true
+            ::protocol/result
+            (when global-provider {:seon.ai/provider global-provider})}]}))]
+    (ts/steps-ai {:seon.agent/id a-id} nil)))
 
-(deftest ai-slot-honors-per-agent-provider-overlay
+(deftest ai-slot-is-remotely-provider-gated
   (async done
-    (-> (with-conn
-          (fn [conn]
-            (-> (db/transact! {:seon.db/tx-data
-                               [{:seon.ai/id "config"
-                                 :seon.ai/provider :deepseek}
-                                {:seon.agent/id a-id
-                                 :seon.ai/agent-provider :typeahead}]})
-                (.then
-                  (fn [res]
-                    (ok! res)
-                    (is (seq (ts/steps-ai {:seon.db/db @conn
-                                           :seon.agent/id a-id}))
-                        "agent :typeahead over global :deepseek → renders")
-                    ;; the reverse: global :typeahead, agent opted OUT
-                    (db/transact! {:seon.db/tx-data
-                                   [{:seon.ai/id "config"
-                                     :seon.ai/provider :typeahead}
-                                    {:seon.agent/id a-id
-                                     :seon.ai/agent-provider :deepseek}]})))
-                (.then
-                  (fn [res]
-                    (ok! res)
-                    (is (= "" (ts/steps-ai {:seon.db/db @conn
-                                            :seon.agent/id a-id}))
-                        "agent :deepseek over global :typeahead → empty"))))))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+    (-> (js/Promise.all
+          #js [(render-ai nil nil)
+               (render-ai nil :typeahead)
+               (render-ai :typeahead :deepseek)
+               (render-ai :deepseek :typeahead)])
+        (.then
+          (fn [results]
+            (let [[default global override opt-out] (js->clj results)]
+              (is (= "" default) "shipped deepseek default vanishes")
+              (is (str/includes? global "⟹") "global typeahead renders")
+              (is (str/includes? override ";; =>") "agent override renders")
+              (is (= "" opt-out) "agent override wins over global typeahead")
+              (is (not (str/includes? global "①"))
+                  "glyph teaching remains in the menu")
+              (done))))
+        (.catch (fn [error] (is false (str error)) (done))))))
 
 ;; ============================================================
 ;; :seon.render/html — the step-trace tile.
