@@ -283,3 +283,68 @@
     (is (instance? clojure.lang.ExceptionInfo failure))
     (is (re-find #"must depend on a database attribute"
                  (.getMessage ^Throwable failure)))))
+
+(deftest one-process-readiness-thread-routes-concurrent-runtime-sources
+  (let [scope-a {::executor/database-name "runtime-a"
+                 ::coordinate/attachment
+                 {::coordinate/database-id (random-uuid)
+                  ::coordinate/branch :db}
+                 ::executor/connection-id [(random-uuid) :db]
+                 ::executor/generation (random-uuid)}
+        scope-b {::executor/database-name "runtime-b"
+                 ::coordinate/attachment
+                 {::coordinate/database-id (random-uuid)
+                  ::coordinate/branch :db}
+                 ::executor/connection-id [(random-uuid) :db]
+                 ::executor/generation (random-uuid)}
+        source-a (committed-report/open!
+                  (::executor/connection-id scope-a)
+                  (::executor/generation scope-a) 4)
+        source-b (committed-report/open!
+                  (::executor/connection-id scope-b)
+                  (::executor/generation scope-b) 4)
+        runtime-a {::writer/readiness-owner (Object.)
+                   ::writer/interest-lock (Object.)
+                   ::writer/interest-state
+                   (atom {::writer/by-scope {}
+                          ::writer/by-source {source-a scope-a}})
+                   ::writer/executor :runtime-a}
+        runtime-b {::writer/readiness-owner (Object.)
+                   ::writer/interest-lock (Object.)
+                   ::writer/interest-state
+                   (atom {::writer/by-scope {}
+                          ::writer/by-source {}})
+                   ::writer/executor :runtime-b}
+        submissions (atom [])]
+    (try
+      (with-redefs [executor/try-submit!
+                    (fn [submission]
+                      (swap! submissions conj
+                             [(::executor/executor submission)
+                              (::executor/scope submission)])
+                      {::executor/accepted? true ::executor/joined? false})]
+        (#'writer/register-readiness! runtime-a)
+        (#'writer/register-readiness! runtime-b)
+        (let [thread
+              (::writer/readiness-thread @@#'writer/readiness-state)]
+          (is (instance? Thread thread))
+          (is (.isAlive ^Thread thread))
+          (is (= 2 (count (::writer/readiness-runtimes
+                           @@#'writer/readiness-state)))))
+        (committed-report/offer! source-a (::executor/generation scope-a) :a)
+        (committed-report/offer! source-b (::executor/generation scope-b) :b)
+        (Thread/yield)
+        (locking (::writer/interest-lock runtime-b)
+          (swap! (::writer/interest-state runtime-b)
+                 assoc-in [::writer/by-source source-b] scope-b))
+        (is (wait-until!
+             #(= #{[:runtime-a scope-a] [:runtime-b scope-b]}
+                 (set @submissions)))
+            "a source taken before owner publication is requeued, not lost"))
+      (finally
+        (#'writer/unregister-readiness! runtime-a)
+        (#'writer/unregister-readiness! runtime-b)
+        (committed-report/close! source-a false)
+        (committed-report/close! source-b false)))
+    (is (nil? (::writer/readiness-thread @@#'writer/readiness-state)))
+    (is (empty? (::writer/readiness-runtimes @@#'writer/readiness-state)))))

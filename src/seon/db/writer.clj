@@ -50,8 +50,7 @@
 (schema/register! ::knn 'fn?)
 (schema/register! ::active-requests 'some?)
 (schema/register! ::interest-state 'some?)
-(schema/register! ::stopping? 'some?)
-(schema/register! ::readiness-thread 'some?)
+(schema/register! ::readiness-owner 'some?)
 (schema/register! ::transport-connection 'map?)
 (schema/register! ::publisher :seon.db.transport.uds/publisher)
 (schema/register!
@@ -79,8 +78,7 @@
   [::executor ::executor]
   [::active-requests {:optional true} ::active-requests]
   [::interest-state {:optional true} ::interest-state]
-  [::stopping? {:optional true} ::stopping?]
-  [::readiness-thread {:optional true} ::readiness-thread]
+  [::readiness-owner {:optional true} ::readiness-owner]
   [::publisher ::publisher]])
 (schema/register! ::request-server :seon.db.transport.uds/request-server)
 (schema/register! ::database-name :seon.db.protocol/database-name)
@@ -1766,6 +1764,10 @@
 
 (def ^:private committed-report-capacity 256)
 (def ^:private committed-report-batch-size 32)
+(defonce ^:private readiness-lock (Object.))
+(defonce ^:private readiness-state
+  (atom {::readiness-runtimes {}
+         ::readiness-thread nil}))
 
 (defn- empty-interest-state []
   {::by-scope {}
@@ -2099,32 +2101,61 @@
         (when-not (::executor/joined? admission)
           (committed-report/requeue-ready! source))))))
 
+(defn- readiness-runtime
+  [source]
+  (some
+   (fn [runtime]
+     (locking (::interest-lock runtime)
+       (when (get-in @(::interest-state runtime) [::by-source source])
+         runtime)))
+   (vals (::readiness-runtimes @readiness-state))))
+
 (defn- run-readiness!
-  [runtime]
-  (try
-    (while (not (.get ^java.util.concurrent.atomic.AtomicBoolean
-                      (::stopping? runtime)))
-      (when-let [source (committed-report/take-ready!)]
-        (submit-ready-source! runtime source)))
-    (catch InterruptedException _)
-    (catch Throwable throwable
-      (when-not (.get ^java.util.concurrent.atomic.AtomicBoolean
-                      (::stopping? runtime))
-        (log/error throwable "database committed-report readiness failed")))))
+  []
+  (loop []
+    (when-not (.isInterrupted (Thread/currentThread))
+      (let [continue?
+            (try
+              (let [source (committed-report/take-ready!)]
+                (if-let [runtime (readiness-runtime source)]
+                  (submit-ready-source! runtime source)
+                  (do
+                    (committed-report/requeue-ready! source)
+                    (Thread/yield))))
+              true
+              (catch InterruptedException _ false)
+              (catch Throwable throwable
+                (log/error throwable "database committed-report readiness failed")
+                true))]
+        (when continue? (recur))))))
 
-(defn- start-readiness!
+(defn- register-readiness!
   [runtime]
-  (doto (Thread. ^Runnable #(run-readiness! runtime)
-                 "seon-database-committed-report-readiness")
-    (.setDaemon true)
-    (.start)))
+  (locking readiness-lock
+    (let [owner (::readiness-owner runtime)
+          state (update @readiness-state ::readiness-runtimes assoc owner runtime)]
+      (if (::readiness-thread state)
+        (reset! readiness-state state)
+        (let [thread
+              (doto (Thread. ^Runnable run-readiness!
+                             "seon-database-committed-report-readiness")
+                (.setDaemon true)
+                (.start))]
+          (reset! readiness-state (assoc state ::readiness-thread thread))))))
+  nil)
 
-(defn- stop-readiness!
+(defn- unregister-readiness!
   [runtime]
-  (.set ^java.util.concurrent.atomic.AtomicBoolean (::stopping? runtime) true)
-  (when-let [thread ^Thread (::readiness-thread runtime)]
-    (.interrupt thread)
-    (.join thread))
+  (locking readiness-lock
+    (let [owner (::readiness-owner runtime)
+          state (update @readiness-state ::readiness-runtimes dissoc owner)]
+      (if (seq (::readiness-runtimes state))
+        (reset! readiness-state state)
+        (let [thread ^Thread (::readiness-thread state)]
+          (when thread
+            (.interrupt thread)
+            (.join thread))
+          (reset! readiness-state (assoc state ::readiness-thread nil))))))
   nil)
 
 (defn- transport-connection
@@ -2924,7 +2955,6 @@
         active-requests (atom {})
         interest-state (atom (empty-interest-state))
         interest-lock (Object.)
-        stopping? (java.util.concurrent.atomic.AtomicBoolean. false)
         runtime-ref (atom nil)
         dispatcher
         (executor/start!
@@ -2948,10 +2978,9 @@
                        ::active-requests active-requests
                        ::interest-state interest-state
                        ::interest-lock interest-lock
-                       ::stopping? stopping?)
-        readiness-thread (start-readiness! runtime)
-        runtime (assoc runtime ::readiness-thread readiness-thread)
-        _ (reset! runtime-ref runtime)]
+                       ::readiness-owner (Object.))
+        _ (reset! runtime-ref runtime)
+        _ (register-readiness! runtime)]
     (try
       (let [ensure-response
             (handle-request
@@ -2982,7 +3011,7 @@
         (let [release
               (registry/release-database!
                {::registry/database-name (keyword database-name)})]
-          (stop-readiness! runtime)
+          (unregister-readiness! runtime)
           (uds/close-publisher! publisher)
           (executor/stop! {::executor/executor dispatcher})
           (if (::registry/release-error release)
@@ -3011,7 +3040,7 @@
                    request-server-shutdown)
         {::stopped? false ::release-results []})
       (do
-        (stop-readiness! (::runtime server))
+        (unregister-readiness! (::runtime server))
         (if (seq (::by-scope @(::interest-state (::runtime server))))
           (do
             (log/error "Database interests remained after transport shutdown."
