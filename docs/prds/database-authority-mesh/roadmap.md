@@ -1220,6 +1220,77 @@ is prohibited.
 
 ### 2026-07-16 active implementation card
 
+#### Impact-ranked remaining work
+
+The remaining program is ranked by eliminating duplicate live state,
+parallelism, failure isolation, and code simplification. Dependency correctness
+may precede a higher-impact deletion, but artifact size, warning count,
+isolated query latency, codec choice, and other local improvements do not
+displace this order.
+
+1. **Finish the authority-only database cut.** One JVM authority owns each
+   database's Datahike connection, immutable indexed values, query cache,
+   single-flight work, listener, and write order. Every Bun process reads and
+   writes it directly through the same persistent protocol session. Migrate
+   coherent synchronous-reader owners—turn/run/context, web render/view,
+   message/schedule/derive, and debug/history—rather than wrapping individual
+   calls. The performance exit is zero Bun-side Datahike database, index,
+   query cache, transaction replay, or full-feed subscription across any
+   number of clusters. Removing unused dependency source is not this win and
+   is not a performance gate.
+2. **Make each agent child the sole owner of its compiler, eval, and tests.**
+   Reuse the existing per-agent child, supervision, deadline, cancellation,
+   database session, and eval implementation. One child retains one
+   `cljs.js` compile state for its lifetime and reconstructs accepted authored
+   source from ordinary database rows after restart. First convert only the
+   eval correctness branches that still require a local Datahike value. Do not
+   build a parent compatibility compiler, second eval path, fixture subsystem,
+   or speculative test extension.
+3. **Delete the pod-global compiler and program replay.** Remove compile-state
+   threading from turn, loop, runtime, and client startup; remove the global
+   replay graph and the pod's bootstrap owner while retaining the bootstrap
+   artifact required by children. This is the first direct heap and cognitive
+   complexity reduction.
+4. **Delete replica/feed/Node compatibility reachability.** Once authority-only
+   behavior is proven, delete the replica, transaction publisher/replay,
+   full-feed correlation, local database construction, Node socket adapters,
+   and synchronous compatibility arities together. This deletion matters
+   because it makes a second live cache/index mechanism impossible—not because
+   it shrinks a JavaScript file.
+5. **Remove the production client's test-only local database owner.** Move the
+   `open-agent-conn!` fixture to existing test support so production startup
+   cannot accidentally regain a local Datahike database merely because old
+   tests use its helper. Removing its imports is maintenance proof, not a
+   claimed runtime-performance result.
+6. **Finish the native Bun web owner.** Remove obsolete replica tests,
+   transaction publication and
+   replay assumptions, dynamic eval lookups, and any second server owner. Let
+   it use direct authority reads, bounded Datastar streams, configurable
+   compression, and native backpressure.
+7. **Thin startup only after program/schema admission has an explicit owner.**
+   Remove client source scanning and reconciliation machinery only after cold
+   and warm starts prove identical canonical program facts. Do not trade a
+   large deletion for hidden bootstrap behavior.
+8. **Graduate supervision, packaging, and density.** Prove persistent compiler
+   reuse, two-agent CPU overlap, isolated timeout/crash/restart, immediate idle
+   release, parent-loss cleanup, no-source Bun packaging, and 1/4/16/32 child
+   density before selecting process caps or authority shards.
+9. **Measure before any remaining optimization.** Only retained CPU, RSS,
+   latency, allocation, queue, or response-byte evidence may promote cache,
+   batching, compression, codec, `--smol`, warm-child, or shard tuning. Small
+   wins that do not remove an owner, unblock correctness, or close a measured
+   budget remain out of the active spine.
+
+The shortest decisive proof for the child cut is one child retaining a
+definition, namespace, and live result across two eval requests; a second child
+defining the same symbol independently; and a killed child reconstructing its
+accepted authored program without a pod compiler. The authority-only proof is
+runtime evidence: multiple Bun clients share one exact JVM-side cache/index
+generation, identical reads compute once there, no Bun process opens a local
+Datahike connection, and cluster count does not multiply indexed database
+state. Static reachability is only a guard against accidentally restoring a
+second owner.
+
 - **Stable integration boundary:** application and agent code continues to use
   the existing `seon.db` functions. Only `seon.db` owns the persistent Bun
   session, protocol requests, cancellation, and ordinary response decoding;
