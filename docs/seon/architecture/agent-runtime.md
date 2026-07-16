@@ -758,6 +758,17 @@ and stricter kernel resource limits remain measured implementations of the same
 contract, not another function or database path. The architecture retains three
 independent requirements:
 
+The execution artifact is one immutable, digest-verified agent runtime image,
+shared by every child of that artifact flavor. It precompiles the
+ClojureScript bootstrap, Seon schemas/functions, the thin remote database
+client, and selected downstream libraries. A child starts from one ordinary
+descriptor containing its agent and database selection, artifact identity, and
+resource profile; it then loads only that agent's coordinate-pinned authored
+overlay and reachable authored dependencies. The launcher supplies an explicit
+minimal environment and immutable runtime root rather than inheriting the host
+environment or requiring a source checkout. Mutable compiler state and heap
+remain per child while the operating system can share immutable artifact pages.
+
 - **capability isolation** exposes only explicitly granted functions;
 - **fault isolation** lets a hung execution be terminated without wedging other
   agents or the web UI; and
