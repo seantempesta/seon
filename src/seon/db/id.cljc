@@ -1165,7 +1165,8 @@
 
      #?(:cljs
         (do
-          (def ^:private generator-policy-query
+          (def generator-policy-query
+            "Stored identity-generator policies, parameterized by identity attributes."
             '[:find ?identity-attr ?generator
               :in $ [?identity-attr ...]
               :where

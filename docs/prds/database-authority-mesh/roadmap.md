@@ -1230,9 +1230,11 @@ is prohibited.
   acquired data. No compatibility connection, query-result replay map, public
   namespace alias, or second database facade may make old local-Datahike call
   shapes appear synchronous.
-- **Earliest unsettled contract:** finish the remaining startup/web synchronous
-  consumers, then switch client session open and local-replica removal in one
-  atomic cut. Restore completion and readiness are now ordinary-data,
+- **Earliest unsettled contract:** move the remaining parent eval, scheduled
+  eval, stored-test, authored-route, and direct-render execution into the
+  existing per-agent child, then delete pod-wide program replay and the local
+  replica/feed in the same clean break. Client session open, restore completion,
+  readiness, startup birth, and singleton configuration are now ordinary-data,
   session-native owners. Planned quiescence already uses the
   authority facade, and `seon.db/close-session!` is the complete native inverse;
   neither needs another protocol. Prompt consumers are complete: the live debug
@@ -1463,9 +1465,22 @@ is prohibited.
   that exact coordinate. Their established pure transaction compilers and
   nonfatal startup behavior remain unchanged; neither singleton sync reads a
   local database value.
-- **Next refill:** finish the remaining startup/web synchronous consumers,
-  move launch-descriptor ownership out of the replica, switch client open
-  atomically, and
+- Startup birth now acquires root, root home, historical ordinary-agent birth,
+  and the stored agent-ID generator policy in one three-member authority
+  request at one immutable coordinate. Fresh boot compiles root completion and
+  the first ordinary agent into one coordinate-fenced allocation transaction;
+  restart performs no write, retracted ordinary agents are not silently
+  replaced, and known-ID creation uses one ordered pull-many instead of local
+  entity reads. Production birth and allocation no longer dereference or pass
+  a Datahike connection.
+  Four focused authority-only regressions pass 4 tests/39 assertions. The
+  containing legacy lifecycle namespace has six additional failures because
+  its old fixture still opens a local Datahike database; those tests are
+  deletion/rewrite inventory, not a compatibility requirement.
+- **Next refill:** move the remaining parent eval/schedule/test/authored-route
+  consumers onto the existing per-agent child execution owner, delete global
+  pod replay rather than adapting it, finish the remaining web synchronous
+  consumers, and
   delete replica, publisher/replay, Node adapters, SCI render reconstruction,
   synchronous database-value arities, and compatibility reachability.
   Supervision graduation then proves immediate idle release, parent-loss

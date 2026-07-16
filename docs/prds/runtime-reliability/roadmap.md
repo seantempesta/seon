@@ -49,8 +49,9 @@ order: exact Datahike identity and capability ownership; fair multi-database
 execution; protocol and persistent native sessions; asynchronous `seon.db`;
 isolated Bun children; atomic replica/feed removal; then density, packaging, and
 the measured one-versus-2/4-authority-shard decision. Its current earliest
-unsettled contract is the complete client restore/readiness/quiescence/session-
-close cut that makes atomic session open and replica removal possible. Restore
+unsettled contract is moving the remaining parent execution consumers onto the
+existing per-agent child so global replay and the local replica/feed can be
+deleted together. Restore
 completion recording, retry adoption, startup attachment validation, and HTTP
 readiness now share one coordinate-pinned ordinary-data authority acquisition;
 readiness no longer dereferences the local replica. The next boundary is the
@@ -67,6 +68,13 @@ The existing remote query surface now exposes its protocol-native historical
 view, closing the only facade gap needed by coordinate-pinned startup birth.
 LLM configuration and brand startup sync also use bounded coordinate-fenced
 authority pulls rather than ambient replica values.
+Root reconciliation and first ordinary-agent birth now share one
+coordinate-pinned three-member authority acquisition. A fresh cluster commits
+both complete births atomically through the existing generated-ID allocator;
+restart and historical retraction are write-free, and no production birth path
+receives a local Datahike connection. The next ordered boundary is moving the
+remaining parent eval/schedule/test/authored-route consumers into the existing
+per-agent execution child so global pod replay can be deleted.
 Autocomplete/export and the debug feed already consume the same coordinate-
 pinned compiled child result; the obsolete synchronous AI composer is deleted.
 Stale debug completions cannot install candidate catalogs, and raw AI

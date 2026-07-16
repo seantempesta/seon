@@ -2903,26 +2903,7 @@
                     (count (::recovery/agent-ids recovered))
                     " agent(s) to idle")
                recovered))))
-        (let [root-home [:seon.ns/name (keyword (str (home/home-ns "root")))]
-              root-ready-before?
-              (and autonomous?
-                   (nil? restore-startup)
-                   (string?
-                    (:seon.ns/source (db/entity {:seon.db/ref root-home}))))
-              root-result
-              (when (and autonomous? (nil? restore-startup))
-                (await
-                 (db/with-tx-context
-                  {:seon.db/user [:seon.agent/id "root"]
-                   :seon.db/process
-                   (db.process/lookup-ref :seon.db.process/boot)}
-                  (fn [] (agent/create! {:seon.agent/id "root"})))))
-              _ (when (and autonomous?
-                           (nil? restore-startup)
-                           (false? (:seon.db/ok? root-result)))
-                  (throw (ex-info "start-runtime!: root birth failed"
-                                  root-result)))
-              initial-result
+        (let [initial-result
               (when (and autonomous? (nil? restore-startup))
                 (await
                  (db/with-tx-context
@@ -2940,9 +2921,7 @@
                                     (::agent/initial-created? initial-result))
                            (:seon.agent/id initial-result))
               created-ids (cond-> []
-                            (and autonomous?
-                                 (nil? restore-startup)
-                                 (not root-ready-before?))
+                            (::agent/root-created? initial-result)
                             (conj "root")
                             initial-id (conj initial-id))
               compile-state (await compile-promise)

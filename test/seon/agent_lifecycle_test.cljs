@@ -31,10 +31,9 @@
     [seon.client :as client]
     [seon.db :as db]
     [seon.db.coordinate :as db.coordinate]
+    [seon.db.id :as db.id]
     [seon.db.protocol :as db.protocol]
-    [seon.db.replica :as replica]
-    [seon.derive :as derive]
-    [seon.launch :as launch]))
+    [seon.derive :as derive]))
 
 (defn- with-conn
   "Open a fresh schema-loaded conn, `set!` it as the ROOT `db/*conn*`
@@ -78,25 +77,6 @@
 
 (defn- derived [id]
   (:seon.agent/state (agent/derive-status {:seon.agent/id id})))
-
-(deftest runtime-advertisement-uses-immutable-launch-writer-owner
-  (let [descriptor
-        (-> replica/default-launch-descriptor
-            (assoc-in [::launch/runtime ::launch/runtime-cluster]
-                      "default-proof")
-            (assoc-in [::launch/writer-owner ::launch/writer-cluster]
-                      "default")
-            (assoc-in [::launch/writer-owner ::launch/writer-repl-port-file]
-                      "tmp/source-writer.port"))]
-    (with-redefs [replica/process-launch-descriptor descriptor
-                  db/attached? (constantly false)]
-      (is (= #:seon.dev.runtime-id
-             {:cluster "default-proof"
-              :ids []
-              :seon.launch/writer-cluster "default"
-              :seon.launch/writer-repl-port-file
-              "tmp/source-writer.port"}
-             (client/runtime-advertisement))))))
 
 ;; ============================================================
 ;; Lifecycle functions — wait / complete / pause / resume / terminate MUTATE the
@@ -476,145 +456,262 @@
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
-(deftest initial-agent-is-created-once-across-current-state-retraction
+(def ^:private birth-coordinate
+  {::db.coordinate/database-id #uuid "00000000-0000-0000-0000-000000000081"
+   ::db.coordinate/branch :db
+   ::db.coordinate/commit-id #uuid "00000000-0000-0000-0000-000000000082"
+   ::db.coordinate/t 536870912})
+
+(defn- grouped-result
+  [value]
+  (db.protocol/success {::db.protocol/result value}))
+
+(deftest initial-agent-birth-acquires-once-and-commits-root-and-child-atomically
   (async done
-    (-> (with-conn
-          (fn ^:async run []
-            (await (agent/create! {:seon.agent/id "root"}))
-            (let [first-result (await (agent/ensure-initial-agent! {}))
-                  initial-id (:seon.agent/id first-result)
-                  second-result (await (agent/ensure-initial-agent! {}))]
-              (is (true? (::agent/initial-created? first-result)))
-              (is (and (string? initial-id) (not= "root" initial-id)))
-              (is (= "root"
-                     (get-in (db/entity
-                               {:seon.db/ref [:seon.agent/id initial-id]})
-                             [:seon.agent/parent :seon.agent/id])))
-              (is (= {::agent/initial-created? false} second-result)
-                  "a second startup does not create another ordinary agent")
-              (await (db/transact!
-                       {:seon.db/tx-data
-                        [[:db.fn/retractEntity
-                          [:seon.agent/id initial-id]]]}))
-              (is (= {::agent/initial-created? false}
-                     (await (agent/ensure-initial-agent! {})))
-                  "historical birth prevents replacement after retraction"))))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+    (let [original-execute db/execute-many
+          original-allocate db.id/allocate!
+          original-transact db/transact!
+          calls (atom [])
+          child-id "amber-fox-river"]
+      (set! db/execute-many
+            (fn [request]
+              (swap! calls conj [:acquire request])
+              (js/Promise.resolve
+                {::db/coordinate birth-coordinate
+                 ::db/results
+                 [(grouped-result [{:seon.agent/id "root"} nil])
+                  (grouped-result nil)
+                  (grouped-result
+                    #{[:seon.agent/id
+                       :seon.db.id.generator/human-readable]})]})))
+      (set! db.id/allocate!
+            (fn [request]
+              (swap! calls conj [:allocate request])
+              (js/Promise.resolve
+                {:seon.db/ok? true
+                 ::db.id/ids {:seon.agent/id child-id}})))
+      (set! db/transact!
+            (fn [& [request]]
+              (swap! calls conj [:forbidden-transact request])
+              (js/Promise.resolve {:seon.db/ok? false})))
+      (-> (agent/ensure-initial-agent! {})
+          (.then
+            (fn [result]
+              (let [[[_ acquire] [_ allocation]] @calls
+                    [root-member history-member policy-member]
+                    (::db/members acquire)
+                    built ((::db.id/transaction-builder allocation)
+                           {:seon.agent/id child-id})
+                    tx-data (::db/tx-data built)
+                    root-row (first (filter #(= "root" (:seon.agent/id %))
+                                            tx-data))
+                    child-row (first (filter #(= child-id (:seon.agent/id %))
+                                             tx-data))]
+                (is (= {::agent/root-created? true
+                        ::agent/initial-created? true
+                        :seon.agent/id child-id}
+                       result))
+                (is (= 2 (count @calls))
+                    "one grouped acquisition feeds one allocation commit")
+                (is (= [db.protocol/pull-many-operation
+                        db.protocol/query-operation
+                        db.protocol/query-operation]
+                       (mapv ::db.protocol/operation (::db/members acquire))))
+                (is (= [[:seon.agent/id "root"]
+                        [:seon.ns/name :my.agent.root]]
+                       (::db.protocol/entity-ids root-member)))
+                (is (true? (::db.protocol/history? history-member)))
+                (is (= db.id/generator-policy-query
+                       (::db.protocol/query-form policy-member)))
+                (is (not (contains? allocation :seon.db/conn)))
+                (is (= {:seon.agent/id
+                        :seon.db.id.generator/human-readable}
+                       (::db.id/generator-policies allocation)))
+                (is (= birth-coordinate (::db/expected-coordinate built))
+                    "the immutable acquisition coordinate fences the birth")
+                (is (= 4 (count tx-data))
+                    "root, root home, child, and child home share one commit")
+                (is (seq (:seon.agent/ctx root-row)))
+                (is (seq (:seon.agent/ctx child-row)))
+                (is (= [:seon.agent/id "root"]
+                       (:seon.agent/parent child-row)))
+                (is (= #{:my.agent.root
+                         (keyword "my.agent.amber-fox-river")}
+                       (into #{} (keep :seon.ns/name) tx-data))))))
+          (.catch (fn [error]
+                    (is false (str "atomic startup birth threw — " error))))
+          (.finally
+            (fn []
+              (set! db/execute-many original-execute)
+              (set! db.id/allocate! original-allocate)
+              (set! db/transact! original-transact)
+              (done)))))))
+
+(deftest initial-agent-history-prevents-a-replacement-without-a-write
+  (async done
+    (let [original-execute db/execute-many
+          original-allocate db.id/allocate!
+          original-transact db/transact!
+          calls (atom [])]
+      (set! db/execute-many
+            (fn [request]
+              (swap! calls conj [:acquire request])
+              (js/Promise.resolve
+                {::db/coordinate birth-coordinate
+                 ::db/results
+                 [(grouped-result
+                    [{:seon.agent/id "root"}
+                     {:seon.ns/name :my.agent.root
+                      :seon.ns/source "(ns my.agent.root)"}])
+                  (grouped-result 42)
+                  (grouped-result
+                    #{[:seon.agent/id
+                       :seon.db.id.generator/human-readable]})]})))
+      (set! db.id/allocate!
+            (fn [request]
+              (swap! calls conj [:forbidden-allocate request])
+              (js/Promise.resolve {:seon.db/ok? false})))
+      (set! db/transact!
+            (fn [& [request]]
+              (swap! calls conj [:forbidden-transact request])
+              (js/Promise.resolve {:seon.db/ok? false})))
+      (-> (agent/ensure-initial-agent! {})
+          (.then
+            (fn [first-result]
+              (is (= {::agent/root-created? false
+                      ::agent/initial-created? false}
+                     first-result))
+              ;; The history member remains true even if the current child was
+              ;; retracted. A later startup must make the same no-write choice.
+              (agent/ensure-initial-agent! {})))
+          (.then
+            (fn [second-result]
+              (is (= {::agent/root-created? false
+                      ::agent/initial-created? false}
+                     second-result))
+              (is (= 2 (count @calls)))
+              (is (every? #(= :acquire (first %)) @calls))))
+          (.catch (fn [error]
+                    (is false (str "historical startup proof threw — " error))))
+          (.finally
+            (fn []
+              (set! db/execute-many original-execute)
+              (set! db.id/allocate! original-allocate)
+              (set! db/transact! original-transact)
+              (done)))))))
 
 ;; ============================================================
 ;; create! — default-turn-limit pass-through, honest error envelope,
 ;; purpose never defaulted.
 ;; ============================================================
 
-(deftest create!-roundtrips-default-turn-limit
+(deftest create!-acquires-once-fences-the-birth-and-preserves-errors
   (async done
-    (-> (with-conn
-          (fn ^:async run []
-            (testing "the work bound in the request lands as entity data"
-              (let [res (await (agent/create!
-                                 {:seon.agent/id "AGTcapround001"
-                                  :seon.agent/default-turn-limit 7}))]
-                (is (= {:seon.agent/id "AGTcapround001"} res)
-                    "success keeps the success shape")
-                (is (= 7 (:seon.agent/default-turn-limit
-                           (db/entity {:seon.db/ref [:seon.agent/id "AGTcapround001"]})))
-                    "default-turn-limit is stored on the entity")))
-            (testing "a new run seeds its turn-limit from the agent's default"
-              (let [snap (await (run/open-run! {:seon.agent/id "AGTcapround001"
-                                                :seon.agent.run/trigger :message}))]
-                (is (= 7 (:seon.agent.run/turn-limit snap))
-                    "the run's WORK bound = the agent's default-turn-limit")))
-            (testing "absent default leaves the stored value unchanged (re-create)"
-              (await (agent/create! {:seon.agent/id "AGTcapround001"}))
-              (is (= 7 (:seon.agent/default-turn-limit
-                         (db/entity {:seon.db/ref [:seon.agent/id "AGTcapround001"]})))
-                  "idempotent re-create never retracts the default"))))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+    (let [original-execute db/execute-many
+          original-transact db/transact!
+          acquired (atom [nil nil])
+          transaction-result
+          (atom {:seon.db/ok? true})
+          calls (atom [])
+          id "AGTbirth000001"]
+      (set! db/execute-many
+            (fn [request]
+              (swap! calls conj [:acquire request])
+              (js/Promise.resolve
+                {::db/coordinate birth-coordinate
+                 ::db/results [(grouped-result @acquired)]})))
+      (set! db/transact!
+            (fn [& [request]]
+              (swap! calls conj [:transact request])
+              (js/Promise.resolve @transaction-result)))
+      (-> (agent/create! {:seon.agent/id id
+                          :seon.agent/purpose "track Acme orders"
+                          :seon.agent/default-turn-limit 7})
+          (.then
+            (fn [result]
+              (is (= {:seon.agent/id id} result))
+              (let [[[_ acquire] [_ transact]] @calls
+                    member (first (::db/members acquire))
+                    agent-row (first (::db/tx-data transact))]
+                (is (= db.protocol/pull-many-operation
+                       (::db.protocol/operation member)))
+                (is (= [[:seon.agent/id id]
+                        [:seon.ns/name :my.agent.AGTbirth000001]]
+                       (::db.protocol/entity-ids member)))
+                (is (= birth-coordinate (::db/expected-coordinate transact)))
+                (is (= id (:seon.agent/id agent-row)))
+                (is (= "track Acme orders" (:seon.agent/purpose agent-row)))
+                (is (= 7 (:seon.agent/default-turn-limit agent-row)))
+                (is (= 2 (count (::db/tx-data transact)))
+                    "agent and home namespace are one transaction"))
+              (reset! acquired
+                      [{:seon.agent/id id}
+                       {:seon.ns/name :my.agent.AGTbirth000001
+                        :seon.ns/source "(ns my.agent.AGTbirth000001)"}])
+              (agent/create! {:seon.agent/id id})))
+          (.then
+            (fn [idempotent]
+              (is (= {:seon.agent/id id} idempotent))
+              (is (= 1 (count (filter #(= :transact (first %)) @calls)))
+                  "a complete entity performs no second write")
+              (reset! acquired [nil nil])
+              (reset! transaction-result
+                      {:seon.db/ok? false
+                       :seon.db/error
+                       {:seon.error/message "rejected"
+                        :seon.error/kind :user-input}})
+              (agent/create! {:seon.agent/id "AGTbirth000002"})))
+          (.then
+            (fn [failed]
+              (is (false? (:seon.db/ok? failed)))
+              (is (= "rejected"
+                     (get-in failed [:seon.db/error :seon.error/message])))
+              (is (= 3 (count (filter #(= :acquire (first %)) @calls)))
+                  "every create decision owns one immutable acquisition")))
+          (.catch (fn [error]
+                    (is false (str "session-native create threw — " error))))
+          (.finally
+            (fn []
+              (set! db/execute-many original-execute)
+              (set! db/transact! original-transact)
+              (done)))))))
 
-(deftest create!-leaves-purpose-absent-unless-stated
+(deftest mint!-uses-the-session-allocator-without-a-local-connection
   (async done
-    (-> (with-conn
-          (fn ^:async run []
-            (testing "no stated purpose → attr ABSENT (optional = absent)"
-              (await (agent/create! {:seon.agent/id "AGTpurpose0001"}))
-              (is (nil? (:seon.agent/purpose
-                          (db/entity {:seon.db/ref [:seon.agent/id "AGTpurpose0001"]})))
-                  "no instruction-text default leaks to the customer tile"))
-            (testing "blank purpose is treated as unstated"
-              (await (agent/create! {:seon.agent/id "AGTpurpose0002"
-                                     :seon.agent/purpose "   "}))
-              (is (nil? (:seon.agent/purpose
-                          (db/entity {:seon.db/ref [:seon.agent/id "AGTpurpose0002"]})))))
-            (testing "an explicitly stated purpose still lands unchanged"
-              (await (agent/create! {:seon.agent/id "AGTpurpose0003"
-                                     :seon.agent/purpose "track Acme orders"}))
-              (is (= "track Acme orders"
-                     (:seon.agent/purpose
-                       (db/entity {:seon.db/ref [:seon.agent/id "AGTpurpose0003"]})))
-                  "the explicit-purpose param path is intact"))))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
-
-(deftest create!-returns-the-error-envelope-on-failed-transact
-  (async done
-    (-> (with-conn
-          (fn ^:async run []
-            ;; Force the transact to FAIL via an invalid attr value —
-            ;; :seon.agent/default-turn-limit is :int, a string is rejected
-            ;; by the transact! validation gate.
-            (let [res (await (agent/create!
-                               {:seon.agent/id "AGTcapround002"
-                                :seon.agent/default-turn-limit "not-an-int"}))]
-              (is (false? (:seon.db/ok? res))
-                  "failure returns the db error envelope, NOT the success
-                   shape (errors are values, like message!)")
-              (is (map? (:seon.db/error res)) "the error map rides along")
-              (is (nil? (:seon.agent/id res))
-                  "no success key on the failure path")
-              (is (nil? (db/entity {:seon.db/ref [:seon.agent/id "AGTcapround002"]}))
-                  "and indeed NO entity exists — anything downstream trusting
-                   the old success shape chased a ghost"))))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
-
-;; ============================================================
-;; Complete birth facts are one atomic database transition.
-;; ============================================================
-
-(deftest create!-commits-context-and-home-namespace-atomically
-  (async done
-    (-> (with-conn
-          (fn ^:async run []
-            (let [id "AGTbirth000001"
-                  ns-name :my.agent.AGTbirth000001
-                  res (await (agent/create! {:seon.agent/id id}))
-                  entity (db/entity {:seon.db/ref [:seon.agent/id id]})
-                  ns-entity (db/entity {:seon.db/ref [:seon.ns/name ns-name]})
-                  txs (db/query
-                        {:seon.db/query
-                         '[:find [?tx ...]
-                           :in $ ?id ?ns
-                           :where
-                           (or-join [?tx ?id ?ns]
-                             [?a :seon.agent/id ?id ?tx]
-                             [?a :seon.agent/ctx _ ?tx]
-                             [?n :seon.ns/name ?ns ?tx]
-                             [?n :seon.ns/source _ ?tx]
-                             [?n :seon.ns/require-edges _ ?tx])]
-                         :seon.db/args [id ns-name]})]
-              (is (= {:seon.agent/id id} res))
-              (is (seq (:seon.agent/ctx entity))
-                  "the complete configured block tree exists immediately")
-              (is (string? (:seon.ns/source ns-entity))
-                  "the deterministic home declaration exists immediately")
-              (is (seq (:seon.ns/require-edges ns-entity))
-                  "structural home dependencies exist immediately")
-              (is (= 1 (count (set txs)))
-                  "agent identity, context link, and home namespace share one tx"))))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+    (let [original-allocate db.id/allocate!
+          calls (atom [])
+          child-id "silver-pine-brook"]
+      (set! db.id/allocate!
+            (fn [request]
+              (swap! calls conj request)
+              (js/Promise.resolve
+                {:seon.db/ok? true
+                 ::db.id/ids {:seon.agent/id child-id}})))
+      (-> (agent/mint! {:seon.agent/purpose "observe the cluster"
+                        :seon.agent/default-turn-limit 5
+                        :seon.agent/parent [:seon.agent/id "root"]})
+          (.then
+            (fn [result]
+              (let [request (first @calls)
+                    built ((::db.id/transaction-builder request)
+                           {:seon.agent/id child-id})
+                    [agent-row home-row] (::db/tx-data built)]
+                (is (= {:seon.agent/id child-id} result))
+                (is (= 1 (count @calls)))
+                (is (not (contains? request :seon.db/conn)))
+                (is (= child-id (:seon.agent/id agent-row)))
+                (is (= "observe the cluster" (:seon.agent/purpose agent-row)))
+                (is (= 5 (:seon.agent/default-turn-limit agent-row)))
+                (is (= [:seon.agent/id "root"]
+                       (:seon.agent/parent agent-row)))
+                (is (= (keyword "my.agent.silver-pine-brook")
+                       (:seon.ns/name home-row))))))
+          (.catch (fn [error]
+                    (is false (str "session-native mint threw — " error))))
+          (.finally
+            (fn []
+              (set! db.id/allocate! original-allocate)
+              (done)))))))
 
 (deftest resume-reconstructs-process-state-without-writing-database-state
   (async done
@@ -690,29 +787,3 @@
              (set! db/unlisten! original-unlisten)
              (reset! client/!state previous-state)
              (done)))))))
-
-(deftest create!-completes-the-bare-provenance-root-once
-  (async done
-    (-> (with-conn
-          (fn ^:async run []
-            (let [root-before (db/entity {:seon.db/ref [:seon.agent/id "root"]})
-                  t-before (db/basis-t)]
-              (is (= "root" (:seon.agent/id root-before))
-                  "provenance genesis installs the root lookup target")
-              (is (nil? (:seon.agent/ctx root-before))
-                  "genesis does not pretend the agent birth already happened")
-              (await (agent/create! {:seon.agent/id "root"}))
-              (let [root-after (db/entity
-                                 {:seon.db/ref [:seon.agent/id "root"]})
-                    t-born (db/basis-t)]
-                (is (> t-born t-before))
-                (is (seq (:seon.agent/ctx root-after)))
-                (is (string?
-                      (:seon.ns/source
-                        (db/entity
-                          {:seon.db/ref [:seon.ns/name :my.agent.root]}))))
-                (await (agent/create! {:seon.agent/id "root"}))
-                (is (= t-born (db/basis-t))
-                    "a born root is an exact no-op and keeps its edits")))))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw — " e)) (done))))))

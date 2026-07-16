@@ -322,11 +322,13 @@
   [:seon.db/coordinate :seon.db.coordinate/coordinate]
   [::resumable-agent-ids ::resumable-agent-ids-response]])
 (schema/register! ::initial-created? :boolean)
+(schema/register! ::root-created? :boolean)
 (schema/register! ::ensure-initial-agent-request [:map])
 (schema/register!
   ::ensure-initial-agent-response
   [:or
    [:map
+    [::root-created? ::root-created?]
     [::initial-created? ::initial-created?]
     [:seon.agent/id {:optional true} :seon.agent/id]]
    :seon.db/transact-response])
@@ -383,22 +385,12 @@
      ::resumable-agent-ids
      (->> (:datahike.query/result member) sort vec)}))
 
-(defn- ordinary-agent-ever-born?
-  "True when database history proves a non-root agent was ever born.
-
-   History, rather than the current view, is load-bearing: deleting or
-   terminating the initial agent must not make a later restart look like a
-   first boot and silently manufacture a replacement."
-  [database]
-  (boolean
-    (db/query
-      {:seon.db/db (db/history database)
-       :seon.db/query
-       '[:find ?agent .
-         :where
-         [?agent :seon.agent/id ?id _ true]
-         [?agent :seon.eval/home-requires _ _ true]
-         [(not= ?id "root")]]})))
+(def ^:private ordinary-agent-ever-born-query
+  '[:find ?agent .
+    :where
+    [?agent :seon.agent/id ?id _ true]
+    [?agent :seon.eval/home-requires _ _ true]
+    [(not= ?id "root")]])
 
 ;; ============================================================
 ;; Derived status — the agent FINGERPRINT. The whole derived state in one map.
@@ -432,6 +424,27 @@
   []
   {:seon.db/ok? false
    :seon.db/error (:seon/error (admission/unavailable))})
+
+(defn- acquisition-failure
+  [message data]
+  {:seon.db/ok? false
+   :seon.db/error
+   {:seon.error/message message
+    :seon.error/kind :core-bug
+    :seon.error/data data}})
+
+(defn- successful-member?
+  [member]
+  (true? (::db.protocol/success? member)))
+
+(defn- pull-many-member
+  [entity-ids]
+  {::db.protocol/operation db.protocol/pull-many-operation
+   ::db.protocol/selector '[*]
+   ::db.protocol/entity-ids entity-ids
+   :datahike.resource/max-work 100000
+   :datahike.resource/max-results 4096
+   :datahike.resource/max-result-weight 1048576})
 
 (defn- initial-agent-tx
   "Complete creation facts for one new agent and its home namespace.
@@ -487,24 +500,36 @@
    entity; callers must branch instead of chasing a ghost."
   {:malli/schema [:=> [:cat ::create-request] ::create-response]}
   [{:seon.agent/keys [id purpose default-turn-limit]}]
-  (let [entity (db/entity {:seon.db/ref [:seon.agent/id id]})
-        home-source (:seon.ns/source
-                      (db/entity {:seon.db/ref
-                                  [:seon.ns/name (keyword (str (home/home-ns id)))]}))
-        complete? (and entity
-                       (or (not= "root" id) (string? home-source)))]
-    (if complete?
-      {:seon.agent/id id}
-      (let [res (await (db/transact!
-                         {:seon.db/tx-data
-                          (initial-agent-tx id purpose default-turn-limit nil
-                                            entity)}))]
-      (if (false? (:seon.db/ok? res))
-        (do (js/console.error
-              (str "seon.agent/create! transact FAILED for " id ": "
-                   (:seon.error/message (:seon.db/error res))))
-            res)
-          {:seon.agent/id id})))))
+  (let [acquired
+        (await
+         (db/execute-many
+          {::db/members
+           [(pull-many-member
+             [[:seon.agent/id id]
+              [:seon.ns/name (keyword (str (home/home-ns id)))]])]}))
+        member (first (::db/results acquired))]
+    (if-not (and (map? acquired)
+                 (not (:seon.error/message acquired))
+                 (successful-member? member))
+      (acquisition-failure "Agent creation acquisition failed." acquired)
+      (let [[entity home-entity] (::db.protocol/result member)
+            complete? (and entity
+                           (or (not= "root" id)
+                               (string? (:seon.ns/source home-entity))))]
+        (if complete?
+          {:seon.agent/id id}
+          (let [res
+                (await
+                 (db/transact!
+                  {::db/tx-data
+                   (initial-agent-tx id purpose default-turn-limit nil entity)
+                   ::db/expected-coordinate (::db/coordinate acquired)}))]
+            (if (false? (:seon.db/ok? res))
+              (do (js/console.error
+                   (str "seon.agent/create! transact FAILED for " id ": "
+                        (:seon.error/message (:seon.db/error res))))
+                  res)
+              {:seon.agent/id id})))))))
 
 (schema/register!
   ::mint-request
@@ -513,6 +538,28 @@
    [:seon.agent/default-turn-limit {:optional true}
     :seon.agent/default-turn-limit]
    [:seon.agent/parent             {:optional true} :seon.db/ref]])
+
+(defn- ^:async allocate-agent!
+  [{:seon.agent/keys [purpose default-turn-limit parent]
+    :seon.db/keys [tx-data expected-coordinate]
+    ::db.id/keys [generator-policies]}]
+  (await
+   (db.id/allocate!
+    (cond->
+     {::db.id/allocations
+      [{::db.id/key :seon.agent/id
+        ::db.id/identity-attr :seon.agent/id}]
+      ::db.id/transaction-builder
+      (fn [ids]
+        (let [id (get ids :seon.agent/id)]
+          (cond->
+           {::db/tx-data
+            (into (vec tx-data)
+                  (initial-agent-tx id purpose default-turn-limit parent nil))}
+            expected-coordinate
+            (assoc ::db/expected-coordinate expected-coordinate))))}
+       generator-policies
+       (assoc ::db.id/generator-policies generator-policies)))))
 
 (defn ^:async mint!
   "Atomically allocate and create one genuinely new agent identity.
@@ -525,16 +572,10 @@
   [{:seon.agent/keys [purpose default-turn-limit parent]}]
   (let [env
         (await
-          (db.id/allocate!
-            {::db.id/allocations
-             [{::db.id/key :seon.agent/id
-               ::db.id/identity-attr :seon.agent/id}]
-             ::db.id/transaction-builder
-             (fn [ids]
-               (let [id (get ids :seon.agent/id)]
-                 {:seon.db/tx-data
-                  (initial-agent-tx id purpose default-turn-limit parent nil)}))
-             :seon.db/conn db/*conn*}))
+         (allocate-agent!
+          {:seon.agent/purpose purpose
+           :seon.agent/default-turn-limit default-turn-limit
+           :seon.agent/parent parent}))
         id (get-in env [::db.id/ids :seon.agent/id])]
     (if (false? (:seon.db/ok? env))
       (do (js/console.error
@@ -544,12 +585,11 @@
       {:seon.agent/id id})))
 
 (defn ^:async ensure-initial-agent!
-  "Create the cluster's one initial ordinary agent only on a true first boot.
+  "Ensure root and the cluster's one initial ordinary agent at one coordinate.
 
    A non-root agent's historical birth fact permanently satisfies this
-   transition, even if that agent is later terminated or retracted. The new
-   agent is allocated through [[mint!]] and parented by root; this function
-   adds no second creation path. Root must already exist as a lookup target.
+   transition, even if that agent is later terminated or retracted. A fresh
+   database commits root and the initial agent atomically.
 
    Returns `::initial-created?` and, when created, the new agent id. Database
    failures remain ordinary `seon.db/transact!` error envelopes."
@@ -557,12 +597,67 @@
    [:=> [:cat ::ensure-initial-agent-request]
     ::ensure-initial-agent-response]}
   [_]
-  (if (ordinary-agent-ever-born? @db/*conn*)
-    {::initial-created? false}
-    (let [result (await (mint! {:seon.agent/parent [:seon.agent/id "root"]}))]
-      (if (false? (:seon.db/ok? result))
-        result
-        (assoc result ::initial-created? true)))))
+  (let [acquired
+        (await
+         (db/execute-many
+          {::db/members
+           [(pull-many-member
+             [[:seon.agent/id "root"]
+              [:seon.ns/name :my.agent.root]])
+            {::db.protocol/operation db.protocol/query-operation
+             ::db.protocol/query-form ordinary-agent-ever-born-query
+             ::db.protocol/arguments []
+             ::db.protocol/history? true
+             :datahike.resource/max-work 100000
+             :datahike.resource/max-results 1
+             :datahike.resource/max-result-weight 4096}
+            {::db.protocol/operation db.protocol/query-operation
+             ::db.protocol/query-form db.id/generator-policy-query
+             ::db.protocol/arguments [[:seon.agent/id]]
+             :datahike.resource/max-work 100000
+             :datahike.resource/max-results 1
+             :datahike.resource/max-result-weight 4096}]}))
+        [root-member history-member policy-member] (::db/results acquired)]
+    (if-not (and (map? acquired)
+                 (not (:seon.error/message acquired))
+                 (every? successful-member?
+                         [root-member history-member policy-member]))
+      (acquisition-failure "Initial agent acquisition failed." acquired)
+      (let [[root root-home] (::db.protocol/result root-member)
+            root-complete? (and root (string? (:seon.ns/source root-home)))
+            ordinary-born? (boolean (::db.protocol/result history-member))
+            coordinate (::db/coordinate acquired)
+            root-tx (when-not root-complete?
+                      (initial-agent-tx "root" nil nil nil root))]
+        (cond
+          (and root-complete? ordinary-born?)
+          {::root-created? false ::initial-created? false}
+
+          ordinary-born?
+          (let [result
+                (await
+                 (db/transact!
+                  {::db/tx-data root-tx
+                   ::db/expected-coordinate coordinate}))]
+            (if (false? (:seon.db/ok? result))
+              result
+              {::root-created? true ::initial-created? false}))
+
+          :else
+          (let [policies (into {} (::db.protocol/result policy-member))
+                result
+                (await
+                 (allocate-agent!
+                  {:seon.agent/parent [:seon.agent/id "root"]
+                   ::db/tx-data root-tx
+                   ::db/expected-coordinate coordinate
+                   ::db.id/generator-policies policies}))]
+            (if (false? (:seon.db/ok? result))
+              result
+              {::root-created? (not root-complete?)
+               ::initial-created? true
+               :seon.agent/id
+               (get-in result [::db.id/ids :seon.agent/id])})))))))
 
 ;; ============================================================
 ;; Spawn depth (multi-agent-context Piece 2) — the DEPTH-CAP backstop. The soft
