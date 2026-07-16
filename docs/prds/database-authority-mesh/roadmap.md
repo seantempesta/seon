@@ -1325,7 +1325,33 @@ package-size measurement is added for this test.
   rendering now consumes ordinary pre-fetched data. There is no compatibility
   period: remaining callers that require a database value, connection, lazy
   entity, temporal wrapper, or synchronous query are invalid and must move to
-  coordinate-bound authority operations or be deleted. Stored-test,
+  coordinate-bound authority operations or be deleted.
+  Commit `fbc40f48` makes that break canonical: `seon.db` now exposes only the
+  persistent asynchronous authority session and ordinary protocol values. Its
+  authority-density build compiles 122 files with zero warnings into 52,847
+  bytes and contains no Datahike, Konserve, PSS, superv.async, or partial-cps
+  dependency strings; the full client compile's 236 warnings are the honest
+  legacy-consumer inventory. Commits `de766b71`, `9668a2b0`, `63be0019`,
+  `ac7b1399`, and `25ccb5a2` remove ambient database injection and move brand,
+  knowledge, and skill consumers onto coordinate-pinned ordinary reads.
+  Commit `9d9e870b` removes the web-side database snapshot/output cache and
+  replay bookkeeping in favor of one normalized subscription and child-owned
+  projection, deleting 6,890 lines. Commit `7873b0ad` makes root's system view
+  an ordinary dynamic render through that same child/surface path; it acquires
+  authority rows and does not recursively construct another agent's surfaces.
+  Commit `4804349e` deletes the SCI/local-database auto-run renderer: both AI
+  and HTML twins now invoke the same selected function asynchronously in the
+  child. Commit `0e5be5dc` deletes the final database-interest aliases, leaving
+  `listen!` and `unlisten!` as the only public interest names.
+
+  Datahike remains the computation-cache owner. Exact identical reads at one
+  immutable coordinate share its completed cache and single-flight. The web
+  layer retains only normalized subscription/delivery state and the latest
+  complete serialized render for fan-out or reconnect; it must not add a
+  second query/result cache. Transaction changed attributes intersect each
+  subscription's declared read attributes before a render is scheduled, so
+  independent streams advance only when their own projection can change.
+  Stored-test,
   authored-route, and direct-render execution move into the existing per-agent
   child; pod-wide program replay is deleted rather than adapted. Client session
   open, restore completion,
@@ -1717,12 +1743,16 @@ package-size measurement is added for this test.
   now pass framed UDS execution; the focused gate passes 53 tests and 411
   assertions. The resolved issue is
   [[../../seon/issues/archive/bun-transit-query-list-is-not-ordinary-on-jvm]].
-- **Next refill:** finish the canonical `seon.db` remote-only implementation,
-  then migrate stored-test/authored-route consumers onto the existing per-agent
-  child execution owner, delete global pod replay rather than adapting it, and
-  finish the remaining web synchronous consumers. Delete publisher/replay,
-  Node adapters, SCI render reconstruction, synchronous database-value arities,
-  and every compatibility reference exposed by the clean break.
+- **Next refill:** integrate the in-progress publisher/replay deletion and the
+  changed-attribute subscription gate, then use the remote-only compile
+  inventory in dependency order: agent run/loop/lifecycle/schedule transitions;
+  `my.plan` and toolkit functions; obsolete context/render fallbacks; web,
+  debug, and database browser; then eval/autocomplete and remaining tests.
+  Each public mutation acquires one coordinate-pinned ordinary projection,
+  compiles a pure transaction, and submits it behind that coordinate fence.
+  Delete the old arity or test in the same cut; do not restore a connection,
+  database value, temporal wrapper, SCI renderer, publisher, replay page, Node
+  adapter, or compatibility name merely to reduce warnings.
   Supervision graduation then proves immediate idle release, parent-loss
   cleanup, memory-pressure admission, remote-only artifact reachability, and
   the retained 1/4/16/32 density matrix before selecting the shipped child cap
