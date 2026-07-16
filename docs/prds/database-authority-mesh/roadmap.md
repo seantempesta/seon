@@ -952,9 +952,11 @@ and consumer inventory may run in parallel:
   exact framed bytes consume retained global/session output capacity.
 - Slot 3: the remote `seon.db` contract is frozen. Refill with its protocol and
   dependency gaps: strict temporal `t`, aggregate execute-many weight,
-  nonthrowing ordered pull-many, compact transaction replies, and truthful
-  resolved async schemas. Generated-manifest schema, duplicate live interest
-  rejection, and recursive ordinary-wire validation are complete.
+  nonthrowing ordered pull-many, and truthful resolved async schemas. Compact
+  transaction replies move with the atomic replica/replay deletion rather than
+  creating a temporary committed-datom bridge. Generated-manifest schema,
+  duplicate live interest rejection, and recursive ordinary-wire validation
+  are complete.
 - Slot 4: Bun child supervision is source-grounded. Refill after the database
   facade with a dedicated child artifact and the zero-process dormant-agent
   trigger falsifier; IPC never becomes a database broker.
@@ -1045,6 +1047,16 @@ dependent lookup refs when present, and unique result keys. Commit `e9a9a793`
 passes 12 CLJ protocol/generated-ID tests with 86 assertions and 3 focused CLJS
 tests with 13 assertions. The writer's older private ordinary-data walk is now
 duplicate policy to delete during the remote-facade cut, not a second contract.
+
+The compact mutation response is deliberately coupled to replica removal. The
+current replica consumes the authority's returned, schema-coerced committed
+datoms to advance its local database; the caller's original transaction form is
+not an equivalent substitute. Removing the echoed transaction data earlier
+would require a temporary replacement translation/feed path. In the atomic
+Unit 9 cut, the Bun caller already retains its frozen request and the response
+shrinks directly to request ID, previous/current coordinate, temporary IDs,
+added/retracted counts, optional generated entity IDs, and recovery truth while
+the replay/event schemas and their producers disappear in the same commit.
 
 Integrated proof that closes it:
 Schema/index/history/selective-interest conformance, including forward/reverse
