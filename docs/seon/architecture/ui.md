@@ -136,11 +136,13 @@ technical surface wraps or horizontally scrolls, and the canvas has a bounded
 default height. Scale is handled by disclosure and windowing, never smaller
 unbounded text.
 
-**Capability + cache.** Agent-authored renders, layouts, and route handlers run
-SCI-bounded (`seon.render.sci/invoke-bounded`, a deadline), never
-`lookup-value`-direct; core symbols run compiled, and the bootstrap CLJS compiler
-stays out of the web bundle. The byte-stable cache prefix at low priority is
-preserved for provider prefix-caching.
+**Capability + cache.** The async outer web/context owner acquires the authored
+program and its ordinary inputs at one database coordinate, invokes the owning
+agent's compiled Bun child under the one host deadline, and gives the pure
+synchronous renderer only the ordinary result. Agent-authored renders, layouts,
+and route handlers never run inside the web host or perform leaf RPCs. The
+byte-stable cache prefix at low priority is preserved for provider
+prefix-caching.
 
 **Context assembly is its own domain.** How the prompt bands by dynamism
 (stable prefix / sliding window / free dynamic tail), the
@@ -267,7 +269,7 @@ render-unit, routing, and live-morph mechanism in one route tree:
   other live page, not a provenance-routed debug interest. With no open page it
   owns no database interest or render work.
 - **app** (`/agent/{id}/app/{x}`) — an agent-authored sub-page; its route handler
-  is an agent layout symbol, SCI-bounded.
+  is an agent layout symbol executed by that agent's bounded Bun child.
 
 ## The persistent header — one shared render unit
 
@@ -329,9 +331,9 @@ registered per [[data-model]].)
   NOT its own route — **namespaces are not a routing level**. The gate authorizes
   the fn by resolving its owning agent from the fn's `my.agent.<id>` namespace and
   granting it only if it is a registered `:seon.fn` in that agent's home ns;
-  refusal precedes any invoke; args stay data; the call runs SCI-bounded → it
-  transacts → the page re-derives and the stream morphs. reitit replaces the
-  FRAGILE dispatch, not the SECURE gate.
+  refusal precedes any invoke; args stay data; the call runs in the owning
+  bounded Bun child → it transacts → the page re-derives and the stream morphs.
+  reitit replaces the FRAGILE dispatch, not the SECURE gate.
 - **Interactivity is plain Clojure.** Agents author fn-calls in handler slots; a
   render-time server-side postwalk rewrites a fn-call `(cancel-order! id)` or a
   fn-ref `submit-order!` into one standard datastar `@post` to the agent's
@@ -515,11 +517,12 @@ implements the `view = f(db)` model through `seon.web.datastar`.
   reverse it (a browser POST → the owning agent's sandbox → result datoms →
   selective derivation → morph). The database is the bus both ways.
 
-Each SCI render owns its input accessor and deadline closure inside its fresh
-interpreter context. No process-global input/deadline cell can be overwritten by
-a nested or future concurrent render. The one-time interpreter warmup uses its
-own local deadline as well. Repeated failure logging/recording uses a bounded
-FIFO suppression window; it cannot retain an unbounded set of broken symbols.
+Each authored invocation owns one immutable input message and parent-side
+deadline. No process-global input/deadline cell can be overwritten by a nested
+or future concurrent render. A deadline or disconnect poisons that child
+against reuse before termination, so a late result cannot enter a newer render.
+Repeated failure logging/recording uses a bounded FIFO suppression window; it
+cannot retain an unbounded set of broken symbols.
 
 The same Datastar subscription mechanism serves root, agent, debug, and data
 views. There is no provenance-routed debug stream or unused generic `/sse`

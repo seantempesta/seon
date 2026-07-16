@@ -455,4 +455,4 @@ order, dates, measurements, and acceptance evidence.
   resolved-coordinate caching). Read before
   touching the loop.
 - [[library-grounding]] — the current concept-to-source read map for Datahike,
-  Malli, SCI, Reitit, Datastar, and the test selectors.
+  Malli, ClojureScript/Bun execution, Reitit, Datastar, and the test selectors.

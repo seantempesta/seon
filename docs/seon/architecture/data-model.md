@@ -208,10 +208,12 @@ Two storage encodings, both VALUES:
   `:seon.render/html` (references `:seon.render.canvas/content`,
   `[:or :symbol ::hiccup]`).
 
-The render path resolves these through ONE engine: `ai-render` / `html-render`
-call `eval/lookup-value` on a qualified symbol, falling through to a
-pretty-printer on a miss. Agent-authored symbols run SCI-bounded; core symbols
-run compiled. The render engine itself is owned by [[ui]].
+The render path resolves these through ONE engine: the async outer owner
+acquires the symbol, source closure, and input at one coordinate and asks the
+owning agent's compiled Bun child for an ordinary result. `ai-render` /
+`html-render` remain synchronous pure projections over that result and fall
+through to a pretty-printer when no authored symbol resolves. The render engine
+itself is owned by [[ui]].
 
 ### 2.4 tx provenance — datom → transaction → user/process
 
@@ -658,7 +660,7 @@ only the identities and core refs matter here.
 
 | entity | identity attr | valueType | other refs |
 |---|---|---|---|
-| `:seon.ns` | `:seon.ns/name` `[:keyword {:seon.db/identity true}]` | keyword | `:seon.ns/require-edges` (component rows `{:seon.ns.require/target :keyword, alias :symbol, refers [:set :symbol]}` — the sole reified `:as`/`:refer` facts used to build the SCI environment and synthesize boot replay's `(ns …)` head; committed with the home namespace at agent birth, updated by the analyzer tee, and indexed from full source at boot), `:seon.ns/source :string` |
+| `:seon.ns` | `:seon.ns/name` `[:keyword {:seon.db/identity true}]` | keyword | `:seon.ns/require-edges` (component rows `{:seon.ns.require/target :keyword, alias :symbol, refers [:set :symbol]}` — the sole reified `:as`/`:refer` facts used to compile the reachable authored source closure and synthesize boot replay's `(ns …)` head; committed with the home namespace at agent birth, updated by the analyzer tee, and indexed from full source at boot), `:seon.ns/source :string` |
 
 Render-time consumers never reparse `:seon.ns/source` to recover aliases or
 refers. Namespace source and require-edge facts are committed together; the
