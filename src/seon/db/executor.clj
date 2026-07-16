@@ -106,7 +106,8 @@
                    [::stopped? ::stopped?]])
 
 (def ^:private empty-queue clojure.lang.PersistentQueue/EMPTY)
-(def ^:private cpu-classes #{:read :knn :hnsw})
+(def ^:private cpu-classes #{:read :knn :hnsw :delivery})
+(def ^:private serialized-classes #{:mutation :delivery})
 
 (defn capacity
   "Return one immutable authority capacity map from the selected processors."
@@ -138,6 +139,9 @@
        :mutation {::maximum-active mutation
                   ::maximum-queued (max 8 (* 4 mutation))
                   ::maximum-queued-by-database 8}
+       :delivery {::maximum-active cpu-workers
+                  ::maximum-queued (max 16 (* 4 cpu-workers))
+                  ::maximum-queued-by-database 1}
        :hnsw {::maximum-active 1
               ::maximum-queued 1
               ::maximum-queued-by-database 1}}})))
@@ -214,7 +218,7 @@
           (if (and (allowed-classes work-class)
                    (eligible-class? state capacity work-class))
             (let [eligible-database?
-                  (if (= :mutation work-class)
+                  (if (serialized-classes work-class)
                     #(zero? (get-in state [::running-by-class-database
                                            [work-class %]] 0))
                     (constantly true))
@@ -583,7 +587,7 @@
                   ::remove-database-response]}
   [{::keys [executor scope]}]
   (let [{::keys [queued]} (fence-scope! executor scope #{:read :provider :knn
-                                                         :hnsw
+                                                         :hnsw :delivery
                                                          :mutation})]
     {::abandoned-count (count queued)}))
 

@@ -607,6 +607,56 @@
         (.countDown release)
         (executor/stop! {::executor/executor worker})))))
 
+(deftest delivery-is-serial-per-database-and-parallel-across-databases
+  (let [a-first-entered (CountDownLatch. 1)
+        a-second-entered (CountDownLatch. 1)
+        b-entered (CountDownLatch. 1)
+        release-a-first (CountDownLatch. 1)
+        release-all (CountDownLatch. 1)
+        worker
+        (start-worker
+         3
+         {:delivery
+          (fn [{:request/keys [database position]}]
+            (case [database position]
+              [:a 1] (do (.countDown a-first-entered)
+                         (.await release-a-first))
+              [:a 2] (do (.countDown a-second-entered)
+                         (.await release-all))
+              [:b 1] (do (.countDown b-entered)
+                         (.await release-all)))
+            [database position])})
+        a-scope (scope "a" (random-uuid) (random-uuid))
+        b-scope (scope "b" (random-uuid) (random-uuid))
+        delivery
+        (fn [database-name exact-scope job-id database position]
+          (assoc (request worker database-name exact-scope job-id nil)
+                 ::executor/work-class :delivery
+                 ::executor/request {:request/database database
+                                     :request/position position}))]
+    (try
+      (let [a-first (submit-async!
+                     (delivery "a" a-scope "delivery/a-1" :a 1))
+            _ (is (.await a-first-entered 5 TimeUnit/SECONDS))
+            a-second (submit-async!
+                      (delivery "a" a-scope "delivery/a-2" :a 2))
+            b-first (submit-async!
+                     (delivery "b" b-scope "delivery/b-1" :b 1))]
+        (is (.await b-entered 5 TimeUnit/SECONDS)
+            "another database uses the second CPU worker")
+        (is (false? (.await a-second-entered 100 TimeUnit/MILLISECONDS))
+            "one database preserves committed-report order")
+        (.countDown release-a-first)
+        (is (.await a-second-entered 5 TimeUnit/SECONDS))
+        (.countDown release-all)
+        (is (= [::executor/value [:a 1]] @a-first))
+        (is (= [::executor/value [:a 2]] @a-second))
+        (is (= [::executor/value [:b 1]] @b-first)))
+      (finally
+        (.countDown release-a-first)
+        (.countDown release-all)
+        (executor/stop! {::executor/executor worker})))))
+
 (deftest one-job-transitions-from-provider-to-knn-without-an-identity-gap
   (let [provider-entered (CountDownLatch. 1)
         release-provider (CountDownLatch. 1)
