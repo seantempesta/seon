@@ -29,3 +29,63 @@
                    ::datastar/producer #(swap! calls inc)}])]
     (is (= 1 (count catalog)))
     (is (zero? @calls))))
+
+(deftest subscriptions-render-only-for-declared-changed-attributes
+  (let [affected? @#'datastar/subscription-affected?]
+    (is (affected? {::datastar/dependencies #{:seon.agent/id}}
+                   {:seon.db/changed-attrs #{:seon.agent/id}}))
+    (is (not (affected? {::datastar/dependencies #{:seon.agent/id}}
+                        {:seon.db/changed-attrs #{:seon.message/text}})))
+    (is (affected? {::datastar/dependencies :all}
+                   {:seon.db/changed-attrs #{:seon.message/text}}))
+    ;; Missing transaction evidence or missing producer dependencies fail open.
+    (is (affected? {::datastar/dependencies #{:seon.agent/id}}
+                   {:seon.db/changed-attrs #{}}))
+    (is (affected? {}
+                   {:seon.db/changed-attrs #{:seon.message/text}}))))
+
+(deftest complete-render-bytes-follow-the-coordinate-that-proved-them
+  (let [next-point (assoc point ::coordinate/t 43)
+        registry {::datastar/subscriptions
+                  {:agent {::datastar/live? true
+                           ::datastar/dependencies #{:seon.agent/id}
+                           ::datastar/full-event "event: full\n\n"
+                           ::datastar/full-event-coordinate point}
+                   :historical {::datastar/live? false
+                                ::datastar/full-event "event: frozen\n\n"
+                                ::datastar/full-event-coordinate point}}}
+        unchanged (@#'datastar/advance-full-events
+                   registry
+                   {:seon.db/coordinate next-point
+                    :seon.db/changed-attrs #{:seon.message/text}})
+        affected (@#'datastar/advance-full-events
+                  registry
+                  {:seon.db/coordinate next-point
+                   :seon.db/changed-attrs #{:seon.agent/id}})]
+    (is (= "event: full\n\n"
+           (get-in unchanged [::datastar/subscriptions :agent
+                              ::datastar/full-event])))
+    (is (= next-point
+           (get-in unchanged [::datastar/subscriptions :agent
+                              ::datastar/full-event-coordinate])))
+    (is (= "event: frozen\n\n"
+           (get-in affected [::datastar/subscriptions :historical
+                             ::datastar/full-event])))
+    (is (= point
+           (get-in affected [::datastar/subscriptions :historical
+                             ::datastar/full-event-coordinate])))
+    (is (not (contains? (get-in affected [::datastar/subscriptions :agent])
+                        ::datastar/full-event)))
+    (is (not (contains? (get-in affected [::datastar/subscriptions :agent])
+                        ::datastar/full-event-coordinate)))))
+
+(deftest completed-change-becomes-the-shared-reconnect-event
+  (let [event "event: datastar-patch-elements\n\n"
+        recorded (@#'datastar/record-complete-event
+                  {::datastar/full-event "old"
+                   ::datastar/full-event-committed? true}
+                  {::datastar/change {:seon.db/coordinate point}}
+                  {::datastar/event event})]
+    (is (= event (::datastar/full-event recorded)))
+    (is (= point (::datastar/full-event-coordinate recorded)))
+    (is (true? (::datastar/full-event-committed? recorded)))))

@@ -101,12 +101,14 @@
 (schema/register! ::fingerprint [:string {:min 1}])
 (schema/register! ::view-id [:string {:min 1 :max 128}])
 (schema/register! ::optional-view-id [:maybe ::view-id])
-(schema/register! ::dependencies :map)
+(schema/register! ::dependencies
+  [:or [:= :all] [:set :qualified-keyword]])
 (schema/register! ::element :seon.render.canvas/hiccup)
 (schema/register! ::elements [:vector :seon.render.canvas/hiccup])
 (schema/register! ::serialized-elements [:vector :string])
 (schema/register! ::event :string)
 (schema/register! ::last-event :string)
+(schema/register! ::full-event-coordinate ::db.coordinate/coordinate)
 (schema/register! ::view-state
   [:map
    [::view-id ::view-id]
@@ -450,6 +452,30 @@
              (merge (::serialized-elements-by-token prior)
                     (::serialized-elements-by-token request))))))
 
+(defn- subscription-affected?
+  "Whether committed attributes can change one subscription's projection."
+  [subscription change]
+  (let [dependencies (::dependencies subscription)
+        changed-attrs (:seon.db/changed-attrs change)]
+    (or (= :all dependencies)
+        (nil? dependencies)
+        (empty? changed-attrs)
+        (boolean (seq (set/intersection dependencies changed-attrs))))))
+
+(defn- record-complete-event
+  "Retain one complete serialized render inside its live subscription."
+  [subscription active rendered]
+  (let [event (::event rendered)
+        coordinate (or (:seon.db/coordinate rendered)
+                       (get-in active [::change :seon.db/coordinate]))]
+    (cond-> subscription
+      event
+      (assoc ::full-event event
+             ::full-event-committed? true)
+
+      (and coordinate (or event (::full-event subscription)))
+      (assoc ::full-event-coordinate coordinate))))
+
 (defn- finish-render!
   [subscription-key subscription-id render-id rendered]
   (let [[before after]
@@ -468,13 +494,11 @@
                                (dissoc ::pending-render)))
                  (assoc-in
                   registry path
-                  (cond-> (dissoc subscription ::active-render)
+                  (cond-> (record-complete-event
+                           (dissoc subscription ::active-render)
+                           active rendered)
                     (contains? rendered ::dependencies)
                     (assoc ::dependencies (::dependencies rendered))
-
-                    (::render-full? active)
-                    (assoc ::full-event (::event rendered)
-                           ::full-event-committed? true)
 
                     (and (not (::render-full? active))
                          (::event rendered)
@@ -589,15 +613,17 @@
 (defn- subscription-from-feed
   "Create one normalized render authority from the first consumer's plan."
   [subscription-key feed]
-  {::subscription-id (random-uuid)
-   ::subscription-key subscription-key
-   ::consumer-view-ids #{}
-   ::live? (:seon.web.feed/live? feed)
-   ::render-number 0
-   ::full-event-committed? false
-   :seon.web.feed/render-full (:seon.web.feed/render-full feed)
-   ::render-change (:seon.web.feed/render-change feed)
-   ::dependencies (or (::dependencies feed) {})})
+  (cond->
+   {::subscription-id (random-uuid)
+    ::subscription-key subscription-key
+    ::consumer-view-ids #{}
+    ::live? (:seon.web.feed/live? feed)
+    ::render-number 0
+    ::full-event-committed? false
+    :seon.web.feed/render-full (:seon.web.feed/render-full feed)
+    ::render-change (:seon.web.feed/render-change feed)}
+    (contains? feed ::dependencies)
+    (assoc ::dependencies (::dependencies feed))))
 
 (defn- socket-consumer
   "Remove subscription authority from a socket-owning view descriptor."
@@ -697,7 +723,8 @@
   "Render each normalized live subscription once, then fan out its patch."
   [change]
   (doseq [[subscription-key subscription] (::subscriptions @!feeds)
-          :when (::live? subscription)]
+          :when (and (::live? subscription)
+                     (subscription-affected? subscription change))]
     (enqueue-render! subscription-key
                      {::render-full? false
                       ::change change
@@ -813,21 +840,37 @@
 ;; Lifecycle — db/listen! IS the refresh signal.
 ;; ============================================================
 
-(defn- invalidate-full-events
-  "Drop cached first paints after one authoritative database change."
-  [registry]
+(defn- advance-full-events
+  "Invalidate affected renders and advance unchanged renders to the commit."
+  [registry change]
   (update registry ::subscriptions
           (fn [subscriptions]
             (into {}
                   (map (fn [[subscription-key subscription]]
-                         [subscription-key (dissoc subscription ::full-event)]))
+                         [subscription-key
+                          (cond
+                            (not (::live? subscription)) subscription
+                            (subscription-affected? subscription change)
+                            (dissoc subscription
+                                    ::full-event
+                                    ::full-event-coordinate)
+                            :else
+                            (cond-> subscription
+                              (::full-event subscription)
+                              (assoc ::full-event-coordinate
+                                     (:seon.db/coordinate change))))]))
                   subscriptions))))
 
 (defn- on-tx [event]
   (let [change (event-change event)]
-    ;; Invalidate before the deliberately coalesced socket morph.
-    (swap! !feeds invalidate-full-events)
-    (schedule-broadcast! change)))
+    ;; Invalidate only affected subscriptions before their coalesced morph.
+    ;; Unaffected complete bytes remain valid and advance to this coordinate.
+    (swap! !feeds advance-full-events change)
+    (when (some (fn [[_ subscription]]
+                  (and (::live? subscription)
+                       (subscription-affected? subscription change)))
+                (::subscriptions @!feeds))
+      (schedule-broadcast! change))))
 
 (defn install!
   "Install the view tx-listener. Idempotent — same key replaces."
@@ -1444,12 +1487,18 @@
   (cond->
    {:seon.web.feed/key [:seon.web.feed/agent id]
     :seon.web.feed/live? true
+    ;; The current page acquisition includes a global datom count. Until that
+    ;; value becomes its own independently derived stream, every commit can
+    ;; change this projection; claiming narrower surface attrs would be wrong.
+    ::dependencies :all
     :seon.web.feed/render-full
     (fn []
       (-> (db/head-coordinate)
           (.then (fn [coordinate]
-                   (render-agent-view-at! id coordinate)))
-          (.then (fn [element] {::element element}))))
+                   (-> (render-agent-view-at! id coordinate)
+                       (.then (fn [element]
+                                {::element element
+                                 :seon.db/coordinate coordinate})))))))
     :seon.web.feed/render-change
     (fn [_subscription change]
       (-> (render-agent-view-at! id (:seon.db/coordinate change))
@@ -1490,7 +1539,9 @@
              :seon.web.feed/render-full
              (fn []
                (-> (render-agent-view-at! id selector)
-                   (.then (fn [element] {::element element}))))
+                   (.then (fn [element]
+                            {::element element
+                             :seon.db/coordinate selector}))))
              :seon.web.feed/render-change
              (fn [_subscription _change] {::elements []})}
             view-id (assoc ::view-id view-id)))
