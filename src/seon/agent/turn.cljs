@@ -35,6 +35,8 @@
     [seon.db.id :as db.id]
     [seon.error :as error]
     [seon.eval :as seval]
+    [seon.execution :as execution]
+    [seon.execution.host :as execution.host]
     [seon.log :as seon-log]
     [seon.repl.internal :as repl-internal]
     [seon.schema :as schema]))
@@ -301,21 +303,52 @@
 ;; Prompt assembly.
 ;; ============================================================
 
-(defn render-prompt
-  "The agent's full LLM context, rendered as a bare String (sync).
+(schema/register!
+  ::prompt-error
+  [:map
+   [:seon.error/message :string]
+   [:seon.error/kind :keyword]
+   [:seon.error/data {:optional true} :map]])
+(schema/register! ::prompt-result [:or :string ::prompt-error])
 
-   Thin delegate to [[seon.agent.ctx/render-context]] (the SINGLE producer the human
-   web UI `seon.agent.debug/ctx-preview` also routes through, so the
-   debug view and the model's prompt are byte-identical by construction).
-   Renders against the frozen `db` value the loop pinned for this TURN (the
-   one basis-t the bound-checks + render share, §8a); defaults to `@*conn*`
-   when called without one."
-  {:malli/schema [:function
-                  [:=> [:catn [:seon.agent/id :seon.agent/id]] :string]
-                  [:=> [:catn [:seon.agent/id :seon.agent/id] [:seon.db/db :any]] :string]]}
-  ([agent-id] (render-prompt agent-id @db/*conn*))
-  ([agent-id db]
-   (ctx/render-context {:seon.agent/id agent-id :seon.db/db db})))
+(defn ^:async render-prompt
+  "Render one agent prompt inside its isolated execution child.
+
+   The caller supplies the complete frozen database coordinate. The trusted
+   compiled prompt owner performs every prompt read and selected function call
+   at that coordinate and returns the ordinary rendered-context value. This
+   orchestration tail validates that the child did not move coordinates and
+   returns only the exact context text consumed by the LLM."
+  {:malli/schema [:=> [:cat :seon.agent/id
+                       :seon.db.coordinate/coordinate]
+                  ::prompt-result]}
+  [agent-id point]
+  (let [response
+        (await
+          (execution.host/invoke-compiled!
+            point agent-id [{:seon.agent/id agent-id}]))]
+    (cond
+      (not= point (::execution/coordinate response))
+      {:seon.error/message
+       "The execution child returned a prompt from another database coordinate."
+       :seon.error/kind :core-bug
+       :seon.error/data
+       {:seon.db/expected-coordinate point
+        :seon.db/current-coordinate (::execution/coordinate response)}}
+
+      (= execution/result-message (::execution/message response))
+      (let [rendered (::execution/result response)
+            text (:seon.render/text rendered)]
+        (if (string? text)
+          text
+          {:seon.error/message
+           "The execution child returned an invalid rendered prompt."
+           :seon.error/kind :core-bug}))
+
+      :else
+      (or (::execution/error response)
+          {:seon.error/message "The execution child did not return a prompt."
+           :seon.error/kind :core-bug}))))
 
 ;; ============================================================
 ;; The turn bracket — open-turn! folds the prompt projection + the current
@@ -759,7 +792,7 @@
         estimated?  (assoc :seon.agent.turn/usage-estimated? true)
         (seq pfields) (assoc :seon.agent.turn/llm-meta (pr-str pfields))))))
 
-(defn ^:async run-turn!
+(defn ^:async ^:private run-turn-body!
   "One full turn end-to-end. Map-in / map-out.
 
    Input keys:
@@ -787,13 +820,17 @@
         ;; reads the config accessor.
         stream?    (= :stream (ctx/repl-mode db))
         turn-idx   (turn-index id)
-        prompt     (render-prompt id db)
+        rendered-coordinate (coordinate/resolved db)
+        prompt-result (await (render-prompt id rendered-coordinate))
+        _ (when (map? prompt-result)
+            (throw (ex-info (:seon.error/message prompt-result)
+                            prompt-result)))
+        prompt     prompt-result
         full-prompt (ai/debug-full-prompt {:seon.ai/ctx prompt})
         ;; Always-on observability capture: the frozen db's complete coordinate
         ;; (resolved through `db/at-coordinate`) + the assembled prompt verbatim
         ;; as a blob. Both land on the turn's
         ;; open-tx; a failed blob write yields nil and the turn proceeds.
-        rendered-coordinate (db/head-coordinate db)
         ;; Where the batch STARTS: the agent's derived current-ns over the
         ;; SAME frozen db the prompt rendered from — so the ns the cursor
         ;; showed the agent is the ns its forms run in (an in-ns in a prior
@@ -854,10 +891,11 @@
                 n-ok (or (:seon.agent/eval-count result) 0)]
             (log id turn-idx (name (or (:seon.agent.turn/status result) :done)) n-ok
                  (if (:seon.agent.turn/status result) "llm-error" "ok"))
-            (assoc (db/pull {:seon.db/pull-pattern
-                             '[* {:seon.agent.turn/evals [*]}
-                                  {:seon.agent.turn/llm-attempts [*]}]
-                             :seon.db/ref [:seon.agent.turn/id turn-id]})
+            (assoc (await
+                     (db/pull {:seon.db/pull-pattern
+                               '[* {:seon.agent.turn/evals [*]}
+                                    {:seon.agent.turn/llm-attempts [*]}]
+                               :seon.db/ref [:seon.agent.turn/id turn-id]}))
                    :seon.agent/eval-count n-ok))))
       (catch :default e
         ;; Catastrophic turn failure → return the :error shape. State is the
@@ -869,3 +907,14 @@
           (cond-> {:seon.agent.turn/status :error
                    :seon.error/data        (str e)}
             turn-id (assoc :seon.agent.turn/id turn-id)))))))
+
+(defn ^:async run-turn!
+  "Run one complete turn and convert every outer orchestration failure to data."
+  {:malli/schema [:=> [:catn [:input :map]] :map]}
+  [{:seon.agent/keys [id] :as input}]
+  (try
+    (await (run-turn-body! input))
+    (catch :default exception
+      (log id "run-turn! orchestration error" (error/->message exception))
+      {:seon.agent.turn/status :error
+       :seon.error/data (error/->message exception)})))
