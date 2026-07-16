@@ -1030,6 +1030,33 @@
        (map #(str ";   " %))
        (str/join "\n")))
 
+(defn- format-escalation-section
+  [escalation planner sent?]
+  (if-let [{:my.plan/keys [id title root-sym root-kind fail-count last-error]}
+           escalation]
+    (str "; STUCK ▶ " id " «" title "» — the same call has failed "
+         fail-count "× since this step went active (root " root-sym
+         (when root-kind (str ", kind " root-kind)) "):\n"
+         (comment-lines (tokens/clip-str last-error 60)) "\n"
+         (cond
+           sent?
+           (str "; The planner (" planner ") has been consulted to "
+                "revise this subtree; its\n"
+                "; revision lands in this plan. Do not re-run the "
+                "failing form — work a\n"
+                "; different angle or await the revised plan.")
+
+           planner
+           (str "; The planner (" planner ") is being consulted to "
+                "revise this subtree.")
+
+           :else
+           (str "; No frontier planner agent exists in this cluster — "
+                "no consult sent.\n"
+                "; Revise this subtree yourself "
+                "(my.plan/reconcile!) before retrying the form.")))
+    ""))
+
 (defn escalation-section
   "The reactive STUCK band for [[plan-body]] — \"\" unless [[escalation]]
    flags the ▶ step right now. One factual block: the step, the repeated
@@ -1038,35 +1065,13 @@
    no frontier planner in this cluster. Vanishes the moment the wedge
    breaks (a same-call success, a step change, a re-plan)."
   [db agent-eid agent-id]
-  (if-let [{:my.plan/keys [id title root-sym root-kind fail-count
-                           last-error episode]}
-           (escalation db agent-eid)]
-    (let [planner (planner-for db agent-id id)
-          sent?   (and planner
-                       (consult-sent? db agent-eid
-                                      (consult-marker id episode)))]
-      (str "; STUCK ▶ " id " «" title "» — the same call has failed "
-           fail-count "× since this step went active (root " root-sym
-           (when root-kind (str ", kind " root-kind)) "):\n"
-           (comment-lines (tokens/clip-str last-error 60)) "\n"
-           (cond
-             sent?
-             (str "; The planner (" planner ") has been consulted to "
-                  "revise this subtree; its\n"
-                  "; revision lands in this plan. Do not re-run the "
-                  "failing form — work a\n"
-                  "; different angle or await the revised plan.")
-
-             planner
-             (str "; The planner (" planner ") is being consulted to "
-                  "revise this subtree.")
-
-             :else
-             (str "; No frontier planner agent exists in this cluster — "
-                  "no consult sent.\n"
-                  "; Revise this subtree yourself "
-                  "(my.plan/reconcile!) before retrying the form."))))
-    ""))
+  (let [escalation (escalation db agent-eid)
+        {:my.plan/keys [id episode]} escalation
+        planner (when escalation (planner-for db agent-id id))
+        sent? (and planner
+                   (consult-sent? db agent-eid
+                                  (consult-marker id episode)))]
+    (format-escalation-section escalation planner sent?)))
 
 (defn- consult-content
   "The consult message body: the episode marker, the distilled failure
@@ -1246,6 +1251,46 @@
       (descendant ?root ?leaf))
     (leaf ?leaf)])
 
+(def ^:private eval-projections-query
+  {:find '[?eval
+           (pull ?eval [:seon.eval/id :seon.eval/ok? :seon.eval/source
+                        :seon.eval/error :seon.eval/error-data])
+           ?eval-tx]
+   :in '[$ ?agent-id ?active-tx]
+   :where '[[?agent :seon.agent/id ?agent-id]
+            [?eval :seon.eval/agent ?agent]
+            [?eval :seon.eval/ok? _ ?eval-tx]
+            [(> ?eval-tx ?active-tx)]]
+   :order-by '[?eval-tx :asc ?eval :asc]})
+
+(def ^:private planner-candidates-query
+  {:find '[?id ?provider]
+   :in '[$ ?worker-id]
+   :where '[[?agent :seon.agent/id ?id]
+            [?agent :seon.eval/home-requires _]
+            [(not= ?id ?worker-id)]
+            (not-join [?agent] [?agent :seon.agent/terminated-at _])
+            [(get-else $ ?agent :seon.ai/agent-provider :inherit) ?provider]]
+   :order-by '[?id :asc]})
+
+(def ^:private planner-authors-query
+  '[:find [?author-id ...]
+    :in $ ?step-id
+    :where
+    [?step :my.plan/id ?step-id]
+    [?step _ _ ?tx]
+    [?tx :seon.db/user ?author]
+    [?author :seon.agent/id ?author-id]])
+
+(def ^:private consult-message-query
+  {:find '[?message]
+   :in '[$ ?worker-id ?marker]
+   :where '[[?worker :seon.agent/id ?worker-id]
+            [?message :seon.agent.message/from ?worker]
+            [?message :seon.agent.message/content ?content]
+            [(clojure.string/includes? ?content ?marker)]]
+   :limit 1})
+
 (defn- query-member
   [query arguments max-work max-results max-result-weight]
   {::protocol/operation protocol/query-operation
@@ -1271,15 +1316,35 @@
     :datahike.resource/max-result-weight 1024}])
 
 (defn- selected-acquisition-members
-  [step-id]
-  [{::protocol/operation protocol/pull-operation
-    ::protocol/selector ancestor-selector
-    ::protocol/entity-id [:my.plan/id step-id]
-    :datahike.resource/max-work 100000
-    :datahike.resource/max-results 2048
-    :datahike.resource/max-result-weight 65536}
-   (query-member root-rollup-query [rules step-id]
-                 5000000 5000000 4096)])
+  ([step-id] (selected-acquisition-members step-id nil nil))
+  ([step-id agent-id active-tx]
+   (cond->
+     [{::protocol/operation protocol/pull-operation
+       ::protocol/selector ancestor-selector
+       ::protocol/entity-id [:my.plan/id step-id]
+       :datahike.resource/max-work 100000
+       :datahike.resource/max-results 2048
+       :datahike.resource/max-result-weight 65536}
+      (query-member root-rollup-query [rules step-id]
+                    5000000 5000000 4096)]
+     active-tx
+     (conj (query-member eval-projections-query [agent-id active-tx]
+                         5000000 5000000 2097152)))))
+
+(defn- escalation-acquisition-members
+  [worker-id step-id marker]
+  [(query-member planner-candidates-query [worker-id]
+                 500000 100000 262144)
+   {::protocol/operation protocol/pull-operation
+    ::protocol/selector [:seon.ai/provider]
+    ::protocol/entity-id [:seon.ai/id "config"]
+    :datahike.resource/max-work 10000
+    :datahike.resource/max-results 8
+    :datahike.resource/max-result-weight 1024}
+   (query-member planner-authors-query [step-id]
+                 500000 100000 65536)
+   (query-member consult-message-query [worker-id marker]
+                 1000000 1000000 4096)])
 
 (defn- member-result
   [member]
@@ -1319,8 +1384,72 @@
      :my.plan/total total
      :my.plan/done? (and (pos? total) (= done total))}))
 
+(defn- planner-from-rows
+  [worker-id candidate-rows global-provider author-ids]
+  (let [global-provider (or global-provider :deepseek)
+        authors (set author-ids)
+        candidates
+        (->> candidate-rows
+             (keep (fn [[id raw-provider]]
+                     (let [override
+                           (db/decode-edn-value :seon.ai/agent-provider
+                                                raw-provider)
+                           provider (if (= :inherit override)
+                                      global-provider
+                                      override)]
+                       (when (and (not= worker-id id)
+                                  (ai/frontier-provider? provider))
+                         id))))
+             vec)]
+    (or (first (filter authors candidates))
+        (first candidates))))
+
+(defn ^:async ^:private acquire-escalation-text
+  [coordinate agent-id active eval-member]
+  (if-not active
+    ""
+    (let [evals (mapv second (member-result eval-member))]
+      (if-let [wedge-state (wedge evals escalation-stuck-n)]
+        (let [escalation (merge wedge-state
+                                {:my.plan/id (:my.plan/id active)
+                                 :my.plan/title (:my.plan/title active)})
+              marker (consult-marker (:my.plan/id escalation)
+                                     (:my.plan/episode escalation))
+              acquired
+              (await (db/execute-many
+                       {::db/coordinate coordinate
+                        ::db/members
+                        (escalation-acquisition-members
+                          agent-id (:my.plan/id escalation) marker)
+                        ::db/max-result-weight 393216}))]
+          (if-not (= coordinate (::db/coordinate acquired))
+            (acquisition-error
+              "escalation coordinate check"
+              {:seon.db/expected-coordinate coordinate
+               :seon.db/actual-coordinate (::db/coordinate acquired)})
+            (let [[candidates-member config-member authors-member
+                   message-member] (::db/results acquired)]
+              (if-not (every? #(true? (::protocol/success? %))
+                              [candidates-member config-member authors-member
+                               message-member])
+                (acquisition-error "escalation member"
+                                   (::db/results acquired))
+                (let [global-provider
+                      (:seon.ai/provider (member-result config-member))
+                      planner
+                      (planner-from-rows
+                        agent-id
+                        (member-result candidates-member)
+                        global-provider
+                        (member-result authors-member))
+                      sent? (boolean
+                              (and planner
+                                   (seq (member-result message-member))))]
+                  (format-escalation-section escalation planner sent?))))))
+        ""))))
+
 (defn ^:async ^:private acquire-plan-block
-  "Acquire the bounded normal plan prompt data at one database coordinate."
+  "Acquire the bounded plan prompt data at one database coordinate."
   [{agent-id :seon.agent/id :as input}]
   (let [coordinate (or (::db/coordinate input)
                        (::db/coordinate (db/current-tx-context)))]
@@ -1363,37 +1492,48 @@
                    ::dones dones}
                   (let [selected
                         (await (db/execute-many
-                                 {::db/coordinate coordinate
-                                  ::db/members
-                                  (selected-acquisition-members
-                                    (:my.plan/id step))
-                                  ::db/max-result-weight 131072}))]
+                                  {::db/coordinate coordinate
+                                   ::db/members
+                                   (selected-acquisition-members
+                                    (:my.plan/id step)
+                                    agent-id
+                                    (:seon.db/tx active))
+                                  ::db/max-result-weight
+                                  (if active 2359296 131072)}))]
                     (if-not (= coordinate (::db/coordinate selected))
                       (acquisition-error
                         "selected coordinate check"
                         {:seon.db/expected-coordinate coordinate
                          :seon.db/actual-coordinate (::db/coordinate selected)})
-                      (let [[ancestor-member rollup-member]
+                      (let [[ancestor-member rollup-member eval-member]
                             (::db/results selected)]
-                        (if-not (and
-                                  (true? (::protocol/success? ancestor-member))
-                                  (true? (::protocol/success? rollup-member)))
+                        (if-not (every?
+                                  #(true? (::protocol/success? %))
+                                  (cond-> [ancestor-member rollup-member]
+                                    active (conj eval-member)))
                           (acquisition-error "selected member"
                                              (::db/results selected))
-                          {::db/coordinate coordinate
-                           :seon.agent/entity agent
-                           ::anchor
-                           {:my.plan/step step
-                            :my.plan/chain
-                            (ancestor-chain-from-pull
-                              (member-result ancestor-member))
-                            :my.plan/active? (some? active)
-                            :my.plan/progress
-                            (rollup-from-rows
-                              (member-result rollup-member))}
-                           ::actives actives
-                           ::readies readies
-                           ::dones dones})))))))))))))
+                          (let [escalation-text
+                                (await (acquire-escalation-text
+                                         coordinate agent-id active eval-member))]
+                            (if (and (map? escalation-text)
+                                     (:seon.error/message escalation-text))
+                              escalation-text
+                              {::db/coordinate coordinate
+                               :seon.agent/entity agent
+                               ::anchor
+                               {:my.plan/step step
+                                :my.plan/chain
+                                (ancestor-chain-from-pull
+                                  (member-result ancestor-member))
+                                :my.plan/active? (some? active)
+                                :my.plan/progress
+                                (rollup-from-rows
+                                  (member-result rollup-member))}
+                               ::actives actives
+                               ::readies readies
+                               ::dones dones
+                               ::escalation-text escalation-text})))))))))))))))
 
 (defn recent-done
   "The `agent-eid`'s most-recently-completed steps (newest first), capped at

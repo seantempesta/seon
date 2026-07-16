@@ -887,14 +887,15 @@
                (pull-member-result {:db/id 1 :seon.agent/id a-id})]}
              {::db/coordinate coordinate
               ::db/results
-              [(pull-member-result
+             [(pull-member-result
                  {:my.plan/id "active-step"
                   :my.plan/title "do it"
                   :my.plan/parent
                   {:my.plan/id "root-step"
                    :my.plan/title "the goal"
                    :my.plan/goal "ship it"}})
-               (query-member-result [[:done 2] [:active 1]])]}])
+               (query-member-result [[:done 2] [:active 1]])
+               (query-member-result [])]}])
           original-execute-many db/execute-many]
       (set! db/execute-many
             (fn [request]
@@ -909,12 +910,13 @@
               (is (= 2 (count @requests)))
               (is (every? #(= coordinate (::db/coordinate %)) @requests)
                   "both dependent reads retain the inherited coordinate")
-              (is (= [4 2] (mapv (comp count ::db/members) @requests)))
+              (is (= [4 3] (mapv (comp count ::db/members) @requests)))
               (is (= [protocol/query-operation protocol/query-operation
                       protocol/query-operation protocol/pull-operation]
                      (mapv ::protocol/operation
                            (::db/members (first @requests)))))
-              (is (= [protocol/pull-operation protocol/query-operation]
+              (is (= [protocol/pull-operation protocol/query-operation
+                      protocol/query-operation]
                      (mapv ::protocol/operation
                            (::db/members (second @requests)))))
               (is (= ["root-step" "active-step"]
@@ -928,7 +930,135 @@
               (let [rendered ((deref #'plan-int/format-plan-body) acquired)]
                 (is (str/includes? rendered "ship it"))
                 (is (str/includes? rendered "verify it"))
-                (is (str/includes? rendered "already done")))))
+                (is (str/includes? rendered "already done"))
+                (is (not (str/includes? rendered "STUCK"))
+                    "an active step without a wedge pays no third request"))))
+          (.catch (fn [error] (is false (str "threw — " error))))
+          (.finally
+            (fn []
+              (set! db/execute-many original-execute-many)
+              (done)))))))
+
+(deftest remote-plan-wedge-alone-triggers-the-third-batch
+  (async done
+    (let [at (js/Date. 1000)
+          failure (fn [id]
+                    {:seon.eval/id id
+                     :seon.eval/ok? false
+                     :seon.eval/source
+                     "(schema/register! :my.exp/rows (map [:string]))"
+                     :seon.eval/error "register!: input invalid"
+                     :seon.eval/error-data
+                     (pr-str {:seon.error/kind :schema})})
+          requests (atom [])
+          responses
+          (atom
+            [{::db/coordinate coordinate
+              ::db/results
+              [(query-member-result
+                 [["active-step" "do it" "verify it" at false 31]])
+               (query-member-result [])
+               (query-member-result [])
+               (pull-member-result {:db/id 1 :seon.agent/id a-id})]}
+             {::db/coordinate coordinate
+              ::db/results
+              [(pull-member-result
+                 {:my.plan/id "active-step"
+                  :my.plan/title "do it"
+                  :my.plan/parent
+                  {:my.plan/id "root-step" :my.plan/title "the goal"}})
+               (query-member-result [[:active 1]])
+               (query-member-result
+                 [[10 (failure "eval-1") 32]
+                  [11 (failure "eval-2") 33]
+                  [12 (failure "eval-3") 34]])]}
+             {::db/coordinate coordinate
+              ::db/results
+              [(query-member-result [["aaa-frontier" ":deepseek"]
+                                     [b-id ":inherit"]
+                                     ["local-worker" ":typeahead"]])
+               (pull-member-result {:seon.ai/provider :deepseek})
+               (query-member-result [b-id])
+               (query-member-result [77])]}])
+          original-execute-many db/execute-many]
+      (set! db/execute-many
+            (fn [request]
+              (swap! requests conj request)
+              (let [response (first @responses)]
+                (swap! responses subvec 1)
+                (js/Promise.resolve response))))
+      (-> ((deref #'plan-int/acquire-plan-block)
+           {::db/coordinate coordinate :seon.agent/id a-id})
+          (.then
+            (fn [acquired]
+              (is (= [4 3 4]
+                     (mapv (comp count ::db/members) @requests)))
+              (is (every? #(= coordinate (::db/coordinate %)) @requests))
+              (let [second-members (::db/members (nth @requests 1))
+                    third-members (::db/members (nth @requests 2))
+                    marker (second (::protocol/arguments
+                                     (nth third-members 3)))
+                    rendered ((deref #'plan-int/format-plan-body) acquired)]
+                (is (= [2097152 262144 1024 65536 4096]
+                       [(:datahike.resource/max-result-weight
+                          (nth second-members 2))
+                        (:datahike.resource/max-result-weight
+                          (nth third-members 0))
+                        (:datahike.resource/max-result-weight
+                          (nth third-members 1))
+                        (:datahike.resource/max-result-weight
+                          (nth third-members 2))
+                        (:datahike.resource/max-result-weight
+                          (nth third-members 3))]))
+                (is (= (plan-int/consult-marker "active-step" "eval-1")
+                       marker)
+                    "the exact derived episode marker scopes the message query")
+                (is (str/includes? rendered "STUCK ▶ active-step"))
+                (is (str/includes? rendered "schema/register!"))
+                (is (str/includes? rendered b-id))
+                (is (not (str/includes? rendered "aaa-frontier"))
+                    "a step author wins over an earlier frontier candidate")
+                (is (str/includes? rendered "has been consulted")))))
+          (.catch (fn [error] (is false (str "threw — " error))))
+          (.finally
+            (fn []
+              (set! db/execute-many original-execute-many)
+              (done)))))))
+
+(deftest remote-ready-plan-remains-two-batches-without-eval-query
+  (async done
+    (let [at (js/Date. 1000)
+          requests (atom [])
+          responses
+          (atom
+            [{::db/coordinate coordinate
+              ::db/results
+              [(query-member-result [])
+               (query-member-result [["ready-step" "next" "" at false]])
+               (query-member-result [])
+               (pull-member-result {:db/id 1 :seon.agent/id a-id})]}
+             {::db/coordinate coordinate
+              ::db/results
+              [(pull-member-result
+                 {:my.plan/id "ready-step" :my.plan/title "next"})
+               (query-member-result [[:open 1]])]}])
+          original-execute-many db/execute-many]
+      (set! db/execute-many
+            (fn [request]
+              (swap! requests conj request)
+              (let [response (first @responses)]
+                (swap! responses subvec 1)
+                (js/Promise.resolve response))))
+      (-> ((deref #'plan-int/acquire-plan-block)
+           {::db/coordinate coordinate :seon.agent/id a-id})
+          (.then
+            (fn [acquired]
+              (is (= [4 2] (mapv (comp count ::db/members) @requests)))
+              (is (= ""
+                     (::plan-int/escalation-text acquired)))
+              (is (= false
+                     (get-in acquired
+                             [::plan-int/anchor :my.plan/active?])))))
           (.catch (fn [error] (is false (str "threw — " error))))
           (.finally
             (fn []
@@ -967,6 +1097,54 @@
               (is (= "Plan initial member failed."
                      (:seon.error/message member-failure)))
               (is (= "bounded active query failed"
+                     (get-in member-failure
+                             [:seon.error/data 0 ::protocol/error])))))
+          (.catch (fn [error] (is false (str "threw — " error))))
+          (.finally
+            (fn []
+              (set! db/execute-many original-execute-many)
+              (done)))))))
+
+(deftest remote-plan-escalation-returns-third-batch-errors
+  (async done
+    (let [failure {:seon.eval/id "episode"
+                   :seon.eval/ok? false
+                   :seon.eval/source "(schema/register! :my.exp/x :bad)"
+                   :seon.eval/error "bad schema"}
+          eval-member
+          (query-member-result [[10 failure 32]
+                                [11 failure 33]
+                                [12 failure 34]])
+          active {:my.plan/id "active" :my.plan/title "work"}
+          responses
+          (atom
+            [{::db/coordinate (assoc coordinate :seon.db.coordinate/t 43)
+              ::db/results []}
+             {::db/coordinate coordinate
+              ::db/results
+              [{::protocol/success? false ::protocol/error "candidate failure"}
+               (pull-member-result {})
+               (query-member-result [])
+               (query-member-result [])]}])
+          original-execute-many db/execute-many]
+      (set! db/execute-many
+            (fn [_]
+              (let [response (first @responses)]
+                (swap! responses subvec 1)
+                (js/Promise.resolve response))))
+      (-> ((deref #'plan-int/acquire-escalation-text)
+           coordinate a-id active eval-member)
+          (.then
+            (fn [mismatch]
+              (is (= "Plan escalation coordinate check failed."
+                     (:seon.error/message mismatch)))
+              ((deref #'plan-int/acquire-escalation-text)
+               coordinate a-id active eval-member)))
+          (.then
+            (fn [member-failure]
+              (is (= "Plan escalation member failed."
+                     (:seon.error/message member-failure)))
+              (is (= "candidate failure"
                      (get-in member-failure
                              [:seon.error/data 0 ::protocol/error])))))
           (.catch (fn [error] (is false (str "threw — " error))))
