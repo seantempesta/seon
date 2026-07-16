@@ -42,3 +42,18 @@ database point.
 - Current raw-value query latency and allocation do not regress.
 - A benchmark demonstrates that the added identity/bookkeeping wins for the
   expected historical-query workload before the optimization graduates.
+
+## Current evidence
+
+Datahike `f3776b720c700525d650159e0561c813b8b42bce` implements the private
+four-fact key for direct numeric earlier `AsOfDB` queries. Focused
+persistent-set, hitchhiker-tree, and specification proof passes 102 tests and
+756 assertions. The canonical Node ClojureScript gate passes 137 tests and 945
+assertions. The retained tests cover 2/32-way sharing, completed hits, every
+identity input, resource limits, cancellation, clear, failure/retry,
+reentrancy, final release, and reconnect.
+
+The semantic and lifetime defect is fixed. Keep this issue open until the
+grown temporal benchmark proves the latency, allocation, CPU, and bounded
+retention thresholds in the linked research report; that measurement belongs
+to Unit 10 density graduation and does not require another cache mechanism.

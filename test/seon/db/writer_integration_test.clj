@@ -573,6 +573,10 @@
                          (::protocol/datoms history-page)))))
         (is (= #{{:id "alice" :score 1} {:id "bob" :score 2}}
                (set (:datahike.query/result temporal-query))))
+        (is (= :datahike.cache.outcome/miss-owner
+               (get-in temporal-query
+                       [:datahike.query/cache-evidence
+                        :datahike.cache/outcome])))
         (is (= #{[1 true] [2 true]}
                (set (:datahike.query/result temporal-history))))
         (is (= [1 2] (mapv :seon.db/v (::protocol/datoms temporal-page))))
@@ -595,6 +599,11 @@
         (is (= #{{:id "alice" :score 1} {:id "bob" :score 2}}
                (set (get-in temporal-many
                             [::protocol/results 1 :datahike.query/result]))))
+        (is (= :datahike.cache.outcome/hit
+               (get-in temporal-many
+                       [::protocol/results 1
+                        :datahike.query/cache-evidence
+                        :datahike.cache/outcome])))
         (is (= [2 1]
                (mapv :seon.db/v
                      (get-in temporal-many

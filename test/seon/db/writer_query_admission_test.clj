@@ -119,12 +119,15 @@
                       "joined query caller did not acquire")
                      response))
                  (range 32))
-                evidence (executor/evidence (::writer/executor server))
                 other (request! runtime transport
                                 (query-request database-b head-b "b/query"))
                 other-response (deref other 2000 ::timeout)]
-            (is (= 1 (get-in evidence [::executor/running-by-class :read])))
-            (is (zero? (::executor/queued evidence)))
+            (wait-until!
+             #(let [evidence (executor/evidence (::writer/executor server))]
+                (and (= 1 (get-in evidence
+                                  [::executor/running-by-class :read]))
+                     (zero? (::executor/queued evidence))))
+             "joined acquisition jobs did not yield their workers")
             (is (not= ::timeout other-response)
                 "database B finishes while database A's owner is blocked")
             (is (::protocol/success? other-response))
