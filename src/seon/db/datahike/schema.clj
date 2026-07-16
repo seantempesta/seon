@@ -21,7 +21,8 @@
    Public API:
    - `malli-type->datahike-type` -- leaf type mapping
    - `malli-map->datahike-schema` -- full schema vector derivation"
-  (:require [malli.core :as m]))
+  (:require [malli.core :as m]
+            [malli.registry :as mr]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Type Mapping
@@ -255,6 +256,26 @@
 ;;; ---------------------------------------------------------------------------
 ;;; Public API
 ;;; ---------------------------------------------------------------------------
+
+(defn malli-form->datahike-attribute
+  "Derive one Datahike declaration from a canonical schema-form population.
+
+   `forms` is the complete database-owned `{qualified-keyword malli-form}` map.
+   Compiling against that explicit registry keeps one database's authored
+   references isolated from every other database and from process-global Malli
+   state."
+  {:malli/schema
+   [:=> [:catn [::forms :map]
+               [::attribute :qualified-keyword]
+               [::form :any]]
+    [:map-of :keyword :any]]}
+  [forms attribute form]
+  (let [registry (mr/composite-registry
+                  (m/default-schemas)
+                  (mr/fast-registry forms))
+        compiled (m/schema form {:registry registry})]
+    (assoc (schema->attr-partial attribute nil compiled)
+           :db/ident attribute)))
 
 (defn malli-map->datahike-schema
   "Derive a datahike schema vector from a Malli `:map` schema.

@@ -280,6 +280,22 @@
 ;;; End-to-end: install schema into datahike and transact data
 ;;; ---------------------------------------------------------------------------
 
+(deftest explicit-form-population-is-the-only-reference-registry-test
+  (let [forms {:example/name :string
+               :example/names [:set :example/name]
+               :example/id [:uuid {:seon.db/identity true}]}]
+    (is (= {:db/ident :example/names
+            :db/valueType :db.type/string
+            :db/cardinality :db.cardinality/many}
+           (dhs/malli-form->datahike-attribute
+            forms :example/names (:example/names forms))))
+    (is (= {:db/ident :example/id
+            :db/valueType :db.type/uuid
+            :db/cardinality :db.cardinality/one
+            :db/unique :db.unique/identity}
+           (dhs/malli-form->datahike-attribute
+            forms :example/id (:example/id forms))))))
+
 (deftest e2e-derive-install-transact-test
   (testing "derived schema installs and accepts valid data"
     (schema/register! :seon.db.datahike.schema-test/id
