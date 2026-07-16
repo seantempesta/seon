@@ -49,8 +49,10 @@ order: exact Datahike identity and capability ownership; fair multi-database
 execution; protocol and persistent native sessions; asynchronous `seon.db`;
 isolated Bun children; atomic replica/feed removal; then density, packaging, and
 the measured one-versus-2/4-authority-shard decision. Its current earliest
-unsettled contract is the async `seon.db` consumer cut over the now-settled
-Datahike cache/resource and coordinate-pinned authority protocol.
+unsettled contract is coordinate-pinned authored source loading and compiled
+execution inside the now-supervised per-agent Bun child. Recovery/resume and
+the remaining client lifecycle migrate in parallel over the settled async
+database facade; the session-open switch waits for their one atomic cut.
 
 The database lifecycle work already integrated below remains a prerequisite and
 evidence source, but its older restore/undo scheduling cards are not the active
