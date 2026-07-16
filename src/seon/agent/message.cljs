@@ -23,6 +23,7 @@
     [seon.agent.message.internal :as internal]
     [seon.db :as db]
     [seon.db.id :as db.id]
+    [seon.db.protocol :as protocol]
     [seon.runtime.admission :as admission]
     [seon.schema :as schema]
     [seon.warn :as warn]))
@@ -80,32 +81,66 @@
 
 (schema/register! ::recent-limit [:int {:min 1 :max 200}])
 (schema/register! ::recent-request
-  [:map
-   [:seon.db/db :seon.db/db-val]
+  [:map {:closed true}
    [:seon.agent/id :string]
-   [::recent-limit ::recent-limit]])
-(schema/register! ::recent-response [:vector :map])
+   [::recent-limit ::recent-limit]
+   [::db/coordinate {:optional true} ::db/coordinate]])
+(schema/register! ::read-failure
+  [:map {:closed true}
+   [:seon.db/ok? [:= false]]
+   [:seon.db/error :seon.db/error]])
+(schema/register! ::recent-response [:or [:vector :map] ::read-failure])
 (schema/register! ::recent-all-request
-  [:map
-   [:seon.db/db :seon.db/db-val]
-   [::recent-limit ::recent-limit]])
+  [:map {:closed true}
+   [::recent-limit ::recent-limit]
+   [::db/coordinate {:optional true} ::db/coordinate]])
 
 (def ^:private recent-pull-pattern
   '[* {:seon.agent.message/from [:db/id :seon.user/id :seon.agent/id]
        :seon.agent.message/to   [:db/id :seon.user/id :seon.agent/id]}])
 
-(defn- exact-ref-eids
-  "Newest entity ids carrying ref `value` under indexed ref attr `attr`."
-  [dbv attr value limit]
-  (->> (db/rseek-datoms
-         {:seon.db/db dbv
-          :seon.db/index :avet
-          :seon.db/components [attr value]
-          :seon.db/index-limit limit
-          :seon.db/index-prefix? true})
-       (map :seon.db/e)))
+(defn- query-member
+  [query arguments]
+  {::protocol/operation protocol/query-operation
+   ::protocol/query-form query
+   ::protocol/arguments arguments
+   :datahike.resource/max-results 1
+   :datahike.resource/max-result-weight 65536})
 
-(defn recent
+(defn- index-member
+  [attribute value limit]
+  {::protocol/operation protocol/index-page-operation
+   ::protocol/index :avet
+   ::protocol/prefix [attribute value]
+   ::protocol/direction :reverse
+   ::protocol/limit limit
+   :datahike.resource/max-result-weight 131072})
+
+(defn- member-result
+  [member]
+  (or (::protocol/result member)
+      (:datahike.query/result member)))
+
+(defn- read-failure
+  [message data]
+  {:seon.db/ok? false
+   :seon.db/error {:seon.error/message message
+                   :seon.error/data data}})
+
+(defn- failed-read?
+  [value]
+  (and (map? value)
+       (or (false? (:seon.db/ok? value))
+           (:seon.error/message value))))
+
+(defn- ordered-messages
+  [messages]
+  (->> messages
+       (remove nil?)
+       (sort-by #(.getTime ^js (:seon.agent.message/at %)))
+       vec))
+
+(defn ^:async recent
   "Return one agent's newest messages, oldest first, from bounded ref indexes.
 
    Conversation membership remains derived (`from = agent OR to contains
@@ -114,49 +149,92 @@
    pulls; it never scans or sorts the complete message log. Message entities
    are append-only, so descending entity ids are their creation order."
   {:malli/schema [:=> [:cat ::recent-request] ::recent-response]}
-  [{dbv :seon.db/db agent-id :seon.agent/id limit ::recent-limit}]
-  (let [installed (db/installed-schema dbv)]
-    (if (and (contains? installed :seon.agent.message/from)
-             (contains? installed :seon.agent.message/to))
-    (if-some [agent-eid
-              (some-> (db/index-datoms
-                        {:seon.db/db dbv
-                         :seon.db/index :avet
-                         :seon.db/components [:seon.agent/id agent-id]
-                         :seon.db/index-limit 1})
-                      first
-                      :seon.db/e)]
-      (->> (concat (exact-ref-eids dbv :seon.agent.message/from agent-eid limit)
-                   (exact-ref-eids dbv :seon.agent.message/to agent-eid limit))
-           distinct
-           (sort >)
-           (take limit)
-           (keep #(db/pull {:seon.db/db dbv
-                            :seon.db/pull-pattern recent-pull-pattern
-                            :seon.db/ref %}))
-           (sort-by #(.getTime ^js (:seon.agent.message/at %)))
-           vec)
-      [])
-      [])))
+  [{agent-id :seon.agent/id limit ::recent-limit :as request}]
+  (let [initial
+        (await
+         (db/execute-many
+          (cond->
+           {::db/members
+            [(query-member
+              '[:find ?entity .
+                :in $ ?agent-id
+                :where [?entity :seon.agent/id ?agent-id]]
+              [agent-id])]
+            ::db/max-result-weight 65536}
+            (::db/coordinate request)
+            (assoc ::db/coordinate (::db/coordinate request)))))]
+    (if-not (and (::db/coordinate initial)
+                 (= 1 (count (::db/results initial)))
+                 (true? (::protocol/success? (first (::db/results initial)))))
+      (read-failure "Recent-message agent lookup failed." initial)
+      (if-some [agent-eid (member-result (first (::db/results initial)))]
+        (let [indexed
+              (await
+               (db/execute-many
+                {::db/coordinate (::db/coordinate initial)
+                 ::db/members
+                 [(index-member :seon.agent.message/from agent-eid limit)
+                  (index-member :seon.agent.message/to agent-eid limit)]
+                 ::db/max-result-weight 262144}))]
+          (if-not (and (= (::db/coordinate initial) (::db/coordinate indexed))
+                       (= 2 (count (::db/results indexed)))
+                       (every? #(true? (::protocol/success? %))
+                               (::db/results indexed)))
+            (read-failure "Recent-message index read failed." indexed)
+            (let [entity-ids
+                  (->> (::db/results indexed)
+                       (mapcat ::protocol/datoms)
+                       (map :seon.db/e)
+                       distinct
+                       (sort >)
+                       (take limit)
+                       vec)
+                  messages
+                  (if (seq entity-ids)
+                    (await
+                     (db/pull-many
+                      {::db/coordinate (::db/coordinate initial)
+                       ::db/pull-pattern recent-pull-pattern
+                       ::db/refs entity-ids
+                       ::db/max-results limit
+                       ::db/max-result-weight 524288}))
+                    [])]
+              (if (failed-read? messages)
+                (read-failure "Recent-message pull failed." messages)
+                (ordered-messages messages)))))
+        []))))
 
-(defn recent-all
-  "Return the newest-created messages across the database, bounded and oldest first."
+(defn ^:async recent-all
+  "Return newest messages across the database, bounded and oldest first."
   {:malli/schema [:=> [:cat ::recent-all-request] ::recent-response]}
-  [{dbv :seon.db/db limit ::recent-limit}]
-  (if (contains? (db/installed-schema dbv) :seon.agent.message/at)
-    (->> (db/rseek-datoms
-           {:seon.db/db dbv
-            :seon.db/index :aevt
-            :seon.db/components [:seon.agent.message/at]
-            :seon.db/index-limit limit
-            :seon.db/index-prefix? true})
-         (map :seon.db/e)
-         (keep #(db/pull {:seon.db/db dbv
-                          :seon.db/pull-pattern recent-pull-pattern
-                          :seon.db/ref %}))
-         (sort-by #(.getTime ^js (:seon.agent.message/at %)))
-         vec)
-    []))
+  [{limit ::recent-limit :as request}]
+  (let [indexed
+        (await
+         (db/index-page
+          (cond->
+           {::db/index :aevt
+            ::db/components [:seon.agent.message/at]
+            ::db/direction :reverse
+            ::db/index-limit limit
+            ::db/max-result-weight 131072}
+            (::db/coordinate request)
+            (assoc ::db/coordinate (::db/coordinate request)))))]
+    (if (failed-read? indexed)
+      (read-failure "Recent-message index read failed." indexed)
+      (let [entity-ids (mapv :seon.db/e (::db/datoms indexed))
+            messages
+            (if (seq entity-ids)
+              (await
+               (db/pull-many
+                {::db/coordinate (::db/coordinate indexed)
+                 ::db/pull-pattern recent-pull-pattern
+                 ::db/refs entity-ids
+                 ::db/max-results limit
+                 ::db/max-result-weight 524288}))
+              [])]
+        (if (failed-read? messages)
+          (read-failure "Recent-message pull failed." messages)
+          (ordered-messages messages))))))
 
 ;; ============================================================
 ;; message! — the SINGLE write entry point for messages (the functions
@@ -222,7 +300,15 @@
   (and (not= my-eid (:db/id (:seon.agent.message/from m)))
        (not= :core (:seon.agent.message/origin m))))
 
-(defn inbound-msg-datom?
+(schema/register!
+ ::inbound-datom-request
+ [:map {:closed true}
+  [::db/coordinate ::db/coordinate]
+  [:seon.db/datom ::protocol/datom]
+  [:seon.agent/eid :int]])
+(schema/register! ::inbound-datom-response [:or :boolean ::read-failure])
+
+(defn ^:async inbound-msg-datom?
   "True iff `datom` adds a waking inbound message target for `my-eid`.
 
    The target check belongs in this adapter because every agent receives the
@@ -230,15 +316,24 @@
    [[waking-inbound?]], so loop wakeups and transcript classification share one
    rule. Hop exhaustion deliberately remains outside this predicate: the loop
    must receive exhausted messages in order to refuse them loudly."
-  {:malli/schema
-   [:=> [:catn [:seon.db/db :seon.db/db-val]
-                  [:seon.db/datom :any]
-                  [:seon.agent/eid :int]]
-    :boolean]}
-  [db {eid :seon.db/e target :seon.db/v} my-eid]
-  (and (= target my-eid)
-       (waking-inbound? (db/entity {:seon.db/db db :seon.db/ref eid})
-                        my-eid)))
+  {:malli/schema [:=> [:cat ::inbound-datom-request]
+                  ::inbound-datom-response]}
+  [{point ::db/coordinate
+    {eid :seon.db/e target :seon.db/v} :seon.db/datom
+    my-eid :seon.agent/eid}]
+  (if-not (= target my-eid)
+    false
+    (let [message
+          (await
+           (db/pull
+            {::db/coordinate point
+             ::db/pull-pattern recent-pull-pattern
+             ::db/ref eid
+             ::db/max-results 1
+             ::db/max-result-weight 65536}))]
+      (if (failed-read? message)
+        (read-failure "Inbound-message pull failed." message)
+        (waking-inbound? message my-eid)))))
 
 (defn hop-live?
   "True iff message `m`'s hop count is under `seon.warn/hop-cap`.
@@ -313,10 +408,13 @@
              "pass from explicitly or call inside (seon.db/with-agent …).")}}
 
       :else
-      (let [from-user? (internal/user-entity? from)
-            hops   (if from-user?
-                     0
-                     (inc (internal/outbound-hops agent-id to)))
+      (let [send-data (await (internal/acquire-send-data from to))]
+        (if-not (:seon.db/ok? send-data)
+          send-data
+          (let [from-user? (:seon.agent.message/from-user? send-data)
+                hops (if from-user?
+                       0
+                       (inc (:seon.agent.message/hops send-data)))
             ;; Provenance: explicit :origin wins (a :core nudge);
             ;; otherwise derived — a user-ref send is :human, every
             ;; other send is :agent. Never stored as nil.
@@ -354,46 +452,42 @@
                   {::db.id/key allocation-key
                    ::db.id/identity-attr :my.plan/id}))
               step-allocations)
-            env
-            (await
-              (db.id/allocate!
-                {::db.id/allocations allocations
-                 ::db.id/transaction-builder
-                 (fn [ids]
-                   (let [msg-id (get ids :seon.agent.message/id)
-                         row    {:seon.agent.message/id      msg-id
-                                 :seon.agent.message/from    from
-                                 :seon.agent.message/to      to
-                                 :seon.agent.message/content content
-                                 :seon.agent.message/at      at
-                                 :seon.agent.message/hops    hops
-                                 :seon.agent.message/origin  origin}
-                         steps
-                         (mapv
-                           (fn [{allocation-key
-                                 :seon.agent.message/allocation-key
-                                 agent-ref
-                                 :seon.agent.message/agent-ref}]
-                             {:my.plan/id         (get ids allocation-key)
-                              :my.plan/title      (internal/clip-title content)
-                              :my.plan/status     :open
-                              :my.plan/created-at at
-                              :my.plan/agent      agent-ref
-                              :my.plan/from       from
-                              :my.plan/message
-                              [:seon.agent.message/id msg-id]})
-                           step-allocations)]
-                     {:seon.db/tx-data (into [row] steps)}))
-                 :seon.db/conn db/*conn*}))
-            msg-id (get-in env [::db.id/ids :seon.agent.message/id])]
-        (if (:seon.db/ok? env)
-          ;; concise success — the tx-report stays off the agent
-          ;; surface; the id is the durable handle
-          ;; ([:seon.agent.message/id msg-id]).
-          {:seon.agent.message/ok?  true
-           :seon.agent.message/id   msg-id
-           :seon.agent.message/hops hops}
-          env))))))
+                env
+                (await
+                 (db.id/allocate!
+                  {::db.id/allocations allocations
+                   ::db.id/transaction-builder
+                   (fn [ids]
+                     (let [msg-id (get ids :seon.agent.message/id)
+                           row {:seon.agent.message/id msg-id
+                                :seon.agent.message/from from
+                                :seon.agent.message/to to
+                                :seon.agent.message/content content
+                                :seon.agent.message/at at
+                                :seon.agent.message/hops hops
+                                :seon.agent.message/origin origin}
+                           steps
+                           (mapv
+                            (fn [{allocation-key
+                                  :seon.agent.message/allocation-key
+                                  agent-ref
+                                  :seon.agent.message/agent-ref}]
+                              {:my.plan/id (get ids allocation-key)
+                               :my.plan/title (internal/clip-title content)
+                               :my.plan/status :open
+                               :my.plan/created-at at
+                               :my.plan/agent agent-ref
+                               :my.plan/from from
+                               :my.plan/message
+                               [:seon.agent.message/id msg-id]})
+                            step-allocations)]
+                       {:seon.db/tx-data (into [row] steps)}))}))
+                msg-id (get-in env [::db.id/ids :seon.agent.message/id])]
+            (if (:seon.db/ok? env)
+              {:seon.agent.message/ok? true
+               :seon.agent.message/id msg-id
+               :seon.agent.message/hops hops}
+              env))))))))
 
 ;; ============================================================
 ;; The two agent-facing functions. Thin wrappers over `message!` — `from`

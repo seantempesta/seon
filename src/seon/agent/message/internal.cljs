@@ -14,7 +14,8 @@
    attrs fully-qualified (`:seon.agent.message/from`, never `::from`)."
   (:require
     [clojure.string :as str]
-    [seon.db :as db]))
+    [seon.db :as db]
+    [seon.db.protocol :as protocol]))
 
 (defn clip-title
   "A SHORT single-line preview of message `content` for an address-step
@@ -32,26 +33,12 @@
       :else (str (subs one-line 0 80) "…"))))
 
 (defn user-entity?
-  "Does `ref` resolve to THE user entity?"
-  [ref]
-  (boolean (:seon.user/id (db/entity {:seon.db/ref ref}))))
-
-(defn- latest-user-at
-  "Wall-clock of the most recent message FROM the user (any conversation),
-   or nil when the user has never spoken. The hop-chain BARRIER: a human
-   message resets every agent↔agent pair's ping-pong count."
-  []
-  (ffirst (db/query
-            {:seon.db/query
-             '[:find (max ?at)
-               :where
-               [?m :seon.agent.message/from ?u]
-               [?u :seon.user/id _]
-               [?m :seon.agent.message/at ?at]]})))
+  "True when an ordinary pulled entity is the one human user."
+  [entity]
+  (boolean (:seon.user/id entity)))
 
 (defn outbound-hops
-  "BASE hops for a new outbound from `agent-id` to recipients `to-refs`
-   (the normalized `to` vector — lookup-refs or eids); `message!` adds 1.
+  "Base hops from one bounded authority query result; `message!` adds one.
 
    The ping-pong guard measures the depth of a back-and-forth within the
    SAME {me, peer} PAIR — reset at each human message — NOT the length of
@@ -69,22 +56,91 @@
    guard: a genuine A↔B↔A↔B runaway stays inside one pair, so its count
    still climbs every bounce and trips at `seon.warn/hop-cap`. A human
    message moves the barrier forward and resets every pair."
-  [agent-id to-refs]
-  (let [my-eid    (:db/id (db/entity {:seon.db/ref [:seon.agent/id agent-id]}))
-        peer-eids (into #{} (keep #(:db/id (db/entity {:seon.db/ref %}))) to-refs)]
-    (if (or (nil? my-eid) (empty? peer-eids))
-      0
-      (let [barrier (or (latest-user-at) (js/Date. 0))]
-        (->> (db/query
-               {:seon.db/query
-                '[:find ?h
-                  :in $ ?me [?peer ...] ?barrier
-                  :where
-                  [?m :seon.agent.message/to ?me]
-                  [?m :seon.agent.message/from ?peer]
-                  [?m :seon.agent.message/at ?at]
-                  [(> ?at ?barrier)]
-                  [(get-else $ ?m :seon.agent.message/hops 0) ?h]]
-                :seon.db/args [my-eid (vec peer-eids) barrier]})
-             (map first)
-             (reduce max 0))))))
+  [query-result]
+  (or query-result 0))
+
+(def ^:private sender-pull-pattern
+  '[:db/id :seon.user/id :seon.agent/id])
+
+(defn- query-member
+  [query arguments max-results]
+  {::protocol/operation protocol/query-operation
+   ::protocol/query-form query
+   ::protocol/arguments arguments
+   :datahike.resource/max-results max-results
+   :datahike.resource/max-result-weight 65536})
+
+(defn- pull-many-member
+  [refs]
+  {::protocol/operation protocol/pull-many-operation
+   ::protocol/selector sender-pull-pattern
+   ::protocol/entity-ids refs
+   :datahike.resource/max-results (max 1 (count refs))
+   :datahike.resource/max-result-weight 65536})
+
+(defn- member-result
+  [member]
+  (or (::protocol/result member)
+      (:datahike.query/result member)))
+
+(defn- failure
+  [message data]
+  {:seon.db/ok? false
+   :seon.db/error {:seon.error/message message
+                   :seon.error/data data}})
+
+(defn ^:async acquire-send-data
+  "Acquire sender identity and hop depth from one immutable database value."
+  [from to-refs]
+  (let [refs (vec (distinct (into [from] to-refs)))
+        initial
+        (await
+         (db/execute-many
+          {::db/members
+           [(pull-many-member refs)
+            (query-member
+             '[:find (max ?at) .
+               :where
+               [?message :seon.agent.message/from ?user]
+               [?user :seon.user/id _]
+               [?message :seon.agent.message/at ?at]]
+             [] 1)]
+           ::db/max-result-weight 131072}))]
+    (if-not (and (::db/coordinate initial)
+                 (= 2 (count (::db/results initial)))
+                 (every? #(true? (::protocol/success? %))
+                         (::db/results initial)))
+      (failure "Message database acquisition failed." initial)
+      (let [[entities-member barrier-member] (::db/results initial)
+            entities (member-result entities-member)
+            by-ref (zipmap refs entities)
+            sender (get by-ref from)
+            sender-eid (:db/id sender)
+            peer-eids (into #{} (keep #(some-> (get by-ref %) :db/id)) to-refs)
+            from-user? (user-entity? sender)
+            barrier (or (member-result barrier-member) (js/Date. 0))]
+        (if (or from-user? (nil? sender-eid) (empty? peer-eids))
+          {:seon.db/ok? true
+           :seon.agent.message/from-user? from-user?
+           :seon.agent.message/hops 0}
+          (let [hops
+                (await
+                 (db/query
+                  {::db/coordinate (::db/coordinate initial)
+                   ::db/query
+                   '[:find (max ?h) .
+                     :in $ ?sender [?peer ...] ?barrier
+                     :where
+                     [?message :seon.agent.message/to ?sender]
+                     [?message :seon.agent.message/from ?peer]
+                     [?message :seon.agent.message/at ?at]
+                     [(> ?at ?barrier)]
+                     [(get-else $ ?message :seon.agent.message/hops 0) ?h]]
+                   ::db/args [sender-eid (vec peer-eids) barrier]
+                   ::db/max-results 1
+                   ::db/max-result-weight 65536}))]
+            (if (and (map? hops) (:seon.error/message hops))
+              (failure "Message hop query failed." hops)
+              {:seon.db/ok? true
+               :seon.agent.message/from-user? false
+               :seon.agent.message/hops (outbound-hops hops)})))))))
