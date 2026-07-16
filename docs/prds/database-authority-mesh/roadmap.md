@@ -161,6 +161,14 @@ The final ordinary-data async database surface and its eight concrete closure
 gaps are [[research/remote-seon-db-contract-freeze-2026-07-16]]. The exact Bun
 child lifecycle, zero-process dormant-agent wake seam, and density proof are
 [[research/bun-child-supervision-seam-2026-07-16]].
+The exact modest-hardware supervision policy, Bun terminal/resource signals,
+host memory-pressure seam, platform containment limits, and retained 1/4/16/32
+matrix are
+[[research/bun-child-modest-hardware-supervision-policy-2026-07-16]]. It selects
+one parent-owned invocation deadline, `proc.exited` terminal truth, immediate
+idle retirement, no heartbeat, and no production RSS poller. Final density
+numbers wait for a remote-only execution artifact because the current child
+still packages the monolithic `seon.db` Datahike dependency graph.
 Strict reads inside one containing commit are grounded in
 [[research/strict-temporal-coordinate-seam-2026-07-16]]. The dependency-native
 ordered/missing-value pull contract is
@@ -1201,13 +1209,22 @@ fallback is prohibited.
   resolution, and bounded stale core-index retry. The independent client lane
   now migrates recovery/resume over ordinary coordinate-pinned data while the
   execution lane implements the one authored-source owner grounded in
-  [[research/unit-8-authored-source-loading-seam-2026-07-16]].
+  [[research/unit-8-authored-source-loading-seam-2026-07-16]]. The independent
+  supervision audit rejects heartbeats and polling: the host absolute deadline
+  must cancel and retire the exact child, `proc.exited` closes the slot, and an
+  abnormal post-ready exit runs exact fenced recovery without replay. A
+  source-grounded remote-client dependency audit now owns the later artifact
+  slimming seam without changing the public `seon.db` interface.
 - **Next refill:** after authored render parity, migrate interaction and eval
   through that same child owner and land the 13/16-member prompt acquisition
   with immutable retry inputs. In parallel, finish restore/readiness,
   quiescence, and session close. Only then switch client open atomically and
   delete replica, publisher/replay, Node adapters, SCI render reconstruction,
   synchronous database-value arities, and compatibility reachability.
+  Supervision graduation then proves immediate idle release, parent-loss
+  cleanup, memory-pressure admission, remote-only artifact reachability, and
+  the retained 1/4/16/32 density matrix before selecting the shipped child cap
+  or any warm set.
 
 Datahike's existing `pull-many` already parses once, owns one pull frame
 machine and resource budget, and certifies one eager result. Its dependency
