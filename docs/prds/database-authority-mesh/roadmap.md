@@ -1202,6 +1202,16 @@ fallback is prohibited.
 
 ### 2026-07-16 active implementation card
 
+- **Stable integration boundary:** application and agent code continues to use
+  the existing `seon.db` functions. Only `seon.db` owns the persistent Bun
+  session, protocol requests, cancellation, and ordinary response decoding;
+  Datahike APIs and values remain JVM-internal. Migration is by async
+  computation owner—one prompt acquisition, route refresh, quiescence scan, or
+  startup acquisition—not by mechanically replacing every leaf query call.
+  The synchronous recursive render/context formatter stays pure over ordinary
+  acquired data. No compatibility connection, query-result replay map, public
+  namespace alias, or second database facade may make old local-Datahike call
+  shapes appear synchronous.
 - **Earliest unsettled contract:** every async outer render, interaction, eval,
   and prompt owner acquires one coordinate-pinned invocation and calls the one
   supervised child interface. Recursive render/context functions receive only
