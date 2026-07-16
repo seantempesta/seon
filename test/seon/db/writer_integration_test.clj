@@ -12,7 +12,8 @@
             [seon.embed :as embed]
             [seon.schema :as schema])
   (:import [java.io File]
-           [java.nio.channels Channels SocketChannel]))
+           [java.nio.channels Channels SocketChannel]
+           [java.util.concurrent CountDownLatch TimeUnit]))
 
 (defn- socket-path
   [label]
@@ -1522,17 +1523,19 @@
           ::writer/backend :memory
           ::writer/request-socket-path request-path
           ::writer/publish-socket-path publish-path})
-        ^SocketChannel request-channel (uds/connect! request-path)]
+        ^SocketChannel a (uds/connect! request-path)
+        ^SocketChannel b (uds/connect! request-path)]
     (try
-      (acquire! request-channel database-name "fence/session")
+      (acquire! a database-name "fence/a")
+      (acquire! b database-name "fence/b")
       (let [opened
-            (call! request-channel
+            (call! a
                    (protocol/ensure-database-request
                     {::protocol/request-id "invalid/ensure-after"
                      ::protocol/database-name database-name
                      ::protocol/backend :memory}))
             schema
-            (call! request-channel
+            (call! a
                    (protocol/transaction-request
                     {::protocol/database-name database-name
                      ::protocol/request-id "fence/schema"
@@ -1545,18 +1548,43 @@
                        :db/valueType :db.type/string
                        :db/cardinality :db.cardinality/one}]}))
             frozen (::protocol/coordinate schema)
-            accepted
-            (call! request-channel
+            ready (CountDownLatch. 2)
+            start (CountDownLatch. 1)
+            submit
+            (fn [channel request-id entity-id]
+              (future
+                (.countDown ready)
+                (.await start)
+                (call! channel
+                       (protocol/transaction-request
+                        {::protocol/database-name database-name
+                         ::protocol/request-id request-id
+                         ::protocol/expected-coordinate frozen
+                         ::protocol/transaction-data
+                         [{:writer.fence/id entity-id
+                           :writer.fence/value request-id}]}))))
+            left (submit a "fence/left" "left")
+            right (submit b "fence/right" "right")
+            _ready? (is (.await ready 5 TimeUnit/SECONDS)
+                        "both requests are ready before concurrent release")
+            _started? (.countDown start)
+            responses [(deref left 5000 ::timed-out)
+                       (deref right 5000 ::timed-out)]
+            accepted (first (filter ::protocol/success? responses))
+            rejected (first (remove ::protocol/success? responses))
+            committed (::protocol/coordinate accepted)
+            wrong-commit
+            (call! a
                    (protocol/transaction-request
                     {::protocol/database-name database-name
-                     ::protocol/request-id "fence/accepted"
-                     ::protocol/expected-coordinate frozen
+                     ::protocol/request-id "fence/wrong-commit"
+                     ::protocol/expected-coordinate
+                     (assoc committed ::coordinate/commit-id (random-uuid))
                      ::protocol/transaction-data
                      [{:writer.fence/id "one"
-                       :writer.fence/value "accepted"}]}))
-            committed (::protocol/coordinate accepted)
+                       :writer.fence/value "wrong-commit-must-not-land"}]}))
             wrong-branch
-            (call! request-channel
+            (call! a
                    (protocol/transaction-request
                     {::protocol/database-name database-name
                      ::protocol/request-id "fence/wrong-branch"
@@ -1565,23 +1593,27 @@
                      ::protocol/transaction-data
                      [{:writer.fence/id "one"
                        :writer.fence/value "wrong-branch-must-not-land"}]}))
-            rejected
-            (call! request-channel
-                   (protocol/transaction-request
-                    {::protocol/database-name database-name
-                     ::protocol/request-id "fence/rejected"
-                     ::protocol/expected-coordinate frozen
-                     ::protocol/transaction-data
-                     [{:writer.fence/id "one"
-                       :writer.fence/value "must-not-land"}]}))
             connection
             (::registry/conn
              (registry/lookup-connection
               {::registry/database-name (keyword database-name)}))
-            stored (d/pull (d/db connection) '[*]
-                           [:writer.fence/id "one"])]
+            stored
+            (d/q '[:find ?id ?value
+                   :where
+                   [?entity :writer.fence/id ?id]
+                   [?entity :writer.fence/value ?value]]
+                 (d/db connection))]
         (is (true? (::protocol/success? opened)))
+        (is (not-any? #{::timed-out} responses))
+        (is (= 1 (count (filter ::protocol/success? responses)))
+            "exactly one same-head request commits")
+        (is (= 1 (count (remove ::protocol/success? responses)))
+            "the serialized writer rejects the losing request")
         (is (true? (::protocol/success? accepted)))
+        (is (= protocol/stale-coordinate-error
+               (::protocol/error-kind wrong-commit)))
+        (is (= committed (::protocol/current-coordinate wrong-commit))
+            "equal t cannot cross a different commit identity")
         (is (= protocol/stale-coordinate-error
                (::protocol/error-kind wrong-branch)))
         (is (= committed (::protocol/current-coordinate wrong-branch))
@@ -1593,10 +1625,11 @@
         (is (= committed (::protocol/current-coordinate rejected)))
         (is (= (::coordinate/t committed) (:max-tx (d/db connection)))
             "the rejected request creates no receipt or transaction")
-        (is (= "accepted" (:writer.fence/value stored))
-            "none of the stale request lands"))
+        (is (= 1 (count stored))
+            "only the winning request's domain facts land"))
       (finally
-        (try (.close request-channel) (catch Throwable _))
+        (try (.close a) (catch Throwable _))
+        (try (.close b) (catch Throwable _))
         (writer/stop! server)
         (.delete (File. request-path))
         (.delete (File. publish-path))))))

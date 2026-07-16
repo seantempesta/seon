@@ -1089,6 +1089,9 @@
               transaction
               (cond-> {:tx-data data-with-receipts
                        :tx-meta transaction-meta*}
+                expected-coordinate
+                (assoc :datahike/expected-basis-t
+                       (::coordinate/t expected-coordinate))
                 generated?
                 (assoc ::id/generated-candidates candidates))]
           {::transaction-result (d/transact! connection transaction)
@@ -1097,12 +1100,25 @@
            ::candidates candidates
            ::database-name database-name
            ::coordinate/attachment attachment
+           ::protocol/expected-coordinate expected-coordinate
            ::connection connection
            ::runtime runtime})))))
 
+(defn- serialized-transaction-error
+  [connection expected-coordinate ^Throwable throwable]
+  (if (= :transaction/stale-basis (:error (ex-data throwable)))
+    (ex-info "The database coordinate changed before commit."
+             {::failure-kind protocol/stale-coordinate-error
+              ::protocol/expected-coordinate expected-coordinate
+              ::protocol/current-coordinate
+              (coordinate/resolved (d/db connection))}
+             throwable)
+    throwable))
+
 (defn- finish-transaction!
   [{::keys [runtime connection database-name request-id fingerprint candidates]
-    attachment ::coordinate/attachment}
+    attachment ::coordinate/attachment
+    expected-coordinate ::protocol/expected-coordinate}
    result]
   (if (instance? Throwable result)
     ;; A commit can win before the acknowledgement is lost. The durable
@@ -1110,7 +1126,8 @@
     (if-let [response
              (recover-current connection request-id fingerprint candidates)]
       response
-      (throw result))
+      (throw
+       (serialized-transaction-error connection expected-coordinate result)))
     (let [response
           (response-from-report-data (transaction-report-data result request-id))
           generated-entity-ids (::id/generated-eids result)]
