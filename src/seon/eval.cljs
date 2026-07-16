@@ -2956,30 +2956,21 @@
 (defn ns-require-edges-tx
   "Tx ops making `:seon.ns/require-edges` for `ns-kw` EXACTLY `new-edges`.
 
-   `[]` when the stored edge set already equals `new-edges` (set
-   compare over the normalized maps — no spurious tx ops). On change
-   the old COMPONENT rows are `[:db/retractEntity …]`'d (cascade
-   removes the parent ref datoms too; REPL-verified, no orphans) and
-   the new set is asserted via the `:seon.ns/name` identity upsert
-   (creates the ns row when absent)."
+   Whole-attribute retraction is idempotent and Datahike recursively retracts
+   component values. The exact new set is then asserted through the namespace
+   identity. No database read, component-id discovery, or stale diff is
+   required."
   {:malli/schema
-   [:=> [:catn [::db :any] [::ns-kw :keyword]
+   [:=> [:catn [::ns-kw :keyword]
          [::new-edges :seon.analyzer-info/require-edges]]
         [:vector :any]]}
-  [db ns-kw new-edges]
-  (if (= (persisted-require-edges db ns-kw) new-edges)
-    []
-    (let [old-eids (map first
-                        (db/query '[:find ?e
-                                    :in $ ?ns
-                                    :where
-                                    [?n :seon.ns/name ?ns]
-                                    [?n :seon.ns/require-edges ?e]]
-                                  db ns-kw))]
-      (vec (concat (for [e old-eids] [:db/retractEntity e])
-                   (when (seq new-edges)
-                     [{:seon.ns/name         ns-kw
-                       :seon.ns/require-edges (vec new-edges)}]))))))
+  [ns-kw new-edges]
+  (cond-> [[:db.fn/retractAttribute
+            [:seon.ns/name ns-kw]
+            :seon.ns/require-edges]]
+    (seq new-edges)
+    (conj {:seon.ns/name ns-kw
+           :seon.ns/require-edges (vec (sort-by pr-str new-edges))})))
 
 (defn fn-read-attrs-tx
   "Return tx ops making `:seon.fn/read-attrs` exactly `new-kws`.
@@ -4647,16 +4638,14 @@
               ;; [[persisted-require-targets]] — C36). Skip the transient
               ;; eval-scaffolding nses (`cljs.user` / `seon.dynamic`)
               ;; so we never mint a `:seon.ns` row for them.
-              ;; Diff'd against the live db value ([] when unchanged);
-              ;; rides in record-eval!'s atomic tee tx.
+              ;; Exact whole-attribute replacement rides in record-eval!'s
+              ;; atomic tee transaction and requires no local database value.
               ending-ns (when (::ok? result) @current-ns)
               req-tx    (when (and ending-ns
                                    (symbol? ending-ns)
                                    (not (contains? transient-ns-syms
-                                                   ending-ns))
-                                   db/*conn*)
+                                                   ending-ns)))
                           (ns-require-edges-tx
-                            @db/*conn*
                             (keyword (str ending-ns))
                             (analyzer-info/ns-require-edges
                               compile-state ending-ns)))
@@ -5045,7 +5034,7 @@
                           (vec (concat
                                  (unalias-decl-tx db ns-kw a)
                                  (ns-require-edges-tx
-                                   db ns-kw
+                                   ns-kw
                                    (analyzer-info/ns-require-edges
                                      compile-state ns-arg)))))]
               (await (record-form-result!

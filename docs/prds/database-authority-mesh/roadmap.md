@@ -1578,12 +1578,13 @@ second owner.
   stops as database error data instead of entering transcript fallback. Two
   connection-free regressions pass 2 tests/6 assertions.
 - Eval program projection no longer reads a database value merely to compute
-  optional function-field and declared-read-attribute diffs. Idempotent
-  attribute retraction followed by the exact current values expresses both
-  replacements directly in the one serialized transaction. This deletes two
-  local snapshot dependencies from every accepted function definition and
-  removes stale-diff code without adding a remote read. Focused pure
-  transaction proof passes 2 tests/4 assertions.
+  optional function-field, declared-read-attribute, or namespace require-edge
+  diffs. Idempotent whole-attribute retraction followed by the exact current
+  values expresses all three replacements directly in the one serialized
+  transaction; Datahike's component semantics retract the old edge entities.
+  This deletes three local snapshot dependencies from accepted program changes
+  and removes stale-diff/component-ID code without adding a remote read.
+  Focused pure transaction proof passes 3 tests/6 assertions.
 - Cold authored-program reconstruction now uses one seven-member
   coordinate-pinned authority request for the agent's namespace sources,
   require-edge links, functions, tests, home namespace, schemas, and function

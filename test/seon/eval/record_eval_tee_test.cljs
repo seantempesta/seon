@@ -375,6 +375,21 @@
            [:seon.fn/sym "probe.user/f"] :seon.fn/read-attrs]]
          (seval/fn-read-attrs-tx "probe.user/f" #{}))))
 
+(deftest namespace-require-edges-replace-components-without-a-database-read
+  (let [edges #{{:seon.ns.require/target :my.alpha}
+                {:seon.ns.require/target :my.beta
+                 :seon.ns.require/alias 'beta}}]
+    (is (= [[:db.fn/retractAttribute
+             [:seon.ns/name :my.agent]
+            :seon.ns/require-edges]
+            {:seon.ns/name :my.agent
+             :seon.ns/require-edges (vec (sort-by pr-str edges))}]
+           (seval/ns-require-edges-tx :my.agent edges)))
+    (is (= [[:db.fn/retractAttribute
+             [:seon.ns/name :my.agent]
+             :seon.ns/require-edges]]
+           (seval/ns-require-edges-tx :my.agent #{})))))
+
 (deftest ambiguous-wire-result-never-starts-a-second-allocation
   (async done
     (let [!calls (atom 0)
