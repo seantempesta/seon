@@ -1101,27 +1101,39 @@
   (guarded-load* compile-state {} rc cb))
 
 (defn ^:async load-authored-program!
-  "Load one target and its reachable authored dependencies through cljs.js."
+  "Load selected targets and their reachable dependencies through cljs.js.
+
+   All targets share one source map, schema projection, and compiler state.
+   Distinct target namespaces load sequentially; cljs.js recursively loads each
+   namespace's declared dependencies through the same guarded source map."
   {:malli/schema [:=> [:cat :map] :any]}
   [{:seon.execution/keys [schema-forms function-contracts namespace-rows
-                          function-symbol compile-state]}]
+                          function-symbols compile-state]}]
   (let [compile-state (or compile-state (await (init-bootstrap!)))
+        function-symbols (vec (distinct function-symbols))
         sources (into {}
                       (keep (fn [row]
                               (let [source (namespace-source row)]
                                 (when-not (str/blank? source)
                                   [(:seon.ns/name row) source]))))
                       namespace-rows)
-        target-row (some (fn [row]
-                           (when (some #{function-symbol}
-                                       (:seon.fn/symbols row))
-                             row))
-                         namespace-rows)
-        target-ns (:seon.ns/name target-row)
-        target-source (get sources target-ns)]
-    (when-not target-source
-      (throw (ex-info "The target authored namespace has no source."
-                      {:seon.execution/function-symbol function-symbol
+        namespace-by-symbol
+        (into {}
+              (mapcat (fn [row]
+                        (map (fn [function-symbol]
+                               [function-symbol (:seon.ns/name row)])
+                             (:seon.fn/symbols row))))
+              namespace-rows)
+        missing (->> function-symbols
+                     (remove #(get sources (get namespace-by-symbol %)))
+                     vec)
+        target-namespaces (->> function-symbols
+                               (map namespace-by-symbol)
+                               distinct
+                               vec)]
+    (when (seq missing)
+      (throw (ex-info "Selected authored functions have no namespace source."
+                      {:seon.execution/function-symbols missing
                        :seon.error/kind :core-bug})))
     (schema/activate-projection!
      (schema/build-projection
@@ -1130,20 +1142,31 @@
       (into {} (map (fn [[sym form]]
                       [(symbol sym) (reader/read-string form)]))
             function-contracts)))
-    (when-not (lookup-value function-symbol)
-      (await
-       (js/Promise.
-        (fn [resolve reject]
-          (cljs/eval-str
-           compile-state target-source (symbol (name target-ns))
-           {:eval cljs/js-eval
-            :load (partial guarded-load* compile-state sources)
-            :ns (symbol (name target-ns))
-            :context :statement
-            :def-emits-var true
-            :analyze-deps true}
-           (fn [{:keys [error]}]
-             (if error (reject error) (resolve nil))))))))
+    (loop [remaining target-namespaces]
+      (when-let [target-ns (first remaining)]
+        (let [namespace-targets
+              (filterv #(= target-ns (get namespace-by-symbol %))
+                       function-symbols)]
+          (when-not (every? lookup-value namespace-targets)
+            (await
+             (js/Promise.
+              (fn [resolve reject]
+                (cljs/eval-str
+                 compile-state (get sources target-ns) (symbol (name target-ns))
+                 {:eval cljs/js-eval
+                  :load (partial guarded-load* compile-state sources)
+                  :ns (symbol (name target-ns))
+                  :context :statement
+                  :def-emits-var true
+                  :analyze-deps true}
+                 (fn [{:keys [error]}]
+                   (if error (reject error) (resolve nil))))))))
+          (recur (subvec remaining 1)))))
+    (let [unloaded (remove lookup-value function-symbols)]
+      (when (seq unloaded)
+        (throw (ex-info "Selected authored functions did not load."
+                        {:seon.execution/function-symbols (vec unloaded)
+                         :seon.error/kind :core-bug}))))
     compile-state))
 
 ;; ============================================================

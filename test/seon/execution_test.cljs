@@ -1,10 +1,12 @@
 (ns seon.execution-test
   (:require
+   [cljs.js :as cljs]
    [cljs.test :refer [async deftest is testing]]
    [seon.db :as db]
    [seon.db.protocol :as protocol]
    [seon.eval :as seval]
-   [seon.execution :as execution]))
+   [seon.execution :as execution]
+   [seon.schema :as schema]))
 
 (def digest (apply str (repeat 64 "a")))
 (def coordinate
@@ -160,6 +162,69 @@
     (is (= first-value second-value))
     (is (= (execution/source-digest first-value)
            (execution/source-digest second-value)))))
+
+(deftest authored-loader-loads-each-selected-namespace-once
+  (async done
+    (let [compile-state (atom {})
+          loaded (atom #{})
+          evaluated (atom [])
+          projections (atom 0)
+          original-init seval/init-bootstrap!
+          original-lookup seval/lookup-value
+          original-eval-str cljs/eval-str
+          original-build schema/build-projection
+          original-activate schema/activate-projection!]
+      (set! seval/init-bootstrap!
+            (fn [] (js/Promise.resolve compile-state)))
+      (set! seval/lookup-value #(when (contains? @loaded %) :loaded))
+      (set! schema/build-projection (fn [& _] :projection))
+      (set! schema/activate-projection!
+            (fn [projection]
+              (is (= :projection projection))
+              (swap! projections inc)))
+      (set! cljs/eval-str
+            (fn [_ source target _ callback]
+              (swap! evaluated conj [target source])
+              (case target
+                my.alpha (swap! loaded into
+                                ['my.alpha/first 'my.alpha/second])
+                my.beta (swap! loaded conj 'my.beta/run))
+              (callback {})))
+      (-> (seval/load-authored-program!
+            {:seon.execution/schema-forms []
+             :seon.execution/function-contracts []
+             :seon.execution/namespace-rows
+             [{:seon.ns/name :my.alpha
+               :seon.ns/source "(ns my.alpha)"
+               :seon.ns/require-edges []
+               :seon.fn/symbols ['my.alpha/first 'my.alpha/second]
+               :seon.fn/sources ["(defn first [] 1)"
+                                 "(defn second [] 2)"]}
+              {:seon.ns/name :my.beta
+               :seon.ns/source "(ns my.beta)"
+               :seon.ns/require-edges []
+               :seon.fn/symbols ['my.beta/run]
+               :seon.fn/sources ["(defn run [] 3)"]}]
+             :seon.execution/function-symbols
+             ['my.alpha/first 'my.alpha/second
+              'my.beta/run 'my.alpha/first]})
+          (.then
+            (fn [returned-state]
+              (is (identical? compile-state returned-state))
+              (is (= 1 @projections))
+              (is (= ['my.alpha 'my.beta] (mapv first @evaluated)))
+              (is (= 2 (count @evaluated)))))
+          (.catch
+            (fn [error]
+              (is false (str "multi-target load rejected: " error))))
+          (.finally
+            (fn []
+              (set! seval/init-bootstrap! original-init)
+              (set! seval/lookup-value original-lookup)
+              (set! cljs/eval-str original-eval-str)
+              (set! schema/build-projection original-build)
+              (set! schema/activate-projection! original-activate)
+              (done)))))))
 
 (deftest ordinary-namespace-source-preserves-one-compile-unit
   (let [source (seval/namespace-source

@@ -431,9 +431,9 @@
       (nil? loaded)
       (let [compile-state
             (await (eval/load-authored-program!
-                    (assoc program ::function-symbol
-                           (get-in invocation [::function-identity
-                                               ::function-symbol]))))]
+                    (assoc program ::function-symbols
+                           [(get-in invocation [::function-identity
+                                                ::function-symbol])])))]
         (swap! state assoc ::program program ::compile-state compile-state)
           program)
 
@@ -442,9 +442,9 @@
         (await
          (eval/load-authored-program!
           (assoc program
-                 ::function-symbol
-                 (get-in invocation [::function-identity
-                                     ::function-symbol])
+                 ::function-symbols
+                 [(get-in invocation [::function-identity
+                                      ::function-symbol])]
                  ::compile-state (::compile-state @state))))
         program)
 
