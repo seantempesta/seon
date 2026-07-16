@@ -97,6 +97,16 @@
              (get-in descriptor
                      [::launch/runtime :seon.client/launch-capability]))))))
 
+(deftest process-descriptor-decodes-the-operator-published-value
+  (let [descriptor (ordinary "data/clusters/default"
+                             :seon.dev.artifact.flavor/default "client")
+        encoded (pr-str descriptor)]
+    (is (= descriptor (launch/decode-descriptor encoded)))
+    (is (thrown? js/Error (launch/decode-descriptor "{:not-edn")))
+    (is (thrown? js/Error
+                 (launch/decode-descriptor
+                  (pr-str (assoc descriptor :seon.test/unknown true)))))))
+
 (deftest branch-descriptor-inherits-source-owners-and-isolates-target-data
   (let [source-attachment
         {::coordinate/database-id

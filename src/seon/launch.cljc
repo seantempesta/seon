@@ -1,12 +1,14 @@
 (ns seon.launch
   "Immutable process-launch data shared by the operator and pod."
-  (:require [clojure.string :as str]
+  (:require #?(:cljs [cljs.reader :as reader])
+            [clojure.string :as str]
             [my.blob.schema]
             [seon.client.schema]
             [seon.db.coordinate :as coordinate]
             [seon.db.protocol :as protocol]
             [seon.db.restore-admin.schema]
             [seon.dev.restore.schema]
+            #?(:cljs [seon.platform :as platform])
             [seon.schema :as schema]))
 
 (schema/register! ::path [:string {:min 1}])
@@ -341,3 +343,65 @@
       ::blob-storage-view
       {:my.blob/writable-dir (normalize-path writable-blob-dir)
        :my.blob/read-only-dirs read-only-dirs}})))
+
+#?(:cljs
+   (do
+     (schema/register! ::encoded-descriptor [:string {:min 1}])
+
+     (defn decode-descriptor
+       "Read and validate one operator-published launch descriptor."
+       {:malli/schema [:=> [:cat ::encoded-descriptor] ::descriptor]}
+       [encoded]
+       (let [descriptor
+             (try
+               (reader/read-string encoded)
+               (catch :default error
+                 (throw
+                  (ex-info "SEON_LAUNCH_DESCRIPTOR is invalid."
+                           {::encoded-descriptor encoded
+                            :seon.error/kind :core-bug}
+                           error))))]
+         (validate-descriptor descriptor)))
+
+     (defn- default-process-descriptor
+       []
+       (let [cluster-dir (or (platform/env-val "SEON_CLUSTER_DIR")
+                             "data/clusters/default")
+             cluster (basename cluster-dir)
+             artifact-name (or (platform/env-val "SEON_ARTIFACT_FLAVOR")
+                               "default")
+             artifact-flavor
+             (keyword "seon.dev.artifact.flavor" artifact-name)]
+         (default-descriptor
+          {::cluster-dir cluster-dir
+           ::artifact-flavor artifact-flavor
+           ::client-build-id
+           (if (= :seon.dev.artifact.flavor/acme artifact-flavor)
+             "acme-client"
+             "client")
+           ::request-socket-path
+           (or (platform/env-val "SEON_DB_SOCK")
+               (platform/env-val "SEON_REQ_SOCK")
+               (str "tmp/seon-cluster-" cluster "-db.sock"))
+           ;; Retained only until the atomic publisher/feed deletion updates
+           ;; the launch descriptor schema and operator in the same cut.
+           ::publish-socket-path
+           (or (platform/env-val "SEON_PUB_SOCK")
+               (str "tmp/seon-cluster-" cluster "-pub.sock"))
+           ::writer-repl-port-file
+           (or (platform/env-val "SEON_WRITER_REPL_PORT_FILE")
+               (str "tmp/seon-writer-repl-port-" cluster))
+           ::process-dir
+           (or (platform/env-val "SEON_PROC_DIR") "tmp/seon-operator")
+           ::log-dir
+           (or (platform/env-val "SEON_LOG_DIR") "logs/operator")
+           ::http-port
+           (js/parseInt (or (platform/env-val "SEON_PORT") "7890") 10)
+           ::http-port-file
+           (or (platform/env-val "SEON_PORT_FILE") "tmp/seon-port")})))
+
+     (def process-launch-descriptor
+       "The one validated immutable launch descriptor for this process."
+       (if-let [encoded (platform/env-val "SEON_LAUNCH_DESCRIPTOR")]
+         (decode-descriptor encoded)
+         (default-process-descriptor)))))

@@ -225,9 +225,8 @@
     ;; state. Required here so the build includes it; item 10's
     ;; detect-and-tee in seon.eval/eval-batch! consumes it.
     [seon.analyzer-info :as analyzer-info]
-    ;; Local reads plus the sole-writer transaction and feed attachment.
+    ;; One multiplexed authority session owns reads, writes, and interests.
     [seon.db.protocol :as db.protocol]
-    [seon.db.replica :as replica]
     [seon.db.restore :as db.restore]
     ;; Use Shadow's own reload-source selection for build notifications;
     ;; this must stay identical to the files its Node client actually loaded.
@@ -338,7 +337,7 @@
      [::launch/writer-cluster ::launch/writer-cluster]
      [::launch/writer-repl-port-file ::launch/writer-repl-port-file]]]}
   []
-  (let [descriptor replica/process-launch-descriptor
+  (let [descriptor launch/process-launch-descriptor
         runtime (::launch/runtime descriptor)
         writer-owner (::launch/writer-owner descriptor)]
     (merge
@@ -423,7 +422,7 @@
   [message]
   (when (and (db/attached?)
              (nil? (::launch/restore-startup
-                    replica/process-launch-descriptor)))
+                    launch/process-launch-descriptor)))
     (case (:type message)
       :build-start
       (admission/begin-publication!)
@@ -853,57 +852,55 @@
       conn)))
 
 (schema/register! ::prepare-writes? :boolean)
-(schema/register! ::open-database-connection-request
+(schema/register! ::open-database-session-request
   [:map {:closed true}
    [::prepare-writes? ::prepare-writes?]])
 
-(defn ^:async open-database-connection!
-  "Open the pod's local database replica and attach its transaction feed.
+(defn- session-selection
+  "Project one validated launch descriptor into a database session request."
+  [descriptor]
+  (let [writer-owner (::launch/writer-owner descriptor)
+        database (::launch/database descriptor)
+        coordinate (::db.coordinate/coordinate database)]
+    (cond-> {::db/socket-path (::launch/request-socket-path writer-owner)
+             ::db/database-name (::db.protocol/database-name database)
+             ::db/backend (::db.protocol/backend database)}
+      (::db.protocol/database-path database)
+      (assoc ::db/database-path (::db.protocol/database-path database))
+      coordinate
+      (assoc ::db/attachment (db.coordinate/attachment coordinate)))))
+
+(defn ^:async open-database-session!
+  "Open this process's one persistent database authority session.
 
    Order is load-bearing:
-     1. `ping!` — FAIL LOUD if the database writer is down (no local
-        fallback, no dual backend).
-     2. `ensure-database!` — idempotently open the authoritative database and
-        return its writer-owned identity.
-     3. `d/connect` — reads go local from here; writes dispatch to the
-        remote writer, explicitly routed to this database.
-     4. when `prepare-writes?`, provenance genesis/migration and full runtime
-        schema installation run before autonomous work. A non-autonomous
-        attachment validates inherited state without either write.
-     5. feed attachment — foreign writers' txs fire this conn's native
-        listeners (wake triggers + web UI SSE)."
+     1. `db/open-session!` connects, negotiates capabilities, ensures the
+        selected database, and acquires its immutable attachment.
+     2. when `prepare-writes?`, provenance and runtime schema preparation use
+        that same session before autonomous work begins.
+
+   The result is ordinary namespaced data. Bun retains no local Datahike
+   connection, index, replay cursor, or publisher socket."
   {:malli/schema
-   [:=> [:cat ::open-database-connection-request] :any]}
+   [:=> [:cat ::open-database-session-request] :any]}
   [{::keys [prepare-writes?]}]
-  (let [descriptor replica/process-launch-descriptor
+  (let [descriptor launch/process-launch-descriptor
         writer-owner (::launch/writer-owner descriptor)
-        database-selection (::launch/database descriptor)]
-    (await (replica/ping! {::launch/descriptor descriptor}))
-    (let [opened (await (replica/ensure-database!
-                         {::launch/descriptor descriptor}))
-        resolved-coordinate (::db.coordinate/coordinate opened)
-        descriptor (launch/with-coordinate
-                    {::launch/descriptor descriptor
-                     ::db.coordinate/coordinate resolved-coordinate})
-        conn (await
-              (d/connect
-               (replica/database-config
-                {::launch/descriptor descriptor})))]
-      (id/assert-allocation-writer! conn)
-      (log/info-console! "seon.client/open-database-connection!"
-                         (str "database "
-                              (::db.protocol/database-name database-selection)
-                              ": "
-                              (::db.protocol/database-path database-selection)
-                              " (writer: "
-                              (::launch/request-socket-path writer-owner) ")"))
-      (when prepare-writes?
-        (await (db/ensure-provenance! {:seon.db/conn conn}))
-        (await (install-runtime-schema! conn false)))
-      (await (replica/attach!
-              {::replica/conn conn
-               ::launch/descriptor descriptor}))
-      conn)))
+        database (::launch/database descriptor)
+        opened (await (db/open-session! (session-selection descriptor)))]
+    (log/info-console! "seon.client/open-database-session!"
+                       (str "database "
+                            (::db.protocol/database-name database)
+                            ": "
+                            (::db.protocol/database-path database)
+                            " (writer: "
+                            (::launch/request-socket-path writer-owner) ")"))
+    (when prepare-writes?
+      ;; These existing owners are migrated to the authority session in the
+      ;; same Unit 7 consumer cut; the client does not reproduce their logic.
+      (await (db/ensure-provenance! {}))
+      (await (install-runtime-schema! nil false)))
+    opened))
 
 ;; ---------------------------------------------------------------------------
 ;; Resume — replay-program-graph! (the DB-is-the-running-system spine)
@@ -2589,7 +2586,7 @@
    starts shared HTTP/debug/ticker machinery. Agent birth is not a mode of this
    function; warm callers use [[seon.agent/start!]]. A repeated attached call
    validates the retained capability, reads resumable ids, and idempotently
-   reattaches the replica/web surfaces. It never re-enters replay, publication,
+   reattaches the web surfaces. It never re-enters replay, publication,
    boot writes, or agent hosting."
   {:malli/schema [:=> [:cat ::start-runtime-request] :any]}
   [{::keys [llm-fn launch-capability]}]
@@ -2597,7 +2594,7 @@
         _ (claim-launch-capability! capability)
         autonomous? (true? (::autonomous? capability))
         descriptor (launch/validate-descriptor
-                     replica/process-launch-descriptor)
+                     launch/process-launch-descriptor)
         attached? (db/attached?)
         restore-startup
         (validate-restore-launch! descriptor capability)
@@ -2607,18 +2604,6 @@
             {::launch/descriptor descriptor}))]
     (if attached?
       (let [conn db/*conn*
-            _ (await (replica/attach!
-                       {::replica/conn conn
-                        ::launch/descriptor
-                        replica/process-launch-descriptor}))
-            _ (when (and restore-startup
-                         (not (true? (::replica/connected?
-                                       (replica/status)))))
-                (throw
-                  (ex-info
-                    "Restore refresh requires a caught-up transaction feed."
-                    {:seon.db.replica/status (replica/status)
-                     :seon.error/kind :core-bug})))
             restore-completion-result
             (when restore-startup
               (validate-restore-completion!
@@ -2645,10 +2630,9 @@
          :seon.web/port port
          :seon.web/port-file port-file})
       (let [conn (await
-                   (open-database-connection!
+                   (open-database-session!
                     {::prepare-writes? (and autonomous?
                                             (nil? restore-startup))}))
-            _ (set! db/*conn* conn)
             _ (validate-restore-attachment!
                conn descriptor restore-startup)
             _ (db/assert-preconditions! {:seon.db/conn conn})
@@ -3039,19 +3023,17 @@
                      merge-quiesce-progress
                      {::agent-runtime/unhosted-ids host-ids})
         progress (::quiesce-progress state)]
-    (replica/detach!)
     ;; Resolve the final immutable point while the active schema projection is
     ;; still installed. `admission/detach!` intentionally activates the empty
     ;; projection; a later coordinate validation would then resolve its
     ;; symbolic schema against that empty registry and fail the otherwise
     ;; complete quiesce with `:malli.core/invalid-schema`.
-    (let [coordinate (when capture-coordinate? (db/head-coordinate @conn))]
+    (let [coordinate (when capture-coordinate? (await (db/head-coordinate)))]
       (let [detached (admission/detach!)]
         (when (false? (::admission/detached? detached))
           (throw (ex-info "Runtime projection detach failed." detached))))
       (let [generation (process-generation)]
-        (await (db/release-connection! {::db/conn conn}))
-        (set! db/*conn* nil)
+        (db/close-session!)
         (swap! !state dissoc
                ::launch-capability
                ::cleanup-requires-connection?
@@ -3291,7 +3273,7 @@
   ;; opens the store.
   (log/quiet-library-logs!)
   (claim-blob-storage-view!
-   (::launch/blob-storage-view replica/process-launch-descriptor))
+   (::launch/blob-storage-view launch/process-launch-descriptor))
   (install-process-safety-net!)
   (log/info-console! "seon.client" "-main boot" {:boot-at (:boot-at @!state)})
   ;; Malli instrumentation is installed from the validated PROGRAM projection
@@ -3324,7 +3306,7 @@
       (-> (start-runtime!
            {::llm-fn llm-fn
             ::launch-capability
-            (get-in replica/process-launch-descriptor
+            (get-in launch/process-launch-descriptor
                     [::launch/runtime :seon.client/launch-capability])})
           (.then (fn [{:seon.agent/keys [id ns]
                        :seon.client/keys [resumed-ids created-ids]
