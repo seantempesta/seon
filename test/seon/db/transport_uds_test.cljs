@@ -1,7 +1,6 @@
 (ns seon.db.transport-uds-test
   "Focused Bun session framing, correlation, and terminal-state tests."
   (:require [cljs.test :refer-macros [async deftest is testing]]
-            [seon.db.coordinate :as coordinate]
             [seon.db.protocol :as protocol]
             [seon.db.transport.uds :as uds]))
 
@@ -19,31 +18,35 @@
 (def ^:private take-event @#'uds/take-event)
 (def ^:private !connect-native @#'uds/!connect-native)
 
-(def ^:private point
-  {::coordinate/database-id
-   #uuid "54b5b7e7-51fb-3220-b079-81a81914d86f"
-   ::coordinate/branch :db
-   ::coordinate/commit-id
-   #uuid "6a56b426-c836-5817-9f6b-20584f2e81d5"
-   ::coordinate/t 536870929})
+(def ^:private database
+  {:db-name "transport"
+   :t 536870929
+   :as-of nil
+   :since nil
+   :history false
+   :datahike/commit-id
+   #uuid "6a56b426-c836-5817-9f6b-20584f2e81d5"})
 
 (def ^:private datom
-  {:seon.db/e 17
-   :seon.db/a :person/name
-   :seon.db/v "Ada"
-   :seon.db/tx 536870929
-   :seon.db/added? true})
+  [17 :person/name "Ada" 536870929 true])
 
 (defn- datoms-event [request-id]
   {::protocol/event protocol/datoms-event
    ::protocol/request-id request-id
-   ::protocol/coordinate point
-   ::protocol/datoms [datom]})
+   :db-before (assoc database :t (dec (:t database)))
+   :db-after database
+   :tx-data [datom]
+   :tempids {}
+   :tx-meta {}})
 
 (defn- resynchronization-event [request-id]
   {::protocol/event protocol/resynchronization-event
    ::protocol/request-id request-id
-   ::protocol/coordinate point})
+   :db-after database})
+
+(defn- database-advanced-event [database]
+  {::protocol/event protocol/database-advanced-event
+   :db-after database})
 
 (defn- concatenate [arrays]
   (let [result (js/Uint8Array.
@@ -273,6 +276,21 @@
          (append-event (empty-events)
                        (datoms-event "listen/too-large")
                        (inc maximum-queued-event-bytes))))))
+
+(deftest latest-database-events-coalesce-to-the-newest-value
+  (let [newest (assoc database
+                      :t (inc (:t database))
+                      :datahike/commit-id
+                      #uuid "6a56b426-c836-5817-9f6b-20584f2e81d6")
+        events (-> (empty-events)
+                   (append-event (database-advanced-event database) 100)
+                   (append-event (database-advanced-event newest) 120)
+                   (append-event (database-advanced-event database) 100))
+        taken (take-event events)]
+    (is (= 1 (count (::uds/events events))))
+    (is (= 120 (::uds/queued-event-bytes events)))
+    (is (= (database-advanced-event newest) (::uds/event taken)))
+    (is (empty? (::uds/events (::uds/events taken))))))
 
 (deftest event-overflow-terminates-once-and-discards-old-generation-callbacks
   (async done

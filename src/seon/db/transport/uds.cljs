@@ -167,17 +167,33 @@
 (defn- resynchronization [event]
   {::protocol/event protocol/resynchronization-event
    ::protocol/request-id (::protocol/request-id event)
-   ::protocol/coordinate (::protocol/coordinate event)})
+   :db-after (:db-after event)})
+
+(defn- event-key [event]
+  (if (= protocol/database-advanced-event (::protocol/event event))
+    [:seon.db (:db-name (:db-after event))]
+    (::protocol/request-id event)))
+
+(defn- newer-database-event [left right]
+  (if (> (:t (:db-after right)) (:t (:db-after left))) right left))
 
 (defn- append-event
   "Retain one event per interest; repetition becomes explicit resync."
   [events event frame-bytes]
-  (let [request-id (::protocol/request-id event)
-        prior (get-in events [::events request-id])
-        next-event (if prior (resynchronization event) event)
+  (let [key (event-key event)
+        prior (get-in events [::events key])
+        next-event (cond
+                     (nil? prior) event
+                     (= protocol/database-advanced-event
+                        (::protocol/event event))
+                     (newer-database-event (::event prior) event)
+                     :else (resynchronization event))
+        next-frame-bytes (if (and prior (identical? next-event (::event prior)))
+                           (::frame-bytes prior)
+                           frame-bytes)
         queued-event-bytes (+ (- (::queued-event-bytes events)
                                  (or (::frame-bytes prior) 0))
-                              frame-bytes)
+                              next-frame-bytes)
         pending-event-count (+ (count (::events events)) (if prior 0 1))]
     (when (or (> pending-event-count maximum-pending-events)
               (> queued-event-bytes maximum-queued-event-bytes))
@@ -186,18 +202,18 @@
                 :seon.db.transport.uds.failure/event-overflow
                 {::frame-bytes queued-event-bytes})))
     (cond-> (-> events
-                (assoc-in [::events request-id]
-                          {::event next-event ::frame-bytes frame-bytes})
+                (assoc-in [::events key]
+                          {::event next-event ::frame-bytes next-frame-bytes})
                 (assoc ::queued-event-bytes queued-event-bytes))
-      (nil? prior) (update ::request-ids conj request-id))))
+      (nil? prior) (update ::request-ids conj key))))
 
 (defn- take-event [events]
-  (when-let [request-id (first (::request-ids events))]
-    (let [{::keys [event frame-bytes]} (get-in events [::events request-id])]
+  (when-let [key (first (::request-ids events))]
+    (let [{::keys [event frame-bytes]} (get-in events [::events key])]
       {::event event
        ::events (-> events
                     (update ::request-ids subvec 1)
-                    (update ::events dissoc request-id)
+                    (update ::events dissoc key)
                     (update ::queued-event-bytes - frame-bytes))})))
 
 (defn- append-output [output ^js frame]
@@ -409,24 +425,27 @@
                            {::protocol/request-id request-id}))
                          (enqueue-cancel! request-id))))))
                (deliver-message! [message frame-bytes]
-                 (let [request-id (::protocol/request-id message)]
-                   (when-not (string? request-id)
-                     (throw
-                      (failure "Database message has no request id."
-                               :seon.db.transport.uds.failure/protocol)))
-                   (if (::protocol/event message)
+                 (let [request-id (::protocol/request-id message)
+                       event (::protocol/event message)]
+                   (if event
                      (if (and (contains? #{protocol/datoms-event
-                                          protocol/resynchronization-event}
-                                        (::protocol/event message))
+                                          protocol/resynchronization-event
+                                          protocol/database-advanced-event}
+                                        event)
                               (protocol/valid-response? message))
                        (enqueue-event! message frame-bytes)
                        (throw
                         (failure "Database session received an invalid event."
                                  :seon.db.transport.uds.failure/protocol)))
-                     (when-let [{::keys [resolve]} (get @!pending request-id)]
-                       (swap! !pending dissoc request-id)
-                       (when resolve
-                         (resolve message))))))
+                     (do
+                       (when-not (string? request-id)
+                         (throw
+                          (failure "Database message has no request id."
+                                   :seon.db.transport.uds.failure/protocol)))
+                       (when-let [{::keys [resolve]} (get @!pending request-id)]
+                         (swap! !pending dissoc request-id)
+                         (when resolve
+                           (resolve message)))))))
                (receive! [chunk]
                  (when-not @!terminal?
                    (try

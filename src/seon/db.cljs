@@ -48,6 +48,7 @@
 (schema/register! ::database-path :seon.db.protocol/database-path)
 (schema/register! ::capabilities :seon.db.protocol/capabilities)
 (schema/register! ::session :seon.db.transport.uds/session)
+(schema/register! ::databases [:map-of ::database-name :seon.db/db])
 (schema/register! ::thunk 'fn?)
 (schema/register! ::tx-context :map)
 
@@ -169,12 +170,39 @@
 (defn- db-value? [value]
   (protocol/database-value? value))
 
+(defn- newer-database
+  "Keep the newest descriptor and reject an impossible split history."
+  [current candidate]
+  (cond
+    (nil? current) candidate
+    (> (:t candidate) (:t current)) candidate
+    (< (:t candidate) (:t current)) current
+    (= (:datahike/commit-id candidate) (:datahike/commit-id current)) current
+    :else
+    (throw
+     (ex-info "One database transaction has conflicting commit identities."
+              {:seon.error/kind :core-bug
+               :seon.db/current-db current
+               :seon.db/candidate-db candidate}))))
+
+(defn- cache-database [state database]
+  (if (and state (db-value? database))
+    (update-in state [::databases (:db-name database)]
+               newer-database database)
+    state))
+
 (defn- response-error [response]
+  (when-let [database (:seon.db/current-db response)]
+    (swap! !session cache-database database))
   {:seon.error/message (::protocol/error response)
    :seon.error/kind (or (:seon.error/kind response) :core-bug)
    :seon.error/data
    (cond-> {::protocol/error-kind (::protocol/error-kind response)
             ::protocol/request-id (::protocol/request-id response)}
+     (:seon.db/expected-db response)
+     (assoc :seon.db/expected-db (:seon.db/expected-db response))
+     (:seon.db/current-db response)
+     (assoc :seon.db/current-db (:seon.db/current-db response))
      (::protocol/expected-coordinate response)
      (assoc ::protocol/expected-coordinate
             (::protocol/expected-coordinate response))
@@ -212,11 +240,7 @@
 
 (defn- session-event! [event]
   (when-let [database (:db-after event)]
-    (swap! !session
-           (fn [state]
-             (if (= (::database-name state) (:db-name database))
-               (assoc state ::opened-db database)
-               state))))
+    (swap! !session cache-database database))
   (when-let [handler (get-in @!session
                              [::interest-handlers
                               (::protocol/request-id event) ::handler])]
@@ -242,7 +266,7 @@
 
 (defn- session-result [state]
   {::database-name (::database-name state)
-   ::db (::opened-db state)
+   ::db (get-in state [::databases (::database-name state)])
    ::capabilities (::capabilities state)})
 
 (defn- ^:async connect-selection! [selection owner]
@@ -261,6 +285,11 @@
                         (fn [current]
                           (if (identical? owner (::owner current)) nil current))))}))
             _ (reset! opened session)
+            _ (swap! !session
+                     (fn [current]
+                       (if (identical? owner (::owner current))
+                         (assoc current ::session session ::databases {})
+                         current)))
             capabilities-response
             (await
              (request-on-session!
@@ -293,13 +322,16 @@
               15000))
             _ (when-not (::protocol/success? acquire-response)
                 (throw (ex-info "Acquiring the database failed." acquire-response)))
-            state {::owner owner
-                   ::selection selection
-                   ::session session
-                   ::database-name database-name
-                   ::capabilities (::protocol/capabilities capabilities-response)
-                   ::opened-db (::db acquire-response)
-                   ::interest-handlers {}}]
+            state (-> @!session
+                      (assoc ::owner owner
+                             ::selection selection
+                             ::session session
+                             ::database-name database-name
+                             ::capabilities
+                             (::protocol/capabilities capabilities-response)
+                             ::interest-handlers {})
+                      (dissoc ::opening)
+                      (cache-database (::db acquire-response)))]
         (swap! !session
                (fn [current]
                  (if (identical? owner (::owner current)) state current)))
@@ -398,11 +430,11 @@
   (internal/run-with-tx-context tx-context thunk))
 
 (defn- ^:async resolve-db! [database-name acquire?]
-  (if-let [{current-name ::database-name opened-db ::opened-db}
+  (if-let [{current-name ::database-name databases ::databases}
            (active-session)]
     (let [name (or database-name current-name)]
-      (if (and (not acquire?) (= name current-name))
-        opened-db
+      (if-let [database (get databases name)]
+        database
         (let [request-id (str (random-uuid))
               request (if acquire?
                         (protocol/acquire-database-request
@@ -415,7 +447,10 @@
           (cond
             (error-value? response) response
             (not (::protocol/success? response)) (response-error response)
-            :else (::db response)))))
+            :else
+            (let [database (::db response)]
+              (swap! !session cache-database database)
+              database)))))
     (session-error "This process has no open database session." {})))
 
 (defn- ^:async read-db! [request]
@@ -499,8 +534,7 @@
           (let [report (select-keys response
                                     [:db-before :db-after :tx-data
                                      :tempids :tx-meta])]
-            (when (= (:db-name database) (:db-name (:db-after report)))
-              (swap! !session assoc ::opened-db (:db-after report)))
+            (swap! !session cache-database (:db-after report))
             (cond-> report
               (seq (::protocol/generated-entity-ids response))
               (assoc :seon.db.id/eids (::protocol/generated-entity-ids response))
@@ -896,7 +930,11 @@
     (cond
       (error-value? response) response
       (not (::protocol/success? response)) (response-error response)
-      :else (::protocol/released? response))))
+      :else
+      (let [released? (::protocol/released? response)]
+        (when released?
+          (swap! !session update ::databases dissoc (:db-name database)))
+        released?))))
 
 ;;; Pure schema/transaction transforms
 

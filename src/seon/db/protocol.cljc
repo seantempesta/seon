@@ -49,6 +49,7 @@
 
 (def datoms-event :seon.db.protocol.event/datoms)
 (def resynchronization-event :seon.db.protocol.event/resynchronization)
+(def database-advanced-event :seon.db.protocol.event/database-advanced)
 
 (def protocol-error :seon.db.protocol.error/protocol)
 (def database-error :seon.db.protocol.error/database)
@@ -95,7 +96,7 @@
 (def unknown-status :seon.db.protocol.status/unknown)
 (def feed-behind-status :seon.db.protocol.status/feed-behind)
 
-(def current-version 9)
+(def current-version 10)
 
 ;; One wire contract must reject the same legal frame on every host. Paging and
 ;; operation-level result bounds remain the preferred way to stay well below it.
@@ -286,7 +287,9 @@
 (schema/register! ::generated-entity-ids
                   [:map-of :qualified-keyword :int])
 (schema/register! ::recovered? :boolean)
-(schema/register! ::event [:enum datoms-event resynchronization-event])
+(schema/register!
+ ::event
+ [:enum datoms-event resynchronization-event database-advanced-event])
 (schema/register! ::query [:string {:min 1}])
 (schema/register! ::limit [:int {:min 1}])
 (schema/register! ::index [:enum :eavt :aevt :avet])
@@ -771,6 +774,11 @@
   [::request-id ::request-id]
   [:db-after :db-after]])
 (schema/register!
+ ::database-advanced-event-map
+ [:map {:closed true}
+  [::event [:= database-advanced-event]]
+  [:db-after :db-after]])
+(schema/register!
  ::ensure-database-response
  [:map {:closed true}
   [::success? [:= true]]
@@ -870,6 +878,7 @@
   ::unlisten-response
   ::datoms-event-map
   ::resynchronization-event-map
+  ::database-advanced-event-map
   ::ensure-database-response
   ::acquire-database-response
   ::observe-database-lifecycle-response

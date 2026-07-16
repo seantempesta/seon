@@ -33,7 +33,7 @@
      (transit/reader (ByteArrayInputStream. (.toByteArray output)) :json))))
 
 (deftest database-values-are-complete-closed-and-temporally-unambiguous
-  (is (= 9 protocol/current-version))
+  (is (= 10 protocol/current-version))
   (is (protocol/database-value? db))
   (is (protocol/database-value? (assoc db :as-of 536870928)))
   (is (protocol/database-value? (assoc db :since #inst "2026-07-16")))
@@ -138,13 +138,16 @@
         {::protocol/event protocol/resynchronization-event
          ::protocol/request-id "listen/native"
          :db-after db}
+        database-advanced
+        {::protocol/event protocol/database-advanced-event
+         :db-after db}
         listen (protocol/listen-request
                 {::protocol/request-id "listen/native"
                  :seon.db/db db
                  ::protocol/datom-patterns [{:seon.db/a :person/name}]})]
     (is (every? protocol/valid-request? [request listen]))
     (is (every? protocol/valid-response?
-                [response event resynchronization]))
+                [response event resynchronization database-advanced]))
     (doseq [legacy [(assoc request ::protocol/expected-coordinate {})
                     (assoc response ::protocol/previous-coordinate {})
                     (assoc response ::protocol/datoms-added 1)

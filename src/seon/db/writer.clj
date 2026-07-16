@@ -2081,6 +2081,34 @@
           (close-pressured-connection! transport-connection status request-id))
         status))))
 
+(defn- send-database-event!
+  [transport-connection database-name attachment event]
+  (locking (::connection-lock transport-connection)
+    (when (and (not @(::closed? transport-connection))
+               (not (.get ^java.util.concurrent.atomic.AtomicBoolean
+                          (::closing? transport-connection)))
+               (contains? @(::acquisitions transport-connection)
+                          [database-name attachment]))
+      (let [result ((::send! transport-connection) event)
+            status (::uds/send-status result)]
+        (when-not (= uds/send-accepted status)
+          (close-pressured-connection! transport-connection status nil))
+        status))))
+
+(defn- deliver-database-advanced!
+  [origin attachment database]
+  (let [database-name (:db-name database)
+        connections
+        (::registry/transport-connections
+         (registry/acquired-transport-connections
+          {::registry/database-name (keyword database-name)
+           ::registry/attachment attachment}))
+        event {::protocol/event protocol/database-advanced-event
+               :db-after database}]
+    (doseq [transport-connection connections
+            :when (not (identical? origin transport-connection))]
+      (send-database-event! transport-connection database-name attachment event))))
+
 (defn- candidate-interests
   [runtime scope datoms]
   (locking (::interest-lock runtime)
@@ -2537,13 +2565,16 @@
       value)))
 
 (defn- reserve-single-job!
-  [runtime request-id owner scope scopes job-id]
+  [runtime request-id owner scope scopes job-id entry-data]
   (let [active (::active-requests runtime)]
     (locking active
       (when (identical? owner (get-in @active [request-id ::owner]))
         (let [request-bytes (get-in @active [request-id ::request-bytes] 0)]
-        (swap! active update request-id assoc
-               ::scope scope ::scopes (or scopes #{scope}) ::jobs #{job-id})
+        (swap! active update request-id
+               #(merge % entry-data
+                       {::scope scope
+                        ::scopes (or scopes #{scope})
+                        ::jobs #{job-id}}))
           request-bytes)))))
 
 (declare complete-executor! drive-execute-many!)
@@ -2983,9 +3014,18 @@
         (if (::execute-many? entry)
           (complete-execute-many! runtime request-id (::owner entry) job-id outcome)
           (when-not (::query-callback? entry)
-            (deliver-active-request!
-             runtime request-id (::owner entry)
-             (single-outcome-response (::request entry) outcome))))))
+            (let [request (::request entry)
+                  response (single-outcome-response request outcome)]
+              (deliver-active-request! runtime request-id (::owner entry) response)
+              (when (and (= protocol/transact-operation
+                            (::protocol/operation request))
+                         (::protocol/success? response)
+                         (not (::protocol/recovered? response))
+                         (:db-after response))
+                (deliver-database-advanced!
+                 (::transport-connection entry)
+                 (::coordinate/attachment entry)
+                 (:db-after response))))))))
     (when (map? job-id)
       (requeue-scope! runtime job-id))))
 
@@ -3099,7 +3139,9 @@
   (when-let [request-bytes
              (reserve-single-job! runtime request-id owner scope
                                   (::executor/scopes submission)
-                                  (::executor/job-id submission))]
+                                  (::executor/job-id submission)
+                                  (select-keys (::executor/request submission)
+                                               [::coordinate/attachment]))]
     (try
       (executor/try-submit!
        (assoc submission ::executor/request-bytes request-bytes))

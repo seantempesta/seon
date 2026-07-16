@@ -178,6 +178,41 @@
                   (is false (str "database-value contract rejected: " error))
                   (done))))))
 
+(deftest latest-database-value-is-a-monotonic-session-cache
+  (async done
+    (let [newest (assoc database
+                        :t (inc (:t database))
+                        :datahike/commit-id
+                        #uuid "10000000-0000-0000-0000-000000000003")]
+      (-> (with-recording-authority
+            {}
+            (fn [{::keys [requests connection-options]}]
+              (-> (open!)
+                  (.then
+                   (fn [_]
+                     (reset! requests [])
+                     ((::uds/on-event! @connection-options)
+                      {::protocol/event protocol/database-advanced-event
+                       :db-after newest})
+                     (db/db)))
+                  (.then
+                   (fn [current]
+                     (is (= newest current))
+                     (is (empty? @requests)
+                         "reading the latest database never crosses the socket")
+                     ((::uds/on-event! @connection-options)
+                      {::protocol/event protocol/database-advanced-event
+                       :db-after database})
+                     (db/db)))
+                  (.then
+                   (fn [current]
+                     (is (= newest current)
+                         "an older delivery cannot move the session backwards"))))))
+          (.then (fn [_] (done)))
+          (.catch (fn [error]
+                    (is false (str "latest database cache rejected: " error))
+                    (done)))))))
+
 (deftest positional-and-namespaced-map-arities-form-the-same-requests
   (async done
     (let [query-form '[:find ?e :in $ ?minimum

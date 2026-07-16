@@ -1323,10 +1323,12 @@ for a one-key tagged-map approximation. This is not a whole-request benchmark;
 the architecture win remains shared indexes and computation rather than tens
 of descriptor bytes.
 
-Current ordered boundary: the ordinary database-value protocol, writer, and
-public facade contracts are green; migrate consumers in dependency order and
-delete their coordinate/compact-envelope assumptions rather than preserving a
-compatibility path. Commits `74953530`, `ae43154c`, and `022c09ef` settle the
+Current ordered boundary: the ordinary database-value protocol, writer, public
+facade, and always-cached latest descriptor contracts are green. Migrate the
+first cold-bootstrap `seon.eval` database-value owner and then the remaining
+consumers in dependency order; delete their connection, coordinate, and compact
+envelope assumptions rather than preserving a compatibility path. Commits
+`74953530`, `ae43154c`, and `022c09ef` settle the
 always-current database-value architecture, explicit secondary-database
 lifetime, and selective upstream compatibility proof. Commit `97f9d6bb` adds
 the six exact-var-selectable CLJS facade contracts, and `dd10db08` adds the
@@ -1337,7 +1339,33 @@ transaction-report shapes. Its session retains the latest database map from
 initial acquisition, accepted transactions, and committed transaction events,
 so omitted-database operations add no preliminary head-resolution hop while
 explicit database maps remain immutable snapshot fences. Focused facade proof
-passes 6 tests/41 assertions and the real writer/UDS proof passes 14/94.
+passes 7 tests/44 assertions and the real writer/UDS proof passes 14/94.
+
+Protocol version 10 makes that latest value explicit without adding another
+request, subscription, or database representation. After one successful
+non-recovered commit, the writer returns the native transaction report to the
+origin and sends a request-id-free `database-advanced` event containing only
+the same small `:db-after` map to sibling physical sessions that acquired the
+exact database attachment. Each process keeps one monotonic descriptor per
+acquired database; a lower `:t` is ignored, equal `:t` with another commit ID
+is a protocol fault, release evicts that database, and session close clears all
+of them. The open/acquire race merges rather than overwrites a newer event.
+The Bun socket queue coalesces only these events by database and retains the
+highest `:t`; selective listener events keep their existing request identity
+and resynchronization semantics. Focused proof passes 15 tests/57 assertions
+for the CLJS native session queue and 44/279 across JVM protocol, registry, and
+real UDS execution.
+
+The first dependent runtime cut now captures `(seon.db/db)` once for each loop
+recurrence and supplies that identical descriptor to every `execute-many`
+member. Message wake no longer performs a state read plus one request per
+candidate datom: the exact transaction `:db-after` and native transaction
+datoms select candidates, then one ordered `pull-many` acquires the agent and
+all candidate messages. The cold exact-var test remains behind the known
+atomic consumer cut because loading `seon.eval` still reaches its obsolete
+`:seon.db/db-val` schema; the canonical client compiles and that load failure
+now identifies the next dependency-ready consumer rather than motivating a
+compatibility schema.
 
 The stopped plan-consumer draft remains an explicit uncommitted handoff because
 its pure row transformations are reusable but its coordinate and

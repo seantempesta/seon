@@ -196,9 +196,19 @@
   {:malli/schema [:=> [:catn [::call-input ::call-input]] ::message]}
   [{::keys [channel message]}]
   (let [input (Channels/newInputStream ^SocketChannel channel)
-        output (Channels/newOutputStream ^SocketChannel channel)]
+        output (Channels/newOutputStream ^SocketChannel channel)
+        request-id (::protocol/request-id message)]
     (write-frame! output message)
-    (read-frame input)))
+    (loop []
+      (let [response (read-frame input)]
+        (if (::protocol/event response)
+          (recur)
+          (if (= request-id (::protocol/request-id response))
+            response
+            (throw
+             (ex-info "Database response does not match the request."
+                      {::protocol/request-id request-id
+                       ::protocol/response response}))))))))
 
 (defn- codec-workers
   "Create the bounded off-selector codec and admission executor."

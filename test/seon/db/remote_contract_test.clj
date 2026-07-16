@@ -896,8 +896,21 @@
                                  (str database-a "/primary")]
                         :remote.contract/name "event-a"]]
                       nil))
-                    event-a (deref (future (read-next listener-a))
-                                   3000 ::timed-out)]
+                    events-a [(deref (future (read-next listener-a))
+                                           3000 ::timed-out)
+                              (deref (future (read-next listener-a))
+                                     3000 ::timed-out)]
+                    advanced-a
+                    (some #(when (= protocol/database-advanced-event
+                                    (::protocol/event %)) %)
+                          events-a)
+                    event-a
+                    (some #(when (= protocol/datoms-event
+                                    (::protocol/event %)) %)
+                          events-a)]
+                (is (= (:db-after report-a) (:db-after advanced-a)))
+                (is (nil? (::protocol/request-id advanced-a))
+                    "the latest database value is not another request")
                 (is (= (:db-after report-a) (:db-after event-a)))
                 (is (= "listen/a" (::protocol/request-id event-a)))
                 (is (= ::still-waiting
@@ -927,8 +940,13 @@
                                (str database-a "/primary")]
                       :remote.contract/name "after-unlisten"]]
                     nil))
-                  (is (= ::still-waiting
-                         (deref after 100 ::still-waiting)))))))
+                  (let [advanced-after (deref after 3000 ::timed-out)
+                        no-listener (future (read-next listener-a))]
+                    (is (= protocol/database-advanced-event
+                           (::protocol/event advanced-after)))
+                    (is (= ::still-waiting
+                           (deref no-listener 100 ::still-waiting))
+                        "unlisten removes only the selective callback"))))))
           (finally
             (try (.close listener-a) (catch Throwable _))
             (try (.close listener-b) (catch Throwable _))

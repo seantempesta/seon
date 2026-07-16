@@ -59,6 +59,15 @@
 (schema/register! ::initialization-error :string)
 (schema/register! ::transport-connection 'some?)
 (schema/register! ::transport-connections [:set ::transport-connection])
+(schema/register!
+ ::acquired-transport-connections-request
+ [:map {:closed true}
+  [::database-name ::database-name]
+  [::attachment ::attachment]])
+(schema/register!
+ ::acquired-transport-connections-response
+ [:map {:closed true}
+  [::transport-connections ::transport-connections]])
 (schema/register! ::ensured? :boolean)
 (schema/register! ::acquired? :boolean)
 (schema/register! ::release-completion 'some?)
@@ -2020,6 +2029,22 @@
                       database-name)}))
     {::error-kind :seon.db.registry.error/not-found
      ::error (str "unknown database-name: " database-name)}))
+
+(defn acquired-transport-connections
+  "Snapshot the physical sessions acquiring one exact database attachment."
+  {:malli/schema
+   [:=> [:cat ::acquired-transport-connections-request]
+    ::acquired-transport-connections-response]}
+  [{::keys [database-name attachment]}]
+  (locking !registry
+    (let [entry (get @!registry database-name)]
+      {::transport-connections
+       (if (and entry
+                (= attachment (::attachment entry))
+                (not (cleanup-required? entry))
+                (nil? (::release-completion entry)))
+         (::transport-connections entry #{})
+         #{})})))
 
 ;;; --- Test seam -------------------------------------------------------------
 

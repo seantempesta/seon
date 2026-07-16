@@ -169,6 +169,18 @@
         (is (= snapshot-before-wrong snapshot-after-wrong)
             "wrong attachments change neither exact transport membership nor the ensured reference")
         (is (::registry/acquired? second-acquire))
+        (is (= #{connection-a connection-b}
+               (::registry/transport-connections
+                (registry/acquired-transport-connections
+                 {::registry/database-name database-name
+                  ::registry/attachment attachment})))
+            "one exact attachment exposes its current physical sessions")
+        (is (empty?
+             (::registry/transport-connections
+              (registry/acquired-transport-connections
+               {::registry/database-name database-name
+                ::registry/attachment wrong-attachment})))
+            "a replaced attachment can never receive a later database value")
         (is (= 1 @connect-calls)
             "wrong attachments never connect; only the correct sibling reconnects")
         (is (identical? conn
@@ -183,6 +195,11 @@
         (is (= 1 @release-calls))
         (is (empty? @drains)
             "a sibling release never fences the shared database")
+        (is (= #{connection-b}
+               (::registry/transport-connections
+                (registry/acquired-transport-connections
+                 {::registry/database-name database-name
+                  ::registry/attachment attachment}))))
         (is (= (d/db conn)
                (d/db (::registry/conn
                       (registry/resolve-connection
