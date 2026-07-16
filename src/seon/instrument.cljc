@@ -104,19 +104,10 @@
       the current eval context — explicit caller args always win. Adding a
       dependency is ONE entry here + fns declaring the key.
 
-      The eval-context SOURCE is the ALS/`*conn*` the loop already establishes
-      (`seon.agent.turn/run-turn!` wraps eval in `db/with-agent id`), so the
-      fn body never reads an invisible dynamic var — the boundary does it once,
-      visibly, and the fn's spec is the honest statement of what it needs. A
-      provider yielding nil leaves the key ABSENT (never store nil — optional =
-      absent). `eval-ctx` is reserved for future per-call context; today the
-      providers read ALS/`*conn*` directly and it is passed `nil`."
-     {:seon.db/db     (fn [_] (some-> db/*conn* deref))
-      :seon.agent/id  (fn [_] (db/current-agent-id))
-      ;; \"now\" — the basis-t (tx-id int) of the current db value, the turn's
-      ;; reproducible time coordinate (replay = pass a past t explicitly;
-      ;; explicit wins). Schema registered in `seon.render`.
-      :seon.render/at (fn [_] (some-> db/*conn* deref db/basis-t))}))
+      The agent id comes from the child fiber's ALS scope. Database values and
+      time coordinates are deliberately not injectable: the authority owner
+      acquires ordinary data at an explicit coordinate and passes it in."
+     {:seon.agent/id (fn [_] (db/current-agent-id))}))
 
 #?(:cljs
    (defn- inject-into
@@ -941,65 +932,6 @@
 #?(:cljs
    (defn- coverage-gaps-for-rows [registry rows]
      (into [] (keep #(coverage-gap registry %)) rows)))
-
-#?(:cljs
-   (defn instrument-namespaces-from-db!
-     "Restore wrappers lost by one Shadow namespace reload.
-
-      `::namespace-syms` is the exact resource set from Shadow's build
-      notification. The database query is restricted to those namespaces;
-      [[coverage-gap]] then reduces their persisted contracts to the exact
-      live function vars whose wrappers were replaced. A build that changed
-      no function definitions performs no Malli mutation, and unrelated
-      program rows are never read."
-     {:malli/schema
-      [:=>
-       [:cat
-        [:map
-         [::db :any]
-         [::namespace-syms [:set :symbol]]]]
-       :map]}
-     [{::keys [db namespace-syms]}]
-     (if-not (enabled?)
-       {::enabled? false ::n-namespaces (count namespace-syms)
-        ::n-inspected 0 ::n-gaps 0
-        ::n-unstrumented 0 ::n-instrumented 0}
-       (let [registry
-             (:seon.schema.projection/registry
-               (schema/current-projection))
-             namespace-names (mapv keyword (sort namespace-syms))
-             rows
-             (if (seq namespace-names)
-               (db/query
-                 '[:find ?sym ?spec
-                   :in $ [?ns-name ...]
-                   :where
-                   [?n :seon.ns/name ?ns-name]
-                   [?e :seon.fn/ns ?n]
-                   [?e :seon.fn/sym ?sym]
-                   [?e :seon.fn/spec ?spec]]
-                 db namespace-names)
-               #{})
-             gaps (coverage-gaps-for-rows registry rows)
-             changed-syms (into #{} (map ::target-sym) gaps)
-             targets
-             (into []
-                   (keep (fn [{::keys [target-sym schema-form]}]
-                           (when schema-form
-                             (cond-> {::sym target-sym
-                                      ::schema-form schema-form}
-                               registry (assoc ::registry registry)))))
-                   gaps)
-             result
-             (if (seq changed-syms)
-               (instrument-delta!
-                 {::changed-syms changed-syms ::targets targets})
-               {::enabled? true ::n-unstrumented 0 ::n-instrumented 0
-                ::accepted-syms #{} ::rejected []})]
-         (assoc result
-                ::n-namespaces (count namespace-syms)
-                ::n-inspected (count rows)
-                ::n-gaps (count gaps))))))
 
 #?(:cljs
    (defn coverage-gaps
