@@ -28,7 +28,8 @@ compensate for unclear functions.
 
 ## Current position
 
-**Current phase: unit 0 graduated; database lifecycle/recovery is active.**
+**Current phase: unit 0 graduated; the database authority mesh replacement is
+active.**
 The permanent JVM database server, canonical CLJS runtime, Babashka operator,
 database protocol, shared Datastar feed, database-authoritative program/schema
 projection, and focused test doors are already active. Work from the original
@@ -39,6 +40,27 @@ PRDs now own the remaining order; this branch must not remain the container for
 every local ambition. Remote replication, cloud topology, browser replicas,
 offline mutation, mobile packaging, and the full paid Inspect AI battery remain
 explicit follow-on work rather than completion gates.
+
+### 2026-07-16 scheduling override
+
+[[../database-authority-mesh/roadmap]] is the current implementation and proof
+ledger. Its ten units replace the client-replica/feed/Node runtime in dependency
+order: exact Datahike identity and capability ownership; fair multi-database
+execution; protocol and persistent native sessions; asynchronous `seon.db`;
+isolated Bun children; atomic replica/feed removal; then density, packaging, and
+the measured one-versus-2/4-authority-shard decision. Its current earliest
+unsettled contract is Datahike query acquisition before scarce Seon compute
+admission.
+
+The database lifecycle work already integrated below remains a prerequisite and
+evidence source, but its older restore/undo scheduling cards are not the active
+refill queue while the authority-mesh goal is active. Likewise, the original
+units 2–8 resume only through consumers of the settled asynchronous authority
+surface; they may not extend the replica, transaction broadcast/replay, Node
+transport, or synchronous local-DB interfaces that the mesh deletes. Any lower
+section labelled “current portfolio”, “current dependency spine”, or
+“compaction resume card” and dated before this override is retained historical
+evidence, not scheduling authority.
 
 ### Program task ledger
 
