@@ -9,9 +9,9 @@
   (:require
    [clojure.string :as str]
    [malli.core :as m]
-   [seon.db.coordinate :as coordinate]
+   #?(:cljs [seon.db :as db]
+      :default [seon.db :as-alias db])
    [seon.db.id.schema :as id.schema]
-   [seon.db.protocol :as protocol]
    [seon.schema :as schema]
    #?@(:bb []
        :default [[datahike.api :as d]
@@ -31,69 +31,9 @@
 ;;; Syntax and policy
 ;;; ---------------------------------------------------------------------------
 
-(schema/register! ::identity-attr :qualified-keyword)
-
 ;;; ---------------------------------------------------------------------------
 ;;; Atomic allocation contract
 ;;; ---------------------------------------------------------------------------
-
-(schema/register! ::key :qualified-keyword)
-(schema/register! ::value :seon.db/id)
-(schema/register! ::allocation
-                  [:map
-                   [::key ::key]
-                   [::identity-attr ::identity-attr]])
-(schema/register! ::allocations [:vector {:min 1} ::allocation])
-(schema/register! ::transaction-builder 'fn?)
-(schema/register! ::candidate-key ::key)
-(schema/register! ::lookup-ref
-                  [:tuple ::identity-attr :seon.db/lookup-ref-value])
-(schema/register! ::dependent-identity
-                  [:map
-                   [::candidate-key ::candidate-key]
-                   [::lookup-ref ::lookup-ref]])
-(schema/register! ::dependent-identities
-                  [:vector {:min 1} ::dependent-identity])
-(schema/register! ::dependent-lookup-refs
-                  [:vector {:min 1} ::lookup-ref])
-(schema/register! ::generated-candidate
-                  [:map
-                   [::key ::key]
-                   [::identity-attr ::identity-attr]
-                   [::value ::value]
-                   [::dependent-lookup-refs {:optional true}
-                    ::dependent-lookup-refs]])
-(schema/register! ::generated-candidates
-                  [:vector {:min 1} ::generated-candidate])
-(schema/register! ::generator-policies
-                  [:map-of ::identity-attr ::generator])
-(schema/register! ::ids [:map-of ::key ::value])
-(schema/register! ::eids [:map-of ::key :int])
-(schema/register! ::recovered-commit? :boolean)
-(schema/register! ::attempts [:int {:min 1 :max 16}])
-
-(schema/register!
- ::allocate-request
- [:map
-  [::allocations ::allocations]
-  [::transaction-builder ::transaction-builder]
-   ;; `seon.db.id` sits below the public `seon.db` facade so the facade can
-   ;; load the canonical id schemas without a require cycle. Allocation is an
-   ;; internal creation primitive; its caller therefore supplies the active
-   ;; conn explicitly instead of relying on `seon.db/*conn*` ambient state.
-  [:seon.db/conn :any]])
-
-(schema/register!
- ::allocate-response
- [:or
-  [:map
-   [:seon.db/ok? [:= true]]
-   [::ids ::ids]
-   [::eids ::eids]
-   [::recovered-commit? {:optional true} ::recovered-commit?]]
-  [:map
-   [:seon.db/ok? [:= false]]
-   [:seon.db/error :map]]])
 
 ;; `:any` is intentional only at the Datahike boundary: a db value and a
 ;; transaction item are third-party library values with no honest closed
@@ -1202,37 +1142,15 @@
            {::error :seon.db.id.error/candidate-conflict
             ::generated-candidate candidate})))
 
-     #?(:cljs
-        (defn- committed-write?
-          [envelope]
-          (= protocol/committed-status
-             (get-in envelope
-                     [:seon.db/error :seon.error/data
-                      ::protocol/status]))))
-
-     #?(:cljs
-        (defn- committed-eids
-          [conn manifest]
-          (let [db @conn]
-            (into {}
-                  (map
-                   (fn [{allocation-key ::key
-                         identity-attr ::identity-attr
-                         candidate ::value}]
-                     [allocation-key
-                      (d/q '[:find ?e .
-                             :in $ ?attr ?value
-                             :where [?e ?attr ?value]]
-                           db identity-attr candidate)]))
-                  manifest))))
-
      (defn- validate-request!
-       [{::keys [allocations transaction-builder]
-         conn :seon.db/conn}]
+       [{::keys [allocations transaction-builder generator-policies]}]
        (when-not (m/validate ::allocate-request
-                             {::allocations allocations
-                              ::transaction-builder transaction-builder
-                              :seon.db/conn conn})
+                             (cond->
+                               {::allocations allocations
+                                ::transaction-builder transaction-builder}
+                               generator-policies
+                               (assoc ::generator-policies
+                                      generator-policies)))
          (throw
           (ex-info "Invalid seon.db.id/allocate! request."
                    {::error :seon.db.id.error/invalid-request
@@ -1243,12 +1161,70 @@
                    {::error :seon.db.id.error/duplicate-allocation-key
                     ::allocations allocations
                     :seon.error/kind :core-bug})))
-       (when (nil? conn)
-         (throw
-          (ex-info "Allocation requires the active database connection."
-                   {::error :seon.db.id.error/missing-connection
-                    :seon.error/kind :core-bug})))
        nil)
+
+     #?(:cljs
+        (do
+          (def ^:private generator-policy-query
+            '[:find ?identity-attr ?generator
+              :in $ [?identity-attr ...]
+              :where
+              [?schema :seon.schema/key ?identity-attr]
+              [?schema :seon.db.id/generator ?generator]])
+
+          (defn- validate-generator-policies!
+            [allocations policies]
+            (let [required (set (map ::identity-attr allocations))]
+              (when-not (m/validate ::generator-policies policies)
+                (throw
+                 (ex-info "Database returned invalid generated identity policies."
+                          {::error :seon.db.id.error/invalid-generator-policies
+                           ::generator-policies policies
+                           :seon.error/kind :core-bug})))
+              (doseq [identity-attr required]
+                (let [generator (get policies identity-attr)]
+                  (when-not generator
+                    (throw
+                     (ex-info "Generated identity attribute has no stored generator policy."
+                              {::error :seon.db.id.error/missing-generator-policy
+                               ::identity-attr identity-attr
+                               :seon.error/kind :core-bug})))
+                  (when (and (= generator :seon.db.id.generator/human-readable)
+                             (not= identity-attr :seon.agent/id))
+                    (throw
+                     (ex-info "Human-readable generation is reserved for :seon.agent/id."
+                              {::error :seon.db.id.error/human-readable-non-agent
+                               ::identity-attr identity-attr
+                               ::generator generator
+                               :seon.error/kind :core-bug})))
+                  (when (and (= identity-attr :seon.agent/id)
+                             (not= generator
+                                   :seon.db.id.generator/human-readable))
+                    (throw
+                     (ex-info ":seon.agent/id must use the human-readable generator."
+                              {::error :seon.db.id.error/agent-generator
+                               ::identity-attr identity-attr
+                               ::generator generator
+                               :seon.error/kind :core-bug})))))
+              (select-keys policies required)))
+
+          (defn- ^:async acquire-generator-policies!
+            [allocations]
+            (let [identity-attrs (->> allocations
+                                      (map ::identity-attr)
+                                      distinct
+                                      (sort-by str)
+                                      vec)
+                  rows (await
+                        (db/query
+                         {::db/query generator-policy-query
+                          ::db/args [identity-attrs]}))]
+              (when (and (map? rows) (:seon.error/message rows))
+                (throw
+                 (ex-info "Generated identity policy acquisition failed."
+                          {:seon.db/error rows
+                           :seon.error/kind :core-bug})))
+              (validate-generator-policies! allocations (into {} rows))))))
 
      (defn assert-allocation-writer!
        "Assert that a connection routes allocations through one serialized writer.
@@ -1334,10 +1310,11 @@
 
      #?(:cljs
         (defn ^:async ^:private allocate-attempt!
-          [{::keys [allocations transaction-builder] conn :seon.db/conn :as request}
+          [{::keys [allocations transaction-builder generator-policies]
+            :as request}
            attempt]
-          (let [policies (generator-policies {::db-value @conn})
-                candidate-manifest (candidate-round! policies allocations)
+          (let [candidate-manifest (candidate-round! generator-policies
+                                                     allocations)
                 ids            (candidate-map candidate-manifest)
                 raw-built      (transaction-builder ids)]
             (when (instance? js/Promise raw-built)
@@ -1350,9 +1327,8 @@
                   _ (db.internal/assert-invocation-shape! built)
                   transaction-request
                   (-> built
-                      (assoc :seon.db/conn conn)
                       (assoc ::generated-candidates manifest))
-                  envelope (await (db.internal/transact!* transaction-request))]
+                  envelope (await (db/transact! transaction-request))]
               (cond
                 (:seon.db/ok? envelope)
                 (let [eids (::eids envelope)]
@@ -1362,28 +1338,6 @@
                      "The sole writer committed an allocation without returning every eid."
                      :core-bug
                      {::error :seon.db.id.error/incomplete-writer-response
-                      ::ids ids
-                      ::eids eids})))
-
-           ;; The durable request receipt can prove that a reply was
-           ;; lost after commit. The candidates are already durable: recover
-           ;; their eids from the materialized local db and never mint again.
-                (committed-write? envelope)
-                (let [eids (committed-eids conn manifest)]
-                  (if (every? some? (vals eids))
-                    {:seon.db/ok? true
-                     :seon.db/tx
-                     (get-in envelope
-                             [:seon.db/error :seon.error/data
-                              ::protocol/coordinate
-                              ::coordinate/t])
-                     ::ids ids
-                     ::eids eids
-                     ::recovered-commit? true}
-                    (failure
-                     "A committed allocation could not be resolved from the local database."
-                     :core-bug
-                     {::error :seon.db.id.error/committed-allocation-missing
                       ::ids ids
                       ::eids eids})))
 
@@ -1479,8 +1433,15 @@
           [request]
           (try
             (validate-request! request)
-            (assert-allocation-writer! (:seon.db/conn request))
-            (await (allocate-attempt! request 1))
+            (let [policies (or (::generator-policies request)
+                               (await
+                                (acquire-generator-policies!
+                                 (::allocations request))))]
+              (validate-generator-policies! (::allocations request) policies)
+              (await
+               (allocate-attempt!
+                (assoc request ::generator-policies policies)
+                1)))
             (catch :default e
               (failure
                (or (.-message e) (str e))

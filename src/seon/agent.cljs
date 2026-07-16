@@ -70,6 +70,7 @@
     [seon.config :as config]
     [seon.db :as db]
     [seon.db.id :as db.id]
+    [seon.db.protocol :as db.protocol]
     [seon.derive :as derive]
     [seon.error :as error]
     [seon.runtime.admission :as admission]
@@ -314,9 +315,12 @@
 
 (schema/register! ::armable-agent-ids-request [:map [:seon.db/db {:optional true} :seon.db/db-val]])
 (schema/register! ::armable-agent-ids-response [:vector :seon.agent/id])
-(schema/register! ::resumable-agent-ids-request
-  [:map [:seon.db/db {:optional true} :seon.db/db-val]])
 (schema/register! ::resumable-agent-ids-response [:vector :seon.agent/id])
+(schema/register!
+ ::resumable-agent-ids-result
+ [:map
+  [:seon.db/coordinate :seon.db.coordinate/coordinate]
+  [::resumable-agent-ids ::resumable-agent-ids-response]])
 (schema/register! ::initial-created? :boolean)
 (schema/register! ::ensure-initial-agent-request [:map])
 (schema/register!
@@ -340,17 +344,40 @@
   [{:seon.db/keys [db]}]
   (derive/armable-agent-ids (or db @db/*conn*)))
 
-(defn resumable-agent-ids
-  "Born agent ids this process must host: each without a termination fact.
+(defn ^:async resumable-agent-ids!
+  "Read born, nonterminated process hosts at one database coordinate.
 
-   Unlike [[armable-agent-ids]], this includes running and paused agents; those
-   states still require fresh process handles after a cold start or reload.
-   An identity-only provenance-genesis target is not born and is omitted."
-  {:malli/schema
-   [:=> [:cat ::resumable-agent-ids-request]
-    ::resumable-agent-ids-response]}
-  [{:seon.db/keys [db]}]
-  (derive/resumable-agent-ids (or db @db/*conn*)))
+   Running and paused agents are included because they still need fresh
+   process handles after a cold start or reload. Identity-only provenance
+   targets are not born and are omitted. The returned coordinate makes the
+   immutable basis explicit to callers that combine this result with other
+   startup decisions."
+  {:malli/schema [:=> [:cat] ::resumable-agent-ids-result]}
+  []
+  (let [result
+        (await
+         (db/execute-many
+          {::db/members
+           [{::db.protocol/operation db.protocol/query-operation
+             ::db.protocol/query-form
+             '[:find [?id ...]
+               :where
+               [?agent :seon.agent/id ?id]
+               [?agent :seon.eval/home-requires _]
+               (not [?agent :seon.agent/terminated-at _])]
+             ::db.protocol/arguments []}]}))
+        member (first (::db/results result))]
+    (when (and (map? result) (:seon.error/message result))
+      (throw (ex-info "Resumable agent ID acquisition failed."
+                      {:seon.db/error result
+                       :seon.error/kind :core-bug})))
+    (when-not (true? (::db.protocol/success? member))
+      (throw (ex-info "Resumable agent ID query failed."
+                      {:seon.db/error member
+                       :seon.error/kind :core-bug})))
+    {::db/coordinate (::db/coordinate result)
+     ::resumable-agent-ids
+     (->> (:datahike.query/result member) sort vec)}))
 
 (defn- ordinary-agent-ever-born?
   "True when database history proves a non-root agent was ever born.

@@ -14,6 +14,7 @@
   (:require
     [seon.db :as db]
     [seon.db.id :as db.id]
+    [seon.db.protocol :as protocol]
     [seon.eval.internal :as eval.internal]
     [seon.schema :as schema]))
 
@@ -65,59 +66,151 @@
      {:optional true} :seon.runtime.recovery/id]]
    :seon.db/transact-response])
 
-(defn- repair-targets
-  "Current nonterminated agents that still own a run pointer."
-  [database]
-  (->> (db/query
-         {:seon.db/db database
-          :seon.db/query
-          '[:find ?agent-id ?run-id ?status
-            :where
-            [?agent :seon.agent/id ?agent-id]
-            [?agent :seon.agent/run ?run]
-            [?run :seon.agent.run/id ?run-id]
-            [?run :seon.agent.run/status ?status]
-            (not [?agent :seon.agent/terminated-at _])]})
-       (sort-by (juxt first second))
-       vec))
+(def ^:private repair-targets-query
+  '[:find ?agent-id ?run-id ?status
+    :where
+    [?agent :seon.agent/id ?agent-id]
+    [?agent :seon.agent/run ?run]
+    [?run :seon.agent.run/id ?run-id]
+    [?run :seon.agent.run/status ?status]
+    (not [?agent :seon.agent/terminated-at _])])
 
-(defn- running-turns
-  "Running turn ids grouped with their pointed-at run ids."
-  [database target-run-ids]
-  (let [target-run-ids (set target-run-ids)]
-    (->> (db/query
-           {:seon.db/db database
-            :seon.db/query
-            '[:find ?run-id ?turn-id
-              :where
-              [?run :seon.agent.run/id ?run-id]
-              [?turn :seon.agent.turn/run ?run]
-              [?turn :seon.agent.turn/id ?turn-id]
-              [?turn :seon.agent.turn/status :running]]})
-         (filter (fn [[run-id _]] (contains? target-run-ids run-id)))
-         (sort-by (juxt first second))
-         vec)))
+(def ^:private running-turns-query
+  '[:find ?run-id ?turn-id
+    :where
+    [?agent :seon.agent/run ?run]
+    (not [?agent :seon.agent/terminated-at _])
+    [?run :seon.agent.run/id ?run-id]
+    [?turn :seon.agent.turn/run ?run]
+    [?turn :seon.agent.turn/id ?turn-id]
+    [?turn :seon.agent.turn/status :running]])
 
-(defn- running-evals
-  "Running eval ids grouped with their pointed-at run and turn ids."
-  [database target-run-ids]
-  (if (contains? (db/installed-schema database) :seon.eval/status)
-    (let [target-run-ids (set target-run-ids)]
-      (->> (db/query
-             {:seon.db/db database
-              :seon.db/query
-              '[:find ?run-id ?turn-id ?eval-id
-                :where
-                [?run :seon.agent.run/id ?run-id]
-                [?turn :seon.agent.turn/run ?run]
-                [?turn :seon.agent.turn/id ?turn-id]
-                [?turn :seon.agent.turn/evals ?eval]
-                [?eval :seon.eval/id ?eval-id]
-                [?eval :seon.eval/status :running]]})
-           (filter (fn [[run-id _ _]] (contains? target-run-ids run-id)))
-           (sort-by (juxt first second #(nth % 2)))
-           vec))
-    []))
+(def ^:private running-evals-query
+  '[:find ?run-id ?turn-id ?eval-id
+    :where
+    [?agent :seon.agent/run ?run]
+    (not [?agent :seon.agent/terminated-at _])
+    [?run :seon.agent.run/id ?run-id]
+    [?turn :seon.agent.turn/run ?run]
+    [?turn :seon.agent.turn/id ?turn-id]
+    [?turn :seon.agent.turn/evals ?eval]
+    [?eval :seon.eval/id ?eval-id]
+    [?eval :seon.eval/status :running]])
+
+(def ^:private recovery-policy-query
+  '[:find ?generator .
+    :where
+    [?schema :seon.schema/key :seon.runtime.recovery/id]
+    [?schema :seon.db.id/generator ?generator]])
+
+(defn- query-member
+  [query]
+  {::protocol/operation protocol/query-operation
+   ::protocol/query-form query
+   ::protocol/arguments []})
+
+(defn- member-value!
+  [operation member]
+  (if (true? (::protocol/success? member))
+    (:datahike.query/result member)
+    (throw (ex-info (str "Recovery " operation " failed.")
+                    {:seon.db/error member
+                     :seon.error/kind :core-bug}))))
+
+(defn- ^:async acquire-recovery!
+  []
+  (let [acquired
+        (await
+         (db/execute-many
+          {::db/members
+           (mapv query-member
+                 [repair-targets-query running-turns-query
+                  running-evals-query recovery-policy-query])}))]
+    (when (and (map? acquired) (:seon.error/message acquired))
+      (throw (ex-info "Recovery database acquisition failed."
+                      {:seon.db/error acquired
+                       :seon.error/kind :core-bug})))
+    (let [[targets turns evals policy] (::db/results acquired)]
+      {::db/coordinate (::db/coordinate acquired)
+       ::targets (->> (member-value! "target acquisition" targets)
+                      (sort-by (juxt first second))
+                      vec)
+       ::turns (->> (member-value! "turn acquisition" turns)
+                    (sort-by (juxt first second))
+                    vec)
+       ::evals (->> (member-value! "eval acquisition" evals)
+                    (sort-by (juxt first second #(nth % 2)))
+                    vec)
+       ::generator (member-value! "generator-policy acquisition" policy)})))
+
+(defn- compile-recovery
+  [{::keys [targets turns evals] ::db/keys [coordinate]}
+   recovery-id closed-at detail]
+  (let [agent-ids (mapv first targets)
+        run-ids (mapv second targets)
+        open-run-ids (->> targets
+                          (keep (fn [[_ run-id status]]
+                                  (when (= :open status) run-id)))
+                          distinct
+                          vec)
+        turn-ids (->> turns (map second) sort vec)
+        eval-ids (->> evals (map #(nth % 2)) sort vec)
+        fences (mapv (fn [[agent-id run-id _]]
+                       (db/cas-assert
+                        [:seon.agent/id agent-id]
+                        :seon.agent/run
+                        [:seon.agent.run/id run-id]))
+                     targets)
+        pointer-retractions
+        (mapv (fn [[agent-id run-id _]]
+                [:db/retract
+                 [:seon.agent/id agent-id]
+                 :seon.agent/run
+                 [:seon.agent.run/id run-id]])
+              targets)
+        run-closes
+        (mapv (fn [run-id]
+                {:seon.agent.run/id run-id
+                 :seon.agent.run/status :closed
+                 :seon.agent.run/closed-reason :crashed
+                 :seon.agent.run/closed-at closed-at})
+              open-run-ids)
+        turn-closes
+        (mapv (fn [turn-id]
+                {:seon.agent.turn/id turn-id
+                 :seon.agent.turn/status :interrupted})
+              turn-ids)
+        eval-closes
+        (into []
+              (mapcat (fn [eval-id]
+                        (eval.internal/terminal-tx-data
+                         {:seon.eval/id eval-id
+                          :seon.eval/status :interrupted})))
+              eval-ids)
+        anchor (cond->
+                 {:seon.runtime.recovery/id recovery-id
+                  :seon.runtime.recovery/reason :unexpected-exit}
+                 detail
+                 (assoc :seon.runtime.recovery/detail detail))]
+    {::db/expected-coordinate coordinate
+     ::db/tx-data (-> fences
+                      (into pointer-retractions)
+                      (into run-closes)
+                      (into turn-closes)
+                      (into eval-closes)
+                      (conj anchor))
+     ::agent-ids agent-ids
+     ::run-ids run-ids
+     ::turn-ids turn-ids
+     ::eval-ids eval-ids}))
+
+(defn- failure-envelope
+  [error]
+  {:seon.db/ok? false
+   :seon.db/error
+   {:seon.error/message (or (.-message error) (str error))
+    :seon.error/kind (or (:seon.error/kind (ex-data error)) :core-bug)
+    :seon.error/data (or (ex-data error) {})}})
 
 (defn ^:async recover!
   "Fence interrupted ownership and restore every affected agent to idle.
@@ -133,98 +226,48 @@
   {:malli/schema [:=> [:catn [::request ::recover-request]]
                   ::recover-response]}
   [{:seon.runtime.recovery/keys [detail]}]
-  (let [database @db/*conn*
-        targets (repair-targets database)]
-    (if (empty? targets)
-      {::repaired? false
-       ::agent-ids []
-       ::run-ids []
-       ::turn-ids []
-       ::eval-ids []}
-      (let [agent-ids (mapv first targets)
-            run-ids (mapv second targets)
-            open-run-ids (->> targets
-                              (keep (fn [[_ run-id status]]
-                                      (when (= :open status) run-id)))
-                              distinct
-                              vec)
-            turn-rows (running-turns database run-ids)
-            turn-ids (->> turn-rows (map second) sort vec)
-            eval-rows (running-evals database run-ids)
-            eval-ids (->> eval-rows (map #(nth % 2)) sort vec)
-            closed-at (js/Date.)
-            envelope
-            (await
-              (db.id/allocate!
+  (try
+    (let [{::keys [targets generator] :as acquired}
+          (await (acquire-recovery!))]
+      (if (empty? targets)
+        {::repaired? false
+         ::agent-ids []
+         ::run-ids []
+         ::turn-ids []
+         ::eval-ids []}
+        (let [closed-at (js/Date.)
+              envelope
+              (await
+               (db.id/allocate!
                 {::db.id/allocations
                  [{::db.id/key :seon.runtime.recovery/id
                    ::db.id/identity-attr :seon.runtime.recovery/id}]
+                 ::db.id/generator-policies
+                 {:seon.runtime.recovery/id generator}
                  ::db.id/transaction-builder
                  (fn [ids]
-                   (let [recovery-id
-                         (get ids :seon.runtime.recovery/id)
-                         fences
-                         (mapv
-                           (fn [[agent-id run-id _]]
-                             (db/cas-assert
-                               [:seon.agent/id agent-id]
-                               :seon.agent/run
-                               [:seon.agent.run/id run-id]))
-                           targets)
-                         pointer-retractions
-                         (mapv
-                           (fn [[agent-id run-id _]]
-                             [:db/retract
-                              [:seon.agent/id agent-id]
-                              :seon.agent/run
-                              [:seon.agent.run/id run-id]])
-                           targets)
-                         run-closes
-                         (mapv
-                           (fn [run-id]
-                             {:seon.agent.run/id run-id
-                              :seon.agent.run/status :closed
-                              :seon.agent.run/closed-reason :crashed
-                              :seon.agent.run/closed-at closed-at})
-                           open-run-ids)
-                         turn-closes
-                         (mapv
-                           (fn [turn-id]
-                             {:seon.agent.turn/id turn-id
-                              :seon.agent.turn/status :interrupted})
-                           turn-ids)
-                         eval-closes
-                         (into []
-                               (mapcat
-                                 (fn [eval-id]
-                                   (eval.internal/terminal-tx-data
-                                     {:seon.eval/id eval-id
-                                      :seon.eval/status :interrupted})))
-                               eval-ids)
-                         anchor
-                         (cond->
-                           {:seon.runtime.recovery/id recovery-id
-                            :seon.runtime.recovery/reason :unexpected-exit}
-                           detail
-                           (assoc :seon.runtime.recovery/detail detail))]
-                     {:seon.db/tx-data
-                      (-> fences
-                          (into pointer-retractions)
-                          (into run-closes)
-                          (into turn-closes)
-                          (into eval-closes)
-                          (conj anchor))}))
-                 :seon.db/conn db/*conn*}))
-            recovery-id
-            (get-in envelope [::db.id/ids :seon.runtime.recovery/id])]
-        (if (false? (:seon.db/ok? envelope))
-          envelope
-          {::repaired? true
-           ::agent-ids agent-ids
-           ::run-ids run-ids
-           ::turn-ids turn-ids
-           ::eval-ids eval-ids
-           :seon.runtime.recovery/id recovery-id})))))
+                   (select-keys
+                    (compile-recovery
+                     acquired
+                     (get ids :seon.runtime.recovery/id)
+                     closed-at
+                     detail)
+                    [::db/expected-coordinate ::db/tx-data]))}))
+              recovery-id
+              (get-in envelope [::db.id/ids :seon.runtime.recovery/id])
+              compiled
+              (when (:seon.db/ok? envelope)
+                (compile-recovery acquired recovery-id closed-at detail))]
+          (if (false? (:seon.db/ok? envelope))
+            envelope
+            {::repaired? true
+             ::agent-ids (::agent-ids compiled)
+             ::run-ids (::run-ids compiled)
+             ::turn-ids (::turn-ids compiled)
+             ::eval-ids (::eval-ids compiled)
+             :seon.runtime.recovery/id recovery-id}))))
+    (catch :default error
+      (failure-envelope error))))
 
 ;; ---------------------------------------------------------------------------
 ;; Root notice projection — transaction joins, never copied anchor data.

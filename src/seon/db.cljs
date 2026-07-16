@@ -68,7 +68,7 @@
     [malli.core :as m]
     [seon.config :as config]
     [seon.db.coordinate :as db.coordinate]
-    [seon.db.id]
+    [seon.db.id.schema]
     [seon.db.internal :as internal]
     [seon.db.protocol :as protocol]
     [seon.db.process :as process]
@@ -1033,7 +1033,9 @@
                  ::retracted (::protocol/datoms-retracted response)}
           (seq (::protocol/generated-entity-ids response))
           (assoc :seon.db.id/eids
-                 (::protocol/generated-entity-ids response)))))))
+                 (::protocol/generated-entity-ids response))
+          (::protocol/recovered? response)
+          (assoc :seon.db.id/recovered-commit? true))))))
 
 (defn ^{:async true :seon.fn/agent-facing? true} transact!
   "Save records to the database, persisting new facts durably.

@@ -346,11 +346,20 @@
       #:seon.dev.runtime-id
        {:cluster (::launch/runtime-cluster runtime)
         :ids (if (db/attached?)
-               (agent/resumable-agent-ids {:seon.db/db @db/*conn*})
+               (or (::resumable-agent-ids @!state) [])
                [])})
      (select-keys writer-owner
                   [::launch/writer-cluster
                    ::launch/writer-repl-port-file]))))
+
+(defn- ^:async acquire-resumable-agent-ids!
+  []
+  (let [result (await (agent/resumable-agent-ids!))
+        ids (::agent/resumable-agent-ids result)]
+    (swap! !state assoc
+           ::resumable-agent-ids ids
+           ::resumable-agent-ids-coordinate (::db/coordinate result))
+    ids))
 
 (defn start-heartbeat!
   "Holds the Node event loop open with a minute-cadence heartbeat. The
@@ -2421,7 +2430,7 @@
       (-> (repl/ensure-bootstrap!)
           (.then
            (fn ^:async rehost! [compile-state]
-             (let [ids (agent/resumable-agent-ids {:seon.db/db @conn})]
+             (let [ids (await (acquire-resumable-agent-ids!))]
                (doseq [id ids]
                  (await (agent/resume!
                          {:seon.agent/id id
@@ -2721,7 +2730,7 @@
                 restore-completion-claim
                 (::restore-completion-result @!state)
                 @conn))
-            available-ids (agent/resumable-agent-ids {:seon.db/db @conn})
+            available-ids (await (acquire-resumable-agent-ids!))
             resumed-ids (if autonomous? available-ids [])
             primary (or (first (remove #{"root"} available-ids))
                         (first available-ids)
@@ -2812,18 +2821,11 @@
                             (conj "root")
                             initial-id (conj initial-id))
               compile-state (await compile-promise)
-              available-ids (agent/resumable-agent-ids {:seon.db/db @conn})
+              available-ids (await (acquire-resumable-agent-ids!))
               resumable-ids (if autonomous? available-ids [])
-              all-ids (->> (db/query
-                            {:seon.db/db @conn
-                             :seon.db/query
-                             '[:find [?id ...]
-                               :where [?a :seon.agent/id ?id]]})
-                           sort vec)
               primary (or initial-id
                           (first (remove #{"root"} available-ids))
                           (first available-ids)
-                          (first all-ids)
                           "root")]
           (when-not (admission/begin-publication!)
             (throw

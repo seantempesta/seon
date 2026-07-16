@@ -13,7 +13,7 @@
        the new DERIVED state keyword. `wait` with no agent in scope returns a
        loud error envelope (errors are values).
      - `agent/armable-agent-ids` selects idle wake targets, while
-       `agent/resumable-agent-ids` selects every nonterminated process host.
+       `derive/resumable-agent-ids` selects every nonterminated process host.
      - `agent/create!` roundtrips `:seon.agent/default-turn-limit`; purpose is
        never defaulted; a failed transact returns the db error envelope; and
        all initial agent/context/home-namespace facts share one transaction.
@@ -31,6 +31,7 @@
     [seon.client :as client]
     [seon.db :as db]
     [seon.db.replica :as replica]
+    [seon.derive :as derive]
     [seon.launch :as launch]))
 
 (defn- with-conn
@@ -453,7 +454,7 @@
                      (agent/armable-agent-ids {:seon.db/db @db/*conn*}))
                   "a running agent is mid-run, not wakeable")
               (is (= ["aaa-2606101200" "bbb-2606101200"]
-                     (agent/resumable-agent-ids {:seon.db/db @db/*conn*}))
+                     (derive/resumable-agent-ids @db/*conn*))
                   "running state still needs process-local handles"))
             (testing "closing the run re-arms it (back to derived :idle)"
               (await (db/with-agent "aaa-2606101200"
@@ -469,7 +470,7 @@
               (is (= ["bbb-2606101200"]
                      (agent/armable-agent-ids {:seon.db/db @db/*conn*})))
               (is (= ["bbb-2606101200"]
-                     (agent/resumable-agent-ids {:seon.db/db @db/*conn*}))))))
+                     (derive/resumable-agent-ids @db/*conn*))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 

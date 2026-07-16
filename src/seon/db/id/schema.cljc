@@ -28,3 +28,73 @@
  [:enum
   :seon.db.id.generator/human-readable
   :seon.db.id.generator/compact])
+
+;; Portable allocation data. These shapes live below both `seon.db` and
+;; `seon.db.id` so the database facade can load the wire/result contracts
+;; without loading the Bun candidate-generation implementation.
+(schema/register! :seon.db.id/identity-attr :qualified-keyword)
+(schema/register! :seon.db.id/key :qualified-keyword)
+(schema/register! :seon.db.id/value :seon.db/id)
+(schema/register!
+ :seon.db.id/allocation
+ [:map
+  [:seon.db.id/key :seon.db.id/key]
+  [:seon.db.id/identity-attr :qualified-keyword]])
+(schema/register!
+ :seon.db.id/allocations
+ [:vector {:min 1} :seon.db.id/allocation])
+(schema/register! :seon.db.id/transaction-builder 'fn?)
+(schema/register! :seon.db.id/candidate-key :seon.db.id/key)
+(schema/register!
+ :seon.db.id/lookup-ref
+ [:tuple :seon.db.id/identity-attr :seon.db/lookup-ref-value])
+(schema/register!
+ :seon.db.id/dependent-identity
+ [:map
+  [:seon.db.id/candidate-key :seon.db.id/candidate-key]
+  [:seon.db.id/lookup-ref :seon.db.id/lookup-ref]])
+(schema/register!
+ :seon.db.id/dependent-identities
+ [:vector {:min 1} :seon.db.id/dependent-identity])
+(schema/register!
+ :seon.db.id/dependent-lookup-refs
+ [:vector {:min 1} :seon.db.id/lookup-ref])
+(schema/register!
+ :seon.db.id/generated-candidate
+ [:map
+  [:seon.db.id/key :seon.db.id/key]
+  [:seon.db.id/identity-attr :seon.db.id/identity-attr]
+  [:seon.db.id/value :seon.db.id/value]
+  [:seon.db.id/dependent-lookup-refs
+   {:optional true} :seon.db.id/dependent-lookup-refs]])
+(schema/register!
+ :seon.db.id/generated-candidates
+ [:vector {:min 1} :seon.db.id/generated-candidate])
+(schema/register!
+ :seon.db.id/generator-policies
+ [:map-of :seon.db.id/identity-attr :seon.db.id/generator])
+(schema/register!
+ :seon.db.id/ids
+ [:map-of :seon.db.id/key :seon.db.id/value])
+(schema/register! :seon.db.id/eids [:map-of :seon.db.id/key :int])
+(schema/register! :seon.db.id/recovered-commit? :boolean)
+(schema/register! :seon.db.id/attempts [:int {:min 1 :max 16}])
+(schema/register!
+ :seon.db.id/allocate-request
+ [:map
+  [:seon.db.id/allocations :seon.db.id/allocations]
+  [:seon.db.id/transaction-builder :seon.db.id/transaction-builder]
+  [:seon.db.id/generator-policies
+   {:optional true} :seon.db.id/generator-policies]])
+(schema/register!
+ :seon.db.id/allocate-response
+ [:or
+  [:map
+   [:seon.db/ok? [:= true]]
+   [:seon.db.id/ids :seon.db.id/ids]
+   [:seon.db.id/eids :seon.db.id/eids]
+   [:seon.db.id/recovered-commit?
+    {:optional true} :seon.db.id/recovered-commit?]]
+  [:map
+   [:seon.db/ok? [:= false]]
+   [:seon.db/error :map]]])

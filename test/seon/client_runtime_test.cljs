@@ -177,7 +177,7 @@
         original-recovery recovery/recover!
         original-create agent/create!
         original-initial agent/ensure-initial-agent!
-        original-resumable agent/resumable-agent-ids
+        original-resumable agent/resumable-agent-ids!
         original-query db/query
         original-transact db/transact!
         original-begin admission/begin-publication!
@@ -259,10 +259,11 @@
           (fn [_]
             (swap! effects conj :forbidden/initial-agent)
             (promise-value {:seon.db/ok? true})))
-    (set! agent/resumable-agent-ids
-          (fn [_]
+    (set! agent/resumable-agent-ids!
+          (fn []
             (swap! effects conj :available-agents)
-            ["root" "worker"]))
+            (promise-value
+             {::agent/resumable-agent-ids ["root" "worker"]})))
     (set! db/query
           (fn [& _]
             (swap! effects conj :read-agents)
@@ -366,7 +367,7 @@
            (set! recovery/recover! original-recovery)
            (set! agent/create! original-create)
            (set! agent/ensure-initial-agent! original-initial)
-           (set! agent/resumable-agent-ids original-resumable)
+           (set! agent/resumable-agent-ids! original-resumable)
            (set! db/query original-query)
            (set! db/transact! original-transact)
            (set! admission/begin-publication! original-begin)
@@ -852,7 +853,7 @@
           connection (atom {})
           effects (atom [])
           original-attached? db/attached?
-          original-resumable agent/resumable-agent-ids
+          original-resumable agent/resumable-agent-ids!
           original-replica-attach replica/attach!
           original-web-start web.serve/start!
           original-replay client/replay-program-graph!
@@ -863,10 +864,10 @@
                      ::client/launch-capability non-autonomous-capability
                      ::client/runtime-phase :seon.client.runtime/running))
       (set! db/attached? (constantly true))
-      (set! agent/resumable-agent-ids
-            (fn [_]
+      (set! agent/resumable-agent-ids!
+            (fn []
               (swap! effects conj :status)
-              ["root"]))
+              (promise-value {::agent/resumable-agent-ids ["root"]})))
       (set! replica/attach!
             (fn [_]
               (swap! effects conj :replica)
@@ -899,7 +900,7 @@
           (.finally
            (fn []
              (set! db/attached? original-attached?)
-             (set! agent/resumable-agent-ids original-resumable)
+             (set! agent/resumable-agent-ids! original-resumable)
              (set! replica/attach! original-replica-attach)
              (set! web.serve/start! original-web-start)
              (set! client/replay-program-graph! original-replay)

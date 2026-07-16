@@ -6,7 +6,6 @@
    #?(:clj  [clojure.test :refer [deftest is testing use-fixtures]]
       :cljs [cljs.test :refer [deftest is testing async use-fixtures]])
    [datahike.api :as d]
-   #?@(:cljs [[datahike.core :as datahike]])
    #?@(:clj [[datahike.writing :as writing]])
    [malli.core :as m]
    [seon.db.id :as id]
@@ -509,23 +508,10 @@
           ::id/generated-candidate candidate}}})
 
      (defn- with-transact-stub [stub body]
-       (let [original db.internal/transact!*]
-         (set! db.internal/transact!* stub)
+       (let [original db/transact!]
+         (set! db/transact! stub)
          (-> (js/Promise.resolve (body))
-             (.finally (fn [] (set! db.internal/transact!* original))))))
-
-     (defn- stub-allocation-conn []
-       (let [db-value
-             (-> (datahike/empty-db
-                  nil
-                  {:schema-flexibility :write
-                   :keep-history? true})
-                 (d/with (allocation-schema-transaction))
-                 :db-after
-                 (assoc-in [:config :writer :backend] :seon.db.writer/remote))]
-         (reify
-           IDeref
-           (-deref [_] db-value))))
+             (.finally (fn [] (set! db/transact! original))))))
 
      (defn- split-view-conn
        "Build a conn whose runtime and persisted writer configs differ."
@@ -558,14 +544,12 @@
                   (::id/error (ex-data failure)))))))
 
      (defn- allocation-request
-       ([builder]
-        (allocation-request (stub-allocation-conn) builder))
-       ([conn builder]
-        {::id/allocations
+       [builder]
+       {::id/allocations
          [{::id/key allocation-key
            ::id/identity-attr identity-attr}]
          ::id/transaction-builder builder
-         :seon.db/conn conn}))
+         ::id/generator-policies {identity-attr compact-generator}})
 
      (defn- fresh-allocation-conn []
        (let [base-config {:store {:backend :memory :id (random-uuid)}
@@ -584,46 +568,6 @@
                                 {:tx-data
                                  (allocation-schema-transaction)})))
                           (.then (fn [_] conn))))))))
-
-     (deftest local-allocation-uses-the-canonical-preparation
-       (async done
-              (register-allocation-schema!)
-              (-> (fresh-allocation-conn)
-                  (.then
-                   (fn [conn]
-                     (-> (id/allocate!
-                          {::id/allocations
-                           [{::id/key allocation-key
-                             ::id/identity-attr identity-attr}
-                            {::id/key other-allocation-key
-                             ::id/identity-attr other-identity-attr}]
-                           ::id/transaction-builder
-                           (fn [ids]
-                             {:seon.db/tx-data
-                              [{identity-attr (get ids allocation-key)
-                                :idtest.record/source "first"}
-                               {:idtest.record/source "automatic-between"}
-                               {other-identity-attr (get ids other-allocation-key)
-                                :idtest.record/source "later"}]})
-                           :seon.db/conn conn})
-                         (.then (fn [response]
-                                  {::response response ::conn conn})))))
-                  (.then
-                   (fn [{::keys [response conn]}]
-                     (let [eids (::id/eids response)
-                           automatic-eid
-                           (:e (first (d/datoms @conn :avet
-                                                :idtest.record/source
-                                                "automatic-between")))]
-                       (is (true? (:seon.db/ok? response)))
-                       (is (= #{allocation-key other-allocation-key}
-                              (set (keys eids))))
-                       (is (= 3 (count (conj (set (vals eids))
-                                             automatic-eid)))))))
-                  (.catch (fn [error]
-                            (is false (str "local allocation rejected: "
-                                           (.-message error)))))
-                  (.finally done))))
 
      (deftest concurrent-local-candidate-transactions-have-one-winner
        (async done
