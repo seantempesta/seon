@@ -2,8 +2,8 @@
   "Process-local hosting for durable agents.
 
    Durable birth belongs to [[seon.agent]]. This namespace owns the inverse
-   projection: reconstruct one existing agent's disposable compiler namespace,
-   loop input, and message listener from database facts.
+   projection: reconstruct one existing agent's loop input and message listener
+   from database facts.
    Resume never allocates identity or re-runs cluster boot work; unhost removes
    every per-agent process handle."
   (:require
@@ -11,14 +11,11 @@
     [seon.agent.loop :as loop]
     [seon.ai.dispatch :as ai.dispatch]
     [seon.db :as db]
-    [seon.eval :as seval]
-    [seon.repl :as repl]
     [seon.runtime.admission :as admission]
     [seon.schema :as schema]))
 
 (schema/register! ::wake? [:boolean {:default true}])
 (schema/register! ::llm-fn 'fn?)
-(schema/register! ::compile-state :any)
 (schema/register! ::resumed? :boolean)
 (schema/register! ::unhosted? :boolean)
 (schema/register! ::unhosted-ids [:vector :seon.agent/id])
@@ -27,8 +24,7 @@
 (schema/register! ::resume-request
   [:map
    [:seon.agent/id :seon.agent/id]
-   [::llm-fn {:optional true} ::llm-fn]
-   [::compile-state {:optional true} ::compile-state]])
+   [::llm-fn {:optional true} ::llm-fn]])
 
 (schema/register! ::resume-response
   [:or
@@ -86,13 +82,13 @@
 (defn ^:async resume!
   "Reconstruct one existing, nonterminated agent in this process.
 
-   The database entity must already exist. The function wires its deterministic
-   home namespace into the shared bootstrap compiler and replaces any stale
-   loop listener/input. No cluster seed, program replay,
-   global instrumentation, identity allocation, or duplicate membership
-   bookkeeping occurs here."
+   The database entity must already exist. The function replaces any stale
+   loop listener/input. The supervised execution child reconstructs the
+   agent's compiler and authored program lazily. No cluster seed, program
+   replay, global instrumentation, identity allocation, or duplicate
+   membership bookkeeping occurs here."
   {:malli/schema [:=> [:cat ::resume-request] ::resume-response]}
-  [{:seon.agent/keys [id] ::keys [llm-fn compile-state]}]
+  [{:seon.agent/keys [id] ::keys [llm-fn]}]
   (if-not (admission/available?)
     {:seon.agent/id id
      ::resumed? false
@@ -113,19 +109,16 @@
            ::error (str "resume!: agent " id " is terminated")})
 
         :else
-        (let [cs  (or compile-state (await (repl/ensure-bootstrap!)))
-              llm (or llm-fn (ai.dispatch/llm-fn))
+        (let [llm (or llm-fn (ai.dispatch/llm-fn))
               ns  (home/home-ns id)]
           (await
             (db/with-agent id
               (fn ^:async resume-agent! []
-                (await (seval/setup-agent-ns! cs ns id))
                 (when (admission/available?)
                   (if (wake-armed? id)
                     (loop/install-wake-trigger!
                       {:seon.agent/id id
-                       :seon.agent/llm-fn llm
-                       :seon.agent/compile-state cs})
+                       :seon.agent/llm-fn llm})
                     (loop/uninstall-wake-trigger! {:seon.agent/id id}))))))
           (if (admission/available?)
             {:seon.agent/id id

@@ -92,11 +92,6 @@
     ;; set; boot-seed! transacts (route/core-routes-tx). Required here so the
     ;; schema register! calls run and the build includes the seed builder.
     [seon.route :as route]
-    ;; Iteration surface — owns the canonical `!compile-state`
-    ;; defonce (in `seon.repl`). start-runtime! reads through
-    ;; `seon.repl/ensure-bootstrap!` rather than holding a second
-    ;; copy here. See compile-state-lifecycle research note.
-    [seon.repl :as repl]
     ;; One-node source extraction (`form-source-at`) for the program-graph
     ;; source capture below — rewrite-clj parses EXACTLY one top-level form,
     ;; so char/regex/string-literal parens are balanced correctly (a raw
@@ -2538,33 +2533,28 @@
             envelope))))))
 
 (schema/register! ::llm-fn        'fn?)
-(schema/register! ::compile-state :any)
 (defn- rehost-agent-runtimes!
   "Reconstruct every nonterminated agent after a code reload.
 
-   This is process-local work only: one shared compile-state, then
-   [[seon.agent/resume!]] per database-derived id. It never runs cluster seed,
-   program replay, global instrumentation, or identity allocation."
+   This is process-local work only: [[seon.agent/resume!]] per
+   database-derived id. Each agent's execution child reconstructs its accepted
+   program lazily; the pod owns no compiler or program replay."
   []
   (if (db/attached?)
-    (let [conn db/*conn*]
-      (-> (repl/ensure-bootstrap!)
-          (.then
-           (fn ^:async rehost! [compile-state]
-             (let [ids (await (acquire-resumable-agent-ids!))]
-               (doseq [id ids]
-                 (await (agent/resume!
-                         {:seon.agent/id id
-                          :seon.agent.runtime/compile-state compile-state})))
-               (log/info-console! "seon.client"
-                                  "reload: agent runtimes rehosted"
-                                  {:seon.client/reinstalled ids})
-               ids)))
+    (-> (acquire-resumable-agent-ids!)
+        (.then
+         (fn ^:async rehost! [ids]
+           (doseq [id ids]
+             (await (agent/resume! {:seon.agent/id id})))
+           (log/info-console! "seon.client"
+                              "reload: agent runtimes rehosted"
+                              {:seon.client/reinstalled ids})
+           ids))
           (.catch
            (fn [err]
              (log/error-console! "seon.client"
                                  "reload: agent runtime rehost FAILED"
-                                 err)))))
+                                 err))))
     (js/Promise.resolve [])))
 
 (schema/register! ::seeded? [:= true])
@@ -2827,8 +2817,8 @@
   "Cold-start the cluster process or refresh attached read-surface readiness.
 
    The cold transition attaches the database, reconciles boot-managed facts,
-   reconstructs the compiler/program graph, instruments the accepted graph,
-   performs crash recovery, resumes every nonterminated durable agent, and
+   publishes instrumentation from the accepted graph, performs crash recovery,
+   resumes every nonterminated durable agent, and
    starts shared HTTP/debug/ticker machinery. Agent birth is not a mode of this
    function; warm callers use [[seon.agent/start!]]. A repeated attached call
    validates the retained capability, reads resumable ids, and idempotently
@@ -2883,9 +2873,7 @@
                 descriptor restore-startup restore-completion-claim))
             _ (await
                (db/assert-preconditions!
-                {::db/coordinate (::db/coordinate session-open)}))
-            ;; Bootstrap compilation can overlap autonomous database work.
-            compile-promise (repl/ensure-bootstrap!)]
+                {::db/coordinate (::db/coordinate session-open)}))]
         (when (and autonomous? (nil? restore-startup))
           (await (boot-seed! {})))
         (when autonomous?
@@ -2926,7 +2914,6 @@
                             (::agent/root-created? initial-result)
                             (conj "root")
                             initial-id (conj initial-id))
-              compile-state (await compile-promise)
               available-ids (await (acquire-resumable-agent-ids!))
               resumable-ids (if autonomous? available-ids [])
               primary (or initial-id
@@ -2937,22 +2924,7 @@
             (throw
              (ex-info "start-runtime!: program publication is already closed"
                       (admission/state))))
-          (let [replay-stats
-                (await
-                 (replay-program-graph!
-                  {::conn session-open
-                   ::compile-state compile-state
-                   ::agent-id primary
-                   ::record-failures? autonomous?}))
-                _ (log/info-console! "seon.client/start-runtime!"
-                                     (str "replay: " (pr-str replay-stats)))
-                _ (when (and restore-startup
-                             (pos? (::replay-n-fail replay-stats)))
-                    (throw
-                      (ex-info
-                        "start-runtime!: restored program replay failed"
-                        replay-stats)))
-                preparation
+          (let [preparation
                 (when restore-startup
                   (await
                    (admission/prepare-committed!
@@ -3010,9 +2982,7 @@
                               (await
                                (agent/resume!
                                 (cond->
-                                  {:seon.agent/id id
-                                   :seon.agent.runtime/compile-state
-                                   compile-state}
+                                  {:seon.agent/id id}
                                   (fn? llm-fn)
                                   (assoc :seon.agent.runtime/llm-fn llm-fn))))))
                     @!results)

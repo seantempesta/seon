@@ -1662,7 +1662,16 @@ package-size measurement is added for this test.
   retains the existing run fence and scheduled-turn accounting, and passes no
   compiler state through loop input. The frozen client artifact compiles with
   its existing migration-warning inventory.
-- **Next refill:** move the remaining stored-test/authored-route
+- Runtime resume, reload rehosting, and loop wake state no longer acquire,
+  retain, or thread a pod-global compiler. The supervised child lazily owns
+  compiler reconstruction; the pod retains only its provider closure and wake
+  listener. The `bench-client` artifact compiles 515 files with the existing
+  32-warning synchronous-consumer inventory. The now-unreachable replay
+  implementation remains deletion inventory for the atomic client cut; its
+  source volume and generated package contribution are not performance
+  evidence.
+- **Next refill:** build the retained-state harness over real Bun children and
+  the canonical persistent authority session, then move stored-test/authored-route
   consumers onto the existing per-agent child execution owner, delete global
   pod replay rather than adapting it, finish the remaining web synchronous
   consumers, and

@@ -108,12 +108,12 @@
 
 ;; ============================================================
 ;; Process-local loop-input registry — agent-id → the `input` map
-;; (`:seon.agent/id` / `:seon.agent/llm-fn` / `:seon.agent/compile-state`) the
+;; (`:seon.agent/id` / `:seon.agent/llm-fn`) the
 ;; wake trigger was (re)armed with. `install-wake-trigger!` (re)stamps it on
 ;; EVERY arm, so it stays exactly as fresh as the live wake-handler closure (a
 ;; hot reload re-arms with a freshly-resolved llm-fn). A genuinely stateful
-;; runtime artifact — the llm-fn is a closure and compile-state is the live
-;; bootstrap, neither DB-derivable. This registry remains a separate runtime-
+;; runtime artifact — the llm-fn is a closure and is not DB-derivable. This
+;; registry remains a separate runtime-
 ;; service consolidation target; it is not evidence about result liveness.
 ;; `drive-run!` reads it to RE-ENTER the loop on RESUME (the loop exits on
 ;; :pause; resume must re-drive the still-open run). `defonce` survives a hot
@@ -239,7 +239,7 @@
 (defn ^:async run-loop!
   "Drive agentic turns for `run-id` until the FSM leaves :running.
 
-   `input` carries `:seon.agent/id` / `:seon.agent/llm-fn` / `:seon.agent/compile-state`.
+   `input` carries `:seon.agent/id` and `:seon.agent/llm-fn`.
    A fold of [[seon.agent.transition]] over [[next-event]]: :turn-ok beats
    + runs a turn; the loop closes the run on the bounds it owns (:turn-limit /
    :deadline / :error / :no-forms); function closes (:wait/:complete/:terminate)
@@ -301,7 +301,11 @@
                 (let [r (await (await-bounded
                                     "turn/run-turn!"
                                     (turn/run-turn!
-                                      (assoc input :seon.agent.run/id run-id :seon.db/db db))))
+                                      {:seon.agent/id id
+                                       :seon.agent/llm-fn
+                                       (:seon.agent/llm-fn input)
+                                       :seon.agent.run/id run-id
+                                       :seon.db/db db})))
                     ;; A turn that errored (LLM error / catastrophic), a result
                     ;; that created NO turn (no `:seon.agent.turn/id` — e.g. a
                     ;; fenced/failed open-tx that left no entity), OR a turn that
@@ -670,13 +674,12 @@
 
    Input map:
      :seon.agent/id              the agent's id string
-     :seon.agent/llm-fn          ctx-string -> Promise<{:text \"…\"}>
-     :seon.agent/compile-state   bootstrap compile-state"
+     :seon.agent/llm-fn          ctx-string -> Promise<{:text \"…\"}>"
   {:malli/schema [:=> [:catn [:input [:map [:seon.agent/id :seon.agent/id]]]] :any]}
   [{:seon.agent/keys [id] :as input}]
   ;; Stamp the loop input so RESUME can re-drive the open run with this
-  ;; agent's live llm-fn / compile-state (refreshed on every re-arm — see the
-  ;; !loop-input block comment). Same staleness profile as the wake handler.
+  ;; agent's live llm-fn (refreshed on every re-arm — see the !loop-input block
+  ;; comment). Same staleness profile as the wake handler.
   (swap! !loop-input assoc id input)
   ;; One stable listener key per agent so re-arming REPLACES the prior
   ;; listener (a hot reload must not leave two listeners firing for one
@@ -693,7 +696,7 @@
    Idempotent. This is the inverse of [[install-wake-trigger!]] and is the
    required process cleanup for termination or an explicit unhost. Removing
    both cells is load-bearing: retaining only `!loop-input` would let a later
-   resume drive a terminated agent with stale provider/compiler handles."
+   resume drive a terminated agent with a stale provider handle."
   {:malli/schema
    [:=> [:catn [:input [:map [:seon.agent/id :seon.agent/id]]]]
     [:map

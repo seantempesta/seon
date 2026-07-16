@@ -263,9 +263,9 @@
                 (let [final (await (db/with-agent agent-id
                                      (fn ^:async drive []
                                        (await (loop/run-loop!
-                                                {:seon.agent/id            agent-id
-                                                 :seon.agent/llm-fn        (scripted-llm "(complete \"done\")")
-                                                 :seon.agent/compile-state cs}
+                                                {:seon.agent/id     agent-id
+                                                 :seon.agent/llm-fn
+                                                 (scripted-llm "(complete \"done\")")}
                                                 run-id)))))]
                   (testing "the loop returns the terminal FSM state :idle"
                     (is (= :idle final)))
@@ -295,11 +295,11 @@
                     final  (await (db/with-agent agent-id
                                     (fn ^:async drive []
                                       (await (loop/run-loop!
-                                               {:seon.agent/id            agent-id
+                                               {:seon.agent/id agent-id
                                                 ;; a benign form — never completes,
                                                 ;; so the WORK bound is the stopper
-                                                :seon.agent/llm-fn        (scripted-llm "(+ 1 1)")
-                                                :seon.agent/compile-state cs}
+                                                :seon.agent/llm-fn
+                                                (scripted-llm "(+ 1 1)")}
                                                run-id)))))]
                 (testing "the loop closes on the work bound and returns :idle"
                   (is (= :idle final)))
@@ -337,8 +337,7 @@
                       (await
                         (loop/run-loop!
                           {:seon.agent/id agent-id
-                           :seon.agent/llm-fn blocked-llm
-                           :seon.agent/compile-state cs}
+                           :seon.agent/llm-fn blocked-llm}
                           run-id))))
                   running?
                   (await
@@ -406,9 +405,8 @@
                     final  (await (db/with-agent agent-id
                                     (fn ^:async drive []
                                       (await (loop/run-loop!
-                                               {:seon.agent/id            agent-id
-                                                :seon.agent/llm-fn        (scripted-llm "")
-                                                :seon.agent/compile-state cs}
+                                                {:seon.agent/id agent-id
+                                                 :seon.agent/llm-fn (scripted-llm "")}
                                                run-id)))))]
                 (testing "the loop halts on the empty-streak and returns :idle"
                   (is (= :idle final)))
@@ -434,9 +432,10 @@
                     final  (await (db/with-agent agent-id
                                     (fn ^:async drive []
                                       (await (loop/run-loop!
-                                               {:seon.agent/id            agent-id
-                                                :seon.agent/llm-fn        (scripted-llm-seq ["" "(complete \"done\")"])
-                                                :seon.agent/compile-state cs}
+                                                {:seon.agent/id agent-id
+                                                 :seon.agent/llm-fn
+                                                 (scripted-llm-seq
+                                                  ["" "(complete \"done\")"])}
                                                run-id)))))]
                 (testing "a single empty turn does NOT trip the streak guard"
                   (is (= :idle final)))
@@ -472,9 +471,9 @@
                 (let [final (await (db/with-agent agent-id
                                      (fn ^:async drive []
                                        (await (loop/run-loop!
-                                                {:seon.agent/id            agent-id
-                                                 :seon.agent/llm-fn        (scripted-llm "(+ 1 1)")
-                                                 :seon.agent/compile-state cs}
+                                                {:seon.agent/id agent-id
+                                                 :seon.agent/llm-fn
+                                                 (scripted-llm "(+ 1 1)")}
                                                 a-id)))))]
                   (testing "the superseded loop bails (returns a terminal state)"
                     (is (= :idle final)))
@@ -575,9 +574,8 @@
           (fn ^:async run []
             (let [cs (await (boot-agent!))]
               (loop/install-wake-trigger!
-                {:seon.agent/id            agent-id
-                 :seon.agent/llm-fn        (scripted-llm "(complete \"ok\")")
-                 :seon.agent/compile-state cs})
+                {:seon.agent/id agent-id
+                 :seon.agent/llm-fn (scripted-llm "(complete \"ok\")")})
               (testing "no run before any message; agent is derived :idle"
                 (is (= [] (runs-for agent-id)))
                 (is (= :idle (derived agent-id))))
@@ -684,9 +682,8 @@
           (fn ^:async run []
             (let [cs (await (boot-agent!))]
               (loop/install-wake-trigger!
-                {:seon.agent/id            agent-id
-                 :seon.agent/llm-fn        (scripted-llm "(+ 1 1)")
-                 :seon.agent/compile-state cs})
+                {:seon.agent/id agent-id
+                 :seon.agent/llm-fn (scripted-llm "(+ 1 1)")})
               ;; Put the agent in :running by OPENING a run manually (nothing
               ;; drives it — the :running wake branch only renews the lease).
               (let [opened (await (run/open-run! {:seon.agent/id agent-id
@@ -718,9 +715,8 @@
               ;; lookup-ref resolves (no trigger installed for it).
               (await (db/transact! {:seon.db/tx-data [{:seon.agent/id "AGTpeerrun0001"}]}))
               (loop/install-wake-trigger!
-                {:seon.agent/id            agent-id
-                 :seon.agent/llm-fn        (scripted-llm "(complete \"ok\")")
-                 :seon.agent/compile-state cs})
+                {:seon.agent/id agent-id
+                 :seon.agent/llm-fn (scripted-llm "(complete \"ok\")")})
               (testing "a hop-CAP message wakes NOTHING (loud refusal, no run)"
                 (await (send-inbound! [:seon.agent/id "AGTpeerrun0001"] agent-id
                                       "ping-pong" warn/hop-cap :agent))
@@ -877,9 +873,9 @@
                     final  (await (db/with-agent agent-id
                                     (fn ^:async drive []
                                       (await (loop/run-loop!
-                                               {:seon.agent/id            agent-id
-                                                :seon.agent/llm-fn        never-settling-llm
-                                                :seon.agent/compile-state cs}
+                                               {:seon.agent/id agent-id
+                                                :seon.agent/llm-fn
+                                                never-settling-llm}
                                                run-id)))))]
                 (testing "the loop RETURNS (never parks) and lands :idle"
                   (is (= :idle final)))
@@ -915,9 +911,9 @@
                     final  (await (db/with-agent agent-id
                                     (fn ^:async drive []
                                       (await (loop/run-loop!
-                                               {:seon.agent/id            agent-id
-                                                :seon.agent/llm-fn        never-settling-llm
-                                                :seon.agent/compile-state cs}
+                                               {:seon.agent/id agent-id
+                                                :seon.agent/llm-fn
+                                                never-settling-llm}
                                                run-id)))))]
                 (testing "the loop RETURNS at the per-turn bound and lands :idle"
                   (is (= :idle final)))
@@ -958,9 +954,9 @@
                   child-id "AGTloopchild01"]
               ;; parent = agent-id (booted, idle); arm its REAL wake trigger.
               (loop/install-wake-trigger!
-                {:seon.agent/id            agent-id
-                 :seon.agent/llm-fn        (scripted-llm "(complete \"noted child outcome\")")
-                 :seon.agent/compile-state cs})
+                {:seon.agent/id agent-id
+                 :seon.agent/llm-fn
+                 (scripted-llm "(complete \"noted child outcome\")")})
               ;; child, parent ref set (raw transact — spawn path not under test)
               (await (db/transact!
                        {:seon.db/tx-data [{:seon.agent/id     child-id
@@ -1004,9 +1000,9 @@
             (let [cs       (await (boot-agent!))
                   child-id "AGTloopchild02"]
               (loop/install-wake-trigger!
-                {:seon.agent/id            agent-id
-                 :seon.agent/llm-fn        (scripted-llm "(complete \"never runs\")")
-                 :seon.agent/compile-state cs})
+                {:seon.agent/id agent-id
+                 :seon.agent/llm-fn
+                 (scripted-llm "(complete \"never runs\")")})
               (await (db/transact!
                        {:seon.db/tx-data [{:seon.agent/id     child-id
                                            :seon.agent/parent [:seon.agent/id agent-id]}]}))
