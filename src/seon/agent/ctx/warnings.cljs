@@ -7,6 +7,7 @@
     [clojure.string :as str]
     [seon.agent.ctx :as ctx]
     [seon.db :as db]
+    [seon.db.protocol :as protocol]
     [seon.instrument :as instrument]
     [seon.warn :as warn]))
 
@@ -37,29 +38,51 @@
       (cond-> {:seon.db/db db}
         (some? scope) (assoc :seon.warn/ns scope)))))
 
+(def ^:private latest-user-query
+  '[:find (max ?at)
+    :where
+    [?m :seon.agent.message/from ?u]
+    [?u :seon.user/id _]
+    [?m :seon.agent.message/at ?at]])
+
+(def ^:private core-frame-query
+  '[:find ?e ?fn
+    :where
+    [?e :seon.error/frames ?f]
+    [?f :seon.error.frame/index 0]
+    [?f :seon.error.frame/fn ?fn]])
+
+(def ^:private core-fault-query
+  '[:find ?e ?msg ?t ?inst
+    :where
+    [?e :seon.error/fault :core ?tx]
+    [?e :seon.error/message ?msg]
+    [(get-else $ ?e :seon.error/t 0) ?t]
+    [?tx :db/txInstant ?inst]])
+
+(def ^:private program-schema-query
+  '[:find ?sym ?spec
+    :where
+    [?e :seon.fn/sym ?sym]
+    [?e :seon.fn/spec ?spec]])
+
+(defn- query-member [query-form]
+  {::protocol/operation protocol/query-operation
+   ::protocol/query-form query-form
+   :datahike.resource/max-work 2000000
+   :datahike.resource/max-results 65536
+   :datahike.resource/max-result-weight 2097152})
+
+(defn- member-result [member]
+  (when (true? (::protocol/success? member))
+    (or (::protocol/result member)
+        (:datahike.query/result member))))
+
 (defn- core-fault-rows
-  "[eid msg t tx-inst frame0] rows for `:core`-fault errors since the
-   latest user message (every one when no user message exists yet).
-   `frame0` is the top parsed stack frame's fn name, \"\" when none."
-  [db]
-  (let [cutoff (warn/latest-user-at db)
-        frame0 (into {} (db/query
-                          {:seon.db/db db
-                           :seon.db/query
-                           '[:find ?e ?fn
-                             :where
-                             [?e :seon.error/frames ?f]
-                             [?f :seon.error.frame/index 0]
-                             [?f :seon.error.frame/fn ?fn]]}))
-        rows   (db/query
-                 {:seon.db/db db
-                  :seon.db/query
-                  '[:find ?e ?msg ?t ?inst
-                    :where
-                    [?e :seon.error/fault :core ?tx]
-                    [?e :seon.error/message ?msg]
-                    [(get-else $ ?e :seon.error/t 0) ?t]
-                    [?tx :db/txInstant ?inst]]})]
+  "Format ordinary core-fault query results at one database coordinate."
+  [cutoff-rows frame-rows rows]
+  (let [cutoff (ffirst cutoff-rows)
+        frame0 (into {} frame-rows)]
     (->> rows
          (filter (fn [[_ _ _ inst]]
                    (or (nil? cutoff)
@@ -68,7 +91,7 @@
          (mapv (fn [[e msg t inst]]
                  [e msg t inst (get frame0 e "")])))))
 
-(defn core-faults-block
+(defn ^:async core-faults-block
   "`:core`-fault errors since the last user message — root cluster only.
 
    The derived strict-gate surface of the error-blame design (RULED
@@ -80,11 +103,25 @@
    `:seon.config/root-context` (other agents see nothing — core bugs
    are not theirs to fix; the affected agent already saw its in-place
    `:seon/error` envelope)."
-  {:malli/schema [:=> [:cat :seon.render/section-request] :string]}
-  [{:seon.db/keys [db]}]
-  (let [rows (core-fault-rows db)]
-    (if (empty? rows)
+  {:malli/schema [:=> [:cat :seon.render/section-request :any] :string]}
+  [_input _invoke-selected!]
+  (let [acquired (await (db/execute-many
+                          {::db/members
+                           (mapv query-member
+                                 [latest-user-query core-frame-query
+                                  core-fault-query])
+                           ::db/max-result-weight 4194304}))
+        members (::db/results acquired)
+        rows (when (every? #(true? (::protocol/success? %)) members)
+               (apply core-fault-rows (map member-result members)))]
+    (cond
+      (nil? rows)
+      (str "[core-faults] render failed: " (pr-str members))
+
+      (empty? rows)
       ""
+
+      :else
       (str ";;; CORE FAULTS — " (count rows)
            " since the last user message (root-only)\n"
            "; These are SEON CORE bugs (fault :core — our machinery), not agent errors.\n"
@@ -99,7 +136,7 @@
            "\n; Freeze the db a fault saw: (seon.db/as-of <t>) ; "
            "full row: (seon.db/pull '[*] <eid>)"))))
 
-(defn instrumentation-gaps-block
+(defn ^:async instrumentation-gaps-block
   "Specced fns whose live var lost its malli wrapper — root cluster only.
 
    The derived coverage invariant (C46) as a reactive section: the census
@@ -112,11 +149,23 @@
    system-wide, not any one agent's). Structural async opt-outs
    (`async-unwrappable?`) are excluded; the kill-switch (`SEON_INSTRUMENT`
    off) renders empty — no invariant to hold."
-  {:malli/schema [:=> [:cat :seon.render/section-request] :string]}
-  [{:seon.db/keys [db]}]
-  (let [gaps (instrument/coverage-gaps db)]
-    (if (empty? gaps)
+  {:malli/schema [:=> [:cat :seon.render/section-request :any] :string]}
+  [_input _invoke-selected!]
+  (let [result (await (db/query
+                        {:seon.db/query program-schema-query
+                         :datahike.resource/max-work 4000000
+                         :datahike.resource/max-results 65536
+                         :datahike.resource/max-result-weight 4194304}))
+        gaps (when-not (:seon.error/message result)
+               (instrument/coverage-gaps result))]
+    (cond
+      (nil? gaps)
+      (str "[instrumentation-gaps] render failed: " (pr-str result))
+
+      (empty? gaps)
       ""
+
+      :else
       (str ";;; INSTRUMENTATION GAPS — " (count gaps)
            " specced fns without a live wrapper (root-only)\n"
            "; These fns carry a :malli/schema but their LIVE var is not malli-wrapped\n"

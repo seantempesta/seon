@@ -843,16 +843,6 @@
                     ::verification-gaps verification-gaps)))))))
 
 #?(:cljs
-   (defn- program-schema-rows
-     "The canonical qualified-symbol/spec rows, in stable order."
-     [db]
-     (sort-by first
-              (db/query '[:find ?sym ?spec
-                          :where [?e :seon.fn/sym ?sym]
-                                 [?e :seon.fn/spec ?spec]]
-                        db))))
-
-#?(:cljs
    (defn instrument-projection-delta!
      "Publish exactly one validated program/schema projection delta.
 
@@ -1013,22 +1003,21 @@
 
 #?(:cljs
    (defn coverage-gaps
-     "Specced program-graph fns whose live var has no Malli wrapper.
+     "Specced program-graph rows whose live var has no Malli wrapper.
 
       This is a derived invariant over canonical DB rows plus live function
       objects; it stores no registry or dirty flag. Rows with no live var are
       not gaps. Every live canonical contract is wrapped or appears here as an
       unwrapped, unreadable, or currently unresolvable contract."
-     {:malli/schema [:=> [:catn [::db :any]]
+     {:malli/schema [:=> [:cat [:sequential [:tuple :string :string]]]
                      [:vector [:map
                                [::sym :string]
                                [::reason :keyword]]]]}
-     [db]
+     [rows]
      (if-not (enabled?)
        []
        (let [registry
              (:seon.schema.projection/registry
                (schema/current-projection))]
          (mapv #(select-keys % [::sym ::reason])
-               (coverage-gaps-for-rows registry
-                                       (program-schema-rows db)))))))
+               (coverage-gaps-for-rows registry (sort-by first rows)))))))
