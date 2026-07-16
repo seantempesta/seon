@@ -179,6 +179,11 @@ instead deletes the final local CLJS consumers and Datahike implementation in
 that cut, leaving the remote implementation as canonical `seon.db` without a
 lasting alias layer. The child launch freezes absolute runtime root/cwd and an
 explicit environment instead of inheriting the host.
+Shadow/ClojureScript remains the sole closure owner: Seon defines the correct
+entrypoint and removes architecturally unreachable local-replica dependencies,
+then accepts the compiler-derived transitive package. There is no manual module
+list, dependency stub, or bundle-byte-driven removal of capabilities an agent
+legitimately needs.
 Strict reads inside one containing commit are grounded in
 [[research/strict-temporal-coordinate-seam-2026-07-16]]. The dependency-native
 ordered/missing-value pull contract is
