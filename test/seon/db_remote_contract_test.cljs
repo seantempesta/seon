@@ -3,19 +3,12 @@
   (:require
    [cljs.test :refer [async deftest is testing]]
    [seon.db :as db]
-   [seon.db.coordinate :as coordinate]
    [seon.db.protocol :as protocol]
    [seon.db.transport.uds :as uds]
    [seon.instrument :as instrument]))
 
 (def ^:private database-name "contract-default")
 (def ^:private socket-path "tmp/db-remote-contract.sock")
-
-(def ^:private point
-  {::coordinate/database-id #uuid "10000000-0000-0000-0000-000000000001"
-   ::coordinate/branch :db
-   ::coordinate/commit-id #uuid "10000000-0000-0000-0000-000000000002"
-   ::coordinate/t 536870913})
 
 (def ^:private database
   {:db-name database-name
@@ -33,7 +26,7 @@
 (defn- response-for
   [request query-results]
   (let [name (or (::protocol/database-name request) database-name)
-        attachment (coordinate/attachment point)]
+        current (assoc database :db-name name)]
     (case (::protocol/operation request)
       :seon.db.protocol.operation/capabilities
       (success request {::protocol/capabilities
@@ -41,24 +34,20 @@
 
       :seon.db.protocol.operation/ensure-database
       (success request {::protocol/database-name name
-                        ::coordinate/coordinate point
+                        ::db/db current
                         ::protocol/backend :memory})
 
       :seon.db.protocol.operation/acquire-database
       (success request {::protocol/database-name name
-                        ::protocol/attachment attachment
-                        ::protocol/coordinate point
+                        ::db/db current
                         ::protocol/acquired? true})
 
       :seon.db.protocol.operation/resolve-head
       (success request {::protocol/database-name name
-                        ::protocol/attachment attachment
-                        ::protocol/coordinate point})
+                        ::db/db current})
 
       :seon.db.protocol.operation/query
       (success request {::protocol/database-name name
-                        ::protocol/attachment attachment
-                        ::protocol/coordinate point
                         :datahike.query/result
                         (get query-results (::protocol/query-form request))
                         :datahike.query/attribute-dependencies #{}
@@ -67,20 +56,30 @@
 
       :seon.db.protocol.operation/pull
       (success request {::protocol/database-name name
-                        ::protocol/attachment attachment
-                        ::protocol/coordinate point
                         ::protocol/result {:example/id 1}})
 
       :seon.db.protocol.operation/pull-many
       (success request {::protocol/database-name name
-                        ::protocol/attachment attachment
-                        ::protocol/coordinate point
                         ::protocol/result [{:example/id 1} nil]})
+
+      :seon.db.protocol.operation/index-page
+      (success request
+               {:datahike.index-page/datoms [[1 :example/id "one"
+                                               536870913 true]]
+                :datahike.index-page/complete? true})
+
+      :seon.db.protocol.operation/transact
+      (success request
+               {:db-before (assoc current :t 536870912
+                                  :datahike/commit-id
+                                  #uuid "10000000-0000-0000-0000-000000000001")
+                :db-after current
+                :tx-data [[1 :example/id "one" 536870913 true]]
+                :tempids {-1 1}
+                :tx-meta {:seon.db/user [:seon.agent/id "root"]}})
 
       :seon.db.protocol.operation/listen
       (success request {::protocol/database-name name
-                        ::protocol/attachment attachment
-                        ::protocol/coordinate point
                         ::protocol/listening? true})
 
       :seon.db.protocol.operation/unlisten
@@ -97,8 +96,6 @@
       :seon.db.protocol.operation/release-database
       (success request {::protocol/target-database-name
                         (::protocol/target-database-name request)
-                        ::protocol/target-attachment
-                        (::protocol/target-attachment request)
                         ::protocol/released? true})
 
       (success request {}))))
@@ -176,11 +173,17 @@
                      (is (nil? (:since earlier)))
                      (is (= 536870912 (:since later)))
                      (is (nil? (:as-of later)))
-                     (is (true? (:history all-datoms))))))))
+                     (is (true? (:history all-datoms)))
+                     (-> (db/db {::db/database-name "experiment-17"})
+                         (.then
+                          (fn [secondary]
+                            (is (= "experiment-17" (:db-name secondary)))
+                            (is (= (:datahike/commit-id database)
+                                   (:datahike/commit-id secondary)))))))))))
         (.then (fn [_] (done)))
         (.catch (fn [error]
                   (is false (str "database-value contract rejected: " error))
-                  (done))))))
+                  (done)))))))
 
 (deftest positional-and-namespaced-map-arities-form-the-same-requests
   (async done
@@ -217,8 +220,28 @@
                   (.then (fn [value] (is (= {:example/id 1} value))
                            (db/pull-many database '[*] [1 404])))
                   (.then (fn [value] (is (= [{:example/id 1} nil] value))
+                           (db/pull-many {::db/db database
+                                          :seon.db/selector '[*]
+                                          :seon.db/eids [1 404]})))
+                  (.then (fn [value] (is (= [{:example/id 1} nil] value))
                            (db/entity database 1)))
-                  (.then (fn [value] (is (= {:example/id 1} value)))))))
+                  (.then (fn [value] (is (= {:example/id 1} value))
+                           (db/entity {::db/db database :seon.db/eid 1})))
+                  (.then (fn [value] (is (= {:example/id 1} value))
+                           (db/index-page
+                            database
+                            {::db/index :eavt ::db/direction :forward
+                             ::db/index-limit 2})))
+                  (.then
+                   (fn [page]
+                     (is (= [[1 :example/id "one" 536870913 true]]
+                            (:datahike.index-page/datoms page)))
+                     (db/index-page
+                      {::db/db database ::db/index :eavt
+                       ::db/direction :forward ::db/index-limit 2})))
+                  (.then
+                   (fn [page]
+                     (is (true? (:datahike.index-page/complete? page))))))))
           (.then (fn [_] (done)))
           (.catch (fn [error]
                     (is false (str "public arity contract rejected: " error))
@@ -298,7 +321,22 @@
                                  [query-result pull-result transact-result]))
                      (js/Promise.all #js [query-result pull-result
                                           transact-result]))))))
-        (.then (fn [_] (done)))
+        (.then
+         (fn [values]
+           (let [report (aget values 2)]
+             (is (= #{:db-before :db-after :tx-data :tempids :tx-meta}
+                    (set (keys report))))
+             (is (= database (:db-after report)))
+             (is (= [[1 :example/id "one" 536870913 true]]
+                    (:tx-data report))))
+           (db/transact! {::db/tx-data [{:db/ident :example/id}]
+                          ::db/tx-meta
+                          {:seon.db/user [:seon.agent/id "root"]}})))
+        (.then
+         (fn [report]
+           (is (= #{:db-before :db-after :tx-data :tempids :tx-meta}
+                  (set (keys report))))
+           (done)))
         (.catch (fn [error]
                   (is false (str "authority operation rejected instead of resolving: "
                                  error))
@@ -313,7 +351,9 @@
                   replacement-events (atom [])]
               (-> (open!)
                   (.then (fn [_] (reset! requests [])
-                           (db/listen! :updates #(swap! first-events conj %))))
+                           (db/listen! {::db/key :updates
+                                        ::db/handler
+                                        #(swap! first-events conj %)})))
                   (.then (fn [key] (is (= :updates key))
                            (db/listen! :updates
                                        #(swap! replacement-events conj %))))
@@ -322,8 +362,8 @@
                      (is (= :updates key))
                      (is (= [protocol/listen-operation protocol/listen-operation]
                             (mapv ::protocol/operation @requests))
-                         "the authority replaces a key without a client registry")
-                     (db/unlisten! :updates)))
+                         "one session-owned callback map has no duplicate delivery")
+                     (db/unlisten! {::db/key :updates})))
                   (.then
                    (fn [removed?]
                      (is (true? removed?))
@@ -342,6 +382,10 @@
             (-> (open!)
                 (.then
                  (fn [_]
+                   (db/db {::db/database-name "experiment-17"})))
+                (.then
+                 (fn [secondary]
+                   (is (= "experiment-17" (:db-name secondary)))
                    (let [cancel! (public-db-function 'cancel!)
                          release (public-db-function 'release)]
                      (is (fn? cancel!) "`seon.db/cancel!` is public")
@@ -351,8 +395,7 @@
                        (-> (cancel! "query-17")
                            (.then
                             (fn [_]
-                              (release (assoc database
-                                              :db-name "experiment-17"))))))))))
+                              (release secondary))))))))
                 (.then
                  (fn [_]
                    (when (seq @requests)
