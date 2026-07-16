@@ -169,6 +169,12 @@ one parent-owned invocation deadline, `proc.exited` terminal truth, immediate
 idle retirement, no heartbeat, and no production RSS poller. Final density
 numbers wait for a remote-only execution artifact because the current child
 still packages the monolithic `seon.db` Datahike dependency graph.
+The exact Shadow reachability and launch-environment seam is
+[[research/execution-artifact-database-dependency-seam-2026-07-16]]: 81 heavy
+database implementation imports occupy 8,293,078 of 18,810,383 live
+unoptimized execution bytes (44.1%). The one public `seon.db` namespace selects
+a private build-role implementation; the child launch freezes absolute runtime
+root/cwd and an explicit environment instead of inheriting the host.
 Strict reads inside one containing commit are grounded in
 [[research/strict-temporal-coordinate-seam-2026-07-16]]. The dependency-native
 ordered/missing-value pull contract is
@@ -1187,20 +1193,20 @@ fallback is prohibited.
 
 ### 2026-07-16 active implementation card
 
-- **Earliest unsettled contract:** an authored render function is acquired at
-  the invocation coordinate, verified by its existing symbol, exact source
-  digest, agent, and REPL provenance, compiled through the existing Shadow
-  bootstrap and `cljs.js` loader inside that agent's supervised Bun child, and
-  invoked with no SCI environment or local database value. Unchanged loaded
-  source may stay warm; changed or removed loaded source retires the child and
-  permits one fresh-child retry instead of mutable namespace unloading.
-- **Integrated proof that closes it:** cold same-namespace and transitive
-  authored loading, schema-overlay and standalone-data falsifiers, exact digest
-  and provenance refusal, warm no-compile reuse, changed/removed source
-  retirement, bounded source/result bytes, cancellation during acquisition,
-  compilation, Promise wait, and a synchronous loop, plus concurrent distinct
-  child PIDs and direct authority sessions. The SCI and in-pod authored-render
-  door are deleted in the same cut.
+- **Earliest unsettled contract:** every async outer render, interaction, eval,
+  and prompt owner acquires one coordinate-pinned invocation and calls the one
+  supervised child interface. Recursive render/context functions receive only
+  ordinary precomputed results and remain synchronous. No caller invokes SCI,
+  discovers a local database value, or introduces a render-only executor.
+- **Integrated proof that closes it:** commit `86db045d` supplies deterministic
+  authored-program identity, target-plus-reachable `cljs.js` loading, exact
+  symbol/source/agent/REPL verification, one compiler state per child, fresh
+  replacement on source change, parent-owned deadlines before and after ready,
+  timeout poisoning, late-result refusal, and cross-agent fault isolation. Its
+  focused gate passes 16 tests/72 assertions. The remaining proof invokes cold,
+  warm, changed, canceled, and synchronous-loop authored renders through the
+  real web/context owners, then proves the same ordinary result reaches pure
+  rendering while deleting the SCI and in-pod authored-render door.
 - **Dependency-ready parallel portfolio:** commit `72bcf3ba` owns the
   flavor-specific execution artifact and native `Bun.spawn` host; its focused
   proof passes 5 tests/23 assertions and its artifact/config/process proof
@@ -1214,17 +1220,22 @@ fallback is prohibited.
   namespaces remains blocked by the intentionally broken legacy replica import.
   Integration review is now falsifying whether its cached MCP advertisement
   membership remains current after post-boot birth/termination; no second
-  registry or synchronous fallback is acceptable. The execution lane
-  implements the one authored-source owner grounded in
+  registry or synchronous fallback is acceptable. Commit `86db045d` implements
+  the one authored-source owner grounded in
   [[research/unit-8-authored-source-loading-seam-2026-07-16]]. The independent
   supervision audit rejects heartbeats and polling: the host absolute deadline
   must cancel and retire the exact child, `proc.exited` closes the slot, and an
   abnormal post-ready exit runs exact fenced recovery without replay. A
-  source-grounded remote-client dependency audit now owns the later artifact
-  slimming seam without changing the public `seon.db` interface.
-- **Next refill:** after authored render parity, migrate interaction and eval
-  through that same child owner and land the 13/16-member prompt acquisition
-  with immutable retry inputs. In parallel, finish restore/readiness,
+  source-grounded remote-client dependency audit proves that the current child
+  spends 44.1% of its live JS bytes on local database implementation code. Its
+  later slimming seam selects one private build-role implementation behind the
+  unchanged public `seon.db` interface and moves eval-limit environment reads
+  into closed startup/config data before enforcing the explicit child
+  environment.
+- **Next refill:** migrate the outer authored render owners first, then
+  interaction and eval through that same child owner and land the 13/16-member
+  prompt acquisition with immutable retry inputs. In parallel, finish
+  restore/readiness,
   quiescence, and session close. Only then switch client open atomically and
   delete replica, publisher/replay, Node adapters, SCI render reconstruction,
   synchronous database-value arities, and compatibility reachability.
