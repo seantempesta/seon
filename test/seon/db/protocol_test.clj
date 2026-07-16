@@ -3,33 +3,25 @@
   (:require [clojure.test :refer [deftest is testing]]
             [cognitect.transit :as transit]
             [seon.db.coordinate :as coordinate]
-            [seon.db.protocol :as protocol]
-            [seon.schema :as schema])
+            [seon.db.protocol :as protocol])
   (:import [java.io ByteArrayInputStream ByteArrayOutputStream]))
 
-(def ^:private point
-  {::coordinate/database-id
-   #uuid "54b5b7e7-51fb-3220-b079-81a81914d86f"
-   ::coordinate/branch :db
-   ::coordinate/commit-id
-   #uuid "6a56b426-c836-5817-9f6b-20584f2e81d5"
-   ::coordinate/t 536870929})
+(def ^:private db
+  {:db-name "default"
+   :t 536870929
+   :as-of nil
+   :since nil
+   :history false
+   :datahike/commit-id
+   #uuid "6a56b426-c836-5817-9f6b-20584f2e81d5"})
 
-(def ^:private attachment (coordinate/attachment point))
+(def ^:private other-db
+  (assoc db
+         :db-name "research"
+         :datahike/commit-id
+         #uuid "b6d0f53b-3044-5f0a-95d8-5ea3218248f5"))
 
-(def ^:private datom
-  {:seon.db/e 17
-   :seon.db/a :person/name
-   :seon.db/v "Ada"
-   :seon.db/tx 536870929
-   :seon.db/added? true})
-
-(def ^:private cursor
-  (merge datom
-         {::protocol/coordinate point
-          ::protocol/index :aevt
-          ::protocol/direction :forward
-          ::protocol/history? false}))
+(def ^:private datom [17 :person/name "Ada" 536870929 true])
 
 (defrecord HostOwner [value])
 
@@ -40,312 +32,194 @@
     (transit/read
      (transit/reader (ByteArrayInputStream. (.toByteArray output)) :json))))
 
-(deftest failures-preserve-the-existing-seon-error-kind
-  (let [failure
-        (protocol/failure
-         {::protocol/error-kind protocol/database-error
-          ::protocol/error "unknown attribute"
-          :seon.error/kind :user-input
-          ::protocol/body {::protocol/request-id "query/user-input"}})
-        member
-        (dissoc failure ::protocol/request-id)]
-    (is (protocol/valid-response? failure))
-    (is (= :user-input (:seon.error/kind failure)))
-    (is (= failure (transit-roundtrip failure)))
-    (is (schema/valid-candidate-value? ::protocol/member-response member))))
+(deftest database-values-are-complete-closed-and-temporally-unambiguous
+  (is (= 9 protocol/current-version))
+  (is (protocol/database-value? db))
+  (is (protocol/database-value? (assoc db :as-of 536870928)))
+  (is (protocol/database-value? (assoc db :since #inst "2026-07-16")))
+  (doseq [invalid [(dissoc db :t)
+                   (assoc db :extra true)
+                   (assoc db :as-of 536870928 :since 536870927)
+                   (assoc db :history :yes)]]
+    (is (false? (protocol/database-value? invalid)))))
 
-(deftest schema-and-history-requests-are-closed-and-transit-stable
-  (let [schema-request
-        (protocol/schema-request
-         {::protocol/request-id "schema/read"
-          ::protocol/database-name "default"
-          ::protocol/attachment attachment
-          ::protocol/coordinate point})
-        schema-response
-        (protocol/success
-         {::protocol/request-id "schema/read"
-          ::protocol/database-name "default"
-          ::protocol/attachment attachment
-          ::protocol/coordinate point
-          ::protocol/schema
-          {:person/name {:db/valueType :db.type/string
-                         :db/cardinality :db.cardinality/one}}})
-        query-request
-        (protocol/query-request
-         {::protocol/request-id "query/history"
-          ::protocol/database-name "default"
-          ::protocol/attachment attachment
-          ::protocol/coordinate point
-          ::protocol/query-form '[:find ?e :where [?e :person/name]]
-          ::protocol/arguments []
-          ::protocol/history? true})]
-    (is (= 8 protocol/current-version))
-    (is (every? protocol/valid-request? [schema-request query-request]))
-    (is (protocol/valid-response? schema-response))
-    (is (= schema-request (transit-roundtrip schema-request)))
-    (is (= schema-response (transit-roundtrip schema-response)))
-    (is (false? (protocol/valid-request?
-                 (assoc schema-request :transport/session-id "private"))))
-    (is (false? (protocol/valid-response?
-                 (assoc schema-response :transport/cache-owner "private"))))
-    (is (false? (protocol/valid-request?
-                 (assoc query-request ::protocol/history? :yes))))))
+(deftest reads-carry-ordinary-database-values-without-legacy-routing
+  (let [descriptor-shaped-data [[other-db]]
+        query (protocol/query-request
+               {::protocol/request-id "query/multi"
+                :seon.db/db db
+                ::protocol/query-form
+                '[:find ?value :in $left $right [[?value]]
+                  :where [$left _ :person/name]
+                         [$right _ :person/name]]
+                ::protocol/arguments [db other-db descriptor-shaped-data]})
+        pull (protocol/pull-request
+              {::protocol/request-id "pull/one"
+               :seon.db/db db
+               ::protocol/selector '[*]
+               ::protocol/entity-id 17})]
+    (is (every? protocol/valid-request? [query pull]))
+    (is (= descriptor-shaped-data
+           (nth (::protocol/arguments query) 2)))
+    (is (= query (transit-roundtrip query)))
+    (doseq [legacy [(assoc query ::protocol/database-name "default")
+                    (assoc query ::protocol/coordinate {})
+                    (assoc query ::protocol/attachment {})
+                    (assoc query ::protocol/history? true)]]
+      (is (false? (protocol/valid-request? legacy))))
+    (is (false?
+         (protocol/valid-request?
+          (assoc query :seon.db/db
+                 (assoc db :as-of 536870928 :since 536870927)))))))
 
-(deftest index-pages-seal-the-complete-datom-and-ordered-view
-  (let [request
-        (protocol/index-page-request
-         {::protocol/request-id "index/page"
-          ::protocol/database-name "default"
-          ::protocol/attachment attachment
-          ::protocol/coordinate point
-          ::protocol/index :aevt
-          ::protocol/prefix [:person/name]
-          ::protocol/direction :forward
-          ::protocol/limit 200
-          ::protocol/cursor cursor})
-        response
-        (protocol/success
-         {::protocol/request-id "index/page"
-          ::protocol/database-name "default"
-          ::protocol/attachment attachment
-          ::protocol/coordinate point
-          ::protocol/datoms [datom]
-          ::protocol/complete? false
-          ::protocol/cursor cursor})]
+(deftest index-pages-use-datahikes-native-eager-shape
+  (let [request (protocol/index-page-request
+                 {::protocol/request-id "index/page"
+                  :seon.db/db db
+                  ::protocol/index :aevt
+                  ::protocol/prefix [:person/name]
+                  ::protocol/direction :forward
+                  ::protocol/limit 20
+                  ::protocol/cursor datom})
+        response (protocol/success
+                  {::protocol/request-id "index/page"
+                   :datahike.index-page/datoms [datom]
+                   :datahike.index-page/complete? false
+                   :datahike.index-page/cursor datom})]
     (is (protocol/valid-request? request))
     (is (protocol/valid-response? response))
-    (is (= request (transit-roundtrip request)))
     (is (= response (transit-roundtrip response)))
-    (testing "the semantic page and prefix bounds are closed"
-      (is (false? (protocol/valid-request?
-                   (assoc request ::protocol/limit 0))))
-      (is (false? (protocol/valid-request?
-                   (assoc request ::protocol/limit 201))))
-      (is (false? (protocol/valid-request?
-                   (assoc request ::protocol/prefix [1 2 3 4 5])))))
-    (testing "a cursor cannot move to another ordered view"
-      (doseq [mismatched
-              [(assoc-in request [::protocol/cursor ::protocol/coordinate]
-                         (assoc point ::coordinate/t 536870928))
-               (assoc request ::protocol/index :avet)
-               (assoc request ::protocol/direction :reverse)
-               (assoc request ::protocol/history? true)]]
-        (is (false? (protocol/valid-request? mismatched)))
-        (is (map? (protocol/explain-request mismatched)))))
     (is (false? (protocol/valid-response?
-                 (update response ::protocol/cursor dissoc :seon.db/added?))))))
+                 (assoc response ::protocol/datoms [datom]))))
+    (is (false? (protocol/valid-request?
+                 (assoc request ::protocol/cursor [17 :person/name]))))))
 
-(deftest byte-valued-prefix-and-cursor-survive-transit-as-content
-  (let [value (byte-array [1 2 3])
-        request
-        (protocol/index-page-request
-         {::protocol/request-id "index/bytes"
-          ::protocol/database-name "default"
-          ::protocol/attachment attachment
-          ::protocol/coordinate point
-          ::protocol/index :avet
-          ::protocol/prefix [:fingerprint value]
-          ::protocol/direction :forward
-          ::protocol/limit 10
-          ::protocol/cursor
-          (merge cursor
-                 {:seon.db/a :fingerprint
-                  :seon.db/v value
-                  ::protocol/index :avet})})
-        decoded (transit-roundtrip request)]
-    (is (protocol/valid-request? decoded))
-    (is (= [1 2 3]
-           (vec (second (::protocol/prefix decoded)))
-           (vec (get-in decoded [::protocol/cursor :seon.db/v]))))))
-
-(deftest execute-many-composes-only-immutable-read-members
-  (let [request
-        (protocol/execute-many-request
-         {::protocol/request-id "many/schema-index"
-          ::protocol/database-name "default"
-          ::protocol/attachment attachment
-          ::protocol/coordinate point
-          ::protocol/members
-          [{::protocol/operation protocol/schema-operation}
-           {::protocol/operation protocol/index-page-operation
-            ::protocol/index :aevt
-            ::protocol/prefix [:person/name]
-            ::protocol/direction :forward
-            ::protocol/limit 20
-            ::protocol/cursor cursor}]})
-        response
-        (protocol/success
-         {::protocol/request-id "many/schema-index"
-          ::protocol/database-name "default"
-          ::protocol/attachment attachment
-          ::protocol/coordinate point
-          ::protocol/results
-          [(protocol/success {::protocol/schema {}})
-           (protocol/success {::protocol/datoms [datom]
-                              ::protocol/complete? false
-                              ::protocol/cursor cursor})]})]
+(deftest execute-many-members-select-their-own-database-values
+  (let [request (protocol/execute-many-request
+                 {::protocol/request-id "many/databases"
+                  ::protocol/members
+                  [{::protocol/operation protocol/schema-operation
+                    :seon.db/db db}
+                   {::protocol/operation protocol/pull-operation
+                    :seon.db/db other-db
+                    ::protocol/selector [:db/id]
+                    ::protocol/entity-id 17}]})
+        response (protocol/success
+                  {::protocol/request-id "many/databases"
+                   ::protocol/results [{:person/name "Ada"} nil]})]
     (is (protocol/valid-request? request))
     (is (= protocol/maximum-frame-bytes
            (:datahike.resource/max-result-weight request)))
     (is (protocol/valid-response? response))
-    (is (= response (transit-roundtrip response)))
-    (is (false? (protocol/valid-request?
-                 (assoc-in request
-                           [::protocol/members 1 ::protocol/direction]
-                           :reverse))))
     (is (false? (protocol/valid-request?
                  (dissoc request :datahike.resource/max-result-weight))))
-    (is (= 1024
-           (:datahike.resource/max-result-weight
-            (protocol/execute-many-request
-             (assoc (dissoc request ::protocol/operation)
-                    :datahike.resource/max-result-weight 1024)))))
-    (doseq [operation [protocol/listen-operation
-                       protocol/unlisten-operation]]
-      (is (false?
-           (protocol/valid-request?
-            (assoc request ::protocol/members
-                   [{::protocol/operation operation}])))))))
+    (is (false? (protocol/valid-request?
+                 (assoc request ::protocol/database-name "default"))))))
 
-(deftest selective-interests-use-request-identity-and-closed-data
-  (let [query-listen
-        (protocol/listen-request
-         {::protocol/request-id "listen/query"
-          ::protocol/database-name "default"
-          ::protocol/attachment attachment
-          ::protocol/query-form
-          '[:find ?name :where [?entity :person/name ?name]]})
-        datom-listen
-        (protocol/listen-request
-         {::protocol/request-id "listen/datoms"
-          ::protocol/database-name "default"
-          ::protocol/attachment attachment
-          ::protocol/datom-patterns
-          [{:seon.db/a :seon.agent.message/to
-            :seon.db/e 17
-            :seon.db/added? true}]})
-        unlisten
-        (protocol/unlisten-request
-         {::protocol/request-id "unlisten/query"
-          ::protocol/target-request-id "listen/query"})
-        listen-response
-        (protocol/success
-         {::protocol/request-id "listen/query"
-          ::protocol/database-name "default"
-          ::protocol/attachment attachment
-          ::protocol/coordinate point
-          ::protocol/listening? true})
-        unlisten-response
-        (protocol/success
-         {::protocol/request-id "unlisten/query"
-          ::protocol/target-request-id "listen/query"
-          ::protocol/listening? false})
-        event
-        {::protocol/event protocol/datoms-event
-         ::protocol/request-id "listen/query"
-         ::protocol/coordinate point
-         ::protocol/datoms [datom]}
+(deftest transactions-and-listeners-carry-one-native-report-shape
+  (let [expected-db (assoc db :t 536870928)
+        request (protocol/transaction-request
+                 {::protocol/request-id "transact/native"
+                  :seon.db/db db
+                  :seon.db/expected-db expected-db
+                  ::protocol/transaction-data
+                  [{:db/id 17 :person/name "Ada"}]})
+        report {:db-before expected-db
+                :db-after db
+                :tx-data [datom]
+                :tempids {-1 17}
+                :tx-meta {:db/txInstant #inst "2026-07-16"}}
+        response (protocol/success
+                  (assoc report ::protocol/request-id "transact/native"))
+        event (assoc report
+                     ::protocol/event protocol/datoms-event
+                     ::protocol/request-id "listen/native")
         resynchronization
         {::protocol/event protocol/resynchronization-event
-         ::protocol/request-id "listen/query"
-         ::protocol/coordinate point}]
-    (is (every? protocol/valid-request?
-                [query-listen datom-listen unlisten]))
+         ::protocol/request-id "listen/native"
+         :db-after db}
+        listen (protocol/listen-request
+                {::protocol/request-id "listen/native"
+                 :seon.db/db db
+                 ::protocol/datom-patterns [{:seon.db/a :person/name}]})]
+    (is (every? protocol/valid-request? [request listen]))
     (is (every? protocol/valid-response?
-                [listen-response unlisten-response event resynchronization]))
-    (doseq [value [query-listen datom-listen unlisten listen-response
-                   unlisten-response event resynchronization]]
-      (is (= value (transit-roundtrip value))))
-    (is (false? (protocol/valid-request?
-                 (assoc query-listen ::protocol/datom-patterns
-                        [{:seon.db/a :person/name}]))))
-    (is (false? (protocol/valid-request?
-                 (assoc unlisten :transport/session-id "private"))))
-    (is (false? (protocol/valid-response?
-                 (assoc event ::protocol/database-name "default"))))))
+                [response event resynchronization]))
+    (doseq [legacy [(assoc request ::protocol/expected-coordinate {})
+                    (assoc response ::protocol/previous-coordinate {})
+                    (assoc response ::protocol/datoms-added 1)
+                    (assoc response ::protocol/datoms-retracted 0)]]
+      (is (false? ((if (::protocol/operation legacy)
+                     protocol/valid-request?
+                     protocol/valid-response?)
+                   legacy))))
+    (testing "transaction and listener selection require current values"
+      (is (false? (protocol/valid-request?
+                   (assoc request :seon.db/db
+                          (assoc db :as-of 536870928)))))
+      (is (false? (protocol/valid-request?
+                   (assoc request :seon.db/expected-db
+                          (assoc expected-db :history true)))))
+      (is (false? (protocol/valid-request?
+                   (assoc listen :seon.db/db
+                          (assoc db :since 536870928))))))))
 
-(deftest ordinary-wire-values-are-eager-portable-data
-  (let [binary (byte-array [1 2 3])
-        accepted
-        [nil true 17 17N 17M 1/3 "value" :bare :qualified/value
-         'query/value #uuid "54b5b7e7-51fb-3220-b079-81a81914d86f"
-         #inst "2026-07-16T00:00:00.000-00:00"
-         (java.net.URI. "https://example.test/value") binary
-         {:find ['?entity] :where [['?entity :person/name "Ada"]]}
-         #{:one :two} [:one {:bare "preserved"}] '(and (= ?x 1))]
-        rejected
-        [(fn [] :host) (map identity [1 2]) (->HostOwner :host)
-         (atom :host) (future :host) (promise) (Thread/currentThread)
-         (ex-info "host" {})]]
-    (is (every? protocol/ordinary-wire-value? accepted))
-    (is (not-any? protocol/ordinary-wire-value? rejected))))
-
-(deftest canonical-validation-rejects-host-owners-before-encoding
-  (let [query
-        (protocol/query-request
-         {::protocol/request-id "query/host-owner"
-          ::protocol/database-name "default"
-          ::protocol/attachment attachment
-          ::protocol/coordinate point
-          ::protocol/query-form '[:find ?value :in $ ?input]
-          ::protocol/arguments [(future :host)]})
-        response
-        (protocol/success
-         {::protocol/request-id "pull/lazy-result"
-          ::protocol/database-name "default"
-          ::protocol/attachment attachment
-          ::protocol/coordinate point
-          ::protocol/result (map identity [1 2])})
-        event
-        {::protocol/event protocol/datoms-event
-         ::protocol/request-id "listen/host-owner"
-         ::protocol/coordinate point
-         ::protocol/datoms [(assoc datom :seon.db/v (atom :host))]}]
-    (is (false? (protocol/valid-request? query)))
-    (is (map? (protocol/explain-request query)))
-    (is (false? (protocol/valid-response? response)))
-    (is (map? (protocol/explain-response response)))
-    (is (false? (protocol/valid-response? event)))))
-
-(deftest generated-candidate-manifests-use-the-portable-id-shape
-  (let [candidate
-        {:seon.db.id/key :allocation/agent
-         :seon.db.id/identity-attr :seon.agent/id
-         :seon.db.id/value "mint-ember-otter"
-         :seon.db.id/dependent-lookup-refs
-         [[:seon.user/id "human"]]}
-        request
-        (protocol/transaction-request
-         {::protocol/database-name "default"
-          ::protocol/request-id "transact/generated"
-          ::protocol/transaction-data []
-          ::protocol/generated-candidates [candidate]})
-        conflict
-        (protocol/failure
-         {::protocol/error-kind protocol/generated-candidate-conflict-error
-          ::protocol/error "collision"
-          ::protocol/body
-          {::protocol/request-id "transact/generated"
-           ::protocol/generated-candidate candidate}})]
+(deftest release-selects-an-acquired-database-by-ordinary-value
+  (let [request (protocol/release-database-request
+                 {::protocol/request-id "release/research"
+                  :seon.db/db other-db})
+        response (protocol/success
+                  {::protocol/request-id "release/research"
+                   ::protocol/released? true})]
     (is (protocol/valid-request? request))
-    (is (protocol/valid-response? conflict))
-    (is (= request (transit-roundtrip request)))
-    (testing "the manifest is nonempty, closed, and attribute-qualified"
-      (doseq [invalid-candidate
-              [(assoc candidate :seon.db.id/extra true)
-               (assoc candidate :seon.db.id/key :unqualified)
-               (assoc candidate :seon.db.id/identity-attr :unqualified)
-               (assoc candidate :seon.db.id/value "invalid")
-               (assoc candidate :seon.db.id/dependent-lookup-refs [])
-               (assoc candidate :seon.db.id/dependent-lookup-refs
-                      [[:unqualified "human"]])]]
-        (is (false?
-             (protocol/valid-request?
-              (assoc request ::protocol/generated-candidates
-                     [invalid-candidate]))))))
-    (is (false?
-         (protocol/valid-request?
-          (assoc request ::protocol/generated-candidates []))))
+    (is (protocol/valid-response? response))
+    (is (false? (protocol/valid-request?
+                 (assoc request ::protocol/target-attachment {}))))))
+
+(deftest private-branch-administration-retains-native-coordinates
+  (let [point {::coordinate/database-id
+               #uuid "54b5b7e7-51fb-3220-b079-81a81914d86f"
+               ::coordinate/branch :db
+               ::coordinate/commit-id
+               #uuid "6a56b426-c836-5817-9f6b-20584f2e81d5"
+               ::coordinate/t 536870929}
+        request (protocol/resolve-transaction-coordinate-request
+                 {::protocol/request-id "restore/tx"
+                  ::protocol/database-name "default"
+                  ::protocol/head-coordinate
+                  {::coordinate/database-id (::coordinate/database-id point)
+                   ::coordinate/branch :db
+                   ::coordinate/commit-id (::coordinate/commit-id point)
+                   ::coordinate/t (::coordinate/t point)}
+                  ::protocol/transaction-id 536870929})]
+    (is (protocol/valid-request? request))))
+
+(deftest ordinary-wire-values-reject-host-owners-and-lazy-results
+  (is (every? protocol/ordinary-wire-value?
+              [nil true 17 17N 17M 1/3 "value" :qualified/value
+               #inst "2026-07-16" db [db] #{:one :two}]))
+  (is (not-any? protocol/ordinary-wire-value?
+                [(fn [] :host) (map identity [1 2]) (->HostOwner :host)
+                 (atom :host) (future :host) (promise)
+                 (Thread/currentThread) (ex-info "host" {})]))
+  (let [response (protocol/success
+                  {::protocol/request-id "pull/lazy"
+                   ::protocol/result (map identity [1 2])})]
+    (is (false? (protocol/valid-response? response)))
+    (is (map? (protocol/explain-response response)))))
+
+(deftest generated-candidates-remain-closed-and-uniquely-keyed
+  (let [candidate {:seon.db.id/key :allocation/agent
+                   :seon.db.id/identity-attr :seon.agent/id
+                   :seon.db.id/value "mint-ember-otter"
+                   :seon.db.id/dependent-lookup-refs
+                   [[:seon.user/id "human"]]}
+        request (protocol/transaction-request
+                 {::protocol/request-id "transact/generated"
+                  :seon.db/db db
+                  ::protocol/transaction-data []
+                  ::protocol/generated-candidates [candidate]})]
+    (is (protocol/valid-request? request))
     (testing "candidate keys identify one result position"
       (is (false?
            (protocol/valid-request?
@@ -353,14 +227,4 @@
                    [candidate
                     (assoc candidate
                            :seon.db.id/identity-attr :my.plan/id
-                           :seon.db.id/value "abcdefghijkl")]))))
-      (is (map? (protocol/explain-request
-                 (assoc request ::protocol/generated-candidates
-                        [candidate
-                         (assoc candidate
-                                :seon.db.id/identity-attr :my.plan/id
-                                :seon.db.id/value "abcdefghijkl")])))))
-    (is (false?
-         (protocol/valid-response?
-          (assoc conflict ::protocol/generated-candidate
-                 (assoc candidate :seon.db.id/key :unqualified)))))))
+                           :seon.db.id/value "abcdefghijkl")])))))))

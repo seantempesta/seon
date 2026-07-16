@@ -95,7 +95,7 @@
 (def unknown-status :seon.db.protocol.status/unknown)
 (def feed-behind-status :seon.db.protocol.status/feed-behind)
 
-(def current-version 8)
+(def current-version 9)
 
 ;; One wire contract must reject the same legal frame on every host. Paging and
 ;; operation-level result bounds remain the preferred way to stay well below it.
@@ -168,6 +168,11 @@
 
 ;;; Shared schemas
 
+(defn- one-temporal-bound?
+  [value]
+  (not (and (some? (:as-of value))
+            (some? (:since value)))))
+
 (schema/register!
  ::operation
  [:enum ping-operation
@@ -204,7 +209,23 @@
 (schema/register! ::entity-id :any)
 (schema/register! ::query-form
                   [:or [:vector :any] :map [:string {:min 1}]])
-(schema/register! ::history? :boolean)
+(schema/register! :seon.db/db
+                  [:map {:closed true}
+                   [:db-name [:string {:min 1}]]
+                   [:t [:int {:min 0}]]
+                   [:as-of [:or :nil [:int {:min 0}] :inst]]
+                   [:since [:or :nil [:int {:min 0}] :inst]]
+                   [:history :boolean]
+                   [:datahike/commit-id :uuid]])
+(schema/register! :seon.db/expected-db :seon.db/db)
+(schema/register! :seon.db/current-db :seon.db/db)
+
+(defn database-value?
+  "True when `value` is one complete ordinary database value."
+  {:malli/schema [:=> [:cat :any] :boolean]}
+  [value]
+  (and (schema/valid-candidate-value? :seon.db/db value)
+       (one-temporal-bound? value)))
 (schema/register! :datahike.resource/max-work [:int {:min 1}])
 (schema/register! :datahike.resource/max-results [:int {:min 1}])
 (schema/register! :datahike.resource/max-result-weight [:int {:min 1}])
@@ -215,7 +236,6 @@
 (schema/register! ::database-path [:string {:min 1}])
 (schema/register! ::backend [:enum :memory :file])
 (schema/register! ::coordinate ::coordinate/coordinate)
-(schema/register! ::previous-coordinate ::coordinate/coordinate)
 (schema/register!
  ::head-coordinate
  [:map {:closed true}
@@ -224,13 +244,10 @@
   [::coordinate/commit-id ::coordinate/commit-id]
   [::coordinate/t ::coordinate/t]])
 (schema/register! ::transaction-id ::coordinate/t)
-(schema/register! ::expected-coordinate ::coordinate/coordinate)
-(schema/register! ::current-coordinate ::coordinate/coordinate)
 (schema/register! ::source-coordinate ::coordinate/coordinate)
 (schema/register! ::expected-source-head ::coordinate/coordinate)
 (schema/register! ::expected-target-head ::coordinate/coordinate)
 (schema/register! ::source-head ::coordinate/coordinate)
-(schema/register! ::attachment ::coordinate/attachment)
 (schema/register! ::target-attachment ::coordinate/attachment)
 (schema/register! ::target-branch :keyword)
 (schema/register! ::main-coordinate ::coordinate/coordinate)
@@ -246,9 +263,6 @@
 (schema/register! ::acquired? :boolean)
 (schema/register! ::released? :boolean)
 (schema/register! ::deleted? :boolean)
-(schema/register! ::complete? :boolean)
-(schema/register! ::datoms-added [:int {:min 0}])
-(schema/register! ::datoms-retracted [:int {:min 0}])
 (schema/register! ::request-id
                   [:string {:min 1 :seon.db/identity true}])
 (schema/register! ::target-request-id ::request-id)
@@ -258,7 +272,6 @@
 (schema/register! ::version [:int {:min 1}])
 (schema/register! ::transaction-data [:vector :any])
 (schema/register! ::transaction-meta :map)
-(schema/register! ::temporary-ids :map)
 (schema/register!
  ::generated-candidate
  [:map {:closed true}
@@ -280,27 +293,12 @@
 (schema/register! ::prefix [:vector {:max 4} :any])
 (schema/register! ::direction [:enum :forward :reverse])
 (schema/register! ::index-page-limit [:int {:min 1 :max 200}])
-(schema/register!
- ::datom
- [:map {:closed true}
-  [:seon.db/e :int]
-  [:seon.db/a :keyword]
-  [:seon.db/v :any]
-  [:seon.db/tx :int]
-  [:seon.db/added? :boolean]])
+(schema/register! ::datom [:tuple :int :keyword :any :int :boolean])
 (schema/register! ::datoms [:vector ::datom])
-(schema/register!
- ::cursor
- [:map {:closed true}
-  [::coordinate ::coordinate]
-  [::index ::index]
-  [::direction ::direction]
-  [::history? ::history?]
-  [:seon.db/e :int]
-  [:seon.db/a :keyword]
-  [:seon.db/v :any]
-  [:seon.db/tx :int]
-  [:seon.db/added? :boolean]])
+(schema/register! ::cursor ::datom)
+(schema/register! :datahike.index-page/datoms ::datoms)
+(schema/register! :datahike.index-page/complete? :boolean)
+(schema/register! :datahike.index-page/cursor ::cursor)
 (schema/register! ::schema :map)
 (schema/register!
  :datahike.query/attribute-dependencies
@@ -318,6 +316,11 @@
 (schema/register! ::entity-ids [:vector :any])
 (schema/register! ::knn-entity-ids [:vector :int])
 (schema/register! ::hits [:vector :map])
+(schema/register! :db-before :seon.db/db)
+(schema/register! :db-after :seon.db/db)
+(schema/register! :tx-data ::datoms)
+(schema/register! :tempids :map)
+(schema/register! :tx-meta :map)
 (schema/register!
  ::error-kind
  [:enum protocol-error database-error internal-error not-found-error
@@ -391,35 +394,6 @@
 (schema/register! :seon.db.protocol.tempid/key-edn :string)
 (schema/register! :seon.db.protocol.tempid/entity :seon.db/ref)
 
-(defn- cursor-matches-index-page?
-  [coordinate* request]
-  (if-let [cursor (::cursor request)]
-    (= {::coordinate coordinate*
-        ::index (::index request)
-        ::direction (::direction request)
-        ::history? (true? (::history? request))}
-       (select-keys cursor
-                    [::coordinate ::index ::direction ::history?]))
-    true))
-
-(defn- execute-many-cursors-match?
-  [{::keys [coordinate members]}]
-  (every? (fn [member]
-            (or (not= index-page-operation (::operation member))
-                (cursor-matches-index-page? coordinate member)))
-          members))
-
-(defn- request-cursors-match?
-  [request]
-  (case (::operation request)
-    :seon.db.protocol.operation/index-page
-    (cursor-matches-index-page? (::coordinate request) request)
-
-    :seon.db.protocol.operation/execute-many
-    (execute-many-cursors-match? request)
-
-    true))
-
 (schema/register!
  ::ping-request
  [:map {:closed true}
@@ -441,12 +415,9 @@
  [:map {:closed true}
   [::operation [:= query-operation]]
   [::request-id ::request-id]
-  [::database-name ::database-name]
-  [::attachment ::attachment]
-  [::coordinate ::coordinate]
+  [:seon.db/db :seon.db/db]
   [::query-form ::query-form]
   [::arguments ::arguments]
-  [::history? {:optional true} ::history?]
   [:datahike.resource/max-work {:optional true}
    :datahike.resource/max-work]
   [:datahike.resource/max-results {:optional true}
@@ -458,9 +429,7 @@
  [:map {:closed true}
   [::operation [:= pull-operation]]
   [::request-id ::request-id]
-  [::database-name ::database-name]
-  [::attachment ::attachment]
-  [::coordinate ::coordinate]
+  [:seon.db/db :seon.db/db]
   [::selector ::selector]
   [::entity-id ::entity-id]
   [:datahike.resource/max-work {:optional true}
@@ -474,9 +443,7 @@
  [:map {:closed true}
   [::operation [:= pull-many-operation]]
   [::request-id ::request-id]
-  [::database-name ::database-name]
-  [::attachment ::attachment]
-  [::coordinate ::coordinate]
+  [:seon.db/db :seon.db/db]
   [::selector ::selector]
   [::entity-ids ::entity-ids]
   [:datahike.resource/max-work {:optional true}
@@ -490,22 +457,17 @@
  [:map {:closed true}
   [::operation [:= schema-operation]]
   [::request-id ::request-id]
-  [::database-name ::database-name]
-  [::attachment ::attachment]
-  [::coordinate ::coordinate]])
+  [:seon.db/db :seon.db/db]])
 (schema/register!
  ::index-page-request
  [:map {:closed true}
   [::operation [:= index-page-operation]]
   [::request-id ::request-id]
-  [::database-name ::database-name]
-  [::attachment ::attachment]
-  [::coordinate ::coordinate]
+  [:seon.db/db :seon.db/db]
   [::index ::index]
   [::prefix ::prefix]
   [::direction ::direction]
   [::limit ::index-page-limit]
-  [::history? {:optional true} ::history?]
   [::cursor {:optional true} ::cursor]
   [:datahike.resource/max-result-weight {:optional true}
    :datahike.resource/max-result-weight]])
@@ -513,9 +475,9 @@
  ::query-member
  [:map {:closed true}
   [::operation [:= query-operation]]
+  [:seon.db/db :seon.db/db]
   [::query-form ::query-form]
   [::arguments ::arguments]
-  [::history? {:optional true} ::history?]
   [:datahike.resource/max-work {:optional true} :datahike.resource/max-work]
   [:datahike.resource/max-results {:optional true} :datahike.resource/max-results]
   [:datahike.resource/max-result-weight {:optional true}
@@ -524,6 +486,7 @@
  ::pull-member
  [:map {:closed true}
   [::operation [:= pull-operation]]
+  [:seon.db/db :seon.db/db]
   [::selector ::selector]
   [::entity-id ::entity-id]
   [:datahike.resource/max-work {:optional true} :datahike.resource/max-work]
@@ -534,6 +497,7 @@
  ::pull-many-member
  [:map {:closed true}
   [::operation [:= pull-many-operation]]
+  [:seon.db/db :seon.db/db]
   [::selector ::selector]
   [::entity-ids ::entity-ids]
   [:datahike.resource/max-work {:optional true} :datahike.resource/max-work]
@@ -543,16 +507,17 @@
 (schema/register!
  ::schema-member
  [:map {:closed true}
-  [::operation [:= schema-operation]]])
+  [::operation [:= schema-operation]]
+  [:seon.db/db :seon.db/db]])
 (schema/register!
  ::index-page-member
  [:map {:closed true}
   [::operation [:= index-page-operation]]
+  [:seon.db/db :seon.db/db]
   [::index ::index]
   [::prefix ::prefix]
   [::direction ::direction]
   [::limit ::index-page-limit]
-  [::history? {:optional true} ::history?]
   [::cursor {:optional true} ::cursor]
   [:datahike.resource/max-result-weight {:optional true}
    :datahike.resource/max-result-weight]])
@@ -570,9 +535,6 @@
  [:map {:closed true}
   [::operation [:= execute-many-operation]]
   [::request-id ::request-id]
-  [::database-name ::database-name]
-  [::attachment ::attachment]
-  [::coordinate ::coordinate]
   [::members ::members]
   [:datahike.resource/max-result-weight
    :datahike.resource/max-result-weight]])
@@ -587,16 +549,14 @@
  [:map {:closed true}
   [::operation [:= listen-operation]]
   [::request-id ::request-id]
-  [::database-name ::database-name]
-  [::attachment ::attachment]
+  [:seon.db/db :seon.db/db]
   [::query-form ::query-form]])
 (schema/register!
  ::datom-listen-request
  [:map {:closed true}
   [::operation [:= listen-operation]]
   [::request-id ::request-id]
-  [::database-name ::database-name]
-  [::attachment ::attachment]
+  [:seon.db/db :seon.db/db]
   [::datom-patterns ::datom-patterns]])
 (schema/register! ::listen-request
                   [:or ::query-listen-request ::datom-listen-request])
@@ -613,15 +573,13 @@
   [::request-id ::request-id]
   [::database-name ::database-name]
   [::backend ::backend]
-  [::coordinate/attachment {:optional true} ::coordinate/attachment]
   [::database-path {:optional true} ::database-path]])
 (schema/register!
  ::acquire-database-request
  [:map {:closed true}
   [::operation [:= acquire-database-operation]]
   [::request-id ::request-id]
-  [::database-name ::database-name]
-  [::attachment ::attachment]])
+  [::database-name ::database-name]])
 (schema/register!
  ::observe-database-lifecycle-request
  [:map {:closed true}
@@ -643,9 +601,7 @@
  [:map {:closed true}
   [::operation [:= release-database-operation]]
   [::request-id ::request-id]
-  [::target-database-name ::target-database-name]
-  [::target-attachment ::target-attachment]
-  [::expected-target-head ::expected-target-head]])
+  [:seon.db/db :seon.db/db]])
 (schema/register!
  ::delete-branch-request
  [:map {:closed true}
@@ -657,12 +613,12 @@
   [::expected-target-head ::expected-target-head]])
 (schema/register!
   ::transaction-request
-  [:map
+  [:map {:closed true}
   [::operation [:= transact-operation]]
-  [::database-name ::database-name]
   [::request-id ::request-id]
+  [:seon.db/db :seon.db/db]
   [::transaction-data ::transaction-data]
-  [::expected-coordinate {:optional true} ::expected-coordinate]
+  [:seon.db/expected-db {:optional true} :seon.db/expected-db]
   [::transaction-meta {:optional true} ::transaction-meta]
   [::generated-candidates {:optional true} ::generated-candidates]])
 (schema/register!
@@ -678,9 +634,7 @@
   [:map {:closed true}
   [::operation [:= knn-search-operation]]
   [::request-id ::request-id]
-  [::database-name ::database-name]
-  [::attachment ::attachment]
-  [::coordinate ::coordinate]
+  [:seon.db/db :seon.db/db]
   [::query ::query]
   [::limit ::limit]
   [::entity-ids {:optional true} ::knn-entity-ids]])
@@ -720,8 +674,8 @@
  [::error ::error]
   [:seon.error/kind {:optional true} :keyword]
   [::generated-candidate {:optional true} ::generated-candidate]
-  [::expected-coordinate {:optional true} ::expected-coordinate]
-  [::current-coordinate {:optional true} ::current-coordinate]])
+  [:seon.db/expected-db {:optional true} :seon.db/expected-db]
+  [:seon.db/current-db {:optional true} :seon.db/current-db]])
 (schema/register!
  ::ping-response
  [:map {:closed true}
@@ -739,17 +693,12 @@
  [:map {:closed true}
   [::success? [:= true]]
   [::request-id ::request-id]
-  [::database-name ::database-name]
-  [::attachment ::attachment]
-  [::coordinate ::coordinate]])
+  [:seon.db/db :seon.db/db]])
 (schema/register!
  ::query-response
  [:map {:closed true}
   [::success? [:= true]]
   [::request-id ::request-id]
-  [::database-name ::database-name]
-  [::attachment ::attachment]
-  [::coordinate ::coordinate]
   [:datahike.query/result :datahike.query/result]
   [:datahike.query/attribute-dependencies
    :datahike.query/attribute-dependencies]
@@ -760,76 +709,29 @@
  [:map {:closed true}
   [::success? [:= true]]
   [::request-id ::request-id]
-  [::database-name ::database-name]
-  [::attachment ::attachment]
-  [::coordinate ::coordinate]
   [::result ::result]])
 (schema/register!
  ::schema-response
  [:map {:closed true}
   [::success? [:= true]]
   [::request-id ::request-id]
-  [::database-name ::database-name]
-  [::attachment ::attachment]
-  [::coordinate ::coordinate]
   [::schema ::schema]])
 (schema/register!
  ::index-page-response
  [:map {:closed true}
   [::success? [:= true]]
   [::request-id ::request-id]
-  [::database-name ::database-name]
-  [::attachment ::attachment]
-  [::coordinate ::coordinate]
-  [::datoms ::datoms]
-  [::complete? ::complete?]
-  [::cursor {:optional true} ::cursor]])
-(schema/register!
- ::query-member-response
- [:map {:closed true}
-  [::success? [:= true]]
-  [:datahike.query/result :datahike.query/result]
-  [:datahike.query/attribute-dependencies
-   :datahike.query/attribute-dependencies]
-  [:datahike.query/cache-evidence :datahike.query/cache-evidence]
-  [:datahike.query/resource-evidence :datahike.query/resource-evidence]])
-(schema/register!
- ::read-member-response
- [:map {:closed true}
-  [::success? [:= true]]
-  [::result ::result]])
-(schema/register!
- ::schema-member-response
- [:map {:closed true}
-  [::success? [:= true]]
-  [::schema ::schema]])
-(schema/register!
- ::index-page-member-response
- [:map {:closed true}
-  [::success? [:= true]]
-  [::datoms ::datoms]
-  [::complete? ::complete?]
-  [::cursor {:optional true} ::cursor]])
-(schema/register!
- ::failed-member-response
- [:map {:closed true}
- [::success? [:= false]]
- [::error-kind ::error-kind]
-  [::error ::error]
-  [:seon.error/kind {:optional true} :keyword]])
-(schema/register! ::member-response
-                  [:or ::failed-member-response ::query-member-response
-                   ::read-member-response ::schema-member-response
-                   ::index-page-member-response])
+  [:datahike.index-page/datoms :datahike.index-page/datoms]
+  [:datahike.index-page/complete? :datahike.index-page/complete?]
+  [:datahike.index-page/cursor {:optional true}
+   :datahike.index-page/cursor]])
+(schema/register! ::member-response :any)
 (schema/register! ::results [:vector ::member-response])
 (schema/register!
  ::execute-many-response
  [:map {:closed true}
   [::success? [:= true]]
   [::request-id ::request-id]
-  [::database-name ::database-name]
-  [::attachment ::attachment]
-  [::coordinate ::coordinate]
   [::results ::results]])
 (schema/register!
  ::cancel-response
@@ -844,9 +746,6 @@
  [:map {:closed true}
   [::success? [:= true]]
   [::request-id ::request-id]
-  [::database-name ::database-name]
-  [::attachment ::attachment]
-  [::coordinate ::coordinate]
   [::listening? [:= true]]])
 (schema/register!
  ::unlisten-response
@@ -860,21 +759,24 @@
  [:map {:closed true}
   [::event [:= datoms-event]]
   [::request-id ::request-id]
-  [::coordinate ::coordinate]
-  [::datoms ::datoms]])
+  [:db-before :db-before]
+  [:db-after :db-after]
+  [:tx-data :tx-data]
+  [:tempids :tempids]
+  [:tx-meta :tx-meta]])
 (schema/register!
  ::resynchronization-event-map
  [:map {:closed true}
   [::event [:= resynchronization-event]]
   [::request-id ::request-id]
-  [::coordinate ::coordinate]])
+  [:db-after :db-after]])
 (schema/register!
  ::ensure-database-response
  [:map {:closed true}
   [::success? [:= true]]
   [::request-id ::request-id]
   [::database-name ::database-name]
-  [::coordinate/coordinate ::coordinate/coordinate]
+  [:seon.db/db :seon.db/db]
   [::backend ::backend]
   [::database-path {:optional true} ::database-path]])
 (schema/register!
@@ -883,8 +785,7 @@
   [::success? [:= true]]
   [::request-id ::request-id]
   [::database-name ::database-name]
-  [::attachment ::attachment]
-  [::coordinate ::coordinate]
+  [:seon.db/db :seon.db/db]
   [::acquired? ::acquired?]])
 (schema/register!
  ::observe-database-lifecycle-response
@@ -917,8 +818,6 @@
  [:map {:closed true}
   [::success? [:= true]]
   [::request-id ::request-id]
-  [::target-database-name ::target-database-name]
-  [::target-attachment ::target-attachment]
   [::released? ::released?]])
 (schema/register!
  ::delete-branch-response
@@ -932,16 +831,14 @@
   [::deleted? ::deleted?]])
 (schema/register!
  ::transaction-response
- [:map
+  [:map {:closed true}
   [::success? [:= true]]
   [::request-id ::request-id]
-  [::coordinate ::coordinate]
-  [::previous-coordinate ::previous-coordinate]
-  [::temporary-ids ::temporary-ids]
-  [::transaction-data ::transaction-data]
-  [::transaction-meta {:optional true} ::transaction-meta]
-  [::datoms-added ::datoms-added]
-  [::datoms-retracted ::datoms-retracted]
+  [:db-before :db-before]
+  [:db-after :db-after]
+  [:tx-data :tx-data]
+  [:tempids :tempids]
+  [:tx-meta :tx-meta]
   [::generated-entity-ids {:optional true} ::generated-entity-ids]
   [::recovered? {:optional true} ::recovered?]])
 (schema/register!
@@ -955,9 +852,6 @@
  [:map {:closed true}
   [::success? [:= true]]
   [::request-id ::request-id]
-  [::database-name ::database-name]
-  [::attachment ::attachment]
-  [::coordinate ::coordinate]
   [::hits ::hits]])
 (schema/register!
  ::response
@@ -1000,14 +894,12 @@
   [::request-id ::request-id]
   [::database-name ::database-name]
   [::backend ::backend]
-  [::coordinate/attachment {:optional true} ::coordinate/attachment]
   [::database-path {:optional true} ::database-path]])
 (schema/register!
  ::acquire-database-request-input
  [:map {:closed true}
   [::request-id ::request-id]
-  [::database-name ::database-name]
-  [::attachment ::attachment]])
+  [::database-name ::database-name]])
 (schema/register!
  ::request-id-input
  [:map {:closed true}
@@ -1021,12 +913,9 @@
  ::query-request-input
  [:map {:closed true}
   [::request-id ::request-id]
-  [::database-name ::database-name]
-  [::attachment ::attachment]
-  [::coordinate ::coordinate]
+  [:seon.db/db :seon.db/db]
   [::query-form ::query-form]
   [::arguments ::arguments]
-  [::history? {:optional true} ::history?]
   [:datahike.resource/max-work {:optional true}
    :datahike.resource/max-work]
   [:datahike.resource/max-results {:optional true}
@@ -1037,9 +926,7 @@
  ::pull-request-input
  [:map {:closed true}
   [::request-id ::request-id]
-  [::database-name ::database-name]
-  [::attachment ::attachment]
-  [::coordinate ::coordinate]
+  [:seon.db/db :seon.db/db]
   [::selector ::selector]
   [::entity-id ::entity-id]
   [:datahike.resource/max-work {:optional true}
@@ -1052,9 +939,7 @@
  ::pull-many-request-input
  [:map {:closed true}
   [::request-id ::request-id]
-  [::database-name ::database-name]
-  [::attachment ::attachment]
-  [::coordinate ::coordinate]
+  [:seon.db/db :seon.db/db]
   [::selector ::selector]
   [::entity-ids ::entity-ids]
   [:datahike.resource/max-work {:optional true}
@@ -1067,21 +952,16 @@
  ::schema-request-input
  [:map {:closed true}
   [::request-id ::request-id]
-  [::database-name ::database-name]
-  [::attachment ::attachment]
-  [::coordinate ::coordinate]])
+  [:seon.db/db :seon.db/db]])
 (schema/register!
  ::index-page-request-input
  [:map {:closed true}
   [::request-id ::request-id]
-  [::database-name ::database-name]
-  [::attachment ::attachment]
-  [::coordinate ::coordinate]
+  [:seon.db/db :seon.db/db]
   [::index ::index]
   [::prefix ::prefix]
   [::direction ::direction]
   [::limit ::index-page-limit]
-  [::history? {:optional true} ::history?]
   [::cursor {:optional true} ::cursor]
   [:datahike.resource/max-result-weight {:optional true}
    :datahike.resource/max-result-weight]])
@@ -1089,9 +969,6 @@
  ::execute-many-request-input
  [:map {:closed true}
   [::request-id ::request-id]
-  [::database-name ::database-name]
-  [::attachment ::attachment]
-  [::coordinate ::coordinate]
   [::members ::members]
   [:datahike.resource/max-result-weight {:optional true}
    :datahike.resource/max-result-weight]])
@@ -1104,15 +981,13 @@
  ::query-listen-request-input
  [:map {:closed true}
   [::request-id ::request-id]
-  [::database-name ::database-name]
-  [::attachment ::attachment]
+  [:seon.db/db :seon.db/db]
   [::query-form ::query-form]])
 (schema/register!
  ::datom-listen-request-input
  [:map {:closed true}
   [::request-id ::request-id]
-  [::database-name ::database-name]
-  [::attachment ::attachment]
+  [:seon.db/db :seon.db/db]
   [::datom-patterns ::datom-patterns]])
 (schema/register! ::listen-request-input
                   [:or ::query-listen-request-input
@@ -1140,9 +1015,7 @@
  ::release-database-request-input
  [:map {:closed true}
   [::request-id ::request-id]
-  [::target-database-name ::target-database-name]
-  [::target-attachment ::target-attachment]
-  [::expected-target-head ::expected-target-head]])
+  [:seon.db/db :seon.db/db]])
 (schema/register!
  ::delete-branch-request-input
  [:map {:closed true}
@@ -1153,11 +1026,11 @@
   [::expected-target-head ::expected-target-head]])
 (schema/register!
   ::transaction-request-input
-  [:map
-  [::database-name ::database-name]
+  [:map {:closed true}
   [::request-id ::request-id]
+  [:seon.db/db :seon.db/db]
   [::transaction-data ::transaction-data]
-  [::expected-coordinate {:optional true} ::expected-coordinate]
+  [:seon.db/expected-db {:optional true} :seon.db/expected-db]
   [::transaction-meta {:optional true} ::transaction-meta]
   [::generated-candidates {:optional true} ::generated-candidates]])
 (schema/register!
@@ -1171,9 +1044,7 @@
   ::knn-request-input
   [:map {:closed true}
   [::request-id ::request-id]
-  [::database-name ::database-name]
-  [::attachment ::attachment]
-  [::coordinate ::coordinate]
+  [:seon.db/db :seon.db/db]
   [::query ::query]
   [::limit ::limit]
   [::entity-ids {:optional true} ::knn-entity-ids]])
@@ -1200,38 +1071,38 @@
   (assoc input ::operation resolve-head-operation))
 
 (defn query-request
-  "Construct one coordinate-pinned Datahike query request."
+  "Construct one immutable-database Datahike query request."
   {:malli/schema [:=> [:cat ::query-request-input] ::query-request]}
   [input]
   (assoc input ::operation query-operation))
 
 (defn pull-request
-  "Construct one coordinate-pinned Datahike pull request."
+  "Construct one immutable-database Datahike pull request."
   {:malli/schema [:=> [:cat ::pull-request-input] ::pull-request]}
   [input]
   (assoc input ::operation pull-operation))
 
 (defn pull-many-request
-  "Construct one coordinate-pinned Datahike pull-many request."
+  "Construct one immutable-database Datahike pull-many request."
   {:malli/schema [:=> [:cat ::pull-many-request-input] ::pull-many-request]}
   [input]
   (assoc input ::operation pull-many-operation))
 
 (defn schema-request
-  "Construct one coordinate-pinned Datahike schema request."
+  "Construct one immutable-database Datahike schema request."
   {:malli/schema [:=> [:cat ::schema-request-input] ::schema-request]}
   [input]
   (assoc input ::operation schema-operation))
 
 (defn index-page-request
-  "Construct one coordinate-pinned bounded Datahike index page request."
+  "Construct one immutable-database Datahike index page request."
   {:malli/schema [:=> [:cat ::index-page-request-input]
                   ::index-page-request]}
   [input]
   (assoc input ::operation index-page-operation))
 
 (defn execute-many-request
-  "Construct one coordinate-pinned group of independent database reads."
+  "Construct one bounded group of independent database reads."
   {:malli/schema [:=> [:cat ::execute-many-request-input]
                   ::execute-many-request]}
   [input]
@@ -1263,13 +1134,11 @@
   "Construct one idempotent database-open request."
   {:malli/schema [:=> [:cat ::ensure-request-input]
                   ::ensure-database-request]}
-  [{::keys [request-id database-name backend database-path]
-    attachment ::coordinate/attachment}]
+  [{::keys [request-id database-name backend database-path]}]
   (cond-> {::operation ensure-database-operation
            ::request-id request-id
            ::database-name database-name
            ::backend backend}
-    attachment (assoc ::coordinate/attachment attachment)
     database-path (assoc ::database-path database-path)))
 
 (defn acquire-database-request
@@ -1295,7 +1164,7 @@
   (assoc input ::operation create-branch-operation))
 
 (defn release-database-request
-  "Construct one attachment-fenced database-release request."
+  "Construct one release request for an acquired database value."
   {:malli/schema [:=> [:cat ::release-database-request-input]
                   ::release-database-request]}
   [input]
@@ -1312,14 +1181,15 @@
   "Construct one idempotent logical transaction request."
   {:malli/schema [:=> [:cat ::transaction-request-input]
                   ::transaction-request]}
-  [{::keys [database-name request-id transaction-data transaction-meta
-            expected-coordinate generated-candidates]
+  [{::keys [request-id transaction-data transaction-meta generated-candidates]
+    database :seon.db/db
+    expected-db :seon.db/expected-db
     :as input}]
   (cond-> {::operation transact-operation
-           ::database-name database-name
            ::request-id request-id
+           :seon.db/db database
            ::transaction-data transaction-data}
-    expected-coordinate (assoc ::expected-coordinate expected-coordinate)
+    expected-db (assoc :seon.db/expected-db expected-db)
     (seq transaction-meta) (assoc ::transaction-meta transaction-meta)
     (contains? input ::generated-candidates)
     (assoc ::generated-candidates generated-candidates)))
@@ -1335,12 +1205,11 @@
 (defn knn-search-request
   "Construct one bounded embedding-neighbor request."
   {:malli/schema [:=> [:cat ::knn-request-input] ::knn-search-request]}
-  [{::keys [request-id database-name attachment coordinate query limit entity-ids]}]
+  [{::keys [request-id query limit entity-ids]
+    database :seon.db/db}]
   (cond-> {::operation knn-search-operation
            ::request-id request-id
-           ::database-name database-name
-           ::attachment attachment
-           ::coordinate coordinate
+           :seon.db/db database
            ::query query
            ::limit limit}
     (seq entity-ids) (assoc ::entity-ids entity-ids)))
@@ -1386,10 +1255,43 @@
       (= (count candidate-keys) (count (distinct candidate-keys))))
     true))
 
+(defn- current-database-value?
+  [value]
+  (and (database-value? value)
+       (nil? (:as-of value))
+       (nil? (:since value))
+       (false? (:history value))))
+
 (defn- request-semantics-valid?
   [request]
-  (and (request-cursors-match? request)
-       (generated-candidate-keys-unique? request)))
+  (let [database-values
+        (cond-> [(get request :seon.db/db)
+                 (get request :seon.db/expected-db)]
+          (= execute-many-operation (::operation request))
+          (into (map :seon.db/db (::members request))))]
+    (and (every? database-value? (remove nil? database-values))
+         (case (::operation request)
+           :seon.db.protocol.operation/transact
+           (and (current-database-value? (:seon.db/db request))
+                (or (nil? (:seon.db/expected-db request))
+                    (current-database-value?
+                     (:seon.db/expected-db request))))
+
+           :seon.db.protocol.operation/listen
+           (current-database-value? (:seon.db/db request))
+
+           true)
+         (generated-candidate-keys-unique? request))))
+
+(defn- response-semantics-valid?
+  [response]
+  (every? database-value?
+          (remove nil?
+                  [(get response :seon.db/db)
+                   (get response :seon.db/expected-db)
+                   (get response :seon.db/current-db)
+                   (:db-before response)
+                   (:db-after response)])))
 
 (defn valid-request?
   "True when `request` is one complete canonical protocol request."
@@ -1406,9 +1308,8 @@
   (or (@request-explainer request)
       (when-not (ordinary-wire-value? request)
         {::error "Protocol requests contain only eager ordinary wire values."})
-      (when-not (request-cursors-match? request)
-        {::cursor (::cursor request)
-         ::error "Index-page cursor does not match request."})
+      (when-not (request-semantics-valid? request)
+        {::error "Protocol database values must have one temporal bound."})
       (when-not (generated-candidate-keys-unique? request)
         {::generated-candidates (::generated-candidates request)
          ::error "Generated candidate keys must be unique."})))
@@ -1418,7 +1319,8 @@
   {:malli/schema [:=> [:cat :any] :boolean]}
   [response]
   (and (@response-validator response)
-       (ordinary-wire-value? response)))
+       (ordinary-wire-value? response)
+       (response-semantics-valid? response)))
 
 (defn valid-writer-terminal-result?
   "True when `result` is one complete writer terminal value."
@@ -1432,7 +1334,9 @@
   [response]
   (or (@response-explainer response)
       (when-not (ordinary-wire-value? response)
-        {::error "Protocol responses contain only eager ordinary wire values."})))
+        {::error "Protocol responses contain only eager ordinary wire values."})
+      (when-not (response-semantics-valid? response)
+        {::error "Protocol database values must have one temporal bound."})))
 
 ;;; Durable idempotency receipt
 
@@ -1452,7 +1356,8 @@
      (hasch/uuid
       {::version current-version
        ::transaction-data (::transaction-data request)
-       ::expected-coordinate (::expected-coordinate request)
+       :seon.db/db (:seon.db/db request)
+       :seon.db/expected-db (:seon.db/expected-db request)
        ::transaction-meta (or (::transaction-meta request) {})
        ::generated-candidates (or (::generated-candidates request) [])})))
 
