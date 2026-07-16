@@ -136,13 +136,18 @@ exact frames and encoded bytes before introducing cross-block composition.
 
 ## Source migration boundaries
 
-The existing pure tail stays in place:
+The formatting tail stays in place after removing its one hidden read:
 
 - `agent-blocks` sorting and profile merge;
 - block omission and token caps;
 - block ordering and brackets;
 - stable/volatile prompt boundary; and
 - generic string/Hiccup rendering and validation.
+
+`rendered-blocks->context-text` currently calls the zero-argument
+`cache-breakpoint`, which can fall back to `db/*conn*`. Discovery must acquire
+that existing agent/config value and carry it through the ordinary root input;
+the synchronous tail may not retain the fallback.
 
 The database-reading heads move to asynchronous acquisition in their current
 owners:
