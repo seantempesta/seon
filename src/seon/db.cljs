@@ -750,9 +750,6 @@
             (if (error-value? response) response (response-error response))))))
     (session-error "This process has no open database session." {})))
 
-(defn ^:async listen-sync! [request] (await (listen! request)))
-(defn ^:async listen-async! [request] (await (listen! request)))
-
 (defn ^:async unlisten! [{::keys [key]}]
   (let [request-id (str key)]
     (if-let [{::keys [session]} (active-session)]
