@@ -1,85 +1,33 @@
 (ns seon.agent.ctx.render-fns
-  "Auto-run — the current ns's render fns become context (context.md
-   §\"Auto-run\").
-
-   The render pass QUERIES THE PROGRAM GRAPH for fns in the agent's CURRENT
-   namespace whose OUTPUT schema is a render type — a `:map` declaring
-   `:seon.render/ai` (a block: its string joins the prompt) and/or
-   `:seon.render/hiccup` (its own surface on the agent's page; the
-   `:seon.render/html-response` envelope declares both — the twins). Each
-   such fn becomes ONE DERIVED context block ([[derived-blocks]]) that
-   [[seon.agent.ctx/context-root]] merges into the agent's stored block set
-   at [[auto-run-priority]] — right after the stable code (`:namespaces`,
-   20) and before the volatile tail. ONE ordered render list; never a
-   second rendering system. Writing a specced `defn` IS authoring context.
-
-   Detection is STRUCTURAL — the output schema, resolved via malli
-   ([[output-twin-keys]]); no name conventions, no hand lists. DERIVED,
-   never stored: blocks are computed per render from the db + current-ns;
-   drop the fn (or leave the ns) and its block vanishes. `install!` stays
-   the explicit override — a fn already pinned by a stored block's slot is
-   SKIPPED here (the stored block's priority wins).
-
-   Each run goes through the bounded, errors-as-values path: an
-   agent-authored fn is SCI-interpreted with the wall-clock interrupt
-   ([[seon.render.sci/invoke-bounded]] — fail-loud, no unbounded
-   fallback); a core fn calls compiled through the ONE injecting
-   instrumentation wrapper. Dependencies arrive EXPLICITLY (explicit-wins
-   injection): the runner passes the render's frozen `:seon.db/db`, the
-   `:seon.agent/id`, and `:seon.render/at` (basis-t) in the input map. A
-   throw / interrupt / wrong shape becomes a `;; ⚠` line in the block and
-   a `:seon/error` card — the render pass always survives. The ai output
-   is clipped at `seon.config/render-fn-token-cap` TOKENS."
+  "Pure auto-run block selection and child-local selected-function execution."
   (:require
-    [cljs.reader :as reader]
-    [malli.core :as m]
-    [seon.ai.tokens :as tokens]
-    [seon.config :as config]
-    [seon.db :as db]
-    [seon.db.id :as db.id]
-    [seon.error :as err]
-    [seon.eval :as seval]
-    [seon.render.canvas :as canvas]
-    [seon.render.sci :as render-sci]
-    [seon.schema :as schema]))
+   [cljs.reader :as reader]
+   [malli.core :as m]
+   [seon.ai.tokens :as tokens]
+   [seon.config :as config]
+   [seon.db.id :as db.id]
+   [seon.schema :as schema]))
 
 (def auto-run-priority
-  "The derived blocks' `:seon.agent.ctx/priority` — context.md group 3:
-   right after the stable code (`:namespaces` = 20), before the volatile
-   tail (`:canvas` = 35)."
+  "Derived render functions appear after stable code context."
   30)
 
-(def ^:private twin-keys
-  "The output-map keys that make a fn a renderer — the block/surface twins
-   (`:seon.render/html-response` is the established envelope; a map
-   declaring either key alone is a single-sided renderer)."
-  #{:seon.render/ai :seon.render/hiccup})
+(def ^:private twin-keys #{:seon.render/ai :seon.render/hiccup})
 
 (defn output-twin-keys
-  "The render twin-keys a fn's persisted `spec-str` DECLARES on its output.
-
-   Reads the spec (a pr-str'd `:=>` form) via `m/-function-info` →
-   `m/deref` (resolves a registered ref like `:seon.render/html-response`
-   or passes an inline `:map` through) → `m/entries`, and intersects the
-   output map's keys with [[twin-keys]]. `#{}` for a non-`:=>` /
-   multi-arity / non-map-output / unreadable spec — errors-as-values, the
-   fn is simply not a renderer."
-  {:malli/schema [:=> [:catn [::spec-str :string]] [:set :keyword]]}
+  "Return the render keys declared by one persisted function schema."
+  {:malli/schema [:=> [:cat :string] [:set :keyword]]}
   [spec-str]
   (try
     (let [form (reader/read-string spec-str)
           info (m/-function-info (m/schema form))
-          out  (some-> (:output info) m/deref)]
+          out (some-> (:output info) m/deref)]
       (if (and out (= :map (m/type out)))
         (into #{} (comp (map first) (filter twin-keys)) (m/entries out))
         #{}))
     (catch :default _ #{})))
 
-(defn- select-render-fn-rows
-  "The public, specced rows whose output schema declares a
-   render twin — `[{::sym ::twins}]`, name-sorted (deterministic block
-   order within the group). Pure over eager ordinary namespace data."
-  [rows]
+(defn- select-render-fn-rows [rows]
   (->> rows
        (keep (fn [{:seon.fn/keys [sym spec private?]}]
                (when (and sym spec (not private?))
@@ -89,449 +37,85 @@
        (sort-by (comp str ::sym))
        vec))
 
-(defn- render-fn-rows
-  [db cur-ns]
-  (if-not cur-ns
-    []
-    (->> (db/query
-           {:seon.db/db db
-            :seon.db/query
-            '[:find ?sym ?spec ?priv
-              :in $ ?ns
-              :where
-              [?n :seon.ns/name ?ns]
-              [?f :seon.fn/ns ?n]
-              [?f :seon.fn/sym ?sym]
-              [?f :seon.fn/spec ?spec]
-              [(get-else $ ?f :seon.fn/private? false) ?priv]]
-            :seon.db/args [cur-ns]})
-         (keep (fn [[sym spec priv]]
-                 (when-not priv
-                   (let [twins (output-twin-keys spec)]
-                     (when (seq twins)
-                       {::sym (symbol sym) ::twins twins})))))
-         (sort-by (comp str ::sym))
-         vec)))
-
-;; :seon.ns/name lives HERE (not seon.agent.ctx) because THIS ns loads
-;; first — seon.agent.ctx requires us, and ::current-ns below references
-;; it at load time (a cold boot with the registration upstream dies with
-;; ":seon.ns/name is not a valid Malli schema").
+;; These load-order schemas remain here because this namespace is the first
+;; execution-child owner that references them.
 (schema/register! :seon.ns/name [:keyword {:seon.db/identity true}])
+(schema/register!
+ :seon.agent/id
+ [:and {:seon.db/identity true
+        :seon.db.id/generator :seon.db.id.generator/human-readable}
+  ::db.id/agent-value])
 
 (schema/register! ::fn-sym :symbol)
 (schema/register! ::current-ns :seon.ns/name)
 (schema/register! ::pinned-syms [:set :symbol])
 (schema/register! ::fn-rows [:vector :map])
-
-;; `:seon.agent/id` — registered HERE (not in its owning ns `seon.agent`)
-;; because this is the FIRST-loading ns whose load-time schema references
-;; it (`::derived-blocks-request` below; seon.render + seon.agent load
-;; after this ns, and register!'s compilability guard rejects forward
-;; references — same precedent as `:seon.ns/name` above). Moved
-;; seon.agent → seon.render in C54, → here in C58. The value schema admits the
-;; reserved orchestrator `root`, preserved legacy ids, and newly generated
-;; readable ids; only the readable branch is generated now.
-;; The `:or` bridges to the SAME datahike schema: the CLJS bridge
-;; (seon.db.internal/form->datahike-value-type) walks `:and` → base, then
-;; the `:or` (one mappable type :db.type/string via :seon.db/id + the
-;; unmappable `[:= "root"]`) → :db.type/string; the
-;; `{:seon.db/identity true}` prop still yields :db.unique/identity.
-;; Because the resolved head is `:and` (not `:or`), `edn-encoded-attr?`
-;; is FALSE — "root" stores as a plain string, NOT pr-str'd EDN.
 (schema/register!
-  :seon.agent/id
-  [:and {:seon.db/identity true
-         :seon.db.id/generator :seon.db.id.generator/human-readable}
-   ::db.id/agent-value])
-
-(schema/register! ::derived-blocks-request
-  [:map
-   [:seon.db/db    {:optional true} :seon.db/db]
-   [:seon.agent/id {:optional true} :seon.agent/id]
-   [::current-ns   {:optional true} ::current-ns]
-   [::fn-rows      {:optional true} ::fn-rows]
-   [::pinned-syms  {:optional true} ::pinned-syms]])
-
-;; ============================================================
-;; The canvas default — the agent's last-updated surface (context.md /
-;; ui.md §canvas: "derived by default, pinnable to override"). Pure
-;; f(db value): nothing is stored, no touched-at stamp — the touch
-;; coordinate is read off the datoms' tx column (+ the history view,
-;; so a retraction counts as a change too).
-;; ============================================================
-
-(def ^:private dependency-exclusions
-  "Transaction/delivery plumbing is not domain view data.
-
-   These attrs appear as qualified literals in generic database helpers and
-   provenance queries, but their presence on every commit must not invalidate
-   every renderer or steal surface focus. A renderer that intentionally shows
-   provenance should derive it behind a domain-facing function/read model."
-  #{:db/txInstant
-    :seon.db/user
-    :seon.db/process
-    :seon.db.protocol/request-id})
-
-(defn- declared-read-attrs
-  "The fn's DECLARED read-set: the attrs its author's forms name as
-   qualified keyword literals (agent `my.*` code must fully qualify
-   (#73), so the literals are the queries). Reads only persisted
-   `:seon.fn/read-attrs`, extracted from the already-read defn form by
-   the analyzer tee. Intersected with the installed schema at read time
-   and stripped of output/protocol attrs. Conservative by construction:
-   an attr reached only dynamically is not watched."
-  [installed persisted-kws]
-  (->> persisted-kws
-       (filter installed)
-       (remove twin-keys)
-       (remove dependency-exclusions)
-       distinct
-       vec))
-
-(schema/register! ::last-updated-request
-  [:map
-   [:seon.db/db    :seon.db/db]
-   [:seon.agent/id :string]])
-(schema/register! ::surface-sym :symbol)
-(schema/register! ::touch :int)
-(schema/register! ::last-updated-response
-  [:map
-   [::surface-sym {:optional true} ::surface-sym]
-   [::touch    {:optional true} ::touch]])
-
-(defn- fn-row
-  "One stored fn's source transaction and declared database read-set."
-  [db sym]
-  (let [installed (db/installed-schema db)]
-    (when (every? installed [:seon.fn/sym :seon.fn/source])
-      (when-let [[src-tx]
-                 (first (db/query
-                          {:seon.db/db db
-                           :seon.db/query
-                           '[:find ?tx
-                             :in $ ?sym
-                             :where
-                             [?f :seon.fn/sym ?sym]
-                             [?f :seon.fn/source _ ?tx]]
-                           :seon.db/args [(str sym)]}))]
-        (let [persisted (if (installed :seon.fn/read-attrs)
-                          (set (:seon.fn/read-attrs
-                                 (db/pull db [:seon.fn/read-attrs]
-                                          [:seon.fn/sym (str sym)])))
-                          #{})]
-          {::src-tx src-tx
-           ::attrs (declared-read-attrs installed persisted)})))))
-
-(schema/register! ::renderer-read-attrs-request
-  [:map
-   [:seon.db/db :seon.db/db]
-   [:seon.render/html :symbol]])
-(schema/register! ::renderer-read-attrs-response
-  [:map [::attrs [:vector :qualified-keyword]]])
-
-(defn renderer-read-attrs
-  "A symbolic renderer's declared database read-set.
-
-   This is the dependency projection used by both recency and live UI
-   invalidation. It reads the analyzer-produced `:seon.fn/read-attrs`
-   database facts through [[fn-row]]."
-  {:malli/schema [:=> [:cat ::renderer-read-attrs-request]
-                  ::renderer-read-attrs-response]}
-  [{db :seon.db/db renderer :seon.render/html}]
-  {::attrs (vec (or (::attrs (fn-row db renderer)) []))})
-
-(schema/register! ::renderer-touch-request
-  [:map
-   [:seon.db/db :seon.db/db]
-   [:seon.agent/id :string]
-   [:seon.render/html :symbol]])
-(schema/register! ::renderer-touch-response
-  [:map [::touch {:optional true} ::touch]])
-
-(defn renderer-touch
-  "Latest transaction by `agent-id` touching a renderer's declared read-set.
-
-   The renderer identity and read-set come from the stored program graph. The
-   history query joins each source/data transaction to BOTH durable provenance
-   dimensions: the agent user and the REPL process. Root boot/config work and
-   another agent changing the same attribute therefore cannot steal focus.
-   The renderer's own source transaction counts only when that agent authored
-   it through the REPL. Pure over `db`; `{}` means no deliberate update by
-   this agent."
-  {:malli/schema [:=> [:cat ::renderer-touch-request]
-                  ::renderer-touch-response]}
-  [{db :seon.db/db id :seon.agent/id sym :seon.render/html}]
-  (if-let [{::keys [src-tx attrs]} (fn-row db sym)]
-    (let [history  (db/history db)
-          repl-eid (:db/id
-                     (db/entity {:seon.db/db db
-                                 :seon.db/ref
-                                 [:seon.db.process/id :seon.db.process/repl]}))
-          attr-tx (when (seq attrs)
-                    (ffirst
-                      (db/query
-                        {:seon.db/db history
-                         :seon.db/query
-                         '[:find (max ?tx)
-                           :in $ ?aid ?repl [?a ...]
-                           :where
-                           [?e ?a _ ?tx]
-                           [?tx :seon.db/user ?author]
-                           [?author :seon.agent/id ?aid]
-                           [?tx :seon.db/process ?repl]]
-                         :seon.db/args [id repl-eid (vec attrs)]})))
-          source-by-agent?
-          (boolean
-            (seq (db/query
-                    {:seon.db/db history
-                    :seon.db/query
-                    '[:find ?tx
-                      :in $ ?tx ?aid ?repl
-                      :where
-                      [?tx :seon.db/user ?author]
-                      [?author :seon.agent/id ?aid]
-                      [?tx :seon.db/process ?repl]]
-                    :seon.db/args [src-tx id repl-eid]})))
-          touches (cond-> []
-                    source-by-agent? (conj src-tx)
-                    attr-tx (conj attr-tx))]
-      (if (seq touches) {::touch (apply max touches)} {}))
-    {}))
-
-(defn last-updated-surface
-  "The agent's last-updated surface fn — the derived canvas default.
-
-   Candidates are THIS agent's authored surface fns: `:seon.fn` rows whose
-   `:seon.fn/source` datom's tx carries the agent user AND the REPL process.
-   Both facts are required: root boot/config transactions also carry root as
-   their user, but they are system work rather than definitions deliberately
-   authored by the root agent. Candidates additionally require a registered
-   spec whose output declares `:seon.render/hiccup`
-   ([[output-twin-keys]] — the same structural detection as auto-run).
-   Each candidate's TOUCH coordinate is the max agent/REPL tx over (a) its own
-   source datom — redefining the surface touches it — and (b) every datom
-   of the attrs it declares ([[declared-read-attrs]] — persisted
-   `:seon.fn/read-attrs` facts), read
-   on the HISTORY view so retractions count. The candidate with the max touch
-   is the last-updated surface; `{}` when the agent has authored none (the
-   caller falls back to the welcome). Ties break on the fn name.
-
-   Pure over the frozen db value — derive-don't-store: no touched-at
-   stamp exists anywhere. Honest bound: a surface reading attrs it never
-   names literally (dynamic attr construction) follows only its own
-   redefinitions."
-  {:malli/schema [:=> [:cat ::last-updated-request] ::last-updated-response]}
-  [{db :seon.db/db id :seon.agent/id}]
-  (let [installed (db/installed-schema db)
-        repl-eid (:db/id
-                   (db/entity {:seon.db/db db
-                               :seon.db/ref
-                               [:seon.db.process/id :seon.db.process/repl]}))]
-    (if-not (every? installed [:seon.fn/sym :seon.fn/source :seon.fn/spec
-                               :seon.db/user :seon.db/process
-                               :seon.db.process/id])
-      {}
-      (let [;; `get-else` on a NEVER-INSTALLED attr yields NO rows at all
-            ;; (not its default), so the privacy column joins the query
-            ;; only when `:seon.fn/private?` is installed; the filter
-            ;; itself runs in Clojure, mirroring [[render-fn-rows]].
-            q    (if (installed :seon.fn/private?)
-                     '[:find ?sym ?spec ?srctx ?priv
-                      :in $ ?aid ?repl
-                      :where
-                      [?f :seon.fn/source _ ?srctx]
-                     [?srctx :seon.db/user ?author]
-                     [?author :seon.agent/id ?aid]
-                     [?srctx :seon.db/process ?repl]
-                     [?f :seon.fn/sym ?sym]
-                     [?f :seon.fn/spec ?spec]
-                     [(get-else $ ?f :seon.fn/private? false) ?priv]]
-                   '[:find ?sym ?spec ?srctx
-                     :in $ ?aid ?repl
-                     :where
-                     [?f :seon.fn/source _ ?srctx]
-                     [?srctx :seon.db/user ?author]
-                     [?author :seon.agent/id ?aid]
-                     [?srctx :seon.db/process ?repl]
-                     [?f :seon.fn/sym ?sym]
-                     [?f :seon.fn/spec ?spec]])
-            persisted-kws
-            (fn [sym]
-              (if (installed :seon.fn/read-attrs)
-                (set (:seon.fn/read-attrs
-                       (db/pull db [:seon.fn/read-attrs]
-                                [:seon.fn/sym (str sym)])))
-                #{}))
-            rows (->> (db/query {:seon.db/db db :seon.db/query q
-                                 :seon.db/args [id repl-eid]})
-                      (keep (fn [[sym spec srctx priv]]
-                              (when (and (not priv)
-                                         (contains? (output-twin-keys spec)
-                                                    :seon.render/hiccup))
-                                {::surface-sym (symbol sym)
-                                 ::src-tx   srctx
-                                 ::attrs    (declared-read-attrs
-                                              installed
-                                              (persisted-kws sym))}))))
-            ;; ONE aggregate over the union of watched attrs (history view —
-            ;; a retraction is a change), then per-candidate max lookup.
-            attrs   (into #{} (mapcat ::attrs) rows)
-            attr-tx (if (seq attrs)
-                      (into {} (db/query
-                                 {:seon.db/db (db/history db)
-                                  :seon.db/query
-                                  '[:find ?a (max ?tx)
-                                    :in $ ?aid ?repl [?a ...]
-                                    :where
-                                    [?e ?a _ ?tx]
-                                    [?tx :seon.db/user ?author]
-                                    [?author :seon.agent/id ?aid]
-                                    [?tx :seon.db/process ?repl]]
-                                  :seon.db/args [id repl-eid (vec attrs)]}))
-                      {})
-            best    (->> rows
-                         (map (fn [{::keys [surface-sym src-tx attrs]}]
-                                {::surface-sym surface-sym
-                                 ::touch (reduce max src-tx
-                                                 (keep attr-tx attrs))}))
-                         (sort-by (juxt ::touch (comp str ::surface-sym)))
-                         last)]
-        (if (some? best)
-          {::surface-sym (::surface-sym best)}
-          {})))))
+ ::derived-blocks-request
+ [:map
+  [::fn-rows ::fn-rows]
+  [::pinned-syms {:optional true} ::pinned-syms]])
 
 (defn derived-blocks
-  "The DERIVED auto-run context blocks for the agent's current ns.
-
-   One block per discovered render fn ([[render-fn-rows]]), each carrying
-   `::fn-sym` (the fn to run) and the runner symbols in the slots its
-   output declares — `:seon.render/ai` → [[render-fn-block-ai]],
-   `:seon.render/hiccup` → [[render-fn-block-html]] — at
-   [[auto-run-priority]]. A fn in `::pinned-syms` (already the slot of a
-   STORED block — the `install!` override) is skipped. Computed per render,
-   never persisted."
+  "Build auto-run blocks from the ordinary function rows already acquired."
   {:malli/schema [:=> [:cat ::derived-blocks-request] [:vector :map]]}
-  [{db :seon.db/db cur-ns ::current-ns rows ::fn-rows pinned ::pinned-syms}]
-  (->> (if (some? rows)
-         (select-render-fn-rows rows)
-         (render-fn-rows db cur-ns))
+  [{rows ::fn-rows pinned ::pinned-syms}]
+  (->> (select-render-fn-rows rows)
        (remove #(contains? (or pinned #{}) (::sym %)))
        (mapv (fn [{sym ::sym twins ::twins}]
-               (cond-> {:seon.agent.ctx/name     (keyword "render-fn" (name sym))
+               (cond-> {:seon.agent.ctx/name (keyword "render-fn" (name sym))
                         :seon.agent.ctx/priority auto-run-priority
-                        ::fn-sym                 sym}
+                        ::fn-sym sym}
                  (contains? twins :seon.render/ai)
-                 (assoc :seon.render/ai 'seon.agent.ctx.render-fns/render-fn-block-ai)
+                 (assoc :seon.render/ai
+                        'seon.agent.ctx.render-fns/render-fn-block-ai)
                  (contains? twins :seon.render/hiccup)
-                 (assoc :seon.render/html 'seon.agent.ctx.render-fns/render-fn-block-html))))))
+                 (assoc :seon.render/html
+                        'seon.agent.ctx.render-fns/render-fn-block-html))))))
 
-;; ============================================================
-;; The runner — ONE bounded, errors-as-values invocation shared by both
-;; twins. Returns the fn's value (the html-response envelope or a bare
-;; view value) OR the `:seon.render.sci/interrupt` / `:seon.render.sci/error`
-;; envelope — never throws.
-;; ============================================================
+(defn- selected-call [input]
+  {:seon.execution/function-symbol (::fn-sym (:seon.render/node input))
+   :seon.execution/arguments
+   [(cond-> {:seon.render/entity (:seon.agent/entity input)}
+      (:seon.agent/id input)
+      (assoc :seon.agent/id (:seon.agent/id input)))]})
 
-(defn- run-render-fn
-  "Run the derived block's `::fn-sym` for `view`, bounded + errors-as-values.
+(defn- failure-message [input result]
+  (str (::fn-sym (:seon.render/node input)) " failed: "
+       (or (get-in result [:seon.execution/error :seon.error/message])
+           "selected function failed")))
 
-   Builds the fn's input EXPLICITLY from the render context — the frozen
-   `:seon.db/db`, the `:seon.agent/id`, and `:seon.render/at` (the frozen
-   db's basis-t) — so a fn declaring those keys reads the render's frozen
-   snapshot (explicit args win over boundary injection). An agent-authored
-   sym runs SCI-bounded ([[seon.render.sci/invoke-bounded]]); a core sym
-   calls compiled (its instrumented wrapper validates). Never throws."
-  [in view]
-  (let [node (:seon.render/node in)
-        sym  (::fn-sym node)
-        db*  (:seon.db/db in)
-        input (cond-> {:seon.db/db db*}
-                (:seon.agent/id in) (assoc :seon.agent/id (:seon.agent/id in))
-                db* (assoc :seon.render/at
-                           (try (db/basis-t db*) (catch :default _ 0))))]
-    (cond
-      (not (qualified-symbol? sym))
-      {:seon.render.sci/error
-       {:seon.error/message (str "auto-run block carries no runnable ::fn-sym ("
-                                 (pr-str sym) ")")}}
-      (err/agent-authored-sym? sym)
-      (render-sci/invoke-bounded sym input view)
-      :else
-      (if-let [f (seval/lookup-value sym)]
-        (try (f input)
-             (catch :default e {:seon.render.sci/error (err/->map e)}))
-        {:seon.render.sci/error
-         {:seon.error/message (str sym " does not resolve — define it and this "
-                                   "block self-heals next render")}}))))
-
-(defn- clip-marker
-  "The LOUD token-denominated truncation notice appended at an auto-run
-   clip cut."
-  [budget total]
-  (str " …⟨⚠ clipped at " budget " of " total
-       " tokens — narrow this render fn's output⟩"))
+(defn- error-card [message]
+  [:div {:class "text-error text-xs font-mono"} (str "render error: " message)])
 
 (defn ^:async render-fn-block-ai
-  "The derived auto-run block's `:seon.render/ai` slot — run the fn, keep
-   its ai twin.
-
-   Runs the node's `::fn-sym` through [[run-render-fn]] and returns its
-   `:seon.render/ai` string (envelope or bare), clipped at
-   `seon.config/render-fn-token-cap` tokens. An interrupt / error / wrong
-   shape becomes a `;; ⚠` line naming the fn — the agent sees exactly what
-   to fix, in place, and the render pass survives (errors-as-values)."
+  "Invoke one derived function in the child and return its bounded AI twin."
   {:malli/schema [:=> [:cat :seon.render/section-request :any] :string]}
-  [in invoke-selected!]
-  (let [sym (::fn-sym (:seon.render/node in))
-        result (first
-                 (await
-                   (invoke-selected!
-                     [{:seon.execution/function-symbol sym
-                       :seon.execution/arguments
-                       [(cond-> {:seon.render/entity (:seon.agent/entity in)}
-                          (:seon.agent/id in)
-                          (assoc :seon.agent/id (:seon.agent/id in)))]}])))]
-    (cond
-      (not (:seon.execution/ok? result))
-      (str ";; ⚠ render fn " sym " failed: "
-           (get-in result [:seon.execution/error :seon.error/message]))
-      :else
-      (let [r (:seon.execution/value result)
-            s (if (map? r) (:seon.render/ai r) r)]
+  [input invoke-selected!]
+  (let [result (first (await (invoke-selected! [(selected-call input)])))]
+    (if-not (:seon.execution/ok? result)
+      (str ";; ⚠ " (failure-message input result))
+      (let [value (:seon.execution/value result)
+            text (if (map? value) (:seon.render/ai value) value)]
         (cond
-          (nil? s)    ""
-          (string? s) (tokens/clip-str s (config/render-fn-token-cap) clip-marker)
-          :else (str ";; ⚠ render fn " sym " returned a non-string "
-                     ":seon.render/ai — fix its output"))))))
+          (nil? text) ""
+          (string? text) (tokens/clip-str text (config/render-fn-token-cap))
+          :else (str ";; ⚠ " (::fn-sym (:seon.render/node input))
+                     " returned a non-string :seon.render/ai"))))))
 
-(defn render-fn-block-html
-  "The derived auto-run block's `:seon.render/html` slot — the surface twin.
-
-   Runs the node's `::fn-sym` through [[run-render-fn]] and returns its
-   `:seon.render/hiccup` (envelope or bare vector); nil renders nothing. An
-   interrupt / error / wrong shape becomes the one `:seon/error` card in
-   place ([[seon.render.canvas/error-card]]) — the render pass survives."
-  {:malli/schema [:=> [:cat :seon.render/section-request] [:maybe :seon.render.canvas/hiccup]]}
-  [in]
-  (let [sym (::fn-sym (:seon.render/node in))
-        r   (run-render-fn in :seon.render/html)]
-    (cond
-      (and (map? r) (:seon.render.sci/interrupt r))
-      (canvas/error-card
-        {:seon.error/message (str sym " did not terminate within its budget")
-         :seon.error/where   :auto-run
-         :seon.error/hint    "render fns must be fast, terminating db→view derivations"})
-      (and (map? r) (:seon.render.sci/error r))
-      (canvas/error-card
-        (assoc (:seon.render.sci/error r) :seon.error/where :auto-run
-               :seon.error/symbol sym))
-      :else
-      (let [h (if (map? r) (:seon.render/hiccup r) r)]
+(defn ^:async render-fn-block-html
+  "Invoke one derived function in the child and return its HTML twin."
+  {:malli/schema [:=> [:cat :seon.render/section-request :any]
+                  [:maybe :seon.render.canvas/hiccup]]}
+  [input invoke-selected!]
+  (let [result (first (await (invoke-selected! [(selected-call input)])))]
+    (if-not (:seon.execution/ok? result)
+      (error-card (failure-message input result))
+      (let [value (:seon.execution/value result)
+            hiccup (if (map? value) (:seon.render/hiccup value) value)]
         (cond
-          (nil? h)    nil
-          (vector? h) h
-          :else (canvas/error-card
-                  {:seon.error/message (str sym " returned a non-hiccup "
-                                            ":seon.render/hiccup — fix its output")
-                   :seon.error/where   :auto-run}))))))
+          (nil? hiccup) nil
+          (vector? hiccup) hiccup
+          :else (error-card
+                 (str (::fn-sym (:seon.render/node input))
+                      " returned non-hiccup :seon.render/hiccup")))))))
