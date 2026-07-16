@@ -289,3 +289,12 @@
 	path = reference-code/bun
 	url = https://github.com/oven-sh/bun.git
 	shallow = true
+[submodule "reference-code/superv.async"]
+	path = reference-code/superv.async
+	url = https://github.com/seantempesta/superv.async.git
+[submodule "reference-code/partial-cps"]
+	path = reference-code/partial-cps
+	url = https://github.com/simm-is/partial-cps.git
+[submodule "reference-code/persistent-sorted-set"]
+	path = reference-code/persistent-sorted-set
+	url = https://github.com/replikativ/persistent-sorted-set.git
