@@ -41,6 +41,12 @@ every local ambition. Remote replication, cloud topology, browser replicas,
 offline mutation, mobile packaging, and the full paid Inspect AI battery remain
 explicit follow-on work rather than completion gates.
 
+The authority-mesh cut is intentionally no longer dual-running. Commit
+`8561ae64` removes the pod-local replica/feed, local Datahike constructors, and
+their obsolete lifecycle/replica tests. The canonical `seon.db` facade is being
+reduced in place to its asynchronous authority session; remaining synchronous
+database-value callers are a breakage inventory, not compatibility obligations.
+
 ### 2026-07-16 scheduling override
 
 [[../database-authority-mesh/roadmap]] is the current implementation and proof

@@ -1317,10 +1317,18 @@ package-size measurement is added for this test.
   acquired data. No compatibility connection, query-result replay map, public
   namespace alias, or second database facade may make old local-Datahike call
   shapes appear synchronous.
-- **Earliest unsettled contract:** move scheduled eval, stored-test,
-  authored-route, and direct-render execution into the
-  existing per-agent child, then delete pod-wide program replay and the local
-  replica/feed in the same clean break. Client session open, restore completion,
+- **Earliest unsettled contract:** complete the deliberately breaking canonical
+  `seon.db` cut and migrate its explicit compile-error inventory. Commit
+  `8561ae64` deletes the pod replica, its transaction feed/replay implementation,
+  the replica and replica-coupled lifecycle tests, both production-bundled local
+  Datahike constructors, and the REPL's hidden in-memory database. Namespace
+  rendering now consumes ordinary pre-fetched data. There is no compatibility
+  period: remaining callers that require a database value, connection, lazy
+  entity, temporal wrapper, or synchronous query are invalid and must move to
+  coordinate-bound authority operations or be deleted. Stored-test,
+  authored-route, and direct-render execution move into the existing per-agent
+  child; pod-wide program replay is deleted rather than adapted. Client session
+  open, restore completion,
   readiness, startup birth, and singleton configuration are now ordinary-data,
   session-native owners. Planned quiescence already uses the
   authority facade, and `seon.db/close-session!` is the complete native inverse;
@@ -1709,12 +1717,12 @@ package-size measurement is added for this test.
   now pass framed UDS execution; the focused gate passes 53 tests and 411
   assertions. The resolved issue is
   [[../../seon/issues/archive/bun-transit-query-list-is-not-ordinary-on-jvm]].
-- **Next refill:** move stored-test/authored-route
-  consumers onto the existing per-agent child execution owner, delete global
-  pod replay rather than adapting it, finish the remaining web synchronous
-  consumers, and
-  delete replica, publisher/replay, Node adapters, SCI render reconstruction,
-  synchronous database-value arities, and compatibility reachability.
+- **Next refill:** finish the canonical `seon.db` remote-only implementation,
+  then migrate stored-test/authored-route consumers onto the existing per-agent
+  child execution owner, delete global pod replay rather than adapting it, and
+  finish the remaining web synchronous consumers. Delete publisher/replay,
+  Node adapters, SCI render reconstruction, synchronous database-value arities,
+  and every compatibility reference exposed by the clean break.
   Supervision graduation then proves immediate idle release, parent-loss
   cleanup, memory-pressure admission, remote-only artifact reachability, and
   the retained 1/4/16/32 density matrix before selecting the shipped child cap
