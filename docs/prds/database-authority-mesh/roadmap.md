@@ -91,7 +91,8 @@ Rust, cloud, Tauri, and mobile hosts conform to the same data fixtures.
 
 ## Dependency ledger
 
-- Datahike `940810f5` (graduated Units 1–3 atop
+- Datahike `092f5b05` (graduated Units 1–3 at `940810f5`, plus attached
+  exact-commit cache identity, atop
   `9ada755087228e10cfb179fa5779ce227a6ed220`):
   `db.cljc`, `connections.cljc`, `connector.cljc`, `core.cljc`,
   `writing.cljc`, `writer.cljc`, `query.cljc`, `resource.cljc`,
@@ -123,7 +124,9 @@ and delivery capacity are grounded in
 construction, cancellation, and filter seams are grounded in
 [[research/proximum-native-capacity-2026-07-16]]. The native web seam and its
 direct-stream backpressure/compression constraints are grounded in
-[[research/bun-serve-datastar-internals-2026-07-16]].
+[[research/bun-serve-datastar-internals-2026-07-16]]. Shadow artifact/runtime
+compatibility and the smallest Bun-only launcher cut are grounded in
+[[research/shadow-bun-runtime-internals-2026-07-16]].
 
 ## Ordered implementation spine
 
@@ -329,6 +332,17 @@ the exact catalog, portable head identity, typed unknown-database failure, and
 no retained host owner in the returned values. The focused transport and
 writer gates pass 19 tests and 124 assertions.
 
+The first coordinate-pinned read falsifier found that Datahike's public
+`commit-as-db` correctly loaded an immutable durable commit but detached its
+connection-generation cache identity. The owned fork now preserves that exact
+identity only when loading through an attached connection or committed DB;
+loading through a raw store remains detached. Consequently, several readers of
+the same older coordinate share the same completed cache and single-flight key
+instead of recomputing after the head advances. The full versioning namespace
+passes 18 tests and 153 assertions across specification, persistent-set, and
+hitchhiker-tree configurations; the focused identity/cache proof contributes
+3 tests and 30 assertions.
+
 Exit proof: transport-neutral fixtures cover schemas, values, identity,
 query/pull/history, branches, fencing, batching, member errors, cancellation,
 listener ordering, paging, release, malformed input, and version negotiation.
@@ -350,6 +364,17 @@ Exit proof: 1/8/32 children, multiplex limits, fragmented frames, partial
 writes, large pages, slow recipients, cancellation, child crash, reconnect,
 and release preserve bounded independent progress and outperform the removed
 request-per-socket path.
+
+Runtime evidence does not require a Shadow fork: the maintained `:node-script`
+and `:node-test` CommonJS artifacts execute directly under Bun. A focused
+artifact passed 2 tests and 7 assertions under both runtimes; the directional
+single sample used 2.05 seconds and 52.57 billion instructions under Bun versus
+4.55 seconds and 128.69 billion under Node. Bun's maximum RSS was higher
+(1.024 GB versus 701 MB), matching the accepted speed-first tradeoff but making
+full-suite and density RSS mandatory graduation evidence. One
+`SEON_JS_RUNTIME` owner must select the pod, focused/full tests, changed-test
+runner, worker validator, and packaging path; no Bun-specific Shadow target is
+justified.
 
 ### Unit 7 — remote `seon.db` and coarse core reads
 
