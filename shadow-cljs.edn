@@ -122,6 +122,22 @@
    :compiler-options {:warnings-as-errors false
                       :externs           ["externs/node_fs.js"]}}
 
+  ;; Per-agent execution child for the DEFAULT artifact flavor. It is compiled
+  ;; once and started lazily by the Bun host. A downstream flavor must declare
+  ;; its own build id and output path (as :acme-client does); it must never
+  ;; publish or watch this default output. The child talks to the database
+  ;; authority directly; parent IPC carries only bounded Transit data.
+  ;; It deliberately has no devtools connection: a child is supervised runtime
+  ;; capacity, not another REPL target, and dormant agents retain no process.
+  :execution
+  {:target           :node-script
+   :output-to        "out/execution/main.js"
+   :main             seon.execution/-main
+   :devtools         {:enabled false}
+   :compiler-options {:warnings-as-errors false
+                      :optimizations      :simple
+                      :externs           ["externs/node_fs.js"]}}
+
   ;; LEAN worker-side PARSE/SYNTACTIC oracle — CO-LOCATED on the diffusion
   ;; GPU worker (diffusion-dynamic-context). The eval-renoise loop
   ;; validates a partial canvas every checkpoint; co-located this is a
