@@ -82,6 +82,8 @@ The child no longer hard-codes one prompt entrypoint. Its existing
 symbol-plus-artifact-digest identity selects from a closed direct function map
 compiled into the execution artifact, preserving one protocol while opening
 the same trusted door for eval and coarse render owners.
+Run ownership is always fenced through the authority when a run ID is present,
+and an unreadable competing eval receipt cannot authorize a fallback write.
 Autocomplete/export and the debug feed already consume the same coordinate-
 pinned compiled child result; the obsolete synchronous AI composer is deleted.
 Stale debug completions cannot install candidate catalogs, and raw AI

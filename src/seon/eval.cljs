@@ -3534,13 +3534,15 @@
         primary (await (transact-record! (vec (or tee []))))
         committed-id (or eval-id
                          (get-in primary [::db.id/ids ::eval-allocation]))
-        settled-status
+        settled-read
         (when (and eval-id (not (:seon.db/ok? primary)))
-          (eval.internal/receipt-state
-            (await
-              (db/pull
-                {::db/pull-pattern [:seon.eval/status]
-                 ::db/ref [:seon.eval/id eval-id]}))))]
+          (await
+            (db/pull
+              {::db/pull-pattern [:seon.eval/status]
+               ::db/ref [:seon.eval/id eval-id]})))
+        settled-status
+        (when-not (:seon.error/message settled-read)
+          (eval.internal/receipt-state settled-read))]
     (cond
       (:seon.db/ok? primary)
       (cond->
@@ -3549,6 +3551,11 @@
          ::tee-recorded? true}
         (and (::ok? result) (not pending?))
         (assoc ::retained-value (::value result)))
+
+      (:seon.error/message settled-read)
+      {:seon.db/ok? false
+       :seon.eval/id eval-id
+       :seon.db/error settled-read}
 
       (contains? #{:done :error :interrupted} settled-status)
       ;; Recovery or another terminal writer won the exact receipt CAS. The
@@ -4773,7 +4780,7 @@
           ;; mix / revert rate = one Datalog query). A SEPARATE top-level
           ;; tx: nested attrs need a boot-schema entry, top-level attrs
           ;; lazy-install (the :seon.eval/record-error precedent).
-          (when (and (:seon.db/ok? recorded) fixed? db/*conn*)
+          (when (and (:seon.db/ok? recorded) fixed?)
             (let [fixes (:seon.repair/fixes pre)
                   r     (await
                           (db/transact!
@@ -5276,10 +5283,10 @@
         ;; agent STILL owns run-id BEFORE any work. A supersede/watchdog-close
         ;; that landed DURING the LLM call moved/retracted the pointer, so this
         ;; CAS aborts → fence-lost? true → the doseq is skipped (no zombie eval
-        ;; rows) and the return carries :seon.eval/fenced?. Skipped (nil) when
-        ;; run-id is absent (a runless eval path) or there's no conn.
+        ;; rows) and the return carries :seon.eval/fenced?. Skipped (nil) only
+        ;; when run-id is absent (a runless eval path).
         fence-lost?
-        (when (and run-id db/*conn*)
+        (when run-id
           (false? (:seon.db/ok?
                     (await (db/transact!
                              {:seon.db/tx-data

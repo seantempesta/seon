@@ -1491,6 +1491,11 @@ is prohibited.
   cannot be redirected through global symbol lookup. The execution artifact
   remains 415 files/18 warnings; focused direct dispatch, host identity, and
   real turn-caller proof passes 8 tests/20 assertions.
+- The eval batch run fence is now unconditional whenever a run ID is present;
+  absence of a local connection can no longer skip the serialized writer CAS.
+  A losing terminal receipt CAS whose authority status read also fails now
+  stops as database error data instead of entering transcript fallback. Two
+  connection-free regressions pass 2 tests/6 assertions.
 - **Next refill:** move the remaining parent eval/schedule/test/authored-route
   consumers onto the existing per-agent child execution owner, delete global
   pod replay rather than adapting it, finish the remaining web synchronous

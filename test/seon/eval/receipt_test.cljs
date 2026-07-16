@@ -12,7 +12,8 @@
     [seon.eval :as seval]
     [seon.eval.internal :as receipt]
     [seon.repl :as repl]
-    [seon.repl.internal :as repl.internal]))
+    [seon.repl.internal :as repl.internal]
+    [seon.runtime.admission :as admission]))
 
 (def ^:private start
   {:seon.agent.turn/id "TRNreceipt0001"
@@ -95,6 +96,85 @@
   (is (= :done (receipt/receipt-state {:seon.eval/ok? true})))
   (is (= :error (receipt/receipt-state {:seon.eval/ok? false})))
   (is (= :absent (receipt/receipt-state {}))))
+
+(deftest failed-terminal-status-read-never-enters-transcript-fallback
+  (async done
+    (let [original-transact db/transact!
+          original-pull db/pull
+          calls (atom [])]
+      (set! db/transact!
+            (fn [& [request]]
+              (swap! calls conj [:transact request])
+              (js/Promise.resolve
+               {:seon.db/ok? false
+                :seon.db/error {:seon.error/message "receipt CAS lost"}})))
+      (set! db/pull
+            (fn
+              ([request]
+               (swap! calls conj [:pull request])
+               (js/Promise.resolve
+                {:seon.error/message "authority status read failed"
+                 :seon.error/kind :core-bug}))
+              ([_selector _eid]
+               (js/Promise.reject
+                (js/Error. "unexpected positional pull")))))
+      (-> (seval/record-eval!
+           {:seon.agent.turn/id-of-turn "TRNreceipt0001"
+            ::seval/eval-id "EVLreceipt0001"
+            ::seval/at (js/Date.)
+            ::seval/duration-ms 1
+            ::seval/narration "late completion"
+            ::seval/source "42"
+            ::seval/ending-ns 'my.agent.receipt
+            ::seval/result {::seval/ok? true ::seval/value 42}
+            ::seval/tee [{:seon.agent/id "AGTreceipt0001"}]})
+          (.then
+           (fn [result]
+             (is (false? (:seon.db/ok? result)))
+             (is (= "authority status read failed"
+                    (get-in result [:seon.db/error :seon.error/message])))
+             (is (= [:transact :pull] (mapv first @calls))
+                 "an unreadable winner cannot authorize fallback writes")))
+          (.catch
+           (fn [error]
+             (is false (str "status-read failure threw — " error))))
+          (.finally
+           (fn []
+             (set! db/transact! original-transact)
+             (set! db/pull original-pull)
+             (done)))))))
+
+(deftest run-fence-is-enforced-without-a-local-connection
+  (async done
+    (let [original-transact db/transact!
+          original-available admission/available?
+          requests (atom [])]
+      (set! admission/available? (constantly true))
+      (set! db/transact!
+            (fn [& [request]]
+              (swap! requests conj request)
+              (js/Promise.resolve {:seon.db/ok? false})))
+      (-> (seval/eval-batch! nil [] 'my.agent.receipt
+                             "AGTreceipt0001" "TRNreceipt0001"
+                             "RUNreceipt0001")
+          (.then
+           (fn [result]
+             (is (true? (:seon.eval/fenced? result)))
+             (is (= 1 (count @requests)))
+             (is (= [[:db.fn/cas
+                      [:seon.agent/id "AGTreceipt0001"]
+                      :seon.agent/run
+                      [:seon.agent.run/id "RUNreceipt0001"]
+                      [:seon.agent.run/id "RUNreceipt0001"]]]
+                    (::db/tx-data (first @requests))))))
+          (.catch
+           (fn [error]
+             (is false (str "session run fence threw — " error))))
+          (.finally
+           (fn []
+             (set! db/transact! original-transact)
+             (set! admission/available? original-available)
+             (done)))))))
 
 (deftest one-terminal-transition-commits-and-late-transitions-are-refused
   (async done
