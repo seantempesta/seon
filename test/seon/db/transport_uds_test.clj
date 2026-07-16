@@ -137,6 +137,45 @@
          ::coordinate/t 536870929}]
     (is (= point (uds/decode (uds/encode point))))))
 
+(deftest transit-decodes-aggregate-query-lists-as-eager-protocol-data
+  (let [point {::coordinate/database-id (random-uuid)
+               ::coordinate/branch :db
+               ::coordinate/commit-id (random-uuid)
+               ::coordinate/t 42}
+        attachment (coordinate/attachment point)
+        query-form
+        '[:find (count ?entity) . :where [?entity :person/name]]
+        direct
+        (protocol/query-request
+         {::protocol/request-id "aggregate/direct"
+          ::protocol/database-name "alpha"
+          ::protocol/attachment attachment
+          ::protocol/coordinate point
+          ::protocol/query-form query-form
+          ::protocol/arguments []})
+        many
+        (protocol/execute-many-request
+         {::protocol/request-id "aggregate/many"
+          ::protocol/database-name "alpha"
+          ::protocol/attachment attachment
+          ::protocol/coordinate point
+          ::protocol/members
+          [{::protocol/operation protocol/query-operation
+            ::protocol/query-form query-form
+            ::protocol/arguments []}]})
+        decoded-direct (uds/decode (uds/encode direct))
+        decoded-many (uds/decode (uds/encode many))
+        direct-aggregate (get-in decoded-direct [::protocol/query-form 1])
+        many-aggregate
+        (get-in decoded-many [::protocol/members 0 ::protocol/query-form 1])]
+    (is (list? direct-aggregate))
+    (is (list? many-aggregate))
+    (is (= '(count ?entity) direct-aggregate many-aggregate))
+    (is (= direct decoded-direct))
+    (is (= many decoded-many))
+    (is (protocol/valid-request? decoded-direct))
+    (is (protocol/valid-request? decoded-many))))
+
 (deftest execute-many-reuses-existing-read-shapes-with-one-public-identity
   (let [point {::coordinate/database-id (random-uuid)
                ::coordinate/branch :db

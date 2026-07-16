@@ -112,6 +112,9 @@
 (def ^:private default-maximum-output-bytes (* 256 1024 1024))
 (def ^:private default-maximum-session-output-bytes (* 128 1024 1024))
 (def ^:private default-maximum-connections 256)
+(def ^:private transit-read-handlers
+  (transit/read-handler-map
+   {"list" (transit/read-handler #(apply list %))}))
 (def ^:private asynchronous-close-class
   (Class/forName "java.nio.channels.AsynchronousCloseException"))
 
@@ -139,7 +142,7 @@
   {:malli/schema [:=> [:catn [:seon.db.transport.uds/payload :any]] ::message]}
   [^bytes payload]
   (let [in (ByteArrayInputStream. payload)
-        reader (transit/reader in :json)]
+        reader (transit/reader in :json {:handlers transit-read-handlers})]
     (transit/read reader)))
 
 (defn write-frame!

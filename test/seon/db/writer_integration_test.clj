@@ -308,6 +308,8 @@
               :where ['?e :reader/id '?id]
               ['?e :reader/score '?score]]
              ::protocol/arguments []}
+            aggregate-form
+            '[:find (count ?entity) . :where [?entity :reader/id]]
             owner
             (call! request-channel
                    (protocol/query-request
@@ -316,6 +318,26 @@
             (call! request-channel
                    (protocol/query-request
                     (assoc query-input ::protocol/request-id "read/query-2")))
+            aggregate
+            (call! request-channel
+                   (protocol/query-request
+                    {::protocol/request-id "read/query-aggregate"
+                     ::protocol/database-name database-name
+                     ::protocol/attachment attachment
+                     ::protocol/coordinate frozen
+                     ::protocol/query-form aggregate-form
+                     ::protocol/arguments []}))
+            aggregate-many
+            (call! request-channel
+                   (protocol/execute-many-request
+                    {::protocol/request-id "read/many-aggregate"
+                     ::protocol/database-name database-name
+                     ::protocol/attachment attachment
+                     ::protocol/coordinate frozen
+                     ::protocol/members
+                     [{::protocol/operation protocol/query-operation
+                       ::protocol/query-form aggregate-form
+                       ::protocol/arguments []}]}))
             pull
             (call! request-channel
                    (protocol/pull-request
@@ -549,7 +571,8 @@
                        ::protocol/entity-id [:reader/id "alice"]}]
                      :datahike.resource/max-result-weight 1}))]
         (is (every? protocol/valid-response?
-                    [owner hit pull pulls schema-response first-page second-page
+                    [owner hit aggregate aggregate-many
+                     pull pulls schema-response first-page second-page
                      wrong-prefix-page
                      reverse-page current-query history-query history-page
                      temporal-query temporal-history temporal-page
@@ -568,6 +591,10 @@
         (is (= #{:reader/id :reader/score}
                (:datahike.query/attribute-dependencies owner)
                (:datahike.query/attribute-dependencies hit)))
+        (is (= 2 (:datahike.query/result aggregate)))
+        (is (= 2
+               (get-in aggregate-many
+                       [::protocol/results 0 :datahike.query/result])))
         (is (= {:reader/id "alice" :reader/score 1}
                (::protocol/result pull)))
         (is (= [{:reader/id "alice" :reader/score 1}
