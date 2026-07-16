@@ -72,6 +72,7 @@
 (schema/register! ::database-path :seon.db.protocol/database-path)
 (schema/register! ::request-socket-path :seon.db.transport.uds/socket-path)
 (schema/register! ::publish-socket-path :seon.db.transport.uds/socket-path)
+(schema/register! ::selected-processors [:int {:min 1}])
 (schema/register!
  ::start-request
  [:map
@@ -79,6 +80,7 @@
   [::database-name ::database-name]
   [::backend ::backend]
   [::database-path {:optional true} ::database-path]
+  [::selected-processors {:optional true} ::selected-processors]
   [::request-socket-path ::request-socket-path]
   [::publish-socket-path ::publish-socket-path]])
 (schema/register!
@@ -1298,20 +1300,24 @@
            {::executor/executor dispatcher
             ::executor/scope scope
             ::executor/cancel d/cancel-query!
-            ::executor/abandon-work-classes #{:provider}}))))))
+            ::executor/abandon-work-classes #{:provider}}))
+        scope))))
 
 (defn- handle-release-database
   [runtime request]
-  (fence-database-work! runtime
-                        (::protocol/target-database-name request)
-                        (::protocol/target-attachment request))
-  (let [result
+  (let [scope (fence-database-work! runtime
+                                    (::protocol/target-database-name request)
+                                    (::protocol/target-attachment request))
+        result
         (registry/release-attachment!
          {::registry/target-database-name
           (keyword (::protocol/target-database-name request))
           ::registry/attachment (::protocol/target-attachment request)
           ::registry/expected-target-head
           (::protocol/expected-target-head request)})]
+    (when (and scope (::registry/released? result) (::executor runtime))
+      (executor/release-scope!
+       {::executor/executor (::executor runtime) ::executor/scope scope}))
     (protocol/success
      {::protocol/target-database-name
       (::protocol/target-database-name request)
@@ -1411,6 +1417,31 @@
 
             :else
             (throw throwable)))))))
+
+(defn- execute-mutation!
+  [runtime request]
+  (if-let [{::keys [connection database-name]
+            attachment ::coordinate/attachment}
+           (connection-for-request request)]
+    (handle-transact runtime connection database-name attachment request)
+    (protocol/failure
+     {::protocol/error-kind protocol/not-found-error
+      ::protocol/error (str "Unknown database: "
+                            (::protocol/database-name request))})))
+
+(defn- handle-admitted-transact
+  [runtime connection database-name attachment request]
+  (if-let [dispatcher (when (contains? (::executor/execute
+                                         (::executor runtime)) :mutation)
+                        (::executor runtime))]
+    (executor/submit!
+     {::executor/executor dispatcher
+      ::executor/work-class :mutation
+      ::executor/database-name database-name
+      ::executor/scope (committed-scope database-name attachment (d/db connection))
+      ::executor/job-id (::protocol/request-id request)
+      ::executor/request request})
+    (handle-transact runtime connection database-name attachment request)))
 
 (defn- handle-replay-transactions
   [connection database-name request]
@@ -1538,7 +1569,8 @@
                   (connection-for-request request)]
            (case (::protocol/operation request)
              :seon.db.protocol.operation/transact
-             (handle-transact runtime connection database-name attachment request)
+             (handle-admitted-transact runtime connection database-name
+                                       attachment request)
 
              :seon.db.protocol.operation/replay-transactions
              (handle-replay-transactions connection database-name request)
@@ -1579,15 +1611,18 @@
 (defn start!
   "Start the request and publication sockets for one writer runtime."
   {:malli/schema [:=> [:cat ::start-request] ::server]}
-  [{::keys [dependencies database-name backend database-path
+  [{::keys [dependencies database-name backend database-path selected-processors
             request-socket-path publish-socket-path]}]
   (let [publisher (uds/start-publisher! publish-socket-path)
         dispatcher
         (executor/start!
-         {::executor/capacity (executor/capacity)
+         {::executor/capacity (if selected-processors
+                                (executor/capacity selected-processors)
+                                (executor/capacity))
           ::executor/execute
           {:read execute-read!
-           :provider (partial execute-embedding! dependencies)}})
+           :provider (partial execute-embedding! dependencies)
+           :mutation (partial execute-mutation! dependencies)}})
         runtime (assoc dependencies
                        ::publisher publisher
                        ::executor dispatcher)]

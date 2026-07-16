@@ -344,17 +344,28 @@ provider waits use separately admitted virtual threads and do not consume CPU
 workers. `writer/start!` constructs one dispatcher rather than independent
 read and embedding executors, and `embed-texts` no longer hides another
 six-thread pool behind one admitted provider job. Exact-scope release drains
-reads while abandoning repairable provider work. Ten executor tests prove
-capacity defaults, CPU/provider independence, class/database fairness, byte
-admission, cancellation, generation fencing, and four concurrent immutable
-database reads. The affected gate passes 54 tests and 317 assertions.
+reads while abandoning repairable provider work. Mutation admission now shares
+the dispatcher but uses separately bounded virtual threads: mutations
+serialize only per database while independent database writers progress
+together. CPU and waiting-work rotation have independent cursors, startup
+rejects invalid capacity maps, shutdown waits for a bounded interval before
+interruption, and a released attachment also releases its drained generation
+fence. Twelve executor tests prove these contracts, including four concurrent
+immutable database reads. The affected gate passes 57 tests and 331
+assertions.
 
 [[research/one-host-dispatcher-replacement-design-2026-07-16]],
 [[research/datahike-mutation-admission-2026-07-16]], and
 [[research/proximum-dispatcher-seams-2026-07-16]] define the remaining Unit 4
-work: move mutation admission before the current connection lock, route KNN
-bounds and external entity IDs, supply HNSW construction capacity, and add
-encode/session byte ownership.
+work. The commit-specific
+[[research/one-host-dispatcher-code-review-2026-07-16]] exposed seven P1 gaps;
+mutation admission, independent scheduling cursors, released-fence retention,
+bounded shutdown, and startup capacity validation are now repaired. Exact
+frame-byte admission is deliberately not claimed until persistent sessions
+own decoded frames. The remaining work is to route KNN bounds and external
+entity IDs, supply HNSW construction capacity, add encode/session byte
+ownership, and give provider calls explicit deadlines with matching connection
+capacity.
 
 This is not Unit 4 graduation because query, KNN, encode/delivery, mutation, and
 control capacity are not all wired and 2/4/8-database adversarial proof remains.

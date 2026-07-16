@@ -3,7 +3,7 @@
   (:require [seon.db.coordinate :as coordinate]
             [seon.db.protocol]
             [seon.schema :as schema])
-  (:import [java.util.concurrent Executors ExecutorService]))
+  (:import [java.util.concurrent Executors ExecutorService TimeUnit]))
 
 (set! *warn-on-reflection* true)
 
@@ -63,6 +63,7 @@
 (schema/register! ::queued-by-class [:map-of ::work-class ::queued])
 (schema/register! ::queued-request-bytes [:int {:min 0}])
 (schema/register! ::retained-identities [:int {:min 0}])
+(schema/register! ::fenced-scopes [:int {:min 0}])
 (schema/register! ::fenced [:int {:min 0}])
 (schema/register! ::completed [:int {:min 0}])
 (schema/register! ::rejected [:int {:min 0}])
@@ -76,6 +77,7 @@
                    [::running-by-class ::running-by-class]
                    [::running-by-database ::running-by-database]
                    [::retained-identities ::retained-identities]
+                   [::fenced-scopes ::fenced-scopes]
                    [::fenced ::fenced]
                    [::completed ::completed]
                    [::rejected ::rejected]
@@ -128,10 +130,12 @@
 (defn- empty-state [classes]
   {::class-order (vec classes)
    ::class-cursor 0
+   ::io-class-cursor 0
    ::ready (zipmap classes (repeat (empty-class-ready)))
    ::jobs {}
    ::closed-scopes #{}
    ::running-by-class {}
+   ::running-by-class-database {}
    ::running-by-database {}})
 
 (defn- add-database [ready database-name]
@@ -147,7 +151,7 @@
                (-> (add-database ready database-name)
                    (update-in [::by-database database-name] conj work)))))
 
-(defn- take-database [ready]
+(defn- take-database [ready eligible-database?]
   (let [order (::database-order ready)
         n (count order)]
     (loop [offset 0]
@@ -156,7 +160,7 @@
         (let [index (mod (+ (::database-cursor ready) offset) n)
               database-name (nth order index)
               queue (get-in ready [::by-database database-name])]
-          (if (seq queue)
+          (if (and (seq queue) (eligible-database? database-name))
             [(-> ready
                  (assoc ::database-cursor (mod (inc index) n))
                  (assoc-in [::by-database database-name] (pop queue)))
@@ -174,21 +178,34 @@
 
 (defn- take-ready [state capacity allowed-classes]
   (let [order (::class-order state)
-        n (count order)]
+        n (count order)
+        cursor-key (if (= allowed-classes cpu-classes)
+                     ::class-cursor
+                     ::io-class-cursor)]
     (loop [offset 0]
       (if (= offset n)
         [state nil]
-        (let [index (mod (+ (::class-cursor state) offset) n)
+        (let [index (mod (+ (get state cursor-key 0) offset) n)
               work-class (nth order index)]
           (if (and (allowed-classes work-class)
                    (eligible-class? state capacity work-class))
-            (let [[ready work] (take-database (get-in state [::ready work-class]))]
+            (let [eligible-database?
+                  (if (= :mutation work-class)
+                    #(zero? (get-in state [::running-by-class-database
+                                           [work-class %]] 0))
+                    (constantly true))
+                  [ready work] (take-database
+                                (get-in state [::ready work-class])
+                                eligible-database?)]
               (if work
                 [(-> state
-                     (assoc ::class-cursor (mod (inc index) n))
+                     (assoc cursor-key (mod (inc index) n))
                      (assoc-in [::ready work-class] ready)
                      (assoc-in [::jobs (::job-id work) ::status] :running)
                      (update-in [::running-by-class work-class] (fnil inc 0))
+                     (update-in [::running-by-class-database
+                                 [work-class (::database-name work)]]
+                                (fnil inc 0))
                      (update-in [::running-by-database (::database-name work)]
                                 (fnil inc 0)))
                  work]
@@ -245,17 +262,35 @@
              (fn [state]
                (if (identical? result (get-in state [::jobs job-id ::result]))
                  (let [class-left (dec (get-in state [::running-by-class work-class]))
+                       class-db-left
+                       (dec (get-in state [::running-by-class-database
+                                           [work-class database-name]]))
                        db-left (dec (get-in state [::running-by-database database-name]))]
                    (cond-> (update state ::jobs dissoc job-id)
                      (zero? class-left) (update ::running-by-class dissoc work-class)
                      (pos? class-left) (assoc-in [::running-by-class work-class] class-left)
+                     (zero? class-db-left)
+                     (update ::running-by-class-database dissoc
+                             [work-class database-name])
+                     (pos? class-db-left)
+                     (assoc-in [::running-by-class-database
+                                [work-class database-name]] class-db-left)
                      (zero? db-left) (update ::running-by-database dissoc database-name)
                      (pos? db-left) (assoc-in [::running-by-database database-name] db-left)))
                  (let [class-left (dec (get-in state [::running-by-class work-class]))
+                       class-db-left
+                       (dec (get-in state [::running-by-class-database
+                                           [work-class database-name]]))
                        db-left (dec (get-in state [::running-by-database database-name]))]
                    (cond-> state
                      (zero? class-left) (update ::running-by-class dissoc work-class)
                      (pos? class-left) (assoc-in [::running-by-class work-class] class-left)
+                     (zero? class-db-left)
+                     (update ::running-by-class-database dissoc
+                             [work-class database-name])
+                     (pos? class-db-left)
+                     (assoc-in [::running-by-class-database
+                                [work-class database-name]] class-db-left)
                      (zero? db-left) (update ::running-by-database dissoc database-name)
                      (pos? db-left) (assoc-in [::running-by-database database-name] db-left))))))
       (swap! (::counts executor) update ::completed inc)
@@ -273,21 +308,34 @@
 (defn- run-worker! [executor allowed-classes]
   (loop []
     (when-let [work (take-work! executor allowed-classes)]
-      (if (= :provider (::work-class work))
+      (if (#{:provider :mutation} (::work-class work))
         (.submit ^ExecutorService (::provider-executor executor)
                  ^Runnable #(run-work! executor work))
         (run-work! executor work))
       (recur))))
+
+(defn- validate-capacity! [capacity classes]
+  (when-not (and (pos-int? (::cpu-workers capacity))
+                 (pos-int? (::maximum-request-bytes capacity))
+                 (pos-int? (::maximum-queued-request-bytes capacity)))
+    (throw (ex-info "Executor capacity contains an invalid process bound."
+                    {::capacity capacity})))
+  (doseq [work-class classes
+          :let [limits (get-in capacity [::classes work-class])]]
+    (when-not (and limits
+                   (pos-int? (::maximum-active limits))
+                   (pos-int? (::maximum-queued limits))
+                   (pos-int? (::maximum-queued-by-database limits)))
+      (throw (ex-info "Executor class capacity is absent or invalid."
+                      {::work-class work-class ::capacity limits}))))
+  capacity)
 
 (defn start!
   "Start the authority-wide bounded dispatcher."
   {:malli/schema [:=> [:cat ::start-request] ::executor]}
   [{::keys [capacity execute]}]
   (let [classes (vec (keys execute))
-        unknown (remove #(contains? (::classes capacity) %) classes)
-        _ (when (seq unknown)
-            (throw (ex-info "Executor classes are absent from capacity."
-                            {::work-classes unknown})))
+        _ (validate-capacity! capacity classes)
         provider-executor (Executors/newVirtualThreadPerTaskExecutor)
         executor {::capacity capacity
                   ::execute execute
@@ -303,7 +351,7 @@
                           (.start)))
                       (range (::cpu-workers capacity)))
         provider-dispatcher
-        (doto (Thread. ^Runnable #(run-worker! executor #{:provider})
+        (doto (Thread. ^Runnable #(run-worker! executor #{:provider :mutation})
                        "seon-database-provider-dispatch")
           (.setDaemon true)
           (.start))]
@@ -403,6 +451,17 @@
                                                          :mutation})]
     {::abandoned-count (count queued)}))
 
+(defn release-scope!
+  "Forget a fully drained fence after its database attachment is released."
+  [{::keys [executor scope]}]
+  (locking (::lock executor)
+    (when (some (fn [[_ job]] (= scope (::scope job)))
+                (::jobs @(::state executor)))
+      (throw (ex-info "Cannot release a scope while work still owns it."
+                      {::scope scope})))
+    (swap! (::state executor) update ::closed-scopes disj scope))
+  nil)
+
 (defn fence-and-drain!
   "Fence a scope, cancel and drain reads, and abandon selected classes."
   {:malli/schema [:=> [:cat ::fence-and-drain-request]
@@ -465,6 +524,7 @@
        ::running-by-class running-by-class
        ::running-by-database (::running-by-database state)
        ::retained-identities (count (::jobs state))
+       ::fenced-scopes (count (::closed-scopes state))
        ::fenced (::fenced counts)
        ::completed (::completed counts)
        ::rejected (::rejected counts)
@@ -479,5 +539,7 @@
     (.notifyAll ^Object (::lock executor)))
   (run! #(.join ^Thread %) (::worker-threads executor))
   (.shutdown ^ExecutorService (::provider-executor executor))
-  (.close ^ExecutorService (::provider-executor executor))
+  (when-not (.awaitTermination ^ExecutorService (::provider-executor executor)
+                               5 TimeUnit/SECONDS)
+    (.shutdownNow ^ExecutorService (::provider-executor executor)))
   {::stopped? true})

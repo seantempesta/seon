@@ -39,6 +39,22 @@
     (is (every? #(= (* 4 1024 1024) (::executor/maximum-request-bytes %))
                 [two four eight]))))
 
+(deftest invalid-capacity-is-rejected-before-workers-start
+  (is (thrown-with-msg?
+       clojure.lang.ExceptionInfo
+       #"invalid process bound"
+       (executor/start!
+        {::executor/capacity (assoc (test-capacity 2)
+                                    ::executor/maximum-request-bytes 0)
+         ::executor/execute {:read :request/value}})))
+  (is (thrown-with-msg?
+       clojure.lang.ExceptionInfo
+       #"absent or invalid"
+       (executor/start!
+        {::executor/capacity (update (test-capacity 2)
+                                    ::executor/classes dissoc :read)
+         ::executor/execute {:read :request/value}}))))
+
 (defn- request
   [worker database-name scope job-id value]
   {::executor/executor worker
@@ -192,6 +208,28 @@
         (.countDown release)
         (executor/stop! {::executor/executor worker})))))
 
+(deftest released-database-scope-does-not-retain-its-fence
+  (let [worker (start-worker {:read :request/value})
+        closed-scope (scope "a" (random-uuid) (random-uuid))]
+    (try
+      (is (= {::executor/abandoned-count 0}
+             (executor/fence-and-drain!
+              {::executor/executor worker
+               ::executor/scope closed-scope
+               ::executor/cancel (constantly nil)})))
+      (is (= 1 (::executor/fenced-scopes (executor/evidence worker))))
+      (is (= {::executor/accepted? false ::executor/joined? false}
+             (executor/try-submit!
+              (request worker "a" closed-scope "closed" :closed))))
+      (is (nil? (executor/release-scope!
+                 {::executor/executor worker ::executor/scope closed-scope})))
+      (is (zero? (::executor/fenced-scopes (executor/evidence worker))))
+      (is (= :open
+             (executor/submit!
+              (request worker "a" closed-scope "reopened" :open))))
+      (finally
+        (executor/stop! {::executor/executor worker})))))
+
 (deftest cancellation-distinguishes-queued-running-and-absent-jobs
   (let [entered (CountDownLatch. 1)
         release (CountDownLatch. 1)
@@ -331,6 +369,46 @@
           (run! deref jobs)
           (is (= [[:read :first] [:knn :knn] [:encode :encode] [:read :read]]
                  @selected))))
+      (finally
+        (.countDown release)
+        (executor/stop! {::executor/executor worker})))))
+
+(deftest mutations-serialize-per-database-and-progress-across-databases
+  (let [entered (CountDownLatch. 2)
+        release (CountDownLatch. 1)
+        active (atom {})
+        peak-by-database (atom {})
+        execute (fn [request]
+                  (let [database (:request/database request)
+                        running (get (swap! active update database (fnil inc 0))
+                                     database)]
+                    (swap! peak-by-database update database (fnil max 0) running)
+                    (.countDown entered)
+                    (.await release)
+                    (swap! active update database dec)
+                    database))
+        worker (start-worker 4 {:mutation execute})
+        a (scope "a" (random-uuid) (random-uuid))
+        b (scope "b" (random-uuid) (random-uuid))
+        submit (fn [database-name one-scope job-id]
+                 (executor/submit-async!
+                  (assoc (request worker database-name one-scope job-id
+                                  database-name)
+                         ::executor/work-class :mutation
+                         ::executor/request {:request/database database-name})))]
+    (try
+      (let [a1 (submit "a" a "mutation/a1")
+            a2 (submit "a" a "mutation/a2")
+            b1 (submit "b" b "mutation/b1")]
+        (is (.await entered 5 TimeUnit/SECONDS)
+            "independent database mutations start together")
+        (is (= {"a" 1 "b" 1} @peak-by-database))
+        (is (= {"a" 1 "b" 1}
+               (::executor/running-by-database (executor/evidence worker))))
+        (.countDown release)
+        (is (= [::executor/value "a"] @a1))
+        (is (= [::executor/value "a"] @a2))
+        (is (= [::executor/value "b"] @b1)))
       (finally
         (.countDown release)
         (executor/stop! {::executor/executor worker})))))
