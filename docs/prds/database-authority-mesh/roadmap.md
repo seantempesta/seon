@@ -144,6 +144,9 @@ fairness, resilience, and later one-versus-shards measurement is
 The final Bun consumer closure, deletion order, and two remaining semantic
 probes are grounded in
 [[research/atomic-bun-authority-consumer-replacement-2026-07-16]].
+The Datahike-owned pre-compute acquisition that removes single-flight joiners
+from scarce Seon CPU capacity is
+[[research/single-flight-admission-seam-2026-07-16]].
 
 ## Ordered implementation spine
 
@@ -837,6 +840,15 @@ passes 24 tests/658 assertions. The repair must expose Datahike's existing
 single-flight acquisition before scarce Seon CPU admission: the owner consumes
 one read worker, while joiners await the same Datahike completion outside CPU
 capacity. Seon must not reproduce Datahike's cache key or coordination.
+
+The selected repair is a host-only opaque Datahike query call acquired after
+exact-value resolution but before query-compute admission. A completed hit
+finishes directly, one `:run` owner enters Seon CPU capacity, and `:waiting`
+joiners retain ordinary request/cancellation lifetime without an executor job.
+`run!` binds the actual worker thread so nested same-key reentrancy remains
+sound. Final cancellation of an acquired but unstarted owner compare-removes
+it; run versus cancel is one phase CAS. Cache identity, evidence, completion,
+release, and ABA fencing remain entirely inside Datahike.
 
 ### Unit 7 — remote `seon.db` and coarse core reads
 
