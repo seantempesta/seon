@@ -328,15 +328,15 @@
   [session]
   (::response-slot (reserve-response-slot-result! session)))
 
-(defn- reserve-output-allowance-result!
-  [session slot]
-  (let [authority-output-bytes (::authority-output-bytes session)
-        allowance (* 2 (+ Integer/BYTES maximum-frame-bytes))]
+(defn- reserve-encoded-output-result!
+  [session slot exact-bytes]
+  (let [authority-output-bytes (::authority-output-bytes session)]
     (locking authority-output-bytes
-      (let [authority-next (+ @authority-output-bytes allowance)
-            session-next (+ @(::session-output-bytes session) allowance)]
+      (let [authority-next (+ @authority-output-bytes exact-bytes)
+            session-next (+ @(::session-output-bytes session) exact-bytes)]
         (cond
-          (.get ^AtomicBoolean (::released? slot))
+          (or (.get ^AtomicBoolean (::released? slot))
+              (.get ^AtomicBoolean (::closed? session)))
           {::send-status send-closed}
 
           (> session-next (::maximum-session-output-bytes session))
@@ -349,20 +349,8 @@
           (do
             (reset! authority-output-bytes authority-next)
             (reset! (::session-output-bytes session) session-next)
-            (reset! (::output-reservation slot) allowance)
+            (reset! (::output-reservation slot) exact-bytes)
             {::send-status send-accepted}))))))
-
-(defn- shrink-output-reservation!
-  [session slot exact-bytes]
-  (let [authority-output-bytes (::authority-output-bytes session)]
-    (locking authority-output-bytes
-      (let [reserved @(::output-reservation slot)
-            released (- reserved exact-bytes)]
-        (when (pos? released)
-          (swap! authority-output-bytes - released)
-          (swap! (::session-output-bytes session) - released)
-          (reset! (::output-reservation slot) exact-bytes)))))
-  slot)
 
 (defn- remove-session!
   [connections session]
@@ -506,6 +494,19 @@
    (::selector session) (::commands session)
    #(close-session! connections workers close-connection! session)))
 
+(defn- fail-session-output!
+  [connections workers close-connection! session pending status]
+  (.set ^AtomicBoolean (::encoding? (::response-slot pending)) false)
+  (release-response-slot! session (::response-slot pending))
+  (complete-send! pending status)
+  (locking (::send-lock session)
+    (.set ^AtomicBoolean (::closing? session) true)
+    (abandon-pending-encodes! session send-closed))
+  (.set ^AtomicBoolean (::encoding-active? session) false)
+  (enqueue-selector!
+   (::selector session) (::commands session)
+   #(close-session! connections workers close-connection! session)))
+
 (defn- take-pending-encode!
   [session]
   (locking (::send-lock session)
@@ -531,17 +532,24 @@
                   (catch Throwable throwable
                     {::encode-error throwable}))]
             (if-let [^ByteBuffer frame (::frame encoded)]
-              (do
-                (shrink-output-reservation! session slot (.remaining frame))
-                (enqueue-selector!
-                 (::selector session) (::commands session)
-                 #(do
-                    (.set ^AtomicBoolean (::encoding? slot) false)
-                    (accept-encoded-response!
-                     connections workers close-connection! shutting-down?
-                     session frame slot)))
-                (complete-send! pending send-accepted)
-                (recur))
+              (let [reservation
+                    (reserve-encoded-output-result!
+                     session slot (.remaining frame))
+                    status (::send-status reservation)]
+                (if (= send-accepted status)
+                  (do
+                    (enqueue-selector!
+                     (::selector session) (::commands session)
+                     #(do
+                        (.set ^AtomicBoolean (::encoding? slot) false)
+                        (accept-encoded-response!
+                         connections workers close-connection! shutting-down?
+                         session frame slot)))
+                    (complete-send! pending send-accepted)
+                    (recur))
+                  (fail-session-output!
+                   connections workers close-connection! session pending
+                   status)))
               (fail-session-encoding!
                connections workers close-connection! session pending))))
         nil))))
@@ -556,30 +564,21 @@
 (defn- admit-response!
   [connections workers close-connection! shutting-down? session message slot
    completion close-on-failure?]
-  (let [allowance (reserve-output-allowance-result! session slot)
-        status (::send-status allowance)]
-    (if-not (= send-accepted status)
+  (let [pending {::message message
+                 ::response-slot slot
+                 ::send-completion completion}
+        ^ArrayDeque queue (::pending-encodes session)]
+    (.addLast queue pending)
+    (if (schedule-session-encoding!
+         connections workers close-connection! shutting-down? session)
+      {::send-status send-accepted ::send-completion completion}
       (do
+        (.removeLastOccurrence queue pending)
         (release-response-slot! session slot)
         (when close-on-failure?
           (close-session-after-admission-failure!
            connections workers close-connection! session))
-        {::send-status status})
-      (let [pending {::message message
-                     ::response-slot slot
-                     ::send-completion completion}
-            ^ArrayDeque queue (::pending-encodes session)]
-        (.addLast queue pending)
-        (if (schedule-session-encoding!
-             connections workers close-connection! shutting-down? session)
-          {::send-status send-accepted ::send-completion completion}
-          (do
-            (.removeLastOccurrence queue pending)
-            (release-response-slot! session slot)
-            (when close-on-failure?
-              (close-session-after-admission-failure!
-               connections workers close-connection! session))
-            {::send-status send-authority-full}))))))
+        {::send-status send-authority-full}))))
 
 (defn- queue-response!
   [connections workers close-connection! shutting-down? session response slot]

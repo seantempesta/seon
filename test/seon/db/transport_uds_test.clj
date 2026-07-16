@@ -796,6 +796,108 @@
         (uds/close-request-server! server)
         (.delete (File. path))))))
 
+(deftest small-fanout-does-not-reserve-maximum-frame-bytes
+  (let [path (socket-path "transport-small-fanout")
+        controls (atom [])
+        release-encodes (CountDownLatch. 1)
+        original-frame @#'seon.db.transport.uds/message-frame
+        server
+        (uds/start-request-server!
+         {::uds/socket-path path
+          ::uds/open-connection!
+          (fn [connection-control]
+            (swap! controls conj connection-control)
+            (Object.))
+          ::uds/close-connection! (constantly nil)
+          ::uds/handler
+          (fn [_owner _request _frame-bytes _complete!] nil)})
+        channels
+        (reduce
+         (fn [channels index]
+           (let [channel (uds/connect! path)]
+             (wait-until! (str "physical session control " index)
+                          #(= (inc index) (count @controls)))
+             (conj channels channel)))
+         [] (range 64))]
+    (try
+      (wait-until! "64 physical session controls" #(= 64 (count @controls)))
+      (with-redefs-fn
+        {#'seon.db.transport.uds/message-frame
+         (fn [message]
+           (.await release-encodes)
+           (original-frame message))}
+        (fn []
+          (let [results
+                (mapv (fn [control index]
+                        ((::uds/send! control) {::event index}))
+                      @controls (range 64))]
+            (is (every? #(= uds/send-accepted (::uds/send-status %)) results)
+                "all small events admit while encoding is blocked")
+            (is (zero? @(::uds/authority-output-bytes server))
+                "unencoded messages retain slots, not maximum-size bytes")
+            (.countDown release-encodes)
+            (is (= (set (range 64))
+                   (into #{}
+                         (map (fn [channel]
+                                (::event
+                                 (uds/read-frame
+                                  (Channels/newInputStream channel)))))
+                         channels)))
+            (is (every? #(= uds/send-accepted
+                            (deref (::uds/send-completion %)
+                                   5000 ::not-complete))
+                        results)))))
+      (finally
+        (.countDown release-encodes)
+        (run! #(try (.close ^SocketChannel %) (catch Throwable _)) channels)
+        (uds/close-request-server! server)
+        (.delete (File. path))))))
+
+(deftest exact-encoded-byte-pressure-is-session-local
+  (let [path (socket-path "transport-exact-pressure")
+        controls (atom [])
+        closed (atom [])
+        server
+        (uds/start-request-server!
+         {::uds/socket-path path
+          ::uds/maximum-output-bytes (* 1024 1024)
+          ::uds/maximum-session-output-bytes 128
+          ::uds/open-connection!
+          (fn [connection-control]
+            (let [owner (assoc connection-control ::connection-id
+                               (random-uuid))]
+              (swap! controls conj owner)
+              owner))
+          ::uds/close-connection! #(swap! closed conj (::connection-id %))
+          ::uds/handler
+          (fn [_owner _request _frame-bytes _complete!] nil)})
+        channels [(uds/connect! path) (uds/connect! path)]]
+    (try
+      (wait-until! "two exact-pressure sessions" #(= 2 (count @controls)))
+      (let [[oversized healthy] @controls
+            [_oversized-channel healthy-channel] channels
+            oversized-result
+            ((::uds/send! oversized) {::event (apply str (repeat 1024 "x"))})]
+        (is (= uds/send-accepted (::uds/send-status oversized-result)))
+        (is (= uds/send-session-full
+               (deref (::uds/send-completion oversized-result)
+                      2000 ::not-complete)))
+        (wait-until! "oversized session cleanup" #(= 1 (count @closed)))
+        (is (= #{(::connection-id oversized)} (set @closed)))
+        (let [healthy-result ((::uds/send! healthy) {::event :healthy})]
+          (is (= uds/send-accepted (::uds/send-status healthy-result)))
+          (is (= {::event :healthy}
+                 (uds/read-frame (Channels/newInputStream healthy-channel))))
+          (is (= uds/send-accepted
+                 (deref (::uds/send-completion healthy-result)
+                        2000 ::not-complete))))
+        (wait-until! "exact output byte release"
+                     #(zero? @(::uds/authority-output-bytes server))))
+      (finally
+        (run! #(try (.close ^SocketChannel %) (catch Throwable _)) channels)
+        (uds/close-request-server! server)
+        (.delete (File. path))))))
+
 (deftest session-pressure-closes-only-that-session
   (let [path (socket-path "transport-session-pressure")
         controls (atom [])

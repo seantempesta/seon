@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: closed
 severity: high
 tags: [issue, database, flow]
 ---
@@ -41,3 +41,18 @@ order, authority/session pressure distinction, and shutdown evidence.
 - Exact output bytes are released on write, close, encoding failure, and forced
   shutdown.
 - One slow or oversized session cannot delay healthy sessions or control entry.
+
+## Resolution
+
+The transport now admits by the existing bounded response slots, encodes on the
+fixed codec-worker pool, and reserves only the exact framed bytes before the
+selector retains them. Retained frames remain bounded by the configured global
+and per-session output ceilings. Temporary encode allocation is independently
+bounded by at most eight codec workers; it is no longer charged once per
+unencoded response.
+
+Focused proof passes 32 tests and 153 assertions. It holds encoding blocked
+while 64 physical sessions admit small addressed events with zero retained
+output bytes, then proves all 64 complete in order. A separate exact-byte
+pressure fixture proves an oversized session completes with session pressure,
+releases all bytes, and closes without delaying a healthy sibling.

@@ -149,6 +149,9 @@ from scarce Seon CPU capacity is
 [[research/single-flight-admission-seam-2026-07-16]].
 The generated-ID remote seam and rejected declarative-template alternative are
 [[research/generated-id-authority-seam-2026-07-16]].
+The async render cut that preserves pure recursive rendering while moving
+database I/O to coordinate-pinned outer acquisition or the owning isolated
+agent child is [[research/async-render-authority-seam-2026-07-16]].
 
 ## Ordered implementation spine
 
@@ -928,10 +931,11 @@ protocol and database APIs do not change.
 The implementation is ordered by semantic dependency, while independent proof
 and consumer inventory may run in parallel:
 
-- Spine: integrate physical-connection-owned selective interests over the
-  completed Datahike paging and fair committed-report batch/requeue seams.
-- Slot 2: integrate the completed native session admission and Bun event
-  demultiplexing into addressed delivery with pressure resynchronization.
+- Spine: close process-global committed-report readiness ownership, then move
+  Datahike single-flight joiners outside scarce Seon read-worker admission.
+- Slot 2: exact addressed-delivery accounting is complete: response slots
+  bound unencoded work, fixed codec workers bound transient copies, and only
+  exact framed bytes consume retained global/session output capacity.
 - Slot 3: use the completed Bun event demultiplexing and bounded callback
   handoff to make the bottom-up `seon.db` consumer closure Promise-ready around
   coarse query/pull-many/execute-many plans, then delete lazy entity traversal.
@@ -950,11 +954,14 @@ checkpoint freezes all artifact inputs; lifecycle remains operator-owned.
 The callback deletion and physical-connection acquisition boundaries are closed:
 the writer is the only public request-lifetime owner, and the socket is the one
 internal authority token with no wire session ID or second reference count.
-Earliest unsettled implementation contract: expose physical-connection-owned
-selective `listen`/`unlisten` over the completed `schema`, operation-local
-`history?`, native `index-page`, and fair committed-report batch/requeue seams.
-This closes the actual consumer requirements before any synchronous local read
-is made asynchronous.
+Physical-connection-owned selective `listen`/`unlisten` is source-complete over
+the completed `schema`, operation-local `history?`, native `index-page`, and
+fair committed-report batch/requeue seams. Integration review found one final
+ownership correction before graduation: Datahike readiness is process-global,
+so exactly one authority dispatcher must route every ready source; a thread per
+writer runtime can consume another runtime's wake-up. The correction and a
+concurrent-runtime falsifier are active before any synchronous local read is
+made asynchronous.
 
 The source-grounded split is now exact. `schema` calls Datahike's existing
 public `d/schema`; no parallel schema projection is built. Executable probes
@@ -998,11 +1005,25 @@ dependency set. Physical connection locks order acknowledgement, event, and
 unlisten. Native send is admission-only with per-session ordering, so Transit
 encoding cannot serialize the report dispatcher.
 
+Addressed delivery no longer reserves two maximum-sized frames before Transit
+encoding. Admission retains one bounded response slot; the fixed codec-worker
+pool bounds transient payload/frame copies; and the selector reserves only the
+exact framed bytes it retains. The focused UDS gate passes 32 tests and 153
+assertions, including 64 simultaneously admitted small sessions and
+session-local exact-byte pressure with a healthy sibling.
+
 Integrated proof that closes it:
 Schema/index/history/selective-interest conformance, including forward/reverse
 cursor continuity, register/commit/unlisten ordering, addressed one-of-1,000
 delivery, report-gap resynchronization, sibling disconnect, and final release;
 followed by the first coarse remote `seon.db` consumer plan.
+
+The render consumer plan is now settled. Core views issue one coordinate-pinned
+`execute-many` acquisition and then render synchronously over ordinary data.
+Agent-authored renderers execute and await ordinary `seon.db` calls inside the
+owning isolated Bun child. The web host performs I/O outside pure view-unit
+state transitions, fences late completion by coordinate plus renderer token,
+and shares one acquisition/render/serialization across equivalent browsers.
 
 Generated identity allocation does not need another authority operation. All
 11 production builders are pure over generated IDs and frozen caller data. Bun
