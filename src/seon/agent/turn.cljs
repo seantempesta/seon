@@ -314,6 +314,7 @@
   [:map
    [:seon.render/text :string]
    [:seon.ai/system-prompt :string]
+   [:seon.ai/config-resolution :seon.ai/config-resolution]
    [:seon.agent.ctx/rendered-blocks {:optional true} [:vector :map]]])
 (schema/register! ::prompt-result [:or ::rendered-prompt ::prompt-error])
 
@@ -360,12 +361,16 @@
        (= execution/result-message (::execution/message response))
        (let [rendered (::execution/result response)
              text (:seon.render/text rendered)
-             system-prompt (:seon.ai/system-prompt rendered)]
+             system-prompt (:seon.ai/system-prompt rendered)
+             resolution (:seon.ai/config-resolution rendered)]
          (cond
            (and (map? rendered) (string? (:seon.error/message rendered)))
            rendered
 
-           (and (string? text) (string? system-prompt))
+           (and (string? text)
+                (string? system-prompt)
+                (schema/valid-candidate-value?
+                 :seon.ai/config-resolution resolution))
            rendered
 
            :else
@@ -640,15 +645,15 @@
 (defn- llm-retry-strategy
   "The backoff strategy for an LLM provider retry: exponential (base ×2),
    jittered, per-wait-clamped, capped at the agent's effective max-retries and
-   a total-duration ceiling. The retry COUNT is READ per agent via
-   [[seon.ai/agent-max-retries]] (config-driven agent-init, move 10) —
-   `::agent-max-retries :inherit` (the default) → `llm-retry-default-n` (4),
-   the same value the old `SEON_AI_MAX_RETRIES` env read produced = parity."
-  [id]
+   a total-duration ceiling. The retry count comes from the same immutable
+   ordinary config resolution as the provider request; absent/`:inherit`
+   retains the established default of four retries."
+  [resolution]
   (-> (retry/multiplicative-strategy llm-retry-base-ms llm-retry-factor)
       (retry/randomize-strategy llm-retry-jitter)
       (retry/clamp-delay llm-retry-max-delay-ms)
-      (retry/max-retries (ai/agent-max-retries id llm-retry-default-n))
+      (retry/max-retries (or (:seon.ai/agent-max-retries resolution)
+                             llm-retry-default-n))
       (retry/max-duration llm-retry-total-cap-ms)))
 
 (defn- attempt-outcome
@@ -746,12 +751,8 @@
    canonical request map. In repl-mode `:stream`, `:seon.ai/stream? true` asks
    the adapter to consume the SDK stream and stop it at the first complete
    form. Every retry gets a fresh controller."
-  [id ordinal llm-fn prompt-text system-prompt stream?]
-  (let [database   @db/*conn*
-        resolution (ai/resolved-config
-                     {:seon.db/db database :seon.agent/id id})
-        point      (db/head-coordinate database)
-        ms         (config/llm-attempt-timeout-ms)
+  [id ordinal point resolution llm-fn prompt-text system-prompt stream?]
+  (let [ms         (config/llm-attempt-timeout-ms)
         controller (js/AbortController.)
         signal     (.-signal controller)
         arg        (cond-> {:seon.ai/ctx          prompt-text
@@ -789,7 +790,7 @@
    flows through unchanged — the turn surfaces its `:seon.ai/error` as a
    value, never a throw. When any retry fired, the resp carries
   `:seon.agent.turn/llm-retries n` so the turn record is honest."
-  [id id-of-turn llm-fn prompt-text system-prompt stream?]
+  [id id-of-turn point resolution llm-fn prompt-text system-prompt stream?]
   (let [!attempts (atom [])
         {:seon.retry/keys [result retries]}
         (await
@@ -798,11 +799,12 @@
              (fn ^:async run-attempt! []
                (let [ordinal (count @!attempts)
                      response
-                     (await (bounded-llm-attempt! id ordinal llm-fn prompt-text
+                     (await (bounded-llm-attempt! id ordinal point resolution
+                                                  llm-fn prompt-text
                                                   system-prompt stream?))]
                  (swap! !attempts conj (::attempt-row response))
                  (dissoc response ::attempt-row)))
-             :seon.retry/strategy (llm-retry-strategy id)
+             :seon.retry/strategy (llm-retry-strategy resolution)
              :seon.retry/retry?   llm-retryable?
              :seon.retry/override (fn [resp]
                                     (some-> (get-in resp [:seon.ai/error
@@ -831,10 +833,11 @@
     stream? :seon.ai/stream?
     start-ns :seon.eval/start-ns
     point ::coordinate/coordinate
+    resolution :seon.ai/config-resolution
     system-prompt :seon.ai/system-prompt
     :seon.agent.turn/keys  [id-of-turn turn-idx prompt-text]}]
-  (let [resp    (await (call-llm! id id-of-turn llm-fn prompt-text
-                                  system-prompt (boolean stream?)))
+  (let [resp    (await (call-llm! id id-of-turn point resolution llm-fn
+                                  prompt-text system-prompt (boolean stream?)))
         retries (:seon.agent.turn/llm-retries resp)
         attempts (:seon.agent.turn/llm-attempts resp)
         raw     (:seon.ai/raw resp)
@@ -896,6 +899,7 @@
                             prompt-result)))
         prompt (:seon.render/text prompt-result)
         system-prompt (:seon.ai/system-prompt prompt-result)
+        config-resolution (:seon.ai/config-resolution prompt-result)
         full-prompt (ai/debug-full-prompt {:seon.ai/ctx prompt
                                            :seon.ai/system-prompt system-prompt})
         ;; Always-on observability capture: the frozen db's complete coordinate
@@ -942,6 +946,7 @@
                                       :seon.agent/llm-fn        llm-fn
                                       :seon.agent.run/id        run-id
                                       ::coordinate/coordinate  rendered-coordinate
+                                      :seon.ai/config-resolution config-resolution
                                       :seon.ai/stream?          stream?
                                       :seon.ai/system-prompt    system-prompt
                                       :seon.eval/start-ns       start-ns

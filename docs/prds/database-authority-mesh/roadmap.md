@@ -1502,6 +1502,17 @@ package-size measurement is added for this test.
   `bench-client` at 46 while both artifacts compile. Focused runtime, turn, and
   provider bridge regressions compile in the test artifact; their runtime proof
   remains behind the same legacy replica import until the atomic client cut.
+- Provider configuration and retry policy now join that same prompt
+  acquisition. One inherited-coordinate `execute-many` pulls the agent's
+  ordinary override/retry values, the cluster system-text/transport limits,
+  and the LLM config row; the execution child resolves the established
+  defaults and provenance once. Every attempt receives that exact ordinary
+  value and prompt coordinate, so a retry performs no database read and cannot
+  silently switch model, endpoint, timeout, or retry budget halfway through a
+  turn. The focused execution runtime passes 9 tests/39 assertions; the
+  connection-free attempt regression and pure row resolver each pass 1 test/8
+  assertions. `bench-client` compiles 515 files with the existing 29-warning
+  consumer-deletion inventory.
 - The debug feed now awaits that same compiled child result once at the event's
   immutable coordinate. Raw AI disclosures close over its ordinary bytes and
   make no second child call; HTML twins remain managed database units. Candidate
@@ -1681,9 +1692,23 @@ package-size measurement is added for this test.
   does not close the density gate: the combined `seon.db` namespace still
   reaches its obsolete local Datahike/Konserve implementation. This is retained
   RSS evidence for the atomic authority-only code cut, not a package-size goal.
+  A controlled release-artifact probe sharpened the cause: no database,
+  Konserve store, query cache, or single-flight registry was populated, yet the
+  child retained about 140,000 objects, 19,500 functions, and all 16,034 JSC
+  function executables after forced collection. The release graph contains 173
+  namespaces, 101 from the obsolete Datahike/Konserve/PSS/superv.async/
+  partial-cps/Fress/core.async closure. `--smol` reduced one sample from roughly
+  224–230 MiB to 209 MiB but did not collapse that live graph. The decisive
+  next falsifier is therefore zero dependency reachability after the canonical
+  `seon.db` cut, followed by the same physical-footprint and 1/8-child proof;
+  bundle bytes and heap flags remain secondary.
   The proof also exposed an independent cross-runtime aggregate-query Transit
-  mismatch, recorded in
-  [[../../seon/issues/bun-transit-query-list-is-not-ordinary-on-jvm]].
+  mismatch. Commit `ad54f1c6` fixes it at the dependency-native JVM decoder
+  seam: Transit semantic lists become eager persistent lists while arbitrary
+  lazy sequences remain invalid. Direct and `execute-many` aggregate requests
+  now pass framed UDS execution; the focused gate passes 53 tests and 411
+  assertions. The resolved issue is
+  [[../../seon/issues/archive/bun-transit-query-list-is-not-ordinary-on-jvm]].
 - **Next refill:** move stored-test/authored-route
   consumers onto the existing per-agent child execution owner, delete global
   pod replay rather than adapting it, finish the remaining web synchronous

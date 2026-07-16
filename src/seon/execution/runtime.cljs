@@ -11,6 +11,7 @@
    [seon.agent.ctx.transcript]
    [seon.agent.ctx.typeahead-steps]
    [seon.agent.ctx.warnings]
+   [seon.ai :as ai]
    [seon.config :as config]
    [seon.db :as db]
    [seon.db.protocol :as protocol]
@@ -120,11 +121,12 @@
         (block-error-text block result)))))
 
 (def ^:private prompt-pull-pattern
-  '[:db/id
-    :seon.agent/id
-    :seon.agent.ctx/cache-breakpoint
-    :seon.render/ai
-    {:seon.agent/ctx [*]}])
+  (into
+   '[:db/id
+     :seon.agent.ctx/cache-breakpoint
+     :seon.render/ai
+     {:seon.agent/ctx [*]}]
+   (ai/agent-config-pull-pattern)))
 
 (def ^:private prompt-acquisition-members
   [{::protocol/operation protocol/pull-operation
@@ -132,10 +134,17 @@
     ::protocol/entity-id nil
     :datahike.resource/max-work 5000000
     :datahike.resource/max-results 65536
-    :datahike.resource/max-result-weight 3145728}
+   :datahike.resource/max-result-weight 3145728}
    {::protocol/operation protocol/pull-operation
-    ::protocol/selector [:seon.config/system-text]
+    ::protocol/selector (conj (ai/model-transport-pull-pattern)
+                              :seon.config/system-text)
     ::protocol/entity-id [:seon.config/id config/cluster-config-id]
+    :datahike.resource/max-work 100000
+    :datahike.resource/max-results 1
+    :datahike.resource/max-result-weight 65536}
+   {::protocol/operation protocol/pull-operation
+    ::protocol/selector (ai/config-pull-pattern)
+    ::protocol/entity-id [:seon.ai/id "config"]
     :datahike.resource/max-work 100000
     :datahike.resource/max-results 1
     :datahike.resource/max-result-weight 65536}])
@@ -177,15 +186,22 @@
                           [:seon.agent/id id])
         acquired (await (db/execute-many {::db/members members
                                           ::db/max-result-weight 3670016}))
-        [agent-member config-member] (::db/results acquired)
-        member-failure? (not (and (true? (::protocol/success? agent-member))
-                                  (true? (::protocol/success? config-member))))]
+        [agent-member cluster-config-member ai-config-member]
+        (::db/results acquired)
+        member-failure?
+        (not (every? #(true? (::protocol/success? %))
+                     [agent-member cluster-config-member ai-config-member]))]
     (if member-failure?
-      (prompt-acquisition-error acquired [agent-member config-member])
+      (prompt-acquisition-error acquired
+                                [agent-member cluster-config-member
+                                 ai-config-member])
       (let [entity (or (acquired-member agent-member) {})
-            system-prompt (or (:seon.config/system-text
-                               (acquired-member config-member))
+            cluster-config-row (or (acquired-member cluster-config-member) {})
+            config-row (merge (or (acquired-member ai-config-member) {})
+                              cluster-config-row)
+            system-prompt (or (:seon.config/system-text cluster-config-row)
                               ctx/system-text)
+            config-resolution (ai/resolved-config-from-rows config-row entity)
             whole-prompt (when-not (seq profile)
                            (some->> (:seon.render/ai entity)
                                     (db/decode-edn-value :seon.render/ai)))
@@ -218,7 +234,8 @@
             (seq profile) (assoc :seon.agent.ctx/profile (vec profile))
             (some? whole-prompt)
             (assoc :seon.agent.ctx/whole-prompt resolved-whole-prompt)))
-         :seon.ai/system-prompt system-prompt)))))
+         :seon.ai/system-prompt system-prompt
+         :seon.ai/config-resolution config-resolution)))))
 
 (defn ^:async eval-batch!
   "Evaluate one parsed batch in this agent's retained child compiler."

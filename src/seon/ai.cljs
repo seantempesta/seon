@@ -579,6 +579,35 @@
    ::agent-max-tokens  ::max-tokens
    ::agent-thinking    ::thinking})
 
+(defn agent-config-pull-pattern
+  "Pull pattern for one agent's ordinary LLM override values."
+  {:malli/schema [:=> [:cat] [:vector :keyword]]}
+  []
+  (into [:seon.agent/id ::agent-max-retries] (keys agent-override-attrs)))
+
+(defn- decode-agent-override
+  [value]
+  (if (string? value)
+    (try (reader/read-string value)
+         (catch :default _ value))
+    value))
+
+(defn- agent-row-override-values
+  [agent]
+  (reduce-kv
+    (fn [m agent-attr global-attr]
+      (let [v (some-> (get agent agent-attr) decode-agent-override)]
+        (if (or (nil? v) (= :inherit v))
+          m
+          (assoc m global-attr v))))
+    {}
+    agent-override-attrs))
+
+(defn- agent-row-max-retries
+  [agent]
+  (let [value (some-> (::agent-max-retries agent) decode-agent-override)]
+    (when (int? value) value)))
+
 (schema/register! ::agent-id [:string {:min 1}])
 (schema/register! ::effective-config-request [:map [::agent-id ::agent-id]])
 
@@ -593,18 +622,9 @@
                     (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id id]}))]
     (if-not agent
       {}
-      (reduce-kv
-        (fn [m agent-attr global-attr]
-          ;; `::agent-*` overrides are MIXED-`:or` schemas → stored pr-str'd by
-          ;; the bridge; decode on read. Gate each attr by the installed schema.
-          (let [v (when (contains? installed agent-attr)
-                    (some->> (get agent agent-attr)
-                             (db/decode-edn-value agent-attr)))]
-            (if (or (nil? v) (= :inherit v))
-              m
-              (assoc m global-attr v))))
-        {}
-        agent-override-attrs))))
+      (agent-row-override-values
+       (select-keys agent (filter #(contains? installed %)
+                                  (keys agent-override-attrs)))))))
 
 (defn- overlay-agent-overrides
   "Lay agent `id`'s `::agent-*` override datoms over `global` (a `::row`),
@@ -666,6 +686,7 @@
   [:map
    [::resolved-config ::resolved-config]
    [::provenance      ::provenance]
+   [::agent-max-retries {:optional true} ::agent-max-retries]
    [::extra-body      {:optional true} ::extra-body]])
 (schema/register! ::config-resolution ::resolved-config-response)
 (schema/register! ::config-evidence
@@ -687,6 +708,18 @@
   [:seon.config.model-transport/response-identity-cap
    :seon.config.model-transport/endpoint-cap])
 
+(defn config-pull-pattern
+  "Pull pattern for the ordinary database values that resolve LLM config."
+  {:malli/schema [:=> [:cat] [:vector :keyword]]}
+  []
+  (into [::id] config-attrs))
+
+(defn model-transport-pull-pattern
+  "Pull pattern for model-transport limits on the cluster config row."
+  {:malli/schema [:=> [:cat] [:vector :keyword]]}
+  []
+  (vec model-transport-cap-attrs))
+
 (defn- model-transport-cap-resolution
   "Model-transport caps and provenance from one immutable database value."
   [database]
@@ -700,6 +733,66 @@
                   (when (and entity (contains? entity attr))
                     [attr [(get entity attr) :config-row]])))
           model-transport-cap-attrs)))
+
+(defn- resolve-config-values
+  [row-cfg overrides transport-caps]
+  (let [pick (fn [k defaults]
+               (cond
+                 (contains? overrides k) [(get overrides k) :agent-override]
+                 (contains? row-cfg k)   [(get row-cfg k) :config-row]
+                 (contains? defaults k)  [(get defaults k) :default]))
+        [prov prov-src] (or (pick ::provider {}) [:deepseek :default])
+        defaults (get shipped-defaults prov {})
+        resolved
+        (reduce
+         (fn [acc k]
+           (if-let [[v src] (pick k defaults)]
+             (-> acc
+                 (assoc-in [::resolved-config k] v)
+                 (assoc-in [::provenance k] src))
+             acc))
+         {::resolved-config {::provider prov}
+          ::provenance      {::provider prov-src}}
+         [::model ::temperature ::max-tokens ::thinking ::timeout-ms
+          ::base-url ::api-key-env ::dg-backend])
+        resolved
+        (reduce-kv
+         (fn [acc attr [value source]]
+           (-> acc
+               (assoc-in [::resolved-config attr] value)
+               (assoc-in [::provenance attr] source)))
+         resolved
+         transport-caps)]
+    (if-let [[raw src] (pick ::extra-body-edn defaults)]
+      (let [body (try (reader/read-string raw) (catch :default _ nil))]
+        (if-let [digest (and (map? body) (extra-body-digest raw))]
+          (-> resolved
+              (assoc ::extra-body body)
+              (assoc-in [::resolved-config ::extra-body-digest] digest)
+              (assoc-in [::provenance ::extra-body-digest] src))
+          resolved))
+      resolved)))
+
+(defn resolved-config-from-rows
+  "Resolve effective LLM configuration from ordinary pulled maps.
+
+   Both maps must come from the same immutable database coordinate. This is
+   the process-independent form used by execution children and turn retries."
+  {:malli/schema
+   [:=> [:catn [::config-row ::row] [::agent-row :map]]
+    ::resolved-config-response]}
+  [config-row agent-row]
+  (cond->
+   (resolve-config-values
+    (select-keys config-row config-attrs)
+    (agent-row-override-values agent-row)
+    (into {}
+          (keep (fn [attr]
+                  (when (contains? config-row attr)
+                    [attr [(get config-row attr) :config-row]])))
+          model-transport-cap-attrs))
+    (some? (agent-row-max-retries agent-row))
+    (assoc ::agent-max-retries (agent-row-max-retries agent-row))))
 
 (defn resolved-config
   "The effective LLM config an agent runs under, derived from a db value.
@@ -726,43 +819,8 @@
   [{db :seon.db/db id :seon.agent/id}]
   (let [overrides (agent-override-values db id)
         row-cfg   (global-config db)
-        transport-caps (model-transport-cap-resolution db)
-        pick      (fn [k defaults]
-                    (cond
-                      (contains? overrides k) [(get overrides k) :agent-override]
-                      (contains? row-cfg k)   [(get row-cfg k)   :config-row]
-                      (contains? defaults k)  [(get defaults k)  :default]))
-        [prov prov-src] (or (pick ::provider {}) [:deepseek :default])
-        defaults  (get shipped-defaults prov {})]
-    (let [resolved
-          (reduce
-            (fn [acc k]
-              (if-let [[v src] (pick k defaults)]
-                (-> acc
-                    (assoc-in [::resolved-config k] v)
-                    (assoc-in [::provenance k] src))
-                acc))
-            {::resolved-config {::provider prov}
-             ::provenance      {::provider prov-src}}
-            [::model ::temperature ::max-tokens ::thinking ::timeout-ms
-             ::base-url ::api-key-env ::dg-backend])
-          resolved
-          (reduce-kv
-            (fn [acc attr [value source]]
-              (-> acc
-                  (assoc-in [::resolved-config attr] value)
-                  (assoc-in [::provenance attr] source)))
-            resolved
-            transport-caps)]
-      (if-let [[raw src] (pick ::extra-body-edn defaults)]
-        (let [body (try (reader/read-string raw) (catch :default _ nil))]
-          (if-let [digest (and (map? body) (extra-body-digest raw))]
-            (-> resolved
-                (assoc ::extra-body body)
-                (assoc-in [::resolved-config ::extra-body-digest] digest)
-                (assoc-in [::provenance ::extra-body-digest] src))
-            resolved))
-        resolved))))
+        transport-caps (model-transport-cap-resolution db)]
+    (resolve-config-values row-cfg overrides transport-caps)))
 
 (defn bounded-evidence-error
   "Bound an evidence error using one resolved positive cap."

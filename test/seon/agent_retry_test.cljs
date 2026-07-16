@@ -18,12 +18,13 @@
        data on `:seon.agent.turn/error` (a bounded string) — no throw
      - a recovery mid-retry is NOT an error, and still records the
        retry honestly
+     - every attempt in one turn uses the prompt coordinate's one ordinary
+       provider and retry-policy resolution; retries perform no database read
 
    Hermetic: blobs re-pointed to a pid-scoped tmp dir (the success path
-   captures the raw reply blob), each test on a fresh :memory conn
+   captures the raw reply blob), legacy persistence cases use a fresh :memory conn
    root-`set!` as `db/*conn*` (CLJS bindings don't survive await). The
-   blank-reply success path evals zero forms, so `compile-state nil` is
-   never touched."
+   coordinate-pinning regression is connection-free."
   (:require
     ["node:fs" :as nfs]
     ["node:path" :as npath]
@@ -127,6 +128,8 @@
     (when-not (:seon.db/ok? env)
       (throw (ex-info "agent-retry-test: seed transact failed" env)))
     (let [point (coordinate/resolved @db/*conn*)
+          resolution (ai/resolved-config
+                      {:seon.db/db @db/*conn* :seon.agent/id agent-id})
           original execution.host/invoke-compiled!]
       (set! execution.host/invoke-compiled!
             (fn [requested-point _agent-id _function-symbol _arguments]
@@ -147,6 +150,7 @@
               {:seon.agent/id              agent-id
                :seon.agent/llm-fn          llm-fn
                ::coordinate/coordinate     point
+               :seon.ai/config-resolution  resolution
                :seon.agent.turn/id-of-turn turn-id
                :seon.agent.turn/turn-idx   1
                :seon.agent.turn/prompt-text "ctx"})))))
@@ -251,58 +255,76 @@
                    (:seon.ai.attempt/request-id (second attempts)))))))
       done)))
 
-(deftest retry-persists-ordered-immutable-config-drift
+(deftest retry-keeps-one-coordinate-pinned-config-resolution
   (async done
-    (run-test
-      (fn ^:async run []
-        (let [seed
-              (await
-                (db/transact!
-                  {:seon.db/tx-data
-                   [{:seon.ai/id "config"
-                     :seon.ai/provider :openai-compat
-                     :seon.ai/model "model-a"
-                     :seon.ai/temperature 0.0
-                     :seon.ai/base-url "https://user:secret@a.example/v1?sig=hide#frag"
-                     :seon.ai/timeout-ms 1111}]}))
-              _ (is (true? (:seon.db/ok? seed)))
-              !calls (atom 0)
-              llm-fn
-              (fn ^:async retry-with-drift [arg]
-                (let [n (swap! !calls inc)]
-                  (if (= 1 n)
-                    (let [changed
-                          (await
-                            (db/transact!
-                              {:seon.db/tx-data
-                               [{:seon.ai/id "config"
-                                 :seon.ai/model "model-b"
-                                 :seon.ai/base-url "https://b.example/v1"
-                                 :seon.ai/timeout-ms 2222}]}))]
-                      (is (true? (:seon.db/ok? changed)))
-                      (transport-failure))
-                    {:text ""
-                     :seon.ai/raw
-                     {:seon.ai/config-evidence
-                      (ai/config-evidence (:seon.ai/config-resolution arg))}})))
-              result (await (ask! "AGTretrydrift1" llm-fn 1))
-              attempts (persisted-attempts (:seon.agent.turn/id result))]
-          (is (= [0 1] (mapv :seon.ai.attempt/ordinal attempts)))
-          (is (= ["model-a" "model-b"]
-                 (mapv :seon.ai.attempt/requested-model attempts)))
-          (is (= [1111 2222]
-                 (mapv :seon.ai.attempt/adapter-timeout-ms attempts)))
-          (is (= [0.0 0.0]
-                 (mapv :seon.ai.attempt/temperature attempts))
-              "zero is retained as a real sampling value, not absence")
-          (is (= ["https://a.example/v1/chat/completions"
-                  "https://b.example/v1/chat/completions"]
-                 (mapv :seon.ai.attempt/endpoint attempts)))
-          (is (not (str/includes? (pr-str attempts) "user:secret")))
-          (is (not (str/includes? (pr-str attempts) "sig=hide")))
-          (is (not= (:seon.ai.attempt/commit-id (first attempts))
-                    (:seon.ai.attempt/commit-id (second attempts))))))
-      done)))
+    (let [point {::coordinate/database-id
+                 #uuid "00000000-0000-4000-8000-000000000081"
+                 ::coordinate/branch :db
+                 ::coordinate/commit-id
+                 #uuid "00000000-0000-4000-8000-000000000082"
+                 ::coordinate/t 42}
+          resolution
+          {:seon.ai/resolved-config
+           {:seon.ai/provider :openai-compat
+            :seon.ai/model "model-a"
+            :seon.ai/temperature 0.0
+            :seon.ai/base-url
+            "https://user:secret@a.example/v1?sig=hide#frag"
+            :seon.ai/timeout-ms 1111}
+           :seon.ai/provenance
+           {:seon.ai/provider :config-row
+            :seon.ai/model :config-row
+            :seon.ai/temperature :config-row
+            :seon.ai/base-url :config-row
+            :seon.ai/timeout-ms :config-row}
+           :seon.ai/agent-max-retries 1}
+          !calls (atom 0)
+          !args (atom [])
+          original execution.host/invoke-compiled!
+          llm-fn
+          (fn [arg]
+            (swap! !args conj arg)
+            (js/Promise.resolve
+             (if (= 1 (swap! !calls inc))
+               (transport-failure)
+               {:text ""})))]
+      (set! execution.host/invoke-compiled!
+            (fn [requested-point _agent-id _function-symbol _arguments]
+              (js/Promise.resolve
+               {::execution/message execution/result-message
+                ::execution/coordinate requested-point
+                ::execution/result {:seon.eval/n-ok 0
+                                    :seon.eval/n-fail 0
+                                    :seon.eval/ids []}})))
+      (-> (turn/ask-and-eval!
+           {:seon.agent/id "AGTretrydrift1"
+            :seon.agent/llm-fn llm-fn
+            ::coordinate/coordinate point
+            :seon.ai/config-resolution resolution
+            :seon.agent.turn/id-of-turn "turn-pinned-config"
+            :seon.agent.turn/turn-idx 1
+            :seon.agent.turn/prompt-text "ctx"})
+          (.then
+           (fn [result]
+             (let [attempts (:seon.agent.turn/llm-attempts result)]
+               (is (= [0 1] (mapv :seon.ai.attempt/ordinal attempts)))
+               (is (= ["model-a" "model-a"]
+                      (mapv :seon.ai.attempt/requested-model attempts)))
+               (is (= [1111 1111]
+                      (mapv :seon.ai.attempt/adapter-timeout-ms attempts)))
+               (is (= [0.0 0.0]
+                      (mapv :seon.ai.attempt/temperature attempts)))
+               (is (every? #(= resolution (:seon.ai/config-resolution %))
+                           @!args))
+               (is (every? #(= (::coordinate/commit-id point)
+                                (:seon.ai.attempt/commit-id %))
+                           attempts))
+               (is (not (str/includes? (pr-str attempts) "user:secret")))
+               (is (not (str/includes? (pr-str attempts) "sig=hide")))
+               (done))))
+          (.catch (fn [error] (is false (str error)) (done)))
+          (.finally
+           (fn [] (set! execution.host/invoke-compiled! original)))))))
 
 (deftest rate-limit-429-is-transient-and-retried
   (async done

@@ -46,7 +46,9 @@
                  [{::protocol/success? true ::protocol/result result}
                   {::protocol/success? true
                    ::protocol/result
-                   {:seon.config/system-text "frozen system"}}]}))))
+                   {:seon.config/system-text "frozen system"}}
+                  {::protocol/success? true
+                   ::protocol/result {:seon.ai/model "frozen-model"}}]}))))
      (-> (db/with-tx-context
            {::db/coordinate point}
            #(runtime/render-prompt! request invoke-selected!))
@@ -64,6 +66,10 @@
            (fn [rendered]
              (is (= "literal whole prompt" (:seon.render/text rendered)))
              (is (= "frozen system" (:seon.ai/system-prompt rendered)))
+             (is (= :deepseek
+                    (get-in rendered [:seon.ai/config-resolution
+                                      :seon.ai/resolved-config
+                                      :seon.ai/provider])))
              (is (= [:prompt]
                     (mapv :seon.agent.ctx/name
                           (:seon.agent.ctx/rendered-blocks rendered))))
@@ -89,6 +95,14 @@
                     (get-in @observed
                             [:seon.execution.runtime-test/request ::db/members
                              1 ::protocol/entity-id])))
+             (is (= [:seon.ai/id "config"]
+                    (get-in @observed
+                            [:seon.execution.runtime-test/request ::db/members
+                             2 ::protocol/entity-id])))
+             (is (= "frozen-model"
+                    (get-in rendered [:seon.ai/config-resolution
+                                      :seon.ai/resolved-config
+                                      :seon.ai/model])))
              (done)))
           (.catch
            (fn [error]
@@ -172,12 +186,8 @@
               database-error {:seon.agent/id "agent-1"} observed)))
           (.then
            (fn [rendered]
-             (is (= [:database]
-                    (mapv :seon.agent.ctx/name
-                          (:seon.agent.ctx/rendered-blocks rendered))))
-             (is (str/includes? (:seon.render/text rendered)
-                                "authority unavailable"))
-             (is (not= "" (:seon.render/text rendered)))
+             (is (= database-error rendered)
+                 "an authority failure remains an explicit error value")
              (done)))
           (.catch
            (fn [error]
@@ -297,13 +307,19 @@
           (.then
            (fn [rendered]
              (testing "an existing agent with no prompt data"
-               (is (= empty-render rendered)))
+               (is (= empty-render
+                      (dissoc rendered :seon.ai/config-resolution)))
+               (is (= :deepseek
+                      (get-in rendered [:seon.ai/config-resolution
+                                        :seon.ai/resolved-config
+                                        :seon.ai/provider]))))
              (call-with-acquired-agent
               nil {:seon.agent/id "missing"} observed)))
           (.then
            (fn [rendered]
              (testing "a genuinely missing agent"
-               (is (= empty-render rendered)))
+               (is (= empty-render
+                      (dissoc rendered :seon.ai/config-resolution))))
              (done)))
           (.catch
            (fn [error]
@@ -320,6 +336,7 @@
                 ::db/results
                 [{::protocol/success? true
                   ::protocol/result {:seon.agent/id "agent-1"}}
+                 {::protocol/success? true ::protocol/result nil}
                  {::protocol/success? true ::protocol/result nil}]})))
       (-> (db/with-tx-context
             {::db/coordinate point}
@@ -329,6 +346,10 @@
           (.then
            (fn [rendered]
              (is (= ctx/system-text (:seon.ai/system-prompt rendered)))
+             (is (= :deepseek
+                    (get-in rendered [:seon.ai/config-resolution
+                                      :seon.ai/resolved-config
+                                      :seon.ai/provider])))
              (done)))
           (.catch (fn [error] (is false (str error)) (done)))
           (.finally (fn [] (set! db/execute-many original)))))))
@@ -346,7 +367,8 @@
                   ::protocol/error {:seon.error/message "authority failed"}}
                  {::protocol/success? true
                   ::protocol/result
-                  {:seon.config/system-text "frozen system"}}]})))
+                  {:seon.config/system-text "frozen system"}}
+                 {::protocol/success? true ::protocol/result nil}]})))
       (-> (db/with-tx-context
             {::db/coordinate point}
             #(runtime/render-prompt!

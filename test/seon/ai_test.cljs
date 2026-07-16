@@ -349,6 +349,33 @@
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
+(deftest ordinary-rows-resolve-one-coordinate-pinned-config
+  (let [resolution
+        (ai/resolved-config-from-rows
+         {::ai/id "config"
+          ::ai/provider :openai-compat
+          ::ai/model "global-model"
+          ::ai/timeout-ms 1111
+          :seon.config.model-transport/response-identity-cap 31}
+         {:seon.agent/id "agent-1"
+          ::ai/agent-model (pr-str "agent-model")
+          ::ai/agent-temperature (pr-str 0.0)
+          ::ai/agent-max-retries (pr-str 2)
+          ::ai/agent-thinking (pr-str :inherit)})
+        config (::ai/resolved-config resolution)]
+    (is (= :openai-compat (::ai/provider config)))
+    (is (= "agent-model" (::ai/model config)))
+    (is (= 0.0 (::ai/temperature config)))
+    (is (= 1111 (::ai/timeout-ms config)))
+    (is (= 2 (::ai/agent-max-retries resolution)))
+    (is (= 31
+           (:seon.config.model-transport/response-identity-cap config)))
+    (is (= :agent-override (get-in resolution [::ai/provenance ::ai/model])))
+    (is (= :config-row
+           (get-in resolution
+                   [::ai/provenance
+                    :seon.config.model-transport/response-identity-cap])))))
+
 (deftest resolved-config-time-travels-complete-transport-intent
   (async done
     (-> (with-conn

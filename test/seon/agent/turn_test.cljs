@@ -12,6 +12,10 @@
    ::coordinate/commit-id #uuid "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
    ::coordinate/t 42})
 
+(def resolution
+  {:seon.ai/resolved-config {:seon.ai/provider :deepseek}
+   :seon.ai/provenance {:seon.ai/provider :default}})
+
 (deftest prompt-is-the-coordinate-pinned-child-result
   (async done
     (let [original execution.host/invoke-compiled!
@@ -23,12 +27,14 @@
                 {::execution/message execution/result-message
                  ::execution/coordinate coordinate
                  ::execution/result {:seon.render/text "remote prompt"
-                                     :seon.ai/system-prompt "frozen system"}})))
+                                     :seon.ai/system-prompt "frozen system"
+                                     :seon.ai/config-resolution resolution}})))
       (-> (turn/render-prompt "agent-1" point)
           (.then
             (fn [prompt]
               (is (= {:seon.render/text "remote prompt"
-                      :seon.ai/system-prompt "frozen system"}
+                      :seon.ai/system-prompt "frozen system"
+                      :seon.ai/config-resolution resolution}
                      prompt))
               (is (= [point "agent-1"
                       'seon.execution.runtime/render-prompt!
@@ -54,7 +60,8 @@
                 {::execution/message execution/result-message
                  ::execution/coordinate coordinate
                  ::execution/result {:seon.render/text "profile prompt"
-                                     :seon.ai/system-prompt "system"}})))
+                                     :seon.ai/system-prompt "system"
+                                     :seon.ai/config-resolution resolution}})))
       (-> (turn/render-prompt "agent-1" point profile)
           (.then
             (fn [prompt]
@@ -80,7 +87,8 @@
                 {::execution/message execution/result-message
                  ::execution/coordinate moved
                  ::execution/result {:seon.render/text "wrong prompt"
-                                     :seon.ai/system-prompt "wrong system"}})))
+                                     :seon.ai/system-prompt "wrong system"
+                                     :seon.ai/config-resolution resolution}})))
       (-> (turn/render-prompt "agent-1" point)
           (.then
             (fn [result]
