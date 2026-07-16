@@ -36,10 +36,12 @@
     [clojure.string :as str]
     [seon.db :as db]
     [seon.db.coordinate :as db.coordinate]
+    [seon.db.protocol :as protocol]
+    [seon.execution :as execution]
+    [seon.execution.host :as execution.host]
     [seon.log :as log]
     [seon.schema :as schema]
     [seon.ui.agent-view :as agent-view]
-    [seon.ui.header :as header]
     [seon.ui.html :as html]
     [seon.web.brand :as brand]
     [seon.web.view-unit :as view-unit]))
@@ -61,9 +63,6 @@
 (schema/register! ::label :string)
 (schema/register! ::order :int)
 (schema/register! ::exclusive-group :qualified-keyword)
-(schema/register! ::view-unit? :boolean)
-(schema/register! ::complete-element? :boolean)
-(schema/register! ::renderer-token [:string {:min 1}])
 (schema/register! ::producer 'fn?)
 (schema/register! ::definition
   [:map
@@ -71,10 +70,7 @@
    [::producer ::producer]
    [::label {:optional true} ::label]
    [::order {:optional true} ::order]
-   [::exclusive-group {:optional true} ::exclusive-group]
-   [::view-unit? {:optional true} ::view-unit?]
-   [::complete-element? {:optional true} ::complete-element?]
-   [::renderer-token {:optional true} ::renderer-token]])
+   [::exclusive-group {:optional true} ::exclusive-group]])
 (schema/register! ::definitions [:vector ::definition])
 (schema/register! ::descriptor
   [:map
@@ -84,10 +80,7 @@
    [::producer ::producer]
    [::label {:optional true} ::label]
    [::order {:optional true} ::order]
-   [::exclusive-group {:optional true} ::exclusive-group]
-   [::view-unit? {:optional true} ::view-unit?]
-   [::complete-element? {:optional true} ::complete-element?]
-   [::renderer-token {:optional true} ::renderer-token]])
+   [::exclusive-group {:optional true} ::exclusive-group]])
 (schema/register! ::catalog [:vector ::descriptor])
 (schema/register! ::active-tokens [:set ::token])
 (schema/register! ::demanded-tokens [:set ::token])
@@ -108,35 +101,12 @@
 (schema/register! ::fingerprint [:string {:min 1}])
 (schema/register! ::view-id [:string {:min 1 :max 128}])
 (schema/register! ::optional-view-id [:maybe ::view-id])
-(schema/register! ::dependencies
-                  [:or
-                   :seon.ui.agent-view/dependencies
-                   :seon.db/read-observations
-                   [:map-of :qualified-keyword [:set :qualified-keyword]]])
+(schema/register! ::dependencies :map)
 (schema/register! ::element :seon.render.canvas/hiccup)
 (schema/register! ::elements [:vector :seon.render.canvas/hiccup])
 (schema/register! ::serialized-elements [:vector :string])
 (schema/register! ::event :string)
 (schema/register! ::last-event :string)
-(schema/register! ::render-thunk 'fn?)
-(schema/register! ::observed-render-request
-  [:map
-   [:seon.db/db :seon.db/db-val]
-   [::render-thunk ::render-thunk]])
-(schema/register! ::observed-render-response
-  [:map
-   [::element ::element]
-   [::dependencies :seon.db/read-observations]])
-(schema/register! ::observed-transition-request
-  [:map
-   [:seon.db/db :seon.db/db-val]
-   [::dependencies :seon.db/read-observations]
-   [::render-thunk ::render-thunk]])
-(schema/register! ::observed-transition-response
-  [:map
-   [::elements ::elements]
-   [::serialized-elements {:optional true} ::serialized-elements]
-   [::dependencies :seon.db/read-observations]])
 (schema/register! ::view-state
   [:map
    [::view-id ::view-id]
@@ -153,7 +123,6 @@
     [:maybe :string] [:maybe :string] [:maybe :string] :boolean]
    [:tuple [:= :seon.web.feed/debug] :seon.agent/id ::view-id]])
 (schema/register! ::render-full 'fn?)
-(schema/register! ::render-full-with-db? :boolean)
 (schema/register! ::render-change 'fn?)
 (schema/register! ::live? :boolean)
 (schema/register! ::feed-definition
@@ -162,7 +131,6 @@
    [:seon.web.feed/live? ::live?]
    [:seon.web.feed/coordinate {:optional true} ::db.coordinate/coordinate]
    [:seon.web.feed/render-full ::render-full]
-   [::render-full-with-db? {:optional true} ::render-full-with-db?]
    [:seon.web.feed/render-change ::render-change]
    [::dependencies {:optional true} ::dependencies]
    [::view-id {:optional true} ::view-id]
@@ -243,32 +211,6 @@
   [active-tokens]
   (view-unit/encode-text (pr-str (vec (sort active-tokens)))))
 
-(defn render-observed
-  "Render one synchronous view and retain its immutable database reads."
-  {:malli/schema [:=> [:cat ::observed-render-request]
-                  ::observed-render-response]}
-  [{dbv :seon.db/db thunk ::render-thunk}]
-  (let [capture (db/capture-reads
-                  {:seon.db/db dbv :seon.db/thunk thunk})]
-    {::element (:seon.db/result capture)
-     ::dependencies (:seon.db/read-observations capture)}))
-
-(defn transition-observed
-  "Rerender one view only when one of its captured reads changed."
-  {:malli/schema [:=> [:cat ::observed-transition-request]
-                  ::observed-transition-response]}
-  [{dbv :seon.db/db observations ::dependencies thunk ::render-thunk}]
-  (if (or (empty? observations)
-          (some #(db/read-observation-changed?
-                   {:seon.db/db dbv :seon.db/read-observation %})
-                observations))
-    (let [rendered (render-observed
-                     {:seon.db/db dbv ::render-thunk thunk})]
-      {::elements [(::element rendered)]
-       ::dependencies (::dependencies rendered)})
-    {::elements []
-     ::dependencies observations}))
-
 ;; ============================================================
 ;; Feed registry — socket-owning views consume normalized subscriptions. A
 ;; subscription key is the feed's stable semantic key plus its active-unit
@@ -279,8 +221,7 @@
 (def ^:private empty-feed-registry
   {::views {}
    ::subscriptions {}
-   ::listener-installed? false
-   ::view-unit/state view-unit/empty-state})
+   ::listener-installed? false})
 
 (defonce ^{:doc "Ephemeral views and their normalized subscription authorities.
                   Reconnecting one view replaces only its socket. Equivalent
@@ -480,10 +421,7 @@
 (defn- render-request-result [subscription request]
   (try
     (if (::render-full? request)
-      (view-fn-patch
-       #(if (::render-full-with-db? subscription)
-          ((:seon.web.feed/render-full subscription) (:seon.db/db request))
-          ((:seon.web.feed/render-full subscription))))
+      (view-fn-patch #((:seon.web.feed/render-full subscription)))
       (let [rendered ((::render-change subscription)
                       subscription (::change request))]
         (if (promise-like? rendered)
@@ -498,15 +436,11 @@
   (cond
     (or (::render-full? request)
         (not (::full-event-committed? subscription)))
-    (cond-> (assoc request ::render-full? true)
-      (contains? (::change request) :seon.db/db)
-      (assoc :seon.db/db (get-in request [::change :seon.db/db])))
+    (assoc request ::render-full? true)
 
     (::render-full? pending)
-    (assoc pending
-           ::render-id (::render-id request)
-           ::render-number (::render-number request)
-           :seon.db/db (get-in request [::change :seon.db/db]))
+    (assoc pending ::render-id (::render-id request)
+           ::render-number (::render-number request))
 
     :else
     (let [prior (or pending active)]
@@ -572,36 +506,6 @@
           (keep #(get-in @!feeds [::views %]) consumer-view-ids))]
     (doseq [conn connections]
       (push-event! conn event))
-    (when (and emit? (not (::render-full? active-before)))
-      (let [diagnostics (view-unit/diagnostics (::view-unit/state after))
-            transition-metrics (::view-unit/last-transition diagnostics)
-            unit-metrics (vals (::view-unit/metrics-by-token transition-metrics))]
-        (log/info-console!
-         "seon.web.datastar" "broadcast"
-         {:seon.web.broadcast/view (first subscription-key)
-          :seon.web.broadcast/connections (count connections)
-          :seon.web.broadcast/targets (::target-count rendered)
-          :seon.web.broadcast/changed-attrs
-          (sort (get-in active-before [::change :seon.db/changed-attrs]))
-          :seon.web.broadcast/active-units
-          (::view-unit/active-unit-count diagnostics)
-          :seon.web.broadcast/candidate-units
-          (::view-unit/candidate-unit-count transition-metrics)
-          :seon.web.broadcast/read-replays
-          (transduce (map ::view-unit/read-replays) + 0 unit-metrics)
-          :seon.web.broadcast/producer-invocations
-          (transduce (map ::view-unit/producer-invocations) + 0 unit-metrics)
-          :seon.web.broadcast/serializations
-          (transduce (map ::view-unit/serializations) + 0 unit-metrics)
-          :seon.web.broadcast/suppressions
-          (frequencies (map ::view-unit/suppression unit-metrics))
-          :seon.web.broadcast/retained-output-bytes
-          (::view-unit/retained-output-bytes diagnostics)
-          :seon.web.broadcast/render-ms
-          (.round js/Math
-                  (- (.now js/performance)
-                     (or (::render-started-at active-before)
-                         (.now js/performance))))})))
     (when (and promoted
                (not= render-id (::render-id promoted)))
       (start-render! subscription-key subscription-id))))
@@ -664,10 +568,8 @@
 
 (defn- push-full!
   "Write one shared full view, or join the normalized render already in flight."
-  ([conn]
-   (push-full! conn nil))
-  ([conn dbv]
-   (let [subscription-key (::subscription-key conn)
+  [conn]
+  (let [subscription-key (::subscription-key conn)
          subscription (get-in @!feeds [::subscriptions subscription-key])
          event (::full-event subscription)
          full-rendering?
@@ -676,9 +578,7 @@
      (cond
        event (push-event! conn event)
        full-rendering? nil
-       :else (enqueue-render! subscription-key
-                              {::render-full? true
-                               :seon.db/db dbv})))))
+       :else (enqueue-render! subscription-key {::render-full? true}))))
 
 (defn- subscription-key-for
   "Normalized subscription coordinate for one feed or socket view."
@@ -696,7 +596,6 @@
    ::render-number 0
    ::full-event-committed? false
    :seon.web.feed/render-full (:seon.web.feed/render-full feed)
-   ::render-full-with-db? (true? (::render-full-with-db? feed))
    ::render-change (:seon.web.feed/render-change feed)
    ::dependencies (or (::dependencies feed) {})})
 
@@ -709,7 +608,6 @@
               :seon.web.feed/live?
               :seon.web.feed/render-full
               :seon.web.feed/render-change
-              ::render-full-with-db?
               ::dependencies)))
 
 (defn- detach-subscription
@@ -729,20 +627,8 @@
     registry))
 
 (defn- detach-view
-  "Release one view's units, socket consumer, and unused subscription."
   [registry view-id]
-  (let [unit-state (or (::view-unit/state registry) view-unit/empty-state)
-        released-state
-        (reduce (fn [state token]
-                  (::view-unit/state
-                   (view-unit/detach-consumer
-                    {::view-unit/state state
-                     ::view-unit/token token
-                     ::view-unit/consumer-id view-id})))
-                unit-state
-                (keys (::view-unit/units unit-state)))]
-    (assoc (detach-subscription registry view-id)
-           ::view-unit/state released-state)))
+  (detach-subscription registry view-id))
 
 (defn- attach-feed
   "Attach a socket consumer to exactly one normalized subscription authority."
@@ -797,7 +683,7 @@
       registry)
     registry))
 
-(declare transition-active-units commit-registry!)
+(declare commit-registry!)
 
 (defn- emitted-elements-for-subscription
   "Distinct managed elements emitted for one subscription's consumers."
@@ -808,21 +694,14 @@
           consumer-view-ids))
 
 (defn- broadcast!
-  "Transition shared units and each live subscription once, then fan patches."
+  "Render each normalized live subscription once, then fan out its patch."
   [change]
-  (let [emitted-by-view
-        (if (:seon.db/db change)
-          (commit-registry! #(transition-active-units % change))
-          {})]
-    (doseq [[subscription-key subscription] (::subscriptions @!feeds)
-            :when (::live? subscription)]
-      (enqueue-render!
-       subscription-key
-       {::render-full? false
-        ::change change
-        ::serialized-elements-by-token
-        (emitted-elements-for-subscription
-         emitted-by-view (::consumer-view-ids subscription))}))))
+  (doseq [[subscription-key subscription] (::subscriptions @!feeds)
+          :when (::live? subscription)]
+    (enqueue-render! subscription-key
+                     {::render-full? false
+                      ::change change
+                      ::serialized-elements-by-token {}})))
 
 ;; ============================================================
 ;; Coalescing — one lifecycle-owned state collapses a tx burst into one
@@ -850,74 +729,29 @@
   (js/clearTimeout timer))
 
 (defn- change-attrs [change]
-  (into (or (:seon.db/changed-attrs change) #{})
-        (keys (:seon.db/attr-index change))))
+  (or (:seon.db/changed-attrs change) #{}))
 
-(defn- merge-attr-index [pending change]
-  (merge-with into
-              (or (:seon.db/attr-index pending) {})
-              (or (:seon.db/attr-index change) {})))
+(defn- event-change [event]
+  (let [datoms (vec (or (::protocol/datoms event) []))
+        attrs (into #{} (map :seon.db/a) datoms)]
+    {:seon.db/coordinate (::protocol/coordinate event)
+     :seon.db/changed-attrs attrs
+     :seon.db/datoms datoms
+     :seon.web.broadcast/structural?
+     (agent-view/structural-change? attrs)}))
 
 (defn- merge-change [pending change]
-  (let [attrs (set/union (or (:seon.db/changed-attrs pending) #{})
-                         (change-attrs change))
-        attr-index (merge-attr-index pending change)
-        db-before (or (:seon.db/db-before pending)
-                      (:seon.db/db-before change))
-        latest-db (if (contains? change :seon.db/db)
-                    (:seon.db/db change)
-                    (:seon.db/db pending))
-        datoms (into (vec (or (:seon.db/datoms pending) []))
-                     (or (:seon.db/datoms change) []))]
-    (cond->
-      {:seon.db/db latest-db
-       :seon.db/changed-attrs attrs
-       :seon.db/attr-index attr-index
-       :seon.db/datoms datoms
-       :seon.web.broadcast/structural?
-       (or (:seon.web.broadcast/structural? pending)
-           (agent-view/structural-change? (change-attrs change)))}
-      (some? db-before) (assoc :seon.db/db-before db-before))))
-
-(defn- running-eval-record-commit?
-  "True when one commit records eval children of still-running turns."
-  [change]
-  (try
-    (let [datoms (or (:seon.db/datoms change) [])
-          post-db (:seon.db/db change)
-          eval-eids
-          (into #{}
-                (comp
-                  (filter :seon.db/added?)
-                  (filter #(= :seon.eval/id (:seon.db/a %)))
-                  (map :seon.db/e))
-                datoms)
-          eval-links
-          (into []
-                (comp
-                  (filter :seon.db/added?)
-                  (filter #(= :seon.agent.turn/evals (:seon.db/a %)))
-                  (filter #(contains? eval-eids (:seon.db/v %))))
-                datoms)
-          linked-eval-eids (into #{} (map :seon.db/v) eval-links)
-          owner-turn-eids (into #{} (map :seon.db/e) eval-links)]
-      (and post-db
-           (seq eval-eids)
-           (= eval-eids linked-eval-eids)
-           (seq owner-turn-eids)
-           (every?
-             (fn [turn-eid]
-               (= :running
-                  (:seon.agent.turn/status
-                    (db/pull {:seon.db/db post-db
-                              :seon.db/pull-pattern
-                              [:seon.agent.turn/status]
-                              :seon.db/ref turn-eid}))))
-             owner-turn-eids)))
-    (catch :default _
-      ;; Recognition is an optimization. Any malformed or unreadable change
-      ;; remains render-worthy rather than risking a suppressed update.
-      false)))
+  {:seon.db/coordinate (or (:seon.db/coordinate change)
+                            (:seon.db/coordinate pending))
+   :seon.db/changed-attrs
+   (set/union (or (:seon.db/changed-attrs pending) #{})
+              (or (:seon.db/changed-attrs change) #{}))
+   :seon.db/datoms
+   (into (vec (or (:seon.db/datoms pending) []))
+         (or (:seon.db/datoms change) []))
+   :seon.web.broadcast/structural?
+   (or (:seon.web.broadcast/structural? pending)
+       (:seon.web.broadcast/structural? change))})
 
 (defn- broadcast-due-at
   [enqueued-at now structural?]
@@ -929,22 +763,8 @@
 (defn- schedule-broadcast! [change]
   (let [now (monotonic-ms)
         current @!coalescer
-        pending (merge-change (::pending-change current) change)
-        running-eval? (running-eval-record-commit? change)]
-    (cond
-      (and running-eval? (::timer current))
-      ;; A prior deliberate change already earned this frame. Merge the eval
-      ;; evidence, but never postpone or replace the timer that owns it.
-      (reset! !coalescer (assoc current ::pending-change pending))
-
-      running-eval?
-      ;; Eval outcomes remain durable database facts. While their owning turn
-      ;; is running, retain their presentation evidence until a non-eval fact
-      ;; (normally the terminal turn status) schedules the existing renderer.
-      (reset! !coalescer {::pending-change pending})
-
-      :else
-      (let [enqueued-at (or (::enqueued-at current) now)
+        pending (merge-change (::pending-change current) change)]
+    (let [enqueued-at (or (::enqueued-at current) now)
             due-at (broadcast-due-at
                      enqueued-at now
                      (:seon.web.broadcast/structural? pending))]
@@ -971,7 +791,7 @@
                      ::enqueued-at enqueued-at
                      ::due-at due-at})
             (when-let [old-timer (::timer current)]
-              (clear-broadcast-timeout! old-timer))))))))
+              (clear-broadcast-timeout! old-timer)))))))
 
 (defn- drain-coalescer! [timer-token]
   (let [[before _]
@@ -1003,12 +823,11 @@
                          [subscription-key (dissoc subscription ::full-event)]))
                   subscriptions))))
 
-(defn- on-tx [change]
-  ;; Invalidate immediately, even when the coalescer deliberately delays the
-  ;; open sockets' partial morph. A newly opened view must always render from
-  ;; the latest database value rather than reuse a pre-transaction first paint.
-  (swap! !feeds invalidate-full-events)
-  (schedule-broadcast! change))
+(defn- on-tx [event]
+  (let [change (event-change event)]
+    ;; Invalidate before the deliberately coalesced socket morph.
+    (swap! !feeds invalidate-full-events)
+    (schedule-broadcast! change)))
 
 (defn install!
   "Install the view tx-listener. Idempotent — same key replaces."
@@ -1080,7 +899,7 @@
    never clobbers its focus/value). Raw string (not hiccup) so the data-init
    single quotes stay literal and the doctype leads."
   [title-suffix body-class feed-url extra-body]
-  (let [b (brand/info)]
+  (let [b (brand/info nil)]
     (str "<!doctype html>\n"
          "<html lang=\"en\" data-theme=\"" (::brand/theme b) "\"><head><meta charset=\"utf-8\">\n"
          "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n"
@@ -1220,7 +1039,6 @@
            ::catalog catalog
            ::active-tokens active-tokens
            ::demanded-tokens demanded-tokens
-           ::render-full-with-db? (true? (::render-full-with-db? feed))
            :seon.web.feed/id feed-id
            :seon.web.feed/gzip gz
            :seon.web.feed/response res
@@ -1265,8 +1083,6 @@
     (when runtime-owned?
       (release-runtime! listener-installed?))
     nil))
-
-(declare active-managed-descriptors reconcile-active-managed-units)
 
 (defn- open-feed!
   "Open a long-lived gzip SSE stream from one derived-view descriptor."
@@ -1318,20 +1134,7 @@
     (.pipe gz res)
     (when-let [replaced (replace-feed! conn)]
       (close-feed-socket! replaced))
-    (let [attached (get-in @!feeds [::views view-id])
-          managed? (seq (active-managed-descriptors attached))
-          database-render? (::render-full-with-db? attached)
-          dbv (when (or managed? database-render?) @db/*conn*)]
-      (commit-registry!
-        (fn [registry]
-          [(reconcile-active-managed-units registry view-id dbv) nil]))
-      ;; `attach-feed` adds the normalized subscription coordinate. First
-      ;; paint and its demanded units must use the registry-owned descriptor
-      ;; and the same immutable database value.
-      (let [current (get-in @!feeds [::views view-id])]
-        (if (or managed? database-render?)
-          (push-full! current dbv)
-          (push-full! current))))
+    (push-full! (get-in @!feeds [::views view-id]))
     (ensure-heartbeat!)
     (log/info-console! "seon.web.datastar" "FEED OPEN"
                        {:seon.web.feed/id (str feed-id)
@@ -1382,19 +1185,6 @@
          :data-seon-unit-active "true"}
    (producer)])
 
-(defn- managed-active-unit
-  "Materialize one committed lifecycle producer against exactly `dbv`."
-  [{token ::token dom-id ::dom-id producer ::producer
-    complete-element? ::complete-element?}
-   dbv]
-  (let [element (producer dbv)]
-    (if complete-element?
-      element
-      [:div {:id dom-id
-             :data-seon-unit token
-             :data-seon-unit-active "true"}
-       element])))
-
 (defn unit-element
   "Render one descriptor as either an inactive stub or its active content."
   {:malli/schema [:=> [:catn [::descriptor ::descriptor]
@@ -1404,183 +1194,13 @@
   (if active? (active-unit descriptor) (inactive-stub descriptor)))
 
 (defn unit-element-html-in-view
-  "Serialize a unit from its open view's committed lifecycle state."
+  "Serialize a unit directly; no server-side rendered-output cache exists."
   {:malli/schema [:=> [:catn [::view-id ::view-id]
                              [::descriptor ::descriptor]
                              [::active? ::active?]]
                   :string]}
-  [view-id descriptor active?]
-  (if-not (and active? (::view-unit? descriptor))
-    (html/->string (unit-element descriptor active?))
-    (if-let [serialized
-             (get-in @!feeds [::view-unit/state ::view-unit/units
-                              (::token descriptor)
-                              ::view-unit/serialized-element])]
-      serialized
-      (html/->string (inactive-stub descriptor)))))
-
-(defn- detach-managed-token
-  "Detach one managed token from a view's pure lifecycle state."
-  [state view-id token]
-  (::view-unit/state
-   (view-unit/detach-consumer
-    {::view-unit/state state
-     ::view-unit/token token
-     ::view-unit/consumer-id view-id})))
-
-(defn- active-managed-descriptors
-  "Managed descriptors demanded by one socket-owning view."
-  [{catalog ::catalog active-tokens ::active-tokens}]
-  (into []
-        (filter #(and (::view-unit? %)
-                      (contains? active-tokens (::token %))))
-        catalog))
-
-(defn- reconcile-active-managed-units
-  "Reconcile one view's managed consumers before its first paint."
-  [registry view-id dbv]
-  (let [view (get-in registry [::views view-id])
-        descriptors (active-managed-descriptors view)
-        desired-tokens (into #{} (map ::token) descriptors)
-        initial-state (or (::view-unit/state registry) view-unit/empty-state)
-        current-tokens
-        (into #{}
-              (keep (fn [[token unit]]
-                      (when (contains? (::view-unit/consumers unit) view-id)
-                        token)))
-              (::view-unit/units initial-state))
-        detached-state
-        (reduce #(detach-managed-token %1 view-id %2)
-                initial-state
-                (set/difference current-tokens desired-tokens))
-        attached-state
-        (reduce
-          (fn [state descriptor]
-            (::view-unit/state
-              (view-unit/attach-consumer
-                {::view-unit/state state
-                 ::view-unit/coordinate (::coordinate descriptor)
-                 ::view-unit/consumer-id view-id
-                 :seon.db/db dbv
-                 ::view-unit/database-coordinate (db.coordinate/resolved dbv)
-                 ::view-unit/renderer-token
-                 (or (::renderer-token descriptor) (::token descriptor))
-                 ::view-unit/producer #(managed-active-unit descriptor %)})))
-          detached-state
-          descriptors)]
-    (assoc registry ::view-unit/state attached-state)))
-
-(defn- retained-unit-html
-  "Serialized output retained for one active unit token."
-  [token]
-  (or (get-in @!feeds [::view-unit/state ::view-unit/units token
-                       ::view-unit/serialized-element])
-      (throw (js/Error. (str "missing retained view unit " token)))))
-
-(defn- descriptor-for-unit
-  "Resolve one retained unit through any current trusted consumer catalog."
-  [registry token consumers]
-  (some (fn [view-id]
-          (descriptor-by-token (get-in registry [::views view-id ::catalog])
-                               token))
-        consumers))
-
-(defn- transition-active-units
-  "Pure registry transition plus emitted serialized elements by consumer."
-  [registry change]
-  (let [initial (or (::view-unit/state registry) view-unit/empty-state)
-        dbv (:seon.db/db change)
-        database-coordinate (db.coordinate/resolved dbv)
-        routing-change (select-keys change
-                                    [:seon.db/changed-attrs
-                                     :seon.db/attr-index])
-        all-tokens (into #{} (keys (::view-unit/units initial)))
-        attribute-candidates
-        (if (schema/valid-candidate-value? :seon.db/candidate-change
-                                           routing-change)
-          (view-unit/candidate-tokens
-           {::view-unit/state initial
-            ::view-unit/change routing-change})
-          all-tokens)
-        descriptors
-        (into {}
-              (keep (fn [[token unit]]
-                      (let [descriptor
-                            (descriptor-for-unit
-                             registry token (::view-unit/consumers unit))]
-                        (when (and descriptor (::view-unit? descriptor))
-                          [token descriptor]))))
-              (::view-unit/units initial))
-        renderer-candidates
-        (into #{}
-              (keep (fn [[token descriptor]]
-                      (when (not= (or (::renderer-token descriptor) token)
-                                   (get-in initial
-                                           [::view-unit/units token
-                                            ::view-unit/renderer-token]))
-                        token)))
-              descriptors)
-        candidate-tokens
-        (set/intersection (into attribute-candidates renderer-candidates)
-                          (into #{} (keys descriptors)))
-        noncandidate-tokens
-        (set/difference (into #{} (keys descriptors)) candidate-tokens)
-        advanced
-        (view-unit/advance-database-coordinate
-         {::view-unit/state initial
-          ::view-unit/tokens noncandidate-tokens
-          ::view-unit/database-coordinate database-coordinate})
-        noncandidate-metrics
-        (into {}
-              (map (fn [token]
-                     (let [unit (get-in advanced [::view-unit/units token])]
-                       [token
-                        {::view-unit/candidate? false
-                         ::view-unit/read-replays 0
-                         ::view-unit/producer-invocations 0
-                         ::view-unit/serializations 0
-                         ::view-unit/suppression
-                         :seon.web.view-unit.suppression/not-candidate
-                         ::view-unit/retained-output-bytes
-                         (js/Buffer.byteLength
-                          (::view-unit/serialized-element unit) "utf8")}])))
-              noncandidate-tokens)
-        [state emitted candidate-metrics]
-        (reduce
-         (fn [[state emitted metrics] token]
-           (let [unit (get-in state [::view-unit/units token])
-                 consumers (::view-unit/consumers unit)
-                 descriptor (get descriptors token)
-                 transition
-                 (view-unit/transition-unit
-                  {::view-unit/state state
-                   ::view-unit/token token
-                   :seon.db/db dbv
-                   ::view-unit/database-coordinate database-coordinate
-                   ::view-unit/renderer-token
-                   (or (::renderer-token descriptor) token)
-                   ::view-unit/producer
-                   #(managed-active-unit descriptor %)})
-                 serialized (::view-unit/serialized-element transition)]
-             [(::view-unit/state transition)
-              (if (::view-unit/emitted? transition)
-                (reduce #(assoc-in %1 [%2 token] serialized)
-                        emitted consumers)
-                emitted)
-              (assoc metrics token (::view-unit/unit-metrics transition))]))
-         [advanced {} {}]
-         candidate-tokens)
-        metrics-by-token (merge noncandidate-metrics candidate-metrics)
-        next-state
-        (if (empty? (::view-unit/units state))
-          view-unit/empty-state
-          (assoc state ::view-unit/last-transition
-                 {::view-unit/database-coordinate database-coordinate
-                  ::view-unit/active-unit-count
-                  (count (::view-unit/units state))
-                  ::view-unit/candidate-unit-count (count candidate-tokens)
-                  ::view-unit/metrics-by-token metrics-by-token}))]
-    [(assoc registry ::view-unit/state next-state) emitted]))
+  [_view-id descriptor active?]
+  (html/->string (unit-element descriptor active?)))
 
 (defn- commit-registry!
   "Commit one synchronous pure registry transition without retrying effects."
@@ -1590,15 +1210,6 @@
     ;; interleaving task. Unlike `swap!`, reset never retries a producer.
     (reset! !feeds registry)
     result))
-
-(defn- transition-view-units!
-  "Advance all shared units once and return elements emitted for `view-id`."
-  [view-id dbv]
-  (vec
-   (vals
-    (get (commit-registry!
-          #(transition-active-units % {:seon.db/db dbv}))
-         view-id {}))))
 
 (defn- write-unit-response!
   "Finish one unit-control response with explicit status and content type."
@@ -1610,134 +1221,45 @@
 
 (defn handle-view-unit!
   "Activate or deactivate one trusted unit in an open ephemeral view."
-  {:malli/schema [:=> [:catn [::ring-request ::ring-request]] :nil]}
   [r]
-  (let [^js res (:seon.http/node-res r)
-        query-string (:query-string r)
-        view-id (query-value query-string "view")
-        token (query-value query-string "unit")
-        active-value (query-value query-string "active")
-        active? (case active-value "1" true "0" false ::invalid-active)]
+  (let [res (:seon.http/node-res r)
+        view-id (query-value (:query-string r) "view")
+        token (query-value (:query-string r) "unit")
+        active? (case (query-value (:query-string r) "active")
+                  "1" true "0" false ::invalid-active)
+        view (get-in @!feeds [::views view-id])
+        target (descriptor-by-token (::catalog view) token)]
     (cond
-      (or (not (safe-view-id? view-id))
-          (not (seq token))
-          (= ::invalid-active active?))
+      (or (not (safe-view-id? view-id)) (= ::invalid-active active?))
       (write-unit-response! res 400 "text/plain; charset=utf-8" "invalid unit request")
-
-      (nil? (get-in @!feeds [::views view-id]))
+      (nil? view)
       (write-unit-response! res 410 "text/plain; charset=utf-8" "view is closed")
-
+      (nil? target)
+      (write-unit-response! res 404 "text/plain; charset=utf-8" "unknown unit")
+      (and (not active?) (contains? (::demanded-tokens view) token))
+      (write-unit-response! res 409 "text/plain; charset=utf-8" "unit is required by this view")
       :else
-      (let [view (get-in @!feeds [::views view-id])
-            catalog (::catalog view)
-            target (descriptor-by-token catalog token)]
-        (cond
-          (nil? target)
-          (write-unit-response! res 404 "text/plain; charset=utf-8" "unknown unit")
-
-          (and (not active?)
-               (contains? (::demanded-tokens view) token))
-          (write-unit-response! res 409 "text/plain; charset=utf-8"
-                                "unit is required by this view")
-
-          :else
-          (try
-            (let [dbv (when (and active? (::view-unit? target)) @db/*conn*)
-                  {:keys [body]}
-                  (commit-registry!
-                   (fn [registry]
-                     (let [current (get-in registry [::views view-id])
-                           transition
-                           (transition-active-set
-                            {::catalog catalog
-                             ::active-tokens (::active-tokens current)
-                             ::token token
-                             ::active? active?})
-                           deactivated (::deactivated-tokens transition)
-                           inactive-elements
-                           (into []
-                                 (comp (filter #(contains? deactivated (::token %)))
-                                       (map inactive-stub))
-                                 catalog)
-                           initial-state (or (::view-unit/state registry)
-                                             view-unit/empty-state)
-                           detached-state
-                           (reduce #(detach-managed-token %1 view-id %2)
-                                   initial-state deactivated)
-                           managed? (::view-unit? target)
-                           lifecycle
-                           (when managed?
-                             (if active?
-                               (view-unit/attach-consumer
-                                {::view-unit/state detached-state
-                                 ::view-unit/coordinate (::coordinate target)
-                                 ::view-unit/consumer-id view-id
-                                 :seon.db/db dbv
-                                 ::view-unit/database-coordinate
-                                 (db.coordinate/resolved dbv)
-                                 ::view-unit/renderer-token
-                                 (or (::renderer-token target) token)
-                                 ::view-unit/producer
-                                 #(managed-active-unit target %)})
-                               (view-unit/detach-consumer
-                                {::view-unit/state detached-state
-                                 ::view-unit/token token
-                                 ::view-unit/consumer-id view-id})))
-                           next-state (if managed?
-                                        (::view-unit/state lifecycle)
-                                        detached-state)
-                           serialized-target
-                           (if (and managed? active?)
-                             (::view-unit/serialized-element lifecycle)
-                             (html/->string
-                              (if active?
-                                (active-unit target)
-                                (inactive-stub target))))
-                           serialized-elements
-                           (into [serialized-target]
-                                 (map html/->string) inactive-elements)
-                           feed-id (:seon.web.feed/id current)
-                           registry
-                           (update-owned-view
-                            registry view-id feed-id
-                            #(assoc % ::active-tokens
-                                    (::active-tokens transition)))]
-                       [(assoc registry ::view-unit/state next-state)
-                        {:body (-> (str/join "\n" serialized-elements)
-                                   patch-elements)}])))]
-              ;; Datastar fetch actions consume event streams. Returning bare
-              ;; HTML here succeeded at HTTP while doing nothing in the DOM,
-              ;; leaving expanded debug disclosures as empty stubs.
-              (write-unit-response! res 200
-                                    "text/event-stream; charset=utf-8"
-                                    body))
-            (catch :default e
-              (log/error-console! "seon.web.datastar" "unit producer failed" e)
-              (write-unit-response! res 500 "text/plain; charset=utf-8"
-                                    "unit render failed"))))))))
+      (let [transition (transition-active-set
+                        {::catalog (::catalog view)
+                         ::active-tokens (::active-tokens view)
+                         ::token token ::active? active?})
+            changed (into [(unit-element target active?)]
+                          (map inactive-stub)
+                          (filter #(contains? (::deactivated-tokens transition) (::token %))
+                                  (::catalog view)))]
+        (swap! !feeds assoc-in [::views view-id ::active-tokens]
+               (::active-tokens transition))
+        (write-unit-response! res 200 "text/event-stream; charset=utf-8"
+                              (patch-rendered-elements changed []))))))
 
 (defn reconcile-view-catalog!
-  "Replace a view catalog and retain available active units.
-
-   Returns the retained active tokens, or the empty set when the view closed
-   before reconciliation. Producers are never invoked."
-  {:malli/schema [:=> [:cat ::reconcile-catalog-request] ::active-tokens]}
+  "Replace one view catalog and retain only available active units."
   [{view-id ::view-id catalog ::catalog}]
   (if-let [view (get-in @!feeds [::views view-id])]
     (let [available (into #{} (map ::token) catalog)
-          retained (set/intersection (::active-tokens view) available)
-          removed (set/difference (::active-tokens view) retained)
-          feed-id (:seon.web.feed/id view)]
-      (commit-registry!
-       (fn [registry]
-         (let [unit-state (reduce #(detach-managed-token %1 view-id %2)
-                                  (or (::view-unit/state registry)
-                                      view-unit/empty-state)
-                                  removed)
-               registry (update-owned-view
-                         registry view-id feed-id
-                         #(assoc % ::catalog catalog ::active-tokens retained))]
-           [(assoc registry ::view-unit/state unit-state) nil])))
+          retained (set/intersection (::active-tokens view) available)]
+      (swap! !feeds assoc-in [::views view-id ::catalog] catalog)
+      (swap! !feeds assoc-in [::views view-id ::active-tokens] retained)
       retained)
     #{}))
 
@@ -1775,15 +1297,12 @@
 
 (defn- safe-id? [id] (boolean (and id (re-matches safe-id-re id))))
 
-(defn- agent-exists?
-  "True iff `id` resolves to a live `:seon.agent/id` entity in the cluster
-   store. Guards the per-agent page: an unknown/stale id (a bookmark from a
-   reset store, a typo) redirects HOME rather than serving an empty view."
-  [id]
+(defn- ^:async agent-exists? [id]
   (boolean
-    (seq (db/query {:seon.db/db    @db/*conn*
-                    :seon.db/query '[:find ?e :in $ ?id :where [?e :seon.agent/id ?id]]
-                    :seon.db/args  [id]}))))
+   (seq (await (db/query {:seon.db/query
+                          '[:find ?e :in $ ?id
+                            :where [?e :seon.agent/id ?id]]
+                          :seon.db/args [id]})))))
 
 (def ^:private canonical-uuid-re
   #"(?i)[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
@@ -1894,9 +1413,6 @@
       ;; #28 — a well-formed but unknown agent (stale bookmark, reset database,
       ;; typo) gracefully redirects HOME rather than serving an empty view or
       ;; a raw 404.
-      (not (agent-exists? id))
-      (do (.writeHead res 302 #js {"Location" "/" "Cache-Control" "no-store"})
-          (.end res ""))
       :else (write-agent-page! res id))))
 
 (defn serve-root!
@@ -1912,73 +1428,33 @@
   [r]
   (write-agent-page! (:seon.http/node-res r) "root"))
 
-(defn- live-agent-feed-definition
-  "Build one live agent feed with both demanded header units."
-  [id view-id]
-  (let [catalog
-        (unit-catalog
-          [{::coordinate
-            {:seon.web.view-unit/name :seon.web.view-unit/system-header}
-            ::view-unit? true
-            ::complete-element? true
-            ::renderer-token "seon.ui.header/system-header-v1"
-            ::producer #(header/system-header %)}
-           {::coordinate
-            {:seon.route/name :seon.route/agent-feed
-             :seon.agent/id id
-             :seon.web.view-unit/name :seon.web.view-unit/agent-header}
-            ::view-unit? true
-            ::complete-element? true
-            ::renderer-token "seon.ui.agent-view/agent-header-v1"
-            ::producer #(agent-view/agent-header % id)}])
-        tokens-by-name
-        (into {}
-              (map (juxt #(get-in % [::coordinate
-                                     :seon.web.view-unit/name])
-                         ::token))
-              catalog)
-        expected-names #{:seon.web.view-unit/agent-header
-                         :seon.web.view-unit/system-header}
-        _ (when-not (= expected-names (set (keys tokens-by-name)))
-            (throw (js/Error. "agent feed requires exactly both header units")))
-        agent-header-token
-        (get tokens-by-name :seon.web.view-unit/agent-header)
-        system-header-token
-        (get tokens-by-name :seon.web.view-unit/system-header)
-        demanded-tokens (into #{} (vals tokens-by-name))
-        agent-header-html #(retained-unit-html agent-header-token)
-        system-header-html #(retained-unit-html system-header-token)]
-    (cond->
-      {:seon.web.feed/key [:seon.web.feed/agent id]
-       :seon.web.feed/live? true
-       ::catalog catalog
-       ::active-tokens demanded-tokens
-       ::demanded-tokens demanded-tokens
-       ::render-full-with-db? true
-       :seon.web.feed/render-full
-       (fn [dbv]
-         (let [rendered
-               (agent-view/render-agent-view
-                 {:seon.db/db dbv
-                  :seon.agent/id id
-                  ::agent-view/agent-header-html (agent-header-html)
-                  ::agent-view/system-header-html (system-header-html)})]
-           {::element (::agent-view/element rendered)
-            ::dependencies (::agent-view/dependencies rendered)}))
-       :seon.web.feed/render-change
-       (fn [{dependencies ::dependencies}
-            {dbv :seon.db/db attrs :seon.db/changed-attrs}]
-         (let [transition
-               (agent-view/transition
-                 {:seon.db/db dbv
-                  :seon.agent/id id
-                  ::agent-view/changed-attrs attrs
-                  ::agent-view/agent-header-html (agent-header-html)
-                  ::agent-view/system-header-html (system-header-html)
-                  ::agent-view/dependencies dependencies})]
-           {::elements (::agent-view/elements transition)
-            ::dependencies (::agent-view/dependencies transition)}))}
-      view-id (assoc ::view-id view-id))))
+(def agent-view-function 'seon.execution.runtime/render-agent-view!)
+
+(defn- ^:async render-agent-view-at! [id coordinate]
+  (let [message (await (execution.host/invoke-compiled!
+                       coordinate id agent-view-function [{:seon.agent/id id}]))]
+    (if (= execution/result-message (::execution/message message))
+      (agent-view/render-agent-view (::execution/result message))
+      [:main {:id "app-view" :class "text-error text-xs font-mono"}
+       (str "render error: "
+            (or (get-in message [::execution/error :seon.error/message])
+                "execution child failed"))])))
+
+(defn- live-agent-feed-definition [id view-id]
+  (cond->
+   {:seon.web.feed/key [:seon.web.feed/agent id]
+    :seon.web.feed/live? true
+    :seon.web.feed/render-full
+    (fn []
+      (-> (db/head-coordinate)
+          (.then (fn [coordinate]
+                   (render-agent-view-at! id coordinate)))
+          (.then (fn [element] {::element element}))))
+    :seon.web.feed/render-change
+    (fn [_subscription change]
+      (-> (render-agent-view-at! id (:seon.db/coordinate change))
+          (.then (fn [element] {::elements [element]}))))}
+   view-id (assoc ::view-id view-id)))
 
 (defn ^:async open-agent-feed!
   "Open the per-agent view gzip feed.
@@ -1989,37 +1465,35 @@
    db->routes resolves its symbol.
 
    A historical request supplies all four `database-id`, `branch`, `commit-id`,
-   and `t` query fields. The point is resolved exactly through
-   `seon.db/at-coordinate`, echoed in the response header, and used as the
-   frozen subscription key. Partial/malformed/wrong-attachment coordinates
-   return a structured 422; only an entirely absent coordinate opens live."
+   and `t` query fields. That ordinary coordinate is passed to the compiled
+   child and used as the frozen subscription key. Partial or malformed
+   coordinates return a structured 422; only an absent coordinate opens live."
   [r]
   (let [^js req (:seon.http/node-req r)
         ^js res (:seon.http/node-res r)
         id      (get-in r [:path-params :id])
         view-id (requested-view-id req)]
-    (if (and (safe-id? id) (agent-exists? id))
+    (if (and (safe-id? id) (await (agent-exists? id)))
       (let [selector (parse-historical-coordinate req)]
         (cond
           (:seon.error/message selector)
           (write-historical-error! res selector)
 
           selector
-          (let [frozen (await (db/at-coordinate db/*conn* selector))]
-            (if (:seon.error/message frozen)
-              (write-historical-error! res frozen)
-              (open-feed!
-                req res
-                (cond->
-                  {:seon.web.feed/key [:seon.web.feed/agent id
-                                       :seon.web.feed/at selector]
-                   :seon.web.feed/live? false
-                   :seon.web.feed/coordinate selector
-                   :seon.web.feed/render-full
-                   #(agent-view/agent-view frozen id)
-                   :seon.web.feed/render-change
-                   (fn [_subscription _change] {::elements []})}
-                  view-id (assoc ::view-id view-id)))))
+          (open-feed!
+           req res
+           (cond->
+            {:seon.web.feed/key [:seon.web.feed/agent id
+                                 :seon.web.feed/at selector]
+             :seon.web.feed/live? false
+             :seon.web.feed/coordinate selector
+             :seon.web.feed/render-full
+             (fn []
+               (-> (render-agent-view-at! id selector)
+                   (.then (fn [element] {::element element}))))
+             :seon.web.feed/render-change
+             (fn [_subscription _change] {::elements []})}
+            view-id (assoc ::view-id view-id)))
 
           :else
           (open-feed! req res (live-agent-feed-definition id view-id))))

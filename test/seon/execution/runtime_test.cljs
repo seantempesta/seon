@@ -439,3 +439,51 @@
            (fn []
              (set! eval/eval-batch! original-eval)
              (set! db/current-agent-id original-agent)))))))
+
+(deftest agent-view-projection-resolves-literal-and-async-authored-surfaces
+  (async done
+    (let [original db/execute-many
+          calls (atom nil)]
+      (set! db/execute-many
+            (fn [_]
+              (js/Promise.resolve
+               {::db/coordinate point
+                ::db/results
+                [{::protocol/success? true
+                  ::protocol/result
+                  {:seon.agent/id "agent-1"
+                   :seon.agent/ctx
+                   [{:seon.agent.ctx/name :literal
+                     :seon.agent.ctx/priority 1
+                     :seon.render/html (pr-str [:div "literal"])}
+                    {:seon.agent.ctx/name :authored
+                     :seon.agent.ctx/priority 2
+                     :seon.render/html (pr-str 'my.agent.agent-1/view)}]}}
+                 {::protocol/success? true
+                  :datahike.query/result 3}
+                 {::protocol/success? true
+                  :datahike.query/result 42}]})))
+      (-> (db/with-tx-context
+           {::db/coordinate point}
+           #(runtime/render-agent-view!
+             {:seon.agent/id "agent-1"}
+             (fn [selected]
+               (reset! calls selected)
+               (js/Promise.resolve
+                [{::execution/ok? true
+                  ::execution/value
+                  {:seon.render/hiccup [:div "authored"]}}]))))
+          (.then
+           (fn [projection]
+             (is (= ['my.agent.agent-1/view]
+                    (mapv ::execution/function-symbol @calls)))
+             (is (= #{"literal" "authored" "canvas"}
+                    (into #{}
+                          (map :seon.render.surface/label)
+                          (:seon.render.surface/surfaces projection))))
+             (is (= 42 (get-in projection
+                               [:seon.ui.header/projection
+                                :seon.ui.header/datom-count])))
+             (done)))
+          (.catch (fn [error] (is false (str error)) (done)))
+          (.finally (fn [] (set! db/execute-many original)))))))

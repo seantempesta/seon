@@ -15,8 +15,10 @@
    [seon.config :as config]
    [seon.db :as db]
    [seon.db.protocol :as protocol]
+   [seon.derive :as derive]
    [seon.execution :as execution]
    [seon.eval :as eval]
+   [seon.render.surface :as surface]
    [seon.schema :as schema]))
 
 (schema/register! ::render-prompt-request
@@ -38,6 +40,9 @@
    [:seon.eval/starting-ns :symbol]
    [:seon.agent.turn/id-of-turn :string]
    [:seon.agent.run/id-of-run {:optional true} :string]])
+
+(schema/register! ::render-agent-view-request
+  [:map {:closed true} [:seon.agent/id :string]])
 
 (defn- block-error-text
   [block result]
@@ -237,6 +242,118 @@
          :seon.ai/system-prompt system-prompt
          :seon.ai/config-resolution config-resolution)))))
 
+(def ^:private agent-view-members
+  [{::protocol/operation protocol/pull-operation
+    ::protocol/selector
+    '[:db/id :seon.agent/id :seon.agent/terminated-at
+      :seon.render.canvas/content
+      {:seon.agent/run [:seon.agent.run/status :seon.agent.run/paused-at]}
+      {:seon.agent/ctx [*]}]
+    ::protocol/entity-id nil
+    :datahike.resource/max-work 5000000
+    :datahike.resource/max-results 65536
+    :datahike.resource/max-result-weight 3145728}
+   {::protocol/operation protocol/query-operation
+    ::protocol/query-form '[:find (count ?a) . :where [?a :seon.agent/id]]
+    ::protocol/arguments []
+    :datahike.resource/max-work 1000000
+    :datahike.resource/max-results 1
+    :datahike.resource/max-result-weight 1024}
+   {::protocol/operation protocol/query-operation
+    ::protocol/query-form '[:find (count ?e) . :where [?e ?a ?v]]
+    ::protocol/arguments []
+    :datahike.resource/max-work 5000000
+    :datahike.resource/max-results 1
+    :datahike.resource/max-result-weight 1024}])
+
+(defn- query-member-value [member]
+  (when (true? (::protocol/success? member))
+    (:datahike.query/result member)))
+
+(defn- html-slot [value]
+  (when (some? value)
+    (db/decode-edn-value :seon.render/html value)))
+
+(defn- html-call [id entity block renderer]
+  {::execution/function-symbol renderer
+   ::execution/invoke-selected? true
+   ::execution/arguments
+   [{:seon.agent/id id
+     :seon.agent/entity entity
+     :seon.render/node block}]})
+
+(defn- page-state [entity]
+  (let [run (:seon.agent/run entity)
+        open? (= :open (:seon.agent.run/status run))]
+    (derive/state-from-primitives
+     (cond-> {:seon.agent.run/open? open?}
+       (:seon.agent/terminated-at entity)
+       (assoc :seon.agent/terminated-at (:seon.agent/terminated-at entity))
+       (and open? (:seon.agent.run/paused-at run))
+       (assoc :seon.agent.run/paused-at (:seon.agent.run/paused-at run))))))
+
+(defn ^:async render-agent-view!
+  "Acquire one page projection and resolve its surfaces inside the child."
+  [{:seon.agent/keys [id]} invoke-selected!]
+  (let [members (assoc-in agent-view-members [0 ::protocol/entity-id]
+                          [:seon.agent/id id])
+        acquired (await (db/execute-many {::db/members members
+                                          ::db/max-result-weight 3670016}))
+        [agent-member agent-count-member datom-count-member] (::db/results acquired)]
+    (if-not (every? #(true? (::protocol/success? %)) (::db/results acquired))
+      (prompt-acquisition-error acquired (::db/results acquired))
+      (let [entity (or (acquired-member agent-member) {})
+            blocks (->> (ctx/selected-agent-blocks entity nil)
+                        (keep (fn [block]
+                                (when-let [renderer (html-slot (:seon.render/html block))]
+                                  (assoc block :seon.render/html renderer))))
+                        vec)
+            canvas-value (when-let [stored (:seon.render.canvas/content entity)]
+                           (db/decode-edn-value
+                            :seon.render.canvas/content stored))
+            canvas-block {:seon.render.surface/selection "canvas"
+                          :seon.render.surface/label "canvas"
+                          :seon.render/html canvas-value}
+            all-blocks (conj blocks canvas-block)
+            targets (->> all-blocks
+                         (keep-indexed (fn [index block]
+                                         (when (symbol? (:seon.render/html block))
+                                           {:index index
+                                            :call (html-call id entity block
+                                                             (:seon.render/html block))})))
+                         vec)
+            results (if (seq targets)
+                      (await (invoke-selected! (mapv :call targets)))
+                      [])
+            result-by-index (into {} (map (juxt :index identity))
+                                  (map (fn [target result]
+                                         (assoc target :result result))
+                                       targets results))
+            surfaces
+            (->> all-blocks
+                 (keep-indexed
+                  (fn [index block]
+                    (let [renderer (:seon.render/html block)
+                          hiccup (cond
+                                   (vector? renderer) renderer
+                                   (symbol? renderer)
+                                   (surface/renderer-value
+                                    block (:result (get result-by-index index)))
+                                   (= "canvas" (:seon.render.surface/selection block))
+                                   [:div {:class "p-2 text-text-500 text-xs"}
+                                    "No canvas render yet."]
+                                   :else nil)]
+                      (surface/materialized block hiccup))))
+                 vec)]
+        {:seon.agent/id id
+         :seon.ui.agent-view/state (if (seq entity) (page-state entity) :unknown)
+         ::surface/surfaces surfaces
+         :seon.ui.header/projection
+         {:seon.ui.header/brand-name "seon"
+          :seon.ui.header/agent-count (or (query-member-value agent-count-member) 0)
+          :seon.ui.header/running-count (if (= :running (page-state entity)) 1 0)
+          :seon.ui.header/datom-count (or (query-member-value datom-count-member) 0)}}))))
+
 (defn ^:async eval-batch!
   "Evaluate one parsed batch in this agent's retained child compiler."
   {:malli/schema [:=> [:cat ::eval-batch-request :any] :map]}
@@ -265,7 +382,13 @@
    {::execution/compiled-function
     (fn [arguments _invoke-selected! _compile-state! prepare-program!]
       (apply eval-batch! (conj arguments prepare-program!)))
-    ::execution/pin-coordinate? false}})
+    ::execution/pin-coordinate? false}
+
+   'seon.execution.runtime/render-agent-view!
+   {::execution/compiled-function
+    (fn [arguments invoke-selected! _compile-state! _prepare-program!]
+      (apply render-agent-view! (conj arguments invoke-selected!)))
+    ::execution/pin-coordinate? true}})
 
 (defn -main
   "Start the execution child from the complete runtime composition root."
