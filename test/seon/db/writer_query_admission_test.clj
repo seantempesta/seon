@@ -4,6 +4,7 @@
             [datahike.api :as d]
             [seon.db.executor :as executor]
             [seon.db.protocol :as protocol]
+            [seon.db.registry :as registry]
             [seon.db.transport.uds :as uds]
             [seon.db.writer :as writer])
   (:import [java.io File]
@@ -41,36 +42,23 @@
         (< deadline (System/nanoTime)) (throw (ex-info message {}))
         :else (do (Thread/yield) (recur))))))
 
-(defn- ensure-and-acquire!
-  [runtime transport database-name]
+(defn- ensure-database-value!
+  [runtime _transport database-name]
   (let [ensure-response
         (writer/handle-request
          runtime
          (protocol/ensure-database-request
           {::protocol/request-id (str database-name "/ensure")
            ::protocol/database-name database-name
-           ::protocol/backend :memory}))
-        head (writer/handle-request
-              runtime
-              (protocol/resolve-head-request
-               {::protocol/request-id (str database-name "/head")
-                ::protocol/database-name database-name}))]
+           ::protocol/backend :memory}))]
     (is (::protocol/success? ensure-response))
-    @(request!
-      runtime transport
-      (protocol/acquire-database-request
-       {::protocol/request-id (str database-name "/acquire")
-        ::protocol/database-name database-name
-        ::protocol/attachment (::protocol/attachment head)}))
-    head))
+    (:seon.db/db ensure-response)))
 
 (defn- query-request
-  [database-name head request-id]
+  [_database-name database request-id]
   (protocol/query-request
    {::protocol/request-id request-id
-    ::protocol/database-name database-name
-    ::protocol/attachment (::protocol/attachment head)
-    ::protocol/coordinate (::protocol/coordinate head)
+    :seon.db/db database
     ::protocol/query-form '[:find ?ident :where [?entity :db/ident ?ident]]
     ::protocol/arguments []}))
 
@@ -86,8 +74,8 @@
         runtime (::writer/runtime server)
         transport (#'writer/transport-connection
                    {::uds/close! (fn [] nil) ::uds/send! (fn [_] nil)})
-        head-a (ensure-and-acquire! runtime transport database-a)
-        head-b (ensure-and-acquire! runtime transport database-b)
+        head-a (ensure-database-value! runtime transport database-a)
+        head-b (ensure-database-value! runtime transport database-b)
         entered (CountDownLatch. 1)
         release (CountDownLatch. 1)
         run-count (atom 0)
@@ -167,13 +155,14 @@
         runtime (::writer/runtime server)
         transport (#'writer/transport-connection
                    {::uds/close! (fn [] nil) ::uds/send! (fn [_] nil)})
-        head-a (ensure-and-acquire! runtime transport database-a)
-        head-b (ensure-and-acquire! runtime transport database-b)
+        head-a (ensure-database-value! runtime transport database-a)
+        head-b (ensure-database-value! runtime transport database-b)
         entered (CountDownLatch. 1)
         release (CountDownLatch. 1)
         run-count (atom 0)
         original-run d/run-q!
         query-member {::protocol/operation protocol/query-operation
+                      :seon.db/db head-a
                       ::protocol/query-form
                       '[:find ?ident :where [?entity :db/ident ?ident]]
                       ::protocol/arguments []}]
@@ -190,9 +179,6 @@
                runtime transport
                (protocol/execute-many-request
                 {::protocol/request-id "many/query-members"
-                 ::protocol/database-name database-a
-                 ::protocol/attachment (::protocol/attachment head-a)
-                 ::protocol/coordinate (::protocol/coordinate head-a)
                  ::protocol/members (vec (repeat 33 query-member))}))]
           (is (.await entered 2 TimeUnit/SECONDS))
           (wait-until!
@@ -250,7 +236,7 @@
         runtime (::writer/runtime server)
         transport (#'writer/transport-connection
                    {::uds/close! (fn [] nil) ::uds/send! (fn [_] nil)})
-        head (ensure-and-acquire! runtime transport database-name)
+        head (ensure-database-value! runtime transport database-name)
         slow-entered (CountDownLatch. 1)
         large-completed (CountDownLatch. 1)
         release-slow (CountDownLatch. 1)
@@ -259,6 +245,7 @@
         (mapv (fn [position]
                 (cond->
                  {::protocol/operation protocol/pull-operation
+                  :seon.db/db head
                   ::protocol/selector [:db/id]
                   ::protocol/entity-id position}
                   (= position 1)
@@ -268,9 +255,6 @@
         request
         (protocol/execute-many-request
          {::protocol/request-id "many/result-limit"
-          ::protocol/database-name database-name
-          ::protocol/attachment (::protocol/attachment head)
-          ::protocol/coordinate (::protocol/coordinate head)
           ::protocol/members members})
         initial (#'writer/execute-many-result-state request)
         placeholder-weight (::writer/result-placeholder-weight initial)
@@ -396,7 +380,7 @@
         runtime (::writer/runtime server)
         transport (#'writer/transport-connection
                    {::uds/close! (fn [] nil) ::uds/send! (fn [_] nil)})
-        head (ensure-and-acquire! runtime transport database-name)
+        head (ensure-database-value! runtime transport database-name)
         guard-entered (CountDownLatch. 1)
         release-guard (CountDownLatch. 1)
         original-guard @#'writer/continue-query-job?]
@@ -453,7 +437,15 @@
         runtime (::writer/runtime server)
         transport (#'writer/transport-connection
                    {::uds/close! (fn [] nil) ::uds/send! (fn [_] nil)})
-        head (ensure-and-acquire! runtime transport database-name)
+        head (ensure-database-value! runtime transport database-name)
+        connection
+        (::registry/conn
+         (registry/resolve-connection
+          {::registry/database-name (keyword database-name)}))
+        _ (d/transact connection
+                      [{:db/ident :query-owner/advanced
+                        :db/valueType :db.type/boolean
+                        :db/cardinality :db.cardinality/one}])
         entered (CountDownLatch. 1)
         release-run (CountDownLatch. 1)
         releases (atom [])

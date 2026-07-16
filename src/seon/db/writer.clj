@@ -723,6 +723,13 @@
      ::query-sources source-descriptors
      ::routing-descriptors (mapv ::database-descriptor source-descriptors)}))
 
+(defn- read-plan
+  "Describe the exact database values used by one ordinary read."
+  [request]
+  (if (= protocol/query-operation (::protocol/operation request))
+    (query-plan request)
+    {::routing-descriptors [(:seon.db/db request)]}))
+
 (declare ancestor-commit?)
 
 (defn- pinned-database
@@ -872,7 +879,7 @@
    :seon.db/added? (boolean (:added datom))})
 
 (defn- execute-db-read
-  [db-value request caller-id temporal?]
+  [db-value request caller-id]
   (let [options (resource-options request)]
     (case (::protocol/operation request)
       :seon.db.protocol.operation/query
@@ -905,11 +912,7 @@
                             options)))}
 
       :seon.db.protocol.operation/schema
-      (if temporal?
-        (throw
-         (ex-info "Schema is unavailable at an earlier transaction cut."
-                  {::failure-kind protocol/protocol-error}))
-        {::protocol/schema (materialize-result (d/schema db-value))})
+      {::protocol/schema (materialize-result (d/schema db-value))}
 
       :seon.db.protocol.operation/index-page
       (materialize-result (index-page db-value request)))))
@@ -934,6 +937,7 @@
 
 (declare acquire-query-call!
          resolve-database-value!
+         resolve-execute-many-plan!
          release-resolved-database-values!)
 
 (defn- execute-read!
@@ -941,6 +945,9 @@
   (cond
     (::run-query-call? work) (d/run-q! (::query-call work))
     (::acquire-query? work) (acquire-query-call! runtime work)
+    (::resolve-execute-many? work)
+    (resolve-execute-many-plan! (::transport-connection work)
+                                (::execute-many-plan work))
     (::resolve-only? work) (pinned-database work)
     (::transport-connection work)
     (let [resolved
@@ -950,23 +957,19 @@
       (try
         (merge (read-response-base request)
                (execute-db-read (::database-value resolved) request
-                                (::protocol/request-id request)
-                                (boolean (or (:as-of (:seon.db/db request))
-                                             (:since (:seon.db/db request))
-                                             (:history (:seon.db/db request))))))
+                                (::protocol/request-id request)))
         (finally
           (release-resolved-database-values! [resolved]))))
     (::database-value work)
     (protocol/success
-     (execute-db-read (::database-value work) request (::caller-id work)
-                      (::temporal? work)))
+     (execute-db-read (::database-value work) request (::caller-id work)))
     :else
     (let [{::keys [database-value containing-database-value temporal?]}
           (pinned-database work)]
       (try
         (merge (read-response-base request)
                (execute-db-read database-value request
-                                (::protocol/request-id request) temporal?))
+                                (::protocol/request-id request)))
         (finally
           (d/release-materialized-db containing-database-value))))))
 
@@ -1614,7 +1617,12 @@
 (defn- query-admission
   "Acquire every routed query database and derive its current executor scope."
   [transport-connection plan]
-  (let [routes
+  (let [_
+        (when (empty? (::routing-descriptors plan))
+          (throw
+           (ex-info "A remote database query requires at least one database source."
+                    {::failure-kind protocol/protocol-error})))
+        routes
         (mapv
          (fn [descriptor]
            (let [{::keys [connection database-name]
@@ -1734,16 +1742,12 @@
 (defn- resolve-query-plan!
   "Rehydrate only parsed source positions and preserve every other argument."
   [transport-connection plan]
-  (let [descriptors (distinct (map ::database-descriptor
-                                   (::query-sources plan)))
-        resolved-by-descriptor
-        (reduce
-         (fn [result descriptor]
-           (assoc result descriptor
-                  (resolve-database-value! transport-connection descriptor false)))
-         {}
-         descriptors)]
+  (let [resolved-by-descriptor (atom {})]
     (try
+      (doseq [descriptor
+              (distinct (map ::database-descriptor (::query-sources plan)))]
+        (swap! resolved-by-descriptor assoc descriptor
+               (resolve-database-value! transport-connection descriptor false)))
       (let [arguments
             (reduce
              (fn [values
@@ -1751,14 +1755,15 @@
                    ::keys [database-descriptor]}]
                (assoc values argument-position
                       (::database-value
-                       (get resolved-by-descriptor database-descriptor))))
+                       (get @resolved-by-descriptor database-descriptor))))
              (::query-arguments plan)
              (::query-sources plan))]
         (assoc plan
                ::query-arguments arguments
-               ::resolved-database-values (vec (vals resolved-by-descriptor))))
+               ::resolved-database-values
+               (vec (vals @resolved-by-descriptor))))
       (catch Throwable throwable
-        (release-resolved-database-values! (vals resolved-by-descriptor))
+        (release-resolved-database-values! (vals @resolved-by-descriptor))
         (throw throwable)))))
 
 (defn- generated-candidate-conflict
@@ -2510,12 +2515,15 @@
 (defn- acquire-query-call!
   [runtime {::keys [request database-value caller-id job-id query-plan
                     transport-connection]
+            prepared-query-arguments ::query-arguments
             :as work}]
   (let [resolved-plan (when query-plan
                         (resolve-query-plan! transport-connection query-plan))
-        arguments (if resolved-plan
-                    (::query-arguments resolved-plan)
-                    (into [database-value] (::protocol/arguments request)))
+        arguments (cond
+                    resolved-plan (::query-arguments resolved-plan)
+                    prepared-query-arguments prepared-query-arguments
+                    :else (into [database-value]
+                                (::protocol/arguments request)))
         resolved-values (or (::resolved-database-values resolved-plan) [])
         physical-values-owned? (atom false)
         request-id (or (::public-request-id work)
@@ -2666,6 +2674,71 @@
              (:datahike.resource/max-result-weight request))
       member)))
 
+(defn- execute-many-plan
+  "Plan every grouped read before any immutable database value is resolved."
+  [request]
+  (let [member-plans
+        (mapv
+         (fn [position]
+           (let [member (execute-many-member-request request position)
+                 plan (read-plan member)]
+             (when (empty? (::routing-descriptors plan))
+               (throw
+                (ex-info
+                 "Every grouped remote read requires a database source."
+                 {::failure-kind protocol/protocol-error
+                  ::protocol/member-position position})))
+             (assoc plan ::request member)))
+         (range (count (::protocol/members request))))]
+    {::member-plans member-plans
+     ::routing-descriptors
+     (into [] (distinct) (mapcat ::routing-descriptors member-plans))}))
+
+(defn- hydrate-query-plan
+  [plan resolved-by-descriptor]
+  (assoc
+   plan
+   ::query-arguments
+   (reduce
+    (fn [arguments
+         {:datahike.query.source/keys [argument-position]
+          ::keys [database-descriptor]}]
+      (assoc arguments argument-position
+             (::database-value
+              (get resolved-by-descriptor database-descriptor))))
+    (::query-arguments plan)
+    (::query-sources plan))))
+
+(defn- resolved-member-plan
+  [plan resolved-by-descriptor]
+  (let [resolved-values
+        (mapv resolved-by-descriptor (::routing-descriptors plan))
+        primary (first resolved-values)
+        query? (= protocol/query-operation
+                  (::protocol/operation (::request plan)))]
+    (cond->
+      (assoc plan
+             ::database-name (::database-name primary)
+             ::scope (::scope primary)
+             ::scopes (into #{} (map ::scope) resolved-values))
+      query? (hydrate-query-plan resolved-by-descriptor)
+      (not query?) (assoc ::database-value (::database-value primary)))))
+
+(defn- resolve-execute-many-plan!
+  [transport-connection plan]
+  (let [resolved-by-descriptor (atom {})]
+    (try
+      (doseq [descriptor (::routing-descriptors plan)]
+        (swap! resolved-by-descriptor assoc descriptor
+               (resolve-database-value! transport-connection descriptor false)))
+      {::member-plans
+       (mapv #(resolved-member-plan % @resolved-by-descriptor)
+             (::member-plans plan))
+       ::resolved-database-values (vec (vals @resolved-by-descriptor))}
+      (catch Throwable throwable
+        (release-resolved-database-values! (vals @resolved-by-descriptor))
+        (throw throwable)))))
+
 (defn- submit-execute-many-members!
   [runtime request-id owner submissions]
   (doseq [{job-id ::executor/job-id :as submission} submissions]
@@ -2707,11 +2780,11 @@
   (let [active (::active-requests runtime)
         dispatcher (::executor runtime)]
     (locking active
-      (let [{::keys [request scope database-value containing-database-value
-                     temporal? next-position next-result-position jobs canceled?]
+      (let [{::keys [request member-plans next-position next-result-position
+                     jobs canceled?]
              :as entry}
             (get @active request-id)]
-        (when (and entry (identical? owner (::owner entry)) database-value
+        (when (and entry (identical? owner (::owner entry)) member-plans
                    (not canceled?) (not (::result-limit-position entry))
                    (not (::finishing? entry)))
           (let [members (::protocol/members request)
@@ -2729,7 +2802,10 @@
                 submissions
                 (mapv
                  (fn [position]
-                   (let [member (execute-many-member-request request position)
+                   (let [{::keys [request database-name scope scopes
+                                  database-value query-arguments]}
+                         (nth member-plans position)
+                         member request
                          job-id [request-id position]
                          caller-id (str "execute-many/"
                                         (hasch/uuid [request-id position]))
@@ -2738,22 +2814,23 @@
                      (cond->
                       {::executor/executor dispatcher
                        ::executor/work-class :read
-                       ::executor/database-name (::protocol/database-name request)
+                       ::executor/database-name database-name
                        ::executor/scope scope
+                       ::executor/scopes scopes
                        ::executor/job-id job-id
                        ::executor/request-id request-id
                        ::executor/request
-                       {::database-name (::protocol/database-name request)
+                       {::database-name database-name
                         ::scope scope
+                        ::scopes scopes
                         ::database-value database-value
-                        ::containing-database-value containing-database-value
-                        ::temporal? temporal?
                         ::job-id job-id
                         ::caller-id caller-id
                         ::public-request-id request-id
                         ::owner (::owner entry)
                         ::execute-many-member? query?
                         ::acquire-query? query?
+                        ::query-arguments query-arguments
                         ::request member}}
                        query? (assoc ::executor/reserved-work-class :read))))
                  positions)]
@@ -2896,11 +2973,11 @@
     (when final
       (let [[entry response] final
             release-error
-            (when-let [database-value (::containing-database-value entry)]
-              (try
-                (d/release-materialized-db database-value)
-                nil
-                (catch Throwable throwable throwable)))
+            (try
+              (release-resolved-database-values!
+               (::resolved-database-values entry))
+              nil
+              (catch Throwable throwable throwable))
             response (if release-error
                        (request-failure-response release-error)
                        response)]
@@ -2922,47 +2999,56 @@
 (defn- complete-execute-many!
   [runtime request-id owner job-id outcome]
   (let [active (::active-requests runtime)
-        resolution? (= job-id [request-id :resolve])]
-    (locking active
-      (let [entry (get @active request-id)]
-        (when (and entry (identical? owner (::owner entry))
-                   (contains? (::jobs entry) job-id))
-          (if resolution?
-            (if (= ::executor/throwable (first outcome))
-              (swap! active update request-id
-                     #(-> %
-                          (update ::jobs disj job-id)
-                          (assoc ::failure-response
-                                 (request-failure-response (second outcome)))))
-              (swap! active update request-id
-                     #(-> %
-                          (update ::jobs disj job-id)
-                          (merge (second outcome)))))
-            (let [position (second job-id)
-                  member (execute-many-member-request (::request entry) position)
-                  query? (= protocol/query-operation
-                            (::protocol/operation
-                             (nth (::protocol/members (::request entry))
-                                  position)))
-                  callback? (contains? (::pending-queries entry) job-id)
-                  result
-                  (bounded-execute-many-member-result
-                   member
-                   (if (= ::executor/throwable (first outcome))
-                     (member-failure (second outcome))
-                     (second outcome)))]
-              (swap! active update request-id
-                     (fn [current]
-                       (->
-                        (cond-> (update current ::jobs disj job-id)
-                          (and (or (nil? (::result-limit-position current))
+        resolution? (= job-id [request-id :resolve])
+        accepted?
+        (locking active
+          (let [entry (get @active request-id)]
+            (when (and entry (identical? owner (::owner entry))
+                       (contains? (::jobs entry) job-id))
+              (if resolution?
+                (if (= ::executor/throwable (first outcome))
+                  (swap! active update request-id
+                         #(-> %
+                              (update ::jobs disj job-id)
+                              (assoc ::failure-response
+                                     (request-failure-response
+                                      (second outcome)))))
+                  (swap! active update request-id
+                         #(-> %
+                              (update ::jobs disj job-id)
+                              (merge (second outcome)))))
+                (let [position (second job-id)
+                      member
+                      (execute-many-member-request (::request entry) position)
+                      query? (= protocol/query-operation
+                                (::protocol/operation
+                                 (nth (::protocol/members (::request entry))
+                                      position)))
+                      callback? (contains? (::pending-queries entry) job-id)
+                      result
+                      (bounded-execute-many-member-result
+                       member
+                       (if (= ::executor/throwable (first outcome))
+                         (member-failure (second outcome))
+                         (second outcome)))]
+                  (swap! active update request-id
+                         (fn [current]
+                           (->
+                            (cond-> (update current ::jobs disj job-id)
+                              (and
+                               (or (nil? (::result-limit-position current))
                                    (< position
                                       (::result-limit-position current)))
                                (not callback?)
                                (or (not query?)
                                    (= ::executor/throwable (first outcome))))
-                          (assoc-in [::results position] result))
-                        (accept-contiguous-execute-many-results)))))))))
+                              (assoc-in [::results position] result))
+                            (accept-contiguous-execute-many-results))))))
+              true)))]
+    (when (and resolution? (not accepted?)
+               (not= ::executor/throwable (first outcome)))
+      (release-resolved-database-values!
+       (::resolved-database-values (second outcome))))
     (if (and resolution? (= ::executor/throwable (first outcome)))
       (let [entry (locking active (get @active request-id))
             response (::failure-response entry)]
@@ -3188,47 +3274,46 @@
   [runtime transport-connection request request-id owner]
   (run! validate-read-input! (::protocol/members request))
   (if-let [result-state (execute-many-result-state request)]
-    (if-let [{::keys [scope connection]
-              attachment ::coordinate/attachment}
-             (scope-for-read transport-connection request)]
-      (let [active (::active-requests runtime)
-            resolution-id [request-id :resolve]
-            initialized?
-            (locking active
-              (when (identical? owner (get-in @active [request-id ::owner]))
-                (swap! active update request-id
-                       (fn [entry]
-                         (merge entry result-state
-                                {::execute-many? true
-                                 ::scope scope
-                                 ::jobs #{resolution-id}
-                                 ::next-position 0})))
-                (get-in @active [request-id ::request-bytes] 0)))]
-        (when initialized?
-          (try
-            (executor/try-submit!
-             {::executor/executor (::executor runtime)
-              ::executor/work-class :read
-              ::executor/database-name (::protocol/database-name request)
-              ::executor/scope scope
-              ::executor/job-id resolution-id
+    (let [{::keys [database-name scope scopes] :as plan}
+          (query-admission transport-connection (execute-many-plan request))
+          active (::active-requests runtime)
+          resolution-id [request-id :resolve]
+          request-bytes
+          (locking active
+            (when (identical? owner (get-in @active [request-id ::owner]))
+              (swap! active update request-id
+                     (fn [entry]
+                       (merge entry result-state
+                              {::execute-many? true
+                               ::scope scope
+                               ::scopes scopes
+                               ::jobs #{resolution-id}
+                               ::next-position 0})))
+              (get-in @active [request-id ::request-bytes] 0)))]
+      (when request-bytes
+        (try
+          (executor/try-submit!
+           {::executor/executor (::executor runtime)
+            ::executor/work-class :read
+            ::executor/database-name database-name
+            ::executor/scope scope
+            ::executor/scopes scopes
+            ::executor/job-id resolution-id
+            ::executor/request-id request-id
+            ::executor/request-bytes request-bytes
+            ::executor/request
+            {::database-name database-name
+             ::scope scope
+             ::scopes scopes
+             ::transport-connection transport-connection
+             ::resolve-execute-many? true
+             ::execute-many-plan plan}})
+          (catch Throwable throwable
+            (complete-executor!
+             runtime
+             {::executor/job-id resolution-id
               ::executor/request-id request-id
-              ::executor/request-bytes initialized?
-              ::executor/request
-              {::database-name (::protocol/database-name request)
-               ::scope scope
-               ::connection connection
-               ::coordinate/attachment attachment
-               ::resolve-only? true
-               ::request request}})
-            (catch Throwable throwable
-              (complete-executor!
-               runtime
-               {::executor/job-id resolution-id
-                ::executor/request-id request-id
-                ::executor/outcome [::executor/throwable throwable]})))))
-      (deliver-active-request! runtime request-id owner
-                               (stale-coordinate-response request)))
+              ::executor/outcome [::executor/throwable throwable]})))))
     (deliver-active-request!
      runtime request-id owner
      (protocol/failure

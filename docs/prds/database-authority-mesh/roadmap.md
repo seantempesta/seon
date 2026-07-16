@@ -1267,6 +1267,27 @@ and returns the exact ordinary database value under its preparation lock; no
 database copy or second cache is created. The real UDS authority contract now
 passes nine tests and 62 assertions with zero failures or errors.
 
+`execute-many` now follows the same ordinary database-value contract per
+member. One aggregate plan parses every query source position, rejects a member
+with no actual database source, deduplicates complete database values, owns the
+union of every executor scope, resolves each immutable native value once, and
+runs the existing bounded positional member window. Query members borrow the
+aggregate-owned values through Datahike single-flight; the aggregate releases
+them only after all jobs and callbacks terminate. Invalid database values fail
+the aggregate atomically before any member starts. The first actual source is
+only the deterministic fair-queue owner; every source remains a lifecycle
+fence. No global or fake database scope was added.
+
+The focused real-authority proof executes pull(A), query(A+B), schema(A), and
+pull(B) in order; a repeated exact historical value incurs one
+`commit-as-db` and one release across pull/query/schema; and a later invalid
+source releases an earlier historical materialization while returning no
+partial results. Datahike-native temporal schema behavior is accepted rather
+than rejected: temporal wrappers expose the containing committed database's
+schema. The remote contract, query-admission/single-flight contract, and
+protocol/executor/registry gates pass 74 tests and 980 assertions with zero
+failures or errors.
+
 The source-grounded database-value seam is
 [[research/datahike-remote-database-value-seam-2026-07-16]]. Datahike's native
 `RemoteDB`, `RemoteHistoricalDB`, `RemoteAsOfDB`, and `RemoteSinceDB` records

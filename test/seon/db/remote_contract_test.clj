@@ -388,6 +388,155 @@
                           [(< ?a 10)] [(< ?b 10)]]
                         [db-a db-b])))))))))
 
+(deftest execute-many-resolves-each-members-database-values-once
+  (let [prefix (str "remote-many-" (random-uuid))
+        database-a (str prefix "-a")
+        database-b (str prefix "-b")]
+    (with-authority [authority "many" [database-a database-b]]
+      (let [channel (::channel authority)
+            db-a (database-value database-a)
+            db-b (database-value database-b)
+            response
+            (call!
+             channel
+             (protocol/execute-many-request
+              {::protocol/request-id "many/ordinary-values"
+               ::protocol/members
+               [{::protocol/operation protocol/pull-operation
+                 :seon.db/db db-a
+                 ::protocol/selector [:remote.contract/rank]
+                 ::protocol/entity-id
+                 [:remote.contract/id (str database-a "/primary")]}
+                {::protocol/operation protocol/query-operation
+                 ::protocol/query-form
+                 '[:find ?a ?b :in $a $b
+                   :where
+                   [$a ?ea :remote.contract/rank ?a]
+                   [$b ?eb :remote.contract/rank ?b]
+                   [(< ?a 10)]
+                   [(< ?b 10)]]
+                 ::protocol/arguments [db-a db-b]}
+                {::protocol/operation protocol/schema-operation
+                 :seon.db/db db-a}
+                {::protocol/operation protocol/pull-operation
+                 :seon.db/db db-b
+                 ::protocol/selector [:remote.contract/rank]
+                 ::protocol/entity-id
+                 [:remote.contract/id (str database-b "/primary")]}]}))
+            results (::protocol/results response)]
+        (is (::protocol/success? response) (pr-str response))
+        (is (= 1 (get-in results [0 ::protocol/result
+                                  :remote.contract/rank])))
+        (is (= #{[1 2]} (get-in results [1 :datahike.query/result])))
+        (is (contains? (get-in results [2 ::protocol/schema])
+                       :remote.contract/rank)
+            (pr-str results))
+        (is (= 2 (get-in results [3 ::protocol/result
+                                  :remote.contract/rank])))
+        (is (every? ordinary-data? results))))))
+
+(deftest execute-many-materializes-and-releases-one-historical-value-once
+  (let [database-name (str "remote-many-history-" (random-uuid))]
+    (with-authority [authority "many-history" [database-name]]
+      (let [channel (::channel authority)
+            before (database-value database-name)
+            _
+            (call!
+             channel
+             (transact-request
+              "many-history/advance" before
+              [[:db/add [:remote.contract/id (str database-name "/primary")]
+                :remote.contract/name "advanced"]]
+              nil))
+            materializations (atom 0)
+            releases (atom 0)
+            original-materialize d/commit-as-db
+            original-release d/release-materialized-db]
+        (with-redefs
+          [d/commit-as-db
+           (fn [& arguments]
+             (swap! materializations inc)
+             (apply original-materialize arguments))
+           d/release-materialized-db
+           (fn [database]
+             (swap! releases inc)
+             (original-release database))]
+          (let [response
+                (call!
+                 channel
+                 (protocol/execute-many-request
+                  {::protocol/request-id "many-history/read"
+                   ::protocol/members
+                   [{::protocol/operation protocol/pull-operation
+                     :seon.db/db before
+                     ::protocol/selector [:remote.contract/name]
+                     ::protocol/entity-id
+                     [:remote.contract/id (str database-name "/primary")]}
+                    {::protocol/operation protocol/query-operation
+                     ::protocol/query-form
+                     '[:find ?name . :in $
+                       :where
+                       [?e :remote.contract/rank 1]
+                       [?e :remote.contract/name ?name]]
+                     ::protocol/arguments [before]}
+                    {::protocol/operation protocol/schema-operation
+                     :seon.db/db before}]}))]
+            (is (::protocol/success? response) (pr-str response))
+            (is (= "name-1"
+                   (get-in response [::protocol/results 0 ::protocol/result
+                                     :remote.contract/name])))
+            (is (= "name-1"
+                   (get-in response [::protocol/results 1
+                                     :datahike.query/result])))
+            (is (= 1 @materializations))
+            (is (= 1 @releases))))))))
+
+(deftest execute-many-releases-partial-resolution-before-atomic-failure
+  (let [prefix (str "remote-many-failure-" (random-uuid))
+        database-a (str prefix "-a")
+        database-b (str prefix "-b")]
+    (with-authority [authority "many-failure" [database-a database-b]]
+      (let [channel (::channel authority)
+            before-a (database-value database-a)
+            _
+            (call!
+             channel
+             (transact-request
+              "many-failure/advance-a" before-a
+              [[:db/add [:remote.contract/id (str database-a "/primary")]
+                :remote.contract/name "advanced"]]
+              nil))
+            invalid-b (update (database-value database-b) :t inc)
+            releases (atom 0)
+            original-release d/release-materialized-db]
+        (with-redefs
+          [d/release-materialized-db
+           (fn [database]
+             (swap! releases inc)
+             (original-release database))]
+          (let [response
+                (call!
+                 channel
+                 (protocol/execute-many-request
+                  {::protocol/request-id "many-failure/read"
+                   ::protocol/members
+                   [{::protocol/operation protocol/pull-operation
+                     :seon.db/db before-a
+                     ::protocol/selector [:remote.contract/name]
+                     ::protocol/entity-id
+                     [:remote.contract/id (str database-a "/primary")]}
+                    {::protocol/operation protocol/pull-operation
+                     :seon.db/db invalid-b
+                     ::protocol/selector [:remote.contract/name]
+                     ::protocol/entity-id
+                     [:remote.contract/id (str database-b "/primary")]}]}))]
+            (is (false? (::protocol/success? response)))
+            (is (= protocol/not-found-error (::protocol/error-kind response)))
+            (is (nil? (::protocol/results response))
+                "no member starts before every database value resolves")
+            (is (= 1 @releases)
+                "the earlier historical materialization is released")))))))
+
 (deftest query-rehydrates-only-top-level-source-bindings
   (let [prefix (str "remote-descriptor-" (random-uuid))
         a (str prefix "-a")
@@ -462,6 +611,13 @@
                          [?e :remote.contract/rank 1]
                          [?e :remote.contract/name ?name]]
                        [history])))
+        (is (contains?
+             (::protocol/schema
+              (call! channel
+                     (request protocol/schema-operation "temporal/schema"
+                              {:seon.db/db earlier})))
+             :remote.contract/rank)
+            "schema follows Datahike's containing committed database")
         (is (not (map? (query! "temporal/instant"
                               '[:find (count ?e) . :in $ :where
                                 [?e :remote.contract/id]]
@@ -744,7 +900,13 @@
                    (zero? (::executor/retained-identities
                            (executor/evidence (::writer/executor server))))
                    (zero? (:datahike.single-flight/active-callers
-                           (d/query-cache-evidence)))))
+                           (d/query-cache-evidence)))
+                   (every?
+                    (fn [database-name]
+                      (empty?
+                       (registry/lookup-connection
+                        {::registry/database-name (keyword database-name)})))
+                    [database-a database-b database-c])))
             "disconnect reaches the one terminal cleanup owner")
         (is (every?
              #(empty? (registry/lookup-connection
