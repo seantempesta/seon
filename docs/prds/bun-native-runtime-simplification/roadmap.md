@@ -85,16 +85,23 @@ JavaScript heap:
 ```text
 cluster control plane
   ├─ shared or family-scoped JVM writer service
-  ├─ Bun pod: cluster A
-  ├─ Bun pod: cluster B
-  └─ Bun pod: cluster C
+  ├─ Bun cluster host A
+  │   ├─ web UI + agent-child supervisor
+  │   ├─ Bun agent child: root
+  │   └─ Bun agent children: active tasks
+  └─ Bun cluster host B
+      ├─ web UI + agent-child supervisor
+      └─ Bun agent children: active agents
 ```
 
-Each child owns its cluster's replica, agent loops, eval/compiler state, HTTP
-server, feeds, and process-local caches. Dormant clusters own durable database
-and artifact facts but no Bun pod. Admission starts a pod only when work or a
-human session needs it; an idle policy drains it after all addressable work is
-safe in the database.
+Each cluster host owns only that cluster's web UI, agent-child supervision, and
+small host-local compiler/control state. Each active agent child owns its own
+loop, eval state, and direct persistent database session. Neither process owns
+a Datahike replica, copied database index, transaction feed, or database result
+cache. Dormant clusters retain durable database and artifact facts but no Bun
+process. Admission starts the host and only the children needed by work or a
+human session; idle policy drains them after all addressable work is safe in
+the database.
 
 A child exit does not inherently terminate the parent. The control plane awaits
 the child's `exited` Promise, samples its post-exit resource usage, records the
@@ -227,14 +234,12 @@ the canonical loopback transport.
 
 ### Package E: make framed UDS linear and native
 
-First replace repeated accumulated-prefix concatenation with a cursor/chunk
-queue decoder and prove arbitrary fragmentation. Then use `Bun.connect`/native
-socket callbacks with exact partial-write cursors and drain retries. Preserve
-Transit framing, request deadlines, publish replay, close/error envelopes, and
-database coordinates.
-
-RPC and publish connections share one decoder and one exact partial-write pump.
-Delete `node:net`, duplicated accumulation, and queued-write assumptions.
+Use the one completed persistent `Bun.connect` database session with its linear
+decoder, request/event demultiplexing, exact partial-write cursor, `drain`
+retry, deadlines, and idempotent terminal transition. Selective interests ride
+that same correlated session. Delete `node:net`, request-per-socket RPC, the
+publisher socket, transaction replay/fanout, duplicated accumulation, and
+queued-write assumptions.
 
 ### Package F: remove the entire compatibility tail
 
@@ -272,8 +277,9 @@ Run one ordered checkpoint against the final combined implementation:
 2. run focused contract/property tests only when the first build exposes a
    failure, repairing the final mechanism rather than restoring adapters;
 3. run the complete operator, writer, and CLJS gates once they compile;
-4. start one isolated Bun cluster, prove database replay, MCP, hot reload,
-   subprocesses, routes, Datastar feeds, restart, and clean shutdown;
+4. start one isolated Bun cluster, prove direct database reads/interests, MCP,
+   hot reload, subprocesses, routes, Datastar feeds, reconnect, and clean
+   shutdown;
 5. run the real-browser root, agent, canvas, data, reconnect, and slow-feed
    journey;
 6. run retained p50/p95/p99 HTTP/feed/process/UDS measurements, event-loop delay,
