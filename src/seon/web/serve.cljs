@@ -100,35 +100,53 @@
    (handle-readiness! nil _req res))
   ([restore-completion-result _req res]
    (let [restore? (some? restore-completion-result)
-         restore-completion (::db.restore/completion
-                              restore-completion-result)
-         restore-coordinate (::db.restore/completion-coordinate
-                              restore-completion-result)
-         restore-readiness
-         (when (and restore?
-                    (db/attached?))
-           (db.restore/readiness
-             {::db.restore/completion restore-completion
-              ::db.restore/completion-coordinate restore-coordinate
-              :seon.runtime.admission/state (admission/state)
-              :seon.db/db @db/*conn*}))
-         ordinary-ready? (admission/available?)
-         body (cond
-                restore-readiness restore-readiness
-                restore? {::db.restore/ready? false
-                          ::db.restore/executable? false}
-                :else (assoc (admission/state)
-                             :seon.runtime.admission/available?
-                             ordinary-ready?
-                             ::db.restore/executable? ordinary-ready?))
-         ready? (if restore?
-                  (true? (::db.restore/ready? body))
-                  ordinary-ready?)]
-     (write-status!
-       res
-       (if ready? 200 503)
-       "application/edn; charset=utf-8"
-       (pr-str body)))))
+         completion (::db.restore/completion restore-completion-result)
+         completion-coordinate
+         (::db.restore/completion-coordinate restore-completion-result)
+         acquired
+         (when (and restore? (db/attached?))
+           (db.restore/acquire-completion!
+            {::db.restore/plan-digest (::db.restore/plan-digest completion)}))]
+     (-> (js/Promise.resolve acquired)
+         (.then
+          (fn [acquired]
+            (let [restore-readiness
+                  (when (and acquired (not (:seon.error/message acquired)))
+                    (db.restore/readiness
+                     {::db.restore/completion completion
+                      ::db.restore/current-completion
+                      (::db.restore/completion acquired)
+                      ::db.restore/completion-coordinate completion-coordinate
+                      ::db.restore/current-coordinate
+                      (::db.restore/current-coordinate acquired)
+                      ::db.restore/publication-rows
+                      (::db.restore/publication-rows acquired)
+                      :seon.runtime.admission/state (admission/state)}))
+                  ordinary-ready? (admission/available?)
+                  body (cond
+                         restore-readiness restore-readiness
+                         restore? {::db.restore/ready? false
+                                   ::db.restore/executable? false}
+                         :else (assoc (admission/state)
+                                      :seon.runtime.admission/available?
+                                      ordinary-ready?
+                                      ::db.restore/executable?
+                                      ordinary-ready?))
+                  ready? (if restore?
+                           (true? (::db.restore/ready? body))
+                           ordinary-ready?)]
+              (write-status!
+               res
+               (if ready? 200 503)
+               "application/edn; charset=utf-8"
+               (pr-str body)))))
+         (.catch
+          (fn [error]
+            (log/error-console! "seon.web.serve" "readiness failed" error)
+            (write-status!
+             res 503 "application/edn; charset=utf-8"
+             (pr-str {::db.restore/ready? false
+                      ::db.restore/executable? false}))))))))
 
 (defn- serve-static! [res url]
   (if-let [[prefix root] (some (fn [[p r]]

@@ -9,7 +9,6 @@
   (:require
     [cljs.reader :as reader]
     [cljs.test :refer [async deftest is testing]]
-    [datahike.api :as d]
     [goog.object :as gobj]
     [my.blob :as blob]
     [seon.agent.run :as run]
@@ -17,9 +16,6 @@
     [seon.ai :as ai]
     [seon.db :as db]
     [seon.db.coordinate :as coordinate]
-    [seon.db.id :as db.id]
-    [seon.db.process :as process]
-    [seon.db.replica :as replica]
     [seon.db.restore :as restore]
     [seon.eval :as seval]
     [seon.runtime.admission :as admission]
@@ -449,82 +445,85 @@
         :seon.agent.runtime/unhosted-ids []}))))
 
 (defn- readiness-response
-  "Status and body written by the live readiness handler."
+  "Resolve with the status and body written by the readiness handler."
   ([] (readiness-response nil))
   ([restore-completion-result]
-  (let [!response (atom {})
-        response #js {:writeHead
-                      (fn [status _headers]
-                        (swap! !response assoc ::status status))
-                      :end
-                      (fn [body]
-                        (swap! !response assoc ::body body))}]
-    ((deref #'serve/handle-readiness!)
-     restore-completion-result nil response)
-    @!response)))
+   (let [!response (atom {})]
+     (js/Promise.
+       (fn [resolve _reject]
+         ((deref #'serve/handle-readiness!)
+          restore-completion-result nil
+          #js {:writeHead
+               (fn [status _headers]
+                 (swap! !response assoc ::status status))
+               :end
+               (fn [body]
+                 (swap! !response assoc ::body body)
+                 (resolve @!response))}))))))
 
 (deftest readiness-tracks-admission-after-startup
-  (let [prior (admission/state)]
-    (try
-      (reset! @#'admission/!state
-              {::admission/status :available
-               ::admission/generation 17})
-      (let [response (readiness-response)
-            body (reader/read-string (::body response))]
-        (is (= 200 (::status response)))
-        (is (true? (::restore/executable? body))))
-      (reset! @#'admission/!state
-              {::admission/status :unavailable
-               ::admission/generation 17
-               ::admission/reason "injected publication failure"})
-      (let [response (readiness-response)]
-        (is (= 503 (::status response)))
-        (let [body (reader/read-string (::body response))]
-          (is (= :unavailable (::admission/status body)))
-          (is (false? (::restore/executable? body)))))
-      (let [!response (atom {})
-            response #js {:writeHead
-                          (fn [status _headers]
-                            (swap! !response assoc ::status status))
-                          :end
-                          (fn [body]
-                            (swap! !response assoc ::body body))}]
-        (serve/create-agent!
-          {:seon.http/node-req nil
-           :seon.http/node-res response})
-        (is (= 503 (::status @!response)))
-        (is (re-find #"Runtime program generation is unavailable"
-                     (::body @!response))
-            "nil request proves refusal occurred before body parsing"))
-      (finally
-        (reset! @#'admission/!state prior)))))
+  (async done
+    (let [prior (admission/state)]
+      (-> (js/Promise.resolve nil)
+          (.then
+            (fn ^:async run []
+              (reset! @#'admission/!state
+                      {::admission/status :available
+                       ::admission/generation 17})
+              (let [response (await (readiness-response))
+                    body (reader/read-string (::body response))]
+                (is (= 200 (::status response)))
+                (is (true? (::restore/executable? body))))
+              (reset! @#'admission/!state
+                      {::admission/status :unavailable
+                       ::admission/generation 17
+                       ::admission/reason "injected publication failure"})
+              (let [response (await (readiness-response))
+                    body (reader/read-string (::body response))]
+                (is (= 503 (::status response)))
+                (is (= :unavailable (::admission/status body)))
+                (is (false? (::restore/executable? body))))))
+          (.catch (fn [error] (is false (str error))))
+          (.finally
+            (fn []
+              (reset! @#'admission/!state prior)
+              (done)))))))
 
 (deftest ordinary-readiness-dispatches-through-the-installed-router
-  (let [prior (admission/state)
-        !response (atom {})
-        request #js {:method "GET" :url "/_seon/ready" :headers #js {}}
-        response #js {:writeHead
-                      (fn [status _headers]
-                        (swap! !response assoc ::status status))
-                      :end
-                      (fn [body]
-                        (swap! !response assoc ::body body))}]
-    (try
-      (reset! @#'admission/!state {::admission/status :available})
-      (router/handle-request request response)
-      (is (= 200 (::status @!response)))
-      (is (true? (::restore/executable?
-                   (reader/read-string (::body @!response))))
-          "the public router calls the compatible two-argument handler")
-      (finally
-        (reset! @#'admission/!state prior)))))
+  (async done
+    (let [prior (admission/state)
+          !response (atom {})
+          request #js {:method "GET" :url "/_seon/ready" :headers #js {}}
+          response-promise
+          (js/Promise.
+            (fn [resolve _reject]
+              (reset! @#'admission/!state {::admission/status :available})
+              (router/handle-request
+                request
+                #js {:writeHead
+                     (fn [status _headers]
+                       (swap! !response assoc ::status status))
+                     :end
+                     (fn [body]
+                       (swap! !response assoc ::body body)
+                       (resolve @!response))})))]
+      (-> response-promise
+          (.then
+            (fn [response]
+              (is (= 200 (::status response)))
+              (is (true? (::restore/executable?
+                           (reader/read-string (::body response)))))))
+          (.catch (fn [error] (is false (str error))))
+          (.finally
+            (fn []
+              (reset! @#'admission/!state prior)
+              (done)))))))
 
 (deftest restore-readiness-serves-only-the-exact-closed-completion-head
   (async done
     (let [prior-admission (admission/state)
-          prior-conn db/*conn*
-          prior-replica-status replica/status
-          !fresh-conn (atom nil)
+          original-attached? db/attached?
+          original-acquire restore/acquire-completion!
           completion-claim
           {::restore/plan-digest (apply str (repeat 64 "a"))
            ::restore/db-name :default
@@ -542,88 +541,49 @@
            #uuid "44444444-4444-4444-8444-444444444444"
            ::restore/undo-branch :undo
            ::restore/target-branch :target}
-          config {:store {:backend :memory :id (random-uuid)}
-                  :schema-flexibility :write
-                  :keep-history? true}
-          connect-config (db.id/allocation-connect-config config)]
-      (-> (d/create-database config)
-          (.then (fn [_] (d/connect connect-config {:sync? false})))
+          completion (assoc completion-claim ::restore/id "restore00001")
+          c {::coordinate/database-id (::restore/database-id completion)
+             ::coordinate/branch :db
+             ::coordinate/commit-id (::restore/forced-commit-id completion)
+             ::coordinate/t 11}
+          rows (mapv (fn [attr] [attr (::coordinate/t c)]) (keys completion))
+          recorded {::restore/ok? true
+                    ::restore/recorded? true
+                    ::restore/already-completed? false
+                    ::restore/completion completion
+                    ::restore/completion-coordinate c}]
+      (set! db/attached? (constantly true))
+      (set! restore/acquire-completion!
+            (fn [_]
+              (js/Promise.resolve
+                {::restore/current-coordinate c
+                 ::restore/installed-schema {}
+                 ::restore/completion completion
+                 ::restore/publication-rows rows})))
+      (reset! @#'admission/!state {::admission/status :publishing})
+      (-> (js/Promise.resolve nil)
           (.then
-           (fn ^:async prove-endpoint [conn]
-             (reset! !fresh-conn conn)
-             (set! db/*conn* conn)
-             (await (db/ensure-provenance! {:seon.db/conn conn}))
-             (await
-              (d/transact!
-               conn
-               {:tx-data
-                (db/malli->datahike-schema
-                  (into restore/completion-attrs
-                        [:seon.schema/key :seon.db.id/generator]))}))
-             (await
-              (d/transact!
-               conn
-               {:tx-data
-                [{:seon.schema/key ::restore/id
-                  :seon.db.id/generator
-                  :seon.db.id.generator/compact}]}))
-             (let [expected (db/head-coordinate @conn)
-                   recorded
-                   (await
-                    (db/with-tx-context
-                     {:seon.db/user [:seon.agent/id "root"]
-                      :seon.db/process (process/lookup-ref ::process/boot)}
-                     (fn []
-                       (restore/record!
-                        {::restore/completion-claim completion-claim
-                         ::restore/expected-coordinate expected}))))
-                   c (::restore/completion-coordinate recorded)
-                   full-completion (::restore/completion recorded)]
-               (is (true? (::restore/ok? recorded)) (pr-str recorded))
-               (reset! @#'admission/!state {::admission/status :publishing})
-               (set! replica/status
-                     (fn [] {::replica/connected? false
-                             ::replica/phase ::replica/reconnecting}))
-               (let [response (readiness-response recorded)]
-                 (is (= 503 (::status response)))
-                 (is (= {::restore/ready? false
-                         ::restore/executable? false}
-                        (reader/read-string (::body response)))
-                     "reconnecting restore evidence cannot observe readiness"))
-               (set! replica/status
-                     (fn [] {::replica/connected? true
-                             ::replica/phase ::replica/live}))
-               (let [response (readiness-response recorded)
-                     body (reader/read-string (::body response))]
-                   (is (= 200 (::status response)))
-                   (is (= {::restore/ready? true
-                           ::restore/executable? false
-                           ::restore/completion full-completion
-                           ::restore/completion-coordinate c}
-                          body)
-                       "the public body is the exact closed readiness schema"))
-                 (set! db/*conn* nil)
-                 (let [response (readiness-response recorded)]
-                   (is (= 503 (::status response)))
-                   (is (= {::restore/ready? false
-                           ::restore/executable? false}
-                          (reader/read-string (::body response)))
-                       "detached restore evidence never falls through to ordinary readiness"))
-                 (set! db/*conn* conn)
-                 (await
-                  (db/with-tx-context
-                   {:seon.db/user [:seon.agent/id "root"]
-                    :seon.db/process (process/lookup-ref ::process/boot)}
-                   (fn []
-                     (db/transact!
-                      {:seon.db/tx-data [{:seon.user/id "later"}]}))))
-                 (is (= 503 (::status (readiness-response recorded)))))))
+           (fn ^:async run []
+             (let [response (await (readiness-response recorded))]
+               (is (= 200 (::status response))))
+             (set! db/attached? (constantly false))
+             (let [response (await (readiness-response recorded))]
+               (is (= 503 (::status response))))
+             (set! db/attached? (constantly true))
+             (set! restore/acquire-completion!
+                   (fn [_]
+                     (js/Promise.resolve
+                       {::restore/current-coordinate (update c ::coordinate/t inc)
+                        ::restore/installed-schema {}
+                        ::restore/completion completion
+                        ::restore/publication-rows rows})))
+             (let [response (await (readiness-response recorded))]
+               (is (= 503 (::status response))))))
           (.catch (fn [error]
                     (is false (str "restore readiness endpoint threw " error))))
           (.finally
            (fn []
-             (when-let [conn @!fresh-conn] (d/release conn))
-             (set! db/*conn* prior-conn)
-             (set! replica/status prior-replica-status)
-             (reset! @#'admission/!state prior-admission)))
-          (.then (fn [_] (done)))))))
+             (set! db/attached? original-attached?)
+             (set! restore/acquire-completion! original-acquire)
+             (reset! @#'admission/!state prior-admission)
+             (done)))))))

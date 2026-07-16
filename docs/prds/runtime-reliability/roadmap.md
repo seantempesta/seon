@@ -50,7 +50,12 @@ execution; protocol and persistent native sessions; asynchronous `seon.db`;
 isolated Bun children; atomic replica/feed removal; then density, packaging, and
 the measured one-versus-2/4-authority-shard decision. Its current earliest
 unsettled contract is the complete client restore/readiness/quiescence/session-
-close cut that makes atomic session open and replica removal possible.
+close cut that makes atomic session open and replica removal possible. Restore
+completion recording, retry adoption, startup attachment validation, and HTTP
+readiness now share one coordinate-pinned ordinary-data authority acquisition;
+readiness no longer dereferences the local replica. The next boundary is the
+remaining startup/web synchronous consumers and launch-descriptor ownership,
+followed by atomic client session open and replica/feed deletion.
 Autocomplete/export and the debug feed already consume the same coordinate-
 pinned compiled child result; the obsolete synchronous AI composer is deleted.
 Stale debug completions cannot install candidate catalogs, and raw AI

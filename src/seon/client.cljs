@@ -2749,22 +2749,31 @@
                     :seon.error/kind :core-bug})))
       startup)))
 
-(defn- validate-restore-completion!
-  "Prove retained completion evidence against the current closed database."
-  [claim result database]
+(defn- ^:async validate-restore-completion!
+  "Prove retained completion evidence against the current authority head."
+  [claim result]
   (let [completion (::db.restore/completion result)
         coordinate (::db.restore/completion-coordinate result)
-        readiness
+        acquired
         (when (and (true? (::db.restore/ok? result))
                    (= claim (dissoc completion ::db.restore/id))
                    (schema/valid-candidate-value?
-                     ::db.coordinate/coordinate coordinate)
-                   (= coordinate (db/head-coordinate database)))
+                    ::db.coordinate/coordinate coordinate))
+          (await
+           (db.restore/acquire-completion!
+            {::db.restore/plan-digest (::db.restore/plan-digest claim)})))
+        readiness
+        (when (and acquired (not (:seon.error/message acquired)))
           (db.restore/readiness
             {::db.restore/completion completion
+             ::db.restore/current-completion
+             (::db.restore/completion acquired)
              ::db.restore/completion-coordinate coordinate
-             :seon.runtime.admission/state (admission/state)
-             :seon.db/db database}))]
+             ::db.restore/current-coordinate
+             (::db.restore/current-coordinate acquired)
+             ::db.restore/publication-rows
+             (::db.restore/publication-rows acquired)
+             :seon.runtime.admission/state (admission/state)}))]
     (when-not (true? (::db.restore/ready? readiness))
       (throw
         (ex-info "start-runtime!: restore completion failed"
@@ -2774,11 +2783,19 @@
                   :seon.error/kind :core-bug})))
     result))
 
-(defn- validate-restore-attachment!
-  [conn descriptor startup]
+(defn- ^:async validate-restore-attachment!
+  [descriptor startup claim]
   (when startup
-    (let [database @conn
-          actual (db/head-coordinate database)
+    (let [acquired
+          (await
+           (db.restore/acquire-completion!
+            {::db.restore/plan-digest (::db.restore/plan-digest claim)}))
+          _ (when (:seon.error/message acquired)
+              (throw
+               (ex-info "Restore startup attachment acquisition failed."
+                        {:seon.db/error acquired
+                         :seon.error/kind :core-bug})))
+          actual (::db.restore/current-coordinate acquired)
           expected (get-in descriptor
                            [::launch/database ::db.coordinate/coordinate])
           forced (get-in startup
@@ -2786,7 +2803,7 @@
                           :seon.db.restore-admin/forced-main-coordinate])
           missing-schema
           (into []
-                (remove #(contains? (db/installed-schema database) %))
+                (remove #(contains? (::db.restore/installed-schema acquired) %))
                 db.restore/completion-attrs)]
       (when-not (and (= expected forced actual)
                      (= :db (::db.coordinate/branch actual)))
@@ -2811,7 +2828,7 @@
    starts shared HTTP/debug/ticker machinery. Agent birth is not a mode of this
    function; warm callers use [[seon.agent/start!]]. A repeated attached call
    validates the retained capability, reads resumable ids, and idempotently
-   reattaches the replica/web surfaces. It never re-enters replay, publication,
+   reattaches the web surface. It never re-enters replay, publication,
    boot writes, or agent hosting."
   {:malli/schema [:=> [:cat ::start-runtime-request] :any]}
   [{::keys [llm-fn launch-capability]}]
@@ -2828,25 +2845,12 @@
           (db.restore/completion-from-launch
             {::launch/descriptor descriptor}))]
     (if attached?
-      (let [conn db/*conn*
-            _ (await (replica/attach!
-                       {::replica/conn conn
-                        ::launch/descriptor
-                        replica/process-launch-descriptor}))
-            _ (when (and restore-startup
-                         (not (true? (::replica/connected?
-                                       (replica/status)))))
-                (throw
-                  (ex-info
-                    "Restore refresh requires a caught-up transaction feed."
-                    {:seon.db.replica/status (replica/status)
-                     :seon.error/kind :core-bug})))
-            restore-completion-result
+      (let [restore-completion-result
             (when restore-startup
-              (validate-restore-completion!
+              (await
+               (validate-restore-completion!
                 restore-completion-claim
-                (::restore-completion-result @!state)
-                @conn))
+                (::restore-completion-result @!state))))
             available-ids (await (acquire-resumable-agent-ids!))
             resumed-ids (if autonomous? available-ids [])
             primary (or (first (remove #{"root"} available-ids))
@@ -2871,8 +2875,9 @@
                     {::prepare-writes? (and autonomous?
                                             (nil? restore-startup))}))
             _ (set! db/*conn* conn)
-            _ (validate-restore-attachment!
-               conn descriptor restore-startup)
+            _ (await
+               (validate-restore-attachment!
+                descriptor restore-startup restore-completion-claim))
             _ (db/assert-preconditions! {:seon.db/conn conn})
             ;; Bootstrap compilation can overlap autonomous database work.
             compile-promise (repl/ensure-bootstrap!)]
@@ -2990,8 +2995,9 @@
                                    ::db.coordinate/coordinate])})))))
                 completion-result
                 (when restore-startup
-                  (validate-restore-completion!
-                    restore-completion-claim completion-result @conn))
+                  (await
+                   (validate-restore-completion!
+                    restore-completion-claim completion-result)))
                 _ (when restore-startup
                     (swap! !state assoc
                            ::restore-completion-result completion-result))

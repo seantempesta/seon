@@ -1230,8 +1230,10 @@ is prohibited.
   acquired data. No compatibility connection, query-result replay map, public
   namespace alias, or second database facade may make old local-Datahike call
   shapes appear synchronous.
-- **Earliest unsettled contract:** make restore completion and readiness
-  ordinary-data, session-native owners. Planned quiescence already uses the
+- **Earliest unsettled contract:** finish the remaining startup/web synchronous
+  consumers, then switch client session open and local-replica removal in one
+  atomic cut. Restore completion and readiness are now ordinary-data,
+  session-native owners. Planned quiescence already uses the
   authority facade, and `seon.db/close-session!` is the complete native inverse;
   neither needs another protocol. Prompt consumers are complete: the live debug
   feed and autocomplete/export consume the same coordinate-pinned child result
@@ -1420,9 +1422,19 @@ is prohibited.
   execution and bench-client artifacts compile at the unchanged 18/46 warning
   inventories; the focused test artifact compiles before the known replica
   import stops namespace startup.
-- **Next refill:** move restore completion/publication acquisition and the
-  readiness door to ordinary coordinate/result data. Then finish the remaining
-  startup/web synchronous consumers, switch client open atomically, and
+- Restore completion recording, retry adoption, startup attachment validation,
+  and the HTTP readiness door now use one coordinate-pinned four-member
+  `execute-many` acquisition over schema, completion, publication facts, and
+  generated-ID policy. Readiness is pure over ordinary values; successful
+  publication reads back at the returned commit coordinate, while a failed
+  competing write reacquires the current head before adopting only identical
+  facts. The complete CLJS test artifact compiles, then the known obsolete
+  `seon.db.replica.js` import stops the runner before namespace startup. The
+  `bench-client` artifact compiles with 40 synchronous-consumer warnings, down
+  from 46, and the execution artifact remains at 18.
+- **Next refill:** finish the remaining startup/web synchronous consumers,
+  move launch-descriptor ownership out of the replica, switch client open
+  atomically, and
   delete replica, publisher/replay, Node adapters, SCI render reconstruction,
   synchronous database-value arities, and compatibility reachability.
   Supervision graduation then proves immediate idle release, parent-loss
