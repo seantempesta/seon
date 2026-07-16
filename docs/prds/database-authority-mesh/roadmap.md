@@ -152,6 +152,10 @@ The generated-ID remote seam and rejected declarative-template alternative are
 The async render cut that preserves pure recursive rendering while moving
 database I/O to coordinate-pinned outer acquisition or the owning isolated
 agent child is [[research/async-render-authority-seam-2026-07-16]].
+The final ordinary-data async database surface and its eight concrete closure
+gaps are [[research/remote-seon-db-contract-freeze-2026-07-16]]. The exact Bun
+child lifecycle, zero-process dormant-agent wake seam, and density proof are
+[[research/bun-child-supervision-seam-2026-07-16]].
 
 ## Ordered implementation spine
 
@@ -883,6 +887,15 @@ child. The cluster supervisor owns lifecycle/control IPC, inference admission,
 restart policy, logs, and terminal evidence. Children own eval/inference/tool
 CPU and direct database sessions; they do not share mutable application state.
 
+The cluster host owns one gap-safe selective wake interest and starts a child
+only when database facts require work. Dormant agents retain no process,
+compiler, session, or listener. Bun IPC carries only bounded lifecycle controls;
+database requests/results remain direct child-to-authority traffic because
+`Subprocess.send` has an unbounded native queue and no drain event. `proc.exited`
+is the terminal authority; IPC disconnect and `onExit` ordering are only
+observations. Children remain referenced and non-detached under explicit Bun
+no-orphans plus Babashka's outer process-group containment.
+
 Exit proof: CPU-bound agents overlap on multiple cores; timeout, cancellation,
 crash, restart, parent loss, database disconnect, and child resource limits do
 not corrupt sibling agents or the authority. Modest-hardware admission limits
@@ -936,15 +949,14 @@ and consumer inventory may run in parallel:
 - Slot 2: exact addressed-delivery accounting is complete: response slots
   bound unencoded work, fixed codec workers bound transient copies, and only
   exact framed bytes consume retained global/session output capacity.
-- Slot 3: use the completed Bun event demultiplexing and bounded callback
-  handoff to make the bottom-up `seon.db` consumer closure Promise-ready around
-  coarse query/pull-many/execute-many plans, then delete lazy entity traversal.
-- Slot 4: the atomic reachability inventory across `db.cljs`,
-  `db/internal.cljs`, `client.cljs`, `repl.cljs`, `embed.cljs`,
-  `handlers/ns.cljs`, `coordinate.cljc`, `id.cljc`, replica, publisher, and
-  replay owners is complete. The generated-ID builder falsifier selected the
-  existing ordinary candidate-manifest transaction; refill with the async
-  render-boundary falsifier before freezing the final `seon.db` contract.
+- Slot 3: the remote `seon.db` contract is frozen. Refill with its protocol and
+  dependency gaps: strict temporal `t`, aggregate execute-many weight,
+  nonthrowing ordered pull-many, generated-manifest schema, duplicate live
+  interest rejection, recursive wire values, compact transaction replies, and
+  truthful resolved async schemas.
+- Slot 4: Bun child supervision is source-grounded. Refill after the database
+  facade with a dedicated child artifact and the zero-process dormant-agent
+  trigger falsifier; IPC never becomes a database broker.
 
 After each unit, integrate its retained proof before refilling. A build/restart
 checkpoint freezes all artifact inputs; lifecycle remains operator-owned.
