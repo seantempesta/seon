@@ -1862,9 +1862,15 @@
 
 (defn- install-interest-locked!
   [runtime transport-connection request connection database-name attachment]
-  (let [db-value (d/db connection)
+  (let [request-id (::protocol/request-id request)
+        _
+        (when (contains? @(::interests transport-connection) request-id)
+          (throw
+           (ex-info "The request id already names a live database interest."
+                    {::failure-kind protocol/request-conflict-error
+                     ::protocol/request-id request-id})))
+        db-value (d/db connection)
         scope (committed-scope database-name attachment db-value)
-        request-id (::protocol/request-id request)
         interest (listen-interest request scope)
         reference (interest-ref transport-connection request-id
                                 (::owner interest))

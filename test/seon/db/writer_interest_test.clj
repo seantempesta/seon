@@ -82,6 +82,105 @@
            {::uds/send-status uds/send-accepted})}]
     connection))
 
+(defn- interest-connection
+  [server request-id]
+  (some (fn [session]
+          (let [connection @(::uds/owner session)]
+            (when (and (map? connection)
+                       (contains? @(::writer/interests connection) request-id))
+              connection)))
+        (vals @(::uds/connections (::writer/request-server server)))))
+
+(deftest duplicate-live-listen-id-preserves-the-original-interest
+  (let [database-name (str "writer-interest-duplicate-" (random-uuid))
+        request-path (socket-path "duplicate-request")
+        publish-path (socket-path "duplicate-publish")
+        server
+        (writer/start!
+         {::writer/dependencies (dependencies)
+          ::writer/database-name database-name
+          ::writer/backend :memory
+          ::writer/selected-processors 3
+          ::writer/request-socket-path request-path
+          ::writer/publish-socket-path publish-path})
+        ^SocketChannel listener (uds/connect! request-path)
+        ^SocketChannel writer-channel (uds/connect! request-path)
+        request-id "duplicate/listen"]
+    (try
+      (let [acquired (acquire! listener database-name "duplicate/listener")
+            _ (acquire! writer-channel database-name "duplicate/writer")
+            _
+            (transact!
+             writer-channel database-name "duplicate/schema"
+             [{:db/ident :duplicate/original
+               :db/valueType :db.type/string
+               :db/cardinality :db.cardinality/one}
+              {:db/ident :duplicate/replacement
+               :db/valueType :db.type/string
+               :db/cardinality :db.cardinality/one}])
+            original
+            (call! listener
+                   (protocol/listen-request
+                    {::protocol/request-id request-id
+                     ::protocol/database-name database-name
+                     ::protocol/attachment (::protocol/attachment acquired)
+                     ::protocol/datom-patterns
+                     [{:seon.db/a :duplicate/original}]}))
+            connection (interest-connection server request-id)
+            interests-before @(::writer/interests connection)
+            indexes-before @(::writer/interest-state (::writer/runtime server))
+            duplicate
+            (call! listener
+                   (protocol/listen-request
+                    {::protocol/request-id request-id
+                     ::protocol/database-name database-name
+                     ::protocol/attachment (::protocol/attachment acquired)
+                     ::protocol/datom-patterns
+                     [{:seon.db/a :duplicate/replacement}]}))]
+        (is (::protocol/listening? original) (pr-str original))
+        (is (some? connection))
+        (is (= protocol/request-conflict-error
+               (::protocol/error-kind duplicate))
+            (pr-str duplicate))
+        (is (= request-id (::protocol/request-id duplicate)))
+        (is (= interests-before @(::writer/interests connection))
+            "the duplicate does not replace the connection-owned interest")
+        (is (= indexes-before
+               @(::writer/interest-state (::writer/runtime server)))
+            "the duplicate does not alter source, scope, or attribute indexes")
+
+        (let [transaction
+              (transact! writer-channel database-name "duplicate/write"
+                         [{:duplicate/original "still-live"}])
+              event (deref (future (read-next listener)) 5000 ::timed-out)]
+          (is (= protocol/datoms-event (::protocol/event event)))
+          (is (= request-id (::protocol/request-id event)))
+          (is (= :duplicate/original
+                 (get-in event [::protocol/datoms 0 :seon.db/a])))
+          (is (= (::protocol/coordinate transaction)
+                 (::protocol/coordinate event))))
+
+        (let [unlisten
+              (call! listener
+                     (protocol/unlisten-request
+                      {::protocol/request-id "duplicate/unlisten"
+                       ::protocol/target-request-id request-id}))]
+          (is (false? (::protocol/listening? unlisten)))
+          (is (empty? @(::writer/interests connection)))
+          (is (= {::writer/by-scope {} ::writer/by-source {}}
+                 @(::writer/interest-state (::writer/runtime server)))))
+        (.close listener)
+        (is (wait-until! #(deref (::writer/closed? connection)))
+            "disconnect completes with no retained interest state")
+        (is (= {::writer/by-scope {} ::writer/by-source {}}
+               @(::writer/interest-state (::writer/runtime server)))))
+      (finally
+        (try (.close listener) (catch Throwable _))
+        (try (.close writer-channel) (catch Throwable _))
+        (writer/stop! server)
+        (.delete (File. request-path))
+        (.delete (File. publish-path))))))
+
 (deftest physical-connections-receive-only-matching-committed-datoms
   (let [database-name (str "writer-interest-" (random-uuid))
         request-path (socket-path "request")
