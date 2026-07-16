@@ -22,7 +22,7 @@
 
     org.replikativ/datahike
     {:git/url "https://github.com/seantempesta/datahike"
-     :git/sha "7eb1b8495ac8af2b955e12febbd892b7d4d65e19"
+     :git/sha "c1faf70ddabb8d702af6e5c8e554dfaf5753afcb"
      :exclusions [org.clojure/clojurescript
                   com.github.pkpkpk/cljs-cache]}
     org.replikativ/konserve
@@ -151,7 +151,7 @@
          ;; PR-shaped pending upstream review.
          :override-deps {org.replikativ/datahike
                          {:git/url "https://github.com/seantempesta/datahike"
-                          :git/sha "7eb1b8495ac8af2b955e12febbd892b7d4d65e19"}
+                          :git/sha "c1faf70ddabb8d702af6e5c8e554dfaf5753afcb"}
                          ;; Konserve 0.9.359 plus the shared CLJ/CLJS legacy
                          ;; header reader and idempotent Node filestore deletion.
                          org.replikativ/konserve

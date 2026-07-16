@@ -91,7 +91,7 @@ Rust, cloud, Tauri, and mobile hosts conform to the same data fixtures.
 
 ## Dependency ledger
 
-- Datahike `7eb1b849` (graduated Units 1–3 at `940810f5`, plus attached
+- Datahike `c1faf70d` (graduated Units 1–3 at `940810f5`, plus attached
   exact-commit cache identity, atop
   `9ada755087228e10cfb179fa5779ce227a6ed220`):
   `db.cljc`, `connections.cljc`, `connector.cljc`, `core.cljc`,
@@ -366,6 +366,13 @@ own decoded frames. The remaining work is to route KNN bounds and external
 entity IDs, supply HNSW construction capacity, add encode/session byte
 ownership, and give provider calls explicit deadlines with matching connection
 capacity.
+
+The Datahike Proximum adapter now converts an upstream `EntityBitSet` once to
+external entity IDs and calls Proximum's indexed external-ID filter seam.
+Filtered search no longer translates every indexed internal node back to an
+entity ID merely to run a predicate. The focused PSS/HHT/spec secondary-index
+gate passes 45 tests and 267 assertions. Sparse/dense crossover measurement
+remains a later tuning question; correctness uses the same entity set.
 
 This is not Unit 4 graduation because query, KNN, encode/delivery, mutation, and
 control capacity are not all wired and 2/4/8-database adversarial proof remains.
