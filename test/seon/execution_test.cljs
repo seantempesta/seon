@@ -58,7 +58,7 @@
   (let [messages (atom [])
         state (atom {::execution/startup startup
                      ::execution/compiled-functions
-                     {prompt-function (fn [_ _] nil)}})
+                     {prompt-function (fn [_ _ _] nil)}})
         request (execution/compiled-invocation
                  "agent-1" 'my.render/view [] coordinate digest)]
     (@#'execution/receive! state (execution/encode-message request)
@@ -74,7 +74,7 @@
         opens (atom 0)
         state (atom {::execution/startup startup
                      ::execution/compiled-functions
-                     {prompt-function (fn [_ _] nil)}})
+                     {prompt-function (fn [_ _ _] nil)}})
         wrong-digest (apply str (repeat 64 "b"))
         request (execution/compiled-invocation
                  "agent-1" prompt-function [1] coordinate wrong-digest)]
@@ -98,9 +98,10 @@
           state (atom {::execution/startup startup
                        ::execution/compiled-functions
                        {prompt-function
-                        (fn [value invoke-selected!]
+                        (fn [arguments invoke-selected! compile-state!]
                           (is (fn? invoke-selected!))
-                          {:seon.execution-test/value value})}})
+                          (is (fn? compile-state!))
+                          {:seon.execution-test/value (first arguments)})}})
           request (execution/compiled-invocation
                    "agent-1" prompt-function [7] coordinate digest)]
       (with-redefs [db/open-session! (fn [_] (js/Promise.resolve nil))
@@ -128,6 +129,32 @@
             (.catch
              (fn [error]
                (is false (str "compiled dispatch rejected: " error))
+               (done))))))))
+
+(deftest child-compiler-state-initializes-once
+  (async done
+    (let [initialized (atom 0)
+          compile-state (atom {})
+          state (atom {})]
+      (with-redefs [seval/init-bootstrap!
+                    (fn []
+                      (swap! initialized inc)
+                      (js/Promise.resolve compile-state))]
+        (-> (js/Promise.resolve
+             (@#'execution/ensure-compile-state! state))
+            (.then
+             (fn [first-state]
+               (-> (js/Promise.resolve
+                    (@#'execution/ensure-compile-state! state))
+                   (.then
+                    (fn [second-state]
+                      (is (identical? compile-state first-state))
+                      (is (identical? first-state second-state))
+                      (is (= 1 @initialized))
+                      (done))))))
+            (.catch
+             (fn [error]
+               (is false (str "compiler state initialization rejected: " error))
                (done))))))))
 
 (deftest bounded-results-are-settled-ordinary-data

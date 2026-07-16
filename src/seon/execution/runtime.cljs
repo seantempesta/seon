@@ -214,7 +214,9 @@
 
 (def compiled-functions
   "Trusted functions directly reachable through this exact execution artifact."
-  {'seon.execution.runtime/render-prompt! render-prompt!})
+  {'seon.execution.runtime/render-prompt!
+   (fn [arguments invoke-selected! _compile-state!]
+     (apply render-prompt! (conj arguments invoke-selected!)))})
 
 (defn -main
   "Start the execution child from the complete runtime composition root."

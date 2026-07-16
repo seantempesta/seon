@@ -1562,6 +1562,16 @@ second owner.
   cannot be redirected through global symbol lookup. The execution artifact
   remains 415 files/18 warnings; focused direct dispatch, host identity, and
   real turn-caller proof passes 8 tests/20 assertions.
+- The execution child now owns exactly one lazily initialized `cljs.js`
+  compile state. Trusted artifact adapters receive only the existing selected-
+  function capability and a private function that returns that state; neither
+  the state nor the execution owner crosses Transit or enters database data.
+  Authored program loading now reuses the same state even on its first load,
+  while prompt rendering does not initialize it. Focused adapter/state proof
+  passes 2 tests/8 assertions, and both execution artifacts compile at the
+  unchanged 415 files/18-warning inventory. Eval is not exposed through this
+  door until its remaining local-Datahike correctness reads are converted to
+  authority requests.
 - The eval batch run fence is now unconditional whenever a run ID is present;
   absence of a local connection can no longer skip the serialized writer CAS.
   A losing terminal receipt CAS whose authority status read also fails now

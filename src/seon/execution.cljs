@@ -429,9 +429,23 @@
                       {::function-symbol target :seon.error/kind :agent}))))
   program)
 
+(defn- ^:async ensure-compile-state!
+  "Return the execution child's one persistent ClojureScript compiler state."
+  [state]
+  (if-let [compile-state (::compile-state @state)]
+    compile-state
+    (let [initialized (await (eval/init-bootstrap!))]
+      (swap! state
+             (fn [current]
+               (if (::compile-state current)
+                 current
+                 (assoc current ::compile-state initialized))))
+      (::compile-state @state))))
+
 (defn- ^:async ensure-program!
   [state invocation function-symbols verify-identity?]
-  (let [program (await (acquire-program! (::coordinate invocation)
+  (let [compile-state (await (ensure-compile-state! state))
+        program (await (acquire-program! (::coordinate invocation)
                                          (::agent-id invocation)))
         _ (when verify-identity?
             (verify-authored-identity! program invocation))
@@ -445,7 +459,8 @@
 
       (nil? loaded)
       (let [compile-state
-            (await (eval/load-authored-program! load-request))]
+            (await (eval/load-authored-program!
+                    (assoc load-request ::compile-state compile-state)))]
         (swap! state assoc
                ::program program
                ::compile-state compile-state
@@ -673,11 +688,13 @@
                         (assoc (or (::run-fence invocation) {})
                                ::db/coordinate (::coordinate invocation))
                         (fn []
-                          (apply function-value
-                                 (cond-> (::arguments invocation)
-                                   compiled?
-                                   (conj (partial invoke-selected!
-                                                  state invocation)))))))))
+                          (if compiled?
+                            (function-value
+                             (::arguments invocation)
+                             (partial invoke-selected! state invocation)
+                             (partial ensure-compile-state! state))
+                            (apply function-value
+                                   (::arguments invocation))))))))
                    (catch :default exception
                      (js/Promise.reject exception)))
                  (js/Promise.reject
