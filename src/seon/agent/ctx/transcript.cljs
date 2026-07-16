@@ -39,8 +39,11 @@
     [malli.core :as m]
     [seon.agent.message :as msg]
     [seon.agent.ctx :as ctx]
+    [seon.agent.home :as home]
     [seon.ai.tokens :as tokens]
+    [seon.config :as config]
     [seon.db :as db]
+    [seon.db.protocol :as protocol]
     [seon.derive :as derive]
     [seon.eval :as seval]
     [seon.handlers.eval :as eval-handler]
@@ -96,7 +99,7 @@
 ;; AI transcript rotation: retain at most 50 turns, then evict one complete
 ;; 25-turn prefix at a time. The settled chunk shares one budget charged on
 ;; actual rendered event text; the current append-only chunk is not charged.
-(schema/register! ::turn-window-size    [:int {:default 50 :min 1}])
+(schema/register! ::turn-window-size    [:int {:default 50 :min 1 :max 200}])
 (schema/register! ::turn-eviction-size  [:int {:default 25 :min 1}])
 (schema/register! ::settled-token-cap   [:int {:default 8192 :min 0}])
 
@@ -434,7 +437,7 @@
         ;; [[transcript-block]] — byte-exact); a direct call with no
         ;; threaded flag falls back to the live read.
         body (ctx/cap-result content ctx/message-render-cap
-                             (if (some? escape?) escape? (ctx/escape-clipping?)))
+                             (if (boolean? escape?) escape? true))
         who  (if outbound?
                (str "▶ to " (str/join ", " to-labels))
                (str "◀ from " from-label))]
@@ -620,14 +623,16 @@
 
 (defn- eval->event
   "Convert one eval row into a transcript event at its optional turn index."
-  [turn-idx e]
+  ([turn-idx e]
+   (eval->event turn-idx e (seval/result-live? (:seon.eval/id e))))
+  ([turn-idx e result-live?]
   (cond->
     {::at           (:seon.eval/at e)
      ::kind         :eval
      ::entity       (into {} e)
-     ::result-live? (seval/result-live? (:seon.eval/id e))
+     ::result-live? result-live?
      :seon.render/ai 'seon.agent.ctx.transcript/eval->renderable}
-    (some? turn-idx) (assoc ::turn-idx turn-idx)))
+    (some? turn-idx) (assoc ::turn-idx turn-idx))))
 
 (defn- eval-events
   "ALL of the agent's evals as transcript events across ALL its turns,
@@ -656,18 +661,19 @@
   "Thread a `; in <ns>` marker into each EVAL event whose ns differs from
    the prior eval's (only evals carry an ns; message events pass through).
    A pure left-to-right pass over the already-time-sorted events."
-  [events]
-  (first
-    (reduce
-      (fn [[out prev-ns] ev]
-        (if (= :eval (::kind ev))
-          (let [ek (:seon.eval/ns (::entity ev))
-                marker (when (and (some? ek) (not= prev-ns ek))
-                         (str "; in " (name ek)))]
-            [(conj out (assoc ev ::ns-marker marker)) (or ek prev-ns)])
-          [(conj out ev) prev-ns]))
-      [[] ::none]
-      events)))
+  ([events] (with-ns-markers events ::none))
+  ([events initial-ns]
+   (first
+     (reduce
+       (fn [[out prev-ns] ev]
+         (if (= :eval (::kind ev))
+           (let [ek (:seon.eval/ns (::entity ev))
+                 marker (when (and (some? ek) (not= prev-ns ek))
+                          (str "; in " (name ek)))]
+             [(conj out (assoc ev ::ns-marker marker)) (or ek prev-ns)])
+           [(conj out ev) prev-ns]))
+       [[] initial-ns]
+       events))))
 
 (defn- format-bytes
   "Compact binary size for the free dynamic tail."
@@ -708,33 +714,34 @@
    it tells the agent what to DO (finish, or message the result), never
    just that something is wrong."
   {:malli/schema [:=> [:catn [::input :map]] :string]}
-  [{:seon.agent/keys [id] db :seon.db/db}]
-  (let [db      (or db @db/*conn*)
-        state   (derive/derive-state db id)
-        cur-ns  (ctx/current-ns {:seon.agent/id id :seon.db/db db})
+  [{:seon.agent/keys [id]
+    state :seon.derive/state
+    cur-ns :seon.eval/ns
+    n-turns ::turn-count
+    run-turn-count :seon.agent.run/turn-count
+    run-form-count :seon.agent.run/form-count
+    mode :seon.config/repl-mode
+    :as input}]
+  (let [mode    (or mode :batch)
         ns-str  (if (keyword? cur-ns) (name cur-ns) (str cur-ns))
-        turns   (ctx/agent-turns id db)
-        n-turns (count turns)
-        run     (derive/current-run db id)
-        run-eid (:db/id run)
+        run     (get-in input [:seon.agent/entity :seon.agent/run])
         ;; loop-k = work spent in the CURRENT open run, in the SAME
         ;; denomination the loop's bound checks (mode-denominated, repl-milestone rung-0
         ;; verdict 2026-07-10): `:batch` counts the run's turns, `:stream`
         ;; counts its FORMS (evals) — one form per stream turn, so prose
         ;; turns don't move the meter. 0 when idle. cap = the run's
         ;; bumpable turn-limit (renew! grows it), else the default when idle.
-        run-turns (when run-eid
-                    (filter #(= run-eid (:db/id (:seon.agent.turn/run %)))
-                            turns))
         loop-k  (cond
-                  (nil? run-eid) 0
-                  (= :stream (ctx/repl-mode db))
-                  (reduce + 0 (map (comp count :seon.agent.turn/evals)
-                                   (remove :seon.agent.turn/scheduled? run-turns)))
-                  :else (count run-turns))
-        policy  (ctx/run-policy db)
+                  (not= :open (:seon.agent.run/status run)) 0
+                  (= :stream mode) (or run-form-count 0)
+                  :else (or run-turn-count 0))
+        policy  (merge (config/default-run-policy)
+                       (select-keys input
+                                    [:seon.config.run/batch-turn-limit
+                                     :seon.config.run/stream-form-limit
+                                     :seon.config.run/deadline-ms]))
         cap     (or (:seon.agent.run/turn-limit run)
-                    (if (= :stream (ctx/repl-mode db))
+                    (if (= :stream mode)
                       (:seon.config.run/stream-form-limit policy)
                       (:seon.config.run/batch-turn-limit policy)))
         ;; localized full date+tz so the agent can judge what's expensive.
@@ -765,15 +772,377 @@
    into evals where the ns changes. Ties (same `:at`) sort messages before
    evals for stable output. The caller flags any inbound newer than the
    agent's last own action as NEW (unanswered)."
-  [db own-id my-eid]
-  (let [turn-ats (mapv :seon.agent.turn/at (ctx/agent-turns own-id db))
-        msgs (or (message-events db my-eid own-id turn-ats) [])
-        evs  (eval-events db own-id)
+  [{:seon.agent/keys [id entity]
+    turns ::turns
+    messages ::messages
+    previous-ns ::previous-ns
+    events ::events}]
+  (if events
+    events
+    (let [my-eid (:db/id entity)
+        turn-ats (mapv :seon.agent.turn/at turns)
+        msgs (->> messages
+                  (keep #(message->event my-eid id %))
+                  (mapv #(assoc % ::turn-idx
+                                (turn-index-at turn-ats (::at %)))))
+        evs  (vec
+               (for [{turn-idx ::turn-idx :as turn} turns
+                     e (sort-by (juxt :seon.eval/at :db/id)
+                                (:seon.agent.turn/evals turn))]
+                 (eval->event turn-idx e
+                              (seval/result-live? (:seon.eval/id e)))))
         kind-rank {:message 0 :eval 1}
         sorted (sort-by (juxt #(.getTime ^js (::at %))
-                              #(kind-rank (::kind %) 9))
+                              #(kind-rank (::kind %) 9)
+                              #(or (:db/id (::entity %)) (::id %) 0))
                         (concat msgs evs))]
-    (with-ns-markers sorted)))
+      (with-ns-markers sorted (or previous-ns ::none)))))
+
+(defn- query-member
+  [query arguments max-work max-results max-result-weight]
+  {::protocol/operation protocol/query-operation
+   ::protocol/query-form query
+   ::protocol/arguments arguments
+   :datahike.resource/max-work max-work
+   :datahike.resource/max-results max-results
+   :datahike.resource/max-result-weight max-result-weight})
+
+(defn- pull-member
+  [selector entity-id max-work max-results max-result-weight]
+  {::protocol/operation protocol/pull-operation
+   ::protocol/selector selector
+   ::protocol/entity-id entity-id
+   :datahike.resource/max-work max-work
+   :datahike.resource/max-results max-results
+   :datahike.resource/max-result-weight max-result-weight})
+
+(defn- member-value
+  [member]
+  (cond
+    (not (true? (::protocol/success? member))) {::error member}
+    (contains? member :datahike.query/result)
+    {:datahike.query/result (:datahike.query/result member)}
+    :else {::protocol/result (::protocol/result member)}))
+
+(def ^:private turn-count-query
+  '[:find (count ?turn) .
+    :in $ ?agent-id
+    :where
+    [?agent :seon.agent/id ?agent-id]
+    [?run :seon.agent.run/agent ?agent]
+    [?turn :seon.agent.turn/run ?run]])
+
+(def ^:private current-ns-query
+  '{:find [?ns ?at ?eval]
+    :in [$ ?agent-id]
+    :where [[?agent :seon.agent/id ?agent-id]
+            [?run :seon.agent.run/agent ?agent]
+            [?turn :seon.agent.turn/run ?run]
+            [?turn :seon.agent.turn/evals ?eval]
+            [?eval :seon.eval/ok? true]
+            [?eval :seon.eval/at ?at]
+            [?eval :seon.eval/ns ?ns]]
+    :order-by [?at :desc ?eval :desc]
+    :limit 1})
+
+(def ^:private last-action-query
+  '[:find (max ?at) .
+    :in $ ?agent-id
+    :where
+    [?agent :seon.agent/id ?agent-id]
+    (or-join [?agent ?at]
+      (and [?run :seon.agent.run/agent ?agent]
+           [?turn :seon.agent.turn/run ?run]
+           [?turn :seon.agent.turn/evals ?eval]
+           [?eval :seon.eval/at ?at])
+      (and [?message :seon.agent.message/from ?agent]
+           [?message :seon.agent.message/at ?at]))])
+
+(def ^:private run-turn-count-query
+  '[:find (count ?turn) .
+    :in $ ?run-id
+    :where
+    [?run :seon.agent.run/id ?run-id]
+    [?turn :seon.agent.turn/run ?run]
+    (not [?turn :seon.agent.turn/scheduled? true])])
+
+(def ^:private run-form-count-query
+  '[:find (count ?eval) .
+    :in $ ?run-id
+    :where
+    [?run :seon.agent.run/id ?run-id]
+    [?turn :seon.agent.turn/run ?run]
+    (not [?turn :seon.agent.turn/scheduled? true])
+    [?turn :seon.agent.turn/evals ?eval]])
+
+(def ^:private eval-rows-query
+  '[:find ?turn
+          (pull ?eval [:db/id :seon.eval/id :seon.eval/at
+                       :seon.eval/source :seon.eval/narration
+                       :seon.eval/output :seon.eval/ok?
+                       :seon.eval/result-edn :seon.eval/error
+                       :seon.eval/error-data :seon.eval/ns
+                       :seon.render/full?])
+    :in $ [?turn ...]
+    :where
+    [?turn :seon.agent.turn/evals ?eval]
+    [?eval :seon.eval/at _]])
+
+(def ^:private message-selector
+  '[:db/id :seon.agent.message/id :seon.agent.message/content
+    :seon.agent.message/at :seon.agent.message/hops
+    :seon.agent.message/origin
+    {:seon.agent.message/from [:db/id :seon.user/id :seon.agent/id]}
+    {:seon.agent.message/to [:db/id :seon.user/id :seon.agent/id]}])
+
+(defn- turns-query [window-size]
+  {:find '[?turn ?at ?scheduled? ?run ?run-id]
+   :in '[$ ?agent-id]
+   :where '[[?agent :seon.agent/id ?agent-id]
+            [?run :seon.agent.run/agent ?agent]
+            [?run :seon.agent.run/id ?run-id]
+            [?turn :seon.agent.turn/run ?run]
+            [?turn :seon.agent.turn/at ?at]
+            [(get-else $ ?turn :seon.agent.turn/scheduled? false) ?scheduled?]]
+   :order-by '[?at :desc ?turn :desc]
+   :limit window-size})
+
+(defn- messages-query [cutoff-at]
+  (cond-> {:find [(list 'pull '?message message-selector)]
+           :in '[$ ?agent-id]
+           :where '[[?agent :seon.agent/id ?agent-id]
+                    (or-join [?message ?agent]
+                      [?message :seon.agent.message/from ?agent]
+                      [?message :seon.agent.message/to ?agent])
+                    [?message :seon.agent.message/at ?at]]}
+    cutoff-at
+    (assoc :in '[$ ?agent-id ?cutoff-at]
+           :where '[[?agent :seon.agent/id ?agent-id]
+                    (or-join [?message ?agent]
+                      [?message :seon.agent.message/from ?agent]
+                      [?message :seon.agent.message/to ?agent])
+                    [?message :seon.agent.message/at ?at]
+                    [(>= ?at ?cutoff-at)]])))
+
+(defn- previous-ns-query [cutoff-at]
+  {:find '[?ns ?eval-at ?eval]
+   :in '[$ ?agent-id ?cutoff-at]
+   :where '[[?agent :seon.agent/id ?agent-id]
+            [?run :seon.agent.run/agent ?agent]
+            [?turn :seon.agent.turn/run ?run]
+            [?turn :seon.agent.turn/at ?turn-at]
+            [(< ?turn-at ?cutoff-at)]
+            [?turn :seon.agent.turn/evals ?eval]
+            [?eval :seon.eval/at ?eval-at]
+            [?eval :seon.eval/ns ?ns]]
+   :order-by '[?eval-at :desc ?eval :desc]
+   :limit 1})
+
+(defn- query-result [member]
+  (:datahike.query/result (member-value member)))
+
+(defn- acquisition-error [members]
+  (some (fn [member] (::error (member-value member))) members))
+
+(defn- database-error [value]
+  (when (and (map? value) (string? (:seon.error/message value))) value))
+
+(defn- ^:async acquire-transcript
+  [{:seon.agent/keys [id entity] :as input}]
+  (let [coordinate (or (::db/coordinate input)
+                       (::db/coordinate (db/current-tx-context)))
+        node (:seon.render/node input)
+        window-size (or (::turn-window-size node) default-turn-window-size)
+        run (:seon.agent/run entity)
+        run-id (:seon.agent.run/id run)
+        open? (= :open (:seon.agent.run/status run))
+        stage-one-members
+        (cond->
+          [(pull-member [:seon.config/repl-mode
+                         :seon.config.run/batch-turn-limit
+                         :seon.config.run/stream-form-limit
+                         :seon.config.run/deadline-ms]
+                        [:seon.config/id config/cluster-config-id]
+                        256 32 4096)
+           ;; Datahike charges intermediate relations to max-results and their
+           ;; retained structure to max-result-weight. Both remain finite;
+           ;; the grown-query fixture calibrates them independently.
+           (query-member turn-count-query [id] 1000000 1000000 4096)
+           (query-member (turns-query window-size) [id] 1000000 1000000 65536)
+           (query-member current-ns-query [id] 500000 500000 8192)
+           (query-member last-action-query [id] 500000 500000 8192)]
+          open? (conj (query-member run-turn-count-query [run-id]
+                                    500000 500000 4096)
+                      (query-member run-form-count-query [run-id]
+                                    500000 500000 4096)))
+        stage-one
+        (if coordinate
+          (await (db/execute-many {::db/coordinate coordinate
+                                   ::db/members stage-one-members
+                                   ::db/max-result-weight 131072}))
+          {::error {:seon.error/message
+                    "Transcript acquisition requires an exact database coordinate."
+                    :seon.error/kind :core-bug}})]
+    (if-let [error (or (::error stage-one)
+                       (database-error stage-one)
+                       (when-not (= coordinate (::db/coordinate stage-one))
+                         {:seon.error/message
+                          "Transcript acquisition moved database coordinates."
+                          :seon.error/kind :core-bug})
+                       (acquisition-error (::db/results stage-one)))]
+      (assoc input ::error error)
+      (let [[config-member turn-count-member turns-member ns-member action-member
+             run-turn-member run-form-member] (::db/results stage-one)
+            stored-config (or (::protocol/result (member-value config-member)) {})
+            turn-count (or (query-result turn-count-member) 0)
+            newest-rows (->> (query-result turns-member)
+                             (sort-by (juxt second first))
+                             vec)
+            first-index (- turn-count (count newest-rows))
+            cutoff-index (turn-window-cutoff turn-count window-size
+                                             (or (::turn-eviction-size node)
+                                                 default-turn-eviction-size))
+            turns (->> newest-rows
+                       (map-indexed
+                         (fn [offset [turn at scheduled? run-eid row-run-id]]
+                           {::turn-idx (+ first-index offset)
+                            :db/id turn
+                            :seon.agent.turn/at at
+                            :seon.agent.turn/scheduled? scheduled?
+                            :seon.agent.turn/run
+                            {:db/id run-eid :seon.agent.run/id row-run-id}}))
+                       (filterv #(>= (::turn-idx %) cutoff-index)))
+            cutoff-at (:seon.agent.turn/at (first turns))
+            rotated? (pos? cutoff-index)
+            stage-two-members
+            (cond-> []
+              (seq turns)
+              (conj (query-member eval-rows-query (mapv :db/id turns)
+                                  1000000 1000000 524288))
+              true
+              (conj (query-member (messages-query cutoff-at)
+                                  (cond-> [id] cutoff-at (conj cutoff-at))
+                                  1000000 1000000 262144))
+              rotated?
+              (conj (query-member (previous-ns-query cutoff-at) [id cutoff-at]
+                                  500000 500000 8192)))
+            stage-two (await (db/execute-many
+                               {::db/coordinate coordinate
+                                ::db/members stage-two-members
+                                ::db/max-result-weight 790528}))]
+        (if-let [error (or (::error stage-two)
+                           (database-error stage-two)
+                           (when-not (= coordinate (::db/coordinate stage-two))
+                             {:seon.error/message
+                              "Transcript acquisition moved database coordinates."
+                              :seon.error/kind :core-bug})
+                           (acquisition-error (::db/results stage-two)))]
+          (assoc input ::error error)
+          (let [[eval-member message-member previous-ns-member]
+                (if (seq turns)
+                  (::db/results stage-two)
+                  (into [nil] (::db/results stage-two)))
+                evals-by-turn (group-by first (or (query-result eval-member) []))
+                turns (mapv (fn [turn]
+                              (assoc turn :seon.agent.turn/evals
+                                     (->> (get evals-by-turn (:db/id turn))
+                                          (map second)
+                                          (sort-by (juxt :seon.eval/at :db/id))
+                                          vec)))
+                            turns)
+                current-ns (or (ffirst (query-result ns-member))
+                               (home/home-ns id))
+                previous-ns (ffirst (query-result previous-ns-member))
+                mode (or (:seon.config/repl-mode stored-config) :batch)
+                policy (merge (config/default-run-policy) stored-config)
+                state (derive/state-from-primitives
+                        (cond-> {:seon.agent.run/open? open?}
+                          (:seon.agent/terminated-at entity)
+                          (assoc :seon.agent/terminated-at
+                                 (:seon.agent/terminated-at entity))
+                          (:seon.agent.run/paused-at run)
+                          (assoc :seon.agent.run/paused-at
+                                 (:seon.agent.run/paused-at run))))
+                effective-node
+                (assoc node :seon.agent.ctx/escape-clipping?
+                       (if (contains? node :seon.agent.ctx/escape-clipping?)
+                         (:seon.agent.ctx/escape-clipping? node)
+                         (if (boolean? (:seon.agent.ctx/escape-clipping? entity))
+                           (:seon.agent.ctx/escape-clipping? entity)
+                           true)))]
+            (merge input policy
+                   {:seon.render/node effective-node
+                    :seon.config/repl-mode mode
+                    :seon.derive/state state
+                    :seon.eval/ns current-ns
+                    ::turn-count turn-count
+                    ::turns turns
+                    ::messages (mapv first (or (query-result message-member) []))
+                    ::last-action-at (query-result action-member)
+                    ::previous-ns previous-ns
+                    :seon.agent.run/turn-count
+                    (or (query-result run-turn-member) 0)
+                    :seon.agent.run/form-count
+                    (or (query-result run-form-member) 0)})))))))
+
+(declare transcript-block)
+
+(defn ^:async transcript-block!
+  "Acquire and render the transcript at the active database coordinate."
+  {:malli/schema [:=> [:cat :seon.render/section-request] :string]}
+  [input]
+  (transcript-block (await (acquire-transcript input))))
+
+(defn- local-transcript-input
+  "Temporarily adapt the current local prompt call to ordinary transcript data."
+  [{:seon.agent/keys [id] db-value :seon.db/db :as input}]
+  (let [db-value (or db-value @db/*conn*)
+        agent (agent-rec id db-value)
+        my-eid (:db/id agent)
+        turns (ctx/agent-turns id db-value)
+        events (let [turn-ats (mapv :seon.agent.turn/at turns)
+                     msgs (or (message-events db-value my-eid id turn-ats) [])
+                     evals (eval-events db-value id)
+                     rank {:message 0 :eval 1}]
+                 (->> (concat msgs evals)
+                      (sort-by (juxt #(.getTime ^js (::at %))
+                                     #(rank (::kind %) 9)))
+                      with-ns-markers))
+        last-action-at (some->> events
+                                (filter #(or (= :eval (::kind %))
+                                             (::outbound? %)))
+                                last
+                                ::at)
+        run (derive/current-run db-value id)
+        run-id (:seon.agent.run/id run)
+        stored-node (block-ent db-value my-eid :transcript)
+        node (merge (into {} stored-node) (:seon.render/node input))
+        policy (ctx/run-policy db-value)]
+    (merge input policy
+           {:seon.agent/entity
+            (cond-> {:db/id my-eid :seon.agent/id id}
+              (:seon.agent/terminated-at agent)
+              (assoc :seon.agent/terminated-at
+                     (:seon.agent/terminated-at agent))
+              run (assoc :seon.agent/run (into {} run)))
+            :seon.render/node
+            (assoc node :seon.agent.ctx/escape-clipping?
+                   (if (contains? node :seon.agent.ctx/escape-clipping?)
+                     (:seon.agent.ctx/escape-clipping? node)
+                     (ctx/escape-clipping? id)))
+            :seon.config/repl-mode (ctx/repl-mode db-value)
+            :seon.derive/state (derive/derive-state db-value id)
+            :seon.eval/ns (ctx/current-ns {:seon.agent/id id
+                                           :seon.db/db db-value})
+            ::turn-count (count turns)
+            ::events events
+            ::turns []
+            ::messages []
+            ::last-action-at last-action-at
+            :seon.agent.run/turn-count
+            (if run-id (derive/run-turn-count db-value run-id) 0)
+            :seon.agent.run/form-count
+            (if run-id (derive/run-form-count db-value run-id) 0)})))
 
 (defn transcript-block
   "The WHOLE bottom of the context: the [[masthead]], then the agent's
@@ -798,12 +1167,19 @@
    past event is byte-identical; only the append-only edge and free dynamic
    readline move."
   {:malli/schema [:=> [:cat :seon.render/section-request] :string]}
-  [{:seon.agent/keys [id] db :seon.db/db render-fn :seon.render/render :as input}]
-  (let [db       (or db @db/*conn*)
-        a        (agent-rec id db)
-        my-eid   (:db/id a)
-        own-id   id
-        cur-ns   (ctx/current-ns {:seon.agent/id id :seon.db/db db})
+  [{:seon.agent/keys [id entity]
+    cur-ns :seon.eval/ns
+    last-action-at ::last-action-at
+    turn-count ::turn-count
+    render-fn :seon.render/render
+    :as input}]
+  (if-not (or (contains? input ::turns) (contains? input ::error))
+    ;; Delete this local compatibility acquisition when the compiled prompt
+    ;; owner invokes `transcript-block!` for every symbol-backed block.
+    (transcript-block (local-transcript-input input))
+    (if-let [error (::error input)]
+    (str "[transcript] render failed: " (pr-str error))
+    (let [node     (:seon.render/node input)
         ns-str   (if (keyword? cur-ns) (name cur-ns) (str cur-ns))
         ;; Render handle: the recursive walker injects `:seon.render/render`
         ;; (ONE section model). When the section is called DIRECTLY (through
@@ -811,15 +1187,7 @@
         ;; is no injected handle — fall back to a local ai render so the
         ;; same code path produces the same String.
         render*  (or render-fn #(render/render :seon.render/ai input %))
-        events   (ordered-events db own-id my-eid)
-        ;; The agent's LAST ACTION = newest :at over its OWN events (evals +
-        ;; outbound messages). Events are already :at-ascending, so the last
-        ;; own-event IS the newest; nil when the agent has not acted yet.
-        last-action-at (some->> events
-                                (filter (fn [ev] (or (= :eval (::kind ev))
-                                                     (::outbound? ev))))
-                                last
-                                ::at)
+        events   (ordered-events input)
         ;; Flag any INBOUND newer than the last action as NEW (UNANSWERED) —
         ;; a fresh wake or a mid-call arrival the agent re-orients to. With no
         ;; prior action (nil) every inbound is unanswered. Once the agent acts
@@ -844,21 +1212,15 @@
         ;; render-context path node = the stored block, so this is
         ;; byte-identical — it additionally lets a PROFILE caller (the
         ;; seon.repl.autocomplete projection) pass per-render config.
-        node     (:seon.render/node input)
-        tblock   (block-ent db my-eid :transcript)
         ;; Batched rotation is derived from turn facts. At 50 turns it removes
         ;; the oldest complete 25-turn chunk; at 75 it removes the next one.
         ;; This creates 24 append-only/cache-stable turns between membership
         ;; changes instead of sliding one event out on every turn.
-        turn-count    (count (ctx/agent-turns id db))
         window-size   (or (::turn-window-size node)
-                          (::turn-window-size tblock)
                           default-turn-window-size)
         eviction-size (or (::turn-eviction-size node)
-                          (::turn-eviction-size tblock)
                           default-turn-eviction-size)
         settled-cap   (or (::settled-token-cap node)
-                          (::settled-token-cap tblock)
                           default-settled-token-cap)
         events*t      (clip-events-by-turn-window
                         turn-count window-size eviction-size events*c)
@@ -870,16 +1232,13 @@
         ;; (the cap changes only at a level boundary). Injected as
         ;; `:seon.render/result-body-cap` onto each eval event's `::entity`,
         ;; which `eval->renderable` forwards to `format-eval-row`.
-        levels   (or (::result-decay node) (::result-decay tblock))
+        levels   (or (::result-decay node) [])
         ;; Runtime-cache bytes OFF (`::result-handles?` false, node first):
         ;; every eval renders without a `result/<id>` handle, so the render is
         ;; a pure function of the db value across eviction/restarts (the
         ;; autocomplete profile's setting).
-        handles? (let [nv (::result-handles? node)
-                       tv (::result-handles? tblock)]
-                   (cond (some? nv) nv
-                         (some? tv) tv
-                         :else      true))
+        handles? (let [nv (::result-handles? node)]
+                   (if (some? nv) nv true))
         ;; A PROFILE may PIN escape-clipping as a block-config CONSTANT
         ;; (`:seon.agent.ctx/escape-clipping?` on the profile's block map) —
         ;; threaded onto each event so the converters never re-read the live
@@ -918,19 +1277,16 @@
              (clip-rendered-events-by-settled-budget active-start settled-cap)
              (map ::text)
              (str/join "\n"))
-        head (masthead ns-str (ctx/repl-mode db))
+        head (masthead ns-str (or (:seon.config/repl-mode input) :batch))
         ;; ::readline? false (node first, stored block fallback) drops the
         ;; folded live readline — the ONE moving (`now`-reading) line — so a
         ;; profile render is a pure function of the db value. Default true.
-        readline? (let [nv (::readline? node)
-                        tv (::readline? tblock)]
-                    (cond (some? nv) nv
-                          (some? tv) tv
-                          :else      true))
+        readline? (let [nv (::readline? node)]
+                    (if (some? nv) nv true))
         tail (when readline? (readline input))]
-    (->> [head body tail]
-         (remove str/blank?)
-         (str/join "\n\n"))))
+      (->> [head body tail]
+           (remove str/blank?)
+           (str/join "\n\n"))))))
 
 ;; ------------------------------------------------------------
 ;; HTML twin — the debug view's right-pane transcript card. The same flat
