@@ -767,49 +767,26 @@
 ;; the authoritative writer is unavailable.
 ;; ---------------------------------------------------------------------------
 
-(defn- pod-full-schema
-  "The pod's full datahike attribute schema: the agent bootstrap attrs
-   plus the tx-meta attrs, both Malli-derived via
-   `seon.db/malli->datahike-schema` (Phase 2.6 — no hand-written
-   `:db.type/*` entries). Adding a new attr is a Malli `register!` in
-   the owning ns plus a keyword line in `agent-bootstrap-attrs` above."
-  []
-  (into (db/malli->datahike-schema agent-bootstrap-attrs)
-        (db/tx-meta-datahike-schema)))
-
 (declare index-schemas)
 
-(defn- generator-policy-facts
-  "Persistable identity-generator facts from the current schema declarations."
-  []
-  (into []
-        (comp
-          (filter #(contains? % :seon.db.id/generator))
-          (map #(select-keys % [:seon.schema/key :seon.db.id/generator])))
-        (index-schemas)))
-
 (defn- ^:async install-runtime-schema!
-  "Install the complete runtime schema, plus optional identity-generator facts,
-   as root through the boot process. Provenance genesis must already exist."
-  [conn generator-facts?]
+  "Admit every canonical runtime schema through one authority transaction.
+
+   The writer derives and prepends Datahike declarations from these canonical
+   Malli forms inside the same commit. Generator policies already live on the
+   corresponding schema rows, so there is no raw `:db/*` declaration or
+   second policy transaction on the Bun side. Provenance genesis must exist."
+  []
   (await
     (db/with-tx-context
       {:seon.db/user [:seon.agent/id "root"]
        :seon.db/process (db.process/lookup-ref :seon.db.process/boot)}
       (fn ^:async install! []
-        (let [schema-env
-              (await (db/transact! {:seon.db/conn conn
-                                    :seon.db/tx-data (pod-full-schema)}))]
+        (let [schema-env (await (db/transact!
+                                {:seon.db/tx-data (index-schemas)}))]
           (when (false? (:seon.db/ok? schema-env))
-            (throw (ex-info "Runtime schema installation failed." schema-env))))
-        (when generator-facts?
-          (let [policy-env
-                (await (db/transact! {:seon.db/conn conn
-                                      :seon.db/tx-data
-                                      (generator-policy-facts)}))]
-            (when (false? (:seon.db/ok? policy-env))
-              (throw (ex-info "Generator-policy installation failed."
-                              policy-env)))))))))
+            (throw (ex-info "Runtime schema installation failed."
+                            schema-env))))))))
 
 (defn ^:async open-agent-conn!
   "Open a FRESH ISOLATED `:memory` conn carrying the pod's full

@@ -2,6 +2,8 @@
   "Focused contract tests for the remote `seon.db` session facade."
   (:require
    [cljs.test :refer [async deftest is testing]]
+   [seon.agent]
+   [seon.agent.message]
    [seon.db :as db]
    [seon.db.coordinate :as coordinate]
    [seon.db.protocol :as protocol]
@@ -21,6 +23,12 @@
          ::coordinate/commit-id
          #uuid "00000000-0000-0000-0000-000000000003"
          ::coordinate/t 536870913))
+
+(def ^:private coordinate-2
+  (assoc coordinate-0
+         ::coordinate/commit-id
+         #uuid "00000000-0000-0000-0000-000000000004"
+         ::coordinate/t 536870914))
 
 (defn- query-response
   [request result]
@@ -168,6 +176,27 @@
                      ::db/database-name database-name
                      ::db/backend :memory}))
 
+(defn- schema-response
+  [request coordinate installed]
+  (protocol/success
+   {::protocol/request-id (::protocol/request-id request)
+    ::protocol/database-name database-name
+    ::protocol/attachment (coordinate/attachment coordinate)
+    ::protocol/coordinate coordinate
+    ::protocol/schema installed}))
+
+(defn- transaction-response
+  [request before after]
+  (protocol/success
+   {::protocol/request-id (::protocol/request-id request)
+    ::protocol/coordinate after
+    ::protocol/previous-coordinate before
+    ::protocol/temporary-ids {}
+    ::protocol/transaction-data (::protocol/transaction-data request)
+    ::protocol/datoms-added
+    (count (::protocol/transaction-data request))
+    ::protocol/datoms-retracted 0}))
+
 (deftest open-negotiates-capabilities-before-database-acquisition
   (async done
     (-> (with-fake-authority
@@ -187,6 +216,216 @@
         (.then (fn [_] (done)))
         (.catch (fn [error]
                   (is false (str "session handshake rejected: " error))
+                  (done))))))
+
+(deftest provenance-genesis-and-preconditions-use-one-session
+  (async done
+    (-> (with-fake-authority
+          (fn [{::keys [requests]}]
+            (-> (open!)
+                (.then
+                 (fn [_]
+                   (reset! requests [])
+                   (let [current (atom coordinate-0)
+                         installed (atom {})
+                         facts (atom #{})
+                         transaction-coordinates
+                         (atom [coordinate-1 coordinate-2])]
+                     (set! uds/request!
+                           (fn [{::uds/keys [message]}]
+                             (swap! requests conj message)
+                             (js/Promise.resolve
+                              (case (::protocol/operation message)
+                                :seon.db.protocol.operation/resolve-head
+                                (protocol/success
+                                 {::protocol/request-id
+                                  (::protocol/request-id message)
+                                  ::protocol/database-name database-name
+                                  ::protocol/attachment
+                                  (coordinate/attachment @current)
+                                  ::protocol/coordinate @current})
+
+                                :seon.db.protocol.operation/schema
+                                (schema-response message @current @installed)
+
+                                :seon.db.protocol.operation/query
+                                (query-response message @facts)
+
+                                :seon.db.protocol.operation/execute-many
+                                (let [required
+                                      [:seon.agent/id :seon.user/id
+                                       :seon.db/user :seon.db/process
+                                       :seon.db.process/id
+                                       :seon.schema/key :seon.schema/form]
+                                      query-ready?
+                                      (every? #(contains? @installed %)
+                                              required)]
+                                  (protocol/success
+                                   {::protocol/request-id
+                                    (::protocol/request-id message)
+                                    ::protocol/database-name database-name
+                                    ::protocol/attachment
+                                    (coordinate/attachment @current)
+                                    ::protocol/coordinate @current
+                                    ::protocol/results
+                                    (cond->
+                                     [(protocol/success
+                                       {::protocol/schema @installed})]
+                                      (= 2
+                                         (count (::protocol/members message)))
+                                      (conj
+                                       (if query-ready?
+                                         (protocol/success
+                                          {:datahike.query/result @facts
+                                           :datahike.query/attribute-dependencies
+                                           #{}
+                                           :datahike.query/cache-evidence {}
+                                           :datahike.query/resource-evidence {}})
+                                         (protocol/failure
+                                          {::protocol/error-kind
+                                           protocol/database-error
+                                           ::protocol/error
+                                           "query attributes are not installed"}))))}))
+
+                                :seon.db.protocol.operation/transact
+                                (let [before @current
+                                      after (first @transaction-coordinates)
+                                      tx-data
+                                      (::protocol/transaction-data message)]
+                                  (swap! transaction-coordinates subvec 1)
+                                  (reset! current after)
+                                  (doseq [row tx-data]
+                                    (when-let [attr (:seon.schema/key row)]
+                                      (swap! installed assoc attr {})
+                                      (swap! facts conj
+                                             [:seon.schema/key attr]))
+                                    (when-let [id (:seon.agent/id row)]
+                                      (swap! facts conj
+                                             [:seon.agent/id id]))
+                                    (when-let [id (:seon.user/id row)]
+                                      (swap! facts conj
+                                             [:seon.user/id id]))
+                                    (when-let [id
+                                               (:seon.db.process/id row)]
+                                      (swap! facts conj
+                                             [:seon.db.process/id id])))
+                                  (transaction-response message before after))))))
+                     (-> (db/ensure-provenance! {})
+                         (.then
+                          (fn [fresh]
+                            (is (= :fresh-genesis
+                                   (::db/provenance-action fresh)))
+                            (is (= (::coordinate/t coordinate-1)
+                                   (::db/genesis-tx fresh)))
+                            (is (= (::coordinate/t coordinate-2)
+                                   (::db/human-tx fresh)))
+                            (let [transactions
+                                  (filterv
+                                   #(= protocol/transact-operation
+                                       (::protocol/operation %))
+                                   @requests)
+                                  genesis (first transactions)
+                                  human (second transactions)
+                                  genesis-data
+                                  (::protocol/transaction-data genesis)]
+                              (is (= 2 (count transactions)))
+                              (is (nil?
+                                   (::protocol/transaction-meta genesis))
+                                  "genesis is deliberately unattributed")
+                              (is (every? map? genesis-data))
+                              (is (some :seon.schema/key genesis-data))
+                              (is (not-any?
+                                   (fn [row]
+                                     (some #(= "db" (namespace %))
+                                           (keys row)))
+                                   genesis-data)
+                                  "the client sends canonical forms, not raw Datahike declarations")
+                              (is (= [{:seon.user/id "user"}]
+                                     (::protocol/transaction-data human)))
+                              (is (= {::db/user [:seon.agent/id "root"]
+                                      ::db/process
+                                      [:seon.db.process/id
+                                       :seon.db.process/boot]}
+                                     (::protocol/transaction-meta human))))
+                            (db/ensure-provenance! {})))
+                         (.then
+                          (fn [converged]
+                            (is (= :converged
+                                   (::db/provenance-action converged)))
+                            (is (= 2
+                                   (count
+                                    (filter
+                                     #(= protocol/transact-operation
+                                         (::protocol/operation %))
+                                     @requests)))
+                                "a converged ensure emits no transaction")
+                            (db/assert-preconditions!
+                             {::db/coordinate coordinate-2})))
+                         (.then
+                         (fn [evidence]
+                            (is (true? (::db/preconditions? evidence)))
+                            (is (= coordinate-2 (::db/coordinate evidence)))
+                            (is (contains? (::db/installed-schema evidence)
+                                           ::db/user))
+                            (is (contains? (::db/installed-schema evidence)
+                                           ::db/process))
+                            (reset! requests [])
+                            (db/assert-preconditions! {})))
+                         (.then
+                          (fn [evidence]
+                            (is (= coordinate-2 (::db/coordinate evidence)))
+                            (is (= [protocol/resolve-head-operation
+                                    protocol/schema-operation]
+                                   (mapv ::protocol/operation @requests)))
+                                "one head resolution returns exact schema evidence")))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [error]
+                  (is false (str "session provenance rejected: " error))
+                  (done))))))
+
+(deftest canonical-schema-admission-is-one-remote-transaction
+  (async done
+    (-> (with-fake-authority
+          (fn [{::keys [requests]}]
+            (-> (open!)
+                (.then
+                 (fn [_]
+                   (reset! requests [])
+                   (set! uds/request!
+                         (fn [{::uds/keys [message]}]
+                           (swap! requests conj message)
+                           (js/Promise.resolve
+                            (transaction-response
+                             message coordinate-0 coordinate-1))))
+                   (db/with-tx-context
+                     {::db/user [:seon.agent/id "root"]
+                      ::db/process
+                      [:seon.db.process/id :seon.db.process/boot]}
+                     (fn []
+                       (db/transact!
+                        {::db/tx-data
+                         [{:seon.schema/key :seon.test/title
+                           :seon.schema/form ":string"}]})))))
+                (.then
+                 (fn [_]
+                   (let [request (first @requests)
+                         tx-data (::protocol/transaction-data request)]
+                     (is (= [protocol/transact-operation]
+                            (mapv ::protocol/operation @requests)))
+                     (is (seq tx-data))
+                     (is (every? :seon.schema/key tx-data))
+                     (is (every? :seon.schema/form tx-data))
+                     (is (not-any?
+                          (fn [row]
+                            (some #(= "db" (namespace %)) (keys row)))
+                          tx-data))
+                     (is (= {::db/user [:seon.agent/id "root"]
+                             ::db/process
+                             [:seon.db.process/id :seon.db.process/boot]}
+                            (::protocol/transaction-meta request)))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [error]
+                  (is false (str "runtime schema admission rejected: " error))
                   (done))))))
 
 (deftest concurrent-same-selection-open-shares-the-complete-handshake

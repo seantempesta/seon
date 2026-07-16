@@ -1910,53 +1910,6 @@
       (commit-error-envelope e))))
 
 ;; ---------------------------------------------------------------------------
-;; Boot preconditions.
-;; ---------------------------------------------------------------------------
-
-(defn assert-preconditions!
-  "Validate database provenance preconditions. Throws on failure.
-
-   Preconditions:
-     1. Resolved conn is opened with `:keep-history? true`. Without
-        history, transaction provenance cannot be queried historically.
-     2. Both provenance attrs in `tx-meta-attrs` are registered in
-        `seon.schema`. Datahike's `flush-tx-meta` rejects unregistered
-        keys at write time; the first tx after boot would crash.
-
-   Called (via the `seon.db/assert-preconditions!` face) from
-   `seon.client/start-agent!` before any agent work fires. Tests pass an
-   explicit `:seon.db/conn` to verify against a fresh conn without
-   touching `*conn*`. `conn` must be resolved by the caller — this ns
-   has no access to `seon.db/*conn*`."
-  [conn]
-  (let [c (resolve-conn conn)]
-    ;; datahike-cljs exposes the conn's config map at `(:config @conn)`.
-    ;; There's no `d/get-config` on the CLJS side (it exists on JVM
-    ;; only). Deref + key access is the supported path.
-    (when-not (:keep-history? (:config @c))
-      (throw (ex-info
-               (str "seon.db: agent conn opened with `:keep-history? false`. "
-                    "transaction provenance requires history "
-                    "(see v1.md §7.1). Open the conn with "
-                    "`:keep-history? true`.")
-               {:kind     :seon.boot/precondition-failed
-                :failure  :keep-history-off
-                ::db/error :seon.boot/precondition-failed})))
-    (let [unregistered (into [] (remove schema/registered?) tx-meta-attrs)]
-      (when (seq unregistered)
-        (throw (ex-info
-                 (str "seon.db: tx-meta attrs not registered: "
-                      (pr-str unregistered) ". seon.db registers these at "
-                      "namespace load — if this fires, the seon.schema "
-                      "registry was likely cleared after seon.db loaded "
-                      "(`schema/clear-all!` in a test, or stale REPL state).")
-                 {:kind          :seon.boot/precondition-failed
-                  :failure       :tx-meta-attrs-unregistered
-                  :unregistered  unregistered
-                  ::db/error     :seon.boot/precondition-failed}))))
-    true))
-
-;; ---------------------------------------------------------------------------
 ;; Listener plumbing — the rich handler-input build + the safe wrapper.
 ;;
 ;; Datahike's native `listen!` stores callbacks in a per-conn atom keyed by

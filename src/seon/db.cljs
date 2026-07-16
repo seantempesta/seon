@@ -990,6 +990,51 @@
   [ref attr value]
   [:db.fn/cas ref attr value value])
 
+(defn- ^:async submit-transaction!
+  "Submit already-normalized transaction data through the active session.
+
+   This is the one wire/envelope implementation used by ordinary attributed
+   transactions and the deliberately unattributed provenance genesis."
+  [arg tx-data tx-meta]
+  (let [request-id (str (random-uuid))
+        generated? (contains? arg :seon.db.id/generated-candidates)
+        request
+        (protocol/transaction-request
+         (cond-> {::protocol/request-id request-id
+                  ::protocol/database-name
+                  (::database-name (active-session))
+                  ::protocol/transaction-data
+                  (internal/encode-edn-slot-values tx-data)}
+           (seq tx-meta)
+           (assoc ::protocol/transaction-meta tx-meta)
+           (::expected-coordinate arg)
+           (assoc ::protocol/expected-coordinate
+                  (::expected-coordinate arg))
+           generated?
+           (assoc ::protocol/generated-candidates
+                  (:seon.db.id/generated-candidates arg))))
+        response (await (send-request! request 120000))]
+    (cond
+      (error-value? response)
+      {::ok? false ::error response}
+
+      (not (::protocol/success? response))
+      {::ok? false ::error (response-error response)}
+
+      :else
+      (let [point (::protocol/coordinate response)
+            transaction-data (::protocol/transaction-data response)]
+        (cond-> {::ok? true
+                 ::coordinate point
+                 ::tempids (::protocol/temporary-ids response)
+                 ::tx (::db.coordinate/t point)
+                 ::tx-count (count transaction-data)
+                 ::added (::protocol/datoms-added response)
+                 ::retracted (::protocol/datoms-retracted response)}
+          (seq (::protocol/generated-entity-ids response))
+          (assoc :seon.db.id/eids
+                 (::protocol/generated-entity-ids response)))))))
+
 (defn ^{:async true :seon.fn/agent-facing? true} transact!
   "Save records to the database, persisting new facts durably.
 
@@ -1114,45 +1159,8 @@
           attrs (into (internal/extract-tx-attrs tx-data) (keys tx-meta))
           _ (internal/validate-attrs! attrs)
           _ (internal/validate-values! tx-data)
-          _ (internal/validate-values! [tx-meta])
-          request-id (str (random-uuid))
-          generated? (contains? arg :seon.db.id/generated-candidates)
-          request
-          (protocol/transaction-request
-           (cond-> {::protocol/request-id request-id
-                    ::protocol/database-name
-                    (::database-name (active-session))
-                    ::protocol/transaction-data
-                    (internal/encode-edn-slot-values tx-data)}
-             (seq tx-meta)
-             (assoc ::protocol/transaction-meta tx-meta)
-             (::expected-coordinate arg)
-             (assoc ::protocol/expected-coordinate
-                    (::expected-coordinate arg))
-             generated?
-             (assoc ::protocol/generated-candidates
-                    (:seon.db.id/generated-candidates arg))))
-          response (await (send-request! request 120000))]
-      (cond
-        (error-value? response)
-        {::ok? false ::error response}
-
-        (not (::protocol/success? response))
-        {::ok? false ::error (response-error response)}
-
-        :else
-        (let [point (::protocol/coordinate response)
-              transaction-data (::protocol/transaction-data response)]
-          (cond-> {::ok? true
-                   ::coordinate point
-                   ::tempids (::protocol/temporary-ids response)
-                   ::tx (::db.coordinate/t point)
-                   ::tx-count (count transaction-data)
-                   ::added (::protocol/datoms-added response)
-                   ::retracted (::protocol/datoms-retracted response)}
-            (seq (::protocol/generated-entity-ids response))
-            (assoc :seon.db.id/eids
-                   (::protocol/generated-entity-ids response))))))
+          _ (internal/validate-values! [tx-meta])]
+      (await (submit-transaction! arg tx-data tx-meta)))
     (catch :default exception
       (internal/commit-error-envelope exception))))
 
@@ -1160,12 +1168,15 @@
 ;; Provenance genesis.
 ;; ---------------------------------------------------------------------------
 
+(declare execute-many head-coordinate installed-schema
+         installed-schema-with-evidence query)
+
 (schema/register! ::provenance-action
                   [:enum :fresh-genesis :converged])
 (schema/register! ::genesis-tx :int)
 (schema/register! ::human-tx   :int)
 (schema/register! ::ensure-provenance-request
-  [:map [::conn {:optional true} ::conn]])
+  [:map {:closed true}])
 (schema/register! ::ensure-provenance-response
   [:map
    [::provenance-action ::provenance-action]
@@ -1176,19 +1187,36 @@
   "The minimal native capabilities required before provenance can self-host."
   [:seon.agent/id :seon.user/id ::user ::process ::process/id])
 
-(defn- attr-installed?
-  [db-value attr]
-  (contains? (:schema db-value) attr))
+(def ^:private canonical-schema-attrs
+  "The canonical schema facts that let the first transaction describe itself."
+  [:seon.schema/key :seon.schema/form])
 
-(defn- lookup-present?
-  [db-value [attr value]]
-  (and (attr-installed? db-value attr)
-       (boolean (d/q '[:find ?e . :in $ ?a ?v :where [?e ?a ?v]]
-                     db-value attr value))))
+(def ^:private provenance-query
+  '[:find ?attr ?value
+    :where
+    (or-join [?entity ?attr ?value]
+      (and [?entity :seon.agent/id ?value]
+           [(ground :seon.agent/id) ?attr])
+      (and [?entity :seon.user/id ?value]
+           [(ground :seon.user/id) ?attr])
+      (and [?entity :seon.db.process/id ?value]
+           [(ground :seon.db.process/id) ?attr])
+      (and [?entity :seon.schema/key ?value]
+           [(ground :seon.schema/key) ?attr]))])
 
-(defn- genesis-tx-data
-  [db-value]
-  (let [unregistered (into [] (remove schema/registered?) genesis-attrs)]
+(def ^:private human-query
+  '[:find ?entity .
+    :where [?entity :seon.user/id "user"]])
+
+(defn- canonical-schema-fact
+  [attr]
+  {:seon.schema/key attr
+   :seon.schema/form (schema/form-string attr)})
+
+(defn- assert-genesis-schemas!
+  []
+  (let [required (into genesis-attrs canonical-schema-attrs)
+        unregistered (into [] (remove schema/registered?) required)]
     (when (seq unregistered)
       (throw (ex-info
                (str "Database genesis requires registered schemas for "
@@ -1196,15 +1224,91 @@
                     "before opening the cluster store.")
                {::error :seon.db/genesis-schema-unregistered
                 ::attrs unregistered
-                :seon.error/kind :core-bug})))
-    (let [missing-attrs (remove #(attr-installed? db-value %) genesis-attrs)
-          missing-root? (not (lookup-present? db-value [:seon.agent/id "root"]))
-          missing-processes
-          (remove #(lookup-present? db-value (process/lookup-ref %)) process/ids)]
-      (into (internal/malli->datahike-schema missing-attrs)
-            (concat
-              (when missing-root? [{:seon.agent/id "root"}])
-              (map (fn [id] {::process/id id}) missing-processes))))))
+                :seon.error/kind :core-bug}))))
+  true)
+
+(defn- operation-value!
+  [operation value]
+  (if (error-value? value)
+    (throw (ex-info (str "Database provenance " operation " failed.")
+                    {::error value :seon.error/kind :core-bug}))
+    value))
+
+(defn- schema-member-value!
+  [operation member]
+  (if (true? (::protocol/success? member))
+    (::protocol/schema member)
+    (throw (ex-info (str "Database provenance " operation " failed.")
+                    {::error member :seon.error/kind :core-bug}))))
+
+(defn- ^:async schema-evidence!
+  []
+  (operation-value! "schema acquisition"
+                    (await (installed-schema-with-evidence {}))))
+
+(defn- ^:async provenance-acquisition!
+  []
+  (let [result
+        (operation-value!
+         "bootstrap acquisition"
+         (await
+          (execute-many
+           {::members
+            [{::protocol/operation protocol/schema-operation}
+             {::protocol/operation protocol/query-operation
+              ::protocol/query-form provenance-query
+              ::protocol/arguments []}]})))
+        [schema-member query-member] (::results result)
+        installed (schema-member-value! "schema read" schema-member)
+        required (into genesis-attrs canonical-schema-attrs)
+        missing (into #{} (remove #(contains? installed %)) required)
+        query-complete? (true? (::protocol/success? query-member))
+        _ (when (and (not query-complete?) (empty? missing))
+            (throw (ex-info "Database provenance identity read failed."
+                            {::error query-member
+                             :seon.error/kind :core-bug})))]
+    {::coordinate (::coordinate result)
+     ::installed-schema installed
+     ::provenance-facts
+     (if query-complete?
+       (set (:datahike.query/result query-member))
+       #{})
+     ::provenance-query-complete? query-complete?}))
+
+(defn- ^:async human-present?!
+  [coordinate]
+  (boolean
+   (operation-value!
+    "human read"
+    (await (query {::query human-query ::coordinate coordinate})))))
+
+(defn- genesis-tx-data
+  [facts]
+  (let [schema-facts
+        (keep (fn [attr]
+                (when-not (contains? facts [:seon.schema/key attr])
+                  (canonical-schema-fact attr)))
+              (into genesis-attrs canonical-schema-attrs))
+        missing-root?
+        (not (contains? facts [:seon.agent/id "root"]))
+        missing-processes
+        (remove #(contains? facts [::process/id %]) process/ids)]
+    (into []
+          (concat schema-facts
+                  (when missing-root? [{:seon.agent/id "root"}])
+                  (map (fn [id] {::process/id id}) missing-processes)))))
+
+(defn- ^:async submit-genesis!
+  [tx-data coordinate]
+  (let [normalized (-> tx-data
+                       internal/coerce-identity-symbol-idents
+                       internal/normalize-entity-ref-keys)
+        attrs (internal/extract-tx-attrs normalized)]
+    (internal/validate-attrs! attrs)
+    (internal/validate-values! normalized)
+    (await (submit-transaction! {::expected-coordinate coordinate}
+                                normalized
+                                nil))))
 
 (defn ^:async ensure-provenance!
   "Establish the minimal transaction-provenance genesis.
@@ -1216,32 +1320,47 @@
    converged store emits no transaction."
   {:malli/schema
    [:=> [:cat ::ensure-provenance-request] ::ensure-provenance-response]}
-  [{::keys [conn] :or {conn *conn*}}]
-  (let [c             (internal/resolve-conn conn)
-        before        @c
-        base-data     (genesis-tx-data before)
-        base-report   (when (seq base-data)
-                        (await (d/transact! c {:tx-data base-data})))
-        after-base    @c
-        human-missing? (not (lookup-present? after-base [:seon.user/id "user"]))
-        human-env     (when human-missing?
-                        (await
-                          (with-tx-context
-                            {::user [:seon.agent/id "root"]
-                             ::process (process/lookup-ref ::process/boot)}
-                            (fn []
-                              (transact! {::conn c
-                                          ::tx-data [{:seon.user/id "user"}]})))))
-        _             (when (and human-env (false? (::ok? human-env)))
-                        (throw (ex-info
-                                 "Database provenance genesis could not ensure the human user."
-                                 {::error (::error human-env)
-                                  :seon.error/kind :core-bug})))
-        action        (if (or base-report human-env)
-                        :fresh-genesis
-                        :converged)]
+  [_]
+  (assert-genesis-schemas!)
+  (let [{::keys [coordinate installed-schema provenance-facts
+                 provenance-query-complete?]}
+        (await (provenance-acquisition!))
+        facts provenance-facts
+        base-data (genesis-tx-data facts)
+        base-env (when (seq base-data)
+                   (await (submit-genesis! base-data coordinate)))
+        _ (when (and base-env (false? (::ok? base-env)))
+            (throw (ex-info "Database provenance genesis transaction failed."
+                            {::error (::error base-env)
+                             :seon.error/kind :core-bug})))
+        after-base (or (::coordinate base-env) coordinate)
+        human-missing?
+        (cond
+          provenance-query-complete?
+          (not (contains? facts [:seon.user/id "user"]))
+
+          (not (contains? installed-schema :seon.user/id))
+          true
+
+          :else
+          (not (await (human-present?! after-base))))
+        human-env
+        (when human-missing?
+          (await
+           (with-tx-context
+             {::user [:seon.agent/id "root"]
+              ::process (process/lookup-ref ::process/boot)}
+             (fn []
+               (transact! {::tx-data [{:seon.user/id "user"}]
+                           ::expected-coordinate after-base})))))
+        _ (when (and human-env (false? (::ok? human-env)))
+            (throw (ex-info
+                    "Database provenance genesis could not ensure the human user."
+                    {::error (::error human-env)
+                     :seon.error/kind :core-bug})))
+        action (if (or base-env human-env) :fresh-genesis :converged)]
     (cond-> {::provenance-action action}
-      base-report  (assoc ::genesis-tx (:max-tx (:db-after base-report)))
+      base-env     (assoc ::genesis-tx (::tx base-env))
       human-env    (assoc ::human-tx (::tx human-env)))))
 
 ;; ---------------------------------------------------------------------------
@@ -1509,6 +1628,27 @@
         (try (dbi/-schema db) (catch :default _ nil)))
       {}))
 
+(schema/register! ::installed-schema-evidence
+  [:map {:closed true}
+   [::coordinate ::coordinate]
+   [::installed-schema :map]])
+
+(defn ^{:async true :seon.fn/agent-facing? true} installed-schema-with-evidence
+  "Read installed schema and retain the exact coordinate it describes."
+  {:malli/schema
+   [:=> [:catn [::request :map]] ::installed-schema-evidence]}
+  [request]
+  (let [base (await (read-request-base! request))]
+    (if (error-value? base)
+      base
+      (let [wire-request (protocol/schema-request base)
+            response (await (send-request! wire-request 15000))]
+        (cond
+          (error-value? response) response
+          (not (::protocol/success? response)) (response-error response)
+          :else {::coordinate (::protocol/coordinate response)
+                 ::installed-schema (::protocol/schema response)})))))
+
 (defn ^{:async true :seon.fn/agent-facing? true} installed-schema
   "The datahike schema map actually INSTALLED on `db`.
 
@@ -1554,15 +1694,10 @@
     [:=> [:catn [::request :map]] :any]]}
   ([] (await (installed-schema {})))
   ([request]
-   (let [base (await (read-request-base! request))]
-     (if (error-value? base)
-       base
-       (let [wire-request (protocol/schema-request base)
-             response (await (send-request! wire-request 15000))]
-         (cond
-           (error-value? response) response
-           (not (::protocol/success? response)) (response-error response)
-           :else (::protocol/schema response)))))))
+   (let [evidence (await (installed-schema-with-evidence request))]
+     (if (error-value? evidence)
+       evidence
+       (::installed-schema evidence)))))
 
 ;; --- pull-pattern guard -----------------------------------------------------
 ;; datahike-cljs throws the cryptic resolve-datom error above when an
@@ -2582,18 +2717,66 @@
          (catch :default _ v))
     v))
 
-(defn assert-preconditions!
-  "Validate boot preconditions; throws ex-info on failure.
+(schema/register! ::preconditions? [:= true])
+(schema/register! ::assert-preconditions-request
+  [:map {:closed true}
+   [::coordinate {:optional true} ::coordinate]])
+(schema/register! ::assert-preconditions-response
+  [:map {:closed true}
+   [::preconditions? ::preconditions?]
+   [::coordinate ::coordinate]
+   [::installed-schema :map]])
 
-   Conn must keep history and have both provenance attrs registered.
-   Called at agent boot."
+(defn ^:async assert-preconditions!
+  "Prove the authority database is ready for attributed application writes.
+
+   The authority owns the database configuration and history policy. This
+   Bun-side proof checks the two facts the consumer depends on: provenance
+   schemas are registered in the running program and installed at one exact
+   database coordinate. Returns that ordinary schema/coordinate evidence for
+   later cold-start checks; throws a core precondition error when it is absent."
   {:malli/schema
    [:function
-    [:=> [:cat] :boolean]
-    [:=> [:catn [::opts [:map [::conn {:optional true} ::conn]]]] :boolean]]}
-  ([] (assert-preconditions! {}))
-  ([{::keys [conn] :or {conn *conn*}}]
-   (internal/assert-preconditions! conn)))
+    [:=> [:cat] ::assert-preconditions-response]
+    [:=> [:catn [::request ::assert-preconditions-request]]
+     ::assert-preconditions-response]]}
+  ([] (await (assert-preconditions! {})))
+  ([request]
+   (let [unregistered (into []
+                            (remove schema/registered?)
+                            internal/tx-meta-attrs)]
+     (when (seq unregistered)
+       (throw
+        (ex-info "Transaction provenance schemas are not registered."
+                 {:kind :seon.boot/precondition-failed
+                  :failure :tx-meta-schema-unregistered
+                  ::attrs unregistered
+                  ::error :seon.boot/precondition-failed})))
+     (let [{acquired-coordinate ::coordinate
+            installed ::installed-schema}
+           (if (::coordinate request)
+             {::coordinate (::coordinate request)
+              ::installed-schema
+              (operation-value!
+               "precondition schema read"
+               (await (installed-schema
+                       {::coordinate (::coordinate request)})))}
+             (await (schema-evidence!)))
+           coordinate acquired-coordinate
+           missing (into []
+                         (remove #(contains? installed %))
+                         internal/tx-meta-attrs)]
+       (when (seq missing)
+         (throw
+          (ex-info "Transaction provenance schemas are not installed."
+                   {:kind :seon.boot/precondition-failed
+                    :failure :tx-meta-schema-uninstalled
+                    ::attrs missing
+                    ::coordinate coordinate
+                    ::error :seon.boot/precondition-failed})))
+       {::preconditions? true
+        ::coordinate coordinate
+        ::installed-schema installed}))))
 
 ;; ---------------------------------------------------------------------------
 ;; Database counts and provenance-derived scopes.
