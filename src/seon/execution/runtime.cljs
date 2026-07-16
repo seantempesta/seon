@@ -19,6 +19,7 @@
    [seon.execution :as execution]
    [seon.eval :as eval]
    [seon.render.surface :as surface]
+   [seon.render.system]
    [seon.schema :as schema]))
 
 (schema/register! ::render-prompt-request
