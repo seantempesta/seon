@@ -12,10 +12,13 @@
   (:require
     [cljs.test :refer [deftest is async]]
     [datahike.api :as d]
+    [datahike.db :as datahike-db]
     [seon.agent :as agent]
     [seon.agent.ctx :as ctx]
     [seon.client :as client]
     [seon.db :as db]
+    [seon.db.coordinate :as coordinate]
+    [seon.db.protocol :as protocol]
     [seon.schema :as schema]
     [seon.state :as state]))
 
@@ -60,6 +63,108 @@
    {:seon.state.scratch.parent/id "pkeep"
     :seon.state.scratch.parent/kids
     [{:seon.state.scratch.child/name :gk3}]}])
+
+(deftest acquisition-joins-one-pull-to-many-provenance-rows
+  (let [entity {:db/id 41
+                :seon.state.scratch.parent/id "one-pull"
+                :seon.state.scratch.parent/kids
+                [{:db/id 42 :seon.state.scratch.child/name :child}]}
+        rows ((deref #'state/acquisition-rows)
+              [[41 entity]]
+              [[41 103] [41 101] [41 102]]
+              [[103 :seon.db.process/config]
+               [101 :seon.db.process/boot]
+               [102 :seon.db.process/config]])]
+    (is (= 1 (count rows))
+        "one pulled component tree survives many scalar provenance rows")
+    (is (= entity (:seon.state/entity (first rows)))
+        "the component payload is neither duplicated nor rebuilt")
+    (is (= 101 (:seon.state/first-tx (first rows))))
+    (is (= :seon.db.process/boot
+           (:seon.state/first-process (first rows)))
+        "the process follows the minimum transaction")))
+
+(deftest acquisition-does-not-manage-an-unattributed-first-transaction
+  (let [entity {:db/id 51 :seon.state.scratch.a/id "unattributed-first"}
+        rows ((deref #'state/acquisition-rows)
+              [[51 entity]]
+              [[51 200] [51 201]]
+              [[201 :seon.db.process/config]])]
+    (is (= 200 (:seon.state/first-tx (first rows))))
+    (is (nil? (:seon.state/first-process (first rows)))
+        "a later config touch cannot claim an entity born unattributed")))
+
+(deftest lookup-ref-acquisition-pulls-only-the-addressed-identity
+  (let [database
+        (d/db-with
+          (datahike-db/empty-db
+            {:seon.agent/id {:db/unique :db.unique/identity}})
+          (mapv (fn [n]
+                  {:seon.agent/id (if (= n 37) "target" (str "other-" n))})
+                (range 100)))
+        rows (d/q (deref #'state/reconcile-lookup-ref-query)
+                  database
+                  [[:seon.agent/id "target"]])]
+    (is (= 1 (count rows))
+        "one exact lookup pair does not pull every entity sharing its attr")
+    (is (= "target" (get-in (first rows) [1 :seon.agent/id])))))
+
+(deftest reconcile-acquires-once-and-fences-its-transaction
+  (async done
+    (let [point {::coordinate/database-id
+                 #uuid "00000000-0000-0000-0000-000000000031"
+                 ::coordinate/branch :db
+                 ::coordinate/commit-id
+                 #uuid "00000000-0000-0000-0000-000000000032"
+                 ::coordinate/t 536870912}
+          next-point (assoc point
+                            ::coordinate/commit-id
+                            #uuid "00000000-0000-0000-0000-000000000033"
+                            ::coordinate/t 536870913)
+          original-execute db/execute-many
+          original-transact db/transact!
+          calls (atom [])
+          restore! (fn []
+                     (set! db/execute-many original-execute)
+                     (set! db/transact! original-transact))]
+      (set! db/execute-many
+            (fn [request]
+              (swap! calls conj [:acquire request])
+              (js/Promise.resolve
+                {::db/coordinate point
+                 ::db/results
+                 [(protocol/success {::protocol/schema {}})
+                  (protocol/success
+                    {:datahike.query/result
+                     [[41 {:db/id 41
+                           :seon.state.scratch.a/id "stale"}]]})
+                  (protocol/success
+                    {:datahike.query/result [[41 100]]})
+                  (protocol/success
+                    {:datahike.query/result
+                     [[100 :seon.db.process/boot]]})]})))
+      (set! db/transact!
+            (fn [request]
+              (swap! calls conj [:transact request])
+              (js/Promise.resolve
+                {::db/ok? true ::db/coordinate next-point})))
+      (-> (state/reconcile!
+            {:seon.state/desired []
+             :seon.db/managed-scope #{:seon.db.process/boot}
+             :seon.db/managed-identity-attrs
+             #{:seon.state.scratch.a/id}})
+          (.then
+            (fn [result]
+              (let [[[_ acquire] [_ transact]] @calls]
+                (is (= 4 (count (::db/members acquire)))
+                    "one grouped read carries schema, entity, tx, and process members")
+                (is (= point (::db/expected-coordinate transact))
+                    "the exact acquisition coordinate fences the write")
+                (is (= [[:db.fn/retractEntity 41]] (::db/tx-data transact)))
+                (is (= next-point (:seon.state/coordinate result))))))
+          (.catch (fn [error]
+                    (is false (str "coordinate-fenced reconcile rejected: " error))))
+          (.finally (fn [] (restore!) (done)))))))
 
 (defn- scratch-conn
   "Promise of a fresh :memory conn with provenance + the scratch attr schema
