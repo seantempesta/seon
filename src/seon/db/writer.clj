@@ -49,6 +49,7 @@
 (schema/register! ::query-vec 'fn?)
 (schema/register! ::knn 'fn?)
 (schema/register! ::active-requests 'some?)
+(schema/register! ::query-jobs 'some?)
 (schema/register! ::interest-state 'some?)
 (schema/register! ::readiness-owner 'some?)
 (schema/register! ::transport-connection 'map?)
@@ -77,6 +78,7 @@
   [::knn ::knn]
   [::executor ::executor]
   [::active-requests {:optional true} ::active-requests]
+  [::query-jobs {:optional true} ::query-jobs]
   [::interest-state {:optional true} ::interest-state]
   [::readiness-owner {:optional true} ::readiness-owner]
   [::publisher ::publisher]])
@@ -675,9 +677,34 @@
       :seon.db.protocol.operation/index-page
       (materialize-result (index-page db-value request)))))
 
+(defn- query-arguments
+  [db-value request caller-id]
+  (merge
+   {:query (::protocol/query-form request)
+    :args (into [(if (true? (::protocol/history? request))
+                  (d/history db-value)
+                  db-value)]
+                (::protocol/arguments request))
+    :request-id caller-id}
+   (resource-options request)))
+
+(declare request-failure-response)
+
+(defn- query-response
+  [request {:keys [status value throwable]}]
+  (if (= :ok status)
+    (merge (read-response-base request)
+           (protocol/success
+            (update value :datahike.query/result materialize-result)))
+    (request-failure-response throwable)))
+
+(declare acquire-query-call!)
+
 (defn- execute-read!
-  [{request ::request :as work}]
+  [runtime {request ::request :as work}]
   (cond
+    (::run-query-call? work) (d/run-q! (::query-call work))
+    (::acquire-query? work) (acquire-query-call! runtime work)
     (::resolve-only? work) (pinned-database work)
     (::database-value work)
     (protocol/success
@@ -710,96 +737,48 @@
     ::protocol/error (or (.getMessage ^Throwable throwable)
                          "The database read failed.")}))
 
-(defn- cancel-running-query
-  [dispatcher target-request-id]
-  (let [deadline (+ (System/nanoTime) 100000000)]
-    (loop []
-      (let [result (d/cancel-query! target-request-id)]
-        (if (or (:datahike.query.cancel/found? result)
-                (>= (System/nanoTime) deadline))
-          result
-          (let [cancel-outcome
-                (executor/cancel!
-                 {::executor/executor dispatcher
-                  ::executor/job-id target-request-id})
-                cancellation (::executor/cancellation cancel-outcome)
-                protocol-request
-                (::request (::executor/request cancel-outcome))]
-            (if (and (= :running cancellation)
-                     (= protocol/query-operation
-                        (::protocol/operation protocol-request)))
-              (do (Thread/sleep 1) (recur))
-              result)))))))
-
-(defn- cancel-running-queries
-  [dispatcher jobs]
-  (let [deadline (+ (System/nanoTime) 100000000)]
-    (loop [remaining (set jobs)
-           outcomes []]
-      (if (or (empty? remaining) (>= (System/nanoTime) deadline))
-        outcomes
-        (let [[remaining outcomes]
-              (reduce
-               (fn [[pending results] [job-id caller-id :as job]]
-                 (let [result (d/cancel-query! caller-id)
-                       running?
-                       (= :running
-                          (::executor/cancellation
-                           (executor/cancel!
-                            {::executor/executor dispatcher
-                             ::executor/job-id job-id})))]
-                   [(if (and running?
-                             (not (:datahike.query.cancel/found? result)))
-                      (conj pending job)
-                      pending)
-                    (conj results result)]))
-               [#{} outcomes]
-               remaining)]
-          (when (seq remaining) (Thread/sleep 1))
-          (recur remaining outcomes))))))
+(declare cancel-query-caller!)
 
 (defn- handle-cancel
-  [runtime request]
+  [runtime request target]
   (let [target-request-id (::protocol/target-request-id request)
         dispatcher (::executor runtime)
-        grouped
-        (executor/cancel-request!
-         {::executor/executor dispatcher
-          ::executor/request-id target-request-id})
-        cancel-outcome
-        (if (= :not-found (::executor/cancellation grouped))
-          (executor/cancel!
-           {::executor/executor dispatcher
-            ::executor/job-id target-request-id})
-          grouped)
-        cancellation (::executor/cancellation cancel-outcome)
-        protocol-request (::request (::executor/request cancel-outcome))
-        query-cancellation
-        (cond
-          (seq (::executor/requests grouped))
-          (cancel-running-queries
-           dispatcher
-           (keep (fn [internal]
-                   (when (= protocol/query-operation
-                            (::protocol/operation (::request internal)))
-                     [(::job-id internal) (::caller-id internal)]))
-                 (::executor/requests grouped)))
-
-          (and (= :running cancellation)
-               (= protocol/query-operation
-                  (::protocol/operation protocol-request)))
-          [(cancel-running-query dispatcher target-request-id)]
-
-          :else [])]
+        jobs (::jobs target)
+        query-callers (::query-callers target)
+        query-cancellations
+        (mapv #(cancel-query-caller! runtime %) (vals query-callers))
+        executor-cancellations
+        (mapv
+         (fn [job-id]
+           (if (contains? query-callers job-id)
+             nil
+             (let [query-job?
+                   (or (and (not (::execute-many? target))
+                            (= protocol/query-operation
+                               (::protocol/operation (::request target))))
+                       (and (::execute-many? target)
+                            (int? (second job-id))
+                            (= protocol/query-operation
+                               (::protocol/operation
+                                (nth (::protocol/members (::request target))
+                                     (second job-id))))))]
+               ((if query-job? executor/cancel-queued! executor/cancel!)
+                {::executor/executor dispatcher ::executor/job-id job-id}))))
+         jobs)
+        cancellations (keep ::executor/cancellation executor-cancellations)]
     (protocol/success
      {::protocol/request-id (::protocol/request-id request)
       ::protocol/target-request-id target-request-id
       ::protocol/canceled?
       (boolean
-       (or (= :queued cancellation)
-           (::executor/canceled? grouped)
-           (some :datahike.query.cancel/detached? query-cancellation)))
-      ::protocol/running? (= :running cancellation)})))
+       (or (some #{:queued :running} cancellations)
+           (some :datahike.query.cancel/detached? query-cancellations)))
+      ::protocol/running?
+      (boolean
+       (or (some #{:running} cancellations)
+           (some #(and (:datahike.query.cancel/last-waiter? %)
+                       (not (:datahike.query.cancel/unstarted-owner? %)))
+                 query-cancellations)))})))
 
 (defn- resolve-exact-connection
   [{::keys [database-name scope]}]
@@ -1473,6 +1452,18 @@
 
 (defn- drain-database-scope!
   [runtime scope]
+  (let [active (::active-requests runtime)
+        caller-ids
+        (locking active
+          (let [request-ids
+                (into [] (keep (fn [[request-id entry]]
+                                 (when (= scope (::scope entry)) request-id)))
+                      @active)]
+            (doseq [request-id request-ids]
+              (swap! active assoc-in [request-id ::canceled?] true))
+            (into [] (mapcat #(vals (get-in @active [% ::query-callers])))
+                  request-ids)))]
+    (run! #(cancel-query-caller! runtime %) caller-ids))
   (when-let [dispatcher (::executor runtime)]
     (executor/fence-and-drain!
      {::executor/executor dispatcher
@@ -2246,6 +2237,131 @@
           (.wait ^Object active)
           (recur))))))
 
+(defn- register-query-job!
+  [runtime owner-request-id job-id]
+  (let [jobs (::query-jobs runtime)]
+    (locking jobs
+      (swap! jobs
+             (fn [state]
+               (-> state
+                   (assoc-in [::by-owner owner-request-id]
+                             {::job-id job-id ::canceled? false})
+                   (assoc-in [::by-job job-id] owner-request-id)))))))
+
+(defn- continue-query-job?
+  [runtime owner-request-id job-id]
+  (let [jobs (::query-jobs runtime)]
+    (locking jobs
+      (let [entry (get-in @jobs [::by-owner owner-request-id])]
+        (when (and (= job-id (::job-id entry))
+                   (not (::canceled? entry)))
+          (swap! jobs assoc-in [::by-owner owner-request-id ::phase] :queued)
+          true)))))
+
+(defn- finish-query-job!
+  [runtime job-id]
+  (let [jobs (::query-jobs runtime)]
+    (locking jobs
+      (when-let [owner-request-id (get-in @jobs [::by-job job-id])]
+        (swap! jobs
+               (fn [state]
+                 (-> state
+                     (update ::by-owner dissoc owner-request-id)
+                     (update ::by-job dissoc job-id))))
+        owner-request-id))))
+
+(defn- cancel-unstarted-owner-job!
+  [runtime owner-request-id]
+  (let [jobs (::query-jobs runtime)
+        job-id
+        (locking jobs
+          (when-let [entry (get-in @jobs [::by-owner owner-request-id])]
+            (swap! jobs assoc-in [::by-owner owner-request-id ::canceled?] true)
+            (::job-id entry)))]
+    (when job-id
+      (executor/cancel-queued!
+       {::executor/executor (::executor runtime)
+        ::executor/job-id job-id}))))
+
+(defn- cancel-query-caller!
+  [runtime caller-id]
+  (let [result (d/cancel-query! caller-id)]
+    (when (:datahike.query.cancel/unstarted-owner? result)
+      (cancel-unstarted-owner-job!
+       runtime (:datahike.query.cancel/owner-request-id result)))
+    result))
+
+(declare complete-execute-many-query!)
+
+(defn- complete-query-call!
+  [runtime request-id owner job-id request db-value execute-many? completion]
+  (if execute-many?
+    (complete-execute-many-query! runtime request-id owner job-id completion)
+    (try
+      (deliver-active-request! runtime request-id owner
+                               (query-response request completion))
+      (finally
+        (d/release-materialized-db db-value)))))
+
+(defn- acquire-query-call!
+  [runtime {::keys [request database-value caller-id job-id]
+            :as work}]
+  (let [db-value (or database-value (pinned-database work))
+        release-on-error? (nil? database-value)
+        request-id (or (::public-request-id work)
+                       (::protocol/request-id request))
+        execute-many? (true? (::execute-many-member? work))]
+    (try
+      (let [call (d/acquire-q! (query-arguments db-value request caller-id))
+            state (d/q-call-state call)
+            completed? (java.util.concurrent.atomic.AtomicBoolean. false)
+            active (::active-requests runtime)
+            installed?
+            (locking active
+              (let [entry (get @active request-id)]
+                (when (and entry (identical? (::owner work) (::owner entry)))
+                  (swap! active update request-id
+                         (fn [current]
+                           (cond-> (-> current
+                                       (assoc-in [::query-callers job-id]
+                                                 caller-id)
+                                       (update ::pending-queries (fnil conj #{})
+                                               job-id))
+                             (not execute-many?)
+                             (assoc ::query-callback? true))))
+                  true)))]
+        (if-not installed?
+          (do
+            (cancel-query-caller! runtime caller-id)
+            (when release-on-error? (d/release-materialized-db db-value))
+            {::query-acquired? true})
+          (do
+            (when (= :run state)
+              (register-query-job! runtime caller-id job-id))
+            (d/on-q-complete!
+             call
+             (fn [completion]
+               (when (.compareAndSet completed? false true)
+                 (complete-query-call! runtime request-id (::owner work) job-id
+                                       request db-value execute-many?
+                                       completion))))
+            (let [canceled?
+                  (locking active
+                    (true? (get-in @active [request-id ::canceled?])))
+                  cancellation (when canceled?
+                                 (cancel-query-caller! runtime caller-id))]
+              (if (and (= :run state)
+                       (not (:datahike.query.cancel/unstarted-owner?
+                             cancellation)))
+                (executor/continue-with
+                 :read {::run-query-call? true ::query-call call}
+                 #(continue-query-job? runtime caller-id job-id))
+                {::query-acquired? true})))))
+      (catch Throwable throwable
+        (when release-on-error?
+          (d/release-materialized-db db-value))
+        (throw throwable)))))
+
 (defn- release-connection-acquisition!
   [runtime transport-connection database-name attachment]
   (let [scope (database-scope database-name attachment)
@@ -2377,20 +2493,28 @@
                    (let [member (nth members position)
                          job-id [request-id position]
                          caller-id (str "execute-many/"
-                                        (hasch/uuid [request-id position]))]
-                     {::executor/executor dispatcher
-                      ::executor/work-class :read
-                      ::executor/database-name (::protocol/database-name request)
-                      ::executor/scope scope
-                      ::executor/job-id job-id
-                      ::executor/request-id request-id
-                      ::executor/request
-                      {::database-name (::protocol/database-name request)
-                       ::scope scope
-                       ::database-value database-value
-                       ::job-id job-id
-                       ::caller-id caller-id
-                       ::request member}}))
+                                        (hasch/uuid [request-id position]))
+                         query? (= protocol/query-operation
+                                   (::protocol/operation member))]
+                     (cond->
+                      {::executor/executor dispatcher
+                       ::executor/work-class :read
+                       ::executor/database-name (::protocol/database-name request)
+                       ::executor/scope scope
+                       ::executor/job-id job-id
+                       ::executor/request-id request-id
+                       ::executor/request
+                       {::database-name (::protocol/database-name request)
+                        ::scope scope
+                        ::database-value database-value
+                        ::job-id job-id
+                        ::caller-id caller-id
+                        ::public-request-id request-id
+                        ::owner (::owner entry)
+                        ::execute-many-member? query?
+                        ::acquire-query? query?
+                        ::request member}}
+                       query? (assoc ::executor/reserved-work-class :read))))
                  positions)]
             (when (seq submissions)
               (swap! active update request-id
@@ -2410,13 +2534,14 @@
   (let [active (::active-requests runtime)
         final
         (locking active
-          (let [{::keys [request jobs canceled? next-position results]
+          (let [{::keys [request jobs pending-queries canceled? next-position results]
                  :as entry}
                 (get @active request-id)
                 member-count (count (::protocol/members request))]
             (when (and entry (identical? owner (::owner entry))
                        (not (::finishing? entry))
                        (empty? jobs)
+                       (empty? pending-queries)
                        (or canceled? (= next-position member-count)))
               (let [results (if canceled?
                               (mapv #(or % (execute-many-canceled-result)) results)
@@ -2472,13 +2597,20 @@
                           (update ::jobs disj job-id)
                           (assoc ::database-value (second outcome)))))
             (let [position (second job-id)
+                  query? (= protocol/query-operation
+                            (::protocol/operation
+                             (nth (::protocol/members (::request entry))
+                                  position)))
+                  callback? (contains? (::pending-queries entry) job-id)
                   result (if (= ::executor/throwable (first outcome))
                            (member-failure (second outcome))
                            (second outcome))]
               (swap! active update request-id
-                     #(-> %
-                          (update ::jobs disj job-id)
-                          (assoc-in [::results position] result))))))))
+                     #(cond-> (update % ::jobs disj job-id)
+                        (and (not callback?)
+                             (or (not query?)
+                                 (= ::executor/throwable (first outcome))))
+                        (assoc-in [::results position] result))))))))
     (if (and resolution? (= ::executor/throwable (first outcome)))
       (let [entry (locking active (get @active request-id))
             response (::failure-response entry)]
@@ -2486,17 +2618,39 @@
           (deliver-active-request! runtime request-id owner response)))
       (drive-execute-many! runtime request-id owner))))
 
+(defn- complete-execute-many-query!
+  [runtime request-id owner job-id completion]
+  (let [active (::active-requests runtime)]
+    (locking active
+      (let [entry (get @active request-id)]
+        (when (and entry (identical? owner (::owner entry))
+                   (contains? (::pending-queries entry) job-id))
+          (swap! active update request-id
+                 #(-> %
+                      (update ::pending-queries disj job-id)
+                      (update ::query-callers dissoc job-id)
+                      (assoc-in [::results (second job-id)]
+                                (if (= :ok (:status completion))
+                                  (protocol/success
+                                   (update (:value completion)
+                                           :datahike.query/result
+                                           materialize-result))
+                                  (member-failure (:throwable completion)))))))))
+    (drive-execute-many! runtime request-id owner)))
+
 (defn- complete-executor!
   [runtime {::executor/keys [request-id job-id outcome]}]
+  (finish-query-job! runtime job-id)
   (if request-id
     (let [active (::active-requests runtime)
           entry (locking active (get @active request-id))]
       (when entry
         (if (::execute-many? entry)
           (complete-execute-many! runtime request-id (::owner entry) job-id outcome)
-          (deliver-active-request!
-           runtime request-id (::owner entry)
-           (single-outcome-response (::request entry) outcome)))))
+          (when-not (::query-callback? entry)
+            (deliver-active-request!
+             runtime request-id (::owner entry)
+             (single-outcome-response (::request entry) outcome))))))
     (when (map? job-id)
       (requeue-scope! runtime job-id))))
 
@@ -2653,17 +2807,25 @@
            (scope-for-read transport-connection request)]
     (submit-single!
      runtime request-id owner scope
-     {::executor/executor (::executor runtime)
-      ::executor/work-class :read
-      ::executor/database-name (::protocol/database-name request)
-      ::executor/scope scope
-      ::executor/job-id request-id
-      ::executor/request-id request-id
-      ::executor/request {::database-name (::protocol/database-name request)
-                          ::scope scope
-                          ::connection connection
-                          ::coordinate/attachment attachment
-                          ::request request}})
+     (cond->
+      {::executor/executor (::executor runtime)
+       ::executor/work-class :read
+       ::executor/database-name (::protocol/database-name request)
+       ::executor/scope scope
+       ::executor/job-id request-id
+       ::executor/request-id request-id
+       ::executor/request {::database-name (::protocol/database-name request)
+                           ::scope scope
+                           ::connection connection
+                           ::coordinate/attachment attachment
+                           ::owner owner
+                           ::job-id request-id
+                           ::caller-id request-id
+                           ::request request}}
+       (= protocol/query-operation (::protocol/operation request))
+       (assoc ::executor/reserved-work-class :read)
+       (= protocol/query-operation (::protocol/operation request))
+       (assoc-in [::executor/request ::acquire-query?] true)))
     (deliver-active-request! runtime request-id owner
                              (stale-coordinate-response request))))
 
@@ -2780,7 +2942,7 @@
             ::protocol/error "A cancel request cannot cancel itself."})
 
           target
-          (handle-cancel runtime request)
+          (handle-cancel runtime request target)
 
           :else
           (protocol/success
@@ -2811,7 +2973,8 @@
                                           (::transport-connection entry))
                                      {::protocol/request-id request-id
                                       ::owner (::owner entry)
-                                      ::execute-many? (::execute-many? entry)})))
+                                      ::execute-many? (::execute-many? entry)
+                                      ::entry entry})))
                                 @active)]
                       (doseq [{::protocol/keys [request-id]} owned]
                         (swap! active update request-id assoc
@@ -2823,13 +2986,15 @@
               {:requests requests :acquisitions acquisitions})))]
     (doseq [{request-id ::protocol/request-id
              owner ::owner
-             execute-many? ::execute-many?}
+             execute-many? ::execute-many?
+             entry ::entry}
             requests]
       (try
         (handle-cancel
          runtime
          {::protocol/request-id request-id
-          ::protocol/target-request-id request-id})
+          ::protocol/target-request-id request-id}
+         entry)
         (when execute-many?
           (drive-execute-many! runtime request-id owner))
         (catch Throwable throwable
@@ -2968,7 +3133,7 @@
                                 (executor/capacity selected-processors)
                                 (executor/capacity))
           ::executor/execute
-          {:read execute-read!
+          {:read (fn [request] (execute-read! @runtime-ref request))
            :provider (partial execute-provider! dependencies)
            :knn (partial execute-knn! dependencies)
            :delivery (fn [request]
@@ -2978,10 +3143,12 @@
           ::executor/complete!
           (fn [completion]
             (complete-executor! @runtime-ref completion))})
+        query-jobs (atom {::by-owner {} ::by-job {}})
         runtime (assoc dependencies
                        ::publisher publisher
                        ::executor dispatcher
                        ::active-requests active-requests
+                       ::query-jobs query-jobs
                        ::interest-state interest-state
                        ::interest-lock interest-lock
                        ::readiness-owner (Object.))

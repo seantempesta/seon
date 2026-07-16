@@ -260,8 +260,9 @@
 (defn- reserved-count
   [state work-class database-name]
   (count
-   (filter (fn [[_ job]]
+           (filter (fn [[_ job]]
              (and (= work-class (::reserved-work-class job))
+                  (not= (::work-class job) (::reserved-work-class job))
                   (or (nil? database-name)
                       (= database-name (::database-name job)))))
            (::jobs state))))
@@ -347,8 +348,12 @@
 
 (defn continue-with
   "Return a private dispatcher value that advances one admitted job in place."
-  [work-class request]
-  {::continue-work-class work-class ::continue-request request})
+  ([work-class request]
+   (continue-with work-class request (constantly true)))
+  ([work-class request continue?]
+   {::continue-work-class work-class
+    ::continue-request request
+    ::continue? continue?}))
 
 (defn- continue-work!
   [executor work continuation]
@@ -356,12 +361,14 @@
     (let [{::keys [job-id owner scope reserved-work-class
                    reserved-request-bytes]} work
           next-class (::continue-work-class continuation)
+          continue? (::continue? continuation)
           state @(::state executor)
           current (get-in state [::jobs job-id])]
       (when (and (= next-class reserved-work-class)
                  (identical? owner (::owner current))
                  (not (::canceled? current))
-                 (not (contains? (::closed-scopes state) scope)))
+                 (not (contains? (::closed-scopes state) scope))
+                 (continue?))
         (let [next-work (-> current
                             (assoc ::work-class next-class
                                    ::request (::continue-request continuation)
@@ -497,12 +504,14 @@
               class-capacity (get-in (::capacity executor) [::classes work-class])
               class-count (get (queued-by-class state) work-class 0)
               database-count (queued-by-class-database state work-class database-name)
-              reserved-capacity (when reserved-work-class
+              distinct-reservation? (and reserved-work-class
+                                         (not= reserved-work-class work-class))
+              reserved-capacity (when distinct-reservation?
                                   (get-in (::capacity executor)
                                           [::classes reserved-work-class]))
               queued-bytes (queued-request-bytes state)
               valid? (and class-capacity
-                          (or (nil? reserved-work-class)
+                          (or (not distinct-reservation?)
                               (and reserved-capacity
                                    (< (+ (get (queued-by-class state)
                                               reserved-work-class 0)
@@ -652,6 +661,31 @@
                   (swap! (::state executor) assoc-in
                          [::jobs job-id ::canceled?] true)
                   {::cancellation :running ::request request})))
+            {::cancellation :not-found}))]
+    (when completion
+      (let [[work outcome] completion]
+        (publish-completion! executor work outcome)))
+    (dissoc canceled ::completion)))
+
+(defn cancel-queued!
+  "Cancel only queued work without marking a running job canceled."
+  [{::keys [executor job-id]}]
+  (let [{::keys [completion] :as canceled}
+        (locking (::lock executor)
+          (if-let [{::keys [status] :as job}
+                   (get-in @(::state executor) [::jobs job-id])]
+            (if (= :queued status)
+              (let [outcome [::throwable
+                             (ex-info "The database request was canceled."
+                                      {::job-id job-id})]]
+                (swap! (::state executor)
+                       #(-> %
+                            (remove-queued-work #{(::owner job)})
+                            (update ::jobs dissoc job-id)))
+                (swap! (::counts executor) update ::fenced inc)
+                (.notifyAll ^Object (::lock executor))
+                {::cancellation :queued ::completion [job outcome]})
+              {::cancellation :running ::request (::request job)})
             {::cancellation :not-found}))]
     (when completion
       (let [[work outcome] completion]

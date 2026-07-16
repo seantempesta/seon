@@ -938,7 +938,7 @@
            {::registry/database-name (keyword database-name)}))
         (registry/restore-registry! {::registry/snapshot snapshot})))))
 
-(deftest datahike-single-flight-waiters-currently-occupy-read-workers
+(deftest synchronous-datahike-query-waiters-occupy-their-calling-workers
   (let [{::registry/keys [snapshot]} (registry/snapshot-registry {})
         database-a (str "executor-flight-a-" (random-uuid))
         database-b (str "executor-flight-b-" (random-uuid))
@@ -1023,7 +1023,7 @@
             (is (await-queued worker 1))
             (is (= 3 (::executor/running (executor/evidence worker))))
             (is (= 1 (.getCount b-entered))
-                "B cannot enter while A's owner and two joined callers own all read workers")
+                "the synchronous dependency API retains each calling worker")
             (is (= [:a-owner-entered :a-owner-and-waiters-active] @trace))
             (.countDown release-owner)
             (let [a-results (mapv deref [owner waiter-1 waiter-2])]
