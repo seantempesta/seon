@@ -6,7 +6,9 @@
    and embedding search. `seon.db.transport.uds` owns only delivery. Every
    database-scoped request names its database explicitly; there is no ambient
    connection path."
-  (:require [clojure.edn :as edn]
+  (:require [clojure.core.async :as async]
+            [clojure.core.async.impl.protocols :as async-protocols]
+            [clojure.edn :as edn]
             [clojure.set :as set]
             [clojure.string :as str]
             [datahike.api :as d]
@@ -1057,7 +1059,7 @@
                ::protocol/current-coordinate
                (coordinate/resolved db-value)}))))
 
-(defn- transact-once!
+(defn- prepare-transaction!
   [runtime connection database-name attachment request]
   (let [transaction-data (::protocol/transaction-data request)
         transaction-meta (::protocol/transaction-meta request)
@@ -1066,56 +1068,93 @@
         candidates (::protocol/generated-candidates request)
         generated? (contains? request ::protocol/generated-candidates)
         fingerprint (protocol/logical-transaction-hash request)
-        _ (assert-protocol-attributes-free! transaction-data transaction-meta)
-        outcome
-        (locking connection
-          (if-let [response
-                   (recover-current connection request-id fingerprint candidates)]
-            {::response response}
-           (let [db-value (d/db connection)
-                 _ (assert-current-coordinate! db-value expected-coordinate)
-                 coerced-data
-                 (coerce-transaction-data (:schema db-value) transaction-data)
-                 caller-tempids
-                 (id/transaction-tempids
-                  {::id/db-value db-value
-                   ::id/transaction-data coerced-data})
-                 data-with-receipts
-                 (into (vec coerced-data)
-                       (protocol/tempid-receipts request-id caller-tempids))
-                 transaction-meta*
-                 (assoc (or transaction-meta {})
-                        ::protocol/request-id request-id
-                        ::protocol/request-hash fingerprint
-                        ::protocol/version protocol/current-version)
-                 transaction
-                 (cond-> {:tx-data data-with-receipts
-                          :tx-meta transaction-meta*}
-                   generated?
-                   (assoc ::id/generated-candidates candidates))]
-             (try
-               (let [report (d/transact connection transaction)
-                     response
-                     (response-from-report-data
-                      (transaction-report-data report request-id))
-                     generated-entity-ids (::id/generated-eids report)]
-                 {::response
-                  (cond-> response
-                    (some? generated-entity-ids)
-                    (assoc ::protocol/generated-entity-ids
-                           generated-entity-ids))
-                  ::report report})
-               (catch Throwable throwable
-                 ;; A commit can win before the acknowledgement is lost. The
-                 ;; durable receipt, not the delivery failure, is authoritative.
-                 (if-let [response
-                          (recover-current connection request-id fingerprint
-                                           candidates)]
-                   {::response response}
-                   (throw throwable)))))))]
-    (when-let [report (::report outcome)]
-      (enqueue-embedding! runtime database-name attachment request-id report))
-    (::response outcome)))
+        _ (assert-protocol-attributes-free! transaction-data transaction-meta)]
+    (locking connection
+      (if-let [response
+               (recover-current connection request-id fingerprint candidates)]
+        {::response response}
+        (let [db-value (d/db connection)
+              _ (assert-current-coordinate! db-value expected-coordinate)
+              coerced-data
+              (coerce-transaction-data (:schema db-value) transaction-data)
+              caller-tempids
+              (id/transaction-tempids
+               {::id/db-value db-value
+                ::id/transaction-data coerced-data})
+              data-with-receipts
+              (into (vec coerced-data)
+                    (protocol/tempid-receipts request-id caller-tempids))
+              transaction-meta*
+              (assoc (or transaction-meta {})
+                     ::protocol/request-id request-id
+                     ::protocol/request-hash fingerprint
+                     ::protocol/version protocol/current-version)
+              transaction
+              (cond-> {:tx-data data-with-receipts
+                       :tx-meta transaction-meta*}
+                generated?
+                (assoc ::id/generated-candidates candidates))]
+          {::transaction-result (d/transact! connection transaction)
+           ::request-id request-id
+           ::fingerprint fingerprint
+           ::candidates candidates
+           ::database-name database-name
+           ::coordinate/attachment attachment
+           ::connection connection
+           ::runtime runtime})))))
+
+(defn- finish-transaction!
+  [{::keys [runtime connection database-name request-id fingerprint candidates]
+    attachment ::coordinate/attachment}
+   result]
+  (if (instance? Throwable result)
+    ;; A commit can win before the acknowledgement is lost. The durable
+    ;; receipt, not the delivery failure, is authoritative.
+    (if-let [response
+             (recover-current connection request-id fingerprint candidates)]
+      response
+      (throw result))
+    (let [response
+          (response-from-report-data (transaction-report-data result request-id))
+          generated-entity-ids (::id/generated-eids result)]
+      (enqueue-embedding! runtime database-name attachment request-id result)
+      (cond-> response
+        (some? generated-entity-ids)
+        (assoc ::protocol/generated-entity-ids generated-entity-ids)))))
+
+(defn- transact-once!
+  [runtime connection database-name attachment request]
+  (let [{::keys [response transaction-result] :as prepared}
+        (prepare-transaction! runtime connection database-name attachment request)]
+    (if response
+      response
+      (finish-transaction!
+       prepared
+       (try
+         @transaction-result
+         (catch Throwable throwable throwable))))))
+
+(defn- transact-once-async!
+  [runtime connection database-name attachment request]
+  (let [{::keys [response transaction-result] :as prepared}
+        (prepare-transaction! runtime connection database-name attachment request)]
+    (if response
+      response
+      (let [completion (async/promise-chan)]
+        (async/take!
+         transaction-result
+         (fn [result]
+           (async/put!
+            completion
+            (try
+              (finish-transaction!
+               prepared
+               (or result
+                   (ex-info "Datahike transaction completion closed."
+                            {::protocol/request-id
+                             (::protocol/request-id request)})))
+              (catch Throwable throwable throwable)))))
+        completion))))
 
 ;;; Transaction-history replay
 
@@ -1537,65 +1576,93 @@
     ::protocol/error "A generated identity candidate is already in use."
     ::protocol/body {::protocol/generated-candidate candidate}}))
 
+(defn- transaction-failure
+  [request ^Throwable throwable]
+  (let [candidates (::protocol/generated-candidates request)
+        generated? (contains? request ::protocol/generated-candidates)
+        failure-kind (::failure-kind (ex-data throwable))]
+    (cond
+      (= failure-kind protocol/stale-coordinate-error)
+      (protocol/failure
+       {::protocol/error-kind protocol/stale-coordinate-error
+        ::protocol/error (.getMessage throwable)
+        ::protocol/body
+        {::protocol/expected-coordinate
+         (::protocol/expected-coordinate (ex-data throwable))
+         ::protocol/current-coordinate
+         (::protocol/current-coordinate (ex-data throwable))}})
+
+      (= failure-kind protocol/request-conflict-error)
+      (protocol/failure
+       {::protocol/error-kind protocol/request-conflict-error
+        ::protocol/error (.getMessage throwable)})
+
+      (= failure-kind protocol/protocol-error)
+      (protocol/failure
+       {::protocol/error-kind protocol/protocol-error
+        ::protocol/error (.getMessage throwable)})
+
+      generated?
+      (let [classified
+            (id/classify-allocation-error
+             {::id/generated-candidates candidates ::id/throwable throwable})]
+        (case (::id/error-status classified)
+          :seon.db.id/candidate-conflict
+          (generated-candidate-conflict (::id/generated-candidate classified))
+
+          :seon.db.id/protocol-error
+          (protocol/failure
+           {::protocol/error-kind protocol/protocol-error
+            ::protocol/error (::id/message classified)})
+
+          :seon.db.id/unrelated
+          (throw throwable)))
+
+      :else
+      (throw throwable))))
+
+(defn- transaction-outcome
+  [request result]
+  (try
+    (if (instance? Throwable result)
+      (throw result)
+      (protocol/success result))
+    (catch Throwable throwable
+      (transaction-failure request throwable))))
+
 (defn- handle-transact
   [runtime connection database-name attachment request]
-  (let [candidates (::protocol/generated-candidates request)
-        generated? (contains? request ::protocol/generated-candidates)]
+  (locking connection
     (try
-      (when generated?
+      (when (contains? request ::protocol/generated-candidates)
         (id/assert-allocation-writer! connection))
-      (protocol/success
+      (transaction-outcome
+       request
        (transact-once! runtime connection database-name attachment request))
       (catch Throwable throwable
-        (let [failure-kind (::failure-kind (ex-data throwable))]
-          (cond
-            (= failure-kind protocol/stale-coordinate-error)
-            (protocol/failure
-             {::protocol/error-kind protocol/stale-coordinate-error
-              ::protocol/error (.getMessage throwable)
-              ::protocol/body
-              {::protocol/expected-coordinate
-               (::protocol/expected-coordinate (ex-data throwable))
-               ::protocol/current-coordinate
-               (::protocol/current-coordinate (ex-data throwable))}})
+        (transaction-failure request throwable)))))
 
-            (= failure-kind protocol/request-conflict-error)
-            (protocol/failure
-             {::protocol/error-kind protocol/request-conflict-error
-              ::protocol/error (.getMessage throwable)})
-
-            (= failure-kind protocol/protocol-error)
-            (protocol/failure
-             {::protocol/error-kind protocol/protocol-error
-              ::protocol/error (.getMessage throwable)})
-
-            generated?
-            (let [classified
-                  (id/classify-allocation-error
-                   {::id/generated-candidates candidates
-                    ::id/throwable throwable})]
-              (case (::id/error-status classified)
-                :seon.db.id/candidate-conflict
-                (generated-candidate-conflict
-                 (::id/generated-candidate classified))
-
-                :seon.db.id/protocol-error
-                (protocol/failure
-                 {::protocol/error-kind protocol/protocol-error
-                  ::protocol/error (::id/message classified)})
-
-                :seon.db.id/unrelated
-                (throw throwable)))
-
-            :else
-            (throw throwable)))))))
+(defn- handle-transact-async
+  [runtime connection database-name attachment request]
+  (let [result
+        (try
+          (when (contains? request ::protocol/generated-candidates)
+            (id/assert-allocation-writer! connection))
+          (transact-once-async! runtime connection database-name attachment request)
+          (catch Throwable throwable throwable))]
+    (if (satisfies? async-protocols/ReadPort result)
+      (let [completion (async/promise-chan)]
+        (async/take! result
+                     #(async/put! completion (transaction-outcome request %)))
+        completion)
+      (transaction-outcome request result))))
 
 (defn- execute-mutation!
   [runtime request]
   (if-let [{::keys [connection database-name]
             attachment ::coordinate/attachment}
            (connection-for-request request)]
-    (handle-transact runtime connection database-name attachment request)
+    (handle-transact-async runtime connection database-name attachment request)
     (protocol/failure
      {::protocol/error-kind protocol/not-found-error
       ::protocol/error (str "Unknown database: "

@@ -238,17 +238,17 @@ before deciding whether to modernize it or delete it.
 
 ## Implementation consequence
 
-The next implementation remains the callback-complete writer because every
-native transport and capacity improvement depends on it. During that cut:
+The callback-complete writer remains the active implementation boundary because
+every native transport and capacity improvement depends on it. The executor now
+keeps a returned core.async `ReadPort` physically active, and the maintained
+mutation path now consumes `d/transact!` through that mechanism. The remaining
+cut is:
 
 1. migrate the writer to one active request map and one completion function;
 2. replace execute-many's waiter loop with completion-driven member admission;
-3. consume `d/transact!` through nonblocking `take!` while holding mutation
-   admission until the physical result;
-4. delete executor result promises, completed-job queues, blocking submit
+3. delete executor result promises, completed-job queues, blocking submit
    functions, and transport waiters; and
-5. compact per-class database readiness so only currently ready databases are
-   selectable.
+4. preserve the now-ready-only per-class database selection structure.
 
 Then replace the request server and Bun client together with the persistent
 selector session, migrate consumers to honest async database functions, delete

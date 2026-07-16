@@ -608,10 +608,17 @@ The same executor now consumes a returned core.async `ReadPort` without parking
 a worker: the job and its class/database capacity remain physically active until
 the port yields a result, Throwable, or closes, and only then enter the one
 completion path. The focused executor gate passes 25 tests/659 assertions and
-the changed writer boundary passes 71 tests/977 assertions. Migrating
-`execute-mutation!` from blocking `d/transact` to existing `d/transact!` is the
-next writer-owned step; the compatibility result promises are still removed
-only with the active-request cut.
+the changed writer boundary passes 71 tests/977 assertions. Compatibility
+result promises are still removed only with the active-request cut.
+
+That mutation migration is now implemented. Transaction preflight and durable
+receipt recovery remain serialized by the executor's one active mutation per
+database, `d/transact!` supplies the physical completion, and the executor
+retains the mutation/database count until its `ReadPort` yields. The synchronous
+direct handler retains its connection lock only as the temporary unary-server
+adapter; the selector cut removes that blocking transport path. Executor,
+receipts, generated identities, transaction coordinates, writer integration,
+and server pass 60 tests/901 assertions.
 
 Exit proof: 1/8/32 children, multiplex limits, fragmented frames, partial
 writes, large pages, slow recipients, cancellation, child crash, reconnect,

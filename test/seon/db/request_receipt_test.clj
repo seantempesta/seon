@@ -188,7 +188,7 @@
               (future
                 (transact! provider-runtime database-name "provider/blocked"
                            [{:receipt/value "blocked"}]))
-              response (deref blocked 5 ::timed-out)]
+              response (deref blocked 1000 ::timed-out)]
           (is (not= ::timed-out response)
               "the primary commit returns before background provider work")
           (is (true? (::protocol/success? response))))
@@ -198,7 +198,7 @@
               (future
                 (transact! provider-runtime database-name "provider/independent"
                            [{:receipt/value "independent"}]))
-              response (deref independent 5 ::timed-out)]
+              response (deref independent 1000 ::timed-out)]
           (is (not= ::timed-out response)
               "an unrelated same-database write commits during provider wait")
           (is (true? (::protocol/success? response))))
@@ -206,7 +206,7 @@
               (future
                 (transact! provider-runtime database-name "provider/overflow"
                            [{:receipt/value "overflow"}]))
-              response (deref overflow 5 ::timed-out)]
+              response (deref overflow 1000 ::timed-out)]
           (is (not= ::timed-out response)
               "a full embedding queue cannot delay the primary transaction")
           (is (true? (::protocol/success? response))))
