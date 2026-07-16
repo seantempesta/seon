@@ -60,7 +60,7 @@
   []
   [{::id "shared"}])
 
-(defn instructions
+(defn ^{:async true :seon.fn/agent-facing? true} instructions
   "The current cluster-wide instructions, oldest append first.
 
    Standing guidance for ALL agents in this cluster, as a vector of text
@@ -68,23 +68,21 @@
    the ns doc for the one-transact append shape); re-run this whenever
    you want the current set. Returns [] when none exist yet.
 
-   ; read the current set (db injected automatically):
+   ; read the current authority value:
    (my.kb.shared/instructions)
    ; returns «vector: [\"Always store provenance (:my.kb/source-path) with findings.\"]»"
-  {:malli/schema [:function
-                  [:=> [:cat] [:vector ::text]]
-                  [:=> [:catn [::db :seon.db/db]] [:vector ::text]]]}
-  ([] (instructions @db/*conn*))
-  ([db]
-   (->> (db/query '[:find ?at ?text
-                    :where
-                    [?s ::id "shared"]
-                    [?s ::instructions ?r]
-                    [?r ::at ?at]
-                    [?r ::text ?text]]
-                  db)
-        (sort-by (fn [[at text]] [(.getTime at) text]))
-        (mapv second))))
+  {:malli/schema [:=> [:cat] [:vector ::text]]}
+  []
+  (->> (await
+        (db/query
+         {:seon.db/query '[:find ?at ?text
+                           :where
+                           [?s ::id "shared"]
+                           [?s ::instructions ?r]
+                           [?r ::at ?at]
+                           [?r ::text ?text]]}))
+       (sort-by (fn [[at text]] [(.getTime at) text]))
+       (mapv second)))
 
 (defn instructions-block
   "The single-`;` `SHARED INSTRUCTIONS` context block.
