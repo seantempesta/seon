@@ -203,6 +203,56 @@
                                 [?e :seon.fn/source ?src]]
                :seon.db/args  [(str sym)]}))))
 
+(defn- rendered-canvas-text
+  "Format one acquired canvas response from ordinary values only."
+  [{:seon.render/keys [hiccup ai error]
+    wired :seon.render.canvas/wired}
+   source cap]
+  (let [body-kind (cond
+                    (some? error)  :error
+                    (some? ai)     :ai
+                    (some? hiccup) :hiccup)
+        body (cond
+               (some? error)
+               (str "Render failed; your human sees the fallback card.\n"
+                    "Fix the renderer or pin a working canvas. Cause: "
+                    (:seon.error/message error) "\n"
+                    (pr-str (select-keys error [:seon.error/data
+                                                :seon.error/ex-data]))
+                    (when (some? ai) (str "\n" ai)))
+
+               (some? ai)     ai
+               (some? hiccup) (pr-str hiccup))
+        body (when (some? body)
+               (tokens/clip-str body cap (partial clip-marker "canvas twin")))]
+    (if (nil? body)
+      ""
+      (let [body-comment (ctx/quote-lines body)
+            wired-value (:seon.render.canvas/value wired)
+            fn-src (when (and (err/agent-authored-sym? wired-value)
+                              (some? source))
+                     (tokens/clip-str
+                       source cap (partial clip-marker "canvas source")))
+            body-label (case body-kind
+                         :error "Render status:"
+                         :ai "Rendered meaning (:seon.render/ai; paired HTML is on screen):"
+                         :hiccup "Rendered Hiccup (exact human view):"
+                         "Rendered output:")]
+        (str "; CANVAS — current human-facing view\n"
+             "; Renderer: " (canvas/wired-label wired) "\n"
+             "; Snapshot: this prompt; the browser refreshes after relevant transactions.\n"
+             "; " body-label "\n"
+             body-comment "\n"
+             (when (some? fn-src)
+               (str ";\n"
+                    "; Agent-authored renderer source:\n"
+                    (ctx/quote-lines fn-src) "\n"))
+             ";\n"
+             "; Change: (my.canvas/show! {:my.canvas/content <hiccup-or-qualified-fn>})\n"
+             "; Live fn: :seon.render/system-input → my.canvas/view; query its :seon.db/db.\n"
+             "; Actions: my.canvas controls call schema'd home-ns handlers; writes redraw.\n"
+             "; Inspect/auto: (my.canvas/pinned {}) / (my.canvas/clear! {}).")))))
+
 (defn canvas-block
   "Show and explain the agent's current live canvas.
 
@@ -241,77 +291,17 @@
   {:malli/schema [:=> [:cat :seon.render/section-request] :string]}
   [{:seon.db/keys [db] :seon.agent/keys [id]}]
   (try
-    (let [{:seon.render/keys [hiccup ai error]
-           wired :seon.render.canvas/wired}
+    (let [{wired :seon.render.canvas/wired :as response}
           ;; The one canvas entry point — SCI wall-clock-bounded for
           ;; agent-authored canvas fns, and on any throw it returns the
           ;; legible `error-response` (never throws past here). This is
           ;; the safety the canvas rides; the body below is always a
           ;; clean twin, an error twin, or the welcome card — never raw.
           (render/render-agent-canvas {:seon.agent/id id :seon.db/db db})
-          cap  (config/render-fn-token-cap)
-          body-kind (cond
-                      (some? error)  :error
-                      (some? ai)     :ai
-                      (some? hiccup) :hiccup)
-          body (cond
-                 ;; Renderer THREW — your human is staring at an error
-                 ;; canvas right now. Say so loudly and first (the agent must
-                 ;; not skim past it), then the message + flattened ex-data
-                 ;; (the agent-actionable parts; raw js error / 4KB stack
-                 ;; dropped), then the fallback twin.
-                 (some? error)
-                 (str "Render failed; your human sees the fallback card.\n"
-                      "Fix the renderer or pin a working canvas. Cause: "
-                      (:seon.error/message error) "\n"
-                      (pr-str (select-keys error [:seon.error/data
-                                                  :seon.error/ex-data]))
-                      (when (some? ai) (str "\n" ai)))
-
-                 (some? ai)     ai
-                 (some? hiccup) (pr-str hiccup))
-          body (when (some? body)
-                 (tokens/clip-str body cap (partial clip-marker "canvas twin")))]
-      (if (nil? body)
-        ""
-        (let [;; The body is a render twin (:ai text, or hiccup pr-str, or
-              ;; an error envelope) — arbitrary content the human's canvas
-              ;; shows. It rides this comment-block as `;` lines (via
-              ;; [[seon.agent.ctx/quote-lines]]) so the whole section reads as
-              ;; eval'able Clojure (the context IS one live REPL); the agent
-              ;; reads the value, it never evaluates.
-              body-comment (ctx/quote-lines body)
-              ;; FN-symbol canvas → show its SOURCE inline (code-as-data),
-              ;; so the agent sees the exact code driving the canvas and can
-              ;; edit it without a lookup. Literal-hiccup canvases have no
-              ;; fn; the body already IS the value verbatim.
-              wired-value  (:seon.render.canvas/value wired)
-              ;; Agents can evolve only their own renderer. Embedding the
-              ;; shared welcome/system source wastes context and invites the
-              ;; exact core-edit mistake the block warns against.
-              fn-src       (when (err/agent-authored-sym? wired-value)
-                             (some-> (wired-fn-source db wired-value)
-                                     (tokens/clip-str
-                                       cap (partial clip-marker "canvas source"))))
-              body-label   (case body-kind
-                             :error "Render status:"
-                             :ai "Rendered meaning (:seon.render/ai; paired HTML is on screen):"
-                             :hiccup "Rendered Hiccup (exact human view):"
-                             "Rendered output:")]
-          (str "; CANVAS — current human-facing view\n"
-               "; Renderer: " (canvas/wired-label wired) "\n"
-               "; Snapshot: this prompt; the browser refreshes after relevant transactions.\n"
-               "; " body-label "\n"
-               body-comment "\n"
-               (when (some? fn-src)
-                 (str ";\n"
-                      "; Agent-authored renderer source:\n"
-                      (ctx/quote-lines fn-src) "\n"))
-               ";\n"
-               "; Change: (my.canvas/show! {:my.canvas/content <hiccup-or-qualified-fn>})\n"
-               "; Live fn: :seon.render/system-input → my.canvas/view; query its :seon.db/db.\n"
-               "; Actions: my.canvas controls call schema'd home-ns handlers; writes redraw.\n"
-               "; Inspect/auto: (my.canvas/pinned {}) / (my.canvas/clear! {})."))))
+          source (when (err/agent-authored-sym?
+                         (:seon.render.canvas/value wired))
+                   (wired-fn-source db (:seon.render.canvas/value wired)))]
+      (rendered-canvas-text response source (config/render-fn-token-cap)))
     ;; CONTRACT: this section NEVER vanishes and NEVER surfaces a bare
     ;; ⚠/malli code. `render-agent-canvas` is already throw-safe, so this
     ;; backstop only fires on an UNEXPECTED failure (e.g. a db read) —

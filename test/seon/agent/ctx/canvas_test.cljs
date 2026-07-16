@@ -4,8 +4,10 @@
     [cljs.test :refer [async deftest is testing]]
     [datahike.api :as d]
     [seon.agent.ctx.canvas :as canvas-ctx]
+    [seon.config :as config]
     [seon.db :as db]
     [seon.db.protocol :as protocol]
+    [seon.render :as render]
     [seon.render.canvas :as canvas]))
 
 (def ^:private agent-id "tst-canvas-remote")
@@ -18,6 +20,44 @@
 
 (def ^:private other-coordinate
   (assoc coordinate :seon.db.coordinate/t 43))
+
+(deftest ordinary-formatting-tail-preserves-the-current-caller-bytes
+  (let [response
+        {:seon.render/hiccup [:div "human"]
+         :seon.render/ai "Agent meaning"
+         :seon.render.canvas/wired
+         {::canvas/source ::canvas/derived
+          ::canvas/value 'seon.render.canvas/welcome}}
+        expected (@#'canvas-ctx/rendered-canvas-text response nil 2000)
+        original-query db/query
+        original-pull db/pull
+        reads (atom 0)
+        fail-read (fn [& _]
+                    (swap! reads inc)
+                    (throw (js/Error. "ordinary tail read the database")))]
+    (try
+      (set! db/query fail-read)
+      (set! db/pull fail-read)
+      (testing "the pure tail consumes only its three ordinary inputs"
+        (is (= expected
+               (@#'canvas-ctx/rendered-canvas-text response nil 2000)))
+        (is (string?
+              (@#'canvas-ctx/rendered-canvas-text
+                (assoc-in response
+                          [:seon.render.canvas/wired ::canvas/value]
+                          'my.canvas/current)
+                "(defn current [_] {:seon.render/ai \"Agent meaning\"})"
+                2000)))
+        (is (zero? @reads)))
+      (testing "the retained caller delegates without changing bytes"
+        (is (= expected
+               (with-redefs [render/render-agent-canvas (constantly response)
+                             config/render-fn-token-cap (constantly 2000)]
+                 (canvas-ctx/canvas-block
+                   {:seon.agent/id agent-id})))))
+      (finally
+        (set! db/query original-query)
+        (set! db/pull original-pull)))))
 
 (defn- fresh-conn
   []
