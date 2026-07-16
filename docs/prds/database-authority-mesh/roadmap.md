@@ -1324,11 +1324,37 @@ is prohibited.
   and exclusion of direct/core evals outside the existing turn graph. Its
   temporary local acquisition is deleted when the compiled prompt caller
   invokes the async owner.
+  Commit `159e16c4` completes namespace acquisition through ordinary data: the
+  selected namespace rows remain pinned to the invocation coordinate, shared
+  schema rows are acquired in batches of at most 40 keys, and acquisition walks
+  each complete reachable closure before the existing formatter independently
+  selects its lexical 40-definition token cap. Shared row/missing-key caches
+  prevent repeated reads across namespaces and a 2,048-key aggregate bound
+  fails as data. The complete execution artifacts compile; the focused runtime
+  runner reaches zero test namespaces because the obsolete replica still
+  imports the intentionally removed two-socket UDS defaults, recorded in
+  [[../../seon/issues/legacy-replica-load-blocks-cljs-tests]].
+  Commit `f8f718d4` adds the bounded canvas-resolution sub-slice. Explicit and
+  configured pins perform no database request; automatic selection performs one
+  candidate query and, only when candidates read database attributes, one
+  grouped history query at the same coordinate. A real Datahike falsifier
+  resolves 256 candidates and 800 changed entities without a per-candidate or
+  per-entity query. Authored invocation, selected source acquisition, and the
+  pure canvas prose tail remain unsettled and this commit does not claim a
+  complete remote canvas block.
+  Commit `ec1d1b37` adds the plan normal-path sub-slice. Two coordinate-pinned
+  `execute-many` requests acquire the bounded active/ready/recent frontier,
+  agent, selected ancestor chain, and root rollup, then reuse the existing pure
+  formatter. The 1,000-step direct Datahike proof executes four queries and
+  returns only the eight-row ready frontier plus its overflow witness. Active
+  evaluation/wedge evidence and the conditional escalation request remain
+  unsettled, so the public plan block is not switched yet.
 - **Next refill:** implement the namespace and transcript acquisitions through
-  the compiled prompt coordinator, first closing the shared pure
-  namespace/schema formatting seam and bounded schema frontiers. Then migrate
-  canvas, plan, warnings, subagent, menu/typeahead, and authored slots through
-  their block-owned acquisitions before wiring one complete prompt result into
+  the compiled prompt coordinator. Namespace and transcript acquisition are
+  now settled; first complete plan escalation/wedge acquisition and canvas
+  invocation/source/pure formatting at their existing owners. Then migrate
+  warnings, subagent, menu/typeahead, and authored slots through their
+  block-owned acquisitions before wiring one complete prompt result into
   turn/debug. In parallel, finish restore/readiness,
   quiescence, and session close. Only then switch client open atomically and
   delete replica, publisher/replay, Node adapters, SCI render reconstruction,
