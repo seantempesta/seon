@@ -1670,8 +1670,21 @@ package-size measurement is added for this test.
   implementation remains deletion inventory for the atomic client cut; its
   source volume and generated package contribution are not performance
   evidence.
-- **Next refill:** build the retained-state harness over real Bun children and
-  the canonical persistent authority session, then move stored-test/authored-route
+- The retained-state harness now holds one and then eight real Bun OS children
+  on independent canonical persistent sessions. Its 52 assertions prove one
+  identical JVM registry connection, unchanged `eavt`/`aevt`/`avet` root
+  identities, one cold `miss-owner`, seven `miss-joined`, all second-pass hits,
+  no publication-socket descriptor in a child, complete session release, and
+  zero remaining flights/callers. The same release-artifact run measured
+  206–225 MiB RSS per child under eight-child pressure, despite no child opening
+  a database. Bun itself measured about 22 MiB. Release packaging therefore
+  does not close the density gate: the combined `seon.db` namespace still
+  reaches its obsolete local Datahike/Konserve implementation. This is retained
+  RSS evidence for the atomic authority-only code cut, not a package-size goal.
+  The proof also exposed an independent cross-runtime aggregate-query Transit
+  mismatch, recorded in
+  [[../../seon/issues/bun-transit-query-list-is-not-ordinary-on-jvm]].
+- **Next refill:** move stored-test/authored-route
   consumers onto the existing per-agent child execution owner, delete global
   pod replay rather than adapting it, finish the remaining web synchronous
   consumers, and

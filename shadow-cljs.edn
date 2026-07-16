@@ -138,6 +138,19 @@
                       :optimizations      :simple
                       :externs           ["externs/node_fs.js"]}}
 
+  ;; Test-only real-process client for the JVM authority retained-state proof.
+  ;; It uses the canonical `seon.db` Bun session and never constructs a local
+  ;; database. `seon.authority-density-test` owns orchestration and assertions;
+  ;; this build is not a production entrypoint or a second test runner.
+  :authority-density-client
+  {:target           :node-script
+   :output-to        "out/authority-density/client.js"
+   :main             seon.db.authority-density-child/-main
+   :devtools         {:enabled false}
+   :compiler-options {:warnings-as-errors false
+                      :optimizations      :simple
+                      :externs           ["externs/node_fs.js"]}}
+
   ;; ACME owns a distinct execution artifact just as it owns :acme-client.
   ;; bin/acme supplies the downstream source root and preload through the same
   ;; flavor-selected Shadow cache; no default watcher writes this output.

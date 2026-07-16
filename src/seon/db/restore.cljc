@@ -213,7 +213,7 @@
            (await
             (db/execute-many
              (cond->
-               {::db/members
+               {:seon.db/members
                 [{::protocol/operation protocol/schema-operation}
                  {::protocol/operation protocol/pull-operation
                   ::protocol/selector completion-attrs
@@ -233,9 +233,9 @@
                   :datahike.resource/max-work 100000
                   :datahike.resource/max-results 1
                   :datahike.resource/max-result-weight 65536}]}
-               point (assoc ::db/coordinate point))))
+               point (assoc :seon.db/coordinate point))))
            [schema-member completion-member publication-member policy-member]
-           (::db/results acquired)]
+           (:seon.db/results acquired)]
        (cond
          (:seon.error/message acquired)
          acquired
@@ -247,7 +247,7 @@
          (let [installed (::protocol/schema schema-member)
                missing (remove #(contains? installed %) completion-attrs)]
            (if (seq missing)
-             {::current-coordinate (::db/coordinate acquired)
+             {::current-coordinate (:seon.db/coordinate acquired)
               ::installed-schema installed
               ::publication-rows []}
              (cond
@@ -262,7 +262,7 @@
 
                :else
                (cond->
-                 {::current-coordinate (::db/coordinate acquired)
+                 {::current-coordinate (:seon.db/coordinate acquired)
                   ::installed-schema installed
                   ::db.id/generator-policies
                   {::id (:datahike.query/result policy-member)}
