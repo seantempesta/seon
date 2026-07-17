@@ -208,6 +208,70 @@
            (is (= :seon.agent.run/remaining-ms
                   (nth (last resume-tx) 2)))))))))
 
+(deftest close-pause-and-resume-reuse-an-explicit-database-value
+  (async done
+    (let [original-db db/db
+          original-pull db/pull
+          original-transact db/transact!
+          db-calls (atom 0)
+          deadline (js/Date. (+ (.getTime (js/Date.)) 60000))
+          paused-at (js/Date. 1000)
+          pulls
+          (atom
+           [{:seon.agent.run/deadline deadline}
+            {:seon.agent.run/paused-at paused-at
+             :seon.agent.run/remaining-ms 5000}
+            {:seon.agent.run/id "run-a"
+             :seon.agent.run/agent
+             {:seon.agent/id "agent-a"
+              :seon.agent/run {:seon.agent.run/id "run-a"}}}])
+          transactions (atom [])]
+      (set! db/db
+            (fn
+              ([]
+               (swap! db-calls inc)
+               (js/Promise.resolve database-after))
+              ([_]
+               (swap! db-calls inc)
+               (js/Promise.resolve database-after))))
+      (set! db/pull
+            (fn
+              ([request]
+               (is (identical? database (::db/db request)))
+               (let [value (first @pulls)]
+                 (swap! pulls subvec 1)
+                 (js/Promise.resolve value)))
+              ([_ _] (js/Promise.reject (js/Error. "unexpected pull arity")))
+              ([_ _ _] (js/Promise.reject (js/Error. "unexpected pull arity")))))
+      (set! db/transact!
+            (fn [& call-args]
+              (swap! transactions conj (first call-args))
+              (js/Promise.resolve native-report)))
+      (finish!
+       done
+       [[#(set! db/db %) original-db]
+        [#(set! db/pull %) original-pull]
+        [#(set! db/transact! %) original-transact]]
+       (fn ^:async test-explicit-database []
+         (await
+          (run/pause!
+           {:seon.agent/id "agent-a"
+            :seon.agent.run/id "run-a"
+            ::db/db database}))
+         (await
+          (run/resume!
+           {:seon.agent/id "agent-a"
+            :seon.agent.run/id "run-a"
+            ::db/db database}))
+         (await
+          (run/close-run!
+           {:seon.agent.run/id "run-a"
+            :seon.agent.run/closed-reason :waited
+            ::db/db database}))
+         (is (zero? @db-calls))
+         (is (= 3 (count @transactions)))
+         (is (every? #(identical? database (::db/db %)) @transactions)))))))
+
 (deftest close-fences-owned-pointer-and-notifies-from-db-after
   (async done
     (let [original-db db/db

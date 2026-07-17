@@ -537,10 +537,13 @@
 (schema/register! ::close-run-request
   [:map
    [:seon.agent.run/id            :seon.agent.run/id]
-   [:seon.agent.run/closed-reason :seon.agent.run/closed-reason]])
+   [:seon.agent.run/closed-reason :seon.agent.run/closed-reason]
+   [:seon.db/db {:optional true} :seon.db/db]])
 
-(defn- close-tx-data
-  "The tx-data [[close-run!]] commits: always the close-row (status :closed +
+(defn ^:no-doc close-tx-data
+  "Transaction data that closes a run.
+
+   Always the close-row (status :closed +
    reason). When the agent still OWNS this run, ALSO lead with the work-fence
    CAS ([[run-fence]] — assert the pointer STILL names this run) and retract the
    pointer, all in ONE tx — so a supersede landing in the owns?-read→commit
@@ -700,8 +703,9 @@
    retract stay in ONE tx — never a `:closed` run with a live pointer, which
    would deadlock `open-run!`'s absent-pointer CAS. `^:async`."
   {:malli/schema [:=> [:cat ::close-run-request] ::transact-result]}
-  [{run-id :seon.agent.run/id reason :seon.agent.run/closed-reason}]
-  (let [database (await (db/db))]
+  [{run-id :seon.agent.run/id reason :seon.agent.run/closed-reason
+    database :seon.db/db}]
+  (let [database (or database (await (db/db)))]
     (if (error-value? database)
       database
       (let [r (await
@@ -814,7 +818,8 @@
 (schema/register! ::pause-request
   [:map
    [:seon.agent/id     :string]
-   [:seon.agent.run/id :seon.agent.run/id]])
+   [:seon.agent.run/id :seon.agent.run/id]
+   [:seon.db/db {:optional true} :seon.db/db]])
 
 (defn ^:async pause!
   "Pause the open run: stamp `paused-at` = now (⇒ `:paused`).
@@ -824,8 +829,8 @@
    never instantly blows the clock bound. The tx LEADS with the [[run-fence]]
    CAS. `^:async`."
   {:malli/schema [:=> [:cat ::pause-request] ::transact-result]}
-  [{id :seon.agent/id run-id :seon.agent.run/id}]
-  (let [database (await (db/db))]
+  [{id :seon.agent/id run-id :seon.agent.run/id database :seon.db/db}]
+  (let [database (or database (await (db/db)))]
     (if (error-value? database)
       database
       (let [run (await
@@ -854,7 +859,8 @@
 (schema/register! ::resume-request
   [:map
    [:seon.agent/id     :string]
-   [:seon.agent.run/id :seon.agent.run/id]])
+   [:seon.agent.run/id :seon.agent.run/id]
+   [:seon.db/db {:optional true} :seon.db/db]])
 
 (defn ^:async resume!
   "Resume a PAUSED run: RETRACT `paused-at` (⇒ `:running`).
@@ -866,8 +872,8 @@
    overwrite with the default window. The tx LEADS with the [[run-fence]] CAS
    too. `^:async`."
   {:malli/schema [:=> [:cat ::resume-request] ::transact-result]}
-  [{id :seon.agent/id run-id :seon.agent.run/id}]
-  (let [database (await (db/db))]
+  [{id :seon.agent/id run-id :seon.agent.run/id database :seon.db/db}]
+  (let [database (or database (await (db/db)))]
     (if (error-value? database)
       database
       (let [run (await

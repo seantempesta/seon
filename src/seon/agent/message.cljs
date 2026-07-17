@@ -291,6 +291,77 @@
        distinct
        vec))
 
+(defn- message-transaction
+  "Build the one generated-id message transaction from acquired message data."
+  [{:seon.agent.message/keys [content from to origin at send-data]}]
+  (let [from-user? (:seon.agent.message/from-user? send-data)
+        hops (if from-user?
+               0
+               (inc (:seon.agent.message/hops send-data)))
+        origin (or origin (if from-user? :human :agent))
+        agent-tos
+        (if (= origin :human)
+          (:seon.agent.message/agent-tos send-data)
+          [])
+        step-allocations
+        (mapv
+         (fn [idx agent-ref]
+           {:seon.agent.message/allocation-key
+            (keyword "seon.agent.message" (str "plan-id-" idx))
+            :seon.agent.message/agent-ref agent-ref})
+         (range)
+         agent-tos)
+        allocations
+        (into
+         [{::db.id/key :seon.agent.message/id
+           ::db.id/identity-attr :seon.agent.message/id}]
+         (map
+          (fn [{allocation-key :seon.agent.message/allocation-key}]
+            {::db.id/key allocation-key
+             ::db.id/identity-attr :my.plan/id}))
+         step-allocations)]
+    {:seon.agent.message/allocations allocations
+     :seon.agent.message/hops hops
+     :seon.agent.message/transaction-builder
+     (fn [ids]
+       (let [message-id (get ids :seon.agent.message/id)
+             message-row
+             {:seon.agent.message/id message-id
+              :seon.agent.message/from from
+              :seon.agent.message/to to
+              :seon.agent.message/content content
+              :seon.agent.message/at at
+              :seon.agent.message/hops hops
+              :seon.agent.message/origin origin}
+             plan-rows
+             (mapv
+              (fn [{allocation-key :seon.agent.message/allocation-key
+                    agent-ref :seon.agent.message/agent-ref}]
+                {:my.plan/id (get ids allocation-key)
+                 :my.plan/title (internal/clip-title content)
+                 :my.plan/status :open
+                 :my.plan/created-at at
+                 :my.plan/agent agent-ref
+                 :my.plan/from from
+                 :my.plan/message [:seon.agent.message/id message-id]})
+              step-allocations)]
+         {:seon.db/tx-data (into [message-row] plan-rows)}))}))
+
+(defn ^:async ^:no-doc message-transaction-for
+  "Acquire and build one message transaction at an immutable database value."
+  [database {:seon.agent.message/keys [content from to origin]}]
+  (let [to (normalize-recipients to)
+        send-data (await (internal/acquire-send-data database from to))]
+    (if (failed-read? send-data)
+      send-data
+      (message-transaction
+       {:seon.agent.message/content content
+        :seon.agent.message/from from
+        :seon.agent.message/to to
+        :seon.agent.message/origin origin
+        :seon.agent.message/at (js/Date.)
+        :seon.agent.message/send-data send-data}))))
+
 (defn ^:async message!
   "Send a message; the single entry point for message writes.
 
@@ -353,82 +424,31 @@
       (let [database (or database (await (db/db)))]
         (if (failed-read? database)
           database
-          (let [send-data (await (internal/acquire-send-data database from to))]
-            (if (failed-read? send-data)
-              send-data
-              (let [from-user? (:seon.agent.message/from-user? send-data)
-                    hops (if from-user?
-                           0
-                           (inc (:seon.agent.message/hops send-data)))
-                    ;; Provenance: explicit :origin wins (a :core nudge);
-                    ;; otherwise derived — a user-ref send is :human, every
-                    ;; other send is :agent. Never stored as nil.
-                    origin (or origin (if from-user? :human :agent))
-                    at (js/Date.)
-                    ;; The message ↔ step safety net (WRITE half): a :human
-                    ;; inbound auto-mints one address-step per agent recipient,
-                    ;; atomically in this transaction. "Addressed" is derived
-                    ;; from the step's completion; there is no stored flag.
-                    agent-tos
-                    (if (= origin :human)
-                      (:seon.agent.message/agent-tos send-data)
-                      [])
-                    step-allocations
-                    (mapv
-                     (fn [idx agent-ref]
-                       {:seon.agent.message/allocation-key
-                        (keyword "seon.agent.message" (str "plan-id-" idx))
-                        :seon.agent.message/agent-ref agent-ref})
-                     (range)
-                     agent-tos)
-                    allocations
-                    (into
-                     [{::db.id/key :seon.agent.message/id
-                       ::db.id/identity-attr :seon.agent.message/id}]
-                     (map
-                      (fn [{allocation-key
-                            :seon.agent.message/allocation-key}]
-                        {::db.id/key allocation-key
-                         ::db.id/identity-attr :my.plan/id}))
-                     step-allocations)
-                    env
+          (let [transaction
+                (await
+                 (message-transaction-for
+                  database
+                  {:seon.agent.message/content content
+                   :seon.agent.message/from from
+                   :seon.agent.message/to to
+                   :seon.agent.message/origin origin}))]
+            (if (failed-read? transaction)
+              transaction
+              (let [env
                     (await
                      (db.id/allocate!
                       {::db/db database
-                       ::db.id/allocations allocations
+                       ::db.id/allocations
+                       (:seon.agent.message/allocations transaction)
                        ::db.id/transaction-builder
-                       (fn [ids]
-                         (let [msg-id (get ids :seon.agent.message/id)
-                               row {:seon.agent.message/id msg-id
-                                    :seon.agent.message/from from
-                                    :seon.agent.message/to to
-                                    :seon.agent.message/content content
-                                    :seon.agent.message/at at
-                                    :seon.agent.message/hops hops
-                                    :seon.agent.message/origin origin}
-                               steps
-                               (mapv
-                                (fn [{allocation-key
-                                      :seon.agent.message/allocation-key
-                                      agent-ref
-                                      :seon.agent.message/agent-ref}]
-                                  {:my.plan/id (get ids allocation-key)
-                                   :my.plan/title
-                                   (internal/clip-title content)
-                                   :my.plan/status :open
-                                   :my.plan/created-at at
-                                   :my.plan/agent agent-ref
-                                   :my.plan/from from
-                                   :my.plan/message
-                                   [:seon.agent.message/id msg-id]})
-                                step-allocations)]
-                           {:seon.db/tx-data (into [row] steps)}))}))
+                       (:seon.agent.message/transaction-builder transaction)}))
                     msg-id (get-in env [::db.id/ids
                                         :seon.agent.message/id])]
                 (if (failed-read? env)
                   env
                   {:seon.agent.message/id msg-id
-                   :seon.agent.message/hops hops}))))))))))
+                   :seon.agent.message/hops
+                   (:seon.agent.message/hops transaction)}))))))))))
 
 ;; ============================================================
 ;; The two agent-facing functions. Thin wrappers over `message!` — `from`

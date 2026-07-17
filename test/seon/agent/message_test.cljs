@@ -55,6 +55,31 @@
     (is (= 81 (count title)))
     (is (re-find #"…$" title))))
 
+(deftest one-pure-builder-owns-message-and-human-plan-transaction-data
+  (let [build @#'message/message-transaction
+        transaction
+        (build
+         {:seon.agent.message/content "do this"
+          :seon.agent.message/from message/user-ref
+          :seon.agent.message/to [[:seon.agent/id "peer"]]
+          :seon.agent.message/at (js/Date. 1000)
+          :seon.agent.message/send-data
+          {:seon.agent.message/from-user? true
+           :seon.agent.message/agent-tos [[:seon.agent/id "peer"]]
+           :seon.agent.message/hops 0}})
+        built
+        ((:seon.agent.message/transaction-builder transaction)
+         {:seon.agent.message/id "message-a"
+          :seon.agent.message/plan-id-0 "plan-a"})
+        [message-row plan-row] (:seon.db/tx-data built)]
+    (is (= 2 (count (:seon.agent.message/allocations transaction))))
+    (is (= 0 (:seon.agent.message/hops transaction)))
+    (is (= "message-a" (:seon.agent.message/id message-row)))
+    (is (= :human (:seon.agent.message/origin message-row)))
+    (is (= "plan-a" (:my.plan/id plan-row)))
+    (is (= [:seon.agent.message/id "message-a"]
+           (:my.plan/message plan-row)))))
+
 (deftest message-request-admits-every-supported-ref-shape
   (let [request (fn [from]
                   {:seon.agent.message/from from

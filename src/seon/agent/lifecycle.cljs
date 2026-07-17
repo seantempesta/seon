@@ -1,319 +1,428 @@
 (ns seon.agent.lifecycle
-  "The agent's run-lifecycle functions — `wait` / `complete` / `pause` / `resume`
-   / `terminate`.
+  "Agent-facing run lifecycle functions over ordinary database values.
 
-   State is DERIVED from the run, so each function is a RUN mutation, not a stored
-   state flip:
-     - `wait`      closes the open run `:waited`      → derived `:idle`
-     - `complete`  closes the open run `:completed`   → derived `:idle`
-     - `pause`     stamps the open run `:paused-at`   → derived `:paused`
-     - `resume`    clears `:paused-at` + re-extends   → derived `:running`
-     - `terminate` sets `:seon.agent/terminated-at` + closes any open run
-                   `:terminated`                      → derived `:terminated`
-
-   Each returns the new DERIVED state keyword (the value the transcript shows:
-   `:idle` for wait/complete, `:paused`/`:running` for pause/resume,
-   `:terminated` for terminate), or a loud error envelope on a failed transact
-   / no agent in scope / no open run (errors are values — never a throw). The
-   REASON a run closed lives on the run (`:seon.agent.run/closed-reason`), not
-   a separate note. No function ever writes a self→self message.
-
-   `wait` and `complete` act on the calling agent. `pause` and `resume` default
-   to the caller but accept an explicit target: root manages the cluster and an
-   ordinary agent manages itself and descendants. `terminate` takes an explicit
-   target under the same rule and never permits terminating root. Caller identity
-   comes from the ALS scope via `(seon.db/current-agent-id)`.
-
-   The run mutations live in [[seon.agent.run]]; the shared
-   no-agent-in-scope envelope in [[seon.agent.internal]].
-
-   `^:async` fns aren't runtime-instrumented — the `:malli/schema` is the
-   contract."
+   State is derived from the agent's termination fact and current run. Each
+   operation acquires one immutable database value, reads every decision from
+   that value, and commits through the one JVM authority. Database failures are
+   returned directly as data; no lifecycle function creates another result
+   envelope or stores a state label."
   (:require
-    [clojure.string :as str]
-    [seon.agent.internal :as internal]
-    [seon.agent.loop :as loop]
-    [seon.agent.message :as msg]
-    [seon.agent.runtime :as runtime]
-    [seon.agent.run :as run]
-    [seon.agent.testrun :as testrun]
-    [seon.db :as db]
-    [seon.runtime.admission :as admission]
-    [seon.schema :as schema]))
+   [clojure.string :as str]
+   [seon.agent.loop :as loop]
+   [seon.agent.message :as message]
+   [seon.agent.runtime :as runtime]
+   [seon.agent.run :as run]
+   [seon.db :as db]
+   [seon.db.id :as db.id]
+   [seon.db.protocol :as protocol]
+   [seon.runtime.admission :as admission]
+   [seon.schema :as schema]))
 
-(schema/register! ::note   :string)
+(schema/register! ::note :string)
 (schema/register! ::result :string)
 (schema/register! ::target-request
   [:map [:seon.agent/id {:optional true} :seon.agent/id]])
+(schema/register! ::direct-error
+  [:map [:seon.error/message :string]])
+(schema/register! ::lifecycle-result
+  [:or :seon.derive/state ::direct-error])
+
+(defn- error-value?
+  [value]
+  (and (map? value) (string? (:seon.error/message value))))
+
+(defn- error-value
+  ([message]
+   {:seon.error/message message})
+  ([message data]
+   {:seon.error/message message
+    :seon.error/data data}))
+
+(defn- no-agent-error
+  [function-name]
+  (error-value
+   (str function-name ": no agent in scope — call inside "
+        "(seon.db/with-agent …).")))
 
 (defn- no-open-run-error
-  "The error envelope a function returns when the agent has no OPEN run to act on
-   (e.g. `wait` called while already idle)."
-  [fn-name id]
-  {:seon.db/ok? false
-   :seon.db/error
-   {:seon.error/message
-    (str fn-name ": agent " (pr-str id) " has no open run to act on "
-         "(it is not currently running).")}})
+  [function-name agent-id]
+  (error-value
+   (str function-name ": agent " (pr-str agent-id)
+        " has no open run to act on (it is not currently running).")))
+
+(defn- unauthorized-target-error
+  [function-name caller-id target-id]
+  (error-value
+   (str function-name ": agent " (pr-str caller-id) " cannot manage "
+        (pr-str target-id) "; root manages the cluster and ordinary agents "
+        "manage only themselves and their descendants.")))
+
+(def ^:private target-selector
+  '[:db/id :seon.agent/id :seon.agent/terminated-at
+    {:seon.agent/parent ...}
+    {:seon.agent/run
+     [:seon.agent.run/id :seon.agent.run/status
+      :seon.agent.run/started-at :seon.agent.run/paused-at]}])
+
+(defn- manages-target?
+  [caller-id target]
+  (and (string? caller-id)
+       (map? target)
+       (or (= "root" caller-id)
+           (loop [agent target seen #{}]
+             (let [id (:seon.agent/id agent)]
+               (cond
+                 (nil? id) false
+                 (= caller-id id) true
+                 (contains? seen id) false
+                 :else (recur (:seon.agent/parent agent) (conj seen id))))))))
+
+(defn ^:async ^:private acquire-target
+  [database function-name caller-id target-id]
+  (let [target
+        (await
+         (db/pull
+          {::db/db database
+           ::db/selector target-selector
+           ::db/eid [:seon.agent/id target-id]}))]
+    (cond
+      (error-value? target) target
+      (not (manages-target? caller-id target))
+      (unauthorized-target-error function-name caller-id target-id)
+      :else target)))
+
+(defn- stale-database-error?
+  [value]
+  (= protocol/stale-coordinate-error
+     (get-in value [:seon.error/data ::protocol/error-kind])))
+
+(defn- completed-test-error
+  [test-runs]
+  (when-let [{:seon.agent.testrun/keys [passed failed errors]}
+             (when (seq test-runs)
+               (apply max-key :db/id test-runs))]
+    (when (or (pos? (or failed 0)) (pos? (or errors 0)))
+      (error-value
+       (str "complete refused — your latest test run is RED ("
+            (or failed 0) " failed, " (or passed 0) " passed"
+            (when (pos? (or errors 0))
+              (str ", " errors " error" (when (not= errors 1) "s")))
+            "). Run the tests and SEE a green result render before completing; "
+            "to stop without claiming success, pause or report the honest status "
+            "with message/user.")))))
+
+(defn- close-transaction-data
+  [agent-id run-id reason closed-at]
+  (run/close-tx-data true agent-id run-id reason closed-at))
 
 (defn ^{:async true :seon.fn/agent-facing? true} wait
-  "Park the calling agent: close the open run `:waited`, derive `:idle`.
+  "Park the calling agent by closing its current run as `:waited`."
+  {:malli/schema [:=> [:catn [::note :string]] ::lifecycle-result]}
+  [_note]
+  (if-let [agent-id (db/current-agent-id)]
+    (let [database (await (db/db))]
+      (if (error-value? database)
+        database
+        (let [current (await
+                       (run/current-run
+                        {:seon.agent/id agent-id :seon.db/db database}))]
+          (cond
+            (error-value? current) current
+            (nil? current) (no-open-run-error "wait" agent-id)
+            :else
+            (let [report
+                  (await
+                   (db/transact!
+                    {::db/db database
+                     ::db/tx-data
+                     (close-transaction-data
+                      agent-id (:seon.agent.run/id current) :waited
+                      (js/Date.))}))]
+              (if (error-value? report) report :idle))))))
+    (no-agent-error "wait")))
 
-   `:idle` is the single wakeable parked state (a new message opens a fresh
-   run). The `note` is informational only — WHY it parked is the run's `:waited`
-   closed-reason. Returns `:idle` on success, a loud error envelope on a
-   failed transact, no agent in scope, or no open run."
-  {:malli/schema [:=> [:catn [::note :string]]
-                  [:or :seon.derive/state :seon.db/transact-response]]}
-  [note]
-  (if-let [id (db/current-agent-id)]
-    (if-let [r (run/current-run {:seon.agent/id id})]
-      (let [env (await (run/close-run!
-                         {:seon.agent.run/id            (:seon.agent.run/id r)
-                          :seon.agent.run/closed-reason :waited}))]
-        (if (:seon.db/ok? env) :idle env))
-      (no-open-run-error "wait" id))
-    (internal/no-agent-error "wait")))
+(def ^:private completion-agent-selector
+  '[:db/id :seon.agent/id
+    {:seon.agent/parent [:db/id :seon.agent/id]}
+    {:seon.agent.testrun/_agent
+     [:db/id :seon.agent.testrun/passed :seon.agent.testrun/failed
+      :seon.agent.testrun/errors]}])
 
-(defn- messaged-recipient-since?
-  "Whether the agent messaged `recipient-eid` at/after `started-at`.
+(defn ^:async ^:private completion-data
+  [database agent-id current]
+  (let [agent
+        (await
+         (db/pull
+          {::db/db database
+           ::db/selector completion-agent-selector
+           ::db/eid [:seon.agent/id agent-id]}))]
+    (if (error-value? agent)
+      agent
+      (let [parent (:seon.agent/parent agent)
+            recipient-ref
+            (if parent
+              [:seon.agent/id (:seon.agent/id parent)]
+              message/user-ref)
+            recipient
+            (if parent
+              parent
+              (await
+               (db/pull
+                {::db/db database
+                 ::db/selector [:db/id :seon.user/id]
+                 ::db/eid message/user-ref})))]
+        (if (error-value? recipient)
+          recipient
+          (let [messages
+                (await
+                 (db/query
+                  {::db/db database
+                   ::db/query
+                   '[:find ?message ?at
+                     :in $ ?from ?to
+                     :where
+                     [?message :seon.agent.message/from ?from]
+                     [?message :seon.agent.message/to ?to]
+                     [?message :seon.agent.message/at ?at]]
+                   ::db/args [(:db/id agent) (:db/id recipient)]
+                   ::db/max-results 10000
+                   ::db/max-result-weight 524288}))]
+            (if (error-value? messages)
+              messages
+              {:seon.agent.lifecycle/agent agent
+               :seon.agent.lifecycle/recipient recipient-ref
+               :seon.agent.lifecycle/already-messaged?
+               (boolean
+                (some
+                 (fn [[_ at]]
+                   (>= (.getTime ^js at)
+                       (.getTime ^js (:seon.agent.run/started-at current))))
+                 messages))})))))))
 
-   DERIVED from the message log at call time (from = the agent's eid,
-   to ∋ the recipient, at ≥ the run's started-at) — no stored flag. The
-   [[complete]] delivery gate: a message already sent this run IS the
-   answer, so complete closes without sending a second one."
-  [agent-eid recipient-eid started-at]
-  (->> (db/query {:seon.db/query '[:find ?m ?at
-                                   :in $ ?from ?to
-                                   :where
-                                   [?m :seon.agent.message/from ?from]
-                                   [?m :seon.agent.message/to ?to]
-                                   [?m :seon.agent.message/at ?at]]
-                  :seon.db/args [agent-eid recipient-eid]})
-       (some (fn [[_ at]]
-               (>= (.getTime ^js at) (.getTime ^js started-at))))
-       boolean))
+(defn- completion-transaction-data
+  [agent-id run-id result result-ref message-data ids now]
+  (let [[fence close-row retract-pointer]
+        (close-transaction-data agent-id run-id :completed now)
+        result-row
+        (cond-> {:seon.agent.run/id run-id}
+          (not (str/blank? result)) (assoc :seon.agent.run/result result)
+          (some? result-ref) (assoc :seon.agent.run/result-ref result-ref))
+        message-rows
+        (if message-data
+          (:seon.db/tx-data
+           ((:seon.agent.message/transaction-builder message-data) ids))
+          [])]
+    (into [fence]
+          (concat
+           (when (> (count result-row) 1) [result-row])
+           message-rows
+           [close-row retract-pointer]))))
 
-(defn- complete-refusal
-  "Refuse `complete` (honest value) when the agent's latest test run is RED.
-
-   Purely DERIVED from the agent's own `:seon.agent.testrun` datoms — no
-   stored gate flag. nil (⇒ complete proceeds) when the agent ran no
-   recognized test suite (a non-test task — root/research agent — completes
-   normally) OR the latest run was green (0 failed, 0 errors). A red latest
-   run means not-done: the agent must SEE a real green render before claiming
-   success, so we return the loud, actionable error envelope it reads next
-   turn. `complete` = a success claim; honest give-up is `pause` or a
-   `(message/user …)`, neither of which is gated."
-  [id]
-  (let [{:seon.agent.testrun/keys [passed failed errors]}
-        (testrun/latest-run @db/*conn* id)]
-    (when (and (some? failed) (or (pos? failed) (pos? errors)))
-      {:seon.db/ok? false
-       :seon.db/error
-       {:seon.error/message
-        (str "complete refused — your latest test run is RED ("
-             failed " failed, " (or passed 0) " passed"
-             (when (pos? errors) (str ", " errors " error" (when (not= errors 1) "s")))
-             "). Run the tests and SEE a green result render before completing; "
-             "a result you did not see the runtime render does not count. To "
-             "STOP without claiming success, `pause` or report your honest "
-             "status with (message/user \"…\") — those are not gated.")}})))
+(defn ^:async ^:private complete-once
+  [result result-ref]
+  (if-let [agent-id (db/current-agent-id)]
+    (let [database (await (db/db))]
+      (if (error-value? database)
+        database
+        (let [current
+              (await
+               (run/current-run
+                {:seon.agent/id agent-id :seon.db/db database}))]
+          (cond
+            (error-value? current) current
+            (nil? current) (no-open-run-error "complete" agent-id)
+            :else
+            (let [acquired (await (completion-data database agent-id current))]
+              (if (error-value? acquired)
+                acquired
+                (or
+                 (completed-test-error
+                  (:seon.agent.testrun/_agent
+                   (:seon.agent.lifecycle/agent acquired)))
+                 (let [send?
+                       (and (not (str/blank? result))
+                            (not (:seon.agent.lifecycle/already-messaged?
+                                  acquired)))
+                       message-data
+                       (when send?
+                         (await
+                          (message/message-transaction-for
+                           database
+                           {:seon.agent.message/content result
+                            :seon.agent.message/from
+                            [:seon.agent/id agent-id]
+                            :seon.agent.message/to
+                            [(:seon.agent.lifecycle/recipient acquired)]})))
+                       run-id (:seon.agent.run/id current)]
+                   (if (error-value? message-data)
+                     message-data
+                     (if message-data
+                       (await
+                        (db.id/allocate!
+                         {::db/db database
+                          ::db.id/allocations
+                          (:seon.agent.message/allocations message-data)
+                          ::db.id/transaction-builder
+                          (fn [ids]
+                            {::db/expected-db database
+                             ::db/tx-data
+                             (completion-transaction-data
+                              agent-id run-id result result-ref message-data ids
+                              (js/Date.))})}))
+                       (await
+                        (db/transact!
+                         {::db/db database
+                          ::db/expected-db database
+                          ::db/tx-data
+                          (completion-transaction-data
+                           agent-id run-id result result-ref nil nil
+                           (js/Date.))}))))))))))))
+    (no-agent-error "complete")))
 
 (defn ^{:async true :seon.fn/agent-facing? true} complete
-  "Finish the calling agent's work; close the open run `:completed`.
-
-   Derived `:idle` (a new message opens a fresh run). The `result` string is
-   delivered to WHOEVER ASKED — with a `:seon.agent/parent` it is messaged to
-   the parent (waking it via the normal inbound gate); with no parent it is
-   messaged to the HUMAN, the same `message!` path as `(message/user …)` —
-   UNLESS the agent already messaged that recipient THIS RUN: the earlier
-   message IS the answer, so complete just closes without sending a second,
-   answer-clobbering message ([[messaged-recipient-since?]] — derived from
-   the message log, no stored flag). Delivery, when it happens, precedes the
-   close (a caller that polls for idle then reads the last user message
-   always sees the result). A blank `result` delivers nothing (there is
-   nothing to say) and just closes. A failed delivery is returned as the
-   error envelope WITHOUT closing the run — retry with a fixed result.
-
-   DURABLE VALUE (multi-agent-context Piece 1): the `result` (and optional
-   `result-ref`, an entity id pointing at the stored work product) are written
-   onto the RUN — `:seon.agent.run/result` / `:seon.agent.run/result-ref` —
-   UNCONDITIONALLY, even when the message is skipped by the answered-this-run
-   guard. Message = wake signal; datom = the value a parent (or the human)
-   reads back at any later time via the run, surviving turns and restarts. So
-   REPORT=DATA, MESSAGE=POINTER: `result` is the ANSWER itself when it is
-   short, else a SHORT pointer (the stored entity id + a one-line summary),
-   with `result-ref` the durable handle — never a long report inline (a
-   multi-line result truncates mid-string and never sends). Store big findings
-   as data first; the reader QUERIES the stored data. Returns `:idle` on
-   success, the error envelope on a failed transact, no agent in scope, or no
-   open run."
-  {:malli/schema [:function
-                  [:=> [:catn [::result :string]]
-                   [:or :seon.derive/state :seon.db/transact-response]]
-                  [:=> [:catn [::result :string] [::result-ref :seon.db/ref]]
-                   [:or :seon.derive/state :seon.db/transact-response]]]}
-  ([result] (complete result nil))
-  ([result result-ref]
-   (if-let [id (db/current-agent-id)]
-     (if-let [r (run/current-run {:seon.agent/id id})]
-       ;; Complete-gate: refuse a success claim while the latest real test
-       ;; run is RED (derived from this agent's own testrun datoms). nil =
-       ;; no test run or green ⇒ proceed. See [[complete-refusal]].
-       (or
-         (complete-refusal id)
-         (let [ent       (db/entity {:seon.db/ref [:seon.agent/id id]})
-               run-id    (:seon.agent.run/id r)
-               parent    (:db/id (:seon.agent/parent ent))
-               recipient (or parent
-                             (:db/id (db/entity {:seon.db/ref msg/user-ref})))
-               started   (:seon.agent.run/started-at r)
-               said?     (boolean
-                           (and recipient started
-                                (messaged-recipient-since?
-                                  (:db/id ent) recipient started)))
-               ;; DURABLE VALUE first — written UNCONDITIONALLY (the said? guard
-               ;; gates only the wake MESSAGE, never the datom). A blank result
-               ;; with no ref writes nothing (optional = absent, never store nil).
-               result-row (cond-> {:seon.agent.run/id run-id}
-                            (not (str/blank? result)) (assoc :seon.agent.run/result result)
-                            (some? result-ref)        (assoc :seon.agent.run/result-ref result-ref))
-               wrote      (when (> (count result-row) 1)
-                            (await (db/transact! {:seon.db/tx-data [result-row]})))
-               sent       (when-not (or (str/blank? result) said?)
-                            (await (msg/message!
-                                     {:seon.agent.message/content result
-                                      :seon.agent.message/to
-                                      (if parent [parent] [msg/user-ref])})))]
-           (cond
-             (false? (:seon.db/ok? wrote)) wrote
-             (false? (:seon.db/ok? sent))  sent
-             :else
-             (let [env (await (run/close-run!
-                                {:seon.agent.run/id            run-id
-                                 :seon.agent.run/closed-reason :completed}))]
-               (if (:seon.db/ok? env) :idle env)))))
-       (no-open-run-error "complete" id))
-     (internal/no-agent-error "complete"))))
-
-(defn ^{:async true :seon.fn/agent-facing? true} pause
-  "Hold a managed agent without killing it; stamp its run `paused-at`.
-
-   With no argument, target the caller. Root may target any ordinary agent; an
-   ordinary agent may target itself or a descendant. Derived `:paused`; banks
-   the remaining wall-clock budget. `resume`
-   re-extends the deadline by it. Returns `:paused` on success, the error
-   envelope on a failed transact, no agent in scope, or no open run."
+  "Complete the current run atomically with its result and optional message."
   {:malli/schema
    [:function
-    [:=> [:catn] [:or :seon.derive/state :seon.db/transact-response]]
-    [:=> [:cat ::target-request]
-     [:or :seon.derive/state :seon.db/transact-response]]]}
+    [:=> [:catn [::result :string]] ::lifecycle-result]
+    [:=> [:catn [::result :string] [::result-ref :seon.db/ref]]
+     ::lifecycle-result]]}
+  ([result] (await (complete result nil)))
+  ([result result-ref]
+   (let [first-result (await (complete-once result result-ref))
+         final-result
+         (if (stale-database-error? first-result)
+           (await (complete-once result result-ref))
+           first-result)]
+     (if (error-value? final-result) final-result :idle))))
+
+(defn ^{:async true :seon.fn/agent-facing? true} pause
+  "Pause the current run of a managed agent."
+  {:malli/schema
+   [:function
+    [:=> [:catn] ::lifecycle-result]
+    [:=> [:cat ::target-request] ::lifecycle-result]]}
   ([] (await (pause {})))
   ([{target-id :seon.agent/id}]
    (let [caller-id (db/current-agent-id)
-         id        (or target-id caller-id)
-         database  @db/*conn*]
-     (cond
-       (nil? id)
-       (internal/no-agent-error "pause")
-
-       (nil? caller-id)
-       (internal/no-agent-error "pause")
-
-       (not (internal/manages? database caller-id id))
-       (internal/unauthorized-target-error "pause" caller-id id)
-
-       :else
-       (if-let [r (run/current-run {:seon.agent/id id})]
-         (let [env (await (run/pause! {:seon.agent/id     id
-                                       :seon.agent.run/id (:seon.agent.run/id r)}))]
-           (if (:seon.db/ok? env) :paused env))
-         (no-open-run-error "pause" id))))))
+         target-id (or target-id caller-id)]
+     (if-not caller-id
+       (no-agent-error "pause")
+       (let [database (await (db/db))]
+         (if (error-value? database)
+           database
+           (let [target
+                 (await
+                  (acquire-target database "pause" caller-id target-id))]
+             (if (error-value? target)
+               target
+               (let [current
+                     (await
+                      (run/current-run
+                       {:seon.agent/id target-id :seon.db/db database}))]
+                 (cond
+                   (error-value? current) current
+                   (nil? current) (no-open-run-error "pause" target-id)
+                   :else
+                   (let [report
+                         (await
+                          (run/pause!
+                           {:seon.agent/id target-id
+                            :seon.agent.run/id (:seon.agent.run/id current)
+                            :seon.db/db database}))]
+                     (if (error-value? report) report :paused))))))))))))
 
 (defn ^{:async true :seon.fn/agent-facing? true} resume
-  "Wake a managed paused run: clear `paused-at` and re-enter the drive loop.
-
-   With no argument, target the caller. Root may target any ordinary agent; an
-   ordinary agent may target itself or a descendant. Derived `:running`; re-extend the
-   deadline by the banked remaining-ms (a long pause never instantly blows the
-   clock bound), and RE-ENTER the drive loop on the still-open run — the loop
-   EXITED on :pause, so resume must re-drive or the run is derived `:running`
-   with nothing folding turns. Returns `:running` on success, the error
-   envelope on a failed transact (incl. a not-actually-paused run), no agent in
-   scope, or no open run."
+  "Resume the paused current run of a managed agent."
   {:malli/schema
    [:function
-    [:=> [:catn] [:or :seon.derive/state :seon.db/transact-response]]
-    [:=> [:cat ::target-request]
-     [:or :seon.derive/state :seon.db/transact-response]]]}
+    [:=> [:catn] ::lifecycle-result]
+    [:=> [:cat ::target-request] ::lifecycle-result]]}
   ([] (await (resume {})))
   ([{target-id :seon.agent/id}]
    (if-not (admission/available?)
-     {:seon.db/ok? false
-      :seon.db/error (:seon/error (admission/unavailable))}
+     (:seon/error (admission/unavailable))
      (let [caller-id (db/current-agent-id)
-           id        (or target-id caller-id)
-           database  @db/*conn*]
-       (cond
-         (nil? id)
-         (internal/no-agent-error "resume")
+           target-id (or target-id caller-id)]
+       (if-not caller-id
+         (no-agent-error "resume")
+         (let [database (await (db/db))]
+           (if (error-value? database)
+             database
+             (let [target
+                   (await
+                    (acquire-target database "resume" caller-id target-id))]
+               (if (error-value? target)
+                 target
+                 (let [current
+                       (await
+                        (run/current-run
+                         {:seon.agent/id target-id :seon.db/db database}))]
+                   (cond
+                     (error-value? current) current
+                     (nil? current) (no-open-run-error "resume" target-id)
+                     :else
+                     (let [report
+                           (await
+                            (run/resume!
+                             {:seon.agent/id target-id
+                              :seon.agent.run/id (:seon.agent.run/id current)
+                              :seon.db/db database}))]
+                       (cond
+                         (error-value? report) report
+                         (not (admission/available?))
+                         (:seon/error (admission/unavailable))
+                         :else
+                         (do
+                           (loop/drive-run! {:seon.agent/id target-id})
+                           :running))))))))))))))
 
-         (nil? caller-id)
-         (internal/no-agent-error "resume")
-
-         (not (internal/manages? database caller-id id))
-         (internal/unauthorized-target-error "resume" caller-id id)
-
-         :else
-         (if-let [r (run/current-run {:seon.agent/id id})]
-           (let [env (await (run/resume! {:seon.agent/id     id
-                                          :seon.agent.run/id (:seon.agent.run/id r)}))]
-             (cond
-               (false? (:seon.db/ok? env)) env
-               (not (admission/available?))
-               {:seon.db/ok? false
-                :seon.db/error (:seon/error (admission/unavailable))}
-               :else
-               (do (loop/drive-run! {:seon.agent/id id})
-                   :running)))
-           (no-open-run-error "resume" id)))))))
+(defn ^:async ^:private terminate-once
+  [caller-id target-id]
+  (let [database (await (db/db))]
+    (if (error-value? database)
+      database
+      (let [target
+            (await
+             (acquire-target database "terminate" caller-id target-id))]
+        (cond
+          (error-value? target) target
+          (:seon.agent/terminated-at target) :terminated
+          :else
+          (let [current
+                (await
+                 (run/current-run
+                  {:seon.agent/id target-id :seon.db/db database}))]
+            (if (error-value? current)
+              current
+              (let [termination
+                    [:db.fn/cas [:seon.agent/id target-id]
+                     :seon.agent/terminated-at nil (js/Date.)]
+                    close-data
+                    (when current
+                      (close-transaction-data
+                       target-id (:seon.agent.run/id current) :terminated
+                       (js/Date.)))
+                    report
+                    (await
+                     (db/transact!
+                      {::db/db database
+                       ::db/expected-db database
+                       ::db/tx-data (into [termination] close-data)}))]
+                (if (error-value? report) report :terminated)))))))))
 
 (defn ^{:async true :seon.fn/agent-facing? true} terminate
-  "Remove a managed agent from the live fleet while preserving its history.
-
-   Presence ⇒ derived `:terminated`, the one UNWAKEABLE state; the open run
-   closes `:terminated`. Root may target any ordinary agent; an ordinary agent
-   may target itself or a descendant. Root itself is protected.
-   Returns `:terminated` on success, the error envelope on a failed transact."
-  {:malli/schema [:=> [:catn [::id :seon.agent/id]]
-                  [:or :seon.derive/state :seon.db/transact-response]]}
-  [id]
-  (let [caller-id (db/current-agent-id)
-        database  @db/*conn*]
-    (cond
-      (nil? caller-id)
-      (internal/no-agent-error "terminate")
-
-      (= "root" id)
-      {:seon.db/ok? false
-       :seon.db/error
-       {:seon.error/message "terminate: the cluster root cannot be terminated."}}
-
-      (not (internal/manages? database caller-id id))
-      (internal/unauthorized-target-error "terminate" caller-id id)
-
-      :else
-      (let [r   (run/current-run {:seon.agent/id id})
-            env (await (db/transact!
-                         {:seon.db/tx-data [{:seon.agent/id             id
-                                             :seon.agent/terminated-at (js/Date.)}]}))]
-        (if (:seon.db/ok? env)
-          (do (when r
-                (await (run/close-run!
-                         {:seon.agent.run/id            (:seon.agent.run/id r)
-                          :seon.agent.run/closed-reason :terminated})))
-              (runtime/unhost! {:seon.agent/id id})
-              :terminated)
-          env)))))
+  "Terminate a managed non-root agent and atomically close its current run."
+  {:malli/schema [:=> [:catn [::id :seon.agent/id]] ::lifecycle-result]}
+  [target-id]
+  (if-let [caller-id (db/current-agent-id)]
+    (if (= "root" target-id)
+      (error-value "terminate: the cluster root cannot be terminated.")
+      (let [first-result (await (terminate-once caller-id target-id))
+            final-result
+            (if (stale-database-error? first-result)
+              (await (terminate-once caller-id target-id))
+              first-result)]
+        (when (= :terminated final-result)
+          (runtime/unhost! {:seon.agent/id target-id}))
+        final-result))
+    (no-agent-error "terminate")))
