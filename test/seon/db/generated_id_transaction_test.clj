@@ -92,6 +92,7 @@
     (is (true? (::protocol/success? response)))
     {::runtime runtime
      ::database-name database-name
+     ::database (:seon.db/db response)
      ::connection
      (::registry/conn
       (registry/lookup-connection
@@ -109,17 +110,17 @@
    ::id/value value})
 
 (defn- allocate!
-  [runtime database-name request-id transaction-data candidates]
+  [runtime database request-id transaction-data candidates]
   (writer/handle-request
    runtime
    (protocol/transaction-request
-    {::protocol/database-name database-name
-     ::protocol/request-id request-id
+    {::protocol/request-id request-id
+     :seon.db/db database
      ::protocol/transaction-data transaction-data
      ::protocol/generated-candidates candidates})))
 
 (deftest multiple-generated-identities-commit-with-their-relationships
-  (let [{::keys [runtime database-name connection]} (open-database!)
+  (let [{::keys [runtime database connection]} (open-database!)
         thing-value (compact-value "thing")
         other-value (compact-value "other")
         thing-candidate
@@ -128,7 +129,7 @@
         (candidate :allocation/other :generated.other/id other-value)
         response
         (allocate!
-         runtime database-name "generated/relationship"
+         runtime database "generated/relationship"
          [{:db/id "thing-temp"
            :generated.thing/id thing-value
            :generated.thing/name "Thing"
@@ -151,13 +152,13 @@
                         ["thing-temp" "other-temp"])))))
 
 (deftest nested-component-can-own-a-generated-identity
-  (let [{::keys [runtime database-name connection]} (open-database!)
+  (let [{::keys [runtime database connection]} (open-database!)
         child-value (compact-value "nested-child")
         child-candidate
         (candidate :allocation/child :generated.child/id child-value)
         response
         (allocate!
-         runtime database-name "generated/nested"
+         runtime database "generated/nested"
          [{:generated.parent/id "known-parent"
            :generated.parent/child
            {:generated.child/id child-value
@@ -176,7 +177,7 @@
             (d/pull (d/db connection) '[*] child-id))))))
 
 (deftest candidate-conflicts-are-atomic-under-concurrency
-  (let [{::keys [runtime database-name connection]} (open-database!)
+  (let [{::keys [runtime database connection]} (open-database!)
         value (compact-value "contended")
         attempted (candidate :allocation/thing :generated.thing/id value)
         start (promise)
@@ -184,7 +185,7 @@
         (fn [label]
           @start
           (allocate!
-           runtime database-name (str "generated/concurrent/" label)
+           runtime database (str "generated/concurrent/" label)
            [{:generated.thing/id value
              :generated.thing/name label}]
            [attempted]))
@@ -203,20 +204,20 @@
                               :generated.thing/id value)))))))
 
 (deftest generated-manifest-is-part-of-the-durable-request-fingerprint
-  (let [{::keys [runtime database-name]} (open-database!)
+  (let [{::keys [runtime database]} (open-database!)
         value (compact-value "fingerprint")
         request-id "generated/fingerprint"
         original
         (candidate :allocation/thing :generated.thing/id value)
         changed (assoc original ::id/key :allocation/renamed)
         first-response
-        (allocate! runtime database-name request-id
+        (allocate! runtime database request-id
                    [{:generated.thing/id value}] [original])
         recovered-response
-        (allocate! runtime database-name request-id
+        (allocate! runtime database request-id
                    [{:generated.thing/id value}] [original])
         conflict-response
-        (allocate! runtime database-name request-id
+        (allocate! runtime database request-id
                    [{:generated.thing/id value}] [changed])]
     (is (true? (::protocol/success? first-response)))
     (is (true? (::protocol/recovered? recovered-response)))
