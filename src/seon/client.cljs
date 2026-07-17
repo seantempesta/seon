@@ -63,6 +63,7 @@
     [seon.db.coordinate :as db.coordinate]
     [seon.db.id :as id]
     [seon.db.process :as db.process]
+    [seon.derive :as derive]
     [seon.error :as error]
     [seon.log :as log]
     ;; Render protocol — A-2. Required here so the build includes it.
@@ -336,109 +337,108 @@
                   [::launch/writer-cluster
                    ::launch/writer-repl-port-file]))))
 
-(defn- newer-advertisement-coordinate?
-  [candidate current]
-  (or (nil? current)
-      (and (db.coordinate/same-attachment? candidate current)
-           (>= (::db.coordinate/t candidate)
-               (::db.coordinate/t current)))))
-
-(defn- ^:async reconcile-runtime-advertisement!
-  [owner coordinate]
-  (let [ids (await (db/query {::db/query agent/resumable-agent-ids-query
-                              ::db/coordinate coordinate}))]
-    (when (:seon.error/message ids)
-      (throw (ex-info "Runtime advertisement projection failed." ids)))
-    (let [projection (->> ids sort vec)]
-      (when (and (identical? owner (::advertisement-owner @!state))
-                 (= coordinate (::advertisement-desired-coordinate @!state)))
-        (swap! !state assoc
-               ::resumable-agent-ids projection
-               ::resumable-agent-ids-coordinate coordinate
-               ::advertisement-accepted-coordinate coordinate)
-        true))))
-
 (defn- refresh-runtime-advertisement!
-  [owner coordinate]
-  (let [accepted? (atom false)]
-    (swap! !state
-           (fn [state]
-             (let [desired (::advertisement-desired-coordinate state)]
-               (if (and (identical? owner (::advertisement-owner state))
-                        (newer-advertisement-coordinate? coordinate desired))
-                 (do (reset! accepted? true)
-                     (assoc state ::advertisement-desired-coordinate coordinate))
-                 state))))
-    (if @accepted?
-      (-> (reconcile-runtime-advertisement! owner coordinate)
-          (.catch
-           (fn [error]
-             (log/error-console! "seon.client"
-                                 "runtime advertisement refresh failed" error))))
-      (js/Promise.resolve false))))
+  [owner database]
+  (if-not (identical? owner (::advertisement-owner @!state))
+    (js/Promise.resolve false)
+    (let [refresh
+          (-> (derive/resumable-agent-ids database)
+              (.then
+               (fn [ids]
+                 (when (:seon.error/message ids)
+                   (throw
+                    (ex-info "Runtime advertisement projection failed." ids)))
+                 (when (and (identical? owner
+                                        (::advertisement-owner @!state))
+                            (identical? database
+                                        (::advertisement-db @!state)))
+                   (swap! !state assoc ::resumable-agent-ids ids)
+                   true))))]
+      (swap! !state
+             (fn [state]
+               (if (identical? owner (::advertisement-owner state))
+                 (assoc state
+                        ::advertisement-db database
+                        ::advertisement-refresh refresh)
+                 state)))
+      refresh)))
 
-(defn- ^:async settle-runtime-advertisement!
+(def ^:private runtime-advertisement-datom-patterns
+  [{:seon.db/a :seon.agent/id}
+   {:seon.db/a :seon.eval/home-requires}
+   {:seon.db/a :seon.agent/terminated-at}])
+
+(defn- runtime-advertisement-event!
+  [owner event]
+  (when-let [database (:db-after event)]
+    (-> (refresh-runtime-advertisement! owner database)
+        (.catch
+         (fn [error]
+           (log/error-console! "seon.client"
+                               "runtime advertisement refresh failed" error))))))
+
+(defn- ^:async attach-runtime-advertisement-owner!
   [owner]
-  (await
-   (loop []
-     (let [{::keys [advertisement-owner
-                    advertisement-desired-coordinate
-                    advertisement-accepted-coordinate]}
-           @!state]
-       (cond
-         (not (identical? owner advertisement-owner)) false
-         (= advertisement-desired-coordinate advertisement-accepted-coordinate)
-         true
-         :else
-         (do
-           (await
-            (reconcile-runtime-advertisement!
-             owner advertisement-desired-coordinate))
-           (recur)))))))
-
-(defn- ^:async attach-runtime-advertisement!
-  []
-  (if-let [interest-key (::advertisement-interest-key @!state)]
-    (let [owner (::advertisement-owner @!state)]
-      (await (settle-runtime-advertisement! owner))
-      {::db/key interest-key
-       ::db/coordinate (::advertisement-accepted-coordinate @!state)})
-    (let [owner (js-obj)]
-      (swap! !state assoc
-             ::advertisement-owner owner
-             ::advertisement-desired-coordinate nil
-             ::advertisement-accepted-coordinate nil)
-      (let [listening
-            (await
-             (db/listen!
-              {::db/key ::runtime-advertisement
-               ::db/query agent/resumable-agent-ids-query
-               ::db/handler
-               (fn [event]
-                 (refresh-runtime-advertisement!
-                  owner (::db.protocol/coordinate event)))}))]
-        (when (:seon.error/message listening)
+  (if-not (identical? owner (::advertisement-owner @!state))
+    false
+    (let [listening-key (atom nil)]
+      (try
+        (let [interest-key
+              (await
+               (db/listen!
+                {::db/key ::runtime-advertisement
+                 ::db/datom-patterns runtime-advertisement-datom-patterns
+                 ::db/handler #(runtime-advertisement-event! owner %)}))]
+          (when (:seon.error/message interest-key)
+            (throw (ex-info "Runtime advertisement interest failed."
+                            interest-key)))
+          (reset! listening-key interest-key)
+          (if-not (identical? owner (::advertisement-owner @!state))
+            (do (await (db/unlisten! interest-key)) false)
+            (do
+              (swap! !state assoc ::advertisement-interest-key interest-key)
+              (let [database (await (db/db))]
+                (when (:seon.error/message database)
+                  (throw (ex-info "Runtime advertisement database read failed."
+                                  database)))
+                ;; An event may win the race while the latest database read is
+                ;; pending. In that case its db-after already owns the refresh.
+                (if-let [refresh (::advertisement-refresh @!state)]
+                  (await refresh)
+                  (await (refresh-runtime-advertisement! owner database))))
+              (swap! !state dissoc ::advertisement-attaching)
+              interest-key)))
+        (catch :default exception
+          (when @listening-key
+            (await (db/unlisten! @listening-key)))
           (swap! !state
                  (fn [state]
                    (if (identical? owner (::advertisement-owner state))
                      (dissoc state
                              ::advertisement-owner
-                             ::advertisement-desired-coordinate
-                             ::advertisement-accepted-coordinate)
+                             ::advertisement-interest-key
+                             ::advertisement-db
+                             ::advertisement-refresh
+                             ::advertisement-attaching
+                             ::resumable-agent-ids)
                      state)))
-          (throw (ex-info "Runtime advertisement interest failed." listening)))
-        (swap! !state
-               (fn [state]
-                 (if (identical? owner (::advertisement-owner state))
-                   (cond->
-                     (assoc state
-                            ::advertisement-interest-key (::db/key listening))
-                     (nil? (::advertisement-desired-coordinate state))
-                     (assoc ::advertisement-desired-coordinate
-                            (::db/coordinate listening)))
-                   state)))
-        (await (settle-runtime-advertisement! owner))
-        listening))))
+          (throw exception))))))
+
+(defn- attach-runtime-advertisement!
+  []
+  (let [{::keys [advertisement-interest-key advertisement-attaching]} @!state]
+    (cond
+      advertisement-interest-key (js/Promise.resolve advertisement-interest-key)
+      advertisement-attaching advertisement-attaching
+      :else
+      (let [owner (js-obj)
+            attaching
+            (-> (js/Promise.resolve nil)
+                (.then (fn [_] (attach-runtime-advertisement-owner! owner))))]
+        (swap! !state assoc
+               ::advertisement-owner owner
+               ::advertisement-attaching attaching)
+        attaching))))
 
 (defn- ^:async acquire-resumable-agent-ids!
   []
@@ -451,13 +451,13 @@
     (swap! !state dissoc
            ::advertisement-owner
            ::advertisement-interest-key
-           ::advertisement-desired-coordinate
-           ::advertisement-accepted-coordinate
-           ::resumable-agent-ids
-           ::resumable-agent-ids-coordinate)
+           ::advertisement-db
+           ::advertisement-refresh
+           ::advertisement-attaching
+           ::resumable-agent-ids)
     (if interest-key
-      (await (db/unlisten! {::db/key interest-key}))
-      {::db/ok? true})))
+      (await (db/unlisten! interest-key))
+      true)))
 
 (defn start-heartbeat!
   "Holds the Bun event loop open with a minute-cadence heartbeat. The
