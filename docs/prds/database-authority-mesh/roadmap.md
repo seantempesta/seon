@@ -235,6 +235,22 @@ proof passes 5 dispatch tests/27 assertions, 2 provider-routing tests/3
 assertions, and 7 typeahead tests/27 assertions. The broader provider suites
 remain part of the pending config/database-lifecycle migration rather than a
 reason to restore removed APIs.
+Commit `571f63f3` settles crash recovery. It captures one ordinary database
+value, executes the four bounded recovery reads at that value, and submits one
+generated-id repair transaction fenced by `:seon.db/expected-db`. Native
+transaction reports and direct errors replace coordinate and nested success
+envelopes; focused proof passes 6 recovery tests/32 assertions and 5 client
+initialization tests/16 assertions.
+Commit `346e70fa` makes accepted eval publication atomic. Receipt
+terminalization, outcome, turn connection, and program rows now commit
+together; the transcript-only retry, later error stamp, fallback classifier,
+and redundant tee-recorded state are deleted. The one stale-database retry
+recompiles from the already-executed frozen result. Focused proof passes 11
+receipt tests/49 assertions with zero warnings, and the issue is archived as
+resolved.
+Commit `67cab865` removes the MCP `eval` compatibility alias from the registry,
+dispatcher, tests, and maintained runbook. The one CLJS tool is `eval_cljs`;
+the operator proof passes 15 tests/49 assertions.
 `3ebfcaf5` leaves one current artifact manifest/application digest and removes
 the four historical readers; `9a66bb78` leaves one generated-identity
 allocator; and `c453a5bd` makes that allocator consume the same native
@@ -271,24 +287,24 @@ modest-hardware density checkpoint.
 
 ### Current implementation checkpoint
 
-- **Earliest unsettled contract:** migrate crash recovery, then the remaining
-  config/membership/quiescence consumers through the one settled client
-  session, publication, and advertisement owner.
+- **Earliest unsettled contract:** remove the phantom config reader, then
+  migrate membership and quiescence through the one settled client session,
+  publication, advertisement, and recovery owner.
 - **Integrated proof that closes it:** eval, autocomplete, namespace context,
   startup, converged reload, advertisement, and runtime hosting reuse ordinary
   database values and native transaction reports; fresh and warm startup both
   execute the one ordered sequence.
-- **Dependency-ready parallel portfolio:** crash recovery and atomic eval
-  publication are active; the MCP eval-alias deletion is an independent
-  compatibility cleanup; the web/render single-owner audit is durable at
+- **Dependency-ready parallel portfolio:** config acquisition and state
+  reconciliation are active; the finite no-containment process-record
+  falsifier is independent; the web/render single-owner audit is durable at
   [[research/web-render-single-owner-audit-2026-07-17]]; the plan consumer cut
   is grounded at [[research/plan-single-owner-audit-2026-07-17]] and explicitly
   rejects the current dirty coordinate/oversized-row prototype. The complete
   parallel-system inventory is durable at
   [[research/parallel-behavior-unification-audit-2026-07-17]].
-- **Next refills:** finish recovery, then migrate config, membership, and
-  quiescence in ordered complete cuts; finish atomic eval publication and
-  remove the MCP alias independently; close the web/feed
+- **Next refills:** finish config and state reconciliation, then migrate
+  membership and quiescence in ordered complete cuts; delete the obsolete
+  process-record branch only if its local evidence falsifier is clean; close the web/feed
   database-value and rendered-transaction owner next, followed by the
   operation-specific plan consumers and atomic eval publication.
   The final graduation gate remains the full frozen-source correctness, live
