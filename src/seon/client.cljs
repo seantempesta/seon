@@ -2010,12 +2010,14 @@
             (let [reconciled
                   (await (apply-config!
                           {:seon.config/manifest manifest}))]
-              (when (false? (:seon.state/ok? reconciled))
+              (when (or (string? (:seon.error/message reconciled))
+                        (false? (:seon.state/ok? reconciled)))
                 (throw
                  (ex-info "Startup config reconciliation failed."
                           {:seon.error/kind :core-bug
                            :seon.state/error
-                           (:seon.state/error reconciled)}))))))
+                           (or (:seon.state/error reconciled)
+                               (:seon.error/message reconciled))}))))))
         (when autonomous?
           (let [recovered
                 (await

@@ -18,6 +18,7 @@
     [clojure.set :as set]
     [seon.db :as db]
     [seon.db.protocol :as protocol]
+    [seon.error :as error]
     [seon.schema :as schema]))
 
 ;; A desired entity-map MUST carry exactly one `:db.unique/identity` attr (the
@@ -32,7 +33,6 @@
 (schema/register! ::changed?  :boolean)
 (schema/register! ::operations [:int {:min 0}])
 (schema/register! ::attempts   [:int {:min 1}])
-(schema/register! ::coordinate :seon.db.coordinate/coordinate)
 (schema/register! ::tx-data    [:vector :any])
 
 (schema/register!
@@ -40,7 +40,8 @@
   [:map {:closed true}
    [::desired ::desired]
    [:seon.db/managed-scope :seon.db/managed-scope]
-   [:seon.db/managed-identity-attrs :seon.db/managed-identity-attrs]])
+   [:seon.db/managed-identity-attrs :seon.db/managed-identity-attrs]
+   [::db/db {:optional true} ::db/db]])
 
 (schema/register!
   ::reconcile-response
@@ -49,12 +50,12 @@
     [::ok? [:= true]]
     [::changed? ::changed?]
     [::operations ::operations]
-    [::attempts ::attempts]
-    [::coordinate ::coordinate]]
+    [::attempts ::attempts]]
    [:map
     [::ok? [:= false]]
     [::error ::error]
-    [::attempts {:optional true} ::attempts]]])
+    [::attempts {:optional true} ::attempts]]
+   ::db/error])
 
 (defn- desired-identity
   "The single registered `:db.unique/identity` `[attr value]` a desired
@@ -398,7 +399,7 @@
   :else #{}))
 
 (defn- ^:async acquire-reconcile-state!
-  [desired identity-attrs]
+  [database desired identity-attrs]
   (let [lookup-refs (lookup-ref-pairs desired)
         members
         (cond->
@@ -418,16 +419,18 @@
                  ::protocol/arguments [(vec lookup-refs)]}))
         result (await
                  (db/execute-many
-                   {::db/members members}))
+                   {::db/db database
+                    ::db/members members}))
         [schema-member entity-member provenance-member process-member
          lookup-member]
         (::db/results result)]
-    {::db/coordinate (::db/coordinate result)
-     ::installed-schema
-     (member-value! "schema acquisition" schema-member ::protocol/schema)
-     ::rows
-     (acquisition-rows
-       (vec
+    (if (and (map? result) (string? (:seon.error/message result)))
+      result
+      {::installed-schema
+       (member-value! "schema acquisition" schema-member ::protocol/schema)
+       ::rows
+       (acquisition-rows
+        (vec
          (into {}
                (cond->
                  (member-value! "entity acquisition" entity-member
@@ -435,28 +438,38 @@
                  lookup-member
                  (into (member-value! "lookup-ref acquisition" lookup-member
                                       :datahike.query/result)))))
-       (member-value! "provenance acquisition"
-                      provenance-member :datahike.query/result)
-       (member-value! "transaction process acquisition"
-                      process-member :datahike.query/result))}))
+        (member-value! "provenance acquisition"
+                       provenance-member :datahike.query/result)
+        (member-value! "transaction process acquisition"
+                       process-member :datahike.query/result))})))
 
-(defn- stale-coordinate-envelope?
-  [envelope]
-  (let [data (get-in envelope [:seon.db/error :seon.error/data])]
-    (or (= :transaction/stale-basis (:error data))
-        (= protocol/stale-coordinate-error
-           (:seon.db.protocol/error-kind data)))))
+(defn- error-value?
+  [value]
+  (and (map? value) (string? (:seon.error/message value))))
 
-(defn- envelope-message
-  [envelope]
-  (or (get-in envelope [:seon.db/error :seon.error/message])
-      (pr-str (:seon.db/error envelope))))
+(defn- transaction-report?
+  [value]
+  (and (map? value)
+       (contains? value :db-before)
+       (contains? value :db-after)
+       (contains? value :tx-data)))
+
+(defn- stale-database-failure?
+  [value]
+  (= protocol/stale-coordinate-error
+     (get-in value [:seon.error/data ::protocol/error-kind])))
+
+(defn- ^:async current-database!
+  [database]
+  (if database
+    (await (db/db {::db/database-name (:db-name database)}))
+    (await (db/db))))
 
 (defn ^:async reconcile!
   "Make the MANAGED datoms match `:seon.state/desired`.
 
    `:seon.state/desired` is a vector of entity-maps. The authority returns the
-   managed rows and installed schema at ONE immutable coordinate. The compiler
+   managed rows and installed schema at ONE immutable database value. The compiler
    consumes that ordinary data and makes these attribute / connection moves —
    no Datahike handle and no entity 'kind' loop:
 
@@ -472,14 +485,15 @@
         are NEVER touched.
 
    The operations land in ONE atomic transaction guarded by the acquired
-   coordinate. A concurrent winner makes the serialized writer reject the
-   stale coordinate, so reconcile reacquires/recompiles up to three times. An
+   database value. A concurrent winner makes the serialized writer reject the
+   stale value, so reconcile reacquires/recompiles up to three times. An
    empty diff submits NO transaction. Writes inherit the ambient
    `seon.db/with-tx-context` user/process refs, so the caller establishes the
    appropriate boot or config process — the
    re-added rows then stay managed for the next reconcile. Errors are values:
-   a desired map lacking exactly one identity attr, or a failed transact, comes
-   back as `{:seon.state/ok? false :seon.state/error …}`.
+   a desired map lacking exactly one identity attr comes back as
+   `{:seon.state/ok? false :seon.state/error …}`. A database failure remains
+   its direct `:seon.error/message` value.
 
      (db/with-tx-context {:seon.db/user [:seon.agent/id \"root\"]
                           :seon.db/process
@@ -492,50 +506,68 @@
                  #{:seon.route/name :my.skills/name :seon.config/id}})))"
   {:malli/schema [:=> [:cat ::reconcile-request] ::reconcile-response]}
   [{::keys [desired]
+    supplied-database ::db/db
     scope :seon.db/managed-scope
     identity-attrs :seon.db/managed-identity-attrs}]
-  (if-let [validation-error
-           (desired-validation-error desired identity-attrs)]
-    {::ok? false ::error validation-error}
-    (loop [attempt 1]
-      (let [acquired (await (acquire-reconcile-state! desired identity-attrs))
-            expected-coordinate (::db/coordinate acquired)
-            compiled (compile-reconcile-tx
+  (try
+    (if-let [validation-error
+             (desired-validation-error desired identity-attrs)]
+      {::ok? false ::error validation-error}
+      (let [initial-database
+            (if supplied-database supplied-database
+                (await (current-database! nil)))]
+        (if (error-value? initial-database)
+          initial-database
+          (loop [attempt 1
+                 database initial-database]
+            (let [acquired
+                  (await
+                   (acquire-reconcile-state!
+                    database desired identity-attrs))]
+              (if (error-value? acquired)
+                acquired
+                (let [compiled
+                      (compile-reconcile-tx
                        acquired desired scope identity-attrs)]
-          (if (false? (::ok? compiled))
-            (assoc compiled ::attempts attempt)
-            (let [tx-data (::tx-data compiled)]
-              (if (empty? tx-data)
-                {::ok? true
-                 ::changed? false
-                 ::operations 0
-                 ::attempts attempt
-                 ::coordinate expected-coordinate}
-                (let [envelope
-                      (await (db/transact!
-                               {:seon.db/expected-coordinate expected-coordinate
-                                :seon.db/tx-data tx-data}))]
-                  (cond
-                    (true? (:seon.db/ok? envelope))
-                    {::ok? true
-                     ::changed? true
-                     ::operations (count tx-data)
-                     ::attempts attempt
-                     ::coordinate (:seon.db/coordinate envelope)}
+                  (if (false? (::ok? compiled))
+                    (assoc compiled ::attempts attempt)
+                    (let [tx-data (::tx-data compiled)]
+                      (if (empty? tx-data)
+                        {::ok? true
+                         ::changed? false
+                         ::operations 0
+                         ::attempts attempt}
+                        (let [result
+                              (await
+                               (db/transact!
+                                {::db/db database
+                                 ::db/expected-db database
+                                 ::db/tx-data tx-data}))]
+                          (cond
+                            (transaction-report? result)
+                            {::ok? true
+                             ::changed? true
+                             ::operations (count tx-data)
+                             ::attempts attempt}
 
-                    (and (stale-coordinate-envelope? envelope)
-                         (< attempt max-reconcile-attempts))
-                    (recur (inc attempt))
+                            (and (stale-database-failure? result)
+                                 (< attempt max-reconcile-attempts))
+                            (let [latest (await (current-database! database))]
+                              (if (error-value? latest)
+                                latest
+                                (recur (inc attempt) latest)))
 
-                    (stale-coordinate-envelope? envelope)
-                    {::ok? false
-                     ::attempts attempt
-                     ::error (str "reconcile!: database head changed during "
-                                  attempt " consecutive compile/commit "
-                                  "attempts")}
+                            (error-value? result)
+                            result
 
-                    :else
-                    {::ok? false
-                     ::attempts attempt
-                     ::error (str "reconcile! transact failed: "
-                                  (envelope-message envelope))})))))))))
+                            :else
+                            {:seon.error/message
+                             "reconcile! transact returned neither a transaction report nor an error."
+                             :seon.error/kind :core-bug
+                             :seon.error/data
+                             {:seon.state/result result}}))))))))))))
+    (catch :default exception
+      (let [value (error/->map exception)]
+        (cond-> value
+          (nil? (:seon.error/kind value))
+          (assoc :seon.error/kind :core-bug))))))
