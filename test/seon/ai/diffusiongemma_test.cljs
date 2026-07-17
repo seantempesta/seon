@@ -21,8 +21,25 @@
      (cljs.test/run-tests 'seon.ai.diffusiongemma-test)"
   (:require
     [cljs.test :refer [deftest is testing async]]
+    [seon.ai :as ai]
     [seon.ai.diffusiongemma :as dg]
     [seon.retry :as retry]))
+
+(defn- resolution
+  ([] (resolution {}))
+  ([config-row]
+   (ai/resolved-config-from-rows
+     (merge {:seon.ai/provider :diffusiongemma}
+            config-row)
+     {})))
+
+(def ^:private worker-resolution
+  (resolution {:seon.ai/base-url "ep1"}))
+
+(defn- complete
+  ([request] (complete request worker-resolution))
+  ([request resolved]
+   (dg/complete (assoc request :seon.ai/config-resolution resolved))))
 
 ;; ============================================================
 ;; Env + fetch seam helpers.
@@ -65,8 +82,7 @@
   "Bind a configured worker env + the scripted `stub-fetch` + a 0ms poll
    interval, run `body` (0-arg → Promise), restore everything."
   [stub-fetch body]
-  (with-env {"SEON_DG_ENDPOINT"    "ep1"
-             "RUNPOD_API_KEY"      "k"
+  (with-env {"RUNPOD_API_KEY"      "k"
              "SEON_DG_API_KEY_ENV" nil}
     (fn []
       (set! dg/*fetch* stub-fetch)
@@ -147,7 +163,7 @@
                                        :output {:text "(defn mean [xs] (/ (reduce + xs) (count xs)))"
                                                 :tok_per_s 512 :completion_tokens 41}})])]
       (-> (with-worker fetch
-            #(dg/complete {::dg/mode :generate ::dg/prompt "write mean"}))
+            #(complete {::dg/mode :generate ::dg/prompt "write mean"}))
           (.then
             (fn [{:seon.ai/keys [text error] :as resp}]
               (is (nil? error))
@@ -169,7 +185,7 @@
                   [(json-response 200 {:id "j2" :status "IN_QUEUE"})
                    (json-response 200 {:status "FAILED" :error "worker crashed"})])]
       (-> (with-worker fetch
-            #(dg/complete {::dg/mode :generate ::dg/prompt "x"}))
+            #(complete {::dg/mode :generate ::dg/prompt "x"}))
           (.then
             (fn [{:seon.ai/keys [text error]}]
               (is (= "" text) "errors-as-values — empty text, never a rejection")
@@ -196,7 +212,7 @@
       (-> (with-worker fetch
             (fn []
               (retry/with-retry!
-                {:seon.retry/thunk    #(dg/complete {::dg/mode :generate ::dg/prompt "x"})
+                {:seon.retry/thunk    #(complete {::dg/mode :generate ::dg/prompt "x"})
                  :seon.retry/strategy (retry/max-retries (retry/constant-strategy 0) 3)
                  :seon.retry/retry?   retryable?})))
           (.then
@@ -212,7 +228,7 @@
   (async done
     (-> (with-worker
           (fn [_ _] (js/Promise.reject (js/TypeError. "fetch failed")))
-          #(dg/complete {::dg/mode :generate ::dg/prompt "x"}))
+          #(complete {::dg/mode :generate ::dg/prompt "x"}))
         (.then
           (fn [{:seon.ai/keys [text error]}]
             (is (= "" text))
@@ -249,9 +265,9 @@
               (js/Promise.reject (js/Error. (str "unexpected URL " url)))))]
       (-> (with-worker fetch
             (fn []
-              (let [p (dg/complete {::dg/mode :generate
-                                    ::dg/prompt "x"
-                                    :seon.ai/abort-signal signal})]
+              (let [p (complete {::dg/mode :generate
+                                 ::dg/prompt "x"
+                                 :seon.ai/abort-signal signal})]
                 (js/setTimeout #(.abort controller) 20)
                 p)))
           (.then
@@ -276,7 +292,9 @@
       (-> (with-env {"SEON_DG_ENDPOINT" nil "RUNPOD_API_KEY" "k"}
             (fn []
               (set! dg/*fetch* (fn [_ _] (swap! called inc) (js/Promise.resolve (json-response 200 {}))))
-              (-> (js/Promise.resolve (dg/complete {::dg/mode :generate ::dg/prompt "x"}))
+              (-> (js/Promise.resolve
+                    (complete {::dg/mode :generate ::dg/prompt "x"}
+                              (resolution)))
                   (.finally (fn [] (set! dg/*fetch* nil))))))
           (.then
             (fn [{:seon.ai/keys [text error]}]
