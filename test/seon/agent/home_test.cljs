@@ -5,7 +5,6 @@
     [cljs.test :refer [async deftest is]]
     [malli.core :as m]
     [seon.agent.home :as home]
-    [seon.config :as config]
     [seon.db :as db]))
 
 (deftest home-namespace-is-a-deterministic-id-projection
@@ -30,14 +29,13 @@
     (is (= (cons :require specs) (nth form 2)))))
 
 (defn- current-home-functions []
-  [db/db db/installed-schema db/entity config/resolve-agent-context])
+  [db/db db/installed-schema db/entity])
 
 (defn- restore-home-functions!
-  [[db-fn installed-schema-fn entity-fn resolve-agent-context-fn]]
+  [[db-fn installed-schema-fn entity-fn]]
   (set! db/db db-fn)
   (set! db/installed-schema installed-schema-fn)
-  (set! db/entity entity-fn)
-  (set! config/resolve-agent-context resolve-agent-context-fn))
+  (set! db/entity entity-fn))
 
 (deftest home-requires-precedence-uses-one-database-value
   (async done
@@ -71,9 +69,6 @@
                  (js/Promise.resolve
                   {:seon.eval/home-requires
                    '[[seon.db :as persisted-db]]}))))
-        (set! config/resolve-agent-context
-              (fn [_id _override]
-                {:seon.eval/home-requires '[[seon.db :as config-db]]}))
         (-> (home/home-requires-for database "probe")
             (.then
              (fn [requires]
@@ -91,7 +86,7 @@
                       (is false (str "home require cleanup rejected: " error))
                       (done))))))))
 
-(deftest home-requires-falls-from-config-to-canonical-data
+(deftest home-requires-falls-from-absent-persisted-data-to-canonical-data
   (async done
     (let [database {:db-name "home-test"
                     :t 7
@@ -108,20 +103,11 @@
               (fn
                 ([] (js/Promise.resolve {}))
                 ([_database] (js/Promise.resolve {}))))
-        (set! config/resolve-agent-context
-              (fn [_id _override]
-                {:seon.eval/home-requires '[[seon.db :as db]]}))
         (-> (home/home-requires-for "probe")
             (.then
              (fn [requires]
-               (is (= '[[seon.db :as db]] requires)
-                   "configuration supplies a fresh agent before its datom exists")
-               (set! config/resolve-agent-context (fn [_id _override] {}))
-               (home/home-requires-for "probe")))
-            (.then
-             (fn [requires]
                (is (= home/home-ns-require-specs requires)
-                   "the canonical data is the final fallback")))
+                   "canonical data follows absent persisted requires")))
             (.catch (fn [error]
                       (is false (str "home require fallback rejected: " error))))
             (.finally (fn [] (restore-home-functions! originals)))

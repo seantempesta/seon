@@ -4,11 +4,10 @@
    The home namespace is a pure projection of an agent id. This namespace is
    the one lower owner of that projection, its canonical require data, the
    reactive per-agent require read, and the exact `(ns …)` source renderer.
-   It depends only on config and database leaves, so agent creation, eval, and
-   context rendering can all reuse the same data without a require cycle."
+   It depends only on the database leaf, so agent creation, eval, and context
+   rendering can all reuse the same data without a require cycle."
   (:require
     [clojure.string :as str]
-    [seon.config :as config]
     [seon.db :as db]
     [seon.schema :as schema]))
 
@@ -55,8 +54,7 @@
 (defn ^:async home-requires-for
   "The require specs for agent `id`'s home ns.
 
-   REACTIVE config-on-record
-   (decision 2), resolved in precedence:
+   Resolved from durable data in precedence:
 
    The one-argument form resolves the current database value. The two-argument
    form reuses the supplied immutable database value so a larger acquisition
@@ -74,10 +72,9 @@
         yet, the attr is uninstalled and querying it would THROW — the gate
         makes the read fall to (2) instead. VERIFIED live (scratch conn):
         transact → attr installs, value round-trips through decode.
-     2. else the `:seon.eval/home-requires` from `resolve-agent-context` — the
-        fresh-MINT case, before the datom is written (the config/manifest value).
-     3. else the [[home-ns-require-specs]] const (= byte-parity for a no-config
-        agent). The const is the DEFAULT VALUE only."
+     2. else the [[home-ns-require-specs]] canonical data. Fresh creation
+        resolves configuration in `seon.agent/initial-agent-tx` and persists
+        the selected requires before this reader can observe the agent."
   {:malli/schema
    [:function
     [:=> [:catn [::id ::id]] ::home-requires-result]
@@ -107,11 +104,7 @@
                        (db/decode-edn-value :seon.eval/home-requires)
                        seq
                        vec)
-              ;; (2) the config/manifest value (fresh mint).
-              (let [reqs (:seon.eval/home-requires
-                           (config/resolve-agent-context id nil))]
-                (when (seq reqs) (vec reqs)))
-              ;; (3) the const default.
+              ;; (2) canonical data for agents without a persisted override.
               home-ns-require-specs))))))))
 
 (defn home-ns-form

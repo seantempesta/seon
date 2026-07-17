@@ -1,8 +1,10 @@
 (ns seon.agent.multiagent-test
   "Focused authority-facade proof for agent birth, delegation, and metadata."
   (:require
+   [clojure.string :as str]
    [cljs.test :refer [async deftest is]]
    [seon.agent :as agent]
+   [seon.agent.ctx :as ctx]
    [seon.agent.message :as message]
    [seon.agent.runtime :as runtime]
    [seon.config :as config]
@@ -23,6 +25,12 @@
   (assoc database :t 43
          :datahike/commit-id
          #uuid "cccccccc-cccc-4ccc-8ccc-cccccccccccc"))
+
+(def configuration
+  (config/resolve-config-singleton {}))
+
+(def stored-configuration
+  (update configuration :seon.config/always pr-str))
 
 (defn- finish!
   [promise done restorations]
@@ -103,13 +111,73 @@
        done
        [[#(set! db/pull %) pull]]))))
 
+(deftest create-reuses-one-decoded-configuration-for-complete-birth
+  (async done
+    (let [db! db/db
+          pull-many db/pull-many
+          transact! db/transact!
+          initial-agent-context ctx/initial-agent-context
+          pull-request (atom nil)
+          transaction (atom nil)
+          received-configuration (atom nil)
+          configured-requires '[[seon.db :as configured-db]]]
+      (set! db/db
+            (fn
+              ([] (js/Promise.resolve database))
+              ([_] (js/Promise.resolve database))))
+      (set! db/pull-many
+            (fn
+              ([request]
+               (reset! pull-request request)
+               (js/Promise.resolve [nil nil stored-configuration]))
+              ([_ _] (js/Promise.reject (js/Error. "unexpected pull-many arity")))
+              ([_ _ _] (js/Promise.reject (js/Error. "unexpected pull-many arity")))))
+      (set! ctx/initial-agent-context
+            (fn [request]
+              (reset! received-configuration
+                      (:seon.config/configuration request))
+              {:seon.eval/home-requires configured-requires}))
+      (set! db/transact!
+            (fn [& call-args]
+              (let [request (first call-args)]
+                (reset! transaction request)
+                (js/Promise.resolve
+                 {:db-before database
+                  :db-after database-after
+                  :tx-data (::db/tx-data request)
+                  :tempids {}}))))
+      (finish!
+       (-> (agent/create! {:seon.agent/id "created"})
+           (.then
+            (fn [result]
+              (is (= {:seon.agent/id "created"} result))
+              (is (identical? database (::db/db @pull-request)))
+              (is (= [[:seon.agent/id "created"]
+                      [:seon.ns/name :my.agent.created]
+                      [:seon.config/id config/cluster-config-id]]
+                     (::db/eids @pull-request)))
+              (is (= configuration @received-configuration)
+                  "creation receives the decoded ordinary singleton")
+              (is (identical? database (::db/db @transaction)))
+              (is (identical? database (::db/expected-db @transaction)))
+              (let [[agent-row home-row] (::db/tx-data @transaction)]
+                (is (= configured-requires
+                       (:seon.eval/home-requires agent-row)))
+                (is (str/includes? (:seon.ns/source home-row)
+                                   "[seon.db :as configured-db]"))))))
+       done
+       [[#(set! db/db %) db!]
+        [#(set! db/pull-many %) pull-many]
+        [#(set! db/transact! %) transact!]
+        [#(set! ctx/initial-agent-context %) initial-agent-context]]))))
+
 (deftest delegate-commits-child-and-first-task-once-before-hosting
   (async done
     (let [available? admission/available?
           current-agent-id db/current-agent-id
           db! db/db
-          pull db/pull
-          config-view config/config-view
+          pull-many db/pull-many
+          initial-agent-context ctx/initial-agent-context
           initial-message message/initial-agent-transaction
           allocate! db.id/allocate!
           resume! runtime/resume!
@@ -117,6 +185,7 @@
           allocation (atom nil)
           committed? (atom false)
           hosted (atom nil)
+          creation-configurations (atom [])
           standalone-calls (atom 0)]
       (set! admission/available? (constantly true))
       (set! db/current-agent-id (constantly "parent"))
@@ -124,17 +193,22 @@
             (fn
               ([] (js/Promise.resolve database))
               ([_] (js/Promise.resolve database))))
-      (set! db/pull
+      (set! db/pull-many
             (fn
               ([request]
                (is (identical? database (::db/db request)))
-               (js/Promise.resolve {:seon.agent/id "parent"}))
-              ([_ _] (js/Promise.reject (js/Error. "unexpected pull arity")))
-              ([_ _ _] (js/Promise.reject (js/Error. "unexpected pull arity")))))
-      (set! config/config-view
-            (fn
-              ([] {:seon.config/spawn-depth-cap 1})
-              ([_] {:seon.config/spawn-depth-cap 1})))
+               (is (= [[:seon.agent/id "parent"]
+                       [:seon.config/id config/cluster-config-id]]
+                      (::db/eids request)))
+               (js/Promise.resolve
+                [{:seon.agent/id "parent"} stored-configuration]))
+              ([_ _] (js/Promise.reject (js/Error. "unexpected pull-many arity")))
+              ([_ _ _] (js/Promise.reject (js/Error. "unexpected pull-many arity")))))
+      (set! ctx/initial-agent-context
+            (fn [request]
+              (swap! creation-configurations conj
+                     (:seon.config/configuration request))
+              {:seon.eval/home-requires '[[seon.db :as db]]}))
       (set! message/initial-agent-transaction
             (fn [db-value from content]
               (is (identical? database db-value))
@@ -208,13 +282,19 @@
                 (is (< child-index message-index)
                     "the child identity precedes its task lookup ref")
                 (is (= [[:seon.agent/id "child"]]
-                       (:seon.agent.message/to (nth tx message-index))))))))
+                       (:seon.agent.message/to (nth tx message-index))))
+                (is (= [configuration configuration]
+                       @creation-configurations)
+                    "every child tx build receives the decoded singleton")
+                (is (identical? (first @creation-configurations)
+                                (second @creation-configurations))
+                    "one acquired config value is reused across tx builds")))))
        done
        [[#(set! admission/available? %) available?]
         [#(set! db/current-agent-id %) current-agent-id]
         [#(set! db/db %) db!]
-        [#(set! db/pull %) pull]
-        [#(set! config/config-view %) config-view]
+        [#(set! db/pull-many %) pull-many]
+        [#(set! ctx/initial-agent-context %) initial-agent-context]
         [#(set! message/initial-agent-transaction %) initial-message]
         [#(set! db.id/allocate! %) allocate!]
         [#(set! runtime/resume! %) resume!]
