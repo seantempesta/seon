@@ -1189,7 +1189,20 @@
 (defn tx-meta-datahike-schema []
   (internal/tx-meta-datahike-schema))
 
-(defn decode-edn-value [attr value]
+(defn decode-edn-value
+  "Decode one mixed-schema attribute value returned by the database."
+  {:malli/schema [:=> [:cat :keyword :any] :any]}
+  [attr value]
   (if (and (string? value) (internal/edn-encoded-attr? attr))
     (reader/read-string value)
     value))
+
+(defn decode-edn-values
+  "Decode every attribute value in one flat pulled entity map."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [values]
+  (reduce-kv
+   (fn [decoded attribute value]
+     (assoc decoded attribute (decode-edn-value attribute value)))
+   {}
+   values))
