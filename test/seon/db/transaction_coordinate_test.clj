@@ -38,11 +38,11 @@
      ::protocol/backend :memory})))
 
 (defn- transact!
-  [runtime database-name request-id value]
+  [runtime database request-id value]
   (writer/handle-request
    runtime
    (protocol/transaction-request
-    {::protocol/database-name database-name
+    {:seon.db/db database
      ::protocol/request-id request-id
      ::protocol/transaction-data
      [{:db/id request-id :db/doc value}]})))
@@ -52,6 +52,10 @@
   (::registry/conn
    (registry/lookup-connection
     {::registry/database-name (keyword database-name)})))
+
+(defn- current-coordinate
+  [database-name]
+  (coordinate/resolved (d/db (connection database-name))))
 
 (defn- resolve-coordinate
   [runtime database-name head-coordinate transaction]
@@ -66,10 +70,10 @@
 (deftest later-head-resolution-skips-a-force-commit-with-the-same-t
   (let [runtime (runtime)
         database-name (str "transaction-coordinate-" (random-uuid))
-        _ (ensure-database! runtime database-name)
+        admitted (ensure-database! runtime database-name)
         completion-response
-        (transact! runtime database-name "completion" "completion")
-        completion-coordinate (::protocol/coordinate completion-response)
+        (transact! runtime (:seon.db/db admitted) "completion" "completion")
+        completion-coordinate (current-coordinate database-name)
         conn (connection database-name)
         completion-db (d/commit-as-db
                        conn (::coordinate/commit-id completion-coordinate))
@@ -79,9 +83,9 @@
             (::coordinate/commit-id completion-coordinate)})
         _ (registry/release-database!
            {::registry/database-name (keyword database-name)})
-        _ (ensure-database! runtime database-name)
-        later-response (transact! runtime database-name "later" "later")
-        later-coordinate (::protocol/coordinate later-response)
+        reopened (ensure-database! runtime database-name)
+        later-response (transact! runtime (:seon.db/db reopened) "later" "later")
+        later-coordinate (current-coordinate database-name)
         resolved
         (resolve-coordinate runtime database-name later-coordinate
                             (::coordinate/t completion-coordinate))]
@@ -92,12 +96,12 @@
 (deftest wrong-attachment-and-non-ancestor-heads-fail-explicitly
   (let [runtime (runtime)
         database-name (str "transaction-coordinate-failures-" (random-uuid))
-        _ (ensure-database! runtime database-name)
-        first-response (transact! runtime database-name "first" "first")
-        first-coordinate (::protocol/coordinate first-response)
+        admitted (ensure-database! runtime database-name)
+        first-response (transact! runtime (:seon.db/db admitted) "first" "first")
+        first-coordinate (current-coordinate database-name)
         abandoned-response
-        (transact! runtime database-name "abandoned" "abandoned")
-        abandoned-coordinate (::protocol/coordinate abandoned-response)
+        (transact! runtime (:db-after first-response) "abandoned" "abandoned")
+        abandoned-coordinate (current-coordinate database-name)
         conn (connection database-name)
         first-db (d/commit-as-db conn (::coordinate/commit-id first-coordinate))
         _ (d/force-branch!
@@ -106,9 +110,9 @@
             (::coordinate/commit-id abandoned-coordinate)})
         _ (registry/release-database!
            {::registry/database-name (keyword database-name)})
-        _ (ensure-database! runtime database-name)
-        current-response (transact! runtime database-name "current" "current")
-        current-coordinate (::protocol/coordinate current-response)
+        reopened (ensure-database! runtime database-name)
+        current-response (transact! runtime (:seon.db/db reopened) "current" "current")
+        current-coordinate (current-coordinate database-name)
         wrong-attachment
         (resolve-coordinate
          runtime database-name
@@ -127,9 +131,9 @@
 (deftest missing-transaction-does-not-substitute-the-frozen-head
   (let [runtime (runtime)
         database-name (str "transaction-coordinate-missing-" (random-uuid))
-        _ (ensure-database! runtime database-name)
-        response (transact! runtime database-name "only" "only")
-        head (::protocol/coordinate response)
+        admitted (ensure-database! runtime database-name)
+        response (transact! runtime (:seon.db/db admitted) "only" "only")
+        head (current-coordinate database-name)
         missing (resolve-coordinate runtime database-name head
                                     (inc (::coordinate/t head)))]
     (is (false? (::protocol/success? missing)))
@@ -154,7 +158,7 @@
            ::coordinate/attachment
            (assoc (coordinate/attachment main-coordinate)
                   ::coordinate/branch branch)}))
-        branch-coordinate (::coordinate/coordinate branch-open)
+        branch-coordinate (current-coordinate branch-name)
         request
         {::protocol/operation
          protocol/resolve-transaction-coordinate-operation
