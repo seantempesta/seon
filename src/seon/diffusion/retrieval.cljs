@@ -38,8 +38,8 @@
    denoise steps — re-committing the symbol toward a name that EXISTS. The
    round-trip (Seon drives, worker stateless) keeps the pod loopback-only.
 
-   PURE readers over a db value (default `seon.db/*conn*`). No writes. The
-   semantic path is the only `^:async` surface (it awaits the wire embed)."
+   Readers capture one ordinary database value and acquire the compact function
+   corpus once. No writes."
   (:require
     [clojure.string :as str]
     [seon.db :as db]
@@ -108,7 +108,7 @@
   [:map
    [::code-buffer-text ::code-buffer-text]
    [::aliases {:optional true} ::aliases]
-   [::db {:optional true} :seon.embed/db]])
+   [::db {:optional true} :seon.db/db]])
 
 (schema/register!
   ::retrieve-candidates-request
@@ -117,7 +117,7 @@
    [::qualifier {:optional true} :string]
    [::aliases {:optional true} ::aliases]
    [::k {:optional true} ::k]
-   [::db {:optional true} :seon.embed/db]])
+   [::db {:optional true} :seon.db/db]])
 
 (schema/register!
   ::retrieve-request
@@ -125,7 +125,7 @@
    [::code-buffer-text ::code-buffer-text]
    [::aliases {:optional true} ::aliases]
    [::k {:optional true} ::k]
-   [::db {:optional true} :seon.embed/db]])
+   [::db {:optional true} :seon.db/db]])
 
 ;; ============================================================
 ;; Known-symbol surfaces (the offline approximation of the analyzer's
@@ -414,12 +414,18 @@
 ;; Program-graph membership + near-name retrieval (GRAPH path — always on)
 ;; ============================================================
 
-(defn- the-db [db] (or db (some-> db/*conn* deref)))
+(def ^:private function-corpus-query
+  '[:find [(pull ?function
+                 [:seon.fn/sym :seon.fn/arglists :seon.fn/doc :seon.fn/spec]) ...]
+    :where [?function :seon.fn/sym]])
 
-(defn- graph-syms
-  "Every `:seon.fn/sym` (FQ strings) in the program graph on `db`."
-  [db]
-  (db/query '[:find [?s ...] :where [?e :seon.fn/sym ?s]] db))
+(defn- ^:async function-corpus
+  "Acquire compact function facts once at one immutable database value."
+  [database]
+  (await (db/query {::db/db database ::db/query function-corpus-query})))
+
+(defn- ^:async selected-db [database]
+  (or database (await (db/db))))
 
 (defn- name-of [fq]
   (let [i (.lastIndexOf fq "/")] (if (>= i 0) (subs fq (inc i)) fq)))
@@ -430,7 +436,16 @@
 ;; The near-name distance fn is the SHARED `seon.diffusion.grammar/levenshtein`
 ;; (one mechanism — the worker's `op:"repair"` candidate sweep uses the same fn).
 
-(defn symbol-resolves?
+(defn- symbol-resolves-in?
+  [functions name qualifier aliases]
+  (let [expanded (when qualifier (get aliases qualifier qualifier))]
+    (boolean
+     (some (fn [{:seon.fn/keys [sym]}]
+             (and (= name (name-of sym))
+                  (or (nil? expanded) (= expanded (ns-of sym)))))
+           functions))))
+
+(defn ^:async symbol-resolves?
   "True iff `::name` names a real program-graph fn.
 
    Accepts an optional alias-expanded `::qualifier`. A FALSE on a committed symbol is the retrieval signal —
@@ -438,24 +453,17 @@
   {:malli/schema [:=> [:cat [:map [::name :string]
                                   [::qualifier {:optional true} :string]
                                   [::aliases {:optional true} ::aliases]
-                                  [::db {:optional true} :seon.embed/db]]]
+                                  [::db {:optional true} :seon.db/db]]]
                   :boolean]}
   [{::keys [name qualifier aliases db]}]
-  (let [db       (the-db db)
-        syms     (graph-syms db)
-        expanded (when qualifier (get aliases qualifier qualifier))]
-    (boolean
-      (some (fn [fq]
-              (and (= name (name-of fq))
-                   (or (nil? expanded) (= expanded (ns-of fq)))))
-            syms))))
+  (let [database (await (selected-db db))
+        functions (await (function-corpus database))]
+    (symbol-resolves-in? functions name qualifier aliases)))
 
-(defn- pull-candidate
-  "Pull the compact spec for one FQ sym and build its candidate map."
-  [db fq match-kind distance]
-  (let [{:seon.fn/keys [sym arglists doc spec]}
-        (db/pull db '[:seon.fn/sym :seon.fn/arglists :seon.fn/doc :seon.fn/spec]
-                 [:seon.fn/sym fq])
+(defn- candidate
+  "Build one candidate from an already acquired function entity."
+  [{:seon.fn/keys [sym arglists doc spec]} match-kind distance]
+  (let [
         doc1 (when (seq doc) (first (str/split-lines doc)))
         spec-text (str sym
                        (when (seq arglists) (str " " arglists))
@@ -470,7 +478,38 @@
       (seq doc)      (assoc ::doc doc)
       (seq spec)     (assoc ::spec spec))))
 
-(defn retrieve-candidates
+(defn- retrieve-candidates-in
+  [functions name qualifier aliases k]
+  (let [k        (or k 5)
+        expanded (when qualifier (get aliases qualifier qualifier))
+        thresh   (max 2 (js/Math.ceil (/ (count name) 2)))
+        scored   (->> functions
+                      (keep (fn [{:seon.fn/keys [sym] :as function}]
+                              (let [nm (name-of sym)
+                                    d  (grammar/levenshtein name nm)]
+                                (cond
+                                  (= name nm)
+                                  {::function function ::match-kind :exact
+                                   ::distance 0}
+                                  (or (<= d thresh)
+                                      (str/includes? nm name)
+                                      (str/includes? name nm))
+                                  {::function function ::match-kind :near-name
+                                   ::distance (min d (inc thresh))}
+                                  :else nil))))
+                      (sort-by (juxt #(if (= :exact (::match-kind %)) 0 1)
+                                     #(if (and expanded
+                                               (= expanded
+                                                  (ns-of (get-in % [::function
+                                                                    :seon.fn/sym]))))
+                                        0 1)
+                                     ::distance
+                                     #(count (name-of (get-in % [::function
+                                                                  :seon.fn/sym])))))
+                      (take k))]
+    (mapv #(candidate (::function %) (::match-kind %) (::distance %)) scored)))
+
+(defn ^:async retrieve-candidates
   "GRAPH-path retrieval of candidate fns for one unresolved name.
 
    Exact name match + near-name
@@ -479,49 +518,35 @@
    Returns up to `::k` (default 5) candidate maps."
   {:malli/schema [:=> [:cat ::retrieve-candidates-request] [:vector ::candidate]]}
   [{::keys [name qualifier aliases k db]}]
-  (let [db       (the-db db)
-        k        (or k 5)
-        expanded (when qualifier (get aliases qualifier qualifier))
-        thresh   (max 2 (js/Math.ceil (/ (count name) 2)))
-        scored   (->> (graph-syms db)
-                      (keep (fn [fq]
-                              (let [nm (name-of fq)
-                                    d  (grammar/levenshtein name nm)]
-                                (cond
-                                  (= name nm)
-                                  {::fq fq ::match-kind :exact ::distance 0}
-                                  (or (<= d thresh)
-                                      (str/includes? nm name)
-                                      (str/includes? name nm))
-                                  {::fq fq ::match-kind :near-name
-                                   ::distance (min d (inc thresh))}
-                                  :else nil))))
-                      (sort-by (juxt #(if (= :exact (::match-kind %)) 0 1)
-                                     #(if (and expanded (= expanded (ns-of (::fq %)))) 0 1)
-                                     ::distance
-                                     #(count (name-of (::fq %)))))
-                      (take k))]
-    (mapv #(pull-candidate db (::fq %) (::match-kind %) (::distance %)) scored)))
+  (let [database (await (selected-db db))
+        functions (await (function-corpus database))]
+    (retrieve-candidates-in functions name qualifier aliases k)))
 
 ;; ============================================================
 ;; Detection + injection descriptor
 ;; ============================================================
 
-(defn unresolved-references
+(defn- unresolved-references-in
+  [functions code-buffer-text aliases]
+  (let [entries (internal/parse-forms code-buffer-text {:strip-fences? false})
+        forms   (->> entries (filter #(= :form (:seon.repl/kind %)))
+                     (map :seon.repl/form))
+        aliases (merge (code-buffer-aliases forms) (or aliases {}))
+        refs    (free-references {::code-buffer-text code-buffer-text
+                                  ::aliases aliases})]
+    (vec (remove (fn [{::keys [name qualifier]}]
+                   (symbol-resolves-in? functions name qualifier aliases))
+                 refs))))
+
+(defn ^:async unresolved-references
   "DETECT step: the `free-references` that do NOT resolve in the graph.
 
    The program-graph misses — the hallucinated / dead-name symbols. Each is a retrieval target."
   {:malli/schema [:=> [:cat ::detect-request] [:vector ::symbol-ref]]}
   [{::keys [code-buffer-text aliases db]}]
-  (let [db      (the-db db)
-        entries (internal/parse-forms code-buffer-text {:strip-fences? false})
-        forms   (->> entries (filter #(= :form (:seon.repl/kind %))) (map :seon.repl/form))
-        aliases (merge (code-buffer-aliases forms) (or aliases {}))
-        refs    (free-references {::code-buffer-text code-buffer-text ::aliases aliases})]
-    (vec (remove (fn [{::keys [name qualifier]}]
-                   (symbol-resolves? (cond-> {::name name ::aliases aliases ::db db}
-                                       qualifier (assoc ::qualifier qualifier))))
-                 refs))))
+  (let [database (await (selected-db db))
+        functions (await (function-corpus database))]
+    (unresolved-references-in functions code-buffer-text aliases)))
 
 (defn build-injection
   "EMIT step: turn one unresolved `::ref` into an injection descriptor.
@@ -543,7 +568,23 @@
        ::spec-text   (::spec-text best)
        ::candidates  candidates})))
 
-(defn retrieve-for-code-buffer
+(defn- retrieve-for-code-buffer-in
+  [functions code-buffer-text aliases k]
+  (let [entries (internal/parse-forms code-buffer-text {:strip-fences? false})
+        forms   (->> entries (filter #(= :form (:seon.repl/kind %)))
+                     (map :seon.repl/form))
+        aliases (merge (code-buffer-aliases forms) (or aliases {}))
+        unres   (unresolved-references-in functions code-buffer-text aliases)]
+    {::unresolved unres
+     ::injections
+     (vec (keep (fn [ref]
+                  (let [cands (retrieve-candidates-in
+                               functions (::name ref) (::qualifier ref) aliases
+                               (or k 5))]
+                    (build-injection {::ref ref ::candidates cands})))
+                unres))}))
+
+(defn ^:async retrieve-for-code-buffer
   "THE graph-path entry: detect, retrieve, and emit injections for a code-buffer.
 
    Detects unresolved symbols in `::code-buffer-text`, retrieves
@@ -552,20 +593,9 @@
    [...]}`."
   {:malli/schema [:=> [:cat ::retrieve-request] ::retrieval-result]}
   [{::keys [code-buffer-text aliases k db]}]
-  (let [db      (the-db db)
-        entries (internal/parse-forms code-buffer-text {:strip-fences? false})
-        forms   (->> entries (filter #(= :form (:seon.repl/kind %))) (map :seon.repl/form))
-        aliases (merge (code-buffer-aliases forms) (or aliases {}))
-        unres   (unresolved-references {::code-buffer-text code-buffer-text ::aliases aliases ::db db})]
-    {::unresolved unres
-     ::injections
-     (vec (keep (fn [ref]
-                  (let [cands (retrieve-candidates
-                                (cond-> {::name (::name ref) ::aliases aliases
-                                         ::k (or k 5) ::db db}
-                                  (::qualifier ref) (assoc ::qualifier (::qualifier ref))))]
-                    (build-injection {::ref ref ::candidates cands})))
-                unres))}))
+  (let [database (await (selected-db db))
+        functions (await (function-corpus database))]
+    (retrieve-for-code-buffer-in functions code-buffer-text aliases k)))
 
 ;; ============================================================
 ;; Semantic enhancement (SEON_EMBED) + wire boundary
@@ -605,7 +635,7 @@
    — embed off or any wire error returns the graph-only result unchanged."
   {:malli/schema [:=> [:cat ::retrieve-request] :any]}
   [{::keys [code-buffer-text] :as req}]
-  (let [base (retrieve-for-code-buffer req)]
+  (let [base (await (retrieve-for-code-buffer req))]
     (if-not (embed/enabled?)
       base
       (try

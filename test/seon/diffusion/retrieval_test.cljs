@@ -19,22 +19,12 @@
     [clojure.test.check :as tc]
     [clojure.test.check.generators :as gen]
     [clojure.test.check.properties :as prop :include-macros true]
-    [datahike.api :as d]
+    [seon.db :as db]
     [seon.diffusion.retrieval :as ret]))
 
 ;; ---------------------------------------------------------------------------
-;; A seeded :memory program graph — three real fns. Raw datahike schema so the
-;; test is self-contained (no seon.agent require). Returns a Promise of the db
-;; VALUE the retrieval fns read.
+;; Ordinary function facts returned through the public database authority seam.
 ;; ---------------------------------------------------------------------------
-
-(def ^:private fn-schema
-  [{:db/ident :seon.fn/sym      :db/cardinality :db.cardinality/one
-    :db/valueType :db.type/string :db/unique :db.unique/identity}
-   {:db/ident :seon.fn/arglists :db/cardinality :db.cardinality/one :db/valueType :db.type/string}
-   {:db/ident :seon.fn/doc      :db/cardinality :db.cardinality/one :db/valueType :db.type/string}
-   {:db/ident :seon.fn/spec     :db/cardinality :db.cardinality/one :db/valueType :db.type/string}
-   {:db/ident :seon.fn/source   :db/cardinality :db.cardinality/one :db/valueType :db.type/string}])
 
 (def ^:private fn-rows
   [{:seon.fn/sym "seon.db/transact!"
@@ -51,30 +41,34 @@
     :seon.fn/doc "Persist a note map."
     :seon.fn/source "(defn save-note! [m] …)"}])
 
-(defn- fresh-db-rows
-  "Open a fresh :memory datahike conn, install the fn schema + `rows`, and
-   resolve to the db VALUE."
-  [rows]
-  (let [cfg {:store {:backend :memory :id (random-uuid)}
-             :schema-flexibility :write
-             :keep-history? false}]
-    (-> (d/create-database cfg)
-        (.then (fn [_] (d/connect cfg {:sync? false})))
-        (.then (fn [conn]
-                 (-> (d/transact! conn fn-schema)
-                     (.then (fn [_] (d/transact! conn rows)))
-                     (.then (fn [_] @conn))))))))
+(def ^:private database
+  {:db-name "diffusion-retrieval-test" :t 42 :as-of nil :since nil
+   :history false
+   :datahike/commit-id #uuid "00000000-0000-0000-0000-000000000042"})
 
-(defn- fresh-db
-  "The fixed three-fn graph (the example tests' fixture)."
-  []
-  (fresh-db-rows fn-rows))
+(defn- with-db-rows [rows f done]
+  (let [original-db db/db
+        original-query db/query]
+    (set! db/db (fn
+                  ([] (js/Promise.resolve database))
+                  ([_request] (js/Promise.resolve database))))
+    (set! db/query
+          (fn
+            ([request]
+             (is (= database (::db/db request))
+                 "retrieval reads one captured database value")
+             (js/Promise.resolve rows))
+            ([_query-form & _inputs]
+             (js/Promise.reject (js/Error. "expected namespaced query request")))))
+    (-> (js/Promise.resolve (f database))
+      (.catch (fn [e] (is false (str "test chain threw — " e))))
+      (.finally (fn []
+                  (set! db/db original-db)
+                  (set! db/query original-query)
+                  (done))))))
 
 (defn- with-db [f done]
-  (-> (fresh-db)
-      (.then f)
-      (.catch (fn [e] (is false (str "test chain threw — " e))))
-      (.then (fn [_] (done)))))
+  (with-db-rows fn-rows f done))
 
 ;; ---------------------------------------------------------------------------
 ;; The canonical wrong-name code-buffer: a qualified hallucination (db/store!) AND a
@@ -94,8 +88,9 @@
 (deftest detect-unresolved-symbols
   (async done
     (with-db
-      (fn [db]
-        (let [unres (ret/unresolved-references {::ret/code-buffer-text code-buffer ::ret/db db})
+      (fn ^:async check-unresolved [database]
+        (let [unres (await (ret/unresolved-references
+                            {::ret/code-buffer-text code-buffer ::ret/db database}))
               syms  (set (map ::ret/symbol unres))]
           (testing "both hallucinated names are flagged (bare + qualified)"
             (is (contains? syms "transct!"))
@@ -118,9 +113,11 @@
 (deftest real-core-name-not-flagged
   (async done
     (with-db
-      (fn [db]
-        (let [unres (ret/unresolved-references
-                      {::ret/code-buffer-text "(defn sum [xs] (reduce-kv + 0 xs))" ::ret/db db})]
+      (fn ^:async check-core [database]
+        (let [unres (await (ret/unresolved-references
+                            {::ret/code-buffer-text
+                             "(defn sum [xs] (reduce-kv + 0 xs))"
+                             ::ret/db database}))]
           (is (empty? unres) "reduce-kv is a real core fn — graph path defers to eval")))
       done)))
 
@@ -131,9 +128,10 @@
 (deftest retrieve-real-candidate-for-typo
   (async done
     (with-db
-      (fn [db]
+      (fn ^:async check-candidates [database]
         (testing "bare typo transct! retrieves seon.db/transact! (edit distance 1)"
-          (let [cands (ret/retrieve-candidates {::ret/name "transct!" ::ret/db db})
+          (let [cands (await (ret/retrieve-candidates
+                              {::ret/name "transct!" ::ret/db database}))
                 best  (first cands)]
             (is (seq cands))
             (is (= "seon.db/transact!" (::ret/sym best)))
@@ -144,7 +142,8 @@
               (is (re-find #"Commit tx-data" (::ret/spec-text best)))
               (is (re-find #":seon.db/transact-request" (::ret/spec best))))))
         (testing "an exact name (different ns) ranks as :exact, distance 0"
-          (let [cands (ret/retrieve-candidates {::ret/name "query" ::ret/db db})]
+          (let [cands (await (ret/retrieve-candidates
+                              {::ret/name "query" ::ret/db database}))]
             (is (= "seon.db/query" (::ret/sym (first cands))))
             (is (= :exact (::ret/match-kind (first cands))))
             (is (= 0 (::ret/distance (first cands)))))))
@@ -157,8 +156,10 @@
 (deftest emit-injection-descriptor
   (async done
     (with-db
-      (fn [db]
-        (let [{::ret/keys [injections]} (ret/retrieve-for-code-buffer {::ret/code-buffer-text code-buffer ::ret/db db})
+      (fn ^:async check-injection [database]
+        (let [{::ret/keys [injections]}
+              (await (ret/retrieve-for-code-buffer
+                      {::ret/code-buffer-text code-buffer ::ret/db database}))
               by-unres (into {} (map (juxt ::ret/unresolved identity)) injections)
               inj      (by-unres "transct!")]
           (testing "the transct! injection names the real replacement + span + spec"
@@ -189,9 +190,11 @@
 (deftest clean-code-buffer-no-injections
   (async done
     (with-db
-      (fn [db]
-        (let [r (ret/retrieve-for-code-buffer
-                  {::ret/code-buffer-text "(defn sum [xs] (reduce + 0 xs))" ::ret/db db})]
+      (fn ^:async check-clean [database]
+        (let [r (await (ret/retrieve-for-code-buffer
+                        {::ret/code-buffer-text
+                         "(defn sum [xs] (reduce + 0 xs))"
+                         ::ret/db database}))]
           (is (empty? (::ret/unresolved r)))
           (is (empty? (::ret/injections r)))))
       done)))
@@ -199,12 +202,16 @@
 (deftest membership-check
   (async done
     (with-db
-      (fn [db]
-        (is (true?  (ret/symbol-resolves? {::ret/name "transact!" ::ret/qualifier "db"
-                                           ::ret/aliases {"db" "seon.db"} ::ret/db db})))
-        (is (false? (ret/symbol-resolves? {::ret/name "transct!" ::ret/db db})))
-        (is (false? (ret/symbol-resolves? {::ret/name "transact!" ::ret/qualifier "db"
-                                           ::ret/aliases {"db" "wrong.ns"} ::ret/db db}))
+      (fn ^:async check-membership [database]
+        (is (true? (await (ret/symbol-resolves?
+                           {::ret/name "transact!" ::ret/qualifier "db"
+                            ::ret/aliases {"db" "seon.db"} ::ret/db database}))))
+        (is (false? (await (ret/symbol-resolves?
+                            {::ret/name "transct!"}))))
+        (is (false? (await (ret/symbol-resolves?
+                            {::ret/name "transact!" ::ret/qualifier "db"
+                             ::ret/aliases {"db" "wrong.ns"}
+                             ::ret/db database})))
             "a real name under the WRONG ns does not resolve"))
       done)))
 
@@ -254,99 +261,71 @@
 ;; Property 1: a symbol that IS in the graph is NEVER flagged unresolved (no
 ;; false-positive correction).
 (deftest retrieve-prop-real-sym-never-flagged
-  (async done
-    (let [rows (gen-graph-rows)
-          syms (mapv :seon.fn/sym rows)]
-      (-> (fresh-db-rows rows)
-          (.then
-            (fn [db]
-              (check 100
-                (prop/for-all [fq (gen/elements syms)]
-                  (let [code-buffer  (str "(defn use1 [x] (" fq " x))")
-                        flagged (set (map ::ret/symbol
-                                          (ret/unresolved-references
-                                            {::ret/code-buffer-text code-buffer ::ret/db db})))]
-                    (and (not (contains? flagged fq))
-                         (ret/symbol-resolves?
-                           {::ret/name (nm-of fq) ::ret/qualifier (ns-of fq)
-                            ::ret/aliases {} ::ret/db db})))))))
-          (.catch (fn [e] (is false (str "threw — " e))))
-          (.then (fn [_] (done)))))))
+  (let [rows (gen-graph-rows)
+        syms (mapv :seon.fn/sym rows)
+        retrieve-in (deref #'ret/retrieve-for-code-buffer-in)]
+    (check 100
+      (prop/for-all [fq (gen/elements syms)]
+        (let [code-buffer (str "(defn use1 [x] (" fq " x))")
+              result (retrieve-in rows code-buffer {} 5)
+              flagged (set (map ::ret/symbol (::ret/unresolved result)))]
+          (not (contains? flagged fq)))))))
 
 ;; Property 2: a code-buffer referencing an absent NEAR-name (1 edit from a real
 ;; sym) IS flagged AND retrieves that real sym.
 (deftest retrieve-prop-near-miss-flagged-and-retrieved
-  (async done
-    (let [rows (gen-graph-rows)
-          syms (mapv :seon.fn/sym rows)]
-      (-> (fresh-db-rows rows)
-          (.then
-            (fn [db]
-              (check 100
-                (prop/for-all [fq    (gen/elements syms)
-                               drop? gen/boolean
-                               extra (gen/elements (vec name-alpha))]
-                  (let [nm     (nm-of fq)
-                        miss   (if drop? (subs nm 0 (dec (count nm))) (str nm extra))
-                        code-buffer (str "(defn use1 [x] (" miss " x))")
-                        flagged   (set (map ::ret/symbol
-                                            (ret/unresolved-references
-                                              {::ret/code-buffer-text code-buffer ::ret/db db})))
-                        cand-syms (set (map ::ret/sym
-                                            (ret/retrieve-candidates
-                                              {::ret/name miss ::ret/db db})))]
-                    (and (contains? flagged miss)        ; absent near-name flagged
-                         (contains? cand-syms fq)))))))   ; retrieves the real sym
-          (.catch (fn [e] (is false (str "threw — " e))))
-          (.then (fn [_] (done)))))))
+  (let [rows (gen-graph-rows)
+        syms (mapv :seon.fn/sym rows)
+        retrieve-in (deref #'ret/retrieve-for-code-buffer-in)]
+    (check 100
+      (prop/for-all [fq    (gen/elements syms)
+                     drop? gen/boolean
+                     extra (gen/elements (vec name-alpha))]
+        (let [nm (nm-of fq)
+              miss (if drop? (subs nm 0 (dec (count nm))) (str nm extra))
+              code-buffer (str "(defn use1 [x] (" miss " x))")
+              result (retrieve-in rows code-buffer {} 5)
+              flagged (set (map ::ret/symbol (::ret/unresolved result)))
+              candidates (mapcat ::ret/candidates (::ret/injections result))]
+          (and (contains? flagged miss)
+               (contains? (set (map ::ret/sym candidates)) fq)))))))
 
 ;; Property 3: every emitted injection has a span within code-buffer bounds (whose
 ;; substring IS the flagged token) and a replacement whose name EXISTS in the
 ;; graph — never a fabricated correction.
 (deftest retrieve-prop-injection-span-and-replacement-valid
-  (async done
-    (let [rows   (gen-graph-rows)
-          syms   (mapv :seon.fn/sym rows)
-          gnames (set (map nm-of syms))]
-      (-> (fresh-db-rows rows)
-          (.then
-            (fn [db]
-              (check 100
-                (prop/for-all [fq    (gen/elements syms)
-                               real  (gen/elements syms)
-                               extra (gen/elements (vec name-alpha))]
-                  (let [miss   (str (nm-of fq) extra)
-                        code-buffer (str "(defn use1 [x] (" real " x) (" miss " x))")
-                        {::ret/keys [injections]}
-                        (ret/retrieve-for-code-buffer {::ret/code-buffer-text code-buffer ::ret/db db})
-                        clen (count code-buffer)]
-                    (and (pos? (count injections))       ; the near-miss yields an injection
-                         (every?
-                           (fn [inj]
-                             (let [[s e] (::ret/span inj)]
-                               (and (<= 0 s) (<= s e) (<= e clen)
-                                    (= (::ret/unresolved inj) (subs code-buffer s e))
-                                    (contains? gnames (nm-of (::ret/replacement inj))))))
-                           injections)))))))
-          (.catch (fn [e] (is false (str "threw — " e))))
-          (.then (fn [_] (done)))))))
+  (let [rows (gen-graph-rows)
+        syms (mapv :seon.fn/sym rows)
+        gnames (set (map nm-of syms))
+        retrieve-in (deref #'ret/retrieve-for-code-buffer-in)]
+    (check 100
+      (prop/for-all [fq    (gen/elements syms)
+                     real  (gen/elements syms)
+                     extra (gen/elements (vec name-alpha))]
+        (let [miss (str (nm-of fq) extra)
+              code-buffer (str "(defn use1 [x] (" real " x) (" miss " x))")
+              {::ret/keys [injections]} (retrieve-in rows code-buffer {} 5)
+              clen (count code-buffer)]
+          (and (pos? (count injections))
+               (every? (fn [inj]
+                         (let [[s e] (::ret/span inj)]
+                           (and (<= 0 s) (<= s e) (<= e clen)
+                                (= (::ret/unresolved inj) (subs code-buffer s e))
+                                (contains? gnames
+                                           (nm-of (::ret/replacement inj))))))
+                       injections)))))))
 
 ;; Property 4 (fail-soft): a dead name with NO near candidate is flagged but
 ;; produces NO injection — never a wrong correction.
 (deftest retrieve-prop-failsoft-no-candidate-no-injection
-  (async done
-    (let [rows (gen-graph-rows)]
-      (-> (fresh-db-rows rows)
-          (.then
-            (fn [db]
-              (check 100
-                (prop/for-all [klen (gen/choose 3 6)]
-                  (let [far    (apply str (repeat klen "z"))  ; 'z' ∉ the name alphabet
-                        code-buffer (str "(defn use1 [x] (" far " x))")
-                        {::ret/keys [unresolved injections]}
-                        (ret/retrieve-for-code-buffer {::ret/code-buffer-text code-buffer ::ret/db db})
-                        flagged (set (map ::ret/symbol unresolved))]
-                    (and (contains? flagged far)         ; the dead name IS flagged
-                         (empty? injections)))))))         ; but NO wrong injection
-          (.catch (fn [e] (is false (str "threw — " e))))
-          (.then (fn [_] (done)))))))
+  (let [rows (gen-graph-rows)
+        retrieve-in (deref #'ret/retrieve-for-code-buffer-in)]
+    (check 100
+      (prop/for-all [klen (gen/choose 3 6)]
+        (let [far (apply str (repeat klen "z"))
+              code-buffer (str "(defn use1 [x] (" far " x))")
+              {::ret/keys [unresolved injections]}
+              (retrieve-in rows code-buffer {} 5)
+              flagged (set (map ::ret/symbol unresolved))]
+          (and (contains? flagged far)
+               (empty? injections)))))))

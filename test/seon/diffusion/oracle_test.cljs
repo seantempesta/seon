@@ -21,21 +21,12 @@
   (:require
     [cljs.test :as t :refer [deftest is testing async]]
     [clojure.string :as str]
-    [datahike.api :as d]
+    [seon.db :as db]
     [seon.diffusion.oracle :as oracle]))
 
 ;; ---------------------------------------------------------------------------
-;; A seeded :memory program graph — two real fns (raw datahike schema, so the
-;; test is self-contained). Returns a Promise of the db VALUE refine reads.
+;; Ordinary function facts returned through the public database authority seam.
 ;; ---------------------------------------------------------------------------
-
-(def ^:private fn-schema
-  [{:db/ident :seon.fn/sym      :db/cardinality :db.cardinality/one
-    :db/valueType :db.type/string :db/unique :db.unique/identity}
-   {:db/ident :seon.fn/arglists :db/cardinality :db.cardinality/one :db/valueType :db.type/string}
-   {:db/ident :seon.fn/doc      :db/cardinality :db.cardinality/one :db/valueType :db.type/string}
-   {:db/ident :seon.fn/spec     :db/cardinality :db.cardinality/one :db/valueType :db.type/string}
-   {:db/ident :seon.fn/source   :db/cardinality :db.cardinality/one :db/valueType :db.type/string}])
 
 (def ^:private fn-rows
   [{:seon.fn/sym "seon.db/transact!"
@@ -48,22 +39,31 @@
     :seon.fn/doc "Run a Datalog query."
     :seon.fn/source "(defn query [& args] …)"}])
 
-(defn- fresh-db []
-  (let [cfg {:store {:backend :memory :id (random-uuid)}
-             :schema-flexibility :write
-             :keep-history? false}]
-    (-> (d/create-database cfg)
-        (.then (fn [_] (d/connect cfg {:sync? false})))
-        (.then (fn [conn]
-                 (-> (d/transact! conn fn-schema)
-                     (.then (fn [_] (d/transact! conn fn-rows)))
-                     (.then (fn [_] @conn))))))))
+(def ^:private database
+  {:db-name "diffusion-oracle-test" :t 42 :as-of nil :since nil
+   :history false
+   :datahike/commit-id #uuid "00000000-0000-0000-0000-000000000042"})
 
 (defn- with-db [f done]
-  (-> (fresh-db)
-      (.then f)
+  (let [original-db db/db
+        original-query db/query]
+    (set! db/db (fn
+                  ([] (js/Promise.resolve database))
+                  ([_request] (js/Promise.resolve database))))
+    (set! db/query
+          (fn
+            ([request]
+             (is (= database (::db/db request))
+                 "oracle retrieval reads one captured database value")
+             (js/Promise.resolve fn-rows))
+            ([_query-form & _inputs]
+             (js/Promise.reject (js/Error. "expected namespaced query request")))))
+    (-> (js/Promise.resolve (f database))
       (.catch (fn [e] (is false (str "test chain threw — " e))))
-      (.then (fn [_] (done)))))
+      (.finally (fn []
+                  (set! db/db original-db)
+                  (set! db/query original-query)
+                  (done))))))
 
 (defn- span-source [code-buffer [s e]] (subs code-buffer s e))
 
@@ -81,9 +81,11 @@
 (deftest combined-control-set
   (async done
     (with-db
-      (fn [db]
+      (fn ^:async check-combined [database]
         (let [{::oracle/keys [clamps renoise-spans injections legs]}
-              (oracle/refine {::oracle/code-buffer-text code-buffer ::oracle/db db})
+              (await (oracle/refine
+                      {::oracle/code-buffer-text code-buffer
+                       ::oracle/db database}))
               clamp-srcs   (set (map ::oracle/source clamps))
               by-unres     (into {} (map (juxt :seon.diffusion.retrieval/unresolved identity)) injections)]
 
@@ -161,9 +163,11 @@
 (deftest structural-def-vs-defn
   (async done
     (with-db
-      (fn [db]
+      (fn ^:async check-structural [database]
         (let [{::oracle/keys [clamps renoise-spans legs]}
-              (oracle/refine {::oracle/code-buffer-text struct-code-buffer ::oracle/db db})
+              (await (oracle/refine
+                      {::oracle/code-buffer-text struct-code-buffer
+                       ::oracle/db database}))
               clamp-srcs (set (map ::oracle/source clamps))]
 
           (testing "no eval verdicts supplied → structural tier rides the PARSE leg"
@@ -200,32 +204,34 @@
 (deftest phase-grammar-gate
   (async done
     (with-db
-      (fn [db]
+      (fn ^:async check-phases [database]
         (letfn [(run [phase]
-                  (let [cs (oracle/refine
-                             (cond-> {::oracle/code-buffer-text phase-code-buffer ::oracle/db db}
-                               phase (assoc ::oracle/phase phase)))]
+                  (oracle/refine
+                   (cond-> {::oracle/code-buffer-text phase-code-buffer
+                            ::oracle/db database}
+                     phase (assoc ::oracle/phase phase))))
+                (summarize [cs]
                     {:violations (->> (::oracle/renoise-spans cs)
                                       (filter #(= :phase-violation (::oracle/error-kind %)))
                                       (map ::oracle/source) set)
-                     :clamps (set (map ::oracle/source (::oracle/clamps cs)))}))]
+                     :clamps (set (map ::oracle/source (::oracle/clamps cs)))})]
 
           (testing ":schemas phase — ns + register! clamp; defn + def renoised"
-            (let [{:keys [violations clamps]} (run :schemas)]
+            (let [{:keys [violations clamps]} (summarize (await (run :schemas)))]
               (is (contains? violations "(defn mean [v] (/ (reduce + v) (count v)))"))
               (is (contains? violations "(def x 5)"))
               (is (contains? clamps "(ns my.work)"))
               (is (contains? clamps "(schema/register! ::id :string)"))))
 
           (testing ":functions phase — ns + defn clamp; register! + def renoised"
-            (let [{:keys [violations clamps]} (run :functions)]
+            (let [{:keys [violations clamps]} (summarize (await (run :functions)))]
               (is (contains? violations "(schema/register! ::id :string)"))
               (is (contains? violations "(def x 5)"))
               (is (contains? clamps "(ns my.work)"))
               (is (contains? clamps "(defn mean [v] (/ (reduce + v) (count v)))"))))
 
           (testing "no phase supplied — the gate is inert (no :phase-violation spans)"
-            (is (empty? (:violations (run nil)))))))
+            (is (empty? (:violations (summarize (await (run nil)))))))))
       done)))
 
 ;; :tests phase — model-written cljs.test deftests. ns + deftest + comment
@@ -241,10 +247,11 @@
 (deftest tests-phase-gate
   (async done
     (with-db
-      (fn [db]
-        (let [cs (oracle/refine {::oracle/code-buffer-text tests-phase-code-buffer
-                                 ::oracle/db db
-                                 ::oracle/phase :tests})
+      (fn ^:async check-test-phase [database]
+        (let [cs (await (oracle/refine
+                         {::oracle/code-buffer-text tests-phase-code-buffer
+                          ::oracle/db database
+                          ::oracle/phase :tests}))
               violations (->> (::oracle/renoise-spans cs)
                               (filter #(= :phase-violation (::oracle/error-kind %)))
                               (map ::oracle/source) set)
@@ -270,8 +277,10 @@
 (deftest eval-verdict-demotes-clean-form-to-renoise
   (async done
     (with-db
-      (fn [db]
-        (let [base (oracle/refine {::oracle/code-buffer-text eval-code-buffer ::oracle/db db})]
+      (fn ^:async check-eval-fold [database]
+        (let [base (await (oracle/refine
+                           {::oracle/code-buffer-text eval-code-buffer
+                            ::oracle/db database}))]
           (testing "with NO eval verdict, the clean (but semantically-dubious) form is a CLAMP"
             (is (= [:parse :retrieve] (::oracle/legs base)))
             (is (= 1 (count (::oracle/clamps base))))
@@ -280,13 +289,15 @@
             (is (empty? (::oracle/renoise-spans base))))
 
           (let [clamp-span (::oracle/span (first (::oracle/clamps base)))
-                folded (oracle/refine {::oracle/code-buffer-text eval-code-buffer
-                                       ::oracle/db db
-                                       ::oracle/eval-verdicts
-                                       [{::oracle/span clamp-span
-                                         ::oracle/ok? false
-                                         ::oracle/error-kind :compile
-                                         ::oracle/message "Use of undeclared Var zzzqqq"}]})]
+                folded (await (oracle/refine
+                               {::oracle/code-buffer-text eval-code-buffer
+                                ::oracle/db database
+                                ::oracle/eval-verdicts
+                                [{::oracle/span clamp-span
+                                  ::oracle/ok? false
+                                  ::oracle/error-kind :compile
+                                  ::oracle/message
+                                  "Use of undeclared Var zzzqqq"}]}))]
             (testing "the eval verdict folds in: the form moves CLAMP → RENOISE"
               (is (= [:parse :retrieve :eval] (::oracle/legs folded)))
               (is (empty? (::oracle/clamps folded)))
@@ -304,15 +315,17 @@
 (deftest injection-supersedes-eval-renoise
   (async done
     (with-db
-      (fn [db]
+      (fn ^:async check-injection-fold [database]
         (let [c "(db/transct! {})"
-              base (oracle/refine {::oracle/code-buffer-text c ::oracle/db db})
+              base (await (oracle/refine
+                           {::oracle/code-buffer-text c ::oracle/db database}))
               inj-span (:seon.diffusion.retrieval/span (first (::oracle/injections base)))
-              folded (oracle/refine {::oracle/code-buffer-text c ::oracle/db db
-                                     ::oracle/eval-verdicts
-                                     [{::oracle/span inj-span
-                                       ::oracle/ok? false
-                                       ::oracle/error-kind :throw}]})]
+              folded (await (oracle/refine
+                             {::oracle/code-buffer-text c ::oracle/db database
+                              ::oracle/eval-verdicts
+                              [{::oracle/span inj-span
+                                ::oracle/ok? false
+                                ::oracle/error-kind :throw}]}))]
           (is (some? inj-span) "the hallucination produced an injection")
           (is (empty? (::oracle/renoise-spans folded))
               "an eval-bad span covered by an injection is NOT re-noised")

@@ -31,10 +31,9 @@
    renoise span (parse error or an eval-bad form). So the three sets never
    double-cover a region.
 
-   PURE reader over a db value (the retrieve leg reads `:seon.fn/sym` from the
-   program graph; default `seon.db/*conn*`). No writes, no GPU."
+   Captures one ordinary database value for the retrieve leg. No writes, no
+   GPU."
   (:require
-    [seon.embed]                                    ; :seon.embed/db schema (referenced below)
     [seon.repl.internal :as internal]
     [seon.diffusion.grammar :as grammar]            ; shared T1/phase predicates (bb + pod)
     [seon.diffusion.retrieval :as retrieval]
@@ -91,7 +90,7 @@
    [::k {:optional true} :seon.diffusion.retrieval/k]
    [::eval-verdicts {:optional true} [:vector ::eval-verdict]]
    [::phase {:optional true} ::phase]
-   [::db {:optional true} :seon.embed/db]])
+   [::db {:optional true} :seon.db/db]])
 
 (schema/register!
   ::control-set
@@ -119,7 +118,7 @@
 ;; The unified dispatcher
 ;; ============================================================
 
-(defn refine
+(defn ^:async refine
   "Run the unified oracle on one checkpoint, return the `::control-set`.
 
    Runs on one mid-denoise checkpoint: PARSE (always) + RETRIEVE (always, reads the program
@@ -143,11 +142,12 @@
         reads    (filter #(= :read (:seon.repl/kind %)) entries)
         ;; RETRIEVE leg — hallucinated-symbol injections (reads the graph).
         {::retrieval/keys [injections]}
-        (retrieval/retrieve-for-code-buffer
+        (await
+         (retrieval/retrieve-for-code-buffer
           (cond-> {:seon.diffusion.retrieval/code-buffer-text code-buffer-text}
             aliases (assoc :seon.diffusion.retrieval/aliases aliases)
             k       (assoc :seon.diffusion.retrieval/k k)
-            db      (assoc :seon.diffusion.retrieval/db db)))
+            db      (assoc :seon.diffusion.retrieval/db db))))
         inj-spans     (mapv :seon.diffusion.retrieval/span injections)
         ;; PARSE-tier renoise spans (broken syntax).
         parse-renoise (mapv (fn [{:seon.repl/keys [span source] :as entry}]
