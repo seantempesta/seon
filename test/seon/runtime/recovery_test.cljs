@@ -1,19 +1,26 @@
 (ns seon.runtime.recovery-test
-  "Protocol-level recovery fixtures over one coordinate-pinned acquisition."
+  "Crash recovery fixtures over one immutable database value."
   (:require
     [cljs.test :refer [async deftest is testing]]
     [malli.core :as m]
     [seon.db :as db]
-    [seon.db.coordinate :as coordinate]
     [seon.db.id :as db.id]
     [seon.db.protocol :as protocol]
     [seon.runtime.recovery :as recovery]))
 
-(def ^:private acquired-coordinate
-  {::coordinate/database-id #uuid "4a2b6d39-1951-4596-a0d7-947a72d4fb1e"
-   ::coordinate/branch :db
-   ::coordinate/commit-id #uuid "ba3a8f3a-554a-4395-92d6-b27fa148b3fd"
-   ::coordinate/t 81})
+(def ^:private database
+  {:db-name "default"
+   :t 81
+   :as-of nil
+   :since nil
+   :history false
+   :datahike/commit-id #uuid "ba3a8f3a-554a-4395-92d6-b27fa148b3fd"})
+
+(def ^:private database-after
+  (assoc database
+         :t 82
+         :datahike/commit-id
+         #uuid "bc3a8f3a-554a-4395-92d6-b27fa148b3fd"))
 
 (defn- query-result
   [value]
@@ -22,8 +29,7 @@
 
 (defn- acquisition
   [targets turns evals]
-  {::db/coordinate acquired-coordinate
-   ::db/results
+  {::db/results
    [(query-result targets)
     (query-result turns)
     (query-result evals)
@@ -31,13 +37,20 @@
 
 (defn- with-authority-stubs
   [acquired allocate body]
-  (let [original-execute-many db/execute-many
+  (let [original-db db/db
+        original-execute-many db/execute-many
         original-allocate db.id/allocate!]
+    (set! db/db
+          (fn
+            ([] (js/Promise.resolve database))
+            ([_] (js/Promise.reject
+                  (js/Error. "unexpected named database selection")))))
     (set! db/execute-many (fn [_] (js/Promise.resolve acquired)))
     (set! db.id/allocate! allocate)
     (-> (js/Promise.resolve (body))
         (.finally
          (fn []
+           (set! db/db original-db)
            (set! db/execute-many original-execute-many)
            (set! db.id/allocate! original-allocate))))))
 
@@ -58,6 +71,7 @@
                   ["run-b" "turn-b" "eval-b"]}
           !execute-request (atom nil)
           !allocation-request (atom nil)
+          original-db db/db
           original-execute-many db/execute-many
           original-allocate db.id/allocate!
           allocate
@@ -66,12 +80,20 @@
             (let [built ((::db.id/transaction-builder request)
                          {:seon.runtime.recovery/id "r12345678901"})]
               (js/Promise.resolve
-               {:seon.db/ok? true
-                :seon.db/coordinate acquired-coordinate
+               {:db-before database
+                :db-after database-after
+                :tx-data (::db/tx-data built)
+                :tempids {}
+                :tx-meta {}
                 ::db.id/ids
                 {:seon.runtime.recovery/id "r12345678901"}
                 ::db.id/eids {:seon.runtime.recovery/id 9001}
                 ::built built})))]
+      (set! db/db
+            (fn
+              ([] (js/Promise.resolve database))
+              ([_] (js/Promise.reject
+                    (js/Error. "unexpected named database selection")))))
       (set! db/execute-many
             (fn [request]
               (reset! !execute-request request)
@@ -81,19 +103,21 @@
            {:seon.runtime.recovery/detail "cold restart"})
           (.then
            (fn [result]
-             (testing "all recovery reads share one execute-many coordinate"
+             (testing "all recovery reads share one immutable database value"
                (is (= 4 (count (::db/members @!execute-request))))
+               (is (identical? database (::db/db @!execute-request)))
                (is (every? #(= protocol/query-operation
                                (::protocol/operation %))
                            (::db/members @!execute-request))))
              (testing "ordinary policy data and a pure builder reach allocation"
+               (is (identical? database (::db/db @!allocation-request)))
                (is (= {:seon.runtime.recovery/id
                        :seon.db.id.generator/compact}
                       (::db.id/generator-policies @!allocation-request)))
                (let [built ((::db.id/transaction-builder @!allocation-request)
                             {:seon.runtime.recovery/id "r12345678901"})
                      tx (::db/tx-data built)]
-                 (is (= acquired-coordinate (::db/expected-coordinate built)))
+                 (is (identical? database (::db/expected-db built)))
                  (is (some #{(db/cas-assert
                               [:seon.agent/id "alpha"]
                               :seon.agent/run
@@ -124,6 +148,7 @@
           (.catch (fn [error] (is false (str "threw — " error))))
           (.finally
            (fn []
+             (set! db/db original-db)
              (set! db/execute-many original-execute-many)
              (set! db.id/allocate! original-allocate)
              (done)))))))
@@ -135,7 +160,12 @@
            (acquisition #{} #{} #{})
            (fn [_]
              (swap! !allocations inc)
-             (js/Promise.resolve {:seon.db/ok? true}))
+             (js/Promise.resolve
+              {:db-before database
+               :db-after database-after
+               :tx-data []
+               :tempids {}
+               :tx-meta {}}))
            #(recovery/recover! {}))
           (.then
            (fn [result]
@@ -149,18 +179,15 @@
   (async done
     (let [!requests (atom [])
           stale
-          {:seon.db/ok? false
-           :seon.db/error
-           {:seon.error/message "database coordinate changed"
-            :seon.error/kind :user-input
-            :seon.error/data
-            {::protocol/error-kind protocol/stale-coordinate-error}}}]
+          {:seon.error/message "expected database value is no longer current"
+           :seon.error/kind :user-input
+           :seon.error/data {:seon.db/expected-db database}}]
       (-> (with-authority-stubs
            (acquisition #{["alpha" "run-a" :open]} #{} #{})
            (fn [request]
              (swap! !requests conj request)
-             (is (= acquired-coordinate
-                    (::db/expected-coordinate
+             (is (identical? database
+                             (::db/expected-db
                      ((::db.id/transaction-builder request)
                       {:seon.runtime.recovery/id "r12345678901"}))))
              (js/Promise.resolve stale))
@@ -176,8 +203,7 @@
 (deftest member-failure-is-an-error-value
   (async done
     (let [failed
-          {::db/coordinate acquired-coordinate
-           ::db/results
+          {::db/results
            [{::protocol/success? false
              ::protocol/error "query budget exhausted"}
             (query-result #{})
@@ -190,8 +216,22 @@
            #(recovery/recover! {}))
           (.then
            (fn [result]
-             (is (false? (:seon.db/ok? result)))
-             (is (= :core-bug
-                    (get-in result [:seon.db/error :seon.error/kind])))))
+             (is (= :core-bug (:seon.error/kind result)))
+             (is (string? (:seon.error/message result)))))
+          (.catch (fn [error] (is false (str "threw — " error))))
+          (.finally done)))))
+
+(deftest acquisition-error-remains-a-direct-error
+  (async done
+    (let [direct-error {:seon.error/message "database unavailable"
+                        :seon.error/kind :core-bug}]
+      (-> (with-authority-stubs
+           direct-error
+           (fn [_]
+             (js/Promise.reject (js/Error. "allocation must not run")))
+           #(recovery/recover! {}))
+          (.then
+           (fn [result]
+             (is (= direct-error result))))
           (.catch (fn [error] (is false (str "threw — " error))))
           (.finally done)))))

@@ -6,7 +6,8 @@
    [seon.client :as client]
    [seon.db :as db]
    [seon.launch :as launch]
-   [seon.runtime.admission :as admission]))
+   [seon.runtime.admission :as admission]
+   [seon.runtime.recovery :as recovery]))
 
 (def ^:private digest
   "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
@@ -66,6 +67,22 @@
     (is (= [{:seon.user/id "user"}
             {:my.kb.shared/id "shared"}]
            (:seon.db/initial-data forward)))))
+
+(deftest startup-recovery-accepts-domain-data-and-throws-direct-errors
+  (let [recovery-result! (deref #'client/recovery-result!)
+        domain-result {::recovery/repaired? false
+                       ::recovery/agent-ids []
+                       ::recovery/run-ids []
+                       ::recovery/turn-ids []
+                       ::recovery/eval-ids []}
+        direct-error {:seon.error/message "expected database is stale"
+                      :seon.error/kind :user-input}
+        thrown (try
+                 (recovery-result! direct-error)
+                 nil
+                 (catch :default exception exception))]
+    (is (identical? domain-result (recovery-result! domain-result)))
+    (is (= direct-error (ex-data thrown)))))
 
 (deftest invalid-complete-program-fails-before-session-open
   (async done

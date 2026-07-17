@@ -445,6 +445,12 @@
   (await (attach-runtime-advertisement!))
   (or (::resumable-agent-ids @!state) []))
 
+(defn- recovery-result!
+  [result]
+  (if (:seon.error/message result)
+    (throw (ex-info "start-runtime!: crash recovery failed" result))
+    result))
+
 (defn- ^:async detach-runtime-advertisement!
   []
   (let [interest-key (::advertisement-interest-key @!state)]
@@ -2018,8 +2024,7 @@
                    :seon.db/process
                    (db.process/lookup-ref :seon.db.process/boot)}
                   (fn [] (recovery/recover! {}))))]
-            (when (false? (:seon.db/ok? recovered))
-              (throw (ex-info "start-runtime!: crash recovery failed" recovered)))
+            (recovery-result! recovered)
             (when (::recovery/repaired? recovered)
               (log/info-console!
                "seon.client/start-runtime!"

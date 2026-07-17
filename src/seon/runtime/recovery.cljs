@@ -15,6 +15,7 @@
     [seon.db :as db]
     [seon.db.id :as db.id]
     [seon.db.protocol :as protocol]
+    [seon.error :as error]
     [seon.eval.internal :as eval.internal]
     [seon.schema :as schema]))
 
@@ -64,7 +65,7 @@
     [::eval-ids ::eval-ids]
     [:seon.runtime.recovery/id
      {:optional true} :seon.runtime.recovery/id]]
-   :seon.db/transact-response])
+   ::db/error])
 
 (def ^:private repair-targets-query
   '[:find ?agent-id ?run-id ?status
@@ -114,37 +115,37 @@
   (if (true? (::protocol/success? member))
     (:datahike.query/result member)
     (throw (ex-info (str "Recovery " operation " failed.")
-                    {:seon.db/error member
-                     :seon.error/kind :core-bug}))))
+                    {:seon.error/kind :core-bug
+                     ::protocol/error (::protocol/error member)
+                     ::protocol/error-kind (::protocol/error-kind member)}))))
 
 (defn- ^:async acquire-recovery!
-  []
+  [database]
   (let [acquired
         (await
          (db/execute-many
-          {::db/members
+          {::db/db database
+           ::db/members
            (mapv query-member
                  [repair-targets-query running-turns-query
                   running-evals-query recovery-policy-query])}))]
-    (when (and (map? acquired) (:seon.error/message acquired))
-      (throw (ex-info "Recovery database acquisition failed."
-                      {:seon.db/error acquired
-                       :seon.error/kind :core-bug})))
-    (let [[targets turns evals policy] (::db/results acquired)]
-      {::db/coordinate (::db/coordinate acquired)
-       ::targets (->> (member-value! "target acquisition" targets)
+    (if (:seon.error/message acquired)
+      acquired
+      (let [[targets turns evals policy] (::db/results acquired)]
+        {::db/db database
+         ::targets (->> (member-value! "target acquisition" targets)
+                        (sort-by (juxt first second))
+                        vec)
+         ::turns (->> (member-value! "turn acquisition" turns)
                       (sort-by (juxt first second))
                       vec)
-       ::turns (->> (member-value! "turn acquisition" turns)
-                    (sort-by (juxt first second))
-                    vec)
-       ::evals (->> (member-value! "eval acquisition" evals)
-                    (sort-by (juxt first second #(nth % 2)))
-                    vec)
-       ::generator (member-value! "generator-policy acquisition" policy)})))
+         ::evals (->> (member-value! "eval acquisition" evals)
+                      (sort-by (juxt first second #(nth % 2)))
+                      vec)
+         ::generator (member-value! "generator-policy acquisition" policy)}))))
 
 (defn- compile-recovery
-  [{::keys [targets turns evals] ::db/keys [coordinate]}
+  [{::keys [targets turns evals] ::db/keys [db]}
    recovery-id closed-at detail]
   (let [agent-ids (mapv first targets)
         run-ids (mapv second targets)
@@ -192,7 +193,7 @@
                   :seon.runtime.recovery/reason :unexpected-exit}
                  detail
                  (assoc :seon.runtime.recovery/detail detail))]
-    {::db/expected-coordinate coordinate
+    {::db/expected-db db
      ::db/tx-data (-> fences
                       (into pointer-retractions)
                       (into run-closes)
@@ -204,13 +205,16 @@
      ::turn-ids turn-ids
      ::eval-ids eval-ids}))
 
-(defn- failure-envelope
-  [error]
-  {:seon.db/ok? false
-   :seon.db/error
-   {:seon.error/message (or (.-message error) (str error))
-    :seon.error/kind (or (:seon.error/kind (ex-data error)) :core-bug)
-    :seon.error/data (or (ex-data error) {})}})
+(defn- error-value?
+  [value]
+  (and (map? value) (string? (:seon.error/message value))))
+
+(defn- transaction-report?
+  [value]
+  (and (map? value)
+       (contains? value :db-before)
+       (contains? value :db-after)
+       (contains? value :tx-data)))
 
 (defn ^:async recover!
   "Fence interrupted ownership and restore every affected agent to idle.
@@ -222,52 +226,74 @@
    transaction and returns `::repaired? false`.
 
    The caller supplies root/boot transaction provenance. Database failures are
-   returned as the ordinary error envelope; no partial repair can commit."
+   returned as direct error values; no partial repair can commit."
   {:malli/schema [:=> [:catn [::request ::recover-request]]
                   ::recover-response]}
   [{:seon.runtime.recovery/keys [detail]}]
   (try
-    (let [{::keys [targets generator] :as acquired}
-          (await (acquire-recovery!))]
-      (if (empty? targets)
-        {::repaired? false
-         ::agent-ids []
-         ::run-ids []
-         ::turn-ids []
-         ::eval-ids []}
-        (let [closed-at (js/Date.)
-              envelope
-              (await
-               (db.id/allocate!
-                {::db.id/allocations
-                 [{::db.id/key :seon.runtime.recovery/id
-                   ::db.id/identity-attr :seon.runtime.recovery/id}]
-                 ::db.id/generator-policies
-                 {:seon.runtime.recovery/id generator}
-                 ::db.id/transaction-builder
-                 (fn [ids]
-                   (select-keys
-                    (compile-recovery
-                     acquired
-                     (get ids :seon.runtime.recovery/id)
-                     closed-at
-                     detail)
-                    [::db/expected-coordinate ::db/tx-data]))}))
-              recovery-id
-              (get-in envelope [::db.id/ids :seon.runtime.recovery/id])
-              compiled
-              (when (:seon.db/ok? envelope)
-                (compile-recovery acquired recovery-id closed-at detail))]
-          (if (false? (:seon.db/ok? envelope))
-            envelope
-            {::repaired? true
-             ::agent-ids (::agent-ids compiled)
-             ::run-ids (::run-ids compiled)
-             ::turn-ids (::turn-ids compiled)
-             ::eval-ids (::eval-ids compiled)
-             :seon.runtime.recovery/id recovery-id}))))
-    (catch :default error
-      (failure-envelope error))))
+    (let [database (await (db/db))]
+      (if (error-value? database)
+        database
+        (let [{::keys [targets generator] :as acquired}
+              (await (acquire-recovery! database))]
+          (cond
+            (error-value? acquired)
+            acquired
+
+            (empty? targets)
+            {::repaired? false
+             ::agent-ids []
+             ::run-ids []
+             ::turn-ids []
+             ::eval-ids []}
+
+            :else
+            (let [closed-at (js/Date.)
+                  result
+                  (await
+                   (db.id/allocate!
+                    {::db/db database
+                     ::db.id/allocations
+                     [{::db.id/key :seon.runtime.recovery/id
+                       ::db.id/identity-attr :seon.runtime.recovery/id}]
+                     ::db.id/generator-policies
+                     {:seon.runtime.recovery/id generator}
+                     ::db.id/transaction-builder
+                     (fn [ids]
+                       (select-keys
+                        (compile-recovery
+                         acquired
+                         (get ids :seon.runtime.recovery/id)
+                         closed-at
+                         detail)
+                        [::db/expected-db ::db/tx-data]))}))
+                  recovery-id
+                  (get-in result [::db.id/ids :seon.runtime.recovery/id])
+                  compiled
+                  (when (transaction-report? result)
+                    (compile-recovery acquired recovery-id closed-at detail))]
+              (cond
+                (error-value? result)
+                result
+
+                (not (transaction-report? result))
+                {:seon.error/message
+                 "Recovery allocation returned neither a transaction report nor an error."
+                 :seon.error/kind :core-bug
+                 :seon.error/data {:seon.runtime.recovery/result result}}
+
+                :else
+                {::repaired? true
+                 ::agent-ids (::agent-ids compiled)
+                 ::run-ids (::run-ids compiled)
+                 ::turn-ids (::turn-ids compiled)
+                 ::eval-ids (::eval-ids compiled)
+                 :seon.runtime.recovery/id recovery-id}))))))
+    (catch :default exception
+      (let [value (error/->map exception)]
+        (cond-> value
+          (nil? (:seon.error/kind value))
+          (assoc :seon.error/kind :core-bug))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Root notice projection — transaction joins, never copied anchor data.
