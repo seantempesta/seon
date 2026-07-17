@@ -1,13 +1,22 @@
 (ns seon.web.router-test
   "Behavioral tests for database-derived reitit cache invalidation."
   (:require
-    [cljs.test :refer [async deftest is testing]]
+    [cljs.test :refer [async deftest is testing use-fixtures]]
     [seon.agent.message]
     [seon.db :as db]
     [seon.route]
     [seon.runtime.admission :as admission]
     [seon.test.async :refer [settle!]]
     [seon.web.router :as router]))
+
+(def ^:private prior-router-state (atom nil))
+
+(use-fixtures
+  :each
+  {:before (fn []
+             (reset! prior-router-state (deref @#'router/!router-state)))
+   :after (fn []
+            (reset! @#'router/!router-state @prior-router-state))})
 
 (defn temporary-handler!
   "Write the temporary route's observable response."

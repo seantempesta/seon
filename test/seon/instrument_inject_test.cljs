@@ -76,11 +76,14 @@
 (def valid-id "INJECTtest0001")
 
 (defn- with-operation [operation-configuration thunk]
-  (db/with-agent
-   valid-id
-   #(db/with-tx-context
-     {:seon.config/configuration operation-configuration}
-     thunk)))
+  (db/without-agent
+   (fn []
+     (db/with-agent
+      valid-id
+      (fn []
+        (db/with-tx-context
+         {:seon.config/configuration operation-configuration}
+         thunk))))))
 
 (deftest declared-absent-dependencies-come-from-one-operation
   (let [result (with-operation configuration

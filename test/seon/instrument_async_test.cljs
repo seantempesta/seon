@@ -295,20 +295,24 @@
                               "an invalid resolved guard records once"))))))
               (.then
                 (fn [_]
-                  (db/with-agent
-                    "INJECTtest0001"
+                  (db/without-agent
                     (fn []
-                      (assert-resolves (async-inject-multi {} 9)
-                                       ["INJECTtest0001" 9]
-                                       "multi-arity injection")))))
+                      (db/with-agent
+                        "INJECTtest0001"
+                        (fn []
+                          (assert-resolves (async-inject-multi {} 9)
+                                           ["INJECTtest0001" 9]
+                                           "multi-arity injection")))))))
               (.then
                 (fn [_]
-                  (db/with-agent
-                    "INJECTtest0001"
+                  (db/without-agent
                     (fn []
-                      (assert-resolves
-                        (async-inject-multi {:seon.agent/id "OTHERagent0002"})
-                        ["OTHERagent0002"] "explicit injection wins")))))
+                      (db/with-agent
+                        "INJECTtest0001"
+                        (fn []
+                          (assert-resolves
+                            (async-inject-multi {:seon.agent/id "OTHERagent0002"})
+                            ["OTHERagent0002"] "explicit injection wins")))))))
               (.then
                 (fn [_]
                   (let [error (js/Error. "nested rejection")]

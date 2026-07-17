@@ -103,8 +103,8 @@
       (is (true? (client/shadow-build-notify! {:type :build-start})))
       (is (true? (client/shadow-build-notify! {:type :build-failure})))
       (is (true? (client/shadow-build-notify! {:type :build-complete})))
-      (is (= [:close :failed :publish] @!effects)
-          "a failed generation never rearms autonomous ticker work"))))
+      (is (= [:close :failed] @!effects)
+          "a failed generation never publishes or rearms autonomous work"))))
 
 (deftest exact-data-and-delta-refresh-only-affected-wrappers
   (let [function-schemas-before (m/function-schemas :cljs)
