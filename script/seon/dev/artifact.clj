@@ -107,11 +107,58 @@
                   :seon.dev.artifact/dependency-actual actual})))
     coordinates))
 
-(defn- git-coordinate! [dependencies library alias dependency-section]
+(defn- command-output!
+  [directory & command]
+  (let [result (apply process/shell
+                      {:dir (str directory)
+                       :out :string
+                       :err :string
+                       :continue true}
+                      command)]
+    (when-not (zero? (:exit result))
+      (throw (ex-info "Maintained dependency Git inspection failed."
+                      {:seon.dev.artifact/directory (str directory)
+                       :seon.dev.artifact/command (vec command)
+                       :seon.dev.artifact/exit (:exit result)
+                       :seon.dev.artifact/error (str/trim (:err result))})))
+    (str/trim (:out result))))
+
+(defn- public-github-url [url]
+  (cond
+    (and (string? url)
+         (re-matches #"https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:\.git)?"
+                     url))
+    url
+
+    (and (string? url)
+         (re-matches #"git@github\.com:[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:\.git)?"
+                     url))
+    (str "https://github.com/" (subs url (count "git@github.com:")))
+
+    :else nil))
+
+(defn- local-root-coordinate!
+  [root local-root]
+  (let [directory (fs/path root local-root)
+        dirty (command-output! directory "git" "status" "--porcelain")
+        url (public-github-url
+             (command-output! directory "git" "remote" "get-url" "origin"))
+        sha (command-output! directory "git" "rev-parse" "HEAD")]
+    (when (seq dirty)
+      (throw (ex-info "A maintained local dependency has uncommitted changes."
+                      {:seon.dev.artifact/dependency-root (str directory)
+                       :seon.dev.artifact/dependency-status
+                       (str/split-lines dirty)})))
+    {:git/url url :git/sha sha}))
+
+(defn- git-coordinate! [root dependencies library alias dependency-section]
   (let [coordinate (get-in dependencies
                            [:aliases alias dependency-section library])
-        git-url (:git/url coordinate)
-        git-sha (:git/sha coordinate)]
+        identity (if-let [local-root (:local/root coordinate)]
+                   (when root (local-root-coordinate! root local-root))
+                   coordinate)
+        git-url (public-github-url (:git/url identity))
+        git-sha (:git/sha identity)]
     (when-not (and (map? coordinate)
                    (string? git-url)
                    (re-matches
@@ -129,25 +176,27 @@
      :seon.dev.artifact/dependency-git-url git-url
      :seon.dev.artifact/dependency-git-sha git-sha}))
 
-(defn- maintained-dependencies-from [dependencies]
-  (mapv
-    (fn [[library selections]]
-      (let [coordinates
-            (mapv (fn [[alias dependency-section]]
-                    (git-coordinate! dependencies library alias
-                                     dependency-section))
-                  selections)
-            selected (first coordinates)]
-        (when-not (apply = coordinates)
-          (throw
-            (ex-info "Maintained dependency aliases select different commits."
-                     {:seon.dev.artifact/dependency-library library
-                      :seon.dev.artifact/dependency-coordinates coordinates})))
-        selected))
-    maintained-dependency-selections))
+(defn- maintained-dependencies-from
+  ([dependencies] (maintained-dependencies-from nil dependencies))
+  ([root dependencies]
+   (mapv
+     (fn [[library selections]]
+       (let [coordinates
+             (mapv (fn [[alias dependency-section]]
+                     (git-coordinate! root dependencies library alias
+                                      dependency-section))
+                   selections)
+             selected (first coordinates)]
+         (when-not (apply = coordinates)
+           (throw
+             (ex-info "Maintained dependency aliases select different commits."
+                      {:seon.dev.artifact/dependency-library library
+                       :seon.dev.artifact/dependency-coordinates coordinates})))
+         selected))
+     maintained-dependency-selections)))
 
 (defn- maintained-dependencies [root]
-  (maintained-dependencies-from
+  (maintained-dependencies-from root
     (edn/read-string (slurp (str (fs/path root "deps.edn"))))))
 
 (defn- regular-files [path]

@@ -433,7 +433,7 @@
         (#'artifact/maintained-dependencies-from
          (assoc-in (maintained-deps)
                    [:aliases :cljs :extra-deps 'thheller/shadow-cljs]
-                   {:git/url "git@github.com:example/shadow-cljs"
+                   {:git/url "ssh://github.com/example/shadow-cljs"
                     :git/sha (apply str (repeat 40 "d"))}))))
   (doseq [url ["https://user@github.com/example/shadow-cljs"
                "https://github.com/example/shadow-cljs?ref=main"
@@ -453,6 +453,19 @@
                    [:aliases :cljs :override-deps
                    'org.replikativ/datahike :git/sha]
                    (apply str (repeat 40 "9")))))))
+
+(deftest maintained-local-root-publishes-its-clean-public-git-identity
+  (let [root (System/getProperty "user.dir")
+        coordinates (#'artifact/maintained-dependencies root)
+        datahike (first coordinates)]
+    (is (= 'org.replikativ/datahike
+           (:seon.dev.artifact/dependency-library datahike)))
+    (is (= "https://github.com/seantempesta/datahike.git"
+           (:seon.dev.artifact/dependency-git-url datahike)))
+    (is (= (#'artifact/command-output!
+            (fs/path root "reference-code/datahike")
+            "git" "rev-parse" "HEAD")
+           (:seon.dev.artifact/dependency-git-sha datahike)))))
 
 (deftest application-identity-binds-writer-and-maintained-dependencies
   (let [directory (fs/create-temp-dir {:prefix "seon-v4-identity-test-"})
