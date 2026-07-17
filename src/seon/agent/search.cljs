@@ -304,7 +304,7 @@
       (in/fail (str "unexpected error in seon.agent.search/grep: "
                     (or (some-> e .-message) (str e)))))))
 
-(defn ^:seon.fn/agent-facing? grep-graph
+(defn ^{:async true :seon.fn/agent-facing? true} grep-graph
   "Search stored code (functions, schemas, namespaces) by regex.
 
    Text-search over the LIVE PROGRAM GRAPH — the literal counterpart of
@@ -313,9 +313,10 @@
    :seon.fn (source + name + docstring), :seon.schema (source), and
    :seon.ns (source) — fns/schemas/namespaces that may exist in NO source
    file (agent-authored + seeded code-as-data), which file-grep can't reach.
-   Synchronous (graph reads are local): returns the
-   :seon.agent.search/grep-graph-response envelope directly. Errors are
-   values — never throws.
+   Captures one database value and runs the selected program queries together;
+   returns a Promise that resolves to the
+   :seon.agent.search/grep-graph-response envelope. Errors are values — never
+   throws.
 
    This is NOT for arbitrary entity data (steps, kb rows, agent state) —
    that is Datalog (`seon.db/query`) / `my.kb`. grep-graph is literal text
@@ -356,4 +357,5 @@
   (if (or (nil? pattern) (str/blank? pattern))
     (in/fail (str ":seon.agent.search/pattern is required and must be non-blank "
                   "— it is a regex over the program graph (fn/schema/ns code)."))
-    (in/graph-search pattern targets max-results full? case-insensitive?)))
+    (await (in/graph-search pattern targets max-results full?
+                            case-insensitive?))))

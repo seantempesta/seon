@@ -19,7 +19,8 @@
     [seon.agent.fs :as fs]
     [seon.agent.search :as-alias search]
     [seon.ai.tokens :as tokens]
-    [seon.db :as db]))
+    [seon.db :as db]
+    [seon.db.protocol :as protocol]))
 
 ;; ============================================================
 ;; Hard caps.
@@ -414,48 +415,66 @@
    ::search/member    member
    ::search/line-text (first-matching-line re src)})
 
-(defn- fn-hits [re]
-  (->> (db/query '[:find ?sym ?src ?doc
-                   :where [?e :seon.fn/sym ?sym] [?e :seon.fn/source ?src]
-                          [(get-else $ ?e :seon.fn/doc "") ?doc]])
+(def ^:private graph-queries
+  {:seon.fn
+   '[:find ?sym ?src ?doc
+     :where [?e :seon.fn/sym ?sym] [?e :seon.fn/source ?src]
+            [(get-else $ ?e :seon.fn/doc "") ?doc]]
+   :seon.schema
+   '[:find ?k ?src
+     :where [?e :seon.schema/key ?k] [?e :seon.schema/form ?src]]
+   :seon.ns
+   '[:find ?nm ?src
+     :where [?e :seon.ns/name ?nm] [?e :seon.ns/source ?src]]
+   :seon.eval
+   '[:find ?id ?src ?ns
+     :where [?e :seon.eval/id ?id] [?e :seon.eval/source ?src]
+            [(get-else $ ?e :seon.eval/ns :seon.eval/unknown) ?ns]]})
+
+(defn- fn-hits [re rows]
+  (->> rows
        (keep (fn [[sym src doc]]
                (when (.test re (str sym "\n" doc "\n" src))
                  (hit :seon.fn (or (namespace (symbol sym)) sym) sym src re))))))
 
-(defn- schema-hits [re]
-  (->> (db/query '[:find ?k ?src
-                   :where [?e :seon.schema/key ?k] [?e :seon.schema/form ?src]])
+(defn- schema-hits [re rows]
+  (->> rows
        (keep (fn [[k src]]
                (when (.test re (str k "\n" src))
                  (hit :seon.schema (or (namespace k) (name k)) (str k) src re))))))
 
-(defn- ns-hits [re]
-  (->> (db/query '[:find ?nm ?src
-                   :where [?e :seon.ns/name ?nm] [?e :seon.ns/source ?src]])
+(defn- ns-hits [re rows]
+  (->> rows
        (keep (fn [[nm src]]
                (when (.test re (str (name nm) "\n" src))
                  (hit :seon.ns (name nm) (str nm) src re))))))
 
-(defn- eval-hits [re]
-  (->> (db/query '[:find ?id ?src ?ns
-                   :where [?e :seon.eval/id ?id] [?e :seon.eval/source ?src]
-                          [(get-else $ ?e :seon.eval/ns :seon.eval/unknown) ?ns]])
+(defn- eval-hits [re rows]
+  (->> rows
        (keep (fn [[id src ns]]
                (when (.test re (str src))
                  (hit :seon.eval (name ns) (str id) src re))))))
 
 (defn graph-hits
-  "Flat hits across the requested graph `targets`, in TARGET ORDER (fns
-   first) so a namespace group samples a concrete fn for its preview. `re`
-   is the compiled stateless pattern."
-  [targets re]
-  (vec (mapcat (fn [t] (case t
-                         :seon.fn     (fn-hits re)
-                         :seon.schema (schema-hits re)
-                         :seon.ns     (ns-hits re)
-                         :seon.eval   (eval-hits re)
+  "Flat hits from query `results`, preserving requested target order."
+  [targets results re]
+  (vec (mapcat (fn [target rows]
+                 (case target
+                         :seon.fn     (fn-hits re rows)
+                         :seon.schema (schema-hits re rows)
+                         :seon.ns     (ns-hits re rows)
+                         :seon.eval   (eval-hits re rows)
                          nil))
-               targets)))
+               targets results)))
+
+(defn graph-query-members
+  "Bounded query operations for selected program graph targets."
+  [targets]
+  (mapv (fn [target]
+          {::protocol/operation protocol/query-operation
+           ::protocol/query-form (get graph-queries target)
+           ::protocol/arguments []})
+        targets))
 
 (defn- ns-row
   "One namespace group → {::ns ::count ::member ::target ::line-text}, sampling
@@ -474,7 +493,7 @@
        ":seon.agent.search/targets, or pass :seon.agent.search/full? true for "
        "every member."))
 
-(defn graph-search
+(defn ^:async graph-search
   "Backend for seon.agent.search/grep-graph: text-search the program graph,
    grouped BY NAMESPACE, via the SAME [[grouped-envelope]] as the file grep.
    Errors as values (invalid regex / unexpected → ok?-false envelope)."
@@ -482,10 +501,19 @@
   (try
     (let [compiled (compile-pattern pattern ci?)]
       (if-let [re (::search/re compiled)]
-        (grouped-envelope (graph-hits targets re) ::search/ns ns-row
-                          {:rows ::search/by-ns :group-count ::search/ns-count
-                           :hint graph-hint}
-                          cap full?)
+        (let [database (await (db/db))]
+          (if (:seon.error/message database)
+            database
+            (let [response (await (db/execute-many
+                                   {::db/db database
+                                    ::db/members (graph-query-members targets)}))]
+              (if-let [results (::db/results response)]
+                (grouped-envelope
+                 (graph-hits targets results re) ::search/ns ns-row
+                 {:rows ::search/by-ns :group-count ::search/ns-count
+                  :hint graph-hint}
+                 cap full?)
+                response))))
         compiled))
     (catch :default e
       (fail (str "unexpected error in seon.agent.search/grep-graph: "

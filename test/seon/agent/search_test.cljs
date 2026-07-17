@@ -29,11 +29,9 @@
     ["node:path" :as npath]
     [cljs.test :as t :refer [deftest is testing async use-fixtures]]
     [clojure.string :as str]
-    [datahike.api :as d]
     [seon.agent.fs :as fs]
     [seon.agent.fs.internal :as fs-int]
     [seon.agent.search :as search]
-    [seon.client :as client]
     [seon.db :as db]
     [seon.test.async :refer [settle!]]))
 
@@ -482,52 +480,46 @@
 ;; grep-graph — the PROGRAM-GRAPH counterpart. Same envelope shape (capped
 ;; rows grouped by a container, honest totals + hint + :full?), but the
 ;; container is the NAMESPACE and the corpus is :seon.fn/:seon.schema/:seon.ns
-;; rows in seon.db. Seeded on a FRESH :memory conn (never the live graph).
+;; rows returned through the public database authority seam.
 ;; ===========================================================================
 
-(defn- graph-conn
-  "Promise of a fresh :memory conn with the pod's boot schema + a tiny
-   program graph: namespaces test.alpha/test.beta, three fns, one schema."
-  []
-  (let [cfg {:store              {:backend :memory :id (random-uuid)}
-             :schema-flexibility :write
-             :keep-history?      true}]
-    (-> (d/create-database cfg)
-        (.then (fn [_] (d/connect cfg {:sync? false})))
-        (.then (fn [conn]
-                 (-> (d/transact!
-                       conn
-                       {:tx-data (into (db/malli->datahike-schema
-                                         client/agent-bootstrap-attrs)
-                                       (db/tx-meta-datahike-schema))})
-                     (.then (fn [_]
-                              (d/transact!
-                                conn
-                                {:tx-data
-                                 [{:seon.ns/name :test.alpha :seon.ns/source "(ns test.alpha)"}
-                                  {:seon.ns/name :test.beta  :seon.ns/source "(ns test.beta)"}
-                                  {:seon.fn/sym "test.alpha/widget-make"
-                                   :seon.fn/source "(defn widget-make [] :widgetized)"
-                                   :seon.fn/doc "makes a widget"}
-                                  {:seon.fn/sym "test.alpha/widget-poke"
-                                   :seon.fn/source "(defn widget-poke [] :poked)"}
-                                  {:seon.fn/sym "test.beta/gadget-make"
-                                   :seon.fn/source "(defn gadget-make [] :gadgetized)"
-                                   :seon.fn/doc "uses widget internally"}
-                                  {:seon.schema/key :test.alpha/widget-size
-                                   :seon.schema/form ":int"}]})))
-                     (.then (fn [_] conn))))))))
+(def ^:private graph-database
+  {:db-name "search-test" :t 42 :as-of nil :since nil :history false
+   :datahike/commit-id #uuid "00000000-0000-0000-0000-000000000042"})
+
+(def ^:private graph-rows
+  {:seon.fn
+   [["test.alpha/widget-make" "(defn widget-make [] :widgetized)" "makes a widget"]
+    ["test.alpha/widget-poke" "(defn widget-poke [] :poked)" ""]
+    ["test.beta/gadget-make" "(defn gadget-make [] :gadgetized)" "uses widget internally"]]
+   :seon.schema [[:test.alpha/widget-size ":int"]]
+   :seon.ns [[:test.alpha "(ns test.alpha)"]
+             [:test.beta "(ns test.beta)"]]
+   :seon.eval []})
 
 (defn- with-graph
-  "Fresh seeded graph conn `set!` as the root db/*conn* for `body` (a 0-arg
-   fn → result), prior root restored after. grep-graph is synchronous, so a
-   plain set!/finally (no await) is enough."
-  [body]
-  (-> (graph-conn)
-      (.then (fn [conn]
-               (let [orig db/*conn*]
-                 (set! db/*conn* conn)
-                 (try (body) (finally (set! db/*conn* orig))))))))
+  "Run one graph search against a recording public database authority."
+  [request verify]
+  (let [original-db db/db
+        original-execute-many db/execute-many
+        targets (or (:seon.agent.search/targets request)
+                    [:seon.fn :seon.schema :seon.ns])]
+    (set! db/db (fn
+                  ([] (js/Promise.resolve graph-database))
+                  ([_request] (js/Promise.resolve graph-database))))
+    (set! db/execute-many
+          (fn [request]
+            (is (= graph-database (::db/db request))
+                "all graph queries share one captured database value")
+            (is (= (count targets) (count (::db/members request)))
+                "one bounded query is sent for each selected target")
+            (js/Promise.resolve
+             {::db/results (mapv graph-rows targets)})))
+    (-> (search/grep-graph request)
+        (.then verify)
+        (.finally (fn []
+                    (set! db/db original-db)
+                    (set! db/execute-many original-execute-many))))))
 
 ;; widget hits: test.alpha = widget-make + widget-poke (fns) + widget-size
 ;; (schema) = 3; test.beta = gadget-make (doc "uses widget internally") = 1.
@@ -535,13 +527,12 @@
 (deftest graph-groups-by-namespace-with-honest-counts
   (async done
     (-> (with-graph
-          (fn []
-            (let [{ok?   :seon.agent.search/ok?
+          {:seon.agent.search/pattern "widget"}
+          (fn [{ok?   :seon.agent.search/ok?
                    by-ns :seon.agent.search/by-ns
                    n     :seon.agent.search/match-count
                    nc    :seon.agent.search/ns-count
-                   trunc? :seon.agent.search/truncated?}
-                  (search/grep-graph {:seon.agent.search/pattern "widget"})]
+                   trunc? :seon.agent.search/truncated?}]
               (is (true? ok?))
               (is (= 4 n) "honest total matching members")
               (is (= 2 nc) "two namespaces")
@@ -551,106 +542,104 @@
                 (is (= :seon.fn (:seon.agent.search/target alpha))
                     "fns sampled first for the row")
                 (is (str/starts-with? (:seon.agent.search/member alpha) "test.alpha/widget")
-                    "member is a concrete matching fn")))))
+                    "member is a concrete matching fn"))))
         (settle! done))))
 
 (deftest graph-no-match-is-ok-and-empty
   (async done
     (-> (with-graph
-          (fn []
-            (let [{ok?   :seon.agent.search/ok?
+          {:seon.agent.search/pattern "zzz-never-present"}
+          (fn [{ok?   :seon.agent.search/ok?
                    by-ns :seon.agent.search/by-ns
                    n     :seon.agent.search/match-count
-                   nc    :seon.agent.search/ns-count}
-                  (search/grep-graph {:seon.agent.search/pattern "zzz-never-present"})]
+                   nc    :seon.agent.search/ns-count}]
               (is (true? ok?) "no matches is ok? true")
               (is (= [] by-ns))
               (is (= 0 n))
-              (is (= 0 nc)))))
+              (is (= 0 nc))))
         (settle! done))))
 
 (deftest graph-max-results-clips-and-hints
   (async done
     (-> (with-graph
-          (fn []
-            (let [{ok?      :seon.agent.search/ok?
+          {:seon.agent.search/pattern "widget"
+           :seon.agent.search/max-results 1}
+          (fn [{ok?      :seon.agent.search/ok?
                    by-ns    :seon.agent.search/by-ns
                    nc       :seon.agent.search/ns-count
                    returned :seon.agent.search/returned
                    hint     :seon.agent.search/hint
-                   trunc?   :seon.agent.search/truncated?}
-                  (search/grep-graph {:seon.agent.search/pattern     "widget"
-                                      :seon.agent.search/max-results 1})]
+                   trunc?   :seon.agent.search/truncated?}]
               (is (true? ok?))
               (is (= 2 nc) "honest namespace count")
               (is (= 1 returned) "only one ns row returned")
               (is (= 1 (count by-ns)))
               (is (true? trunc?))
               (is (string? hint))
-              (is (re-find #"(?i)narrow" hint)))))
+              (is (re-find #"(?i)narrow" hint))))
         (settle! done))))
 
 (deftest graph-full-returns-flat-members
   (async done
     (-> (with-graph
-          (fn []
-            (let [{ok?     :seon.agent.search/ok?
+          {:seon.agent.search/pattern "widget"
+           :seon.agent.search/full? true}
+          (fn [{ok?     :seon.agent.search/ok?
                    matches :seon.agent.search/matches
                    n       :seon.agent.search/match-count
-                   by-ns   :seon.agent.search/by-ns}
-                  (search/grep-graph {:seon.agent.search/pattern "widget"
-                                      :seon.agent.search/full?   true})]
+                   by-ns   :seon.agent.search/by-ns}]
               (is (true? ok?))
               (is (= 4 n) "honest total")
               (is (= 4 (count matches)) "every matching member, flat")
               (is (nil? by-ns) ":by-ns absent in :full? mode")
-              (is (every? :seon.agent.search/member matches)))))
+              (is (every? :seon.agent.search/member matches))))
         (settle! done))))
 
 (deftest graph-targets-filter
   (async done
     (-> (with-graph
-          (fn []
-            (let [{ok?   :seon.agent.search/ok?
+          {:seon.agent.search/pattern "widget"
+           :seon.agent.search/targets [:seon.schema]}
+          (fn [{ok?   :seon.agent.search/ok?
                    by-ns :seon.agent.search/by-ns
-                   n     :seon.agent.search/match-count}
-                  (search/grep-graph {:seon.agent.search/pattern "widget"
-                                      :seon.agent.search/targets [:seon.schema]})]
+                   n     :seon.agent.search/match-count}]
               (is (true? ok?))
               (is (= 1 n) "only the schema matches when targets = [:seon.schema]")
-              (is (= :seon.schema (:seon.agent.search/target (first by-ns)))))))
+              (is (= :seon.schema (:seon.agent.search/target (first by-ns))))))
         (settle! done))))
 
 (deftest graph-bad-regex-envelope
   (async done
     (-> (with-graph
-          (fn []
-            (let [{ok?   :seon.agent.search/ok?
-                   error :seon.agent.search/error}
-                  (search/grep-graph {:seon.agent.search/pattern "(unclosed"})]
+          {:seon.agent.search/pattern "(unclosed"}
+          (fn [{ok?   :seon.agent.search/ok?
+                error :seon.agent.search/error}]
               (is (false? ok?))
-              (is (re-find #"REGEX" error)))))
+              (is (re-find #"REGEX" error))))
         (settle! done))))
 
 (deftest graph-case-insensitive-flag
   (async done
     (-> (with-graph
-          (fn []
-            (let [cs (search/grep-graph {:seon.agent.search/pattern "WIDGET"})
-                  ci (search/grep-graph {:seon.agent.search/pattern           "WIDGET"
-                                         :seon.agent.search/case-insensitive? true})]
-              (is (= 0 (:seon.agent.search/match-count cs)) "case-sensitive by default")
-              (is (true? (:seon.agent.search/ok? ci)))
-              (is (= 4 (:seon.agent.search/match-count ci))))))
+          {:seon.agent.search/pattern "WIDGET"}
+          (fn [cs]
+            (is (= 0 (:seon.agent.search/match-count cs))
+                "case-sensitive by default")))
+        (.then (fn [_]
+                 (with-graph
+                   {:seon.agent.search/pattern "WIDGET"
+                    :seon.agent.search/case-insensitive? true}
+                   (fn [ci]
+                     (is (true? (:seon.agent.search/ok? ci)))
+                     (is (= 4 (:seon.agent.search/match-count ci)))))))
         (settle! done))))
 
 (deftest graph-blank-pattern-envelope
   (async done
     (-> (with-graph
-          (fn []
-            (let [{ok?   :seon.agent.search/ok?
-                   error :seon.agent.search/error}
-                  (search/grep-graph {:seon.agent.search/pattern "  "})]
+          {:seon.agent.search/pattern "  "}
+          (fn [{ok?   :seon.agent.search/ok?
+                error :seon.agent.search/error}]
               (is (false? ok?))
-              (is (re-find #"pattern" error)))))
+              (is (re-find #"pattern" error))))
         (settle! done))))
