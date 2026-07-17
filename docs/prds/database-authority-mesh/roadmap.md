@@ -311,7 +311,10 @@ modest-hardware density checkpoint.
   state reconciliation reuse ordinary database values and native transaction
   reports; fresh and warm startup both execute the one ordered sequence.
 - **Dependency-ready parallel portfolio:** phantom-config deletion is active;
-  membership/quiescence is being grounded read-only against that boundary;
+  membership/quiescence is grounded at
+  [[research/membership-quiescence-single-owner-audit-2026-07-17]] against that
+  boundary, including the stale-result defect tracked at
+  [[../../seon/issues/runtime-membership-can-accept-stale-database-value]];
   the shared-instructions async database defect is an independent existing
   owner; the web/render single-owner audit is durable at
   [[research/web-render-single-owner-audit-2026-07-17]]; the plan consumer cut
