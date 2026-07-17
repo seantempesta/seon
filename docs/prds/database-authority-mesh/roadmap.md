@@ -69,14 +69,11 @@ The current ordered spine is:
    system; and
 6. measure the final architecture, then optimize only the retained bottlenecks.
 
-Earliest unsettled contract: exercise two real Bun execution children over
-complete namespace source sections, accept one database-wide program change,
-then prove both children reconstruct from the new immutable database value and
-that removed definitions are absent. The host-level replacement contract is
-settled: one stale child is killed, exactly one replacement is spawned, and the
-same invocation is retried once without permitting a third attempt. The
-integrated proof starts from the now-settled fresh/full, partial/delta, and
-converged/no-write initialization boundary.
+Earliest unsettled contract: replace the turn's ambient connection and copied
+four-field render coordinate with one ordinary request database value and one
+persisted `:seon.agent.turn/rendered-tx` ref. Prompt acquisition, eval, child
+execution, debug reconstruction, and autocomplete must use that same value;
+there is no compatibility connection or coordinate-shaped wrapper.
 
 The JVM half of that contract is implemented. One unversioned
 `seon.db.program/compile-tx-data` owner reads one immutable Datahike value and
@@ -98,23 +95,14 @@ transaction owners are deleted rather than retained as a compatibility path.
 Focused proof passes 10 CLJS tests/51 assertions for package construction and
 wire forwarding, plus 24 writer tests/117 assertions for authority admission.
 
-Current parallel portfolio:
-
-- top level implements the real two-child whole-namespace publication proof
-  before deleting residual replay helpers;
-- one audit orders the remaining ambient-database consumers into complete
-  behavior migrations against the canonical asynchronous `seon.db` API;
-- one proof-design audit grounds the smallest real two-child fixture in the
-  existing operator and execution owners; and
-- one artifact audit plans deletion of old manifest readers and duplicated
-  identity construction without confusing a necessary current format
-  discriminator with parallel function implementations.
-
-Next refills are complete consumer cohorts after the child contract settles and
-test-gate conversion
-after each owning behavior moves. Final graduation remains one frozen-source
-full test, live browser/agent, crash/restart, packaging, and modest-hardware
-density checkpoint.
+Current parallel portfolio is converged at the child checkpoint. The
+database-consumer audit supplies the ordered migration inventory, the
+real-process proof is implemented, and the artifact audit has isolated the
+single current manifest/application identity cut. Top level now owns the turn
+database-value migration; the next independent refill is artifact identity
+unification after this checkpoint is committed. Final graduation remains one
+frozen-source full test, live browser/agent, crash/restart, packaging, and
+modest-hardware density checkpoint.
 
 ## Settled laws
 
@@ -1487,9 +1475,7 @@ invocation. There is no form replay, program broadcast, per-agent transaction,
 or eager idle-child wake. The host regression proves the stale child receives
 the invocation once, is killed, exactly one fresh child receives the same
 invocation once, and no third attempt is possible. The complete execution and
-host gate passes 30 tests/129 assertions; the remaining integration proof uses
-two real Bun children and an accepted database program change. Exact source and
-decisions are in
+host gate passes 30 tests/129 assertions. Exact source and decisions are in
 [[research/universal-current-program-publication-audit-2026-07-16]].
 
 The real-process proof audit exposed and closed one startup contract mismatch:
@@ -1498,8 +1484,22 @@ callable and its database-pinning policy, while the child entrypoint had still
 validated obsolete bare function values. Startup now validates the same closed
 descriptor consumed by dispatch; bare functions, missing policy, and extra
 fields fail. The complete execution and host gate passes 31 tests/133
-assertions. The two-child authority fixture is now the earliest unsettled
-proof, not another runtime implementation.
+assertions.
+
+The two-child authority fixture is now real and green. One fresh in-memory JVM
+authority serves two independent Bun PIDs. Both children load the same compiled
+baseline and database-wide current program at one immutable database value.
+One child publishes replacement source and retracts two functions; neither
+idle child receives a program broadcast. On their next calls, the host replaces
+each stale child exactly once, both return the replacement behavior, and both
+report the retracted definitions absent. The focused writer proof passes 1
+test/22 assertions. The proof also exposed and fixed the invocation query's
+redundant collection equality clause, startup-error loss, terminal settlement
+ordering, protocol validation through the mutable authored registry, and a
+per-database read queue too small for two concurrent six-member cold reads.
+Those are fixes to the one execution and executor mechanisms, not another
+integration path. The frozen focused checkpoint passes 31 CLJS tests/133
+assertions and 27 writer tests/695 assertions with zero failures or errors.
 
 The cold schema audit corrects one temporary workaround rather than preserving
 it. `schema/register!` should collect EDN declarations without resolving
@@ -1674,15 +1674,15 @@ package-size measurement is added for this test.
   acquired data. No compatibility connection, query-result replay map, public
   namespace alias, or second database facade may make old local-Datahike call
   shapes appear synchronous.
-- **Earliest unsettled contract:** complete the deliberately breaking canonical
-  `seon.db` cut and migrate its explicit compile-error inventory. Commit
+- **Canonical database cut evidence:** the deliberately breaking `seon.db` cut
+  exposes an explicit compile-error migration inventory. Commit
   `8561ae64` deletes the pod replica, its transaction feed/replay implementation,
   the replica and replica-coupled lifecycle tests, both production-bundled local
   Datahike constructors, and the REPL's hidden in-memory database. Namespace
   rendering now consumes ordinary pre-fetched data. There is no compatibility
   period: remaining callers that require a database value, connection, lazy
   entity, temporal wrapper, or synchronous query are invalid and must move to
-  coordinate-bound authority operations or be deleted.
+  ordinary authority database values or be deleted.
   Commit `fbc40f48` makes that break canonical: `seon.db` now exposes only the
   persistent asynchronous authority session and ordinary protocol values. Its
   authority-density build compiles 122 files with zero warnings into 52,847

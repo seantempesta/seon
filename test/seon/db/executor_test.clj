@@ -79,6 +79,11 @@
            (mapv #(get-in % [::executor/classes :provider
                              ::executor/maximum-active])
                  [two four eight])))
+    (is (= [16 16 28]
+           (mapv #(get-in % [::executor/classes :read
+                             ::executor/maximum-queued-by-database])
+                 [two four eight]))
+        "one database admits at least two complete grouped program reads")
     (is (every? #(= (+ Integer/BYTES protocol/maximum-frame-bytes)
                     (::executor/maximum-request-bytes %))
                 [two four eight]))))

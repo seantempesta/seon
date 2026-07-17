@@ -3,7 +3,8 @@
   (:require
    [cognitect.transit :as transit]
    [clojure.walk :as walk]
-   [shadow.cljs.devtools.client.env :as shadow-env]
+   [malli.core :as m]
+   [malli.registry :as mr]
    [seon.db :as db]
    [seon.db.protocol :as db.protocol]
    [seon.error :as error]
@@ -155,6 +156,13 @@
 (defonce ^:private transit-writer (transit/writer :json))
 (defonce ^:private transit-reader (transit/reader :json))
 (defonce ^:private text-encoder (js/TextEncoder.))
+(defonce ^:private message-validators
+  (let [registry (mr/composite-registry
+                  (m/default-schemas)
+                  (mr/fast-registry (schema/snapshot)))
+        options {:registry registry}]
+    {::parent-message (m/validator ::parent-message options)
+     ::child-message (m/validator ::child-message options)}))
 
 (defn encode-message
   "Encode one eager ordinary IPC value as Transit JSON."
@@ -181,14 +189,14 @@
   "True when a value is one complete ordinary parent message."
   {:malli/schema [:=> [:cat :any] :boolean]}
   [message]
-  (and (schema/valid-candidate-value? ::parent-message message)
+  (and ((::parent-message message-validators) message)
        (db.protocol/ordinary-wire-value? message)))
 
 (defn valid-child-message?
   "True when a value is one complete ordinary child message."
   {:malli/schema [:=> [:cat :any] :boolean]}
   [message]
-  (and (schema/valid-candidate-value? ::child-message message)
+  (and ((::child-message message-validators) message)
        (db.protocol/ordinary-wire-value? message)))
 
 (defn bounded-result
@@ -270,11 +278,10 @@
     [?function :seon.fn/spec ?form]])
 
 (def ^:private invocation-source-query
-  '[:find ?sym ?source
+  '[:find ?requested ?source
     :in $ [?requested ...]
     :where
-    [?function :seon.fn/sym ?sym]
-    [(= ?sym ?requested)]
+    [?function :seon.fn/sym ?requested]
     [?function :seon.fn/source ?source ?tx]
     [?tx :seon.db/process ?process]
     [?process :seon.db.process/id :seon.db.process/repl]])
@@ -654,18 +661,18 @@
 
 (defn- settle-active!
   [state token send-message! message]
-  (let [settled? (atom false)]
-    (swap! state
-           (fn [current]
-             (if (identical? token (get-in current [::active ::token]))
-               (do
-                 (reset! settled? true)
-                 (when-let [timer (get-in current [::active ::timer])]
-                   (js/clearTimeout timer))
-                 (dissoc current ::active))
-               current)))
-    (when @settled? (send! send-message! message))
-    @settled?))
+  (if (identical? token (get-in @state [::active ::token]))
+    (do
+      (when-let [timer (get-in @state [::active ::timer])]
+        (js/clearTimeout timer))
+      (send! send-message! message)
+      (swap! state
+             (fn [current]
+               (if (identical? token (get-in current [::active ::token]))
+                 (dissoc current ::active)
+                 current)))
+      true)
+    false))
 
 (defn- fail-invocation!
   [state invocation send-message! message kind]
@@ -760,23 +767,24 @@
                           compiled-function
                           (eval/lookup-value function-symbol))]
                  (try
-                   (js/Promise.resolve
-                    (db/with-agent
-                     (::agent-id invocation)
-                     (fn []
-                       (db/with-tx-context
-                        (cond-> (or (::run-fence invocation) {})
-                          pin-database?
-                          (assoc :seon.db/db (:seon.db/db invocation)))
-                        (fn []
-                          (if compiled?
-                            (function-value
-                             (::arguments invocation)
-                             (partial invoke-selected! state invocation)
-                             (partial ensure-compile-state! state)
-                             (partial prepare-eval-program! state invocation))
-                            (apply function-value
-                                   (::arguments invocation))))))))
+                   (let [value
+                         (db/with-agent
+                          (::agent-id invocation)
+                          (fn []
+                            (db/with-tx-context
+                             (cond-> (or (::run-fence invocation) {})
+                               pin-database?
+                               (assoc :seon.db/db (:seon.db/db invocation)))
+                             (fn []
+                               (if compiled?
+                                 (function-value
+                                  (::arguments invocation)
+                                  (partial invoke-selected! state invocation)
+                                  (partial ensure-compile-state! state)
+                                  (partial prepare-eval-program! state invocation))
+                                 (apply function-value
+                                        (::arguments invocation)))))))]
+                     (js/Promise.resolve value))
                    (catch :default exception
                      (js/Promise.reject exception)))
                  (js/Promise.reject
@@ -908,14 +916,11 @@
           (.then
            (fn [actual-artifact-digest]
              (when-not (and (schema/valid-candidate-value? ::startup startup)
-                            (= shadow-env/build-id
-                               (::shadow-build-id startup))
                             (= actual-artifact-digest
                                (::artifact-digest startup)))
                (throw
                 (ex-info "The execution child startup identity is invalid."
                          {::startup startup
-                          ::compiled-shadow-build-id shadow-env/build-id
                           ::actual-artifact-digest actual-artifact-digest
                           :seon.error/kind :core-bug})))
              (start-child! compiled-functions startup

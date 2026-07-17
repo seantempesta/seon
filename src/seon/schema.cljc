@@ -184,7 +184,7 @@
 (defonce ^:private _value-type
   (update-candidate-forms! assoc :seon.schema/value :any))
 (defonce ^:private _explanation-type
-  (update-candidate-forms! assoc :seon.schema/explanation [:maybe :map]))
+  (update-candidate-forms! assoc :seon.schema/explanation :map))
 (defonce ^:private _namespace-name-type
   (update-candidate-forms! assoc :seon.schema/namespace-name :string))
 (defonce ^:private _kvs-type
@@ -527,7 +527,7 @@
    means the value is valid."
   {:malli/schema [:=> [:catn [::registry-key ::registry-key]
                              [::value ::value]]
-                  ::explanation]}
+                  [:maybe ::explanation]]}
   [schema-key value]
   (m/explain schema-key value {:registry (candidate-registry)}))
 

@@ -121,7 +121,10 @@
          cpu-workers (max 1 (dec processors))
          knn (max 1 (min 2 (quot cpu-workers 2)))
          mutation (max 1 (min 4 (quot (inc processors) 2)))
-         provider (min 6 processors)]
+         provider (min 6 processors)
+         read-queue (max 16 (* 8 cpu-workers))
+         read-database-queue (min read-queue
+                                  (max 16 (* 4 cpu-workers)))]
      {::available-processors (.availableProcessors (Runtime/getRuntime))
       ::selected-processors processors
       ::cpu-workers cpu-workers
@@ -132,8 +135,8 @@
                                              1024 1024)
       ::classes
       {:read {::maximum-active cpu-workers
-              ::maximum-queued (max 16 (* 8 cpu-workers))
-              ::maximum-queued-by-database 8}
+              ::maximum-queued read-queue
+              ::maximum-queued-by-database read-database-queue}
        :knn {::maximum-active knn
              ::maximum-queued (max 4 (* 2 knn))
              ::maximum-queued-by-database 2}

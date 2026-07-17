@@ -19,6 +19,7 @@
 (schema/register! ::tx-data [:vector :any])
 (schema/register! ::opts :map)
 (schema/register! ::tx-meta :map)
+(schema/register! ::error :map)
 (schema/register! ::coordinate :seon.db.coordinate/coordinate)
 (schema/register! ::query-form [:or [:vector :any] :map :string])
 (schema/register! ::query :any)

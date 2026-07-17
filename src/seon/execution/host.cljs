@@ -134,6 +134,7 @@
           "The execution child exited before becoming ready."
           {::pid (.-pid process)
            ::exit-code exit-code
+           ::stdout-tail (::stdout-tail current)
            ::stderr-tail (::stderr-tail current)
            ::artifact-digest (::artifact-digest current)})))
       (when active
@@ -143,6 +144,7 @@
           "The execution child exited before returning a result."
           {::pid (.-pid process)
            ::exit-code exit-code
+           ::stdout-tail (::stdout-tail current)
            ::stderr-tail (::stderr-tail current)
            ::artifact-digest (::artifact-digest current)
            :seon.db/db
@@ -231,13 +233,17 @@
                 (kill-process! process))))
 
           (:seon.execution.message/result :seon.execution.message/error)
-          (when-let [active (::active current)]
-            (if (result-current? (host-configuration) active message)
-              (settle-active! agent-id generation process message)
-              (settle-active!
-               agent-id generation process
-               (host-error (::invocation active)
-                           "The execution result is no longer current."))))
+          (if (and (= execution/error-message (::execution/message message))
+                   (not (::ready? current))
+                   (= "startup" (::execution/invocation-id message)))
+            ((get-in current [::ready ::resolve!]) message)
+            (when-let [active (::active current)]
+              (if (result-current? (host-configuration) active message)
+                (settle-active! agent-id generation process message)
+                (settle-active!
+                 agent-id generation process
+                 (host-error (::invocation active)
+                             "The execution result is no longer current.")))))
 
           nil))
       (catch :default _
