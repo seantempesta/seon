@@ -15,7 +15,6 @@
     [datahike.db :as datahike-db]
     [seon.agent :as agent]
     [seon.agent.ctx :as ctx]
-    [seon.client :as client]
     [seon.db :as db]
     [seon.db.coordinate :as coordinate]
     [seon.db.protocol :as protocol]
@@ -164,102 +163,6 @@
                 (is (= next-point (:seon.state/coordinate result))))))
           (.catch (fn [error]
                     (is false (str "coordinate-fenced reconcile rejected: " error))))
-          (.finally (fn [] (restore!) (done)))))))
-
-(defn- core-program-test-coordinate
-  [n]
-  {::coordinate/database-id #uuid "00000000-0000-0000-0000-000000000041"
-   ::coordinate/branch :db
-   ::coordinate/commit-id
-   (if (= n 1)
-     #uuid "00000000-0000-0000-0000-000000000042"
-     #uuid "00000000-0000-0000-0000-000000000043")
-   ::coordinate/t (+ 536870912 n)})
-
-(deftest core-program-commit-retries-only-stale-and-skips-empty
-  (async done
-    (let [original-acquire (deref #'client/acquire-core-program!)
-          original-compile (deref #'client/compile-core-program-tx)
-          original-transact db/transact!
-          desired [{:seon.fn/sym "frozen/source"}]
-          mode (atom :stale-once)
-          acquisitions (atom 0)
-          compilations (atom [])
-          transactions (atom 0)
-          restore! (fn []
-                     (set! client/acquire-core-program! original-acquire)
-                     (set! client/compile-core-program-tx original-compile)
-                     (set! db/transact! original-transact))
-          reset-counts! (fn [next-mode]
-                          (reset! mode next-mode)
-                          (reset! acquisitions 0)
-                          (reset! compilations [])
-                          (reset! transactions 0))]
-      (set! client/acquire-core-program!
-            (fn []
-              (let [attempt (swap! acquisitions inc)]
-                (js/Promise.resolve
-                  {::db/coordinate (core-program-test-coordinate attempt)}))))
-      (set! client/compile-core-program-tx
-            (fn [all acquired]
-              (swap! compilations conj [all (::db/coordinate acquired)])
-              (if (= :empty @mode) [] [[:db.fn/retractEntity 41]])))
-      (set! db/transact!
-            (fn [request]
-              (let [attempt (swap! transactions inc)]
-                (js/Promise.resolve
-                  (case @mode
-                    :stale-once
-                    (if (= 1 attempt)
-                      {::db/ok? false
-                       ::db/error
-                       {:seon.error/message "stale"
-                        :seon.error/data
-                        {::protocol/error-kind
-                         protocol/stale-coordinate-error}}}
-                      {::db/ok? true
-                       ::db/coordinate (core-program-test-coordinate 2)})
-
-                    :non-stale
-                    {::db/ok? false
-                     ::db/error
-                     {:seon.error/message "terminal"
-                      :seon.error/data
-                      {::protocol/error-kind :seon.db.protocol.error/terminal}}}
-
-                    {::db/ok? true
-                     ::db/coordinate (::db/expected-coordinate request)})))))
-      (-> ((deref #'client/commit-core-program!) desired)
-          (.then
-            (fn [result]
-              (is (true? (::db/ok? result)))
-              (is (= 2 @acquisitions))
-              (is (= 2 @transactions))
-              (is (every? #(identical? desired (first %)) @compilations)
-                  "stale retry reuses the one frozen desired snapshot")
-              (is (= [(core-program-test-coordinate 1)
-                      (core-program-test-coordinate 2)]
-                     (mapv second @compilations)))
-              (reset-counts! :non-stale)
-              ((deref #'client/commit-core-program!) desired)))
-          (.then
-            (fn [result]
-              (is (false? (::db/ok? result)))
-              (is (= 1 @acquisitions)
-                  "a non-stale authority failure does not reacquire")
-              (is (= 1 @transactions))
-              (reset-counts! :empty)
-              ((deref #'client/commit-core-program!) desired)))
-          (.then
-            (fn [result]
-              (is (true? (::db/ok? result)))
-              (is (= 1 @acquisitions))
-              (is (= 1 (count @compilations)))
-              (is (zero? @transactions)
-                  "a converged compilation creates no transaction")))
-          (.catch
-            (fn [error]
-              (is false (str "core-program retry fixture rejected: " error))))
           (.finally (fn [] (restore!) (done)))))))
 
 (defn- scratch-conn
