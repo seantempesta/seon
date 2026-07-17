@@ -69,10 +69,12 @@ The current ordered spine is:
    system; and
 6. measure the final architecture, then optimize only the retained bottlenecks.
 
-Earliest unsettled contract: the authority must admit complete native schema,
-compiled program, and required initial facts before publishing a usable
-database value. The integrated proof is fresh/full, partial/delta, and
-converged/no-write initialization followed by child whole-namespace execution.
+Earliest unsettled contract: prove that the existing Bun execution child is
+replaced exactly once when its accepted program changes, then executes the same
+invocation against the new immutable database value with removed definitions
+absent. The integrated proof starts from the now-settled fresh/full,
+partial/delta, and converged/no-write initialization boundary and exercises two
+independent children over complete namespace source sections.
 
 The JVM half of that contract is implemented. One unversioned
 `seon.db.program/compile-tx-data` owner reads one immutable Datahike value and
@@ -83,14 +85,22 @@ program + initial-data transaction), reruns the same idempotent reconciliation
 for an already-open database, refuses branch initialization, and returns the
 database value that admitted that request. Focused real-Datahike proof covers
 fresh two-commit admission, converged zero-write reopen, failed fresh
-publication, and branch head preservation. The remaining half is to build the
-canonical package data once in the Bun host, pass it during session open, and
-delete the pod-side schema/program/seed writers in the same cut.
+publication, and branch head preservation. The Bun host half now builds one
+deterministically ordered initialization value from the compiled namespace,
+function, schema, and test population; removes wall-clock fields; validates the
+complete schema and function-contract projection before any authority request;
+reuses the launch descriptor's exact execution artifact digest; and sends the
+program plus required initial identities through the one session-open ensure.
+The pod-side provenance, schema, seed, program-acquisition, diff, retry, and
+transaction owners are deleted rather than retained as a compatibility path.
+Focused proof passes 10 CLJS tests/51 assertions for package construction and
+wire forwarding, plus 24 writer tests/117 assertions for authority admission.
 
 Current parallel portfolio:
 
-- top level wires the Bun host to the settled authority initialization and
-  deletes the pod-side schema/program/seed transaction owners;
+- top level adds the missing child digest-change replacement regression and the
+  two-child whole-namespace publication proof before deleting residual replay
+  helpers;
 - the duplication audit orders later ambient-database, renderer, eval, test,
   artifact, and process deletions by dependency and impact;
 - the Datahike transaction probe proves why provenance genesis and the
@@ -99,8 +109,8 @@ Current parallel portfolio:
   `:seon.agent.turn/rendered-tx` ref. Request-scoped `:seon.db/db` maps are not
   persisted as domain state.
 
-Next refills are child live-proof design after initialization settles, complete
-consumer cohorts after the child contract settles, and test-gate conversion
+Next refills are complete consumer cohorts after the child contract settles and
+test-gate conversion
 after each owning behavior moves. Final graduation remains one frozen-source
 full test, live browser/agent, crash/restart, packaging, and modest-hardware
 density checkpoint.

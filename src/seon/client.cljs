@@ -1,5 +1,5 @@
 (ns seon.client
-  "V0 CLJS pod entry point. Long-running Node process; the V0 client.
+  "CLJS cluster host entry point.
 
    Responsibility: attach and cold-start the cluster runtime via
    [[start-runtime!]]. Warm agent birth belongs to [[seon.agent/start!]].
@@ -9,8 +9,8 @@
      ;; Terminal 1 — the watcher (compiles + writes nREPL port file)
      clj -M:cljs watch client
 
-     ;; Terminal 2 — the Node host
-     node out/client/main.js
+     ;; Terminal 2 — the Bun host
+     bun out/client/main.js
 
      ;; Editor / MCP — read `.shadow-cljs/nrepl.port`, then
      ;; pivot into the running CLJS runtime:
@@ -79,9 +79,8 @@
     [seon.render.system]
     [seon.runtime.admission :as admission]
     [seon.runtime.lifecycle :as runtime.lifecycle]
-    ;; Routing-as-data — the `:seon.route/*` schema + the seeded core route
-    ;; set; boot-seed! transacts (route/core-routes-tx). Required here so the
-    ;; schema register! calls run and the build includes the seed builder.
+    ;; Routing-as-data — the `:seon.route/*` schema + declarative core routes.
+    ;; Required here so schema registration and the config builder are loaded.
     [seon.route :as route]
     ;; One-node source extraction (`form-source-at`) for the program-graph
     ;; source capture below — rewrite-clj parses EXACTLY one top-level form,
@@ -129,14 +128,13 @@
     ;; any consumer (`my.data` et al.) registers shapes that reference them.
     [seon.items]
     ;; The my.* scaffold — shared provenance shapes (my.kb) + the
-    ;; system-wide instruction singleton (my.kb.shared) that
-    ;; `seed-core!` below transacts. Required here so their
-    ;; register! calls run before the boot install of :my.kb/* attrs.
+    ;; system-wide instruction singleton (my.kb.shared). Required here so their
+    ;; registrations are present in the compiled initialization program.
     [my.kb]
     [my.kb.shared]
-    ;; Pull-reference corpus — the `:my.skills/*` schema + scanner whose rows
-    ;; `boot-seed!` transacts (`my.skills/seed-skills-tx-data`). These rows are
-    ;; available on demand and are not standing context blocks.
+    ;; Pull-reference corpus — the `:my.skills/*` schema + scanner used by the
+    ;; one declarative config reconciliation. These rows are available on
+    ;; demand and are not standing context blocks.
     ;; Required here so its register! calls run and the build includes it.
     [my.skills]
     ;; The canvas/canvas TOOLKIT — the aggregation (`my.data`) + static
@@ -162,12 +160,10 @@
     [seon.code]
     ;; Config-driven context — the OPTIONAL manifest (`config/system.edn`)
     ;; that shapes the agent-context, routes, and global render bounds.
-    ;; Absent → byte-identical to a no-config boot. `boot-seed!` loads it
-    ;; ONCE and threads it to the route + skill-corpus seed steps.
+    ;; Absent means no config reconciliation; present is loaded once.
     [seon.config :as config]
-    ;; Holistic declarative-state reconcile — `boot-seed!` routes its
-    ;; desired-set steps (routes + skills) through `seon.state/reconcile!`
-    ;; so a manifest that DROPS a route/skill retracts the stale datom.
+    ;; Holistic declarative-state reconciliation routes config, routes, and
+    ;; skills through `seon.state/reconcile!`, including stale retractions.
     [seon.state :as state]
     ;; Local-machine capability surface — A-9. Required so the agent
     ;; can call (seon.agent.fs/read-file ...) + (seon.platform/host) from
@@ -464,8 +460,8 @@
       {::db/ok? true})))
 
 (defn start-heartbeat!
-  "Holds the Node event loop open with a minute-cadence heartbeat. The
-   real V0 client will keep the loop alive via pending agent-loop work;
+  "Holds the Bun event loop open with a minute-cadence heartbeat. The
+   cluster host will keep the loop alive via pending agent-loop work;
    for now this is the simplest 'process stays open' contract."
   {:malli/schema [:=> [:cat] :any]}
   []
@@ -816,7 +812,7 @@
    ;; The shared provenance shapes (registered in my.kb) installed at
    ;; boot so agent-designed my.kb.<domain> schemas can reference them
    ;; before any kb tx lands, plus the my.kb.shared system-wide
-   ;; instruction singleton (empty entity seeded by seed-core!;
+   ;; instruction singleton (empty entity admitted during database open;
    ;; rows are appended at runtime by agents and the user).
    :my.kb/source-path
    :my.kb/source-line
@@ -860,35 +856,16 @@
 ;; Cluster database authority session.
 ;; ---------------------------------------------------------------------------
 
-(declare index-schemas)
+(declare database-initialization)
 
-(defn- ^:async install-runtime-schema!
-  "Admit every canonical runtime schema through one authority transaction.
-
-   The writer derives and prepends Datahike declarations from these canonical
-   Malli forms inside the same commit. Generator policies already live on the
-   corresponding schema rows, so there is no raw `:db/*` declaration or
-   second policy transaction on the Bun side. Provenance genesis must exist."
-  []
-  (await
-    (db/with-tx-context
-      {:seon.db/user [:seon.agent/id "root"]
-       :seon.db/process (db.process/lookup-ref :seon.db.process/boot)}
-      (fn ^:async install! []
-        (let [schema-env (await (db/transact!
-                                {:seon.db/tx-data (index-schemas)}))]
-          (when (false? (:seon.db/ok? schema-env))
-            (throw (ex-info "Runtime schema installation failed."
-                            schema-env))))))))
-
-(schema/register! ::prepare-writes? :boolean)
+(schema/register! ::initialize? :boolean)
 (schema/register! ::open-database-session-request
   [:map {:closed true}
-   [::prepare-writes? ::prepare-writes?]])
+   [::initialize? ::initialize?]])
 
 (defn- session-selection
   "Project one validated launch descriptor into a database session request."
-  [descriptor]
+  [descriptor initialization]
   (let [writer-owner (::launch/writer-owner descriptor)
         database (::launch/database descriptor)
         coordinate (::db.coordinate/coordinate database)]
@@ -897,27 +874,31 @@
              ::db/backend (::db.protocol/backend database)}
       (::db.protocol/database-path database)
       (assoc ::db/database-path (::db.protocol/database-path database))
+      initialization
+      (assoc ::db/initialization initialization)
       coordinate
       (assoc ::db/attachment (db.coordinate/attachment coordinate)))))
 
 (defn ^:async open-database-session!
   "Open this process's one persistent database authority session.
 
-   Order is load-bearing:
-     1. `db/open-session!` connects, negotiates capabilities, ensures the
-        selected database, and acquires its immutable attachment.
-     2. when `prepare-writes?`, provenance and runtime schema preparation use
-        that same session before autonomous work begins.
+   When writes are enabled, the same open request carries the complete compiled
+   program and required initial entities. The authority owns provenance genesis,
+   native schema declaration, exact program reconciliation, and publication of
+   the admitted immutable database value.
 
    The result is ordinary namespaced data. Bun retains no local Datahike
    connection, index, replay cursor, or publisher socket."
   {:malli/schema
    [:=> [:cat ::open-database-session-request] :any]}
-  [{::keys [prepare-writes?]}]
+  [{::keys [initialize?]}]
   (let [descriptor launch/process-launch-descriptor
         writer-owner (::launch/writer-owner descriptor)
         database (::launch/database descriptor)
-        opened (await (db/open-session! (session-selection descriptor)))]
+        initialization (when initialize?
+                         (database-initialization descriptor))
+        opened (await (db/open-session!
+                       (session-selection descriptor initialization)))]
     (log/info-console! "seon.client/open-database-session!"
                        (str "database "
                             (::db.protocol/database-name database)
@@ -925,31 +906,19 @@
                             (::db.protocol/database-path database)
                             " (writer: "
                             (::launch/request-socket-path writer-owner) ")"))
-    (when prepare-writes?
-      (await (db/ensure-provenance! {}))
-      (await (install-runtime-schema!)))
     opened))
 
 ;; ---------------------------------------------------------------------------
-;; Core boot seed (P2, 2026-05-27)
-;;
-;; Per docs/prds/agent-runtime/mvp-completion-plan-2026-05-27.md §Phase 2
-;; + research/repl-session-context-template-2026-05-26.md §5: the core
-;; transacts the user entity + the my.kb.shared instruction singleton plus an
-;; introspection-indexed set of core fns at boot, BEFORE any agent turn —
-;; so replay-from-tx-0 starts on a fully-seeded core, not mid-air.
-;;
-;; Transaction ordering at cold start (in start-runtime!):
-;;   1. seed-core!    — user entity + my.kb.shared singleton
-;;   2. index-core!   — :seon.ns + :seon.fn + canonical schema rows from REAL runtime
-;;                           introspection (var meta + source file-read)
-;;
-;; Each transaction carries root/boot provenance refs, so audit queries can
-;; isolate boot-managed datoms from agent-produced ones.
+;; Required initial database entities.
 ;; ---------------------------------------------------------------------------
 
-(defn seed-core!
-  "Tx-data for THE user entity plus the EMPTY system-wide instruction
+(defn- initial-data
+  "Return the user entity and empty system-wide instruction singleton.
+
+   The database authority admits these identities with the compiled program
+   before publishing the first usable database value.
+
+   The EMPTY system-wide instruction
    singleton (`my.kb.shared/seed-tx-data`); agents and the user APPEND
    rows at runtime, read back via `(my.kb.shared/instructions)` in the
    bootstrap turn.
@@ -961,9 +930,7 @@
    carrying NO rows — re-running asserts zero new datoms and never
    clobbers runtime appends.
 
-   Pure fn. Caller transacts via `db/transact!` as root through the boot
-   database process."
-  {:malli/schema [:=> [:cat] :any]}
+   Reopening the database never clobbers runtime appends."
   []
   (into [{:seon.user/id "user"}]
         (my.kb.shared/seed-tx-data)))
@@ -1682,11 +1649,9 @@
    is the only ref shape ever emitted for `:seon.fn/ns` (a single
    `:seon.db/ref`); it is never a bare keyword.
 
-   Boot-time DEDUP (the \"fresh agent, same conn\" guard) is applied by the
-   caller via [[core-program-tx]], which drops rows already present on the
-   conn so a later `start-runtime!` against the same store seeds nothing.
-   Keeping THIS fn conn-free preserves its role as a pure tx-data builder (the
-   shape the index-core-test guards rely on).
+   The authority reconciles this complete desired population against one
+   immutable database value during session open. Keeping this function
+   connection-free preserves one pure compiled-program builder.
 
    Fns whose source can't be read are OMITTED, not stubbed — the corpus stays
    honest. Returns the tx-data vector; caller transacts as root/boot."
@@ -1732,10 +1697,9 @@
    canonical registered Malli form, so the complete shape of every attr is one
    entity-read away for the agent. It is never display-truncated.
 
-   Pure tx-data builder; the boot reconcile in [[core-program-tx]] protects
-   keys already present on the conn, so an agent's own
-   `(seon.schema/register! …)` tee row (whose :source is the replayable
-   call form) is NEVER overwritten by the boot index."
+   Pure program-data builder. Authority reconciliation never overwrites an
+   agent's own `(seon.schema/register! …)` tee row, whose source is the
+   replayable call form."
   {:malli/schema [:=> [:cat] :any]}
   []
   (let [now (js/Date.)]
@@ -1759,385 +1723,51 @@
                                {:seon.ns/name (keyword (namespace k))}))))))
           (schema/registered-schemas))))
 
-(def ^:private core-function-query
-  '[:find ?sym ?src ?spec ?doc ?args ?priv ?agent-facing
-    :where
-    [?f :seon.fn/sym ?sym]
-    [?f :seon.fn/source ?src ?tx]
-    [(get-else $ ?f :seon.fn/spec "") ?spec]
-    [(get-else $ ?f :seon.fn/doc "") ?doc]
-    [(get-else $ ?f :seon.fn/arglists "") ?args]
-    [(get-else $ ?f :seon.fn/private? false) ?priv]
-    [(get-else $ ?f :seon.fn/agent-facing? false) ?agent-facing]])
+(def ^:private compiled-program-wall-clock-attrs
+  #{:seon.fn/created-at :seon.schema/created-at :seon.test/created-at})
 
-(def ^:private boot-function-query
-  '[:find [?sym ...]
-    :where
-    [?function :seon.fn/sym ?sym]
-    [?function :seon.fn/source _ ?tx]
-    [?tx :seon.db/process ?process]
-    [?process :seon.db.process/id :seon.db.process/boot]])
+(def ^:private compiled-program-identity-attrs
+  [:seon.ns/name :seon.fn/sym :seon.schema/key :seon.test/sym])
 
-(def ^:private core-schema-query
-  '[:find ?key ?form ?generator
-    :where
-    [?schema :seon.schema/key ?key]
-    [?schema :seon.schema/form ?form ?tx]
-    [(get-else $ ?schema :seon.db.id/generator
-               :seon.db.id.generator/absent) ?generator]])
+(defn- compiled-program-sort-key
+  [row]
+  (some (fn [[position attribute]]
+          (when (contains? row attribute)
+            [position (pr-str (get row attribute))]))
+        (map-indexed vector compiled-program-identity-attrs)))
 
-(def ^:private boot-schema-query
-  '[:find [?key ...]
-    :where
-    [?schema :seon.schema/key ?key]
-    [?schema :seon.schema/form _ ?tx]
-    [?tx :seon.db/process ?process]
-    [?process :seon.db.process/id :seon.db.process/boot]])
-
-(def ^:private core-namespace-query
-  '[:find ?name ?source
-           (pull ?namespace [{:seon.ns/require-edges [*]}])
-    :where
-    [?namespace :seon.ns/name ?name]
-    [?namespace :seon.ns/source ?source]])
-
-(def ^:private boot-program-row-query
-  '[:find ?e ?identity-attr ?ident ?source
-    :where
-    (or-join [?e ?identity-attr ?ident ?source ?tx]
-      (and [?e :seon.ns/name ?ident]
-           [?e :seon.ns/source ?source ?tx]
-           [(ground :seon.ns/name) ?identity-attr])
-      (and [?e :seon.fn/sym ?ident]
-           [?e :seon.fn/source ?source ?tx]
-           [(ground :seon.fn/sym) ?identity-attr])
-      (and [?e :seon.schema/key ?ident]
-           [?e :seon.schema/form ?source ?tx]
-           [(ground :seon.schema/key) ?identity-attr])
-      (and [?e :seon.test/sym ?ident]
-           [?e :seon.test/source ?source ?tx]
-           [(ground :seon.test/sym) ?identity-attr]))
-    [?tx :seon.db/process ?process]
-    [?process :seon.db.process/id :seon.db.process/boot]])
-
-(def ^:private agent-id-query
-  '[:find [?id ...] :where [?agent :seon.agent/id ?id]])
-
-(defn- query-member
-  [query]
-  {::db.protocol/operation db.protocol/query-operation
-   ::db.protocol/query-form query
-   ::db.protocol/arguments []})
-
-(defn- query-member-result!
-  [member]
-  (if (true? (::db.protocol/success? member))
-    (:datahike.query/result member)
-    (throw (ex-info "Core-program database acquisition failed."
-                    {:seon.db/error member
-                     :seon.error/kind :core-bug}))))
-
-(defn- normalize-require-edges
-  [pulled]
-  (into #{}
-        (map (fn [edge]
-               (let [refers (:seon.ns.require/refers edge)]
-                 (cond-> (dissoc edge :db/id :seon.ns.require/refers)
-                   (seq refers) (assoc :seon.ns.require/refers
-                                       (set refers))))))
-        (:seon.ns/require-edges pulled)))
-
-(defn- ^:async acquire-core-program!
-  []
-  (let [result (await
-                 (db/execute-many
-                   {::db/members
-                    (mapv query-member
-                          [core-function-query
-                           boot-function-query
-                           core-schema-query
-                           boot-schema-query
-                           core-namespace-query
-                           boot-program-row-query
-                           agent-id-query])}))
-        [function-member boot-function-member schema-member boot-schema-member
-         namespace-member boot-member agent-member]
-        (::db/results result)]
-    {::db/coordinate (::db/coordinate result)
-     ::core-functions (query-member-result! function-member)
-     ::boot-functions (set (query-member-result! boot-function-member))
-     ::core-schemas (query-member-result! schema-member)
-     ::boot-schemas (set (query-member-result! boot-schema-member))
-     ::core-namespaces (query-member-result! namespace-member)
-     ::boot-program-rows (query-member-result! boot-member)
-     ::agent-ids (query-member-result! agent-member)}))
-
-(defn- compile-core-program-tx
-  "Return the exact core-program transaction for the current source.
-
-   [[index-core!]] and [[index-schemas]] are evaluated once to form one desired
-   compiled program graph. Against the acquired ordinary database data, this
-   function derives
-   the complete atomic delta: add missing declarations, replace drifted
-   declaration fields, retract omitted optional fields/components, and remove
-   boot-authored declarations absent from the desired graph. A fresh store
-   receives the complete graph; a converged restart returns `[]`.
-
-   Querying the conn's CURRENT identity set and emitting only the gap means a
-   re-index never re-transacts a core row against the populated store —
-   removing the re-seed interaction that the Run-3 findings traced to a
-   malformed `:seon.fn/ns` value.
-
-   DRIFT-HEALING is uniform across every compiled row: a stored row re-emits
-   whenever ANY freshly-derived field differs from what the store holds —
-   `:seon.ns/source`, schema source/generator policy, and for `:seon.fn` rows
-   the WHOLE derived set (source, spec, doc, arglists, private?, and positive
-   agent-facing eligibility). Identity upsert re-asserts changed datoms in place;
-   an optional fn spec, eligibility fact, or schema generator policy that
-   DISAPPEARED is explicitly retracted
-   (upsert cannot remove a datom). Replacements and removals are guarded by
-   the CURRENT `:source` datom's transaction: only a declaration whose current
-   source was written by the boot process is managed. An
-   agent-authored row (detect-and-tee, runner) with a core sym is NEVER
-   clobbered by the boot index.
-
-   A boot-created agent home namespace is domain data, not compiled-program
-   data. Home names are derived from the current `:seon.agent/id` facts and
-   excluded from removal. Process provenance says HOW a fact arrived; desired
-   identities plus domain connections say WHICH population owns it.
-
-   The namespace/function/schema desired populations must be non-empty before
-   any removal is compiled. Tests belong to the agent-authored program graph,
-   not the compiled boot snapshot. Legacy boot-authored test rows are removed;
-   agent-authored test rows are preserved."
-  [all acquired]
-  (let [
-        ;; Fn rows dedup on sym AND every derived field. Sym-only dedup was
-        ;; the stale-spec bug (live incident 2026-07-02: seon.agent.shell's
-        ;; rows kept a first-index :seon.shell/* spec forever because the
-        ;; changed row was dropped whenever the sym already existed). The
-        ;; "" sentinel marks an absent :seon.fn/spec — a real pr-str'd
-        ;; Malli form is never empty.
-        fn-fields (fn [row]
-                    {:seon.fn/source   (:seon.fn/source row)
-                     :seon.fn/spec     (get row :seon.fn/spec "")
-                     :seon.fn/doc      (:seon.fn/doc row)
-                     :seon.fn/arglists (:seon.fn/arglists row)
-                     :seon.fn/private? (:seon.fn/private? row)
-                     :seon.fn/agent-facing? (true? (:seon.fn/agent-facing? row))})
-        no-generator :seon.db.id.generator/absent
-        schema-fields
-        (fn [row]
-          {:seon.schema/form (:seon.schema/form row)
-           :seon.db.id/generator
-           (get row :seon.db.id/generator no-generator)})
-        function-rows (::core-functions acquired)
-        schema-rows (::core-schemas acquired)
-        namespace-rows (::core-namespaces acquired)
-        have-fns  (into {}
-                        (map (fn [[sym src spec doc args priv agent-facing?]]
-                               [sym {:seon.fn/source   src
-                                     :seon.fn/spec     spec
-                                     :seon.fn/doc      doc
-                                     :seon.fn/arglists args
-                                     :seon.fn/private? priv
-                                     :seon.fn/agent-facing? agent-facing?}]))
-                        function-rows)
-        ;; The core-claimed syms — rows whose :source datom's tx carries the
-        ;; boot-index provenance. Only these may be drift-overwritten.
-        core-syms (::boot-functions acquired)
-        core-schema-keys
-        (::boot-schemas acquired)
-        ;; ns rows dedup on name AND source: a `:seon.ns` row re-emits when
-        ;; its stored `:seon.ns/source` differs from the freshly-built one —
-        ;; this keeps the stored source tracking the build (e.g. a my.*
-        ;; full-source ns whose file changed). Identity upsert on
-        ;; `:seon.ns/name` means the re-emit lands as one `:seon.ns/source`
-        ;; re-assertion, never a duplicate entity.
-        have-nses (into {} (map (juxt first second)) namespace-rows)
-        ;; Schema rows dedup on canonical form AND persisted generator policy. A
-        ;; partial database missing the policy fact re-emits even when form is
-        ;; unchanged; removing a policy emits an explicit retract below because
-        ;; identity upsert cannot remove a card-one datom. Agent-authored rows
-        ;; are protected by transaction provenance, not by overloading the form.
-        have-schs
-        (into {}
-              (map (fn [[k form generator]]
-                     [k {:seon.schema/form form
-                         :seon.db.id/generator
-                         generator}]))
-              schema-rows)
-        desired-identities
-        (into #{}
-              (keep (fn [row]
-                      (some (fn [a]
-                              (when (contains? row a) [a (get row a)]))
-                            [:seon.ns/name :seon.fn/sym :seon.schema/key])))
-              all)
-        desired-values
-        (reduce (fn [m [a v]] (update m a (fnil conj #{}) v))
-                {} desired-identities)
-        _ (doseq [a [:seon.ns/name :seon.fn/sym :seon.schema/key]]
-            (when-not (seq (get desired-values a))
-              (throw (ex-info
-                       (str "core program snapshot has no " a
-                            " declarations; refusing removal")
-                       {:seon.client/missing-program-population a}))))
-        kept      (vec (remove
-                         (fn [row]
-                           (or (when-some [stored (get have-fns (:seon.fn/sym row))]
-                                 (or (= stored (fn-fields row))
-                                     (not (contains? core-syms (:seon.fn/sym row)))))
-                               (and (contains? row :seon.ns/name)
-                                    (= (get have-nses (:seon.ns/name row))
-                                       (:seon.ns/source row)))
-                               (when-some [stored (get have-schs (:seon.schema/key row))]
-                                 (or (= stored (schema-fields row))
-                                     (not (contains? core-schema-keys
-                                                     (:seon.schema/key row)))))))
-                         all))
-        ;; Drifted optional facts need explicit retractions: identity upsert
-        ;; cannot remove a spec or positive eligibility fact by omission.
-        field-retracts
-        (into []
-              (mapcat
-                (fn [row]
-                  (if-some [sym (:seon.fn/sym row)]
-                    (let [stored-spec (get-in have-fns [sym :seon.fn/spec])
-                          stored-agent-facing?
-                          (get-in have-fns [sym :seon.fn/agent-facing?])]
-                      (cond-> []
-                        (and (not (contains? row :seon.fn/spec))
-                             (seq stored-spec))
-                        (conj [:db/retract [:seon.fn/sym sym]
-                               :seon.fn/spec stored-spec])
-
-                        (and stored-agent-facing?
-                             (not (contains? row :seon.fn/agent-facing?)))
-                        (conj [:db/retract [:seon.fn/sym sym]
-                               :seon.fn/agent-facing? true])))
-                    (when-some [schema-key (:seon.schema/key row)]
-                      (let [stored-generator
-                            (get-in have-schs
-                                    [schema-key :seon.db.id/generator])]
-                        (when (and (not= no-generator stored-generator)
-                                   (not (contains? row
-                                                   :seon.db.id/generator)))
-                          [[:db/retract [:seon.schema/key schema-key]
-                            :seon.db.id/generator stored-generator]]))))))
-              kept)
-        ;; `:seon.ns/require-edges` COMPONENT rows can't ride the plain
-        ;; identity upsert: cardinality-many component maps have no
-        ;; identity of their own, so a drift re-emit (changed
-        ;; :seon.ns/source) would DUPLICATE the edge rows. Strip the
-        ;; edges off the kept ns rows and compile the same exact replacement
-        ;; from the ordinary edge maps acquired at this coordinate:
-        ;; retractEntity the old components, assert the new set, [] when
-        ;; unchanged.
-        ;; Diffed over ALL fresh ns rows (not just the kept/drifted
-        ;; ones), so code changes reconcile the complete desired edge
-        ;; set on every boot. All namespace edge sets arrived in the single
-        ;; grouped acquisition above; there is no per-namespace read.
-        persisted-edges
-        (into {}
-              (map (fn [[name _source pulled]]
-                     [name {:edges (normalize-require-edges pulled)
-                            :eids (mapv :db/id
-                                        (:seon.ns/require-edges pulled))}]))
-              namespace-rows)
-        edge-tx   (into []
-                        (mapcat (fn [row]
-                                  (when-some [edges (and (map? row)
-                                                         (:seon.ns/name row)
-                                                         (:seon.ns/require-edges row))]
-                                    (let [name (:seon.ns/name row)
-                                          desired (set edges)
-                                          current (get persisted-edges name)]
-                                      (when (not= desired (:edges current #{}))
-                                        (into
-                                          (mapv (fn [eid]
-                                                  [:db/retractEntity eid])
-                                                (:eids current))
-                                          (when (seq desired)
-                                            [{:seon.ns/name name
-                                              :seon.ns/require-edges
-                                              (vec desired)}])))))))
-                        all)
-        kept      (mapv #(dissoc % :seon.ns/require-edges) kept)
-        agent-home-names
-        (into #{}
-              (map (fn [id] (keyword (str (home/home-ns id)))))
-              (::agent-ids acquired))
-        boot-rows (::boot-program-rows acquired)
-        stale-eids
-        (into #{}
-              (comp
-                (filter
-                  (fn [[_ identity-attr ident _source]]
-                    (and (or (= :seon.test/sym identity-attr)
-                             (seq (get desired-values identity-attr)))
-                         (not (contains? desired-identities
-                                         [identity-attr ident]))
-                         (not (and (= :seon.ns/name identity-attr)
-                                   (contains? agent-home-names ident)))
-                         )))
-                (map first))
-              boot-rows)
-        stale-entities
-        (mapv (fn [e] [:db.fn/retractEntity e]) (sort stale-eids))]
-    (-> kept
-        (into edge-tx)
-        (into field-retracts)
-        (into stale-entities))))
-
-(defn ^:async core-program-tx
-  "Acquire and compile the exact core-program transaction.
-
-   Seven independent Datahike queries execute against one immutable authority
-   coordinate. The returned maps and sets feed [[compile-core-program-tx]],
-   which is pure. The caller must transact `:seon.db/tx-data` with the returned
-   `:seon.db/coordinate` as `:seon.db/expected-coordinate`."
-  {:malli/schema [:=> [:cat]
-                  [:map
-                   [:seon.db/coordinate :seon.db.coordinate/coordinate]
-                   [:seon.db/tx-data [:vector :any]]]]}
-  []
-  (let [all (vec (concat (index-core!) (index-schemas)))
-        acquired (await (acquire-core-program!))]
-    {::db/coordinate (::db/coordinate acquired)
-     ::db/tx-data (compile-core-program-tx all acquired)}))
-
-(def ^:private max-core-program-attempts 3)
-
-(defn- stale-core-program-coordinate?
-  [envelope]
-  (= db.protocol/stale-coordinate-error
-     (get-in envelope
-             [:seon.db/error :seon.error/data
-              :seon.db.protocol/error-kind])))
-
-(defn- ^:async commit-core-program!
-  "Compile and commit one frozen desired core-program snapshot.
-
-   Only the canonical stale-coordinate response reacquires and recompiles.
-   Every other authority error returns immediately to the boot step checker.
-   A converged compilation returns success at the acquired coordinate without
-   creating a transaction."
-  [all]
-  (loop [attempt 1]
-    (let [acquired (await (acquire-core-program!))
-          coordinate (::db/coordinate acquired)
-          tx-data (compile-core-program-tx all acquired)]
-      (if (empty? tx-data)
-        {::db/ok? true ::db/coordinate coordinate}
-        (let [envelope
-              (await (db/transact!
-                       {::db/expected-coordinate coordinate
-                        ::db/tx-data tx-data}))]
-          (if (and (stale-core-program-coordinate? envelope)
-                   (< attempt max-core-program-attempts))
-            (recur (inc attempt))
-            envelope))))))
+(defn- database-initialization
+  "Build the complete deterministic database initialization value."
+  [descriptor]
+  (let [artifact-digest
+        (get-in descriptor [::launch/runtime ::launch/execution-digest])
+        program
+        (->> (concat (index-core!) (index-schemas))
+             (map #(apply dissoc % compiled-program-wall-clock-attrs))
+             (sort-by compiled-program-sort-key)
+             vec)
+        _
+        (admission/committed-projection
+         {::admission/schema-rows
+          (into []
+                (keep (fn [row]
+                        (when-let [key (:seon.schema/key row)]
+                          [key (:seon.schema/form row)])))
+                program)
+          ::admission/function-contract-rows
+          (into []
+                (keep (fn [row]
+                        (when-let [form (:seon.fn/spec row)]
+                          [(:seon.fn/sym row) form])))
+                program)})]
+    (when-not artifact-digest
+      (throw
+       (ex-info "The launch has no compiled execution artifact digest."
+                {:seon.error/kind :core-bug
+                 ::launch/runtime (::launch/runtime descriptor)})))
+    {:seon.execution/artifact-digest artifact-digest
+     :seon.db/program program
+     :seon.db/initial-data (vec (initial-data))}))
 
 (schema/register! ::llm-fn        'fn?)
 (defn- rehost-agent-runtimes!
@@ -2164,9 +1794,6 @@
                                  err))))
     (js/Promise.resolve [])))
 
-(schema/register! ::seeded? [:= true])
-(schema/register! ::boot-seed-request  [:map {:closed true}])
-(schema/register! ::boot-seed-response [:map [::seeded? ::seeded?]])
 (schema/register! ::apply-config-request
   [:map {:closed true}
    [:seon.config/manifest :seon.config/manifest]])
@@ -2202,113 +1829,6 @@
                  :seon.db/managed-scope #{:seon.db.process/config}
                  :seon.db/managed-identity-attrs
                  #{:seon.route/name :my.skills/name :seon.config/id}}))))))))
-
-(defn ^:async boot-seed!
-  "THE core boot seed — one code path for reconciling a database's managed
-   startup facts, shared by `start-runtime!` and isolated runtime setup so
-   callers cannot drift. The agent's identity is NOT seeded — SOUL.md /
-   AGENTS.md are read LIVE as context sections every render
-   (`seon.agent.ctx/file-block`), so every prompt gets the same identity with
-   no seed step.
-
-   Steps, in boot order. TWO provenance layers:
-
-   BOOT-MANAGED (process `:seon.db.process/boot`) — two transactions, each
-   with its own tx so the startup sequence remains observable:
-          :core-seed  — `seed-core!` (user entity +
-                             my.kb.shared instruction singleton).
-          :core-index — `core-program-tx` (`:seon.ns` /
-                             `:seon.fn` / `:seon.schema` rows). This is the
-                             compiled desired graph: drift is repaired and
-                             absent boot-authored declarations are retracted.
-                             Agent-authored declarations are never swept.
-
-   DECLARATIVE DESIRED SET (origin `:config`) — the routes
-   (`route/core-routes-tx`, curated by the manifest) + the skills corpus
-   (`my.skills/seed-skills-tx-data`, curated by the manifest) are the ONE
-   managed declarative population, synced through
-   `seon.state/reconcile!` (scope `#{:config}`). reconcile UPSERTS each
-   desired row by its own `:db.unique/identity` (`:seon.route/name` /
-   `:my.skills/name`) AND RETRACTS any managed row absent from the desired
-   set — so dropping a route from the manifest, or a skill from disk,
-   removes the stale datom (it can no longer persist across boots). The boot
-   populations above are outside this config scope.
-
-   Every read and write uses the process database session. ENVELOPE CONTRACT
-   (A4): `db/transact!` never rejects, so every step checks the
-   envelope and THROWS (surface-errors-loudly) — a silent partial seed
-   is far worse than a crashed boot."
-  {:malli/schema [:=> [:cat ::boot-seed-request] ::boot-seed-response]}
-  [_request]
-  ;; The seed runs outside any inherited agent scope and explicitly selects
-  ;; root plus the boot/config process for each transaction.
-  (await
-    (db/without-agent
-      (fn ^:async seed-unscoped! []
-        (let [;; The OPTIONAL loadout manifest, read ONCE and threaded to
-                  ;; the route + skills steps below. Nil means preserve the
-                  ;; database's config-managed subset; a map means explicitly
-                  ;; reconcile that subset.
-                  manifest (config/load-manifest)
-                  check!   (fn [step {ok?   :seon.db/ok?
-                                      error :seon.db/error}]
-                             (when-not ok?
-                               (throw (ex-info
-                                        (str "boot seed transact failed at "
-                                             step ": "
-                                             (:seon.error/message error))
-                                        {:seon.client/seed-step step
-                                         :seon.db/error error}))))]
-          ;; APPEND-ONLY root/boot core: introspection that is not a desired
-          ;; set, never retracted.
-          (await
-                (db/with-tx-context
-                  {:seon.db/user [:seon.agent/id "root"]
-                   :seon.db/process
-                   (db.process/lookup-ref :seon.db.process/boot)}
-                  (fn ^:async seed! []
-                    (check! :core-seed
-                            (await (db/transact!
-                                     {:seon.db/tx-data (seed-core!)}))))))
-          ;; Freeze source-derived desired data once per boot. A concurrent
-          ;; database winner may force the current-state acquisition and pure
-          ;; diff to repeat, but never re-runs the index builders mid-boot.
-          (let [all (vec (concat (index-core!) (index-schemas)))]
-            (await
-              (db/with-tx-context
-                {:seon.db/user [:seon.agent/id "root"]
-                 :seon.db/process
-                (db.process/lookup-ref :seon.db.process/boot)}
-                (fn ^:async index! []
-                    ;; No soul seed: identity is read live from context files,
-                    ;; never seeded into the database.
-                    (check! :core-index
-                            (await (commit-core-program! all))))))
-              ;; DECLARATIVE DESIRED SET (origin :config): the routes
-              ;; (`:seon.route/*`, identity `:seon.route/name`), the scanned
-              ;; skills corpus (`:my.skills/*`, identity `:my.skills/name`),
-              ;; AND the `:seon.config` SINGLETON (identity `:seon.config/id`,
-              ;; every cluster-config knob as a datom — config-db-migration
-              ;; 2026-07-10) are ONE managed population synced through
-              ;; reconcile! — exact add/change/attribute-remove/entity-remove,
-              ;; and NO transaction on a converged Nth boot. A route dropped
-              ;; from the manifest / a skill removed from disk is RETRACTED.
-              ;; The singleton rides the
-              ;; SAME config-process scope: folding it INTO the desired set is
-              ;; what keeps it retract-PROTECTED. Identity-attr scope prevents
-              ;; that process from sweeping unrelated populations it authored.
-              ;; reconcile! never rejects; its error-value is checked + thrown
-              ;; (surface-errors-loudly).
-              (when manifest
-                (let [recon (await (apply-config!
-                                     {:seon.config/manifest manifest}))]
-                (when (false? (:seon.state/ok? recon))
-                  (throw (ex-info
-                           (str "boot seed reconcile (routes+skills+config) failed: "
-                                (:seon.state/error recon))
-                           {:seon.client/seed-step :core-declarative
-                            :seon.state/error      (:seon.state/error recon)})))))
-          {::seeded? true}))))))
 
 (schema/register! ::start-runtime-request
   [:map {:closed true}
@@ -2473,8 +1993,8 @@
          :seon.web/port-file port-file})
       (let [session-open (await
                    (open-database-session!
-                    {::prepare-writes? (and autonomous?
-                                            (nil? restore-startup))}))
+                    {::initialize? (and autonomous?
+                                        (nil? restore-startup))}))
             _ (await
                (validate-restore-attachment!
                 descriptor restore-startup restore-completion-claim))
@@ -2482,7 +2002,16 @@
                (db/assert-preconditions!
                 {::db/coordinate (::db/coordinate session-open)}))]
         (when (and autonomous? (nil? restore-startup))
-          (await (boot-seed! {})))
+          (when-let [manifest (config/load-manifest)]
+            (let [reconciled
+                  (await (apply-config!
+                          {:seon.config/manifest manifest}))]
+              (when (false? (:seon.state/ok? reconciled))
+                (throw
+                 (ex-info "Startup config reconciliation failed."
+                          {:seon.error/kind :core-bug
+                           :seon.state/error
+                           (:seon.state/error reconciled)}))))))
         (when autonomous?
           (let [recovered
                 (await
@@ -3127,7 +2656,7 @@
   ;; inside `start-runtime!`, after the core is indexed. The DB is the complete,
   ;; ordering-independent source of every fn + spec; later transitions publish
   ;; only their exact dependency delta.
-  ;; A-5: auto-boot the V0 agent + HTTP server unless SEON_NO_AUTO_BOOT.
+  ;; Auto-start the cluster host unless SEON_NO_AUTO_BOOT.
   ;; Cheap default for dev iteration — browser hits the loopback port,
   ;; no REPL needed. Disable for a compiler-only/dev-eval process.
   (when-not (config/no-auto-boot?)
