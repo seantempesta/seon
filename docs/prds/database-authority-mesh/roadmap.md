@@ -267,6 +267,21 @@ passes 13 state tests/45 assertions with zero warnings and 5 client
 initialization tests/16 assertions; first-use schema publication, convergence
 without a write, unmanaged collision, component cascade, and direct database
 errors remain covered.
+Commit `5d77dd0d` deletes the phantom config-reader atom and every
+`config-view`/render-config/repair-config fallback. Cold startup resolves one
+selected manifest once and reuses the identical ordinary singleton for program
+initialization and explicit reconciliation. A config-free reopen attaches
+without initialization, acquires and decodes the retained singleton once, then
+refreshes the same session from that exact data; hot reload uses the same
+acquisition owner and fails closed when the row is absent. Config accessors are
+pure over explicit singleton data. Focused proof passes 22 config tests/94
+assertions, 7 client-initialization tests/20 assertions, and 14 indexing tests/
+115 assertions. The indexing fixture deletes 437 lines of embedded local
+Datahike/program-delta machinery. Its adversarial pass also repaired the one
+current `transact!` Malli contract and added the missing `current-agent-id`
+contract. The remaining config arity warnings are the finite downstream-owner
+ledger; the stale instrumentation fixture is recorded at
+`tmp/test-cljs-20260717-032612-47853.log` rather than restoring an ambient read.
 `3ebfcaf5` leaves one current artifact manifest/application digest and removes
 the four historical readers; `9a66bb78` leaves one generated-identity
 allocator; and `c453a5bd` makes that allocator consume the same native
@@ -303,15 +318,15 @@ modest-hardware density checkpoint.
 
 ### Current implementation checkpoint
 
-- **Earliest unsettled contract:** remove the phantom config reader, then
-  migrate membership and quiescence through the one settled client session,
+- **Earliest unsettled contract:** migrate membership and then quiescence
+  through the one settled client session,
   publication, advertisement, recovery, and state-reconciliation owners.
 - **Integrated proof that closes it:** eval, autocomplete, namespace context,
   startup, converged reload, advertisement, runtime hosting, and declarative
   state reconciliation reuse ordinary database values and native transaction
   reports; fresh and warm startup both execute the one ordered sequence.
-- **Dependency-ready parallel portfolio:** phantom-config deletion is active;
-  membership/quiescence is grounded at
+- **Dependency-ready parallel portfolio:** membership implementation is active
+  and quiescence is grounded at
   [[research/membership-quiescence-single-owner-audit-2026-07-17]] against that
   boundary, including the stale-result defect tracked at
   [[../../seon/issues/runtime-membership-can-accept-stale-database-value]];
@@ -322,8 +337,8 @@ modest-hardware density checkpoint.
   rejects the current dirty coordinate/oversized-row prototype. The complete
   parallel-system inventory is durable at
   [[research/parallel-behavior-unification-audit-2026-07-17]].
-- **Next refills:** finish phantom-config deletion, then migrate membership and
-  quiescence in ordered complete cuts; close the web/feed database-value and
+- **Next refills:** finish membership, then migrate quiescence in one complete
+  cut; close the web/feed database-value and
   rendered-transaction owner next, followed by the exact-database blob
   operator seam and the operation-specific plan consumers.
   The final graduation gate remains the full frozen-source correctness, live
