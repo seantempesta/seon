@@ -30,7 +30,7 @@
 (schema/register! ::max-work [:int {:min 1}])
 (schema/register! ::max-results [:int {:min 1}])
 (schema/register! ::max-result-weight [:int {:min 1}])
-(schema/register! ::members :seon.db.protocol/members)
+(schema/register! ::members [:vector {:min 1 :max 64} :map])
 (schema/register! ::results :seon.db.protocol/results)
 (schema/register! ::index [:enum :eavt :aevt :avet])
 (schema/register! ::components [:vector :any])
@@ -113,6 +113,7 @@
  ::execute-many-request
  [:map {:closed true}
   [::members ::members]
+  [::db {:optional true} :seon.db/db]
   [::max-result-weight {:optional true} ::max-result-weight]])
 (schema/register!
  ::index-page-request
@@ -732,21 +733,46 @@
            :else (::protocol/schema response)))))))
 
 (defn ^{:async true :seon.fn/agent-facing? true} execute-many
-  "Run bounded independent database operations and preserve result positions."
+  "Run bounded independent database operations at one database value."
   [request]
-  (let [wire-request
-        (protocol/execute-many-request
-         (cond-> {::protocol/request-id
-                  (or (::request-id request) (str (random-uuid)))
-                  ::protocol/members (::members request)}
-           (::max-result-weight request)
-           (assoc :datahike.resource/max-result-weight
-                  (::max-result-weight request))))
-        response (await (send-request! wire-request 60000))]
-    (cond
-      (error-value? response) response
-      (not (::protocol/success? response)) (response-error response)
-      :else {::results (::protocol/results response)})))
+  (try
+    (let [members (::members request)
+          member-databases (->> members (keep ::db) distinct vec)
+          selected (or (::db request)
+                       (::db (current-tx-context)))
+          mixed? (or (> (count member-databases) 1)
+                     (and selected
+                          (seq member-databases)
+                          (not= selected (first member-databases))))]
+      (if mixed?
+        (session-error
+         "execute-many requires one database value for every member."
+         {::db selected
+          ::member-databases member-databases})
+        (let [database (or selected
+                           (first member-databases)
+                           (await (read-db! request)))]
+          (if (error-value? database)
+            database
+            (let [wire-request
+                  (protocol/execute-many-request
+                   (cond-> {::protocol/request-id
+                            (or (::request-id request) (str (random-uuid)))
+                            ::protocol/members
+                            (mapv #(assoc % ::db database) members)}
+                     (::max-result-weight request)
+                     (assoc :datahike.resource/max-result-weight
+                            (::max-result-weight request))))
+                  response (await (send-request! wire-request 60000))]
+              (cond
+                (error-value? response) response
+                (not (::protocol/success? response)) (response-error response)
+                :else {::results (::protocol/results response)}))))))
+    (catch :default exception
+      (let [value (error/->map exception)]
+        (cond-> value
+          (nil? (:seon.error/kind value))
+          (assoc :seon.error/kind :core-bug))))))
 
 (defn ^{:async true :seon.fn/agent-facing? true} index-page
   "Return one eager bounded page in native Datahike index order."

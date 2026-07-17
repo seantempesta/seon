@@ -58,6 +58,17 @@
       :seon.db.protocol.operation/pull-many
       (success request {::protocol/result [{:example/id 1} nil]})
 
+      :seon.db.protocol.operation/execute-many
+      (success request
+               {::protocol/results
+                (mapv (fn [_]
+                        (protocol/success
+                         {:datahike.query/result [::grouped-result]
+                          :datahike.query/attribute-dependencies #{}
+                          :datahike.query/cache-evidence {}
+                          :datahike.query/resource-evidence {}}))
+                      (::protocol/members request))})
+
       :seon.db.protocol.operation/index-page
       (success request
                {:datahike.index-page/datoms [[1 :example/id "one"
@@ -364,6 +375,78 @@
           (.then (fn [_] (done)))
           (.catch (fn [error]
                     (is false (str "query shape/source contract rejected: " error))
+                    (done)))))))
+
+(deftest execute-many-resolves-and-attaches-one-database-value
+  (async done
+    (let [member {::protocol/operation protocol/query-operation
+                  ::protocol/query-form
+                  '[:find ?e :where [?e :example/id]]
+                  ::protocol/arguments []}
+          inherited (db/as-of database 536870912)
+          other (assoc database :db-name "other")]
+      (-> (with-recording-authority
+            {}
+            (fn [{::keys [requests]}]
+              (-> (open!)
+                  (.then
+                   (fn [_]
+                     (reset! requests [])
+                     (db/execute-many
+                      {::db/db database ::db/members [member member]})))
+                  (.then
+                   (fn [result]
+                     (is (= #{::db/results} (set (keys result))))
+                     (is (= 2 (count (::db/results result))))
+                     (let [request (first
+                                    (operation-requests
+                                     @requests protocol/execute-many-operation))]
+                       (is (= [database database]
+                              (mapv ::db/db (::protocol/members request))))
+                       (is (empty? (operation-requests
+                                    @requests protocol/resolve-head-operation))))
+                     (reset! requests [])
+                     (db/with-tx-context
+                      {::db/db inherited}
+                      #(db/execute-many {::db/members [member]}))))
+                  (.then
+                   (fn [_]
+                     (let [request (first
+                                    (operation-requests
+                                     @requests protocol/execute-many-operation))]
+                       (is (= [inherited]
+                              (mapv ::db/db (::protocol/members request)))))
+                     (swap! @#'db/!session assoc ::db/databases {})
+                     (reset! requests [])
+                     (db/execute-many {::db/members [member member]})))
+                  (.then
+                   (fn [_]
+                     (is (= [protocol/resolve-head-operation
+                             protocol/execute-many-operation]
+                            (mapv ::protocol/operation @requests))
+                         "omission resolves the current database exactly once")
+                     (let [request (second @requests)]
+                       (is (= [database database]
+                              (mapv ::db/db (::protocol/members request)))))
+                     (reset! requests [])
+                     (db/execute-many
+                      {::db/members [(assoc member ::db/db database)
+                                     (assoc member ::db/db other)]})))
+                  (.then
+                   (fn [result]
+                     (is (= :core-bug (:seon.error/kind result)))
+                     (is (= "execute-many requires one database value for every member."
+                            (:seon.error/message result)))
+                     (is (= [database other]
+                            (get-in result
+                                    [:seon.error/data
+                                     ::db/member-databases])))
+                     (is (empty? @requests)
+                         "mixed member database values fail before transport"))))))
+          (.then (fn [_] (done)))
+          (.catch (fn [error]
+                    (is false (str "execute-many database-value contract rejected: "
+                                   error))
                     (done)))))))
 
 (deftest all-authority-operations-return-promises-of-values
