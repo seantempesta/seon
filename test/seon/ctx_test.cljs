@@ -27,7 +27,14 @@
                   :seon.agent.ctx/priority 20
                   :seon.render/ai "volatile"}]}
         rendered (ctx/rendered-context-from-entity
-                   {:seon.agent/entity entity})
+                   {:seon.agent/entity entity
+                    :seon.agent.ctx/selected-blocks
+                    [{:seon.agent.ctx/name :stable
+                      :seon.agent.ctx/priority 10
+                      :seon.render/ai "stable"}
+                     {:seon.agent.ctx/name :volatile
+                      :seon.agent.ctx/priority 20
+                      :seon.render/ai "volatile"}]})
         text (:seon.render/text rendered)]
     (is (str/includes? text "stable"))
     (is (str/includes? text ctx/stable-boundary))
@@ -49,6 +56,10 @@
                   :seon.render/ai "profile"}]
         rendered (ctx/rendered-context-from-entity
                    {:seon.agent/entity entity
+                    :seon.agent.ctx/selected-blocks
+                    [{:seon.agent.ctx/name :one
+                      :seon.agent.ctx/priority 5
+                      :seon.render/ai "profile"}]
                     :seon.agent.ctx/profile profile})]
     (is (str/includes? (:seon.render/text rendered) "profile"))
     (is (not (str/includes? (:seon.render/text rendered) "two")))

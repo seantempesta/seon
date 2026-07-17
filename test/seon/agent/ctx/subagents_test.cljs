@@ -70,7 +70,7 @@
                  "the answer is 42" 99]
                 ["failed-child" "failed" (js/Date. 3000) :error "" -1]]})]
     (is (str/includes? out "completed: the answer is 42 [→ eid 99]"))
-    (is (str/includes? out "failed-child [idle] · ✗ error"))))
+    (is (str/includes? out "failed-child [idle] risky · ✗ error"))))
 
 (deftest child-formatting-is-bounded-and-overflow-is-truthful
   (let [children (mapv (fn [i]

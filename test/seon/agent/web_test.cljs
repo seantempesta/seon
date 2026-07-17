@@ -181,8 +181,11 @@
                        (is (= total (tokens/estimate (:my.blob/content g)))
                            "blob content == the full extracted markdown")
                        (is (str/includes? (:my.blob/content g) "Main Heading")))
-                     (let [t (blob/text {:my.blob/hash hash})]
-                       (is (true? (:my.blob/ok? t)) "my.blob/text pages the stored doc")))))
+                     (-> (blob/text {:my.blob/hash hash})
+                         (.then
+                           (fn [page]
+                             (is (true? (:my.blob/ok? page))
+                                 "my.blob/text pages the stored doc")))))))
         )
       done)))
 

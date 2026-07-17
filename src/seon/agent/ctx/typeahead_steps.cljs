@@ -75,8 +75,9 @@
 (defn- prompt-provider
   "Resolve the prompt provider from already-acquired ordinary rows."
   [agent-row config-row]
-  (let [override (some-> (:seon.ai/agent-provider agent-row)
-                         (db/decode-edn-value :seon.ai/agent-provider))]
+  (let [stored (:seon.ai/agent-provider agent-row)
+        override (when (some? stored)
+                   (db/decode-edn-value :seon.ai/agent-provider stored))]
     (if (and override (not= :inherit override))
       override
       (or (:seon.ai/provider config-row) :deepseek))))

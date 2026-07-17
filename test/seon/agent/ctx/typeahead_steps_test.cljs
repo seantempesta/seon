@@ -20,7 +20,7 @@
               (is (identical? database (::db/db request)))
               (js/Promise.resolve
                 {::db/results
-                 [(member {:seon.ai/agent-provider (pr-str :typeahead)})
+                 [(member {:seon.ai/agent-provider :typeahead})
                   (member {:seon.ai/provider :deepseek})]})))
       (-> (steps/steps-ai {:seon.agent/id "agent" ::db/db database}
                           nil)
