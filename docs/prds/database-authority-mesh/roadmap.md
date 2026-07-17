@@ -135,12 +135,25 @@ public reconciliation function. Focused loop proof passes 12 tests/51
 assertions, including listener-before-drive, commit-before-host, open-run
 re-drive, close coverage, and CAS-winner adoption.
 
-Earliest unsettled contract: the remaining home-require consumers and the
-central cold-start/reload owner must consume the settled asynchronous database
-value API. `seon.client` still names removed coordinate/envelope and resumable
-query behavior; it must retain one initialization, publication, recovery,
-advertisement, and runtime-host sequence without replaying forms or adding a
-second startup path.
+Commit `490f949b` closes the remaining home-require consumers through the one
+existing `home-requires-for` owner. Its current-database arity is the ordinary
+convenience; its explicit-database arity lets namespace rendering and
+autocomplete reuse their already captured immutable value. Namespace
+formatting performs no database I/O, autocomplete resolves each participating
+agent against one value, and the focused self-host test compiles the same
+configured home package rather than restoring the deleted local-database
+fixture. Focused proof passes 22 tests/91 assertions across home, namespace
+context, eval auto-refer, and autocomplete.
+
+Earliest unsettled contract: the central cold-start/reload owner must consume
+the settled asynchronous database-value API. `seon.client` still names removed
+coordinate/envelope and resumable-query behavior; it must retain one
+initialization, publication, recovery, advertisement, and runtime-host sequence
+without replaying forms or adding a second startup path. The settled source
+cut is grounded at [[research/client-single-lifecycle-audit-2026-07-17]]:
+session identity is stable connection/database selection, while every cold or
+reload publication presents the current initialization through the same
+serialized ensure-and-acquire operation before admission and rehosting.
 `seon.web.serve` also still
 references deleted turn, attempt, and eval-operation coordinate fields and must
 derive historical model evidence from the parent turn's `rendered-tx` without
@@ -223,20 +236,21 @@ modest-hardware density checkpoint.
 
 ### Current implementation checkpoint
 
-- **Earliest unsettled contract:** migrate the exposed asynchronous home
-  consumers and the one cold-start/reload owner without adding wrappers or a
-  second initialization/publication path.
+- **Earliest unsettled contract:** migrate the one cold-start/reload owner
+  without adding wrappers or a second initialization/publication path.
 - **Integrated proof that closes it:** eval, autocomplete, namespace context,
   startup, converged reload, advertisement, and runtime hosting reuse ordinary
   database values and native transaction reports; fresh and warm startup both
   execute the one ordered sequence.
-- **Dependency-ready parallel portfolio:** the home consumer cut is active;
-  the client startup audit is grounding the next source boundary; the
-  web/render single-owner audit is durable at
-  [[research/web-render-single-owner-audit-2026-07-17]].
-- **Next refills:** integrate the client startup cut, then close the web/feed
-  database-value and rendered-transaction cut, followed by remaining toolkit
-  consumers.
+- **Dependency-ready parallel portfolio:** the client session/publication cut
+  is active; the web/render single-owner audit is durable at
+  [[research/web-render-single-owner-audit-2026-07-17]]; the plan consumer cut
+  is grounded at [[research/plan-single-owner-audit-2026-07-17]] and explicitly
+  rejects the current dirty coordinate/oversized-row prototype.
+- **Next refills:** finish the one client session/package publication owner,
+  then migrate its advertisement/recovery/config/startup consumers in ordered
+  complete cuts; close the web/feed database-value and rendered-transaction
+  owner next, followed by the operation-specific plan/toolkit consumers.
   The final graduation gate remains the full frozen-source correctness, live
   Bun/JVM, multi-agent, child-crash, multi-database, and measured resource
   matrix.
