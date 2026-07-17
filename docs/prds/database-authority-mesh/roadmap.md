@@ -34,6 +34,62 @@ authorization, fair admission, request identity, framing, paging,
 backpressure, provenance, fencing, and errors-as-values. Future JVM, native,
 Rust, cloud, Tauri, and mobile hosts conform to the same data fixtures.
 
+## 2026-07-16 system recovery directive
+
+The active objective is to get the complete application running again, pass
+every maintained correctness gate, delete the superseded runtime mechanisms,
+and only then optimize measured latency, CPU, and memory. The durable ordered
+plan is
+[[research/system-recovery-graduation-plan-2026-07-16]]. Initialization detail
+is in [[research/authority-program-initialization-plan-2026-07-16]]; child
+publication detail is in
+[[research/universal-current-program-publication-audit-2026-07-16]]. Older
+implementation cards below remain evidence, but this directive owns current
+sequencing where they conflict.
+
+There is one implementation of each behavior. No `v2`, `new`, `remote`,
+`legacy`, compatibility namespace, local-database fallback, second renderer,
+second eval path, or second lifecycle path may be added to make an intermediate
+state pass. A replacement strengthens the existing owner and deletes the
+superseded owner with its last consumer. If a unit becomes much harder than its
+behavior suggests, pause for an adversarial design pass before adding code.
+
+The current ordered spine is:
+
+1. complete declaration-order-independent schema validation and the one
+   authority-owned database/package initialization boundary;
+2. prove the existing child applies current whole namespace sections over its
+   compiled package and owns eval, tests, and authored renders;
+3. migrate complete application behaviors from removed local-connection APIs
+   to `seon.db` while preserving entity/ref domain data;
+4. replace or delete obsolete local-database tests and make every maintained
+   CLJS, writer, and operator gate pass;
+5. prove fresh start, converged restart, web/Datastar behavior, multiple agents,
+   child crash/reconstruction, and multiple cluster databases in the live
+   system; and
+6. measure the final architecture, then optimize only the retained bottlenecks.
+
+Earliest unsettled contract: the authority must admit complete native schema,
+compiled program, and required initial facts before publishing a usable
+database value. The integrated proof is fresh/full, partial/delta, and
+converged/no-write initialization followed by child whole-namespace execution.
+
+Current parallel portfolio:
+
+- top level integrates the recovery plan and schema/init boundary;
+- the authority-init lane specifies the exact ensure/open move and deletion;
+- the consumer lane inventories coherent behavior migrations and obsolete
+  tests; and
+- the observability lane corrected historical turn evidence to one native
+  `:seon.agent.turn/rendered-tx` ref. Request-scoped `:seon.db/db` maps are not
+  persisted as domain state.
+
+Next refills are child live-proof design after initialization settles, complete
+consumer cohorts after the child contract settles, and test-gate conversion
+after each owning behavior moves. Final graduation remains one frozen-source
+full test, live browser/agent, crash/restart, packaging, and modest-hardware
+density checkpoint.
+
 ## Settled laws
 
 - Datahike cache identity is `[connection-id generation commit-id]`.
@@ -85,7 +141,7 @@ Rust, cloud, Tauri, and mobile hosts conform to the same data fixtures.
    bytes, mutation submission, and lifecycle requests independently.
 6. Avoid copies, broadcasts, brokers, adapter layers, event-loop hops, and fixed
    per-database threads/processes.
-7. Expose coordinates, request/job IDs, cancellation, queue/cache/resource
+7. Expose ordinary database values, request IDs, cancellation, queue/cache/resource
    evidence, capabilities, and errors as ordinary namespaced data.
 8. Delete every superseded replica/feed/adapter mechanism in the cut that makes
    it unreachable.
@@ -1381,15 +1437,55 @@ compile warnings until their owning consumer cut deletes or migrates them.
 Focused loop/message proof starts both cold namespaces and passes 5 tests/23
 assertions with zero failures or errors.
 
-The next ordered contract is the execution transaction context and namespace
-acquisition: replace its request-level coordinate with the captured ordinary
-database value, place that same value on every grouped member, and keep the
-dependent schema frontier on it. Source audit found that the core context
-formatter is already pure and its block acquisition already remote; most old
-`seon.eval` local namespace helpers have no callers and should be deleted.
-The remaining live `seon.agent.ctx.namespaces` path and `my.ns/functions` need
-one async database-value-pinned acquisition, while the obsolete SCI namespace
-reader leaves with SCI rather than earning a new adapter.
+Execution protocol version 3 now carries the existing ordinary `:seon.db/db`
+value on invoke, ready, result, and error messages. Every grouped program query
+receives that identical value as its parsed database source; `execute-many`
+returns results only and no longer pretends to echo request identity. Pinned
+compiled reads inherit the value through the child transaction context, while
+write fencing remains explicit on the individual transaction or targeted run
+CAS. Focused execution and host proof passes 8 tests/47 assertions.
+
+Source audit also found that program publication was already one accepted eval
+transaction. The visibility defect was seven execution queries treating
+transaction authorship as access control. The runtime program is now one
+database-wide current projection: one requested-symbol query prepares calls
+across every agent, and one six-member immutable acquisition returns runtime
+namespace sections, functions, tests, the complete schema forms, and function
+contracts. Provenance continues to record who wrote the current and historical
+facts; it no longer selects who may load them. The existing loader remains the
+only mechanism: each child starts from its compiled artifact, activates the
+complete schema projection, concatenates one current section per runtime
+namespace, and lets `cljs.js` own dependency order, cycles, and load-once. A
+changed digest takes the existing fresh-child and one-retry path on the next
+invocation. There is no form replay, program broadcast, per-agent transaction,
+or eager idle-child wake. Focused shared-program proof passes 3 tests/22
+assertions. Exact source and decisions are in
+[[research/universal-current-program-publication-audit-2026-07-16]].
+
+The cold schema audit corrects one temporary workaround rather than preserving
+it. `schema/register!` should collect EDN declarations without resolving
+references against partial namespace load state; one complete
+`build-projection` validates the population before behavior. Fresh bootstrap
+then installs the complete native persisted-attribute subset plus canonical
+schema/program and initial facts before admission, while converged restart
+writes nothing. After that proof, the four render forms return to their semantic
+owners and `seon.render.schema` is deleted. This also exposes the current writer
+mismatch: all Malli forms are persisted initially, but many native Datahike
+attributes are still installed lazily. Exact source and falsifiers are in
+[[research/schema-bootstrap-order-2026-07-16]].
+
+The turn boundary keeps ordinary database values request-scoped. Persist one
+native `:seon.agent.turn/rendered-tx` ref equal to the database value's basis
+transaction; attempts derive it through their parent turn and duplicate no
+database identity. Return current namespace plus REPL mode from the existing
+prompt acquisition at that same request database value. Historical prompt
+reconstruction uses `as-of` at the transaction ref; exact rare branch forensics
+resolve the originating commit inside the authority. Exact source and the
+no-compatibility cut are in
+[[research/turn-database-value-observability-cut-2026-07-16]]. The dependent
+schema frontier and core namespace/schema override protection follow before
+live admission. Most old `seon.eval` local namespace helpers have no callers
+and should be deleted rather than adapted.
 
 The stopped plan-consumer draft remains an explicit uncommitted handoff because
 its pure row transformations are reusable but its coordinate and

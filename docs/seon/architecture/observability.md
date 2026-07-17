@@ -14,9 +14,10 @@ N?", "what changed between turn N and N+1?", "why did it do that?" — is answer
 by a **query against the database plus the blob archive**. Process logs remain
 necessary operational evidence for startup, readiness, transport, and crashes;
 they are not the durable forensic truth of an agent turn.
-This falls out of the core property: a turn's prompt is a pure render of ONE
-frozen db value, so persisting that ordinary database value makes the whole turn
-reproducible. Observability is not a subsystem bolted on; it is the
+This falls out of the core property: a turn's prompt is a pure render of one
+frozen database value. The turn retains a ref to that value's basis transaction,
+so the same structured inputs can be queried with `as-of`; the complete database
+value remains request-scoped. Observability is not a subsystem bolted on; it is the
 derive-everything principle pointed backwards in time.
 
 ## The turn record
@@ -30,16 +31,15 @@ facts, but Seon does not claim it can enumerate or replay every external effect
 caused inside a turn. What every turn additionally persists—always on, no debug
 flag:
 
-- **The rendered database value** —
-  `:seon.agent.turn/rendered-db` persists the complete
-  `{:db-name :t :as-of :since :history :datahike/commit-id}` value the
-  prompt rendered from. This is the ONE database value the turn transaction
-  cannot provide: the
-  prompt renders before its own tx, with other agents' commits interleaving.
-  Datahike commit id is canonical; `:t` remains an ordered display/query aid and
-  never substitutes for lineage or a temporal filter.
-  `render-prompt` resolves that retained commit under `:db-name` and
-  reproduces the structured context exactly.
+- **The rendered transaction** —
+  `:seon.agent.turn/rendered-tx` is a native Datahike ref to the basis
+  transaction of the request-scoped database value captured before prompt
+  rendering. This is the one historical fact the turn's own transaction cannot
+  supply because other commits may interleave before the turn is recorded.
+  `render-prompt` applies `as-of` at that transaction to reproduce the
+  structured context. Rare exact-branch forensics resolve the transaction's
+  originating commit from Datahike's retained commit graph at the authority;
+  every turn does not duplicate a commit descriptor.
 - **`:seon.agent.turn/prompt-blob`** — the assembled prompt verbatim, in the
   blob archive. The as-of re-render is the *structured, queryable* view; the blob
   is the byte ground truth that survives render-code changes (a re-render runs
@@ -58,13 +58,14 @@ flag:
 - The existing projections: prompt size (tokens at display), `llm-usage` /
   `llm-meta`, the `:seon.eval` component refs, status, retries.
 - **Provider attempts as facts** — every retry attempt connects to the turn
-  with its ordinal, complete immutable database value, resolved non-secret
+  with its ordinal, resolved non-secret
   transport projection, adapter and outer timeout layers, outcome, and present
   response model/fingerprint/request identity. The adapter consumes that one
   resolved value without rereading mutable config. Missing response fields stay
   absent; credentials, headers, and signed parameters never enter evidence.
-  Projection re-derives the adapter from the attempt's resolved value and
-  stream mode from the linked turn's frozen rendered database value. Evidence-size
+  Historical projection uses the parent turn's rendered transaction; attempts
+  do not copy database identity. Projection re-derives the adapter and stream
+  mode at that same historical value. Evidence-size
   policy is read from the config singleton in the final immutable response
   value, once per projection. The process-owned outer attempt bound is retained
   as the exact applied value; admission rejects drift within a run and binds
@@ -113,9 +114,10 @@ Three functions make a turn a first-class object of study:
   cache-stability instrument: bytes that should have been frozen but moved show
   up here.
 - **`agent-debug/ctx-preview`** — generalized over time: preview any agent's
-  context at any complete ordinary database value, not just now. A descriptor
-  missing `:db-name`, containing basis `:t`, temporal fields, or required
-  `:datahike/commit-id` is a typed error; no bare-`:t` selector guesses a commit.
+  context at any complete ordinary database value, not just now. Turn replay
+  constructs that request value from the selected database plus the turn's
+  rendered transaction. Exact cross-lineage branch work resolves a retained
+  commit at the authority rather than guessing one from a transaction number.
 
 Search runs at two ends, one door each, and nothing in between:
 

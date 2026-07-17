@@ -167,7 +167,8 @@ REPL moves work:
   (component retract cascade, no orphans).
 - **A bare top-level `(require …)` is durable by default** — it loads now
   AND persists into the ns's database declaration (`require-decl-tx` merges
-  the specs into `:seon.ns/source`), so resume replays it. `(alias 'a 'ns)`
+  the specs into `:seon.ns/source`), so a fresh child loads the current
+  namespace section with the same dependency. `(alias 'a 'ns)`
   is the same mechanism (rewritten to a require; error-as-value when the
   target exists nowhere). `:as-alias` aliases keywords WITHOUT loading and
   round-trips as an `:seon.ns.require/as-alias?` edge.
@@ -179,7 +180,7 @@ REPL moves work:
   or index the platform test suite. A test becomes a database fact when the
   agent defines it; the dedicated test build remains ordinary build input.
 - **`ns-unmap` removes** — live var + analyzer def gone, the
-  `:seon.fn`/`:seon.test` row retracted (resume + instrumentation forget
+`:seon.fn`/`:seon.test` row retracted (resume + instrumentation forget
   it); compiled-core fns are refused (the override-guard symmetry).
   `ns-unalias` drops an alias from the analyzer, declaration, and edges.
 
@@ -765,8 +766,15 @@ shared by every child of that artifact flavor. It precompiles the
 ClojureScript bootstrap, Seon schemas/functions, the thin remote database
 client, and selected downstream libraries. A child starts from one ordinary
 descriptor containing its agent and database selection, artifact identity, and
-resource profile; it then loads only that agent's database-value-pinned authored
-overlay and reachable authored dependencies. The launcher supplies an explicit
+resource profile; it then acquires the database-wide current runtime-authored
+program at the invocation's immutable database value, activates its complete
+schema projection, and loads only the selected namespace sections plus their
+reachable authored dependencies. Transaction provenance records who wrote each
+fact but never creates per-agent program copies or visibility. Compiled package
+namespaces remain the baseline and are not re-evaluated. A new accepted program
+transaction reaches every child naturally on its next invocation; a changed
+program digest replaces the stale child once without an eager broadcast or eval
+history replay. The launcher supplies an explicit
 minimal environment and immutable runtime root rather than inheriting the host
 environment or requiring a source checkout. Mutable compiler state and heap
 remain per child while the operating system can share immutable artifact pages.

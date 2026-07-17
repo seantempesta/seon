@@ -50,26 +50,18 @@ database-value callers are a breakage inventory, not compatibility obligations.
 ### 2026-07-16 scheduling override
 
 [[../database-authority-mesh/roadmap]] is the current implementation and proof
-ledger. Its ten units replace the client-replica/feed/Node runtime in dependency
-order: exact Datahike identity and capability ownership; fair multi-database
-execution; protocol and persistent native sessions; asynchronous `seon.db`;
-isolated Bun children; atomic replica/feed removal; then density, packaging, and
-the measured one-versus-2/4-authority-shard decision. Its current earliest
-unsettled contract is moving the remaining parent execution consumers onto the
-existing per-agent child so global replay and the local replica/feed can be
-deleted together. Restore
-completion recording, retry adoption, startup attachment validation, and HTTP
-readiness now share one coordinate-pinned ordinary-data authority acquisition;
-readiness no longer dereferences the local replica. The next boundary is the
-remaining startup/web synchronous consumers and launch-descriptor ownership.
-Program admission is also session-native: it acquires schema forms and function
-contracts together at one authority coordinate and publishes only after the
-ordinary projection verifies. Atomic client session open and replica/feed
-deletion follow. The one immutable process descriptor is now decoded and owned
-by `seon.launch`; client consumers no longer depend on the replica for launch
-configuration. Production open/close now use the one persistent authority
-session and the client no longer imports the replica; remaining local reads are
-the explicit startup/replay/resume and web/config migration inventory.
+ledger. Its current recovery plan first completes one authority-owned database
+and package initialization boundary, then proves the existing Bun child over
+its compiled package plus current whole namespace sections. Only after those
+contracts settle does it migrate complete application behaviors, delete the
+remaining local-connection/compiler/replay/rendering owners, restore every
+maintained test gate, and run live and performance graduation. Entity/ref domain
+modeling remains unchanged; ordinary database-value maps are request-scoped.
+The current source is intentionally broken where old synchronous consumers and
+tests still name removed local APIs. Those warnings are a dependency inventory,
+not compatibility work and not permission to create versioned replacement
+functions. Detailed order and evidence are in
+[[../database-authority-mesh/research/system-recovery-graduation-plan-2026-07-16]].
 The existing remote query surface now exposes its protocol-native historical
 view, closing the only facade gap needed by coordinate-pinned startup birth.
 LLM configuration and brand startup sync also use bounded coordinate-fenced

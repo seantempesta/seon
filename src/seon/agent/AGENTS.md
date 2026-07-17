@@ -10,12 +10,12 @@ turn/FSM/bounds), `data-model.md` (every attr you'll touch), `observability.md`
 
 - **`loop.cljs`** — the FSM as data: a fold of one transition over events
   derived from the run's data each iteration. It pins **ONE complete database
-  coordinate per turn** (§8a) and threads it everywhere; never read a newer
-  coordinate mid-turn.
+  value per turn** (§8a) and threads it everywhere; never read a newer database
+  value mid-turn.
 - **`run.cljs`** — a run is the bounded unit a trigger opens: two independent
   bounds (turn-limit + wall-clock deadline), run-id as fencing token, the
   in-tx `:db.fn/cas` work-fence so a superseded run's writes abort at commit.
-- **`turn.cljs`** — one turn: `render-prompt` (one coordinate-pinned compiled
+- **`turn.cljs`** — one turn: `render-prompt` (one database-value-pinned compiled
   child result) →
   `call-llm!` (the SOLE LLM retry authority — never add a parallel retry) →
   eval the reply's forms → persist. Turn datoms are projections; big text
@@ -27,7 +27,7 @@ turn/FSM/bounds), `data-model.md` (every attr you'll touch), `observability.md`
   `install!`/`remove!`, period. No render-merge, no default set, no provider.
   Each `ctx/*` file is one installed block family (namespaces, transcript,
   warnings, canvas, menu, subagents, typeahead-steps).
-- **`debug.cljs`** — `ctx-preview` formats the same coordinate-pinned compiled
+- **`debug.cljs`** — `ctx-preview` formats the same database-value-pinned compiled
   child result the turn consumes (byte-identical system + context bytes).
   Extend inspection here (`turn`, `turn-diff`), never as a second render path.
 - **`fs.cljs`** — THE capability-fn template: allowlist gating via
@@ -51,8 +51,11 @@ turn/FSM/bounds), `data-model.md` (every attr you'll touch), `observability.md`
 - **Never throw into the loop.** Every failure becomes a `:seon/error` value
   surfaced via warnings — the pod is single-threaded; one uncaught throw
   blanks every agent.
-- **Bootstrap is seeded forms**, eval'd quietly (`:core` origin, no wake, no
-  turn count) — the agent sees its own startup. Don't add hidden core magic.
+- **Bootstrap is the compiled child package plus current database-authored
+  namespace sections.** `cljs.js` loads whole namespaces and their requires;
+  never replay individual forms or add another bootstrap path.
+- **A turn persists one rendered transaction ref**, not its request-scoped
+  database-value map. Attempts derive history through their parent turn.
 - **Transcript clips must render byte-identical as they age** (age-band
   eviction, not recency-weighting) or the LLM prompt cache is busted every
   turn.

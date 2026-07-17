@@ -252,18 +252,18 @@ Consequence for modeling: who/when/writing-path is a **join** through the
 transaction, never a domain attribute — a `created-by`/`created-at`/`source-turn`
 attribute duplicates the transaction/domain record. Turn and eval remain
 ordinary linked domain entities and runtime scopes; they are not copied onto
-every transaction and do not promise complete effect replay. The one
-exception is a PRE-event database value: a fact about a db value observed
-*before* the entity's own tx (the turn's rendered
-database name/basis/commit/filter—other
-agents' txs interleave on the shared conn, so the turn's creation-tx is not that
-value). Those are genuinely underivable and ARE stored as domain attrs.
+every transaction and do not promise complete effect replay. The one exception
+is a pre-event transaction ref: a fact about the transaction observed *before*
+the entity's own transaction. A turn's rendered transaction cannot be inferred
+from the turn's creation transaction because other agents may commit between
+rendering and recording. Store that one native ref; keep the complete database
+value request-scoped.
 Worked recipe: the `datahike` skill, "Transaction metadata".
 
 ### 2.5 one ordinary database value
 
-Every registry, protocol, feed, UI, lifecycle, turn, and error boundary uses the
-one registered `:seon.db/database-value` map schema:
+Every registry, protocol, feed, UI, lifecycle, and execution boundary uses the
+one registered `:seon.db/db` map schema while a request is active:
 
 ```clojure
 {:db-name "default"
@@ -278,8 +278,9 @@ one registered `:seon.db/database-value` map schema:
 the containing committed value, not a temporal cut. `:datahike/commit-id` pins
 that exact retained lineage because branch, restore, and batched-commit behavior
 make `{:db-name :t}` insufficient. `:as-of`, `:since`, and `:history` preserve
-Datahike's temporal meanings separately. Cache keys and durable bookmarks retain
-the complete value; no bare-`:t` selector guesses a commit or filter.
+Datahike's temporal meanings separately. Cache keys retain the complete value.
+Durable domain facts use native entity and transaction refs; exact cross-lineage
+bookmarks remain authority/lifecycle data rather than encoded entity state.
 
 ## 3. Identifying an entity shape — presence, not a stored field
 
@@ -461,7 +462,7 @@ The run model + FSM live in [[agent-runtime]].
 | `:seon.agent.turn/status` | `[:enum :running :done :error :interrupted]` | keyword / one | value enum; `:interrupted` is asserted only by crash recovery when no runtime remains to close the committed turn normally |
 | `:seon.agent.turn/run` | `:seon.db/ref` | ref / one | turn → its run |
 | `:seon.agent.turn/cause-message` | `:seon.db/ref` | ref / one | optional; exact inbound human message this turn is assigned to answer |
-| `:seon.agent.turn/rendered-db` | `:seon.db/database-value` | ordinary encoded map / one | complete frozen prompt database value; includes containing basis, temporal filter, and exact Datahike commit lineage |
+| `:seon.agent.turn/rendered-tx` | `:seon.db/ref` | ref / one | basis transaction of the request-scoped database value captured before prompt rendering; historical rendering uses `as-of` |
 | `:seon.agent.turn/prompt-chars` | `:int` | long / one | |
 | `:seon.agent.turn/prompt-blob` | `:seon.db/ref` | ref / one | optional ref to the byte-ground-truth prompt blob |
 | `:seon.agent.turn/reply-blob` | `:seon.db/ref` | ref / one | optional ref to the raw provider reply blob |
@@ -493,15 +494,16 @@ digest—through the ONE chain: the agent's own override datom → the global
 PLUS `:seon.ai/provenance` (per-key `:agent-override`/`:config-row`/
 `:default`, derived by re-walking the chain, not stored). No per-turn
 resolved-config snapshot exists. Datahike is bitemporal, so intent at a past
-database value is the same function over that immutable value:
-`(ai/resolved-config {:seon.db/db rendered-db
+database value is the same function over an immutable value constructed
+`as-of` the turn's rendered transaction:
+`(ai/resolved-config {:seon.db/db historical-db
                       :seon.agent/id id})`.
 
 Intent at the prompt or final-run database value does not prove a provider call.
-Every retry attempt therefore records its own complete ordinary database value,
-ordinal, normalized non-secret endpoint/config projection, timeout layers,
-outcome, and present response identity as component facts connected to the
-turn. Request fields remain derivable from the attempt database value; response
+Every retry attempt therefore records its ordinal, normalized non-secret
+endpoint/config projection, timeout layers, outcome, and present response
+identity as component facts connected to the turn. Request fields remain
+derivable at the parent turn's rendered transaction; response
 identity and outcome are non-derivable evidence. `POST /agents/run` projects
 those ordered bounded facts. A compatibility `model_config` may be derived only
 when all attempts agree; drift or missing attempt evidence rejects formal
