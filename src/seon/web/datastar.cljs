@@ -1247,19 +1247,27 @@
 
 (def agent-view-function 'seon.execution.runtime/render-agent-view!)
 
-(defn- ^:async render-agent-view! [id database]
-  (let [message (await (execution.host/invoke-compiled!
-                       database id agent-view-function [{:seon.agent/id id}]))]
-    (if (= execution/result-message (::execution/message message))
-      (let [projection (::execution/result message)]
+(defn- agent-view-result [message]
+  (if (= execution/result-message (::execution/message message))
+    (let [projection (::execution/result message)]
+      (if-let [error-message (:seon.error/message projection)]
+        {::element
+         [:main {:id "app-view" :class "text-error text-xs font-mono"}
+          (str "render error: " error-message)]
+         ::dependencies :all}
         {::element (agent-view/render-agent-view projection)
-         ::dependencies (or (::dependencies projection) :all)})
-      {::element
-       [:main {:id "app-view" :class "text-error text-xs font-mono"}
-        (str "render error: "
-             (or (get-in message [::execution/error :seon.error/message])
-                 "execution child failed"))]
-       ::dependencies :all})))
+         ::dependencies (or (::dependencies projection) :all)}))
+    {::element
+     [:main {:id "app-view" :class "text-error text-xs font-mono"}
+      (str "render error: "
+           (or (get-in message [::execution/error :seon.error/message])
+               "execution child failed"))]
+     ::dependencies :all}))
+
+(defn- ^:async render-agent-view! [id database]
+  (agent-view-result
+   (await (execution.host/invoke-compiled!
+           database id agent-view-function [{:seon.agent/id id}]))))
 
 (defn- live-agent-feed-definition [id view-id]
   (cond->

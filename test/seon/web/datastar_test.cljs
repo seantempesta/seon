@@ -1,5 +1,6 @@
 (ns seon.web.datastar-test
   (:require [cljs.test :refer [deftest is]]
+            [seon.execution :as execution]
             [seon.ui.html :as html]
             [seon.web.datastar :as datastar]))
 
@@ -53,6 +54,17 @@
 
 (deftest native-javascript-promises-are-recognized
   (is (@#'datastar/promise-like? (js/Promise.resolve :ready))))
+
+(deftest child-database-errors-remain-the-visible-render-error
+  (let [result (@#'datastar/agent-view-result
+                {::execution/message execution/result-message
+                 ::execution/result
+                 {:seon.error/message
+                  "datahike query-results budget exceeded"}})]
+    (is (= :main (first (::datastar/element result))))
+    (is (= :all (::datastar/dependencies result)))
+    (is (= "render error: datahike query-results budget exceeded"
+           (last (::datastar/element result))))))
 
 (deftest subscriptions-render-only-for-declared-changed-attributes
   (let [affected? @#'datastar/subscription-affected?]

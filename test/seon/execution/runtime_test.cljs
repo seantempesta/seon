@@ -526,6 +526,11 @@
                  "the page uses the configured canvas block before derivation")
              (is (= 3 (count (::db/members @acquisition)))
                  "the page acquires the agent, count, and configuration")
+             (is (= 4096
+                    (get-in @acquisition
+                            [::db/members 2
+                             :datahike.resource/max-results]))
+                 "the full configuration pull budgets its retained result tree")
              (is (identical? database (::db/db @acquisition))
                  "the configured canvas shares the page's one database value")
              (is (contains? (:seon.web.datastar/dependencies projection)

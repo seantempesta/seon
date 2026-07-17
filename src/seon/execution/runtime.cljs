@@ -308,9 +308,9 @@
     :datahike.resource/max-result-weight 1024}
    {::protocol/operation protocol/pull-operation
     ::protocol/selector '[*]
-    ::protocol/entity-id [:seon.config/id config/cluster-config-id]
+   ::protocol/entity-id [:seon.config/id config/cluster-config-id]
     :datahike.resource/max-work 100000
-    :datahike.resource/max-results 1
+    :datahike.resource/max-results 4096
     :datahike.resource/max-result-weight 65536}])
 
 (def ^:private agent-view-fixed-dependencies
