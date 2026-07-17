@@ -86,10 +86,10 @@ the changed turn/debug/runtime owners.
 
 Earliest unsettled contract: complete consumers must derive historical model
 and export evidence from the parent turn's `rendered-tx`. Autocomplete/export
-and `seon.web.serve` still reference the deleted coordinate and attempt fields;
-they must move to the same ordinary database value without compatibility
-projections. The eval receipt path is the next database-envelope/ambient-value
-cut after those direct turn consumers.
+is at focused proof; `seon.web.serve` still references the deleted coordinate,
+attempt, and eval-operation fields and must move to the same ordinary database
+value without compatibility projections. The eval receipt implementation is
+the next active database-envelope/ambient-value cut.
 
 The JVM half of that contract is implemented. One unversioned
 `seon.db.program/compile-tx-data` owner reads one immutable Datahike value and
@@ -119,10 +119,16 @@ transaction report/direct error contract as `seon.db`. Focused proof passes 10
 CLJS tests/55 assertions and 12 writer tests/75 assertions. The duplicate-owner
 audit at [[research/duplicate-runtime-owner-audit-2026-07-16]] ranks the next
 cuts: 28 production files still teach the removed database envelope and 19
-still assume an ambient local connection. Top level owns the web/turn consumer
-integration. Autocomplete/export identity and database-value unification is
-active independently, while the eval receipt cut is being source-grounded for
-the next refill. Final graduation remains one frozen-source full test, live
+still assume an ambient local connection. Commit `630132c5` closes embeddings
+on the same one-value rule: omission acquires one current database value, then
+scope query, JVM KNN, and ordered pull-many share it; focused proof passes 5
+tests/19 assertions. Top level owns the web/turn consumer integration.
+Autocomplete/export identity and database-value unification is at focused
+proof. The eval cut is grounded at
+[[research/eval-native-result-database-value-cut-2026-07-16]] and active: it
+retains one `eval-batch!` pipeline, advances through native `:db-after`, fences
+only read-derived record writes, and deletes local operation capture rather
+than replacing it. Final graduation remains one frozen-source full test, live
 browser/agent, crash/restart, packaging, and modest-hardware density checkpoint.
 
 ## Settled laws
