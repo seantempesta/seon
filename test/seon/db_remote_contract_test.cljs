@@ -135,6 +135,17 @@
                      ::db/database-name database-name
                      ::db/backend :memory}))
 
+(def ^:private initialization
+  {:seon.execution/artifact-digest
+   "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+   :seon.db/program
+   [{:seon.ns/name :seon.db
+     :seon.ns/source "(ns seon.db)"}
+    {:seon.fn/sym "seon.db/query"
+     :seon.fn/ns [:seon.ns/name :seon.db]
+     :seon.fn/source "(defn query [input] input)"}]
+   :seon.db/initial-data [{:seon.user/id "user"}]})
+
 (defn- operation-requests
   [requests operation]
   (filterv #(= operation (::protocol/operation %)) requests))
@@ -176,6 +187,29 @@
         (.then (fn [_] (done)))
         (.catch (fn [error]
                   (is false (str "database-value contract rejected: " error))
+                  (done))))))
+
+(deftest initialization-is-forwarded-only-by-the-opening-host
+  (async done
+    (-> (with-recording-authority
+          {}
+          (fn [{::keys [requests]}]
+            (-> (db/open-session!
+                 {::db/socket-path socket-path
+                  ::db/database-name database-name
+                  ::db/backend :memory
+                  ::db/initialization initialization})
+                (.then
+                 (fn [_]
+                   (let [ensure-request
+                         (first
+                          (operation-requests
+                           @requests protocol/ensure-database-operation))]
+                     (is (= initialization
+                            (::db/initialization ensure-request)))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [error]
+                  (is false (str "initialization forwarding rejected: " error))
                   (done))))))
 
 (deftest latest-database-value-is-a-monotonic-session-cache

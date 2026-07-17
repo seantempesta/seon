@@ -236,6 +236,16 @@
 (schema/register! ::database-name [:string {:min 1}])
 (schema/register! ::database-path [:string {:min 1}])
 (schema/register! ::backend [:enum :memory :file])
+(schema/register! :seon.db/program
+                  [:vector [:map-of :qualified-keyword :any]])
+(schema/register! :seon.db/initial-data
+                  [:vector [:map-of :qualified-keyword :any]])
+(schema/register!
+ :seon.db/initialization
+ [:map {:closed true}
+  [:seon.execution/artifact-digest [:re "^[0-9a-f]{64}$"]]
+  [:seon.db/program :seon.db/program]
+  [:seon.db/initial-data :seon.db/initial-data]])
 (schema/register! ::coordinate ::coordinate/coordinate)
 (schema/register!
  ::head-coordinate
@@ -576,7 +586,8 @@
   [::request-id ::request-id]
   [::database-name ::database-name]
   [::backend ::backend]
-  [::database-path {:optional true} ::database-path]])
+  [::database-path {:optional true} ::database-path]
+  [:seon.db/initialization {:optional true} :seon.db/initialization]])
 (schema/register!
  ::acquire-database-request
  [:map {:closed true}
@@ -903,7 +914,8 @@
   [::request-id ::request-id]
   [::database-name ::database-name]
   [::backend ::backend]
-  [::database-path {:optional true} ::database-path]])
+  [::database-path {:optional true} ::database-path]
+  [:seon.db/initialization {:optional true} :seon.db/initialization]])
 (schema/register!
  ::acquire-database-request-input
  [:map {:closed true}
@@ -1143,12 +1155,14 @@
   "Construct one idempotent database-open request."
   {:malli/schema [:=> [:cat ::ensure-request-input]
                   ::ensure-database-request]}
-  [{::keys [request-id database-name backend database-path]}]
+  [{::keys [request-id database-name backend database-path]
+    :seon.db/keys [initialization]}]
   (cond-> {::operation ensure-database-operation
            ::request-id request-id
            ::database-name database-name
            ::backend backend}
-    database-path (assoc ::database-path database-path)))
+    database-path (assoc ::database-path database-path)
+    initialization (assoc :seon.db/initialization initialization)))
 
 (defn acquire-database-request
   "Construct one database acquisition for the current transport connection."

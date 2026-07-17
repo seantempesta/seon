@@ -147,6 +147,7 @@
   [::database-name ::database-name]
   [::backend ::backend]
   [::database-path {:optional true} ::database-path]
+  [::initialization {:optional true} ::initialization]
   [::attachment {:optional true} :seon.db.coordinate/attachment]])
 (schema/register!
  ::open-session-response
@@ -270,7 +271,8 @@
    ::capabilities (::capabilities state)})
 
 (defn- ^:async connect-selection! [selection owner]
-  (let [{::keys [socket-path database-name backend database-path]}
+  (let [{::keys [socket-path database-name backend database-path
+                 initialization]}
         selection
         opened (atom nil)]
     (try
@@ -308,7 +310,8 @@
                (cond-> {::protocol/request-id (str (random-uuid))
                         ::protocol/database-name database-name
                         ::protocol/backend backend}
-                 database-path (assoc ::protocol/database-path database-path)))
+                 database-path (assoc ::protocol/database-path database-path)
+                 initialization (assoc ::initialization initialization)))
               15000))
             _ (when-not (::protocol/success? ensure-response)
                 (throw (ex-info "Opening the database failed." ensure-response)))

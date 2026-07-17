@@ -72,6 +72,57 @@
           (assoc query :seon.db/db
                  (assoc db :as-of 536870928 :since 536870927)))))))
 
+(deftest ensure-database-carries-optional-ordinary-package-initialization
+  (let [initialization
+        {:seon.execution/artifact-digest
+         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+         :seon.db/program
+         [{:seon.ns/name :seon.db
+           :seon.ns/source "(ns seon.db)"}
+          {:seon.fn/sym "seon.db/query"
+           :seon.fn/ns [:seon.ns/name :seon.db]
+           :seon.fn/source "(defn query [input] input)"}
+          {:seon.schema/key :seon.db/db
+           :seon.schema/form "[:map [:db-name :string]]"}]
+         :seon.db/initial-data
+         [{:seon.user/id "user"}
+          {:my.kb.shared/id "shared"
+           :my.kb.shared/owner [:seon.user/id "user"]
+           :seon.render/html 'seon.handlers.message/render-html}]}
+        initialized
+        (protocol/ensure-database-request
+         {::protocol/request-id "ensure/initialized"
+          ::protocol/database-name "default"
+          ::protocol/backend :memory
+          :seon.db/initialization initialization})
+        ordinary
+        (protocol/ensure-database-request
+         {::protocol/request-id "ensure/ordinary"
+          ::protocol/database-name "default"
+          ::protocol/backend :memory})]
+    (is (protocol/valid-request? initialized))
+    (is (= initialized (transit-roundtrip initialized)))
+    (is (= initialization (:seon.db/initialization initialized)))
+    (is (= {::protocol/operation protocol/ensure-database-operation
+            ::protocol/request-id "ensure/ordinary"
+            ::protocol/database-name "default"
+            ::protocol/backend :memory}
+           ordinary)
+        "ordinary child requests retain the existing small request")
+    (is (false?
+         (protocol/valid-request?
+          (assoc initialized :seon.db/initialization
+                 (assoc initialization
+                        :seon.db/program
+                        [(->HostOwner :native)]))))
+        "host-owned values cannot cross the initialization boundary")
+    (is (false?
+         (protocol/valid-request?
+          (assoc initialized :seon.db/initialization
+                 (assoc initialization
+                        :seon.db/initial-data [{:bare-key true}]))))
+        "initial fact maps require namespaced attribute keys")))
+
 (deftest index-pages-use-datahikes-native-eager-shape
   (let [request (protocol/index-page-request
                  {::protocol/request-id "index/page"
