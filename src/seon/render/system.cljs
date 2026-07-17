@@ -82,21 +82,26 @@
 (defn- human-view [agents]
   (let [counts (frequencies (map ::state agents))]
     [:div {:class "seon-card flex flex-col bg-base-950 text-text-200"}
-     [:div {:class (str "flex flex-wrap items-center gap-3 border-b "
-                        "border-base-800 bg-base-900/60 px-3 py-2 "
-                        "text-xs font-mono")}
-      [:span {:class "font-semibold text-text-100"}
-       (str (count agents) " agents")]
-      (mapv (fn [state]
+     (into
+      [:div {:class (str "flex flex-wrap items-center gap-3 border-b "
+                         "border-base-800 bg-base-900/60 px-3 py-2 "
+                         "text-xs font-mono")}
+       [:span {:class "font-semibold text-text-100"}
+        (str (count agents) " agents")]]
+      (concat
+       (map (fn [state]
               (let [[dot style] (state-style state)]
                 [:span {:key (name state) :class style}
                  dot " " (get counts state 0) " " (name state)]))
             [:idle :running :paused :terminated])
-      [:a {:href "/data" :class "ml-auto text-amber-500 hover:text-amber-300"}
-       "database →"]]
-     [:div {:class "grid gap-3 p-3"
-            :style "grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));"}
-      (mapv agent-card agents)]]))
+       [[:a {:href "/data"
+             :class "ml-auto text-amber-500 hover:text-amber-300"}
+         "database →"]]))
+     (into
+      [:div {:class "grid gap-3 p-3"
+             :style "grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));"}]
+      (map agent-card)
+      agents)]))
 
 (defn- ai-view [agents]
   (str/join

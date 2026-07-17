@@ -1,7 +1,8 @@
 (ns seon.render.system-test
   (:require
    [cljs.test :refer [deftest is testing]]
-   [seon.render.system :as system]))
+   [seon.render.system :as system]
+   [seon.ui.html :as html]))
 
 (deftest fleet-summary-is-pure-over-authority-rows
   (let [rows [[{:seon.agent/id "worker"
@@ -18,3 +19,13 @@
     (testing "ordinary fields survive the projection"
       (is (= "Measure throughput"
              (:seon.agent/purpose (last agents)))))))
+
+(deftest human-system-view-is-serializable-hiccup
+  (let [agents [{:seon.agent/id "root"
+                 :seon.render.system/state :idle}
+                {:seon.agent/id "worker"
+                 :seon.render.system/state :running}]
+        markup (html/->string (@#'system/human-view agents))]
+    (is (string? markup))
+    (is (re-find #">2 agents<" markup))
+    (is (re-find #"/agent/worker" markup))))
