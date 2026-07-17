@@ -83,7 +83,8 @@
  :seon.db.id/allocate-request
  [:map
   [:seon.db.id/allocations :seon.db.id/allocations]
-  [:seon.db.id/transaction-builder :seon.db.id/transaction-builder]
+ [:seon.db.id/transaction-builder :seon.db.id/transaction-builder]
+  [:seon.db/db {:optional true} :map]
   [:seon.db.id/generator-policies
    {:optional true} :seon.db.id/generator-policies]])
 (schema/register!

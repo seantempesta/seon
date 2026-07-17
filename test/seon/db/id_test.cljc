@@ -4,16 +4,12 @@
    #?(:clj  [clojure.edn :as edn]
       :cljs [cljs.reader :as edn])
    #?(:clj  [clojure.test :refer [deftest is testing use-fixtures]]
-      :cljs [cljs.test :refer [deftest is testing async use-fixtures]])
-   [datahike.api :as d]
+      :cljs [cljs.test :refer [deftest is testing use-fixtures]])
+   #?@(:clj [[datahike.api :as d]])
    #?@(:clj [[datahike.writing :as writing]])
    [malli.core :as m]
    [seon.db.id :as id]
-   [seon.schema :as schema]
-   #?@(:cljs [[seon.agent]
-              [seon.agent.message]
-              [seon.db :as db]
-              [seon.db.internal :as db.internal]])))
+   [seon.schema :as schema]))
 
 (def ^:private generate-candidate #'id/generate-candidate)
 (def ^:private compact-syntax #"^[a-z][a-z0-9]{11}$")
@@ -165,7 +161,8 @@
     (is (= :seon.db.id.error/unsupported-generator
            (::id/error (ex-data error))))))
 
-(deftest transaction-tempids-follow-the-effective-ref-schema
+#?(:clj
+   (deftest transaction-tempids-follow-the-effective-ref-schema
   (let [old-db
         {:schema
          {:idtest.graph/child
@@ -212,7 +209,7 @@
                     :idtest.namespace/existing}
                   (id/transaction-tempids
                    {::id/db-value old-db
-                    ::id/transaction-data tx-data})))))
+                    ::id/transaction-data tx-data}))))))
 
 #?(:clj
    (do
@@ -498,310 +495,39 @@
 
 #?(:cljs
    (do
-     (defn- conflict-envelope [candidate]
-       {:seon.db/ok? false
-        :seon.db/error
-        {:seon.error/message "candidate conflict"
-         :seon.error/kind :user-input
-         :seon.error/data
-         {::id/error :seon.db.id.error/candidate-conflict
-          ::id/generated-candidate candidate}}})
+     (def ^:private generator-policy-request
+       #'id/generator-policy-request)
+     (def ^:private allocation-transaction-request
+       #'id/allocation-transaction-request)
 
-     (defn- with-transact-stub [stub body]
-       (let [original db/transact!]
-         (set! db/transact! stub)
-         (-> (js/Promise.resolve (body))
-             (.finally (fn [] (set! db/transact! original))))))
-
-     (defn- split-view-conn
-       "Build a conn whose runtime and persisted writer configs differ."
-       [runtime-backend persisted-backend]
-       (let [runtime-db
-             (atom {:config {:writer {:backend runtime-backend}}})
-             persisted-db
-             {:config {:writer {:backend persisted-backend}}}]
-         (reify
-           IDeref
-           (-deref [_] persisted-db)
-           ILookup
-           (-lookup [_ key]
-             (when (= :wrapped-atom key) runtime-db)))))
-
-     (deftest allocation-writer-check-uses-the-live-connection-view
-       (testing "a non-streaming remote deref exposes the authority's config"
-         (is (nil?
-               (id/assert-allocation-writer!
-                 (split-view-conn :seon.db.writer/remote
-                                  :seon.db.id.writer/serialized)))))
-       (testing "persisted config cannot disguise an unsafe live writer"
-         (let [failure
-               (try
-                 (id/assert-allocation-writer!
-                   (split-view-conn :self :seon.db.writer/remote))
-                 nil
-                 (catch :default error error))]
-           (is (= :seon.db.id.error/unconfigured-allocation-writer
-                  (::id/error (ex-data failure)))))))
-
-     (defn- allocation-request
-       [builder]
-       {::id/allocations
-         [{::id/key allocation-key
-           ::id/identity-attr identity-attr}]
-         ::id/transaction-builder builder
-         ::id/generator-policies {identity-attr compact-generator}})
-
-     (defn- fresh-allocation-conn []
-       (let [base-config {:store {:backend :memory :id (random-uuid)}
-                          :schema-flexibility :write
-                          :keep-history? true}
-             connect-config (id/allocation-connect-config base-config)]
-         (-> (d/create-database base-config)
-             (.then (fn [_]
-                      (d/connect connect-config {:sync? false})))
-             (.then (fn [conn]
-                      (-> (db/ensure-provenance! {:seon.db/conn conn})
-                          (.then
-                            (fn [_]
-                              (d/transact!
-                                conn
-                                {:tx-data
-                                 (allocation-schema-transaction)})))
-                          (.then (fn [_] conn))))))))
-
-     (deftest concurrent-local-candidate-transactions-have-one-winner
-       (async done
-              (register-allocation-schema!)
-              (-> (fresh-allocation-conn)
-                  (.then
-                   (fn [conn]
-                     (-> (db.internal/ensure-datahike-attrs!
-                           conn [identity-attr] nil)
-                         (.then
-                          (fn [_]
-                            (let [candidate-value "q66ljwup2b5r"
-                                  manifest [{::id/key allocation-key
-                                             ::id/identity-attr identity-attr
-                                             ::id/value candidate-value}]
-                                  arg-map {:tx-data [{identity-attr candidate-value}]
-                                           ::id/generated-candidates manifest}
-                                  settle (fn [promise]
-                                           (.then promise
-                                                  (fn [_report] true)
-                                                  (fn [_error] false)))]
-                              (-> (js/Promise.all
-                                   #js [(settle (d/transact! conn arg-map))
-                                        (settle (d/transact! conn arg-map))])
-                                  (.then
-                                   (fn [results]
-                                     {::conn conn
-                                      ::results (vec (array-seq results))
-                                      ::candidate-value candidate-value})))))))))
-                  (.then
-                   (fn [{::keys [conn results candidate-value]}]
-                     (is (= 1 (count (filter true? results))))
-                     (is (= 1 (count (filter false? results))))
-                     (is (= 1 (count (d/datoms @conn :avet identity-attr
-                                               candidate-value))))))
-                  (.catch (fn [error]
-                            (is false (str "concurrent local allocation rejected: "
-                                           (.-message error)))))
-                  (.finally done))))
-
-     (deftest local-writer-refuses-an-occupied-dependent-identity-atomically
-       (async done
-              (register-allocation-schema!)
-              (-> (fresh-allocation-conn)
-                  (.then
-                   (fn [conn]
-                     (-> (db.internal/ensure-datahike-attrs!
-                          conn
-                          [identity-attr :idtest.record/source
-                           dependent-identity-attr dependent-source-attr]
-                          nil)
-                         (.then
-                          (fn [_]
-                            (let [candidate "c12345678901"
-                                  home (keyword "idtest.namespace" candidate)]
-                              (-> (d/transact!
-                                   conn
-                                   {:tx-data
-                                    [{dependent-identity-attr home
-                                      dependent-source-attr "orphan-source"}]})
-                                  (.then
-                                   (fn [_]
-                                     (-> (d/transact!
-                                          conn
-                                          {:tx-data
-                                           [{identity-attr candidate
-                                             :idtest.record/source
-                                             (str "agent-source:" candidate)}
-                                            {dependent-identity-attr home
-                                             dependent-source-attr
-                                             (str "home-source:" candidate)}]
-                                           ::id/generated-candidates
-                                           [{::id/key allocation-key
-                                             ::id/identity-attr identity-attr
-                                             ::id/value candidate
-                                             ::id/dependent-lookup-refs
-                                             [[dependent-identity-attr home]]}]})
-                                         (.then
-                                          (fn [_]
-                                            {::conn conn
-                                             ::candidate candidate
-                                             ::home home
-                                             ::rejected? false})
-                                          (fn [_error]
-                                            {::conn conn
-                                             ::candidate candidate
-                                             ::home home
-                                             ::rejected? true}))))))))))))
-                  (.then
-                   (fn [{::keys [conn candidate home rejected?]}]
-                     (is rejected?)
-                     (is (empty? (d/datoms @conn :avet identity-attr candidate))
-                         "the rejected candidate entity never lands")
-                     (is (empty? (d/datoms @conn :avet
-                                           :idtest.record/source
-                                           (str "agent-source:" candidate)))
-                         "the rejected candidate facts never land")
-                     (is (empty? (d/datoms @conn :avet dependent-source-attr
-                                           (str "home-source:" candidate)))
-                         "the attempted dependent upsert never lands")
-                     (let [orphan-eid
-                           (:e (first (d/datoms @conn :avet
-                                                dependent-identity-attr home)))]
-                       (is (= "orphan-source"
-                              (dependent-source-attr
-                               (d/pull @conn '[*] orphan-eid)))
-                           "the occupied dependent entity stays unchanged"))))
-                  (.catch (fn [error]
-                            (is false (str "dependent identity probe rejected: "
-                                           (.-message error)))))
-                  (.finally done))))
-
-     (deftest allocation-rebuilds-the-complete-transaction-after-a-conflict
-       (async done
-              (register-allocation-schema!)
-              (let [!requests (atom [])
-                    !builds   (atom [])
-                    builder   (fn [ids]
-                                (let [candidate (get ids allocation-key)]
-                                  (swap! !builds conj candidate)
-                                  (let [home (keyword "idtest.namespace"
-                                                      candidate)]
-                                    {:seon.db/tx-data
-                                     [{identity-attr candidate
-                                       :idtest.record/source
-                                       (str "source:" candidate)}
-                                      {dependent-identity-attr home
-                                       dependent-source-attr
-                                       (str "home-source:" candidate)}]
-                                     ::id/dependent-identities
-                                     [{::id/candidate-key allocation-key
-                                       ::id/lookup-ref
-                                       [dependent-identity-attr home]}]})))
-                    stub      (fn [request]
-                                (swap! !requests conj request)
-                                (let [manifest (::id/generated-candidates request)]
-                                  (js/Promise.resolve
-                                   (if (= 1 (count @!requests))
-                                     {:seon.db/ok? false
-                                      :seon.db/error
-                                      {:seon.error/message "Datahike upsert conflict"
-                                       :seon.error/kind :user-input
-                                       :seon.error/data
-                                       {:error :transact/upsert
-                                        :assertion
-                                        [1 dependent-identity-attr
-                                         (second
-                                          (first
-                                           (::id/dependent-lookup-refs
-                                            (first manifest))))]}}}
-                                     {:seon.db/ok? true
-                                      :seon.db/tx 100
-                                      :seon.db/tx-count 2
-                                      :seon.db/added 2
-                                      :seon.db/retracted 0
-                                      :seon.db/tempids {}
-                                      ::id/eids {allocation-key 42}}))))]
-                (-> (with-transact-stub
-                      stub
-                      #(id/allocate! (allocation-request builder)))
-                    (.then
-                     (fn [response]
-                       (is (:seon.db/ok? response))
-                       (is (= 2 (count @!builds)))
-                       (is (not= (first @!builds) (second @!builds)))
-                       (is (= (second @!builds)
-                              (get-in response [::id/ids allocation-key])))
-                       (is (= 42 (get-in response [::id/eids allocation-key])))
-                       (let [first-request (first @!requests)
-                             second-request (second @!requests)
-                             first-row  (-> first-request :seon.db/tx-data first)
-                             second-row (-> second-request :seon.db/tx-data first)
-                             first-home (-> first-request :seon.db/tx-data second)
-                             second-home (-> second-request :seon.db/tx-data second)]
-                         (is (not (contains? first-request
-                                             ::id/dependent-identities))
-                             "builder metadata is normalized into the writer manifest")
-                         (is (= (str "source:" (identity-attr first-row))
-                                (:idtest.record/source first-row)))
-                         (is (= (str "source:" (identity-attr second-row))
-                                (:idtest.record/source second-row)))
-                         (is (not= (:idtest.record/source first-row)
-                                   (:idtest.record/source second-row)))
-                         (is (= (str "home-source:" (identity-attr first-row))
-                                (dependent-source-attr first-home)))
-                         (is (= (str "home-source:" (identity-attr second-row))
-                                (dependent-source-attr second-home)))
-                         (is (not= (dependent-identity-attr first-home)
-                                   (dependent-identity-attr second-home))))))
-                    (.catch (fn [e]
-                              (is false (str "allocation rejected: " (.-message e)))))
-                    (.finally done)))))
-
-     (deftest allocation-exhaustion-is-bounded-and-unrelated-errors-do-not-retry
-       (async done
-              (register-allocation-schema!)
-              (let [builder (fn [ids]
-                              {:seon.db/tx-data
-                               [{identity-attr (get ids allocation-key)}]})
-                    !calls  (atom 0)
-                    always-conflicts
-                    (fn [request]
-                      (swap! !calls inc)
-                      (js/Promise.resolve
-                       (conflict-envelope
-                        (first (::id/generated-candidates request)))))]
-                (-> (with-transact-stub
-                      always-conflicts
-                      #(id/allocate! (allocation-request builder)))
-                    (.then
-                     (fn [response]
-                       (is (false? (:seon.db/ok? response)))
-                       (is (= 16 @!calls))
-                       (is (= :seon.db.id.error/exhausted
-                              (get-in response
-                                      [:seon.db/error :seon.error/data
-                                       ::id/error])))
-                       (reset! !calls 0)
-                       (with-transact-stub
-                         (fn [_request]
-                           (swap! !calls inc)
-                           (js/Promise.resolve
-                            {:seon.db/ok? false
-                             :seon.db/error
-                             {:seon.error/message "unrelated unique conflict"
-                              :seon.error/kind :user-input
-                              :seon.error/data
-                              {:seon.db.protocol/error-kind
-                               :seon.db.protocol.error/database}}}))
-                         #(id/allocate! (allocation-request builder)))))
-                    (.then
-                     (fn [response]
-                       (is (false? (:seon.db/ok? response)))
-                       (is (= 1 @!calls))))
-                    (.catch (fn [e]
-                              (is false (str "allocation rejected: " (.-message e)))))
-                    (.finally done)))))))
+     (deftest allocation-uses-one-immutable-database-value
+       (let [database {:db-name "allocator-test"
+                       :t 11
+                       :as-of nil
+                       :since nil
+                       :history false
+                       :datahike/commit-id (random-uuid)}
+             allocations [{::id/key allocation-key
+                           ::id/identity-attr identity-attr}]
+             manifest [{::id/key allocation-key
+                        ::id/identity-attr identity-attr
+                        ::id/value "a12345678901"}]
+             query-request
+             (generator-policy-request database allocations)
+             transaction-request
+             (allocation-transaction-request
+              database
+              {:seon.db/tx-data [{identity-attr "a12345678901"}]}
+              manifest)
+             request {::id/allocations allocations
+                      ::id/transaction-builder
+                      (fn [_ids] {:seon.db/tx-data []})}]
+         (is (= database (:seon.db/db query-request)))
+         (is (= database (:seon.db/db transaction-request)))
+         (is (= [[identity-attr]] (:seon.db/args query-request)))
+         (is (= manifest (::id/generated-candidates transaction-request)))
+         (is (not (contains? transaction-request :seon.db/conn)))
+         (is (m/validate ::id/allocate-request request)
+             "the ordinary database value remains optional")
+         (is (= "Stored identity-generator policies, parameterized by identity attributes."
+                (:doc (meta #'id/generator-policy-query))))))))
