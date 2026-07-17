@@ -63,7 +63,9 @@ build input until the checkpoint is released.
 2. `Bun.spawn` is the subprocess primitive. Its advantage is the stronger
    lifecycle/stream/resource interface, not measured spawn speed.
 3. `Bun.serve` is the target web host. The existing router and response contract
-   remain the application seam.
+   remain the application seam. This is a separate transport cut after the
+   single renderer/feed semantics and correctness gates are settled; it never
+   creates a Bun-specific renderer or feed.
 4. Loopback Datastar SSE is uncompressed by default. Compression is admitted
    only for a measured remote boundary.
 5. Native Bun Unix sockets are the target database transport after the decoder

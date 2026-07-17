@@ -69,18 +69,31 @@ warm smoke baseline is comparison evidence only, not graduation.
 1. Implement one fail-closed admission projection over units 1–8 manifests and
    open-blocker dispositions; do not start destructive/model work before it is
    green.
-2. Add bounded on-demand measurements to the existing operator/feed for
-   startup phases, CLJ/CLJS MCP, local turn overhead, database operations,
-   render/serialize/gzip/browser work, event-loop delay, CPU, JVM/V8 heap, RSS,
-   disk, and feed pressure. Do not add a benchmark runtime or telemetry store.
-3. Register the content-addressed fixture/run/sample evidence shapes, then run
+2. Finish authority-consumer migration and prove fresh/converged initialization,
+   publication, restart, and recovery without races. Do not collect the final
+   startup or complete-render baseline while those dependencies are changing.
+3. Add bounded on-demand measurements to the existing operator/feed for
+   program construction/encoding/transfer/diff/transaction, child spawn and
+   bootstrap, CLJ/CLJS MCP, database hop/cache work, local turn overhead,
+   render/serialize/gzip/socket/browser phases, rerender counts, event-loop
+   delay, CPU, JVM/V8 heap, RSS, disk, and feed pressure. Do not add a benchmark
+   runtime or telemetry store.
+4. Measure the existing complete renderer and single Datastar feed. Only when
+   the evidence identifies material waste may closed transcript, debug, and
+   plan bodies become independently demanded within that same renderer/feed.
+   Program-admission optimization likewise follows measured phase evidence and
+   must retain exact, idempotent, race-free publication.
+5. Treat native `Bun.serve` as a separate outer-transport replacement. It may
+   replace HTTP/SSE hosting after semantic parity, but it does not introduce a
+   second router, renderer, feed, or cache.
+6. Register the content-addressed fixture/run/sample evidence shapes, then run
    the post-unit-8 reference-host characterization and freeze the budgets.
-4. Run the ordered destructive fresh/grown/restart/crash/history/browser/
+7. Run the ordered destructive fresh/grown/restart/crash/history/browser/
    agent/Inspect/no-source-downstream/soak matrix through production doors.
-5. Investigate every regression at its predecessor owner; rerun only affected
+8. Investigate every regression at its predecessor owner; rerun only affected
    slices, then one non-overlapping exact-artifact checkpoint and independently
    verify/read back the raw evidence package.
-6. With candidate-specific owner authorization, preserve, verify, read back,
+9. With candidate-specific owner authorization, preserve, verify, read back,
    and remove one eligible legacy process/worktree/data lane at a time; prove
    current clusters and retained archives remain unaffected after each action.
 

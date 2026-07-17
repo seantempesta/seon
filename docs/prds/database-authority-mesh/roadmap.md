@@ -405,22 +405,24 @@ in the changed listener, router, Datastar, debug, or route owners.
 
 ### Current implementation checkpoint
 
-- **Earliest unsettled contract:** close `seon.web.serve` on the parent turn's
-  native `:seon.agent.turn/rendered-tx` ref and ordinary database values. Its
-  model/eval observability and task-run paths still name removed turn/attempt
-  coordinates, ambient connections, copied eval-operation evidence, and
-  synchronous config/run readers. They must derive history through `db/as-of`
-  and the existing asynchronous owners, then delete those projections.
+- **Earliest unsettled contract:** close the exact-database blob operator seam,
+  then the public blob and operation-specific plan consumers. Web serving and
+  reactive calls now use ordinary database values, native transaction reports,
+  the parent turn's `:seon.agent.turn/rendered-tx` ref, and direct database
+  failures. No consumer may restore an ambient connection, copied coordinate,
+  oversized generic row acquisition, or local database fallback.
 - **Integrated proof that closes it:** eval, autocomplete, namespace context,
   startup, converged reload, advertisement, runtime hosting, and declarative
   state reconciliation, runtime membership, selective interests, routing, and
   complete Datastar rendering reuse ordinary database values and native
   transaction reports; quiescence, agent creation, AI seeding,
   scheduling, the watchdog, warning acquisition, operation configuration, and
-  render execution now reuse the same rule. The next frozen proof must remove
-  every web/feed warning, retain native transaction-report observability, pass
-  the focused serve/reactive-call gates, and compile all four artifacts without
-  warnings in the changed owners.
+  render execution and the web operation boundary now reuse the same rule.
+  Focused web proof passes 13 serve tests/60 assertions and 8 reactive-call
+  tests/30 assertions; the client compiles without warnings in those changed
+  owners. The next frozen proof must make blob retention and public blob reads
+  exact over one immutable database value, then remove the remaining plan
+  consumer contradictions.
 - **Dependency-ready parallel portfolio:** the web/render single-owner audit is
   durable at [[research/web-render-single-owner-audit-2026-07-17]] and the
   rendered-transaction boundary at
@@ -429,14 +431,43 @@ in the changed listener, router, Datastar, debug, or route owners.
   and explicitly rejects the current dirty coordinate/oversized-row prototype.
   The complete parallel-system inventory is durable at
   [[research/parallel-behavior-unification-audit-2026-07-17]].
-- **Next refills:** close the remaining serve/rendered-transaction and reactive
-  call consumers, followed by the exact-database blob operator seam and the
-  operation-specific plan consumers. Each cut strengthens the existing
+- **Next refills:** close the exact-database blob operator, public blob calls,
+  and operation-specific plan consumers; then prove fresh initialization,
+  converged initialization, publication, restart, and recovery without races.
+  Each cut strengthens the existing
   public owner and deletes removed-function callers; none adds aliases,
   versioned function names, local-database fallbacks, or a second renderer.
   The final graduation gate remains the full frozen-source correctness, live
   Bun/JVM, multi-agent, child-crash, multi-database, and measured resource
   matrix.
+
+### Correctness-first performance schedule
+
+Performance work starts only after the remaining consumers and initialization
+path are correct under fresh, converged, restart, and recovery races. The
+program seed path must not retransact already admitted schemas, functions, or
+tests. Its current remaining build, encode, transfer, scan, and comparison cost
+is a measured optimization target, not permission to weaken exact publication
+or introduce a second bootstrap authority.
+
+After that dependency gate:
+
+1. Add bounded phase timing and rerender-count evidence to the existing
+   operator, database protocol, renderer, and Datastar feed.
+2. Measure the current complete render path before changing its demand model.
+   Final startup numbers are deliberately deferred until the dependency work
+   above is integrated; the historical 0.44--0.58 second figure is comparison
+   evidence, not a claim about the completed design.
+3. Keep one renderer and one Datastar feed. If evidence shows complete rendering
+   is still expensive, make costly closed transcript, debug, and plan bodies
+   independently demanded inside that same mechanism. Do not add partial
+   renderers, alternate feeds, or another cache authority.
+4. Optimize converged program admission only from measured phase evidence. A
+   content/digest or delta protocol is admissible only if it preserves exact
+   source identity, race-free publication, and idempotent initialization.
+5. Replace the outer HTTP/SSE host with native `Bun.serve` as a separate
+   transport cut after semantic parity. Routing, render derivation, feed
+   sharing, and database contracts stay unchanged.
 
 The one message writer is settled at `7f732e2e`. `message!` captures one
 database value, derives sender/origin and hop data there, validates normalized
