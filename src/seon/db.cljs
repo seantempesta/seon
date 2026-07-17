@@ -834,17 +834,17 @@
 (defn ^{:async true :seon.fn/agent-facing? true} query
   "Run one Datalog query with source arguments in their declared positions."
   {:malli/schema
-   [:function
-    [:=> [:catn [::request [:or ::query-request ::query-form]]] :any]
-    [:=> [:catn [::query ::query-form] [::rest [:* :any]]] :any]]}
-  ([request]
-   (await
-    (query-result!
-     (if (and (map? request) (contains? request ::query))
-       request
-       {::query request ::args []}))))
-  ([query-form & inputs]
-   (await (query-result! {::query query-form ::args (vec inputs)}))))
+   [:=> [:catn [::request-or-query [:or ::query-request ::query-form]]
+                 [::inputs [:* :any]]]
+    :any]}
+  [request-or-query & inputs]
+  (await
+   (query-result!
+    (if (and (map? request-or-query)
+             (contains? request-or-query ::query)
+             (empty? inputs))
+      request-or-query
+      {::query request-or-query ::args (vec inputs)}))))
 
 (defn ^{:async true :seon.fn/agent-facing? true} query-with-evidence
   "Run a query and return its result plus Datahike cache/resource evidence."
