@@ -63,16 +63,18 @@
   '[:db/id :seon.user/id :seon.agent/id])
 
 (defn- query-member
-  [query arguments max-results]
+  [database query arguments max-results]
   {::protocol/operation protocol/query-operation
+   ::db/db database
    ::protocol/query-form query
    ::protocol/arguments arguments
    :datahike.resource/max-results max-results
    :datahike.resource/max-result-weight 65536})
 
 (defn- pull-many-member
-  [refs]
+  [database refs]
   {::protocol/operation protocol/pull-many-operation
+   ::db/db database
    ::protocol/selector sender-pull-pattern
    ::protocol/entity-ids refs
    :datahike.resource/max-results (max 1 (count refs))
@@ -85,20 +87,26 @@
 
 (defn- failure
   [message data]
-  {:seon.db/ok? false
-   :seon.db/error {:seon.error/message message
-                   :seon.error/data data}})
+  {:seon.error/message message
+   :seon.error/data data})
+
+(defn- resolved-participant?
+  [entity]
+  (and (map? entity)
+       (or (:seon.user/id entity)
+           (:seon.agent/id entity))))
 
 (defn ^:async acquire-send-data
   "Acquire sender identity and hop depth from one immutable database value."
-  [from to-refs]
+  [database from to-refs]
   (let [refs (vec (distinct (into [from] to-refs)))
         initial
         (await
          (db/execute-many
           {::db/members
-           [(pull-many-member refs)
+           [(pull-many-member database refs)
             (query-member
+             database
              '[:find (max ?at) .
                :where
                [?message :seon.agent.message/from ?user]
@@ -106,8 +114,7 @@
                [?message :seon.agent.message/at ?at]]
              [] 1)]
            ::db/max-result-weight 131072}))]
-    (if-not (and (::db/coordinate initial)
-                 (= 2 (count (::db/results initial)))
+    (if-not (and (= 2 (count (::db/results initial)))
                  (every? #(true? (::protocol/success? %))
                          (::db/results initial)))
       (failure "Message database acquisition failed." initial)
@@ -115,18 +122,44 @@
             entities (member-result entities-member)
             by-ref (zipmap refs entities)
             sender (get by-ref from)
+            recipients (mapv by-ref to-refs)
+            unresolved
+            (into []
+                  (remove #(resolved-participant? (get by-ref %)))
+                  refs)
             sender-eid (:db/id sender)
-            peer-eids (into #{} (keep #(some-> (get by-ref %) :db/id)) to-refs)
+            recipient-eids (mapv :db/id recipients)
+            agent-tos
+            (into []
+                  (keep-indexed
+                   (fn [index entity]
+                     (when (:seon.agent/id entity)
+                       (nth to-refs index)))
+                   recipients))
+            peer-eids (set recipient-eids)
             from-user? (user-entity? sender)
             barrier (or (member-result barrier-member) (js/Date. 0))]
-        (if (or from-user? (nil? sender-eid) (empty? peer-eids))
-          {:seon.db/ok? true
+        (cond
+          (seq unresolved)
+          (failure "Message sender or recipient does not resolve to a user or agent."
+                   {:seon.agent.message/refs unresolved})
+
+          (some #(= sender-eid %) recipient-eids)
+          (failure "message!: refused self-recipient — sender and recipient must differ."
+                   {:seon.agent.message/from from
+                    :seon.agent.message/to to-refs})
+
+          (or from-user? (empty? peer-eids))
+          {::db/db database
            :seon.agent.message/from-user? from-user?
+           :seon.agent.message/agent-tos agent-tos
            :seon.agent.message/hops 0}
+
+          :else
           (let [hops
                 (await
                  (db/query
-                  {::db/coordinate (::db/coordinate initial)
+                  {::db/db database
                    ::db/query
                    '[:find (max ?h) .
                      :in $ ?sender [?peer ...] ?barrier
@@ -141,6 +174,7 @@
                    ::db/max-result-weight 65536}))]
             (if (and (map? hops) (:seon.error/message hops))
               (failure "Message hop query failed." hops)
-              {:seon.db/ok? true
+              {::db/db database
                :seon.agent.message/from-user? false
+               :seon.agent.message/agent-tos agent-tos
                :seon.agent.message/hops (outbound-hops hops)})))))))

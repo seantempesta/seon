@@ -11,14 +11,6 @@
    [seon.runtime.admission :as admission]
    [seon.warn :as warn]))
 
-(def point
-  {:seon.db.coordinate/database-id
-   #uuid "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
-   :seon.db.coordinate/branch :db
-   :seon.db.coordinate/commit-id
-   #uuid "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
-   :seon.db.coordinate/t 42})
-
 (def database
   {:db-name "default"
    :t 42
@@ -83,8 +75,7 @@
             (fn [request]
               (swap! requests conj request)
               (js/Promise.resolve
-               {::db/coordinate point
-                ::db/results
+               {::db/results
                 [(protocol/success
                   {::protocol/result
                    [{:db/id 10 :seon.agent/id "sender"}
@@ -92,27 +83,33 @@
                  (protocol/success
                   {:datahike.query/result (js/Date. 1000)})]})))
       (set! db/query
-            (fn [request]
-              (swap! requests conj request)
-              (js/Promise.resolve 3)))
+            (fn
+              ([request]
+               (swap! requests conj request)
+               (js/Promise.resolve 3))
+              ([_query-form & _inputs]
+               (js/Promise.reject
+                (js/Error. "unexpected positional query")))))
       (finish!
        (-> (internal/acquire-send-data
-            [:seon.agent/id "sender"] [[:seon.agent/id "peer"]])
+            database [:seon.agent/id "sender"] [[:seon.agent/id "peer"]])
            (.then
             (fn [result]
-              (is (true? (:seon.db/ok? result)))
               (is (false? (:seon.agent.message/from-user? result)))
               (is (= 3 (:seon.agent.message/hops result)))
+              (is (= database (::db/db result)))
               (is (= 2 (count (::db/members (first @requests))))
                   "sender pulls and the human barrier share one request")
-              (is (= point (::db/coordinate (second @requests)))
+              (is (every? #(= database (::db/db %))
+                          (::db/members (first @requests))))
+              (is (= database (::db/db (second @requests)))
                   "the dependent hop query stays on the acquired value")
-              (is (= 1 (::db/max-results (second @requests)))))))
+              (is (= 1 (::db/max-results (second @requests))))))
            (.finally
             (fn []
               (set! db/execute-many execute-many)
               (set! db/query query))))
-       done)))
+       done))))
 
 (deftest recent-uses-two-bounded-index-members-and-one-pull-many
   (async done
@@ -217,17 +214,27 @@
               (set! db/pull-many pull-many))))
        done))))
 
-(deftest message-write-uses-acquired-data-and-no-local-connection
+(deftest message-write-uses-one-acquired-database-value
   (async done
     (let [available? admission/available?
+          db! db/db
           acquire internal/acquire-send-data
           allocate! db.id/allocate!
-          observed (atom nil)]
+          observed (atom nil)
+          db-calls (atom 0)]
       (set! admission/available? (constantly true))
+      (set! db/db
+            (fn
+              ([]
+               (swap! db-calls inc)
+               (js/Promise.resolve database))
+              ([_request]
+               (js/Promise.reject
+                (js/Error. "unexpected named database read")))))
       (set! internal/acquire-send-data
-            (fn [_from _to]
+            (fn [db-value _from _to]
               (js/Promise.resolve
-               {:seon.db/ok? true
+               {::db/db db-value
                 :seon.agent.message/from-user? false
                 :seon.agent.message/hops 2})))
       (set! db.id/allocate!
@@ -235,11 +242,14 @@
               (reset! observed request)
               (let [built ((::db.id/transaction-builder request)
                            {:seon.agent.message/id "message-id"})]
-                (is (not (contains? request :seon.db/conn)))
+                (is (= database (::db/db request)))
                 (is (= 3 (get-in built [:seon.db/tx-data 0
                                         :seon.agent.message/hops])))
                 (js/Promise.resolve
-                 {:seon.db/ok? true
+                 {:db-before database
+                  :db-after (assoc database :t 43)
+                  :tx-data (:seon.db/tx-data built)
+                  :tempids {}
                   ::db.id/ids {:seon.agent.message/id "message-id"}}))))
       (finish!
        (-> (message/message!
@@ -248,11 +258,41 @@
              :seon.agent.message/content "hello"})
            (.then
             (fn [result]
-              (is (= {:seon.agent.message/ok? true
-                      :seon.agent.message/id "message-id"
+              (is (= {:seon.agent.message/id "message-id"
                       :seon.agent.message/hops 3}
                      result))
+              (is (= 1 @db-calls))
               (is (= 1 (count (::db.id/allocations @observed))))))
+           (.finally
+            (fn []
+              (set! admission/available? available?)
+              (set! db/db db!)
+              (set! internal/acquire-send-data acquire)
+              (set! db.id/allocate! allocate!))))
+       done))))
+
+(deftest message-write-preserves-direct-allocation-error
+  (async done
+    (let [available? admission/available?
+          acquire internal/acquire-send-data
+          allocate! db.id/allocate!
+          failure {:seon.error/message "writer refused"
+                   :seon.error/kind :user-input}]
+      (set! admission/available? (constantly true))
+      (set! internal/acquire-send-data
+            (fn [db-value _from _to]
+              (js/Promise.resolve
+               {::db/db db-value
+                :seon.agent.message/from-user? false
+                :seon.agent.message/hops 0})))
+      (set! db.id/allocate! (fn [_request] (js/Promise.resolve failure)))
+      (finish!
+       (-> (message/message!
+            {::db/db database
+             :seon.agent.message/from [:seon.agent/id "sender"]
+             :seon.agent.message/to [:seon.agent/id "peer"]
+             :seon.agent.message/content "hello"})
+           (.then (fn [result] (is (= failure result))))
            (.finally
             (fn []
               (set! admission/available? available?)
@@ -260,12 +300,66 @@
               (set! db.id/allocate! allocate!))))
        done))))
 
-(deftest blank-content-and-self-message-remain-errors-as-values
+(deftest human-message-normalizes-recipients-and-builds-one-plan-row
   (async done
     (let [available? admission/available?
-          current-agent-id db/current-agent-id]
+          acquire internal/acquire-send-data
+          allocate! db.id/allocate!
+          built (atom nil)]
       (set! admission/available? (constantly true))
-      (set! db/current-agent-id (constantly "self"))
+      (set! internal/acquire-send-data
+            (fn [db-value _from recipients]
+              (is (= [[:seon.agent/id "peer"]] recipients))
+              (js/Promise.resolve
+               {::db/db db-value
+                :seon.agent.message/from-user? true
+                :seon.agent.message/agent-tos recipients
+                :seon.agent.message/hops 0})))
+      (set! db.id/allocate!
+            (fn [request]
+              (is (= 2 (count (::db.id/allocations request))))
+              (let [transaction
+                    ((::db.id/transaction-builder request)
+                     {:seon.agent.message/id "message-id"
+                      :seon.agent.message/plan-id-0 "plan-id"})]
+                (reset! built transaction)
+                (js/Promise.resolve
+                 {:db-before database
+                  :db-after (assoc database :t 43)
+                  :tx-data (:seon.db/tx-data transaction)
+                  :tempids {}
+                  ::db.id/ids
+                  {:seon.agent.message/id "message-id"
+                   :seon.agent.message/plan-id-0 "plan-id"}}))))
+      (finish!
+       (-> (message/message!
+            {::db/db database
+             :seon.agent.message/from message/user-ref
+             :seon.agent.message/to
+             [[:seon.agent/id "peer"] [:seon.agent/id "peer"]]
+             :seon.agent.message/content "do this"})
+           (.then
+            (fn [result]
+              (is (= {:seon.agent.message/id "message-id"
+                      :seon.agent.message/hops 0}
+                     result))
+              (let [[message-row plan-row] (:seon.db/tx-data @built)]
+                (is (= :human (:seon.agent.message/origin message-row)))
+                (is (= [[:seon.agent/id "peer"]]
+                       (:seon.agent.message/to message-row)))
+                (is (= [:seon.agent.message/id "message-id"]
+                       (:my.plan/message plan-row))))))
+           (.finally
+            (fn []
+              (set! admission/available? available?)
+              (set! internal/acquire-send-data acquire)
+              (set! db.id/allocate! allocate!))))
+       done))))
+
+(deftest boundary-validation-remains-direct-errors
+  (async done
+    (let [available? admission/available?]
+      (set! admission/available? (constantly true))
       (finish!
        (-> (message/message!
             {:seon.agent.message/from message/user-ref
@@ -273,12 +367,55 @@
            (.then
             (fn [blank]
               (is (string? (:seon.error/message blank)))
-              (message/agent "self" "hello")))
+              (message/message!
+               {:seon.agent.message/from message/user-ref
+                :seon.agent.message/to []
+                :seon.agent.message/content "hello"})))
            (.then
-            (fn [self]
-              (is (re-find #"YOURSELF" (:seon.error/message self)))))
+            (fn [empty-recipient]
+              (is (re-find #"empty" (:seon.error/message empty-recipient)))
+              (message/message!
+               {:seon.agent.message/from message/user-ref
+                :seon.agent.message/content "hello"
+                :seon.agent.message/origin :human})))
+           (.then
+            (fn [origin]
+              (is (re-find #"only :core" (:seon.error/message origin)))))
            (.finally
             (fn []
-              (set! admission/available? available?)
-              (set! db/current-agent-id current-agent-id))))
+              (set! admission/available? available?))))
+       done))))
+
+(deftest send-acquisition-rejects-unresolved-and-self-participants
+  (async done
+    (let [execute-many db/execute-many
+          responses
+          (atom
+           [[{:db/id 10 :seon.agent/id "sender"}]
+            [{:db/id 10 :seon.agent/id "sender"}
+             {:db/id 10 :seon.agent/id "sender"}]])]
+      (set! db/execute-many
+            (fn [_request]
+              (let [entities (first @responses)]
+                (swap! responses subvec 1)
+                (js/Promise.resolve
+                 {::db/results
+                  [(protocol/success {::protocol/result entities})
+                   (protocol/success
+                    {:datahike.query/result (js/Date. 1000)})]}))))
+      (finish!
+       (-> (internal/acquire-send-data
+            database [:seon.agent/id "sender"] [[:seon.agent/id "missing"]])
+           (.then
+            (fn [missing]
+              (is (re-find #"does not resolve" (:seon.error/message missing)))
+              (internal/acquire-send-data
+               database [:seon.agent/id "sender"]
+               [[:seon.agent/id "sender"]])))
+           (.then
+            (fn [self]
+              (is (re-find #"self-recipient" (:seon.error/message self)))))
+           (.finally
+            (fn []
+              (set! db/execute-many execute-many))))
        done))))

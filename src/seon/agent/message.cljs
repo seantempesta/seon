@@ -6,13 +6,13 @@
        target — seeded at boot by seon.client)
      - `message!` — fully-formed storage, boundary defaulting, the
        blank-content refusal, hop derivation (`outbound-hops`), the
-       concise success envelope
+       concise success value
      - the two agent-facing functions, thin wrappers over `message!` — the
        agent reaches them through the `message/` alias on its home ns
        (`(message/user …)` / `(message/agent …)`):
          `user`  — from = me (the ALS agent), to = the one human user
-         `agent` — from = me, to = [agent-id]; REFUSES `to = me` (loud
-                   error, no row). No self→self messaging, ever.
+         `agent` — from = me, to = [agent-id]. The one `message!` boundary
+                   refuses self-addressing for every caller.
 
    The wake trigger itself lives in [[seon.agent.loop]], while this
    message-data namespace owns the pure waking-inbound rule. `seon.agent`
@@ -217,6 +217,7 @@
 
 (schema/register! ::message-request
   [:map
+   [::db/db {:optional true} :seon.db/db]
    [:seon.agent.message/content :seon.agent.message/content]
    ;; from defaults to the calling agent's ref via the ALS scope
    ;; ((seon.db/current-agent-id)); the HTTP adapter passes the user
@@ -233,15 +234,14 @@
    ;; :agent.
    [:seon.agent.message/origin {:optional true} :seon.agent.message/origin]])
 
-;; Concise success / standard error envelope: the raw transact tx-report
+;; Concise success / direct error value: the raw transact tx-report
 ;; is OFF the agent surface — it taught nothing and carried a misdirected
-;; "narrow your query" hint. Success answers the three things a sender
-;; can act on: did it store, which message, at what hop depth. Failure
-;; stays the core-standard error envelope (errors are values).
+;; "narrow your query" hint. A committed identity already says it stored;
+;; success answers which message and at what hop depth. Failures are direct
+;; :seon.error/message values.
 (schema/register! ::message-response
   [:or
    [:map
-    [:seon.agent.message/ok?  [:= true]]
     [:seon.agent.message/id   :seon.agent.message/id]
     [:seon.agent.message/hops :seon.agent.message/hops]]
    [:map [:seon.error/message :string]]])
@@ -280,18 +280,29 @@
   [m]
   (< (or (:seon.agent.message/hops m) 0) warn/hop-cap))
 
+(defn- normalize-recipients
+  [to]
+  (->> (cond
+         (nil? to) [user-ref]
+         (and (vector? to) (vector? (first to))) to
+         (and (vector? to) (keyword? (first to))) [to]
+         (vector? to) to
+         :else [to])
+       distinct
+       vec))
+
 (defn ^:async message!
   "Send a message; the single entry point for message writes.
 
-   Map-in / map-out; returns a CONCISE envelope, never the raw
+   Map-in / map-out; returns a CONCISE domain result, never the raw
    tx-report:
-     {:seon.agent.message/ok? true :seon.agent.message/id _ :seon.agent.message/hops _}
+     {:seon.agent.message/id _ :seon.agent.message/hops _}
      {:seon.error/message _}   ; failure (errors are values)
 
    Defaulting (boundary liberties — the STORED row is always full):
      :seon.agent.message/from — defaults to [:seon.agent/id (current-agent-id)]
                           from the ALS turn scope. No scope + no explicit
-                          from → error envelope.
+                          from → direct error value.
      :seon.agent.message/to   — single ref or vector; defaults to the user.
      hops               — 0 when from = the user; otherwise this
                           {me,recipient}-pair's prior depth + 1 (per-peer
@@ -300,30 +311,24 @@
                           rounds do NOT accumulate). The wake trigger
                           refuses past `seon.warn/hop-cap`.
 
-   Blank content is REJECTED with an error envelope — an empty message
+   Blank content is rejected with a direct error — an empty message
    carries nothing; since every message write routes through here, the
    guard kills the class.
 
-   Closed runtime admission returns the existing DB failure envelope before
+   Closed runtime admission returns the existing direct error before
    allocation or transaction. Otherwise a message ALWAYS transacts and is
-   delivered — there is no same-turn refusal. Errors are values: if a sibling form in the same turn
-   returned a `{*/ok? false}` envelope the agent may over-claim, but that
+   delivered — there is no same-turn refusal. Errors are values: if a sibling
+   form in the same turn returned an error value the agent may over-claim, but that
    is visible in the transcript and a human follow-up re-wakes the agent.
    Nothing else here blocks a send."
   {:malli/schema [:=> [:cat ::message-request] ::message-response]}
-  [{:seon.agent.message/keys [content from to origin]}]
+  [{database ::db/db
+    :seon.agent.message/keys [content from to origin]}]
   (if-not (admission/available?)
     (:seon/error (admission/unavailable))
     (let [agent-id (db/current-agent-id)
           from     (or from (when agent-id [:seon.agent/id agent-id]))
-          to       (cond
-                   (nil? to)             [user-ref]
-                   (and (vector? to)
-                        (vector? (first to))) to        ; vector of lookup refs
-                   (and (vector? to)
-                        (keyword? (first to))) [to]     ; single lookup ref
-                   (vector? to)          to             ; vector of eids
-                   :else                 [to])]         ; single eid
+          to       (normalize-recipients to)]
     (cond
       (or (nil? content) (str/blank? content))
       {:seon.error/message
@@ -336,95 +341,101 @@
        (str "message!: no :seon.agent.message/from and no agent-id in scope — "
             "pass from explicitly or call inside (seon.db/with-agent …).")}
 
+      (empty? to)
+      {:seon.error/message
+       "message!: empty :seon.agent.message/to refused — address at least one recipient."}
+
+      (and origin (not= :core origin))
+      {:seon.error/message
+       "message!: only :core may override origin; :human/:agent derive from the sender."}
+
       :else
-      (let [send-data (await (internal/acquire-send-data from to))]
-        (if-not (:seon.db/ok? send-data)
-          (:seon.db/error send-data)
-          (let [from-user? (:seon.agent.message/from-user? send-data)
-                hops (if from-user?
-                       0
-                       (inc (:seon.agent.message/hops send-data)))
-            ;; Provenance: explicit :origin wins (a :core nudge);
-            ;; otherwise derived — a user-ref send is :human, every
-            ;; other send is :agent. Never stored as nil.
-            origin (or origin (if from-user? :human :agent))
-            at     (js/Date.)
-            ;; The message ↔ step safety net (WRITE half): a :human inbound
-            ;; auto-mints ONE address-step per AGENT recipient, ATOMIC in
-            ;; this same tx (no listener, no cascade). The step carries a
-            ;; clipped preview + a back-ref to this message's identity —
-            ;; same-tx lookup-refs resolve. "Addressed" is DERIVED from the
-            ;; step's completion; there is no stored handled? flag.
-            agent-tos
-            (if (= origin :human)
-              (into []
-                    (comp
-                      (filter #(and (vector? %)
-                                    (= :seon.agent/id (first %))))
-                      (distinct))
-                    to)
-              [])
-            step-allocations
-            (mapv
-              (fn [idx agent-ref]
-                {:seon.agent.message/allocation-key
-                 (keyword "seon.agent.message" (str "plan-id-" idx))
-                 :seon.agent.message/agent-ref agent-ref})
-              (range)
-              agent-tos)
-            allocations
-            (into
-              [{::db.id/key :seon.agent.message/id
-                ::db.id/identity-attr :seon.agent.message/id}]
-              (map
-                (fn [{allocation-key :seon.agent.message/allocation-key}]
-                  {::db.id/key allocation-key
-                   ::db.id/identity-attr :my.plan/id}))
-              step-allocations)
-                env
-                (await
-                 (db.id/allocate!
-                  {::db.id/allocations allocations
-                   ::db.id/transaction-builder
-                   (fn [ids]
-                     (let [msg-id (get ids :seon.agent.message/id)
-                           row {:seon.agent.message/id msg-id
-                                :seon.agent.message/from from
-                                :seon.agent.message/to to
-                                :seon.agent.message/content content
-                                :seon.agent.message/at at
-                                :seon.agent.message/hops hops
-                                :seon.agent.message/origin origin}
-                           steps
-                           (mapv
-                            (fn [{allocation-key
-                                  :seon.agent.message/allocation-key
-                                  agent-ref
-                                  :seon.agent.message/agent-ref}]
-                              {:my.plan/id (get ids allocation-key)
-                               :my.plan/title (internal/clip-title content)
-                               :my.plan/status :open
-                               :my.plan/created-at at
-                               :my.plan/agent agent-ref
-                               :my.plan/from from
-                               :my.plan/message
-                               [:seon.agent.message/id msg-id]})
-                            step-allocations)]
-                       {:seon.db/tx-data (into [row] steps)}))}))
-                msg-id (get-in env [::db.id/ids :seon.agent.message/id])]
-            (if (:seon.db/ok? env)
-              {:seon.agent.message/ok? true
-               :seon.agent.message/id msg-id
-               :seon.agent.message/hops hops}
-              (:seon.db/error env)))))))))
+      (let [database (or database (await (db/db)))]
+        (if (failed-read? database)
+          database
+          (let [send-data (await (internal/acquire-send-data database from to))]
+            (if (failed-read? send-data)
+              send-data
+              (let [from-user? (:seon.agent.message/from-user? send-data)
+                    hops (if from-user?
+                           0
+                           (inc (:seon.agent.message/hops send-data)))
+                    ;; Provenance: explicit :origin wins (a :core nudge);
+                    ;; otherwise derived — a user-ref send is :human, every
+                    ;; other send is :agent. Never stored as nil.
+                    origin (or origin (if from-user? :human :agent))
+                    at (js/Date.)
+                    ;; The message ↔ step safety net (WRITE half): a :human
+                    ;; inbound auto-mints one address-step per agent recipient,
+                    ;; atomically in this transaction. "Addressed" is derived
+                    ;; from the step's completion; there is no stored flag.
+                    agent-tos
+                    (if (= origin :human)
+                      (:seon.agent.message/agent-tos send-data)
+                      [])
+                    step-allocations
+                    (mapv
+                     (fn [idx agent-ref]
+                       {:seon.agent.message/allocation-key
+                        (keyword "seon.agent.message" (str "plan-id-" idx))
+                        :seon.agent.message/agent-ref agent-ref})
+                     (range)
+                     agent-tos)
+                    allocations
+                    (into
+                     [{::db.id/key :seon.agent.message/id
+                       ::db.id/identity-attr :seon.agent.message/id}]
+                     (map
+                      (fn [{allocation-key
+                            :seon.agent.message/allocation-key}]
+                        {::db.id/key allocation-key
+                         ::db.id/identity-attr :my.plan/id}))
+                     step-allocations)
+                    env
+                    (await
+                     (db.id/allocate!
+                      {::db/db database
+                       ::db.id/allocations allocations
+                       ::db.id/transaction-builder
+                       (fn [ids]
+                         (let [msg-id (get ids :seon.agent.message/id)
+                               row {:seon.agent.message/id msg-id
+                                    :seon.agent.message/from from
+                                    :seon.agent.message/to to
+                                    :seon.agent.message/content content
+                                    :seon.agent.message/at at
+                                    :seon.agent.message/hops hops
+                                    :seon.agent.message/origin origin}
+                               steps
+                               (mapv
+                                (fn [{allocation-key
+                                      :seon.agent.message/allocation-key
+                                      agent-ref
+                                      :seon.agent.message/agent-ref}]
+                                  {:my.plan/id (get ids allocation-key)
+                                   :my.plan/title
+                                   (internal/clip-title content)
+                                   :my.plan/status :open
+                                   :my.plan/created-at at
+                                   :my.plan/agent agent-ref
+                                   :my.plan/from from
+                                   :my.plan/message
+                                   [:seon.agent.message/id msg-id]})
+                                step-allocations)]
+                           {:seon.db/tx-data (into [row] steps)}))}))
+                    msg-id (get-in env [::db.id/ids
+                                        :seon.agent.message/id])]
+                (if (failed-read? env)
+                  env
+                  {:seon.agent.message/id msg-id
+                   :seon.agent.message/hops hops}))))))))))
 
 ;; ============================================================
 ;; The two agent-facing functions. Thin wrappers over `message!` — `from`
 ;; defaults to the ALS agent inside `message!`, so these only fix `to`.
 ;; The agent reaches them through the `message/` alias on its home ns:
-;; `(message/user "…")` / `(message/agent id "…")`. No self→self
-;; messaging, ever: `agent` refuses `to = me` (the wake gate already
-;; ignores `from = me`; this makes it a hard prohibition at the function).
+;; `(message/user "…")` / `(message/agent id "…")`. The one `message!`
+;; boundary refuses self-addressing for every caller.
 ;; Both ride the one injecting wrapper: semantic failures stay ordinary
 ;; error values; only a shape-invalid call trips the validator, surfaced by
 ;; the eval boundary as a structured `:seon/error` value — data, never a
@@ -435,7 +446,7 @@
   "Send a message to your human user.
 
    [[message!]] with `to` := THE one user. `from` is you (the ALS
-   agent). Returns `message!`'s concise envelope.
+   agent). Returns `message!`'s concise result.
    This is how you say something to the human watching your REPL:
 
      (message/user \"done — stored 2 rows\")"
@@ -449,25 +460,16 @@
 
    `message!` with `to` := `[[:seon.agent/id agent-id]]`. `from` is you
    (the ALS agent). Returns
-   `message!`'s concise envelope. The peer must already exist — find live
+   `message!`'s concise result. The peer must already exist — find live
    ids with `(db/query '[:find [?id ...] :where [?e :seon.agent/id ?id]])`:
 
      (message/agent <peer-agent-id> \"heads up: foo depends on qux\")
 
-   REFUSES sending to YOURSELF (the ALS agent in scope): a self-message
-   returns a loud error envelope and transacts NO row — an agent's
-   notes-to-itself are `;;` comments in its turn, never a stored
+   The one message boundary refuses sending to yourself and transacts no row;
+   an agent's notes-to-itself are `;;` comments in its turn, never a stored
    self→self message. Errors are values — branch on `:seon.error/message`."
   {:malli/schema [:=> [:catn [::to-id :string] [::content :string]]
                   ::message-response]}
   [to-id content]
-  (let [me (db/current-agent-id)]
-    (if (and me (= to-id me))
-      {:seon.error/message
-       (str "message/agent: refused — you cannot message YOURSELF ("
-            (pr-str to-id) "). No self→self messages exist anywhere; a "
-            "note to yourself is a ;; comment in your turn. To message a "
-            "PEER, pass that agent's id; to say something to your human, "
-            "use (message/user \"…\").")}
-      (await (message! {:seon.agent.message/content content
-                        :seon.agent.message/to      [[:seon.agent/id to-id]]})))))
+  (await (message! {:seon.agent.message/content content
+                    :seon.agent.message/to      [[:seon.agent/id to-id]]})))
