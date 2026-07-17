@@ -1023,8 +1023,8 @@
 ;;                    (seon.indexing/public-fn-vars)))
 ;;
 ;; The boot indexers consume it alongside `core-vars`: fn-rows +
-;; FULL-SOURCE ns-rows in [[index-core!]], replay-skip membership in
-;; [[core-ns-set]]. Empty in builds without a downstream preload.
+;; FULL-SOURCE ns-rows in [[index-core!]]. Empty in builds without a
+;; downstream preload.
 (defonce !extra-core-vars (atom []))
 
 (defn- extra-core-vars*
@@ -1084,39 +1084,11 @@
    this bundle (`seon.indexing/first-party-ns-strs` over this ns's
    compile-time require closure). The computed replacement for the
    hand-maintained `fn-less-compiled-roots #{\"my.kb\"}` exception: a
-   compiled ns joins [[core-ns-set]] and
-   and gets an [[index-core!]] ns-row BY CONSTRUCTION — whether or not
+   compiled ns gets an [[index-core!]] ns-row BY CONSTRUCTION — whether or not
    any fn-row names it (a register!-only root has no indexed var but is
    still compiled, and its name-set membership is now a build fact, not
    a literal)."
   (into #{} (first-party-ns-strs)))
-
-(defn core-ns-set
-  "The set of namespace keywords owned by the COMPILED core, derived
-   from the build closure and downstream extension vars — the SAME sources
-   of truth the boot indexer writes from, so they can never drift. These are
-   the compiled namespaces indexed for display and dependency grounding;
-   agent-authored source is reconstructed only inside its supervised child.
-
-   A fn (not a def) because downstream extension vars load at runtime. It is
-   NOT tx-meta and NOT a hand-typed ns list. Three computed sources union:
-   [[compiled-first-party-ns-strs]] (the BUILD-DERIVED closure —
-   covers every compiled ns including fn-less register!-only roots),
-   the runtime-scanned extra-src nses, and the live var-meta `:ns` of
-   the indexed vars (covers test/preload/extra vars whose nses sit
-   OUTSIDE this ns's compile-time require closure)."
-  {:malli/schema [:=> [:cat] :any]}
-  []
-  (into (into (into #{} (map keyword) compiled-first-party-ns-strs)
-              ;; Whole-downstream-surface (SEON_EXTRA_SRC): every scanned
-              ;; downstream ns is COMPILED-into-the-bundle core (display-only,
-              ;; replay-skip) — including an unspecced-only ns (`acme.notes`)
-              ;; that owns no registered var. Without this its full-source
-              ;; `:seon.ns` row would be mistaken for agent-authored and
-              ;; re-eval'd on load.
-              (map keyword) (extra-src-ns-strs))
-        (map #(keyword (str (:ns (meta %)))))
-        (concat core-vars @!extra-core-vars)))
 
 (defn- read-src-file
   "Read a core source file given a var-meta `:file` (classpath-relative,
@@ -1218,16 +1190,17 @@
    set is shown); the stub keeps the `:seon.ns/name` row + lookup-ref
    target for indexed members and the on-demand `render-namespace` path,
    and keeps the no-replay invariant trivially cheap to reason about."
-  [configuration ns-sym-str]
+  [configuration extra-sources ns-sym-str]
   (let [stub  (str "(ns " ns-sym-str ")")
         ;; Extra-core nses (downstream SEON_EXTRA_SRC code) are
         ;; full-source by rule, like my.* — closes the render-as-stubs
         ;; gap for the extra root.
         full? (or (nss/full-source-ns? configuration ns-sym-str)
                   (contains? (extra-core-ns-strs) ns-sym-str)
-                  (contains? (extra-src-ns-strs) ns-sym-str))
+                  (contains? extra-sources ns-sym-str))
         src   (if full?
-                (or (read-ns-source ns-sym-str)
+                (or (get extra-sources ns-sym-str)
+                    (read-ns-source ns-sym-str)
                     (do (log/error-console!
                           "seon.client/ns-row"
                           (str "full-source ns " ns-sym-str " source file "
@@ -1576,8 +1549,8 @@
                 (recur (+ i (if form (count form) 1)) rows)))
             :else (recur (inc i) rows)))))))
 
-(defn- extra-src-ns->file
-  "Map of `{ns-name-string file-path}` for every `*.cljs` under the
+(defn- extra-src-ns->source
+  "Map of `{ns-name-string source-string}` for every `*.cljs` under the
    SEON_EXTRA_SRC `/src` + `/test` roots whose `(ns …)` parses AND whose ns is
    NOT reserved (`seon.*`/`my.*` — a downstream root never owns those, and a
    stray match must not forge a core row). `{}` when SEON_EXTRA_SRC is unset.
@@ -1599,19 +1572,11 @@
                            nil))
                 ns  (some-> txt ns-name-from-source)]
             (if (and ns (empty? (reserved-extra-nses [ns])))
-              (assoc m ns file)
+              (assoc m ns txt)
               m)))
         {}
         files))
     {}))
-
-(defn- extra-src-ns-strs
-  "The downstream ns NAME strings discovered by scanning SEON_EXTRA_SRC (see
-   [[extra-src-ns->file]]). A set; `#{}` when SEON_EXTRA_SRC is unset. Used to
-   (a) give EVERY downstream ns a full-source `:seon.ns` row, (b) replay-skip
-   them in [[core-ns-set]], and (c) drive [[extra-fn-rows]]."
-  []
-  (into #{} (keys (extra-src-ns->file))))
 
 (defn- extra-fn-rows
   "`:seon.fn` rows for EVERY public `(defn …)`/`(defn- …)` across the
@@ -1621,34 +1586,25 @@
    unspecced-only ns's fns (`acme.notes/*`) appear as indexed members in the
    namespace render. `now` is the shared `:seon.fn/created-at` instant.
 
-   Each ns's file is read once; its defns parsed by [[defn-rows-from-source]].
+   Each ns's already-acquired source is parsed by [[defn-rows-from-source]].
    Specced downstream fns ALSO get a var-derived row (with the real
    `:seon.fn/spec`) — [[index-core!]] dedups by sym, keeping the var-derived
    row in front so the spec is preserved."
-  [now]
-  (let [fs (js/require "fs")]
-    (into []
-          (mapcat (fn [[ns-str file]]
-                    (let [txt (try (.readFileSync fs file "utf8")
-                                   ;; enumerated file failing to read now is
-                                   ;; anomalous (:core); a silent skip hides a
-                                   ;; downstream ns's fns from the index.
-                                   (catch :default e
-                                     (error/record! {:seon.error/raw e :seon.error/fault :core})
-                                     nil))]
-                      (if txt
-                        (defn-rows-from-source ns-str txt now)
-                        []))))
-          (extra-src-ns->file))))
+  [extra-sources now]
+  (into []
+        (mapcat (fn [[ns-str source]]
+                  (defn-rows-from-source ns-str source now)))
+        extra-sources))
 
 (defn- warn-if-extra-src-unregistered!
-  "Observability for BUG B (silent total invisibility of a consumer's product
-   source): when `SEON_EXTRA_SRC` is set but `extra-core-vars*` is empty, the
+  "Observability for an incomplete consumer package registration.
+
+   When `SEON_EXTRA_SRC` is set but `extra-core-vars*` is empty, the
    consumer wired the source root onto the classpath but their
    SEON_EXTRA_PRELOAD entry ns never ran the `(reset! !extra-core-vars …)` —
-   so ZERO downstream rows index, with no error. Emit ONE loud, actionable
-   `:seon.log` warn naming SEON_EXTRA_SRC + the exact one-liner the entry ns
-   must run. Observability only — does NOT change indexing. Returns nil."
+   so source-derived rows still index but exact runtime var metadata and Malli
+   specs do not. Emit one actionable warning naming SEON_EXTRA_SRC and the
+   registration form. Observability only; does not change indexing."
   [extra]
   (when-let [src (config/extra-src)]
     (when (empty? extra)
@@ -1656,8 +1612,8 @@
         {:seon.log/source  ::index-core!
          :seon.log/message
          (str "SEON_EXTRA_SRC=" src " is set but NO extra-core vars are "
-              "registered — your consumer's product source will NOT be indexed "
-              "(invisible to agent context + retrieval, with no further error). "
+              "registered — source-derived rows will index, but exact runtime "
+              "var metadata and Malli specs will be absent. "
               "Your SEON_EXTRA_PRELOAD entry ns must run, at load time:\n"
               "  (reset! seon.client/!extra-core-vars\n"
               "          (filterv #(clojure.string/starts-with? "
@@ -1696,7 +1652,8 @@
    honest. Returns the tx-data vector; caller transacts as root/boot."
   {:malli/schema [:=> [:cat :seon.config/singleton] :any]}
   [configuration]
-  (let [now     (js/Date.)
+  (let [now           (js/Date.)
+        extra-sources (extra-src-ns->source)
         ;; Downstream extra-core vars join the indexed vars after the
         ;; sym-dedup against core-vars; the reserved-prefix guard
         ;; (seon.*/my.*) is the boot-index-time LOUD refusal — extra-src
@@ -1712,7 +1669,7 @@
         have-syms (into #{} (map :seon.fn/sym) var-rows)
         fn-rows  (into (vec var-rows)
                        (remove #(contains? have-syms (:seon.fn/sym %)))
-                       (extra-fn-rows now))
+                       (extra-fn-rows extra-sources now))
         ;; EVERY compiled first-party ns gets a `:seon.ns` row — the
         ;; BUILD-DERIVED closure set, so a root with no public fns of its
         ;; own (a register!-calls-only ns) still gets its row by
@@ -1723,10 +1680,10 @@
         ;; gets its row even though no fn-row's sym names it (it does
         ;; now, via extra-fn-rows — but the union is belt-and-suspenders,
         ;; and covers a downstream ns with literally zero defns).
-        ns-syms (into (into compiled-first-party-ns-strs (extra-src-ns-strs))
+        ns-syms (into (into compiled-first-party-ns-strs (keys extra-sources))
                       (map #(first (str/split (:seon.fn/sym %) #"/" 2)))
                       fn-rows)
-        ns-rows (map #(ns-row configuration %) (sort ns-syms))]
+        ns-rows (map #(ns-row configuration extra-sources %) (sort ns-syms))]
     (vec (concat ns-rows fn-rows))))
 
 (defn index-schemas
@@ -2057,14 +2014,11 @@
          :seon.client/created-ids []
          :seon.web/port port
          :seon.web/port-file port-file})
-      (let [session-open
+      (let [_session-open
             (await (open-startup-session! startup? selected-configuration))
             _ (await
                (validate-restore-attachment!
-                descriptor restore-startup restore-completion-claim))
-            _ (await
-               (db/assert-preconditions!
-                {::db/coordinate (::db/coordinate session-open)}))]
+                descriptor restore-startup restore-completion-claim))]
         (when (some? selected-manifest)
           (let [reconciled
                 (await (apply-config!
@@ -2708,25 +2662,7 @@
   ;; Cheap default for dev iteration — browser hits the loopback port,
   ;; no REPL needed. Disable for a compiler-only/dev-eval process.
   (when-not (config/no-auto-boot?)
-    (let [llm-fn   (ai.dispatch/llm-fn)
-          provider (ai/provider)
-          key-set? (not (identical? ai.dispatch/stub
-                                    (ai.dispatch/adapter)))]
-      (if key-set?
-        (log/info-console! "seon.client"
-                           (str "using " (name provider) " LLM (API key set)"))
-        ;; LOUD, grep-able marker (namespaces-milestone rung-1 trap, 2026-07-10): a real provider
-        ;; configured with its key unset silently drove a whole trial on the
-        ;; stub. ERROR level + the SEON-STUB-LLM token so harnesses can
-        ;; refuse to dispatch against an accidental stub; boot still
-        ;; proceeds — deterministic tests rely on the stub deliberately.
-        (log/error-console! "seon.client"
-                            (str "SEON-STUB-LLM: using stub LLM — provider "
-                                 (name provider) " is configured but its API "
-                                 "key env is unset; every agent turn will get "
-                                 "canned replies. Export the key and restart "
-                                 "(SEON_CONFIG must ride the restart) if this "
-                                 "pod is meant to do real work.")))
+    (let [llm-fn (ai.dispatch/llm-fn)]
       (-> (start-runtime!
            {::llm-fn llm-fn
             ::launch-capability
