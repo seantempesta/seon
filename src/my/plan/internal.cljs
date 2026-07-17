@@ -68,43 +68,166 @@
   [id]
   (when id [:seon.agent/id id]))
 
-(defn agent-eid
-  "Resolve an agent ref (lookup-ref/eid) to its eid in db value `db`, or nil."
-  [db agent]
-  (:db/id (db/entity db agent)))
-
-(defn status-of
-  "Current :my.plan/status of step `id`, or nil when no such step."
-  [id]
-  (ffirst (db/query {:seon.db/query '[:find ?s :in $ ?id
-                                      :where
-                                      [?t :my.plan/id ?id]
-                                      [?t :my.plan/status ?s]]
-                     :seon.db/args  [id]})))
-
-(defn unresolved-step-refs
-  "Refs that do not resolve to stored plan steps in database value `db`.
-
-   A related step must resolve to an entity carrying `:my.plan/id`; a ref to
-   another entity is not a dependency or parent. Malformed lookup refs are
-   unresolved user input, not exceptions allowed to escape an agent verb."
-  [db refs]
-  (into []
-        (remove
-          (fn [ref]
-            (try
-              (boolean (:my.plan/id (db/entity db ref)))
-              (catch :default _ false))))
-        refs))
-
 (defn write-result
-  "transact! envelope → :my.plan/write-response (tx-report stays
-   off this surface)."
-  [fn-name id env]
-  (if (:seon.db/ok? env)
+  "Convert a transaction report into a plan write response."
+  [fn-name id report]
+  (if-not (:seon.error/message report)
     {:my.plan/ok? true :my.plan/id id}
     (fail (str fn-name ": db write failed — "
-               (get-in env [:seon.db/error :seon.error/message])))))
+               (:seon.error/message report)))))
+
+;; --- Ordinary plan rows ---------------------------------------------------
+;; The public my.plan surface acquires these rows from the writer in one
+;; bounded request.  Everything below is an immutable projection over that
+;; data: no pod-local Datahike value, entity wrapper, index, or cache.
+
+(defn row-id [row] (:my.plan/id row))
+(defn row-parent-id [row] (:my.plan/id (:my.plan/parent row)))
+(defn row-need-ids [row]
+  (into #{} (keep :my.plan/id) (:my.plan/needs row)))
+
+(defn rows-for-agent
+  [rows agent-ref]
+  (let [agent-id (second agent-ref)]
+    (filterv #(= agent-id (get-in % [:my.plan/agent :seon.agent/id])) rows)))
+
+(defn rows-by-id [rows]
+  (into {} (map (juxt row-id identity)) rows))
+
+(defn- child-ids [rows id]
+  (into [] (keep #(when (= id (row-parent-id %)) (row-id %))) rows))
+
+(defn descendant-ids-from-rows
+  [rows id]
+  (loop [pending (child-ids rows id) seen #{}]
+    (if-let [candidate (first pending)]
+      (if (seen candidate)
+        (recur (subvec pending 1) seen)
+        (recur (into (subvec pending 1) (child-ids rows candidate))
+               (conj seen candidate)))
+      (vec seen))))
+
+(defn- has-open-work?
+  [by-id children id seen]
+  (when-not (seen id)
+    (let [row (by-id id)
+          child-ids (children id)]
+      (if (seq child-ids)
+        (boolean (some #(has-open-work? by-id children % (conj seen id))
+                       child-ids))
+        (contains? #{:open :active :blocked} (:my.plan/status row))))))
+
+(defn blocked-from-rows?
+  [rows id]
+  (let [by-id (rows-by-id rows)
+        children #(child-ids rows %)
+        row (by-id id)]
+    (boolean
+      (or (= :blocked (:my.plan/status row))
+          (some #(has-open-work? by-id children % #{}) (row-need-ids row))))))
+
+(defn ready-from-rows?
+  [rows id]
+  (let [by-id (rows-by-id rows)
+        row (by-id id)
+        children #(child-ids rows %)
+        ids (children id)]
+    (boolean
+      (and (= :open (:my.plan/status row))
+           (not (blocked-from-rows? rows id))
+           (or (empty? ids)
+               (not (some #(has-open-work? by-id children % #{id}) ids)))))))
+
+(defn plan-rollup-from-rows
+  [rows id]
+  (let [by-id (rows-by-id rows)
+        ids (conj (set (descendant-ids-from-rows rows id)) id)
+        leaves (filter #(empty? (child-ids rows %)) ids)
+        total (count leaves)
+        done (count (filter #(= :done (:my.plan/status (by-id %))) leaves))]
+    {:my.plan/done done
+     :my.plan/total total
+     :my.plan/done? (and (pos? total) (= done total))}))
+
+(defn status-view-from-rows
+  [rows id]
+  (let [{:my.plan/keys [done total done?]} (plan-rollup-from-rows rows id)]
+    {:my.plan/id id
+     :my.plan/done? done?
+     :my.plan/blocked? (blocked-from-rows? rows id)
+     :my.plan/ready? (ready-from-rows? rows id)
+     :my.plan/progress {:my.plan/done done :my.plan/total total}}))
+
+(defn ready-leaves-from-rows
+  [rows]
+  (->> rows
+       (filter #(ready-from-rows? rows (row-id %)))
+       (sort-by #(.getTime ^js (:my.plan/created-at %)))
+       (mapv #(select-keys % [:my.plan/id :my.plan/title :my.plan/created-at]))))
+
+(defn active-steps-from-rows
+  [rows]
+  (->> rows
+       (filter #(= :active (:my.plan/status %)))
+       (sort-by #(.getTime ^js (:my.plan/created-at %)))
+       vec))
+
+(defn ancestor-chain-from-rows
+  [rows id]
+  (let [by-id (rows-by-id rows)]
+    (loop [chain () current id seen #{}]
+      (if (or (nil? current) (seen current))
+        (vec chain)
+        (let [row (by-id current)]
+          (recur (cons (select-keys row [:my.plan/id :my.plan/title
+                                         :my.plan/goal :my.plan/pace]) chain)
+                 (row-parent-id row)
+                 (conj seen current)))))))
+
+(defn anchor-from-rows
+  [rows]
+  (let [active (first (active-steps-from-rows rows))
+        step (or active (first (ready-leaves-from-rows rows)))]
+    (when step
+      (let [chain (ancestor-chain-from-rows rows (row-id step))
+            root (first chain)]
+        {:my.plan/step step
+         :my.plan/chain chain
+         :my.plan/active? (some? active)
+         :my.plan/progress (plan-rollup-from-rows rows (row-id root))}))))
+
+(defn subtree-from-rows
+  [rows id]
+  (let [by-id (rows-by-id rows)]
+    (letfn [(build [current seen]
+              (when-let [row (and (not (seen current)) (by-id current))]
+                (let [children (into [] (keep #(build % (conj seen current)))
+                                     (child-ids rows current))
+                      node (select-keys row [:my.plan/id :my.plan/title
+                                             :my.plan/status :my.plan/goal
+                                             :my.plan/expect :my.plan/pace
+                                             :my.plan/description
+                                             :my.plan/needs])]
+                  (cond-> node (seq children)
+                    (assoc :my.plan/_parent children)))))]
+      (build id #{}))))
+
+(defn forest-from-rows
+  [rows]
+  (->> rows
+       (filter #(nil? (row-parent-id %)))
+       (sort-by #(.getTime ^js (:my.plan/created-at %)))
+       (keep #(subtree-from-rows rows (row-id %)))
+       vec))
+
+(defn open-steps-from-rows
+  [rows]
+  (->> rows
+       (remove #(= :done (:my.plan/status %)))
+       (sort-by #(.getTime ^js (:my.plan/created-at %)))
+       (mapv #(select-keys % [:my.plan/id :my.plan/title :my.plan/status
+                              :my.plan/created-at :my.plan/description
+                              :my.plan/message]))))
 
 ;; --- Loud unknown-key guard (registry class: silent unknown-key acceptance
 ;; --- in my.* request maps). A request map is OPEN — the eval boundary
@@ -178,175 +301,12 @@
     (or (unknown-key-fail fn-name request (schema-map-keys :my.plan/plan-request))
         (some #(when (map? %) (check-node %)) (:my.plan/children request)))))
 
-;; --- Derived work-queue queries — all pure Datalog over the graph, with
-;; --- [[rules]] as `%`. Nothing here is stored; blocked-ness, ready-ness,
-;; --- roll-up, and the position anchor recompute from the facts every read.
-
-(defn ready-leaves
-  "Ready steps (open, unblocked — a leaf, or a drained non-leaf to verify and
-   close) owned by `agent-eid`, oldest first, as `[{:id :title :created-at} …]`.
-   Sorted in CLJS — `:seon.db/order-by` is not a `seon.db/query` request key."
-  [db agent-eid]
-  (->> (db/query {:seon.db/db db
-                  :seon.db/query
-                  '[:find ?id ?title ?created
-                    :in $ % ?a
-                    :where
-                    [?t :my.plan/agent ?a]
-                    (ready ?t)
-                    [?t :my.plan/id ?id]
-                    [?t :my.plan/title ?title]
-                    [?t :my.plan/created-at ?created]]
-                  :seon.db/args [rules agent-eid]})
-       (sort-by #(.getTime ^js (nth % 2)))
-       (mapv (fn [[id title created]]
-               {:my.plan/id         id
-                :my.plan/title      title
-                :my.plan/created-at created}))))
-
-(defn active-steps
-  "The `agent-eid`'s :active steps, oldest first, as
-   `[{:id :title :expect?} …]`. ONE is the intended cardinality (active!
-   demotes the rest); a vector so a hand-transacted second active still
-   surfaces instead of vanishing."
-  [db agent-eid]
-  (->> (db/query {:seon.db/db db
-                  :seon.db/query
-                  '[:find ?t ?id ?title ?created
-                    :in $ ?a
-                    :where
-                    [?t :my.plan/agent ?a]
-                    [?t :my.plan/status :active]
-                    [?t :my.plan/id ?id]
-                    [?t :my.plan/title ?title]
-                    [?t :my.plan/created-at ?created]]
-                  :seon.db/args [agent-eid]})
-       (sort-by #(.getTime ^js (nth % 3)))
-       (mapv (fn [[e id title _]]
-               (let [expect (:my.plan/expect (db/entity db e))]
-                 (cond-> {:my.plan/id id :my.plan/title title}
-                   expect (assoc :my.plan/expect expect)))))))
-
-(defn ancestor-chain
-  "Step `id`'s ancestor chain as `[root … parent self]` of trimmed maps
-   (id/title + goal/pace when present) — the path the anchor narrates.
-   Walks the plain `parent` ref; cycle-safe via a seen set."
-  [db id]
-  (loop [chain () cur id seen #{}]
-    (if (or (nil? cur) (seen cur))
-      (vec chain)
-      (let [e (db/entity db [:my.plan/id cur])
-            node (cond-> {:my.plan/id cur :my.plan/title (:my.plan/title e)}
-                   (:my.plan/goal e) (assoc :my.plan/goal (:my.plan/goal e))
-                   (:my.plan/pace e) (assoc :my.plan/pace (:my.plan/pace e)))]
-        (recur (cons node chain)
-               (:my.plan/id (:my.plan/parent e))
-               (conj seen cur))))))
-
-(defn descendant-ids
-  "Ids of every node strictly under `id` (transitive, via `descendant`)."
-  [db id]
-  (vec (db/query {:seon.db/db db
-                  :seon.db/query
-                  '[:find [?cid ...]
-                    :in $ % ?root
-                    :where
-                    [?r :my.plan/id ?root]
-                    (descendant ?r ?c)
-                    [?c :my.plan/id ?cid]]
-                  :seon.db/args [rules id]})))
-
-(defn rollup
-  "Done/total over the leaves in `id`'s subtree (INCLUDING `id` itself when
-   it is a leaf). `done?` = every such leaf done. Relation-find `[?l ?s]`
-   (NOT a collection-find, which dedups by status and would mis-count)."
-  [db id]
-  (let [desc (db/query {:seon.db/db db
-                        :seon.db/query
-                        '[:find ?l ?s
-                          :in $ % ?pid
-                          :where
-                          [?p :my.plan/id ?pid]
-                          (descendant ?p ?l)
-                          (leaf ?l)
-                          [?l :my.plan/status ?s]]
-                        :seon.db/args [rules id]})
-        self (db/query {:seon.db/db db
-                        :seon.db/query
-                        '[:find ?p ?s
-                          :in $ % ?pid
-                          :where
-                          [?p :my.plan/id ?pid]
-                          (leaf ?p)
-                          [?p :my.plan/status ?s]]
-                        :seon.db/args [rules id]})
-        rows  (into (set desc) self)
-        total (count rows)
-        done  (count (filter #(= :done (second %)) rows))]
-    {:my.plan/done  done
-     :my.plan/total total
-     :my.plan/done? (and (pos? total) (= done total))}))
-
-(defn blocked?
-  "True iff `id` is stored :blocked OR some `needs` target has open work."
-  [db id]
-  (boolean (seq (db/query {:seon.db/db db
-                           :seon.db/query
-                           '[:find ?t :in $ % ?id
-                             :where [?t :my.plan/id ?id] (blocked ?t)]
-                           :seon.db/args [rules id]}))))
-
-(defn ready?
-  "True iff `id` is open, unblocked, and ready — an actionable leaf or a
-   drained non-leaf whose only remaining action is verify-and-close."
-  [db id]
-  (boolean (seq (db/query {:seon.db/db db
-                           :seon.db/query
-                           '[:find ?t :in $ % ?id
-                             :where [?t :my.plan/id ?id] (ready ?t)]
-                           :seon.db/args [rules id]}))))
-
-(defn status-view
-  "Derived one-node view: done?/blocked?/ready? + the subtree progress."
-  [db id]
-  (let [{:my.plan/keys [done total done?]} (rollup db id)]
-    {:my.plan/id       id
-     :my.plan/done?    done?
-     :my.plan/blocked? (blocked? db id)
-     :my.plan/ready?   (ready? db id)
-     :my.plan/progress {:my.plan/done  done
-                        :my.plan/total total}}))
-
-;; --- The position ANCHOR — derived, never stored. "Where the agent IS":
-;; --- the :active step (or the first ready leaf), its ancestor chain to the
-;; --- root, and the root's done/total roll-up.
-
-(defn anchor
-  "The `agent-eid`'s derived position, or nil when no plan work exists.
-
-   `{:my.plan/step <active-or-first-ready> :my.plan/chain [root … self]
-     :my.plan/active? <bool> :my.plan/progress <root rollup>}`. The :active
-   step wins; with none, the oldest ready leaf is the presumed next
-   position."
-  [db agent-eid]
-  (let [active (first (active-steps db agent-eid))
-        step   (or active (first (ready-leaves db agent-eid)))]
-    (when step
-      (let [chain (ancestor-chain db (:my.plan/id step))
-            root  (first chain)]
-        {:my.plan/step     step
-         :my.plan/chain    chain
-         :my.plan/active?  (some? active)
-         :my.plan/progress (rollup db (:my.plan/id root))}))))
-
 ;; --- The document compiler — ONE compile for plan! AND reconcile!. --------
 ;; --- Authoring IS reconciling against an empty tree: plan! delegates via
 ;; --- [[compile-plan]] with a nil db (empty baseline), reconcile! diffs the
 ;; --- edited document against the caller's live open tree. Cross-sibling
 ;; --- edges link by STRING TEMPID, never same-tx lookup-refs (a lookup-ref
 ;; --- to a not-yet-asserted sibling throws `:entity-id/missing`).
-
-(declare pull-subtree root-ids)   ; the tree-pull section below — one-way dep
 
 (defn doc-children
   "A document node's children — the pull shape (`:my.plan/_parent`) and the
@@ -385,16 +345,6 @@
             []
             forest)))
 
-(defn status-in
-  "Current :my.plan/status of step `id` in db VALUE `db`, or nil."
-  [db id]
-  (ffirst (db/query {:seon.db/db db
-                     :seon.db/query '[:find ?s :in $ ?id
-                                      :where
-                                      [?t :my.plan/id ?id]
-                                      [?t :my.plan/status ?s]]
-                     :seon.db/args [id]})))
-
 (defn prune-done
   "Tree/forest with every `:done` node (and its whole subtree) removed —
    the OPEN projection behind `my.plan/document`. History can't be edited
@@ -411,13 +361,6 @@
       (map? t)    (prune t)
       (vector? t) (into [] (keep prune) t)
       :else       t)))
-
-(defn open-forest
-  "The `agent-eid`'s OPEN plan forest — [[pull-subtree]] per root, `:done`
-   pruned. The SAME projection `my.plan/document` returns, so a round-trip
-   reconcile is a no-op by construction."
-  [db agent-eid]
-  (into [] (keep #(prune-done (pull-subtree db %))) (root-ids db agent-eid)))
 
 (defn flatten-open
   "Open forest to the compiler's namespaced baseline rows."
@@ -578,7 +521,7 @@
   "The post-resolution compile behind [[compile-reconcile]]: identity-
    resolved `entries` + the open `baseline` → the flat tx + the receipt
    fields (`{::error …}` on a bad id / label / needs reference)."
-  [db fn-name agent entries resolved-root? baseline ids now]
+  [known-status fn-name agent entries resolved-root? baseline ids now]
   (let [entries  (vec (map-indexed
                         (fn [i e]
                           (if (::id e)
@@ -600,9 +543,7 @@
     (or
       (some (fn [{::keys [id]}]
               (when id
-                ;; db is nil only on the plan! path, whose node schema has
-                ;; no ::id — so `db` is always bound when ids appear.
-                (let [s (and db (status-in db id))]
+                (let [s (known-status id)]
                   (cond
                     (nil? s)
                     {::error (str fn-name ": no step " (pr-str id) " — keep "
@@ -631,7 +572,7 @@
                         {::error (str fn-name ": unrecognizable :my.plan/needs "
                                       "entry on «" (:my.plan/title node)
                                       "» — use {:my.plan/id \"…\"}.")}
-                        (and db (nil? (status-in db nid)))
+                        (nil? (known-status nid))
                         {::error (str fn-name ": :my.plan/needs names unknown step "
                                       (pr-str nid) ".")}))
                     (doc-needs-ids node)))
@@ -740,14 +681,26 @@
    naming the candidates (never a guess-mint) — and only a genuinely new
    node is minted; a baseline open node absent
    from the document is dropped (entity retract; its absent descendants
-   drop the same way); a `:done` or foreign id → `:error`. `db` nil ⇒
+   drop the same way); a `:done` or foreign id → `:error`. Empty `rows` ⇒
    empty baseline — plan!'s authoring path IS reconcile-against-empty.
    `:after` labels resolve to any node's `:my.plan/ref` (tempid for a
    minted node, lookup-ref for an existing one)."
-  [db fn-name agent forest ids now]
-  (let [raw      (collect-doc-nodes forest)
-        oe       (when db (agent-eid db agent))
-        baseline (if oe (flatten-open (open-forest db oe)) {})]
+  [rows fn-name agent forest ids now]
+  (let [raw (collect-doc-nodes forest)
+        all-by-id (rows-by-id rows)
+        owned (rows-for-agent rows agent)
+        open-rows (remove #(= :done (:my.plan/status %)) owned)
+        baseline
+        (into {}
+              (map (fn [row]
+                     [(row-id row)
+                      (-> (select-keys row [:my.plan/title :my.plan/description
+                                            :my.plan/expect :my.plan/goal
+                                            :my.plan/pace])
+                          (assoc ::parent-id (row-parent-id row)
+                                 ::need-ids (row-need-ids row)))]))
+              open-rows)
+        known-status #(some-> (all-by-id %) :my.plan/status)]
     (or
       (some (fn [{::keys [node]}]
               (let [t (:my.plan/title node)]
@@ -762,7 +715,7 @@
       (let [res (resolve-doc-identities fn-name raw baseline)]
         (if (::error res)
           res
-          (compile-resolved db fn-name agent (::entries res)
+          (compile-resolved known-status fn-name agent (::entries res)
                             (::resolved-root? res) baseline ids now))))))
 
 (defn compile-plan
@@ -770,27 +723,7 @@
    (authoring IS reconciling against an empty tree; one code path). Same
    namespaced compiler contract as [[compile-reconcile]]."
   [agent root ids now]
-  (compile-reconcile nil "plan!" agent [root] ids now))
-
-(defn ^:async retract-subtree!
-  "Retract `id` AND its whole subtree (the plain `parent` ref does NOT
-   cascade, so we walk descendants and `retractEntity` each). Unknown id →
-   fail envelope. History keeps every retracted node — undo is a `db/as-of`
-   away."
-  [id]
-  (if (nil? (status-of id))
-    (fail (str "drop!: no step " (pr-str id)
-               " — (my.plan/tree {}) lists every step id (drop! deletes the "
-               "step and its whole subtree)."))
-    (let [db  @db/*conn*
-          ids (distinct (conj (descendant-ids db id) id))
-          env (await (db/transact!
-                       {:seon.db/tx-data
-                        (mapv (fn [i] [:db.fn/retractEntity [:my.plan/id i]]) ids)}))]
-      (if (:seon.db/ok? env)
-        {:my.plan/ok? true :my.plan/dropped (count ids)}
-        (fail (str "drop!: store failed — "
-                   (get-in env [:seon.db/error :seon.error/message])))))))
+  (compile-reconcile [] "plan!" agent [root] ids now))
 
 ;; --- Tree pull (the structural read behind my.plan/tree). -----------------
 
@@ -802,34 +735,6 @@
     :my.plan/pace :my.plan/description
     {:my.plan/_parent ...}
     {:my.plan/needs [:my.plan/id]}])
-
-(defn pull-subtree
-  "Nested-EDN subtree rooted at step `id` (nil when `id` doesn't resolve)."
-  [db id]
-  (db/pull db tree-pattern [:my.plan/id id]))
-
-(defn root-ids
-  "Ids of `agent-eid`'s steps with no parent edge — the forest roots."
-  [db agent-eid]
-  (vec (db/query {:seon.db/db db
-                  :seon.db/query
-                  '[:find [?id ...]
-                    :in $ ?a
-                    :where
-                    [?t :my.plan/agent ?a]
-                    [?t :my.plan/id ?id]
-                    (not-join [?t] [?t :my.plan/parent _])]
-                  :seon.db/args [agent-eid]})))
-
-(defn all-root-ids
-  "Ids of EVERY step with no parent edge, any agent — the forest's roots."
-  [db]
-  (vec (db/query {:seon.db/db db
-                  :seon.db/query
-                  '[:find [?id ...]
-                    :where
-                    [?t :my.plan/id ?id]
-                    (not-join [?t] [?t :my.plan/parent _])]})))
 
 ;; --- The stuck×N → frontier re-plan ESCALATION (all DERIVED). -------------
 ;; --- A wedge = the ▶ :active step under which the SAME failure root has
@@ -871,27 +776,6 @@
     (try (:seon.error/kind (edn/read-string s))
          (catch :default _ nil))))
 
-(defn- evals-since
-  "The agent's eval rows transacted AFTER tx `since-tx`, oldest first.
-
-   Pulled projections (`id/ok?/source/error/error-data`) ordered by the
-   eval datom's own tx — monotonic tx eids, no wall-clock comparison."
-  [db agent-eid since-tx]
-  (->> (db/query {:seon.db/db db
-                  :seon.db/query
-                  '[:find ?e ?etx
-                    :in $ ?a ?stx
-                    :where
-                    [?e :seon.eval/agent ?a]
-                    [?e :seon.eval/ok? _ ?etx]
-                    [(> ?etx ?stx)]]
-                  :seon.db/args [agent-eid since-tx]})
-       (sort-by second)
-       (mapv (fn [[e _]]
-               (db/pull db [:seon.eval/id :seon.eval/ok? :seon.eval/source
-                            :seon.eval/error :seon.eval/error-data]
-                        e)))))
-
 (defn wedge
   "The dominant live failure streak in ordered eval `rows`, or nil.
 
@@ -927,78 +811,6 @@
                :my.plan/last-error (or (:seon.eval/error (peek fails)) "")}
         kind (assoc :my.plan/root-kind kind)))))
 
-(defn escalation
-  "The `agent-eid`'s escalation-flagged ▶ step, or nil — pure query.
-
-   Flagged = since the current `:active` assertion's tx (the datom's own
-   tx — no history walk, no stored activated-at), the agent's eval log
-   shows a [[wedge]] of ≥ `n` (default [[escalation-stuck-n]]) same-root
-   failures with no same-call success between. Gated on the queried
-   attrs being installed (a fresh cluster with no evals renders no
-   band, never throws)."
-  ([db agent-eid] (escalation db agent-eid escalation-stuck-n))
-  ([db agent-eid n]
-   (let [installed (db/installed-schema db)]
-     (when (every? #(contains? installed %)
-                   [:my.plan/status :seon.eval/agent :seon.eval/ok?])
-       (when-let [[sid title stx]
-                  (->> (db/query {:seon.db/db db
-                                  :seon.db/query
-                                  '[:find ?id ?title ?tx
-                                    :in $ ?a
-                                    :where
-                                    [?t :my.plan/agent ?a]
-                                    [?t :my.plan/status :active ?tx]
-                                    [?t :my.plan/id ?id]
-                                    [?t :my.plan/title ?title]]
-                                  :seon.db/args [agent-eid]})
-                       (sort-by #(nth % 2) >)
-                       first)]
-         (when-let [w (wedge (evals-since db agent-eid stx) n)]
-           (merge w {:my.plan/id sid :my.plan/title title})))))))
-
-(defn planner-for
-  "The cluster's PLANNER for a flagged `worker-id`, derived — or nil.
-
-   A live (non-terminated) agent ≠ the worker whose RESOLVED provider
-   (`seon.ai/resolved-config` over this db — agent override → config row
-   → default) is a frontier one. When several qualify, the one whose tx
-   provenance shows it AUTHORED the flagged step wins (the W3 shape: the
-   planner authored the worker's plan); ties break by sorted id."
-  [db worker-id flagged-step-id]
-  (let [cands (->> (db/query {:seon.db/db db
-                              :seon.db/query '[:find [?id ...]
-                                               :where
-                                               [?a :seon.agent/id ?id]
-                                               [?a :seon.eval/home-requires _]]})
-                   sort
-                   (remove #{worker-id})
-                   (filter (fn [id]
-                             (let [e (db/entity db [:seon.agent/id id])]
-                               (nil? (:seon.agent/terminated-at e)))))
-                   (filter (fn [id]
-                             (ai/frontier-provider?
-                               (get-in (ai/resolved-config
-                                         {:seon.db/db db :seon.agent/id id})
-                                       [:seon.ai/resolved-config
-                                        :seon.ai/provider]))))
-                   vec)
-        authors (when (and flagged-step-id
-                           (contains? (db/installed-schema db)
-                                      :seon.db/user))
-                  (set (db/query {:seon.db/db db
-                                  :seon.db/query
-                                  '[:find [?aid ...]
-                                    :in $ ?sid
-                                    :where
-                                    [?t :my.plan/id ?sid]
-                                    [?t _ _ ?tx]
-                                    [?tx :seon.db/user ?author]
-                                    [?author :seon.agent/id ?aid]]
-                                  :seon.db/args [flagged-step-id]})))]
-    (or (first (filter (or authors #{}) cands))
-        (first cands))))
-
 (defn consult-marker
   "The episode-identity line a consult message embeds — derived from the
    flag query's own inputs (step id + first-fail eval id), so
@@ -1006,21 +818,6 @@
   [step-id episode]
   (str "[escalation :my.plan/step " (pr-str step-id)
        " :my.plan/episode " (pr-str episode) "]"))
-
-(defn consult-sent?
-  "Whether `agent-eid` already sent a message carrying `marker` — the
-   fired-once-per-episode check, derived from the message log."
-  [db agent-eid marker]
-  (->> (db/query {:seon.db/db db
-                  :seon.db/query
-                  '[:find ?m ?c
-                    :in $ ?from
-                    :where
-                    [?m :seon.agent.message/from ?from]
-                    [?m :seon.agent.message/content ?c]]
-                  :seon.db/args [agent-eid]})
-       (some (fn [[_ c]] (str/includes? c marker)))
-       boolean))
 
 (defn- comment-lines
   "String `s` as `; `-prefixed comment lines (the context is eval'able
@@ -1057,22 +854,6 @@
                 "(my.plan/reconcile!) before retrying the form.")))
     ""))
 
-(defn escalation-section
-  "The reactive STUCK band for [[plan-body]] — \"\" unless [[escalation]]
-   flags the ▶ step right now. One factual block: the step, the repeated
-   failure ONCE (root + latest error, clipped), and the consult status —
-   planner consulted (derived from the message log) / consult pending /
-   no frontier planner in this cluster. Vanishes the moment the wedge
-   breaks (a same-call success, a step change, a re-plan)."
-  [db agent-eid agent-id]
-  (let [escalation (escalation db agent-eid)
-        {:my.plan/keys [id episode]} escalation
-        planner (when escalation (planner-for db agent-id id))
-        sent? (and planner
-                   (consult-sent? db agent-eid
-                                  (consult-marker id episode)))]
-    (format-escalation-section escalation planner sent?)))
-
 (defn- consult-content
   "The consult message body: the episode marker, the distilled failure
    envelope (once), the flagged subtree document, and the ask — revise
@@ -1080,17 +861,17 @@
    moment the receipt renders (the W3 turn-economy fix: the ask CARRIES
    its completion condition, so fulfilling it ends the run instead of
    leaking idle turns)."
-  [db worker-id {:my.plan/keys [id title root-sym root-kind fail-count
-                                last-error episode]}]
-  (let [doc (prune-done (pull-subtree db id))]
-    (str (consult-marker id episode) "\n"
+  [worker-id {:my.plan/keys [id title root-sym root-kind fail-count
+                             last-error episode]}
+   document]
+  (str (consult-marker id episode) "\n"
          "Worker " worker-id " is stuck on plan step " id " «" title
          "» — the same root has failed " fail-count
          "× since the step went :active (root " root-sym
          (when root-kind (str ", kind " root-kind)) "):\n"
          (tokens/clip-str last-error 80) "\n"
          "Flagged subtree (the worker's open document, EDN):\n"
-         (tokens/clip-str (pr-str doc) 400) "\n"
+         (tokens/clip-str (pr-str document) 400) "\n"
          "The ask — your zone only: read the worker's full open plan with "
          "(my.plan/document {:seon.agent/id \"" worker-id "\"}); revise "
          "ONLY this subtree — split it, sharpen its expects, reroute — and "
@@ -1099,7 +880,9 @@
          "Optionally send the worker ONE line of guidance: (message/agent "
          "\"" worker-id "\" \"…\"). When the reconcile receipt renders, "
          "the ask is fulfilled — call (complete \"re-planned " id "\") in "
-         "that SAME turn; further turns add nothing.")))
+         "that SAME turn; further turns add nothing."))
+
+(declare acquire-plan-block)
 
 (defn ^:async maybe-consult!
   "Fire the once-per-episode planner consult for a flagged agent.
@@ -1112,37 +895,49 @@
    `{:my.plan/consulted? bool :my.plan/consult-reason kw …}` — reasons
    `:not-flagged` / `:no-planner` / `:already-consulted` / `:sent` /
    `:send-failed`. Never throws."
-  [{agent-id :seon.agent/id}]
+  [{agent-id :seon.agent/id database ::db/db}]
   (try
-    (let [db  @db/*conn*
-          oe  (agent-eid db [:seon.agent/id agent-id])
-          esc (when oe (escalation db oe))]
-      (if-not esc
+    (let [database (or database (await (db/db)))
+          acquired (if (:seon.error/message database)
+                     database
+                     (await (acquire-plan-block
+                             {::db/db database :seon.agent/id agent-id})))
+          consult (::consult acquired)]
+      (cond
+        (:seon.error/message acquired)
+        (merge acquired
+               {:my.plan/consulted? false
+                :my.plan/consult-reason :send-failed})
+
+        (nil? consult)
         {:my.plan/consulted? false :my.plan/consult-reason :not-flagged}
-        (let [{:my.plan/keys [id episode]} esc
-              planner (planner-for db agent-id id)
-              marker  (consult-marker id episode)]
+
+        :else
+        (let [escalation (::escalation consult)
+              planner (::planner consult)]
           (cond
             (nil? planner)
             {:my.plan/consulted? false :my.plan/consult-reason :no-planner}
 
-            (consult-sent? db oe marker)
+            (::consult-sent? consult)
             {:my.plan/consulted? false
              :my.plan/consult-reason :already-consulted}
 
             :else
             (let [env (await (msg/message!
-                               {:seon.agent.message/content
-                                (consult-content db agent-id esc)
+                               {::db/db database
+                                :seon.agent.message/content
+                                (consult-content agent-id escalation
+                                                 (::subtree consult))
                                 :seon.agent.message/from
                                 [:seon.agent/id agent-id]
                                 :seon.agent.message/to
                                 [[:seon.agent/id planner]]}))]
-              (if (:seon.agent.message/ok? env)
+              (if-not (:seon.error/message env)
                 {:my.plan/consulted?     true
                  :my.plan/consult-reason :sent
                  :my.plan/planner        planner
-                 :my.plan/episode        episode}
+                 :my.plan/episode        (:my.plan/episode escalation)}
                 (merge env {:my.plan/consulted?     false
                             :my.plan/consult-reason :send-failed})))))))
     (catch :default e
@@ -1161,22 +956,6 @@
    throws.)"
   [:my.plan/id :my.plan/title :my.plan/status
    :my.plan/created-at :my.plan/description :my.plan/message])
-
-(defn open-steps
-  "Unfinished (:open/:active/:blocked) steps in db value `db`, oldest first;
-   `agent-eid` nil = all agents."
-  [db agent-eid]
-  (let [q (if agent-eid
-            '[:find [?t ...] :in $ % ?o
-              :where (unfinished ?t) [?t :my.plan/agent ?o]]
-            '[:find [?t ...] :in $ %
-              :where [?t :my.plan/id _] (unfinished ?t)])]
-    (->> (db/query {:seon.db/db db
-                    :seon.db/query q
-                    :seon.db/args (if agent-eid [rules agent-eid] [rules])})
-         (map #(select-keys (db/pull db '[*] %) open-keys))
-         (sort-by #(.getTime ^js (:my.plan/created-at %)))
-         vec)))
 
 (def frontier-limit
   "Max ready steps the frontier renders — the constant-size guarantee. The
@@ -1344,7 +1123,13 @@
    (query-member planner-authors-query [step-id]
                  500000 100000 65536)
    (query-member consult-message-query [worker-id marker]
-                 1000000 1000000 4096)])
+                 1000000 1000000 4096)
+   {::protocol/operation protocol/pull-operation
+    ::protocol/selector tree-pattern
+    ::protocol/entity-id [:my.plan/id step-id]
+    :datahike.resource/max-work 5000000
+    :datahike.resource/max-results 200000
+    :datahike.resource/max-result-weight 1048576}])
 
 (defn- member-result
   [member]
@@ -1405,9 +1190,9 @@
         (first candidates))))
 
 (defn ^:async ^:private acquire-escalation-text
-  [coordinate agent-id active eval-member]
+  [database agent-id active eval-member]
   (if-not active
-    ""
+    {::escalation-text ""}
     (let [evals (mapv second (member-result eval-member))]
       (if-let [wedge-state (wedge evals escalation-stuck-n)]
         (let [escalation (merge wedge-state
@@ -1417,21 +1202,18 @@
                                      (:my.plan/episode escalation))
               acquired
               (await (db/execute-many
-                       {::db/coordinate coordinate
+                       {::db/db database
                         ::db/members
                         (escalation-acquisition-members
                           agent-id (:my.plan/id escalation) marker)
                         ::db/max-result-weight 393216}))]
-          (if-not (= coordinate (::db/coordinate acquired))
-            (acquisition-error
-              "escalation coordinate check"
-              {:seon.db/expected-coordinate coordinate
-               :seon.db/actual-coordinate (::db/coordinate acquired)})
+          (if (:seon.error/message acquired)
+            (acquisition-error "escalation read" acquired)
             (let [[candidates-member config-member authors-member
-                   message-member] (::db/results acquired)]
+                   message-member subtree-member] (::db/results acquired)]
               (if-not (every? #(true? (::protocol/success? %))
                               [candidates-member config-member authors-member
-                               message-member])
+                               message-member subtree-member])
                 (acquisition-error "escalation member"
                                    (::db/results acquired))
                 (let [global-provider
@@ -1445,29 +1227,29 @@
                       sent? (boolean
                               (and planner
                                    (seq (member-result message-member))))]
-                  (format-escalation-section escalation planner sent?))))))
-        ""))))
+                  {::escalation-text
+                   (format-escalation-section escalation planner sent?)
+                   ::escalation escalation
+                   ::planner planner
+                   ::consult-sent? sent?
+                   ::subtree (prune-done (member-result subtree-member))})))))
+        {::escalation-text ""}))))
 
 (defn ^:async ^:private acquire-plan-block
-  "Acquire the bounded plan prompt data at one database coordinate."
+  "Acquire the bounded plan prompt data at one immutable database value."
   [{agent-id :seon.agent/id :as input}]
-  (let [coordinate (or (::db/coordinate input)
-                       (::db/coordinate (db/current-tx-context)))]
-    (if-not coordinate
-      (acquisition-error
-        "acquisition"
-        {:seon.error/message
-         "Plan acquisition requires an exact database coordinate."})
+  (let [database (or (::db/db input)
+                     (::db/db (db/current-tx-context))
+                     (await (db/db)))]
+    (if (:seon.error/message database)
+      (acquisition-error "database acquisition" database)
       (let [initial (await (db/execute-many
-                             {::db/coordinate coordinate
+                             {::db/db database
                               ::db/members
                               (initial-acquisition-members agent-id)
                               ::db/max-result-weight 262144}))]
-        (if-not (= coordinate (::db/coordinate initial))
-          (acquisition-error
-            "coordinate check"
-            {:seon.db/expected-coordinate coordinate
-             :seon.db/actual-coordinate (::db/coordinate initial)})
+        (if (:seon.error/message initial)
+          (acquisition-error "initial read" initial)
           (let [[active-member ready-member done-member agent-member]
                 (::db/results initial)]
             (if-not (every? #(true? (::protocol/success? %))
@@ -1484,7 +1266,7 @@
                     active (first actives)
                     step (or active (first readies))]
                 (if-not step
-                  {::db/coordinate coordinate
+                  {::db/db database
                    :seon.agent/entity agent
                    ::anchor nil
                    ::actives actives
@@ -1492,7 +1274,7 @@
                    ::dones dones}
                   (let [selected
                         (await (db/execute-many
-                                  {::db/coordinate coordinate
+                                  {::db/db database
                                    ::db/members
                                    (selected-acquisition-members
                                     (:my.plan/id step)
@@ -1500,11 +1282,8 @@
                                     (:seon.db/tx active))
                                   ::db/max-result-weight
                                   (if active 2359296 131072)}))]
-                    (if-not (= coordinate (::db/coordinate selected))
-                      (acquisition-error
-                        "selected coordinate check"
-                        {:seon.db/expected-coordinate coordinate
-                         :seon.db/actual-coordinate (::db/coordinate selected)})
+                    (if (:seon.error/message selected)
+                      (acquisition-error "selected read" selected)
                       (let [[ancestor-member rollup-member eval-member]
                             (::db/results selected)]
                         (if-not (every?
@@ -1513,13 +1292,12 @@
                                     active (conj eval-member)))
                           (acquisition-error "selected member"
                                              (::db/results selected))
-                          (let [escalation-text
+                          (let [escalation
                                 (await (acquire-escalation-text
-                                         coordinate agent-id active eval-member))]
-                            (if (and (map? escalation-text)
-                                     (:seon.error/message escalation-text))
-                              escalation-text
-                              {::db/coordinate coordinate
+                                         database agent-id active eval-member))]
+                            (if (:seon.error/message escalation)
+                              escalation
+                              {::db/db database
                                :seon.agent/entity agent
                                ::anchor
                                {:my.plan/step step
@@ -1533,32 +1311,9 @@
                                ::actives actives
                                ::readies readies
                                ::dones dones
-                               ::escalation-text escalation-text})))))))))))))))
-
-(defn recent-done
-  "The `agent-eid`'s most-recently-completed steps (newest first), capped at
-   [[recent-done-limit]] — a derived memory of what was just accomplished so
-   the agent doesn't re-do closed setup. Only done steps carry
-   ::completed-at, so that attr doubles as the done filter; [] when
-   nothing's been finished."
-  [db agent-eid]
-  (->> (db/query {:seon.db/db db
-                  :seon.db/query
-                  '[:find ?id ?title ?at
-                    :in $ ?o
-                    :where
-                    [?t :my.plan/agent ?o]
-                    [?t :my.plan/status :done]
-                    [?t :my.plan/id ?id]
-                    [?t :my.plan/title ?title]
-                    [?t :my.plan/completed-at ?at]]
-                  :seon.db/args [agent-eid]})
-       (sort-by #(.getTime ^js (nth % 2)) >)
-       (take recent-done-limit)
-       (mapv (fn [[id title at]]
-               {:my.plan/id           id
-                :my.plan/title        title
-                :my.plan/completed-at at}))))
+                               ::escalation-text (::escalation-text escalation)
+                               ::consult (when (::escalation escalation)
+                                           escalation)})))))))))))))))
 
 (defn stamp
   "Compact ABSOLUTE creation time of `at` — UTC `YYYY-MM-DD HH:MM`, derived
@@ -1661,42 +1416,9 @@
                                        (done-section dones)]))]
     (if (str/blank? body) empty-plan-teaching body)))
 
-(defn plan-body
-  "Windowed plan text for `agent` in db value `db`.
-
-   Four bands, all DERIVED, nothing stored: (1) the position anchor —
-   where you ARE in which goal, (2) the STUCK escalation band — present
-   ONLY while [[escalation]] flags the ▶ step (vanishes when the wedge
-   breaks), (3) the open frontier — the :active step + the ready queue
-   (capped), (4) a small recently-completed tail (resume grounding). A 1000-step plan renders at constant size: the completed
-   interior is dropped from the prompt but stays queryable (`tree`,
-   `status`, `db/query`). Rides as `;` comments so the whole context reads
-   as eval'able Clojure. NO plan data ⇒ [[empty-plan-teaching]] — the
-   block teaches its own workflow exactly when nothing else can."
-  [db agent]
-  (if-let [oe (agent-eid db agent)]
-    (let [a          (anchor db oe)
-          aid        (:seon.agent/id (db/entity db agent))
-          actives    (active-steps db oe)
-          active-ids (into #{} (map :my.plan/id) actives)
-          unfinished (open-steps db oe)
-          actives*   (filterv #(active-ids (:my.plan/id %)) unfinished)
-          readies    (filterv (fn [{:my.plan/keys [id status]}]
-                                (and (not (active-ids id))
-                                     (= :open status)
-                                     (ready? db id)))
-                              unfinished)]
-      (format-plan-body
-        {::anchor a
-         ::actives actives*
-         ::readies readies
-         ::dones (recent-done db oe)
-         ::escalation-text (escalation-section db oe aid)}))
-    empty-plan-teaching))
-
 (defn ^:async plan-block
-  "Acquire and render the calling agent's bounded plan at the active database
-   coordinate. An agent with no plan data gets [[empty-plan-teaching]];
+  "Acquire and render the calling agent's bounded plan from one database
+   value. An agent with no plan data gets [[empty-plan-teaching]];
    everything else is derived and nothing is acknowledged or stored."
   {:malli/schema [:=> [:cat :seon.render/section-request :any] :string]}
   [input _invoke-selected!]
@@ -1753,11 +1475,35 @@
                     (:my.plan/id r)])
            rows))
 
+(def ^:private html-plan-selector
+  [:db/id :my.plan/id :my.plan/title :my.plan/status :my.plan/goal
+   :my.plan/pace :my.plan/expect :my.plan/description :my.plan/created-at
+   :my.plan/completed-at :my.plan/message
+   {:my.plan/agent [:seon.agent/id]}
+   {:my.plan/parent [:my.plan/id]}
+   {:my.plan/needs [:my.plan/id]}])
+
+(defn- ^:async acquire-html-plan-rows
+  [database agent-id]
+  (await
+   (db/query
+    {::db/db database
+     ::db/query
+     '[:find [(pull ?step ?selector) ...]
+       :in $ ?selector ?agent-id
+       :where
+       [?agent :seon.agent/id ?agent-id]
+       [?step :my.plan/agent ?agent]]
+     ::db/args [html-plan-selector agent-id]
+     ::db/max-work 5000000
+     ::db/max-results 200000
+     ::db/max-result-weight 2097152})))
+
 (defn- row->node
-  "Pulled step row `r` → one walked node map (children filled by caller)."
-  [eid->row waiters r children]
+  "Plan row `r` to one walked node map with caller-supplied children."
+  [by-id waiters r children]
   (let [needs (->> (:my.plan/needs r)
-                   (keep (fn [n] (eid->row (:db/id n))))
+                   (keep (fn [need] (by-id (:my.plan/id need))))
                    (mapv (fn [nr] {:my.plan/id    (:my.plan/id nr)
                                    :my.plan/title (:my.plan/title nr)})))]
     (cond-> {:my.plan/id       (:my.plan/id r)
@@ -1775,31 +1521,17 @@
       (:my.plan/completed-at r) (assoc :my.plan/completed-at
                                        (:my.plan/completed-at r))
       (seq needs)               (assoc :my.plan/needs needs)
-      (seq (waiters (:db/id r))) (assoc :my.plan/waiters
-                                        (waiters (:db/id r))))))
+      (seq (waiters (:my.plan/id r))) (assoc :my.plan/waiters
+                                             (waiters (:my.plan/id r))))))
 
 (defn- build-forest
-  "The `agent-eid`'s whole plan forest as nested node maps.
-
-   ONE query for the step eids, one `[*]` pull per step (plain data —
-   the same primitives [[open-steps]] uses), then a pure assembly:
-   children from the forward `parent` ref, `waiters` (what waits on a
-   step) from the inverted `needs` edges. Cycle-safe; oldest-first."
-  [db agent-eid]
-  (let [rows     (->> (db/query {:seon.db/db db
-                                 :seon.db/query
-                                 '[:find [?t ...]
-                                   :in $ ?a
-                                   :where
-                                   [?t :my.plan/agent ?a]
-                                   [?t :my.plan/id _]]
-                                 :seon.db/args [agent-eid]})
-                      (mapv #(db/pull db '[*] %)))
-        eid->row (into {} (map (fn [r] [(:db/id r) r])) rows)
-        kids     (group-by #(get-in % [:my.plan/parent :db/id]) rows)
+  "Build one cycle-safe, oldest-first forest from ordinary plan rows."
+  [rows]
+  (let [by-id (rows-by-id rows)
+        kids (group-by row-parent-id rows)
         waiters  (reduce (fn [m r]
-                           (reduce (fn [m n]
-                                     (update m (:db/id n) (fnil conj [])
+                           (reduce (fn [m need]
+                                     (update m (:my.plan/id need) (fnil conj [])
                                              (:my.plan/title r)))
                                    m (:my.plan/needs r)))
                          {} rows)
@@ -1810,9 +1542,9 @@
                               step-order
                               (remove #(seen (:my.plan/id %)))
                               (mapv #(node % seen)))]
-                     (row->node eid->row waiters r children)))]
+                     (row->node by-id waiters r children)))]
     (->> rows
-         (remove :my.plan/parent)
+         (remove row-parent-id)
          step-order
          (mapv #(node % #{})))))
 
@@ -1826,8 +1558,8 @@
 (defn- need-line-html
   "One `waits on` line for need `n` — done-glyph + title + id (done-ness of
    the target derived via the shared [[rollup]] over db value `db`)."
-  [db n]
-  (let [done? (:my.plan/done? (rollup db (:my.plan/id n)))]
+  [rows n]
+  (let [done? (:my.plan/done? (plan-rollup-from-rows rows (:my.plan/id n)))]
     [:li {:class "flex items-center gap-1"}
      [:span {:class (str "shrink-0 " (if done? "text-success" "text-warning"))}
       (if done? "✓" "○")]
@@ -1836,7 +1568,7 @@
 
 (defn- step-detail-html
   "Walked `node`'s expand-in-place detail panel — `data-show`n by $planstep."
-  [db node]
+  [rows node]
   (let [id  (:my.plan/id node)
         row (fn [label body]
               [:div {:class "flex gap-2"}
@@ -1857,7 +1589,7 @@
      (when-let [needs (seq (:my.plan/needs node))]
        (row "waits on"
             (into [:ul {:class "flex flex-col gap-1"}]
-                  (map #(need-line-html db %))
+                  (map #(need-line-html rows %))
                   needs)))
      (when-let [ws (seq (:my.plan/waiters node))]
        (row "blocks" (str/join ", " ws)))
@@ -1872,15 +1604,15 @@
    its subtree `done/total` roll-up and a collapse chevron ($planclosed,
    click-stopped so it doesn't also toggle the detail). Signals delegate to
    the shared [[rollup]]/[[ready?]]/[[blocked?]] over db value `db`."
-  [db node next-id depth]
+  [rows node next-id depth]
   (let [id       (:my.plan/id node)
         children (:my.plan/children node)
         leaf?    (empty? children)
-        ru       (rollup db id)
+        ru       (plan-rollup-from-rows rows id)
         done?    (:my.plan/done? ru)
         active?  (= :active (:my.plan/status node))
         next?    (= id next-id)
-        blocked? (and (not done?) (blocked? db id))
+        blocked? (and (not done?) (blocked-from-rows? rows id))
         [glyph gcls] (cond
                        active?  ["●" "text-signal"]
                        done?    ["✓" "text-text-500"]
@@ -1912,21 +1644,22 @@
       (when (and next? (not active?))
         [:span {:class "text-2xs text-signal shrink-0"} "next"])
       (when (and (not done?) (not active?) (not next?)
-                 (ready? db id))
+                 (ready-from-rows? rows id))
         [:span {:class "text-2xs text-success shrink-0"} "ready"])
       (when-not leaf?
         [:span {:class "text-2xs text-text-500 tabular-nums shrink-0"}
          (str (:my.plan/done ru) "/" (:my.plan/total ru))])]
-     (step-detail-html db node)
+     (step-detail-html rows node)
      (when-not leaf?
        [:ul {:class "flex flex-col"
              :data-show (str "!$planclosed.includes(' " id " ')")}
-        (map #(step-row-html db % next-id (inc depth)) children)])]))
+        (map #(step-row-html rows % next-id (inc depth)) children)])]))
 
 (defn- root-card-html
   "One bounded, collapsible plan-root card."
-  [db root next-id focused-root-id]
-  (let [{:my.plan/keys [done total]} (rollup db (:my.plan/id root))
+  [rows root next-id focused-root-id]
+  (let [{:my.plan/keys [done total]}
+        (plan-rollup-from-rows rows (:my.plan/id root))
         pct  (if (pos? total) (quot (* 100 done) total) 0)
         goal (:my.plan/goal root)
         pace (:my.plan/pace root)]
@@ -1951,9 +1684,9 @@
        [:div {:style (str "height:2px;background:#f0b429;width:" pct "%")}]]]
      [:div {:class "plan-tree px-2 py-1 border-t border-base-800"}
       [:ul {:class "flex flex-col"}
-       (map #(step-row-html db % next-id 0) (:my.plan/children root))]]]))
+       (map #(step-row-html rows % next-id 0) (:my.plan/children root))]]]))
 
-(defn plan-block-html
+(defn ^:async plan-block-html
   "Live, explorable HTML twin of [[plan-block]] — a `/agent/{id}` surface.
 
    Renders the agent's WHOLE plan forest behind bounded root disclosures (the
@@ -1977,31 +1710,37 @@
    human)."
   {:malli/schema [:=> [:cat :seon.render/section-request]
                   :seon.render.canvas/hiccup]}
-  [{:seon.db/keys [db] :seon.agent/keys [id]}]
-  (let [db     (or db @db/*conn*)
-        oe     (agent-eid db [:seon.agent/id id])
-        forest (if oe (build-forest db oe) [])]
-    (if (empty? forest)
+  [{database :seon.db/db agent-id :seon.agent/id}]
+  (let [database (or database (await (db/db)))
+        rows (if (:seon.error/message database)
+               database
+               (await (acquire-html-plan-rows database agent-id)))]
+    (if (:seon.error/message rows)
+      [:div {:class "text-danger text-2xs font-mono py-1"}
+       "plan unavailable"]
+      (let [forest (build-forest rows)]
+        (if (empty? forest)
       [:div {:class "text-text-500 italic text-2xs font-mono py-1"}
        "no plan yet"]
-      (let [;; The you-are-here — the SAME [[anchor]] the :ai block reads:
-            ;; an :active step wins; else the oldest ready leaf is next.
-            a          (anchor db oe)
+      (let [a (anchor-from-rows rows)
             focused-root-id (some-> a :my.plan/chain first :my.plan/id)
             next-id    (when-not (:my.plan/active? a)
                          (:my.plan/id (:my.plan/step a)))
-            ;; Rows hidden behind $planfull = the done non-root nodes;
-            ;; done-ness derives from the shared [[rollup]].
-            done-count (count (filter #(:my.plan/done? (rollup db (:my.plan/id %)))
-                                      (mapcat #(tree-seq (fn [_] true)
-                                                         :my.plan/children %)
-                                              (mapcat :my.plan/children
-                                                      forest))))
-            dones      (recent-done db oe)]
+            done-count
+            (count (filter #(and (row-parent-id %)
+                                 (:my.plan/done?
+                                  (plan-rollup-from-rows rows (row-id %))))
+                           rows))
+            dones (->> rows
+                       (filter #(= :done (:my.plan/status %)))
+                       (filter :my.plan/completed-at)
+                       (sort-by #(-> % :my.plan/completed-at .getTime) >)
+                       (take recent-done-limit)
+                       vec)]
         [:div {:class "flex flex-col gap-2 text-xs font-mono"
                :data-signals__ifmissing
                "{planstep: '', planclosed: '', planfull: false, plandone: false}"}
-         (map #(root-card-html db % next-id focused-root-id) forest)
+         (map #(root-card-html rows % next-id focused-root-id) forest)
          (when (pos? done-count)
            [:div {:class (str "flex items-center gap-1 text-2xs text-text-400 "
                               "cursor-pointer select-none")
@@ -2023,4 +1762,4 @@
              (map (fn [{:my.plan/keys [title completed-at]}]
                     [:li {:class "text-2xs text-text-500 truncate"}
                      (str "✓ [" (stamp completed-at) "] " title)])
-                  dones)]])]))))
+                  dones)]])]))))))

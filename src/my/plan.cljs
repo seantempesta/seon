@@ -42,6 +42,7 @@
     [seon.agent]   ; load-order: request schemas reference :seon.agent/id
     [seon.db :as db]
     [seon.db.id :as db.id]
+    [seon.db.protocol :as protocol]
     [seon.schema :as schema]))
 
 ;; --- Attribute schemas — one register! per attr; shared shapes referenced,
@@ -91,7 +92,8 @@
    [::id    {:optional true} ::id]
    [::error {:optional true} ::error]])
 
-(schema/register! ::id-request [:map [::id ::id]])
+(schema/register! ::id-request
+  [:map [::id ::id] [::db/db {:optional true} :seon.db/db]])
 
 (schema/register! ::step-request
   [:map
@@ -101,7 +103,8 @@
    [:seon.agent/id  {:optional true} :seon.agent/id]  ; injected: you (omit) — or another agent's id
    [::from          {:optional true} :seon.db/ref]
    [::parent        {:optional true} ::parent]
-   [::needs         {:optional true} ::needs]])
+   [::needs         {:optional true} ::needs]
+   [::db/db         {:optional true} :seon.db/db]])
 
 ;; plan! node shape — recursive: each child may carry its own :children.
 (schema/register! ::plan-node
@@ -121,6 +124,7 @@
    [::pace         {:optional true} ::pace]
    [::expect       {:optional true} ::expect]
    [:seon.agent/id {:optional true} :seon.agent/id]  ; injected: you (omit)
+   [::db/db         {:optional true} :seon.db/db]
    [::children     {:optional true} [:vector ::plan-node]]])
 
 (schema/register! ::ids
@@ -133,8 +137,11 @@
    [::ids   {:optional true} ::ids]
    [::error {:optional true} ::error]])
 
-(schema/register! ::needs-request [:map [::id ::id] [::on ::on]])
-(schema/register! ::move-request  [:map [::id ::id] [::parent ::parent]])
+(schema/register! ::needs-request
+  [:map [::id ::id] [::on ::on] [::db/db {:optional true} :seon.db/db]])
+(schema/register! ::move-request
+  [:map [::id ::id] [::parent ::parent]
+   [::db/db {:optional true} :seon.db/db]])
 
 (schema/register! ::drop-response
   [:map
@@ -154,12 +161,15 @@
   [:map [::id ::id] [::title ::title] [::created-at ::created-at]])
 
 (schema/register! ::next-request
-  [:map [:seon.agent/id {:optional true} :seon.agent/id]])  ; injected: you (omit)
+  [:map
+   [:seon.agent/id {:optional true} :seon.agent/id]
+   [::db/db {:optional true} :seon.db/db]])
 
 (schema/register! ::tree-request
   [:map
    [::root         {:optional true} ::id]   ; a root STEP ID — that subtree only
    [::all?         {:optional true} ::all?]
+   [::db/db         {:optional true} :seon.db/db]
    [:seon.agent/id {:optional true} :seon.agent/id]])  ; injected: you (omit)
 
 ;; ::root → one subtree map; else → a vector of root subtrees; nil when nothing.
@@ -206,6 +216,7 @@
    [::tree         {:optional true
                     :seon.render/prefill-fn 'my.plan/document}
     [:or :map [:vector :map]]]
+   [::db/db         {:optional true} :seon.db/db]
    [:seon.agent/id {:optional true} :seon.agent/id]])  ; injected: you (omit)
 
 (schema/register! ::reconcile-response
@@ -258,6 +269,7 @@
 (schema/register! ::list-request
   [:map
    [:seon.agent/id {:optional true} :seon.agent/id]  ; injected: you (omit)
+   [::db/db         {:optional true} :seon.db/db]
    [::all?         {:optional true} ::all?]])        ; true = every agent's steps
 
 (schema/register! ::list-response
@@ -269,7 +281,7 @@
 (schema/register! ::active? :boolean)
 (schema/register! ::position-request
   [:map
-   [:seon.db/db    {:optional true} :seon.db/db-val]
+   [::db/db {:optional true} :seon.db/db]
    [:seon.agent/id {:optional true} :seon.agent/id]])
 (schema/register! ::position
   [:map
@@ -292,6 +304,252 @@
           {::db.id/key allocation-key
            ::db.id/identity-attr ::id})
         allocation-keys))
+
+(def ^:private plan-row-selector
+  [:db/id ::id ::title ::description ::status ::created-at ::completed-at
+   ::goal ::expect ::pace ::from ::message
+   {::agent [:seon.agent/id]}
+   {::parent [::id]}
+   {::needs [::id]}])
+
+(def ^:private agent-plan-rows-query
+  '[:find [(pull ?step ?selector) ...]
+    :in $ ?selector ?agent-id
+    :where
+    [?agent :seon.agent/id ?agent-id]
+    [?step :my.plan/agent ?agent]])
+
+(def ^:private agent-exists-query
+  '[:find ?agent . :in $ ?agent-id :where [?agent :seon.agent/id ?agent-id]])
+
+(def ^:private duplicate-root-query
+  '[:find [(pull ?root ?selector) ...]
+    :in $ % ?selector ?agent-id ?title
+    :where
+    [?agent :seon.agent/id ?agent-id]
+    [?root :my.plan/agent ?agent]
+    [?root :my.plan/title ?title]
+    (unfinished ?root)
+    (not-join [?root] [?root :my.plan/parent _])])
+
+(declare plan-ref-id)
+
+(defn- query-member
+  [query arguments]
+  {::protocol/operation protocol/query-operation
+   ::protocol/query-form query
+   ::protocol/arguments arguments
+   :datahike.resource/max-work 5000000
+   :datahike.resource/max-results 200000
+   :datahike.resource/max-result-weight 2097152})
+
+(defn- pull-member
+  [selector eid]
+  {::protocol/operation protocol/pull-operation
+   ::protocol/selector selector
+   ::protocol/entity-id eid
+   :datahike.resource/max-work 250000
+   :datahike.resource/max-results 1
+   :datahike.resource/max-result-weight 131072})
+
+(defn- member-result [member]
+  (or (::protocol/result member)
+      (:datahike.query/result member)))
+
+(def ^:private all-plan-rows-query
+  '[:find [(pull ?step ?selector) ...]
+    :in $ ?selector
+    :where [?step :my.plan/id _]])
+
+(def ^:private descendant-rows-query
+  '[:find [(pull ?step ?selector) ...]
+    :in $ % ?selector ?root-id
+    :where
+    [?root :my.plan/id ?root-id]
+    (descendant ?root ?step)])
+
+(def ^:private blocked-step-query
+  '[:find ?step .
+    :in $ % ?step-id
+    :where
+    [?step :my.plan/id ?step-id]
+    (blocked ?step)])
+
+(def ^:private ready-step-query
+  '[:find ?step .
+    :in $ % ?step-id
+    :where
+    [?step :my.plan/id ?step-id]
+    (ready ?step)])
+
+(defn ^:async ^:private acquire-root-plan-rows
+  [request root-id]
+  (let [database (or (::db/db request) (await (db/db)))]
+    (if (:seon.error/message database)
+      database
+      (let [response
+            (await
+             (db/execute-many
+              {::db/db database
+               ::db/members
+               [(pull-member plan-row-selector [::id root-id])
+                (query-member descendant-rows-query
+                              [rules plan-row-selector root-id])]
+               ::db/max-result-weight 2097152}))
+            [root-member descendants-member] (::db/results response)]
+        (if (and (not (:seon.error/message response))
+                 (true? (::protocol/success? root-member))
+                 (true? (::protocol/success? descendants-member)))
+          {::db/db database
+           ::rows (into (cond-> [] (member-result root-member)
+                          (conj (member-result root-member)))
+                        (or (member-result descendants-member) []))}
+          {:seon.error/message "Plan subtree read failed."
+           :seon.error/data response
+           :seon.error/kind :core-bug})))))
+
+(defn ^:async ^:private acquire-status
+  [request step-id]
+  (let [database (or (::db/db request) (await (db/db)))]
+    (if (:seon.error/message database)
+      database
+      (let [response
+            (await
+             (db/execute-many
+              {::db/db database
+               ::db/members
+               [(pull-member plan-row-selector [::id step-id])
+                (query-member descendant-rows-query
+                              [rules plan-row-selector step-id])
+                (query-member blocked-step-query [rules step-id])
+                (query-member ready-step-query [rules step-id])]
+               ::db/max-result-weight 2097152}))
+            [root-member descendants-member blocked-member ready-member]
+            (::db/results response)]
+        (if (and (not (:seon.error/message response))
+                 (= 4 (count (::db/results response)))
+                 (every? #(true? (::protocol/success? %))
+                         (::db/results response)))
+          {::db/db database
+           ::rows (into (cond-> [] (member-result root-member)
+                          (conj (member-result root-member)))
+                        (or (member-result descendants-member) []))
+           ::blocked? (boolean (member-result blocked-member))
+           ::ready? (boolean (member-result ready-member))}
+          {:seon.error/message "Plan status read failed."
+           :seon.error/data response
+           :seon.error/kind :core-bug})))))
+
+(defn ^:async ^:private acquire-all-plan-rows
+  [request]
+  (let [database (or (::db/db request) (await (db/db)))]
+    (if (:seon.error/message database)
+      database
+      (let [rows (await (db/query {::db/db database
+                                   ::db/query all-plan-rows-query
+                                   ::db/args [plan-row-selector]
+                                   :datahike.resource/max-work 5000000
+                                   :datahike.resource/max-results 200000
+                                   :datahike.resource/max-result-weight 2097152}))]
+        (if (:seon.error/message rows)
+          rows
+          {::db/db database ::rows (vec rows)})))))
+
+(defn ^:async ^:private acquire-plan-creation
+  [{agent-id :seon.agent/id ::keys [title] :as request}]
+  (let [database (or (::db/db request) (await (db/db)))]
+    (if (:seon.error/message database)
+      database
+      (let [response
+            (await
+             (db/execute-many
+              {::db/db database
+               ::db/members
+               [(query-member agent-exists-query [agent-id])
+                (query-member duplicate-root-query
+                              [rules plan-row-selector agent-id title])]
+               ::db/max-result-weight 262144}))
+            [agent-member roots-member] (::db/results response)]
+        (if (and (not (:seon.error/message response))
+                 (= 2 (count (::db/results response)))
+                 (every? #(true? (::protocol/success? %))
+                         (::db/results response)))
+          {::db/db database
+           ::agent-exists? (boolean (member-result agent-member))
+           ::rows (vec (or (member-result roots-member) []))}
+          {:seon.error/message "Plan creation read failed."
+           :seon.error/data response
+           :seon.error/kind :core-bug})))))
+
+(defn ^:async ^:private acquire-agent-plan-rows
+  [{agent-id :seon.agent/id :as request}]
+  (let [database (or (::db/db request) (await (db/db)))]
+    (if (:seon.error/message database)
+      database
+      (let [members (cond-> [(query-member agent-plan-rows-query
+                                           [plan-row-selector agent-id])]
+                  agent-id (conj (query-member agent-exists-query [agent-id])))
+        response
+        (await
+         (db/execute-many
+          {::db/db database
+           ::db/members members
+           ::db/max-result-weight 2097152}))
+        [member agent-member] (::db/results response)]
+    (if (and (not (:seon.error/message response))
+             (true? (::protocol/success? member))
+             (or (nil? agent-id)
+                 (true? (::protocol/success? agent-member))))
+      {::db/db database
+       ::rows (vec (or (::protocol/result member)
+                       (:datahike.query/result member)))
+       ::agent-exists? (boolean
+                         (or (::protocol/result agent-member)
+                             (:datahike.query/result agent-member)))}
+      {:seon.error/message "Plan database read failed."
+       :seon.error/data response
+       :seon.error/kind :core-bug})))))
+
+(defn ^:async ^:private acquire-selected-step
+  [request]
+  (let [database (or (::db/db request) (await (db/db)))]
+    (if (:seon.error/message database)
+      database
+      (let [row (await (db/pull database plan-row-selector [::id (::id request)]))]
+        (if (:seon.error/message row)
+          row
+          {::db/db database ::row row})))))
+
+(defn ^:async ^:private acquire-target-steps
+  [request refs]
+  (let [database (or (::db/db request) (await (db/db)))
+        ids (into [] (keep plan-ref-id) refs)]
+    (if (:seon.error/message database)
+      database
+      (let [rows (if (seq ids)
+                   (await (db/pull-many database plan-row-selector
+                                        (mapv #(vector ::id %) ids)))
+                   [])]
+        (if (:seon.error/message rows)
+          rows
+          {::db/db database ::rows (vec (remove nil? rows))})))))
+
+(defn- acquisition-error
+  [fn-name acquired]
+  (when-let [message (:seon.error/message acquired)]
+    (internal/fail (str fn-name ": " message))))
+
+(defn- expected-write
+  [acquired tx-data]
+  {::db/db (::db/db acquired)
+   ::db/expected-db (::db/db acquired)
+   ::db/tx-data tx-data})
+
+(defn- plan-ref-id [ref]
+  (cond
+    (and (vector? ref) (= ::id (first ref))) (second ref)
+    (map? ref) (::id ref)
+    (string? ref) ref))
 
 ;; --- Public API
 
@@ -318,30 +576,39 @@
                             "from inside an agent turn (the boundary fills in you)."))
 
         :else
-        (let [created-at (js/Date.)
+        (let [target-refs (into (cond-> [] parent (conj parent)) needs)
+              target-ids (into #{} (keep plan-ref-id) target-refs)
+              acquired (await (acquire-target-steps request target-refs))
+              read-error (acquisition-error "step!" acquired)
+              found-ids (into #{} (map ::id) (::rows acquired))
+              missing (into [] (remove found-ids) target-ids)
+              created-at (js/Date.)
               env
-              (await
-                (db.id/allocate!
-                  {::db.id/allocations
-                   [{::db.id/key ::id
-                     ::db.id/identity-attr ::id}]
-                   ::db.id/transaction-builder
-                   (fn [ids]
-                     (let [id (get ids ::id)]
-                       {:seon.db/tx-data
-                        [(cond-> {::id         id
-                                  ::title      title
-                                  ::status     :open
-                                  ::created-at created-at
-                                  ::agent      agent}
-                           description (assoc ::description description)
-                           expect      (assoc ::expect expect)
-                           from        (assoc ::from from)
-                           parent      (assoc ::parent parent)
-                           (seq needs) (assoc ::needs needs))]}))
-                   :seon.db/conn db/*conn*}))
+              (when-not (or read-error (seq missing))
+                (await
+                  (db.id/allocate!
+                    {::db.id/allocations
+                     [{::db.id/key ::id
+                       ::db.id/identity-attr ::id}]
+                     ::db.id/transaction-builder
+                     (fn [ids]
+                       (let [id (get ids ::id)]
+                         (expected-write
+                           acquired
+                           [(cond-> {::id id ::title title ::status :open
+                                     ::created-at created-at ::agent agent}
+                              description (assoc ::description description)
+                              expect (assoc ::expect expect)
+                              from (assoc ::from from)
+                              parent (assoc ::parent parent)
+                              (seq needs) (assoc ::needs needs))])))})))
               id (get-in env [::db.id/ids ::id])]
-          (internal/write-result "step!" id env))))))
+          (or read-error
+              (when (seq missing)
+                (internal/fail
+                 (str "step!: related plan step(s) do not exist "
+                      (pr-str missing) ".")))
+              (internal/write-result "step!" id env)))))))
 
 (defn ^{:async true :seon.fn/agent-facing? true} plan!
   "Create your plan ONCE: goal, pace, nested steps, and deps.
@@ -362,10 +629,10 @@
   (or
     (internal/check-plan-keys "plan!" request)
     (let [agent      (internal/agent-ref agent-id)
-          db         @db/*conn*
-          oe         (when agent (internal/agent-eid db agent))
-          open-roots (when oe (internal/open-forest db oe))
-          dup-root   (some #(when (= (:my.plan/title %) title) %) open-roots)]
+          acquired   (await (acquire-plan-creation request))
+          read-error (acquisition-error "plan!" acquired)
+          rows       (when-not read-error (::rows acquired))
+          dup-root   (first rows)]
       (cond
         (or (nil? title) (str/blank? title))
         (internal/fail "plan!: blank :my.plan/title refused — name the plan.")
@@ -373,6 +640,11 @@
         (nil? agent)
         (internal/fail (str "plan!: no :seon.agent/id resolved — pass one, or call "
                             "from inside an agent turn (the boundary fills in you)."))
+
+        read-error read-error
+
+        (not (::agent-exists? acquired))
+        (internal/fail (str "plan!: unknown agent " (pr-str agent-id) "."))
 
         ;; Idempotency guard: plan! only CREATES, and a SAME-TITLE re-statement
         ;; (a model re-emitting its plan — common, since eval results arrive
@@ -410,10 +682,10 @@
                                (ex-info "plan compilation changed during allocation"
                                         {:my.plan/error compile-error
                                          :seon.error/kind :core-bug})))
-                           {:seon.db/tx-data
-                            (::internal/transaction-data compiled)}))
-                       :seon.db/conn db/*conn*}))]
-              (if (:seon.db/ok? env)
+                           (expected-write
+                             acquired
+                             (::internal/transaction-data compiled))))}))]
+              (if-not (:seon.error/message env)
                 (let [compiled
                       (internal/compile-plan agent request (::db.id/ids env) now)]
                   {::ok? true
@@ -421,8 +693,7 @@
                    ::ids (::internal/labels compiled)})
                 (internal/fail
                   (str "plan!: store failed — "
-                       (get-in env
-                               [:seon.db/error :seon.error/message])))))))))))
+                       (:seon.error/message env)))))))))))
 
 (defn ^{:async true :seon.fn/agent-facing? true} active!
   "Mark a plan step `:active`, the one you are working on now.
@@ -434,23 +705,42 @@
   [{::keys [id] :as request}]
   (or
     (internal/check-request-keys "active!" request ::id-request)
-    (case (internal/status-of id)
-      nil     (internal/fail (str "active!: no step " (pr-str id)
-                                  " — (my.plan/next {}) shows the ready ids."))
-      :done   (internal/fail (str "active!: " (pr-str id)
-                                  " is :done — reopen! it first: "
-                                  "(my.plan/reopen! {:my.plan/id " (pr-str id) "})."))
-      :active {::ok? true ::id id}
-      (let [db     @db/*conn*
-            agent  (:db/id (::agent (db/entity db [::id id])))
-            others (when agent
-                     (mapv :my.plan/id (internal/active-steps db agent)))]
-        (->> (await (db/transact!
-                      {:seon.db/tx-data
+    (let [acquired (await (acquire-selected-step request))
+          read-error (acquisition-error "active!" acquired)
+          row (::row acquired)]
+      (or
+        read-error
+        (case (::status row)
+          nil
+          (internal/fail (str "active!: no step " (pr-str id)
+                              " — (my.plan/next {}) shows the ready ids."))
+          :done
+          (internal/fail (str "active!: " (pr-str id)
+                              " is :done — reopen! it first: "
+                              "(my.plan/reopen! {:my.plan/id " (pr-str id) "})."))
+          :active {::ok? true ::id id}
+          (let [agent-id (get-in row [::agent :seon.agent/id])
+                others (await (db/query
+                                {::db/db (::db/db acquired)
+                                 ::db/query
+                                 '[:find [?id ...]
+                                   :in $ ?agent-id
+                                   :where
+                                   [?agent :seon.agent/id ?agent-id]
+                                   [?step :my.plan/agent ?agent]
+                                   [?step :my.plan/status :active]
+                                   [?step :my.plan/id ?id]]
+                                 ::db/args [agent-id]}))]
+            (if (:seon.error/message others)
+              (internal/fail (str "active!: " (:seon.error/message others)))
+            (->> (await
+                   (db/transact!
+                     (expected-write
+                       acquired
                        (into [{::id id ::status :active}]
-                             (map (fn [o] {::id o ::status :open}))
-                             (remove #{id} others))}))
-             (internal/write-result "active!" id))))))
+                             (map (fn [other] {::id other ::status :open}))
+                             (remove #{id} others)))))
+                 (internal/write-result "active!" id)))))))))
 
 (defn ^{:async true :seon.fn/agent-facing? true} done!
   "Record that a plan step is finished and complete.
@@ -463,15 +753,21 @@
   [{::keys [id] :as request}]
   (or
     (internal/check-request-keys "done!" request ::id-request)
-    (case (internal/status-of id)
-      nil   (internal/fail (str "done!: no step " (pr-str id)
-                                " — (my.plan/list-open {}) shows the open ids."))
-      :done {::ok? true ::id id}
-      (->> (await (db/transact!
-                    {:seon.db/tx-data [{::id           id
-                                        ::status       :done
-                                        ::completed-at (js/Date.)}]}))
-           (internal/write-result "done!" id)))))
+    (let [acquired (await (acquire-selected-step request))
+          read-error (acquisition-error "done!" acquired)
+          row (::row acquired)]
+      (or
+        read-error
+        (case (::status row)
+          nil (internal/fail (str "done!: no step " (pr-str id)
+                                  " — (my.plan/list-open {}) shows the open ids."))
+          :done {::ok? true ::id id}
+          (->> (await
+                 (db/transact!
+                   (expected-write
+                     acquired
+                     [{::id id ::status :done ::completed-at (js/Date.)}])))
+               (internal/write-result "done!" id)))))))
 
 (defn ^{:async true :seon.fn/agent-facing? true} reopen!
   "Flip a done/blocked step back to open; retract its `::completed-at`.
@@ -481,16 +777,23 @@
   [{::keys [id] :as request}]
   (or
     (internal/check-request-keys "reopen!" request ::id-request)
-    (case (internal/status-of id)
-      nil   (internal/fail (str "reopen!: no step " (pr-str id)
-                                " — (my.plan/tree {}) lists every step id; "
-                                "reopen! flips a :done/:blocked step back to :open."))
-      :open {::ok? true ::id id}
-      (->> (await (db/transact!
-                    {:seon.db/tx-data
+    (let [acquired (await (acquire-selected-step request))
+          read-error (acquisition-error "reopen!" acquired)
+          row (::row acquired)]
+      (or
+        read-error
+        (case (::status row)
+          nil (internal/fail (str "reopen!: no step " (pr-str id)
+                                  " — (my.plan/tree {}) lists every step id; "
+                                  "reopen! flips a :done/:blocked step back to :open."))
+          :open {::ok? true ::id id}
+          (->> (await
+                 (db/transact!
+                   (expected-write
+                     acquired
                      [{::id id ::status :open}
-                      [:db/retract [::id id] ::completed-at]]}))
-           (internal/write-result "reopen!" id)))))
+                      [:db/retract [::id id] ::completed-at]])))
+               (internal/write-result "reopen!" id)))))))
 
 (defn ^{:async true :seon.fn/agent-facing? true} needs!
   "Add dependency edges; a step is ready only when its needs are done.
@@ -501,22 +804,28 @@
   [{::keys [id on] :as request}]
   (or
     (internal/check-request-keys "needs!" request ::needs-request)
-    (case (internal/status-of id)
-      nil (internal/fail (str "needs!: no step " (pr-str id)
+    (let [acquired (await (acquire-target-steps request (cons [::id id] on)))
+          read-error (acquisition-error "needs!" acquired)
+          by-id (internal/rows-by-id (::rows acquired))]
+      (or
+        read-error
+        (if-not (by-id id)
+          (internal/fail (str "needs!: no step " (pr-str id)
                               " — (my.plan/tree {}) lists every step id. needs! "
                               "adds dependency edges: {:my.plan/id \"<step>\" "
                               ":my.plan/on [[:my.plan/id \"<dep>\"]]}."))
-      (let [db      @db/*conn*
-            missing (internal/unresolved-step-refs db on)]
-        (if (seq missing)
-          (internal/fail
-            (str "needs!: dependency step(s) do not exist " (pr-str missing)
-                 " — (my.plan/tree {}) lists every step id; retry with "
-                 ":my.plan/on [[:my.plan/id \"<dependency-id>\"]]."))
-          (->> (await (db/transact!
-                        {:seon.db/tx-data
-                         (mapv (fn [ref] [:db/add [::id id] ::needs ref]) on)}))
-               (internal/write-result "needs!" id)))))))
+          (let [missing (into [] (remove #(by-id (plan-ref-id %))) on)]
+            (if (seq missing)
+              (internal/fail
+                (str "needs!: dependency step(s) do not exist " (pr-str missing)
+                     " — (my.plan/tree {}) lists every step id; retry with "
+                     ":my.plan/on [[:my.plan/id \"<dependency-id>\"]]."))
+              (->> (await
+                     (db/transact!
+                       (expected-write
+                         acquired
+                         (mapv (fn [ref] [:db/add [::id id] ::needs ref]) on))))
+                   (internal/write-result "needs!" id)))))))))
 
 (defn ^{:async true :seon.fn/agent-facing? true} move!
   "Move a step under a new parent step.
@@ -527,19 +836,24 @@
   [{::keys [id parent] :as request}]
   (or
     (internal/check-request-keys "move!" request ::move-request)
-    (case (internal/status-of id)
-      nil (internal/fail (str "move!: no step " (pr-str id)
+    (let [acquired (await (acquire-target-steps request [[::id id] parent]))
+          read-error (acquisition-error "move!" acquired)
+          by-id (internal/rows-by-id (::rows acquired))]
+      (or
+        read-error
+        (if-not (by-id id)
+          (internal/fail (str "move!: no step " (pr-str id)
                               " — (my.plan/tree {}) lists every step id (the step "
                               "AND its new :my.plan/parent must both exist)."))
-      (let [db      @db/*conn*
-            missing (internal/unresolved-step-refs db [parent])]
-        (if (seq missing)
-          (internal/fail
-            (str "move!: parent step does not exist " (pr-str parent)
-                 " — (my.plan/tree {}) lists every step id; retry with "
-                 ":my.plan/parent [:my.plan/id \"<parent-id>\"]."))
-          (->> (await (db/transact! {:seon.db/tx-data [{::id id ::parent parent}]}))
-               (internal/write-result "move!" id)))))))
+          (if-not (by-id (plan-ref-id parent))
+            (internal/fail
+              (str "move!: parent step does not exist " (pr-str parent)
+                   " — (my.plan/tree {}) lists every step id; retry with "
+                   ":my.plan/parent [:my.plan/id \"<parent-id>\"]."))
+            (->> (await
+                   (db/transact!
+                     (expected-write acquired [{::id id ::parent parent}])))
+                 (internal/write-result "move!" id))))))))
 
 (defn ^{:async true :seon.fn/agent-facing? true} drop!
   "Delete a step and its whole subtree from the plan.
@@ -552,7 +866,27 @@
   [{::keys [id] :as request}]
   (or
     (internal/check-request-keys "drop!" request ::id-request)
-    (await (internal/retract-subtree! id))))
+    (let [acquired (await (acquire-root-plan-rows request id))
+          read-error (acquisition-error "drop!" acquired)
+          rows (::rows acquired)]
+      (or read-error
+          (if-not ((internal/rows-by-id rows) id)
+            (internal/fail (str "drop!: no step " (pr-str id)
+                                " — (my.plan/tree {}) lists every step id."))
+            (let [ids (distinct
+                        (conj (internal/descendant-ids-from-rows rows id) id))
+                  env (await
+                        (db/transact!
+                          (expected-write
+                            acquired
+                            (mapv (fn [step-id]
+                                    [:db.fn/retractEntity [::id step-id]])
+                                  ids))))]
+              (if-not (:seon.error/message env)
+                {::ok? true ::dropped (count ids)}
+                (internal/fail
+                  (str "drop!: store failed — "
+                       (:seon.error/message env))))))))))
 
 (defn ^{:async true :seon.fn/agent-facing? true} reconcile!
   "Revise your existing OPEN plan from ONE edited whole-plan document.
@@ -590,13 +924,16 @@
                             "boundary fills in you)."))
 
         :else
-        (let [nodes (if (map? tree) [tree] (vec tree))]
+        (let [nodes (if (map? tree) [tree] (vec tree))
+              acquired (await (acquire-agent-plan-rows request))
+              read-error (acquisition-error "reconcile!" acquired)]
           (or
+            read-error
             (internal/check-doc-keys "reconcile!" nodes)
-            (let [db-value @db/*conn*
+            (let [rows (::rows acquired)
                   now      (js/Date.)
                   preview  (internal/compile-reconcile
-                             db-value "reconcile!" agent
+                             rows "reconcile!" agent
                              nodes {} now)
                     tx       (::internal/transaction-data preview)
                     labels   (::internal/labels preview)
@@ -621,7 +958,7 @@
                                (fn [ids]
                                  (let [compiled
                                        (internal/compile-reconcile
-                                         db-value "reconcile!" agent
+                                         rows "reconcile!" agent
                                          nodes ids now)]
                                    (when-let [compile-error
                                               (::internal/error compiled)]
@@ -630,15 +967,16 @@
                                          "plan reconciliation changed during allocation"
                                          {:my.plan/error compile-error
                                           :seon.error/kind :core-bug})))
-                                   {:seon.db/tx-data
-                                    (::internal/transaction-data compiled)}))
-                               :seon.db/conn db/*conn*}))
-                          (await (db/transact! {:seon.db/tx-data tx})))]
-                    (if (:seon.db/ok? env)
+                                   (expected-write
+                                     acquired
+                                     (::internal/transaction-data compiled))))}))
+                          (await (db/transact!
+                                   (expected-write acquired tx))))]
+                    (if-not (:seon.error/message env)
                       (let [compiled
                             (if (seq allocation-keys)
                               (internal/compile-reconcile
-                                db-value "reconcile!" agent
+                                rows "reconcile!" agent
                                 nodes
                                 (::db.id/ids env) now)
                               preview)]
@@ -650,25 +988,42 @@
                           (assoc ::resolved-root true)))
                       (internal/fail
                         (str "reconcile!: store failed — "
-                             (get-in env [:seon.db/error
-                                          :seon.error/message])))))))))))))
+                             (:seon.error/message env)))))))))))))
 
-(defn ^:seon.fn/agent-facing? next
+(defn ^{:async true :seon.fn/agent-facing? true} next
   "Get the next plan steps to work on.
 
    Your focus queue: READY leaves (open, unblocked), oldest first. Omit
    `:seon.agent/id` and the boundary fills in YOU — the work to act
    on now. [] when no agent id resolves. `active!` the one you take up."
   {:malli/schema [:=> [:cat ::next-request] [:vector ::step-ref]]}
-  [{agent-id :seon.agent/id}]
-  (if-let [agent (internal/agent-ref agent-id)]
-    (let [db @db/*conn*]
-      (if-let [oe (internal/agent-eid db agent)]
-        (internal/ready-leaves db oe)
-        []))
+  [{agent-id :seon.agent/id :as request}]
+  (if-let [_agent (internal/agent-ref agent-id)]
+    (let [database (or (::db/db request) (await (db/db)))
+          rows (if (:seon.error/message database)
+                 database
+                 (await
+                  (db/query
+                   {::db/db database
+                    ::db/query
+                    '[:find [(pull ?step [:my.plan/id :my.plan/title
+                                          :my.plan/created-at]) ...]
+                      :in $ % ?agent-id
+                      :where
+                      [?agent :seon.agent/id ?agent-id]
+                      [?step :my.plan/agent ?agent]
+                      (ready ?step)]
+                    ::db/args [rules agent-id]
+                    :datahike.resource/max-results 1000
+                    :datahike.resource/max-result-weight 262144})))]
+      (if (:seon.error/message rows)
+        (internal/fail (str "next: " (:seon.error/message rows)))
+        (->> rows
+             (sort-by #(.getTime ^js (::created-at %)))
+             vec)))
     []))
 
-(defn position
+(defn ^:async position
   "Get one agent's current plan position and root progress.
 
    The active step wins; otherwise the oldest ready step is next. The result
@@ -677,12 +1032,16 @@
    own plan; root may pass another agent. No plan is a successful response
    with `::position` absent."
   {:malli/schema [:=> [:cat ::position-request] ::position-response]}
-  [{db-value :seon.db/db agent-id :seon.agent/id}]
+  [{agent-id :seon.agent/id :as request}]
   (if-let [agent (internal/agent-ref agent-id)]
-    (let [database (or db-value @db/*conn*)]
-      (if-let [agent-eid (internal/agent-eid database agent)]
+    (let [acquired (await (acquire-agent-plan-rows request))
+          read-error (acquisition-error "position" acquired)]
+      (or read-error
+      (if (::agent-exists? acquired)
         (if-let [{:my.plan/keys [step chain active? progress]}
-                 (internal/anchor database agent-eid)]
+                 (-> (::rows acquired)
+                     (internal/rows-for-agent agent)
+                     internal/anchor-from-rows)]
           (let [root (first chain)]
             {::ok? true
              ::position
@@ -694,29 +1053,34 @@
                       ::progress   progress}
                (:my.plan/goal root) (assoc ::goal (:my.plan/goal root)))})
           {::ok? true})
-        (internal/fail (str "position: unknown agent " (pr-str agent-id) "."))))
+        (internal/fail (str "position: unknown agent " (pr-str agent-id) ".")))))
     (internal/fail (str "position: no :seon.agent/id resolved — pass one, or "
                         "call from inside an agent turn."))))
 
-(defn ^:seon.fn/agent-facing? tree
+(defn ^{:async true :seon.fn/agent-facing? true} tree
   "Get the whole plan as nested EDN, the structural read for re-planning.
 
    Children under `:my.plan/_parent`, dep ids inline. {::root id} → that
    subtree; {::all? true} → every agent's forest; default → the calling
    agent's forest."
   {:malli/schema [:=> [:cat ::tree-request] ::tree-response]}
-  [{::keys [root all?] agent-id :seon.agent/id}]
-  (let [db @db/*conn*]
+  [{::keys [root all?] agent-id :seon.agent/id :as request}]
+  (let [acquired (await (cond
+                          root (acquire-root-plan-rows request root)
+                          all? (acquire-all-plan-rows request)
+                          :else (acquire-agent-plan-rows request)))
+        rows (::rows acquired)]
     (cond
-      root  (internal/pull-subtree db root)
-      all?  (mapv #(internal/pull-subtree db %) (internal/all-root-ids db))
+      (acquisition-error "tree" acquired)
+      (acquisition-error "tree" acquired)
+      root  (internal/subtree-from-rows rows root)
+      all?  (internal/forest-from-rows rows)
       :else (if-let [agent (internal/agent-ref agent-id)]
-              (if-let [oe (internal/agent-eid db agent)]
-                (mapv #(internal/pull-subtree db %) (internal/root-ids db oe))
-                [])
+              (-> rows (internal/rows-for-agent agent)
+                  internal/forest-from-rows)
               []))))
 
-(defn ^:seon.fn/agent-facing? document
+(defn ^{:async true :seon.fn/agent-facing? true} document
   "Get your open plan as one document to edit and `reconcile!`.
 
    `tree`'s nested shape (children under `:my.plan/_parent`, dep ids
@@ -726,40 +1090,65 @@
    {::root id} → that open subtree; default → your whole open forest."
   {:malli/schema [:=> [:cat ::tree-request] ::tree-response]}
   [request]
-  (internal/prune-done (tree request)))
+  (internal/prune-done (await (tree request))))
 
-(defn ^:seon.fn/agent-facing? status
+(defn ^{:async true :seon.fn/agent-facing? true} status
   "Check one step's status: done, blocked, ready, and progress.
 
    Derived view — done? (subtree complete), blocked? (stored :blocked OR an unmet need),
    ready? (open unblocked leaf), and the {::done ::total} subtree roll-up.
    Pass ::id."
   {:malli/schema [:=> [:cat ::id-request] ::status-response]}
-  [{::keys [id]}]
-  (internal/status-view @db/*conn* id))
+  [{::keys [id] :as request}]
+  (let [acquired (await (acquire-status request id))]
+    (if-let [error (acquisition-error "status" acquired)]
+      error
+      (assoc (internal/status-view-from-rows (::rows acquired) id)
+             ::blocked? (::blocked? acquired)
+             ::ready? (::ready? acquired)))))
 
-(defn ^:seon.fn/agent-facing? list-open
+(defn ^{:async true :seon.fn/agent-facing? true} list-open
   "List unfinished steps (open, active, blocked), oldest first.
 
    Per agent: omit `:seon.agent/id` and the boundary fills in YOU; {::all? true}
    lists every agent's. Flat — includes parents and blocked steps (use
    `next` for the ready-leaf focus queue)."
   {:malli/schema [:=> [:cat ::list-request] ::list-response]}
-  [{::keys [all?] agent-id :seon.agent/id}]
+  [{::keys [all?] agent-id :seon.agent/id :as request}]
   (let [agent (internal/agent-ref agent-id)]
     (cond
-      (nil? db/*conn*)
-      (internal/fail "list-open: no conn bound — runs inside an agent's universe.")
-
       (and (nil? agent) (not all?))
       (internal/fail (str "list-open: no :seon.agent/id resolved — pass one, "
                           "{::all? true}, or call from inside an agent turn."))
 
       :else
-      (let [db @db/*conn*]
-        {::ok?   true
-         ::steps (if all?
-                   (internal/open-steps db nil)
-                   (if-let [oe (internal/agent-eid db agent)]
-                     (internal/open-steps db oe)
-                     []))}))))   ; unknown agent = no steps, derived view
+      (let [database (or (::db/db request) (await (db/db)))
+            rows
+            (if (:seon.error/message database)
+              database
+              (await
+               (db/query
+                {::db/db database
+                 ::db/query
+                 (if all?
+                   '[:find [(pull ?step ?selector) ...]
+                     :in $ % ?selector
+                     :where
+                     [?step :my.plan/id _]
+                     (unfinished ?step)]
+                   '[:find [(pull ?step ?selector) ...]
+                     :in $ % ?selector ?agent-id
+                     :where
+                     [?agent :seon.agent/id ?agent-id]
+                     [?step :my.plan/agent ?agent]
+                     (unfinished ?step)])
+                 ::db/args (cond-> [rules internal/open-keys]
+                             (not all?) (conj agent-id))
+                 :datahike.resource/max-results 10000
+                 :datahike.resource/max-result-weight 1048576})))]
+        (if (:seon.error/message rows)
+          (internal/fail (str "list-open: " (:seon.error/message rows)))
+          {::ok? true
+           ::steps (->> rows
+                        (sort-by #(.getTime ^js (::created-at %)))
+                        vec)})))))

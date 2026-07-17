@@ -405,8 +405,9 @@ in the changed listener, router, Datastar, debug, or route owners.
 
 ### Current implementation checkpoint
 
-- **Earliest unsettled contract:** close the exact-database blob operator seam,
-  then the public blob and operation-specific plan consumers. Web serving and
+- **Earliest unsettled contract:** finish real-authority proof of the public
+  operation-specific plan consumer, then prove exact initialization and
+  recovery. Web serving and
   reactive calls now use ordinary database values, native transaction reports,
   the parent turn's `:seon.agent.turn/rendered-tx` ref, and direct database
   failures. No consumer may restore an ambient connection, copied coordinate,
@@ -434,8 +435,24 @@ hash vector and filesystem effects. The obsolete 1,000-line embedded-Datahike
 test fixture, ambient connection mutation, and removed historical read helpers
 are deleted. Focused proof passes 15 blob tests/54 assertions, 13 serve
 tests/60 assertions, and 8 reactive-call tests/30 assertions. The next
-unsettled contract is the operation-specific `my.plan` acquisition and write
-surface; its four compiler warnings are the active caller inventory.
+unsettled contract is real-authority proof of the operation-specific `my.plan`
+surface. The oversized whole-agent/whole-database acquisition is deleted.
+Simple mutations pull only the selected step; dependency and move operations
+pull only their named targets; plan creation groups agent existence with the
+same-title open-root check; drop and structural reads use the existing recursive
+Datahike rule; `next`, status, and unfinished listing use direct rule-backed
+queries; and whole-agent rows remain only where the entire editable document or
+position is the operation's genuine input. Status asks Datahike's `blocked` and
+`ready` rules at the captured database value, so dependencies outside the
+selected subtree remain correct. The synchronous Datahike plan derivation,
+ambient connection, compact envelopes, coordinate path, and duplicate renderer
+are deleted. The client compiles with zero warnings. Focused proof passes 21
+plan tests/70 assertions, 13 web-serve tests/60 assertions, and 8 reactive-call
+tests/30 assertions. The restored plan suite preserves compiler, graph,
+readiness, reconciliation-identity, database-fence, and escalation semantics
+without restoring the 2,400-line embedded-Datahike fixture. The remaining exit
+is a narrow real-writer/live proof of recursive reads, generated-ID writes,
+document round-trip, prompt/HTML agreement, and consult once-per-episode.
 - **Dependency-ready parallel portfolio:** the web/render single-owner audit is
   durable at [[research/web-render-single-owner-audit-2026-07-17]] and the
   rendered-transaction boundary at
@@ -444,8 +461,7 @@ surface; its four compiler warnings are the active caller inventory.
   and explicitly rejects the current dirty coordinate/oversized-row prototype.
   The complete parallel-system inventory is durable at
   [[research/parallel-behavior-unification-audit-2026-07-17]].
-- **Next refills:** close the exact-database blob operator, public blob calls,
-  and operation-specific plan consumers; then prove fresh initialization,
+- **Next refills:** close the real-authority plan proof; then prove fresh initialization,
   converged initialization, publication, restart, and recovery without races.
   Each cut strengthens the existing
   public owner and deletes removed-function callers; none adds aliases,
