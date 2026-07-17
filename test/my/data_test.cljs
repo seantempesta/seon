@@ -7,63 +7,41 @@
         `(sum ?x)` (no `:with`) would DEDUP-collapse must sum correctly, and
         an argmax must return the winning ROW (not the bare value).
 
-     2. THE PRODUCER + COMPOSITION run against a fresh :memory conn seeded
-        like the pod boots — `rows` finds entities by attribute presence,
+     2. THE PRODUCER + COMPOSITION use ordinary results from the `seon.db`
+        query seam — `rows` finds entities by attribute presence,
         and `rows → group-sum → max-by` answers 'biggest category'. The
         my.kb/source-stats refactor is exercised end-to-end so it can't
         bit-rot.
 
-   The db-backed tests install the conn on the ROOT db/*conn* (a `binding`
-   pops at the first async hop — CLJS dynamic bindings don't survive await),
-   re-pinning before each ambient read (the my.kb-test pattern)."
+   No test embeds Datahike: the JVM authority owns database execution, while
+   these toolkit tests own the query shape and ordinary-data composition."
   (:require
     [cljs.test :refer [deftest is async testing]]
-    [datahike.api :as d]
     [my.data :as data]
     [my.kb :as kb]
-    [seon.client :as client]
-    [seon.db :as db]
-    [seon.schema :as schema]))
+    [seon.db :as db]))
 
-;; --- Test domains. Registered here (fresh test JVM, not the live pod) so
-;; --- db/transact!/db/query accept the attrs; lazy-installed on first write.
-
-(schema/register! :my.subscription/name        [:string {:seon.db/identity true}])
-(schema/register! :my.subscription/monthly-usd :int)
-(schema/register! :my.expense/merchant         [:string {:seon.db/identity true}])
-(schema/register! :my.expense/amount-usd       :int)
-(schema/register! :my.expense/category         :keyword)
-
-(defn- fresh-conn
-  "Promise of a fresh :memory conn with the pod's boot schema. Domain
-   attrs lazy-install on first write."
-  []
-  (let [cfg {:store              {:backend :memory :id (random-uuid)}
-             :schema-flexibility :write
-             :keep-history?      true}]
-    (-> (d/create-database cfg)
-        (.then (fn [_] (d/connect cfg {:sync? false})))
-        (.then (fn [conn]
-                 (-> (db/ensure-provenance! {:seon.db/conn conn})
-                     (.then (fn [_]
-                              (d/transact!
-                                conn
-                                {:tx-data (into (db/malli->datahike-schema
-                                                  client/agent-bootstrap-attrs)
-                                                (db/tx-meta-datahike-schema))})))
-                     (.then (fn [_] conn))))))))
-
-(defn- run-test
-  "Seed conn as the ROOT db/*conn*, run (chain conn) → Promise, restore."
-  [chain done]
-  (-> (fresh-conn)
-      (.then (fn [conn]
-               (let [orig db/*conn*]
-                 (set! db/*conn* conn)
-                 (-> (js/Promise.resolve (chain conn))
-                     (.finally (fn [] (set! db/*conn* orig)))))))
+(defn- finish
+  [promise done]
+  (-> promise
       (.then (fn [_] (done)))
       (.catch (fn [e] (is false (str "threw — " e)) (done)))))
+
+(defn- with-query-result
+  [result body]
+  (let [saved db/query]
+    (set! db/query (fn [& _] (js/Promise.resolve result)))
+    (-> (js/Promise.resolve)
+        (.then (fn [] (body)))
+        (.finally (fn [] (set! db/query saved))))))
+
+(defn- with-rows-result
+  [result body]
+  (let [saved data/rows]
+    (set! data/rows (fn [_] (js/Promise.resolve result)))
+    (-> (js/Promise.resolve)
+        (.then (fn [] (body)))
+        (.finally (fn [] (set! data/rows saved))))))
 
 ;;; ───────────────────────────────────────────────────────────────────────
 ;;; 1. THE REDUCERS — pure over maps. The two footguns are GONE.
@@ -123,18 +101,16 @@
 
 (deftest rows-finds-by-attribute-presence
   (async done
-    (run-test
-      (fn [conn]
-        (-> (db/transact!
-              {:seon.db/tx-data
-               [{:my.subscription/name "Netflix" :my.subscription/monthly-usd 18}
-                {:my.subscription/name "Spotify" :my.subscription/monthly-usd 12}
-                {:my.subscription/name "Adobe CC" :my.subscription/monthly-usd 45}
-                {:my.subscription/name "iCloud" :my.subscription/monthly-usd 11}
-                {:my.subscription/name "NYT" :my.subscription/monthly-usd 15}]})
-            (.then (fn [_]
-                     (set! db/*conn* conn)
-                     (let [env (data/rows {:my.data/attr :my.subscription/name})]
+    (finish
+      (with-query-result
+        [{:my.subscription/name "Netflix" :my.subscription/monthly-usd 18}
+         {:my.subscription/name "Spotify" :my.subscription/monthly-usd 12}
+         {:my.subscription/name "Adobe CC" :my.subscription/monthly-usd 45}
+         {:my.subscription/name "iCloud" :my.subscription/monthly-usd 11}
+         {:my.subscription/name "NYT" :my.subscription/monthly-usd 15}]
+        (fn []
+          (-> (data/rows {:my.data/attr :my.subscription/name})
+              (.then (fn [env]
                        (is (true? (:seon.result/ok? env)))
                        (is (= 5 (:seon.items/count env)) "every subscription, by presence")
                        (is (every? map? (:seon.items/items env)) "self-describing maps")
@@ -148,18 +124,17 @@
 
 (deftest composition-rows-group-sum-max-by-biggest-category
   (async done
-    (run-test
-      (fn [conn]
-        (-> (db/transact!
-              {:seon.db/tx-data
-               [{:my.expense/merchant "Thai Place" :my.expense/amount-usd 28 :my.expense/category :dining}
-                {:my.expense/merchant "Sushi Bar" :my.expense/amount-usd 52 :my.expense/category :dining}
-                {:my.expense/merchant "Cafe Luna" :my.expense/amount-usd 26 :my.expense/category :dining}
-                {:my.expense/merchant "Trader Joe's" :my.expense/amount-usd 73 :my.expense/category :groceries}
-                {:my.expense/merchant "Shell" :my.expense/amount-usd 40 :my.expense/category :transport}]})
-            (.then (fn [_]
-                     (set! db/*conn* conn)
-                     (let [exp     (data/rows {:my.data/attr :my.expense/amount-usd})
+    (finish
+      (with-query-result
+        [{:my.expense/merchant "Thai Place" :my.expense/amount-usd 28 :my.expense/category :dining}
+         {:my.expense/merchant "Sushi Bar" :my.expense/amount-usd 52 :my.expense/category :dining}
+         {:my.expense/merchant "Cafe Luna" :my.expense/amount-usd 26 :my.expense/category :dining}
+         {:my.expense/merchant "Trader Joe's" :my.expense/amount-usd 73 :my.expense/category :groceries}
+         {:my.expense/merchant "Shell" :my.expense/amount-usd 40 :my.expense/category :transport}]
+        (fn []
+          (-> (data/rows {:my.data/attr :my.expense/amount-usd})
+              (.then (fn [exp]
+                     (let [
                            totals  (data/group-sum (merge exp {:my.data/group-key :my.expense/category
                                                                :my.data/key :my.expense/amount-usd}))
                            biggest (data/max-by (merge totals {:my.data/key :my.data/total}))]
@@ -170,7 +145,7 @@
                        ;; falsify: a flat sum-by over rows would give 219 (wrong),
                        ;; a flat max-by over rows would give the $73 row (wrong category).
                        (is (not= 219 (:my.data/total biggest))
-                           "not the flat all-rows sum"))))))
+                           "not the flat all-rows sum")))))))
       done)))
 
 ;;; ───────────────────────────────────────────────────────────────────────
@@ -179,15 +154,22 @@
 
 (deftest source-stats-delegates-to-my-data
   (async done
-    (run-test
-      (fn [_conn]
-        (-> (js/Promise.resolve (kb/build-kb-example!))
-            (.then (fn [stats]
+    (finish
+      (with-rows-result
+        {:seon.result/ok? true
+         :seon.items/count 3
+         :seon.items/items
+         [{:my.kb.source/rating 5 :my.kb.source/topics [:lisp :databases]}
+          {:my.kb.source/rating 4 :my.kb.source/topics [:agents]}
+          {:my.kb.source/rating 5 :my.kb.source/topics [:lisp]}]}
+        (fn []
+          (-> (kb/source-stats)
+              (.then (fn [stats]
                      ;; 3 sources, ratings 5 + 4 + 5 = 14 (two 5s do NOT collapse),
                      ;; topics tallied across the cardinality-many vectors.
                      (is (= 3 (:my.kb/count stats)))
                      (is (= 14 (:my.kb/rating-total stats))
                          "two sources rated 5 sum to 10, not collapse to 5")
                      (is (= 2 (:lisp (:my.kb/topic-counts stats)))
-                         "topic frequencies over the many-valued attr")))))
+                         "topic frequencies over the many-valued attr"))))))
       done)))

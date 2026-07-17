@@ -36,13 +36,14 @@
    [::error {:optional true} ::error]
    [::hint  {:optional true} ::hint]])
 
-(defn ^:seon.fn/agent-facing? functions
+(defn ^{:async true :seon.fn/agent-facing? true} functions
   "List the functions a namespace defines — name, doc, and args.
 
    Answers \"what can I call in X?\" for ANY indexed namespace (seon.*,
    my.*, your own) from public, real function rows with complete schemas.
    Private, non-function, and incomplete rows remain indexed but are excluded;
-   cards sort by name. SYNC — reads the injected frozen database only.
+   cards sort by name. Database reads use one captured database value when
+   supplied, or the current database when `:seon.db/db` is omitted.
 
      (my.ns/functions {:my.ns/ns 'my.plan})
      ; ⟹ «map: :seon.result/ok? true, :my.ns/cards [\"fn my.plan/done! […]\" …],
@@ -59,20 +60,24 @@
         ;; resolve the eid by QUERY, not a lookup-ref pull — pulling an
         ;; unresolved lookup-ref THROWS (:entity-id/missing); a scalar
         ;; find returns nil (errors-as-values).
-        eid   (db/query '[:find ?e . :in $ ?n :where [?e :seon.ns/name ?n]]
-                        dbv ns-kw)]
+        eid   (await
+               (db/query
+                '[:find ?e . :in $ ?n :where [?e :seon.ns/name ?n]]
+                dbv ns-kw))]
     (if (nil? eid)
       {:seon.result/ok? false
        ::error (str "namespace " (name ns-kw) " is not indexed — no :seon.ns row.")
        ::hint  (str "(seon.db/query '[:find [?n ...] :where [_ :seon.ns/name ?n]]) "
                     "lists every indexed namespace.")}
-      (let [pulled (db/pull dbv
-                            '[{:seon.fn/_ns [:seon.fn/sym :seon.fn/arglists
-                                             :seon.fn/doc :seon.fn/spec
-                                             :seon.fn/private?
-                                             :seon.fn/fn-var?
-                                             :seon.fn/schema-error]}]
-                            eid)
+      (let [pulled (await
+                    (db/pull
+                     dbv
+                     '[{:seon.fn/_ns [:seon.fn/sym :seon.fn/arglists
+                                      :seon.fn/doc :seon.fn/spec
+                                      :seon.fn/private?
+                                      :seon.fn/fn-var?
+                                      :seon.fn/schema-error]}]
+                     eid))
             cards  (->> (:seon.fn/_ns pulled)
                         (filter ns-cards/callable-fn-row?)
                         (sort-by :seon.fn/sym)
