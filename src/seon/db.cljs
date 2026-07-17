@@ -864,7 +864,10 @@
   {:malli/schema
    [:function
     [:=> [:cat ::pull-request] :any]
-    [:=> [:catn [::selector [:vector :any]] [::eid :any]] :any]]}
+    [:=> [:catn [::selector [:vector :any]] [::eid :any]] :any]
+    [:=> [:catn [::db :seon.db/db]
+                 [::selector [:vector :any]]
+                 [::eid :any]] :any]]}
   ([request]
    (let [base (await (request-db! request))]
      (if (error-value? base)
