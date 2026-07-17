@@ -112,11 +112,28 @@ ambient connection, removed database envelopes, and embedded lifecycle test
 system are deleted. Focused proof passes 6 lifecycle tests/36 assertions, 12
 message tests/57 assertions, and 9 run tests/39 assertions.
 
-Earliest unsettled contract: the central `seon.agent` owner must consume the
-settled derive/message/lifecycle seams, remove stale context aliases and
-coordinate/envelope/ambient-connection behavior, and make child birth plus its
-initial task one atomic generated-identity transaction before hosting the child.
-The loop must consume native reports/direct errors without copied run readers.
+The central agent and loop migration is implemented at `b950603e` and
+`885349de`. Stale context aliases, coordinate/envelope/ambient-connection
+behavior, copied run readers, and duplicate lifecycle authorization are gone.
+Delegation allocates child and message identities and commits child birth plus
+its initial task in one expected-database transaction before hosting begins;
+ordinary loop decisions, beats, turns, and closes reuse one immutable database
+value and native reports/direct errors. Focused proof passes 13 message
+tests/65 assertions, 4 multiagent tests/22 assertions, 6 lifecycle tests/36
+assertions, the exact pure-authorization test/9 assertions, and 7 loop tests/33
+assertions. Datahike's maintained lookup-ref transaction test proves that a
+reference resolves against the intermediate database value after the identity
+assertion earlier in the same transaction.
+
+Earliest unsettled contract: `seon.agent.runtime/resume!` currently installs
+only the future database interest. A task committed before child hosting can
+therefore miss the listener edge and remain idle. Resume must use one general
+committed-fact reconciliation path that also handles a process dying after the
+commit; no delegate-only wake, resend, processed flag, queue, or replay path is
+allowed. The retained design must either commit/open the ordinary run in the
+same allocation and re-drive open runs on every host, or derive pending inbound
+work without replaying already-covered messages; the shorter source-grounded
+one-owner design wins.
 `seon.web.serve` also still
 references deleted turn, attempt, and eval-operation coordinate fields and must
 derive historical model evidence from the parent turn's `rendered-tx` without
@@ -185,8 +202,12 @@ rather than replaced. The downstream web cut is grounded at
 attempts inherit their parent turn's `as-of` value, and eval-operation replay
 is deleted while restore/feed selector identity remains intact. Run lifecycle
 is grounded at [[research/run-native-result-database-value-cut-2026-07-16]] and
-implemented at `9636fd0e`; downstream derive/schedule migration is the active
-cut. The obsolete config test's private cache, ambient connection, and second
+implemented at `9636fd0e`; derive/schedule and the loop are migrated. Commit
+`216cf90a` leaves one structured menu acquisition shared by the displayed menu
+and typeahead provider, removes its ambient connection, split policy/offers
+readers, lazy entity path, and per-document-node provenance queries, and passes
+3 menu tests/16 assertions plus 7 typeahead tests/27 assertions. The obsolete
+config test's private cache, ambient connection, and second
 local Datahike database were deleted at `8a24839b`, unblocking the canonical
 CLJS artifact; focused config proof passes 22 tests/94 assertions. Final
 graduation remains one
@@ -195,20 +216,18 @@ modest-hardware density checkpoint.
 
 ### Current implementation checkpoint
 
-- **Earliest unsettled contract:** the central agent owner and loop must use
-  the settled async database-value and native-result seams; delegation must
-  atomically commit child birth plus its initial task before process hosting.
-- **Integrated proof that closes it:** focused agent/delegation and loop tests
-  proving one allocation transaction, direct errors, no stale aliases or
-  ambient connection, and no removed result envelope.
-- **Dependency-ready parallel portfolio:** lifecycle is factoring the one
-  existing message transaction composer so completion can commit result,
-  optional message, close, and pointer retraction atomically; listener
-  reconnection is integrated and the web/feed database-value cut is the next
-  dependency-ready refill.
-- **Next refills:** after derive/schedule, migrate the agent owner and atomic
-  delegation; after lifecycle, migrate loop result handling; after listen
-  recovery, close the web/feed database-value and rendered-transaction cut.
+- **Earliest unsettled contract:** process hosting must reconcile committed
+  work so atomic delegation and crash recovery cannot miss a pre-listener task.
+- **Integrated proof that closes it:** a child task committed before hosting
+  starts exactly one ordinary run through the same retained run/loop owner;
+  rehosting an existing open run re-drives it; restart never resends a task or
+  creates a second run.
+- **Dependency-ready parallel portfolio:** the agent home read is removing its
+  last ambient connection; a read-only web/render audit is identifying the one
+  retained renderer/feed cut without taking ownership of active shared diffs.
+- **Next refills:** integrate resume-time committed-work reconciliation, then
+  close the web/feed database-value and rendered-transaction cut, followed by
+  the remaining toolkit/client consumers.
   The final graduation gate remains the full frozen-source correctness, live
   Bun/JVM, multi-agent, child-crash, multi-database, and measured resource
   matrix.
