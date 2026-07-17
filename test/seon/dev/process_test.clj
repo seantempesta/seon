@@ -218,6 +218,11 @@
    :seon.dev.artifact/writer-digest "writer"
    :seon.dev.artifact/application-digest "application"})
 
+(defn- target-manifest-for [configuration]
+  (assoc target-manifest
+         :seon.dev.artifact/execution-output
+         (:seon.dev.config/execution-output configuration)))
+
 (defn- cleanup! [configuration ids]
   (doseq [id ids]
     (try (process/stop! configuration id) (catch Throwable _)))
@@ -2096,12 +2101,14 @@
   (let [base (test-config)
         configuration
         (target-config base (:seon.dev.test/directory base))
-        node-pod (get (process/specs configuration target-manifest)
+        node-pod (get (process/specs configuration
+                                     (target-manifest-for configuration))
                       process/pod-id)
         bun-configuration
         (update configuration :seon.dev.config/environment
                 assoc "SEON_JS_RUNTIME" "bun")
-        bun-pod (get (process/specs bun-configuration target-manifest)
+        bun-pod (get (process/specs bun-configuration
+                                    (target-manifest-for bun-configuration))
                      process/pod-id)]
     (is (= "node" (first (:seon.dev.process/argv node-pod))))
     (is (= "bun" (first (:seon.dev.process/argv bun-pod))))
@@ -2109,6 +2116,18 @@
            (rest (:seon.dev.process/argv bun-pod))))
     (is (= (:seon.dev.process/artifact-digest node-pod)
            (:seon.dev.process/artifact-digest bun-pod)))))
+
+(deftest process-specs-require-published-execution-coordinates
+  (let [base (test-config)
+        configuration (target-config base (:seon.dev.test/directory base))]
+    (is (thrown? Exception
+                 (process/specs configuration
+                                (dissoc (target-manifest-for configuration)
+                                        :seon.dev.artifact/execution-build-id))))
+    (is (thrown? Exception
+                 (process/specs configuration
+                                (dissoc (target-manifest-for configuration)
+                                        :seon.dev.artifact/execution-output))))))
 
 (deftest stale-port-file-does-not-advertise-a-url
   (let [configuration (test-config)
@@ -2118,7 +2137,7 @@
         (with-default-launch-descriptor
           (assoc (target-config configuration directory)
                  :seon.dev.config/http-port-file port-file))
-        manifest target-manifest]
+        manifest (target-manifest-for configuration)]
     (try
       (spit port-file "7890")
       (is (nil? (:seon.dev.target/url
@@ -2129,7 +2148,8 @@
   (let [configuration (test-config)
         directory (:seon.dev.test/directory configuration)
         configuration (target-config configuration directory)
-        spec (get (process/specs configuration target-manifest)
+        manifest (target-manifest-for configuration)
+        spec (get (process/specs configuration manifest)
                   process/watcher-id)
         pid (.pid (java.lang.ProcessHandle/current))
         start-instant (state/process-start-instant pid)
@@ -2153,7 +2173,7 @@
                      "[:execution] Build completed.\n"
                      "[:test] Build completed.\n"))
       (#'process/write-process! configuration process/watcher-id record)
-      (let [status (get-in (process/status configuration target-manifest)
+      (let [status (get-in (process/status configuration manifest)
                            [:seon.dev.target/processes process/watcher-id])]
         (is (= pid (:seon.dev.process/pid status)))
         (is (= start-instant (:seon.dev.process/start-instant status)))
@@ -2169,7 +2189,7 @@
   (let [configuration (test-config)
         directory (:seon.dev.test/directory configuration)
         base (target-config configuration directory)
-        default-argv (get-in (process/specs base target-manifest)
+        default-argv (get-in (process/specs base (target-manifest-for base))
                              [process/watcher-id :seon.dev.process/argv])
         acme (-> base
                  (assoc :seon.dev.config/client-build-id "acme-client"
@@ -2223,12 +2243,12 @@
     (try
       (fs/create-dirs (fs/parent bootstrap-file))
       (spit (str bootstrap-file) "published")
-      (let [digest (artifact/digest-paths runtime-root ["out/bootstrap"])
-            manifest (assoc target-manifest
+      (let [selected (target-config configuration directory)
+            digest (artifact/digest-paths runtime-root ["out/bootstrap"])
+            manifest (assoc (target-manifest-for selected)
                             :seon.dev.artifact/runtime-root (str runtime-root)
                             :seon.dev.artifact/bootstrap-digest digest)
-            specs (process/specs (target-config configuration directory)
-                                 manifest)
+            specs (process/specs selected manifest)
             watcher (get specs process/watcher-id)
             pod (get specs process/pod-id)]
         (is (nil? (get-in watcher [:seon.dev.process/environment
@@ -2262,7 +2282,8 @@
           (when (and (pos? remaining) (not (zero? (:exit probe))))
             (Thread/sleep 20)
             (recur (dec remaining)))))
-      (let [status (process/status configuration target-manifest)]
+      (let [manifest (target-manifest-for configuration)
+            status (process/status configuration manifest)]
         (is (= :seon.dev.target.status/ownership-conflict
                (:seon.dev.target/status status)))
         (is (= :seon.dev.process.status/foreign
@@ -2402,8 +2423,9 @@
           (:seon.dev.config/execution-output source-config)
           ::launch/execution-digest
           (:seon.dev.artifact/execution-digest target-manifest)})
-        ordinary-specs (process/specs source-config target-manifest)
-        branch-specs (process/specs branch-config target-manifest)
+        manifest (target-manifest-for source-config)
+        ordinary-specs (process/specs source-config manifest)
+        branch-specs (process/specs branch-config manifest)
         pod (get branch-specs process/pod-id)
         published
         (edn/read-string
@@ -2455,7 +2477,7 @@
            (fn [_ _] @dependency-ready?)
            #'process/ownership-conflicts (fn [_ _] [])}
           (fn []
-            (let [ready (process/status branch-config target-manifest)]
+            (let [ready (process/status branch-config manifest)]
               (is (= :seon.dev.target.status/ready
                      (:seon.dev.target/status ready)))
               (is (= #{process/watcher-id process/writer-id}
@@ -2465,7 +2487,7 @@
                           (vals (:seon.dev.target/external-dependencies
                                  ready)))))
             (reset! dependency-ready? false)
-            (let [degraded (process/status branch-config target-manifest)]
+            (let [degraded (process/status branch-config manifest)]
               (is (= :seon.dev.target.status/degraded
                      (:seon.dev.target/status degraded)))
               (is (not-any? :seon.dev.process/ready?

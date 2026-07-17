@@ -100,12 +100,19 @@
               :execution (:seon.dev.artifact/execution-digest initial)
               :bootstrap (:seon.dev.artifact/bootstrap-digest initial)
               :css (:seon.dev.artifact/css-digest initial)}))
-      (swap! component assoc :css (apply str (repeat 64 "f")))
-      (let [changed (observe)]
-        (is (not= (:seon.dev.artifact/css-digest initial)
-                  (:seon.dev.artifact/css-digest changed)))
-        (is (not= (:seon.dev.artifact/application-digest initial)
-                  (:seon.dev.artifact/application-digest changed)))))))
+      (doseq [[component-key manifest-key]
+              [[:writer :seon.dev.artifact/writer-digest]
+               [:client :seon.dev.artifact/client-digest]
+               [:execution :seon.dev.artifact/execution-digest]
+               [:bootstrap :seon.dev.artifact/bootstrap-digest]
+               [:css :seon.dev.artifact/css-digest]]]
+        (let [original (get @component component-key)]
+          (swap! component assoc component-key (apply str (repeat 64 "f")))
+          (let [changed (observe)]
+            (is (not= (get initial manifest-key) (get changed manifest-key)))
+            (is (not= (:seon.dev.artifact/application-digest initial)
+                      (:seon.dev.artifact/application-digest changed))))
+          (swap! component assoc component-key original))))))
 
 (deftest cljs-build-command-is-structured
   (let [plain {:seon.dev.config/environment {}}
@@ -476,78 +483,44 @@
                       (:seon.dev.artifact/application-digest writer-change))))))
       (finally (fs/delete-tree directory)))))
 
-(deftest manifest-v4-binds-dependencies-and-v2-v3-remain-readable
-  (let [directory (fs/create-temp-dir {:prefix "seon-manifest-v4-test-"})
+(deftest only-the-current-manifest-format-is-readable
+  (let [directory (fs/create-temp-dir {:prefix "seon-manifest-test-"})
         path (str (fs/path directory "artifact.edn"))
         digest (apply str (repeat 64 "a"))
         config {:seon.dev.config/artifact-manifest path
                 :seon.dev.config/artifact-flavor
                 :seon.dev.artifact.flavor/default}
-        v4 {:seon.dev.artifact/version 4
-            :seon.dev.artifact/published-at "2026-07-14T00:00:00Z"
-            :seon.dev.artifact/flavor :seon.dev.artifact.flavor/default
-            :seon.dev.artifact/client-build-id "client"
-            :seon.dev.artifact/shadow-cache-root "/checkout/.shadow-cljs"
-            :seon.dev.artifact/client-output "/checkout/out/client/main.js"
-            :seon.dev.artifact/runtime-root "/checkout/runtime/content"
-            :seon.dev.artifact/maintained-dependencies
-            (#'artifact/maintained-dependencies-from (maintained-deps))
-            :seon.dev.artifact/writer-digest digest
-            :seon.dev.artifact/client-digest digest
-            :seon.dev.artifact/bootstrap-digest digest
-            :seon.dev.artifact/css-digest digest
-            :seon.dev.artifact/application-digest digest}]
+        manifest
+        {:seon.dev.artifact/version artifact/current-version
+         :seon.dev.artifact/published-at "2026-07-14T00:00:00Z"
+         :seon.dev.artifact/flavor :seon.dev.artifact.flavor/default
+         :seon.dev.artifact/client-build-id "client"
+         :seon.dev.artifact/execution-build-id "execution"
+         :seon.dev.artifact/shadow-cache-root "/checkout/.shadow-cljs"
+         :seon.dev.artifact/client-output "/checkout/out/client/main.js"
+         :seon.dev.artifact/execution-output "/checkout/out/execution/main.js"
+         :seon.dev.artifact/runtime-root "/checkout/runtime/content"
+         :seon.dev.artifact/maintained-dependencies
+         (#'artifact/maintained-dependencies-from (maintained-deps))
+         :seon.dev.artifact/writer-digest digest
+         :seon.dev.artifact/client-digest digest
+         :seon.dev.artifact/execution-digest digest
+         :seon.dev.artifact/bootstrap-digest digest
+         :seon.dev.artifact/css-digest digest
+         :seon.dev.artifact/application-digest digest}]
     (try
-      (spit path (pr-str v4))
-      (is (= v4 (artifact/read-manifest config)))
-      (spit path (pr-str (assoc-in v4
+      (spit path (pr-str manifest))
+      (is (= manifest (artifact/read-manifest config)))
+      (spit path (pr-str (assoc-in manifest
                                    [:seon.dev.artifact/maintained-dependencies
                                     0 :seon.dev.artifact/dependency-library]
                                    'wrong/library)))
       (is (thrown-with-msg? Exception #"identity set is invalid"
                             (artifact/read-manifest config)))
-      (let [v3 (-> v4
-                   (assoc :seon.dev.artifact/version 3)
-                   (dissoc :seon.dev.artifact/maintained-dependencies))]
-        (spit path (pr-str v3))
-        (is (= v3 (artifact/read-manifest config))))
-      (let [v2 (-> v4
-                   (assoc :seon.dev.artifact/version 2)
-                   (dissoc :seon.dev.artifact/runtime-root
-                           :seon.dev.artifact/maintained-dependencies))]
-        (spit path (pr-str v2))
-        (is (= v2 (artifact/read-manifest config))))
-      (finally (fs/delete-tree directory)))))
-
-(deftest legacy-manifests-upgrade-only-as-the-default-flavor
-  (let [directory (fs/create-temp-dir {:prefix "seon-legacy-artifact-"})
-        path (str (fs/path directory "artifact.edn"))
-        digest (apply str (repeat 64 "a"))
-        legacy {:seon.dev.artifact/version 1
-                :seon.dev.artifact/published-at "2026-07-14T00:00:00Z"
-                :seon.dev.artifact/writer-digest digest
-                :seon.dev.artifact/client-digest digest
-                :seon.dev.artifact/bootstrap-digest digest
-                :seon.dev.artifact/css-digest digest
-                :seon.dev.artifact/application-digest digest}
-        base {:seon.dev.config/artifact-manifest path
-              :seon.dev.config/shadow-cache-root
-              (str (fs/path directory ".shadow-cljs"))
-              :seon.dev.config/client-output
-              (str (fs/path directory "out/client/main.js"))}]
-    (try
-      (spit path (pr-str legacy))
-      (let [upgraded
-            (artifact/read-manifest
-              (assoc base :seon.dev.config/artifact-flavor
-                     :seon.dev.artifact.flavor/default))]
-        (is (= 2 (:seon.dev.artifact/version upgraded)))
-        (is (= :seon.dev.artifact.flavor/default
-               (:seon.dev.artifact/flavor upgraded)))
-        (is (= "client" (:seon.dev.artifact/client-build-id upgraded))))
-      (is (thrown-with-msg?
-            Exception #"cannot identify this flavor"
-            (artifact/read-manifest
-              (assoc base :seon.dev.config/artifact-flavor
-                     :seon.dev.artifact.flavor/acme))))
+      (doseq [old-version (range 1 artifact/current-version)]
+        (spit path (pr-str (assoc manifest :seon.dev.artifact/version
+                                  old-version)))
+        (is (thrown-with-msg? Exception #"manifest is invalid"
+                              (artifact/read-manifest config))
+            (str "format " old-version " must be rebuilt")))
       (finally (fs/delete-tree directory)))))

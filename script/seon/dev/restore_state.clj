@@ -191,20 +191,14 @@
                       {:seon.dev.artifact/path
                        (:seon.dev.config/artifact-manifest configuration)}))))
 
-(def ^:private artifact-identity-keys
-  [:seon.dev.artifact/application-digest
-   :seon.dev.artifact/client-digest
-   :seon.dev.artifact/bootstrap-digest
-   :seon.dev.artifact/css-digest
-   :seon.dev.artifact/writer-digest])
-
 (defn- manifest-artifact-identity [manifest]
-  (select-keys manifest artifact-identity-keys))
+  (select-keys manifest [:seon.dev.artifact/application-digest]))
 
 (defn- require-artifact-identity!
   [configuration manifest expected]
   (let [published (manifest-artifact-identity manifest)
-        current (artifact/current-output-digests configuration)]
+        current (manifest-artifact-identity
+                 (artifact/current-output-digests configuration))]
     (when-not (= expected published current)
       (throw
        (ex-info
@@ -754,10 +748,8 @@
             (throw (ex-info "The retained restore-admin result is not successful."
                             {:seon.dev.restore-state/admin-result retained})))
         actual-digest (artifact/current-writer-digest configuration)
-        expected-digest
-        (restore/writer-artifact-digest (::restore/artifact-identity intent))
-        _ (when-not (= expected-digest actual-digest
-                       (:seon.dev.artifact/writer-digest manifest))
+        expected-digest (:seon.dev.artifact/writer-digest manifest)
+        _ (when-not (= expected-digest actual-digest)
             (throw (ex-info "The writer artifact changed after intent publication."
                             {:seon.dev.restore-state/expected-writer-digest
                              expected-digest

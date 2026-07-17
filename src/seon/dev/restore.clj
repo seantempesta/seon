@@ -28,11 +28,7 @@
 (schema/register!
  ::artifact-identity
  [:map {:closed true}
-  [:seon.dev.artifact/application-digest ::digest]
-  [:seon.dev.artifact/client-digest ::digest]
-  [:seon.dev.artifact/bootstrap-digest ::digest]
-  [:seon.dev.artifact/css-digest ::digest]
-  [:seon.dev.artifact/writer-digest ::digest]])
+  [:seon.dev.artifact/application-digest ::digest]])
 (schema/register! ::cluster-dir ::launch/cluster-dir)
 (schema/register! ::intent-path ::launch/path)
 (schema/register! ::branch-heads [:map-of :keyword ::coordinate/coordinate])
@@ -222,12 +218,6 @@
   (conj observed-roster
         (reserved-branch :undo intent-id)
         (reserved-branch :target intent-id)))
-
-(defn writer-artifact-digest
-  "Writer digest derived from one frozen runtime artifact identity."
-  {:malli/schema [:=> [:cat ::artifact-identity] ::digest]}
-  [artifact-identity]
-  (:seon.dev.artifact/writer-digest artifact-identity))
 
 (defn- descriptor-coordinate [descriptor]
   (get-in descriptor [::launch/database ::coordinate/coordinate]))

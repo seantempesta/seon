@@ -296,11 +296,9 @@
         (launch/with-execution-artifact
          {::launch/descriptor descriptor
           ::launch/execution-build-id
-          (or (:seon.dev.artifact/execution-build-id manifest)
-              (:seon.dev.config/execution-build-id config))
+          (:seon.dev.artifact/execution-build-id manifest)
           ::launch/execution-output
-          (or (:seon.dev.artifact/execution-output manifest)
-              (:seon.dev.config/execution-output config))
+          (:seon.dev.artifact/execution-output manifest)
           ::launch/execution-digest
           (:seon.dev.artifact/execution-digest manifest)})
         descriptor-runtime (::launch/runtime descriptor)

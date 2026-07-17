@@ -28,11 +28,10 @@
 (def other-digest (apply str (repeat 64 "b")))
 
 (def artifact-identity
-  {:seon.dev.artifact/application-digest digest
-   :seon.dev.artifact/client-digest digest
-   :seon.dev.artifact/bootstrap-digest digest
-   :seon.dev.artifact/css-digest digest
-   :seon.dev.artifact/writer-digest digest})
+  {:seon.dev.artifact/application-digest digest})
+
+(def artifact-manifest
+  (assoc artifact-identity :seon.dev.artifact/writer-digest digest))
 
 (defrecord UnsupportedRecord [value])
 
@@ -600,9 +599,9 @@
                          "/other/db")))
          "branch roster"
          #(update % ::restore/expected-branch-roster conj :seon.branch/other)
-         "writer artifact"
+         "application artifact"
          #(assoc-in % [::restore/artifact-identity
-                       :seon.dev.artifact/writer-digest]
+                       :seon.dev.artifact/application-digest]
                     other-digest)
          "blob overlay order"
          #(update-in % [::restore/selected-target-descriptor
@@ -621,29 +620,20 @@
                              (::restore/plan-digest intent))))
             label)))))
 
-(deftest artifact-identity-freezes-every-runtime-build-output
+(deftest artifact-identity-is-one-application-digest
   (let [intent (derived-intent)]
-    (is (= digest
-           (restore/writer-artifact-digest
-            (::restore/artifact-identity intent))))
-    (doseq [artifact-key
-            [:seon.dev.artifact/application-digest
-             :seon.dev.artifact/client-digest
-             :seon.dev.artifact/bootstrap-digest
-             :seon.dev.artifact/css-digest
-             :seon.dev.artifact/writer-digest]]
-      (let [changed
-            (restore/derive-intent
-             (assoc-in (intent-request)
-                       [::restore/artifact-identity artifact-key]
-                       other-digest))]
-        (is (not= (::restore/plan-digest intent)
-                  (::restore/plan-digest changed))
-            (str artifact-key))))
+    (let [changed
+          (restore/derive-intent
+           (assoc-in (intent-request)
+                     [::restore/artifact-identity
+                      :seon.dev.artifact/application-digest]
+                     other-digest))]
+      (is (not= (::restore/plan-digest intent)
+                (::restore/plan-digest changed))))
     (is (thrown? Exception
                  (restore/derive-intent
                   (update (intent-request) ::restore/artifact-identity
-                          dissoc :seon.dev.artifact/css-digest))))
+                          dissoc :seon.dev.artifact/application-digest))))
     (is (thrown? Exception
                  (restore/derive-intent
                   (assoc-in (intent-request)
@@ -669,7 +659,7 @@
                    (restore/derive-intent
                     (assoc-in (intent-request)
                               [::restore/artifact-identity
-                               :seon.dev.artifact/writer-digest]
+                               :seon.dev.artifact/application-digest]
                               other-digest))))))
       (is (= intent
              (state/read-edn (restore/intent-path (str directory)))))
@@ -757,7 +747,7 @@
         admin-result {::restore-admin/outcome
                       :seon.db.restore-admin.outcome/applied}
         blob-result {:my.blob/ok? true}
-        manifest artifact-identity
+        manifest artifact-manifest
         commands [:seon.dev.restore.command/create-undo
                   :seon.dev.restore.command/create-target
                   :seon.dev.restore.command/prepare-exclusive-transition
@@ -851,7 +841,7 @@
         admin-result {::restore-admin/outcome
                       :seon.db.restore-admin.outcome/applied}
         blob-result {:my.blob/ok? true}
-        manifest artifact-identity
+        manifest artifact-manifest
         commands [:seon.dev.restore.command/create-undo
                   :seon.dev.restore.command/create-target
                   :seon.dev.restore.command/prepare-exclusive-transition

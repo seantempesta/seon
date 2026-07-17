@@ -13,22 +13,7 @@
            [java.time Instant]
            [java.util.jar JarFile]))
 
-(def ^:private artifact-manifest-v3-schema
-  [:map
-   [:seon.dev.artifact/version [:= 3]]
-   [:seon.dev.artifact/published-at :string]
-   [:seon.dev.artifact/flavor
-    [:enum :seon.dev.artifact.flavor/default
-     :seon.dev.artifact.flavor/acme]]
-   [:seon.dev.artifact/client-build-id :string]
-   [:seon.dev.artifact/shadow-cache-root :string]
-   [:seon.dev.artifact/client-output :string]
-   [:seon.dev.artifact/runtime-root :string]
-   [:seon.dev.artifact/writer-digest [:re #"[0-9a-f]{64}"]]
-   [:seon.dev.artifact/client-digest [:re #"[0-9a-f]{64}"]]
-   [:seon.dev.artifact/bootstrap-digest [:re #"[0-9a-f]{64}"]]
-   [:seon.dev.artifact/css-digest [:re #"[0-9a-f]{64}"]]
-   [:seon.dev.artifact/application-digest [:re #"[0-9a-f]{64}"]]])
+(def current-version 5)
 
 (def ^:private maintained-dependency-schema
   [:map
@@ -37,9 +22,9 @@
     [:re #"https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:\.git)?"]]
    [:seon.dev.artifact/dependency-git-sha [:re #"[0-9a-f]{40}"]]])
 
-(def ^:private artifact-manifest-v5-schema
-  [:map
-   [:seon.dev.artifact/version [:= 5]]
+(def artifact-manifest-schema
+  [:map {:closed true}
+   [:seon.dev.artifact/version [:= current-version]]
    [:seon.dev.artifact/published-at :string]
    [:seon.dev.artifact/flavor
     [:enum :seon.dev.artifact.flavor/default
@@ -59,57 +44,6 @@
    [:seon.dev.artifact/css-digest [:re #"[0-9a-f]{64}"]]
    [:seon.dev.artifact/application-digest [:re #"[0-9a-f]{64}"]]])
 
-(def ^:private artifact-manifest-v4-schema
-  [:map
-   [:seon.dev.artifact/version [:= 4]]
-   [:seon.dev.artifact/published-at :string]
-   [:seon.dev.artifact/flavor
-    [:enum :seon.dev.artifact.flavor/default
-     :seon.dev.artifact.flavor/acme]]
-   [:seon.dev.artifact/client-build-id :string]
-   [:seon.dev.artifact/shadow-cache-root :string]
-   [:seon.dev.artifact/client-output :string]
-   [:seon.dev.artifact/runtime-root :string]
-   [:seon.dev.artifact/maintained-dependencies
-    [:vector {:min 6 :max 6} maintained-dependency-schema]]
-   [:seon.dev.artifact/writer-digest [:re #"[0-9a-f]{64}"]]
-   [:seon.dev.artifact/client-digest [:re #"[0-9a-f]{64}"]]
-   [:seon.dev.artifact/bootstrap-digest [:re #"[0-9a-f]{64}"]]
-   [:seon.dev.artifact/css-digest [:re #"[0-9a-f]{64}"]]
-   [:seon.dev.artifact/application-digest [:re #"[0-9a-f]{64}"]]])
-
-(def ^:private artifact-manifest-v2-schema
-  [:map
-   [:seon.dev.artifact/version [:= 2]]
-   [:seon.dev.artifact/published-at :string]
-   [:seon.dev.artifact/flavor
-    [:enum :seon.dev.artifact.flavor/default
-     :seon.dev.artifact.flavor/acme]]
-   [:seon.dev.artifact/client-build-id :string]
-   [:seon.dev.artifact/shadow-cache-root :string]
-   [:seon.dev.artifact/client-output :string]
-   [:seon.dev.artifact/writer-digest [:re #"[0-9a-f]{64}"]]
-   [:seon.dev.artifact/client-digest [:re #"[0-9a-f]{64}"]]
-   [:seon.dev.artifact/bootstrap-digest [:re #"[0-9a-f]{64}"]]
-   [:seon.dev.artifact/css-digest [:re #"[0-9a-f]{64}"]]
-   [:seon.dev.artifact/application-digest [:re #"[0-9a-f]{64}"]]])
-
-(def artifact-manifest-schema
-  [:or artifact-manifest-v5-schema
-   artifact-manifest-v4-schema
-   artifact-manifest-v3-schema
-   artifact-manifest-v2-schema])
-
-(def ^:private artifact-manifest-v1-schema
-  [:map
-   [:seon.dev.artifact/version [:= 1]]
-   [:seon.dev.artifact/published-at :string]
-   [:seon.dev.artifact/writer-digest [:re #"[0-9a-f]{64}"]]
-   [:seon.dev.artifact/client-digest [:re #"[0-9a-f]{64}"]]
-   [:seon.dev.artifact/bootstrap-digest [:re #"[0-9a-f]{64}"]]
-   [:seon.dev.artifact/css-digest [:re #"[0-9a-f]{64}"]]
-   [:seon.dev.artifact/application-digest [:re #"[0-9a-f]{64}"]]])
-
 (def ^:private writer-cache-schema
   [:map
    [:seon.dev.writer-cache/version [:= 1]]
@@ -125,9 +59,8 @@
                      (mapv #(select-keys % [:path :in :type])
                            (:errors (m/explain artifact-manifest-schema
                                                manifest)))})))
-  (when (#{4 5} (:seon.dev.artifact/version manifest))
-    (validate-maintained-dependencies!
-      (:seon.dev.artifact/maintained-dependencies manifest)))
+  (validate-maintained-dependencies!
+   (:seon.dev.artifact/maintained-dependencies manifest))
   manifest)
 
 (defn- bytes->hex [byte-values]
@@ -297,6 +230,23 @@
    [:seon.dev.artifact/css-digest [:re #"[0-9a-f]{64}"]]
    [:seon.dev.artifact/application-digest [:re #"[0-9a-f]{64}"]]])
 
+(defn- derive-application-digest
+  [config maintained-dependencies writer-digest client-digest execution-digest
+   bootstrap-digest css-digest]
+  (digest-values ["flavor" (:seon.dev.config/artifact-flavor config)
+                  "client-build-id" (:seon.dev.config/client-build-id config)
+                  "client-output" (:seon.dev.config/client-output config)
+                  "shadow-cache-root" (:seon.dev.config/shadow-cache-root config)
+                  "writer" writer-digest
+                  "maintained-dependencies" (pr-str maintained-dependencies)
+                  "client" client-digest
+                  "execution-build-id"
+                  (:seon.dev.config/execution-build-id config)
+                  "execution-output" (:seon.dev.config/execution-output config)
+                  "execution" execution-digest
+                  "bootstrap" bootstrap-digest
+                  "css" css-digest]))
+
 (defn current-output-digests
   "Hash every output that contributes to the application artifact identity."
   {:malli/schema
@@ -310,24 +260,9 @@
         bootstrap-digest (digest-paths root ["out/bootstrap"])
         css-digest (digest-paths root ["resources/public/css/output.css"])
         application-digest
-        (digest-values ["flavor" (:seon.dev.config/artifact-flavor config)
-                        "client-build-id"
-                        (:seon.dev.config/client-build-id config)
-                        "client-output"
-                        (:seon.dev.config/client-output config)
-                        "shadow-cache-root"
-                        (:seon.dev.config/shadow-cache-root config)
-                        "writer" writer-digest
-                        "maintained-dependencies"
-                        (pr-str maintained-dependencies)
-                        "client" client-digest
-                        "execution-build-id"
-                        (:seon.dev.config/execution-build-id config)
-                        "execution-output"
-                        (:seon.dev.config/execution-output config)
-                        "execution" execution-digest
-                        "bootstrap" bootstrap-digest
-                        "css" css-digest])]
+        (derive-application-digest
+         config maintained-dependencies writer-digest client-digest
+         execution-digest bootstrap-digest css-digest)]
     {:seon.dev.artifact/writer-digest writer-digest
      :seon.dev.artifact/client-digest client-digest
      :seon.dev.artifact/execution-digest execution-digest
@@ -340,26 +275,7 @@
   [config]
   (let [path (:seon.dev.config/artifact-manifest config)]
     (when (fs/regular-file? path)
-      (let [manifest (edn/read-string (slurp path))]
-        (if (m/validate artifact-manifest-v1-schema manifest)
-          (if (= :seon.dev.artifact.flavor/default
-                 (:seon.dev.config/artifact-flavor config))
-            (validate-manifest!
-              (assoc manifest
-                     :seon.dev.artifact/version 2
-                     :seon.dev.artifact/flavor
-                     :seon.dev.artifact.flavor/default
-                     :seon.dev.artifact/client-build-id "client"
-                     :seon.dev.artifact/shadow-cache-root
-                     (:seon.dev.config/shadow-cache-root config)
-                     :seon.dev.artifact/client-output
-                     (:seon.dev.config/client-output config)))
-            (throw
-              (ex-info "A legacy artifact manifest cannot identify this flavor."
-                       {:seon.dev.artifact/path path
-                        :seon.dev.artifact/flavor
-                        (:seon.dev.config/artifact-flavor config)})))
-          (validate-manifest! manifest))))))
+      (validate-manifest! (edn/read-string (slurp path))))))
 
 (defn- atomic-spit! [path value]
   (let [path (fs/path path)
@@ -590,26 +506,11 @@
           css-digest (digest-paths root [css])
           runtime-root (publish-runtime-root! config bootstrap-digest)
           application-digest
-          (digest-values ["flavor" (:seon.dev.config/artifact-flavor config)
-                          "client-build-id"
-                          (:seon.dev.config/client-build-id config)
-                          "client-output"
-                          (:seon.dev.config/client-output config)
-                          "shadow-cache-root"
-                          (:seon.dev.config/shadow-cache-root config)
-                          "writer" writer-digest
-                          "maintained-dependencies"
-                          (pr-str maintained-dependencies)
-                          "client" client-digest
-                          "execution-build-id"
-                          (:seon.dev.config/execution-build-id config)
-                          "execution-output"
-                          (:seon.dev.config/execution-output config)
-                          "execution" execution-digest
-                          "bootstrap" bootstrap-digest
-                          "css" css-digest])]
+          (derive-application-digest
+           config maintained-dependencies writer-digest client-digest
+           execution-digest bootstrap-digest css-digest)]
       (validate-manifest!
-        {:seon.dev.artifact/version 5
+        {:seon.dev.artifact/version current-version
          :seon.dev.artifact/published-at (str (Instant/now))
          :seon.dev.artifact/flavor
          (:seon.dev.config/artifact-flavor config)
