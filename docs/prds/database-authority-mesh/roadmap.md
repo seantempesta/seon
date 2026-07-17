@@ -84,12 +84,15 @@ embedded-Datahike observability test systems are deleted. Focused proof passes
 runtime tests/44 assertions; the maintained client compiles with no warning in
 the changed turn/debug/runtime owners.
 
-Earliest unsettled contract: complete consumers must derive historical model
-and export evidence from the parent turn's `rendered-tx`. Autocomplete/export
-is at focused proof; `seon.web.serve` still references the deleted coordinate,
-attempt, and eval-operation fields and must move to the same ordinary database
-value without compatibility projections. The eval receipt implementation is
-the next active database-envelope/ambient-value cut.
+Earliest unsettled contract: `seon.web.serve` still references deleted turn,
+attempt, and eval-operation coordinate fields and must derive historical model
+evidence from the parent turn's `rendered-tx` without compatibility
+projections. Autocomplete/export is settled at `8c2bfbe7`: one captured current
+database value, native `as-of` from each turn's transaction ref, and one
+application digest replace the old coordinate and manifest-identity systems.
+Focused proof passes 3 CLJS tests/9 assertions and 6 Python verifier tests. The
+eval receipt implementation is the next active database-envelope/ambient-value
+cut.
 
 The JVM half of that contract is implemented. One unversioned
 `seon.db.program/compile-tx-data` owner reads one immutable Datahike value and
@@ -123,8 +126,8 @@ still assume an ambient local connection. Commit `630132c5` closes embeddings
 on the same one-value rule: omission acquires one current database value, then
 scope query, JVM KNN, and ordered pull-many share it; focused proof passes 5
 tests/19 assertions. Top level owns the web/turn consumer integration.
-Autocomplete/export identity and database-value unification is at focused
-proof. The eval cut is grounded at
+Autocomplete/export identity and database-value unification is complete except
+for the coordinated live authority export. The eval cut is grounded at
 [[research/eval-native-result-database-value-cut-2026-07-16]] and active: it
 retains one `eval-batch!` pipeline, advances through native `:db-after`, fences
 only read-derived record writes, and deletes local operation capture rather
