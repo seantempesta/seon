@@ -4,9 +4,8 @@
 
    The parser tests run on CAPTURED real pytest output (pytest 9.x, default
    / `-q` / collection-error / green / no-tests variants) — hermetic, no
-   subprocess, no network. The persistence tests use a fresh :memory
-   conn `set!` as the root db/*conn* (CLJS bindings don't survive awaits —
-   the my.plan-test / turn-capture-test pattern).
+   subprocess, no network. The no-scope persistence boundary needs no
+   database session: it must return before attempting a transaction.
 
    Run: bin/test-cljs, or interactively:
      (require 'seon.agent.testrun-test :reload)
@@ -15,7 +14,6 @@
     [cljs.test :refer [deftest is async]]
     [clojure.string :as str]
     [seon.agent.testrun :as testrun]
-    [seon.client :as client]
     [seon.db :as db]))
 
 ;; ---------------------------------------------------------------------------
@@ -140,31 +138,16 @@
 ;; Persistence + the derived :test-failures section.
 ;; ---------------------------------------------------------------------------
 
-(def ^:private agent-id "trtestagent001")
-
-(defn- with-conn
-  "Fresh :memory agent conn `set!` as root db/*conn*, seeded with one agent,
-   `body` (conn → Promise) run under it; prior root restored after."
-  [body]
-  (-> (client/open-agent-conn!)
-      (.then (fn [conn]
-               (let [orig db/*conn*]
-                 (set! db/*conn* conn)
-                 (-> (db/transact! {:seon.db/tx-data [{:seon.agent/id agent-id}]})
-                     (.then (fn [_] (body conn)))
-                     (.finally (fn [] (set! db/*conn* orig)))))))))
-
 (deftest record-without-agent-scope-persists-nothing
   (async done
-    (-> (with-conn
-          (fn [_conn]
-            (db/without-agent
-              (fn []
-                (-> (testrun/record!
-                      {:seon.agent.testrun/result
-                       (testrun/parse {:seon.agent.testrun/stdout out-failures-default})})
-                    (.then (fn [rec]
-                             (is (false? (:seon.agent.testrun/ok? rec))
-                                 "no agent scope → not persisted, but a value not a throw"))))))))
-        (.then (fn [_] (done)))
+    (-> (db/without-agent
+          (fn []
+            (testrun/record!
+              {:seon.agent.testrun/result
+               (testrun/parse
+                 {:seon.agent.testrun/stdout out-failures-default})})))
+        (.then (fn [recorded]
+                 (is (false? (:seon.agent.testrun/ok? recorded))
+                     "no agent scope returns a value without a transaction")
+                 (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
