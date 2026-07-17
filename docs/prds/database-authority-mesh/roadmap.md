@@ -84,10 +84,14 @@ embedded-Datahike observability test systems are deleted. Focused proof passes
 runtime tests/44 assertions; the maintained client compiles with no warning in
 the changed turn/debug/runtime owners.
 
-Earliest unsettled contract: `seon.web.serve` still references deleted turn,
-attempt, and eval-operation coordinate fields and must derive historical model
-evidence from the parent turn's `rendered-tx` without compatibility
-projections. Autocomplete/export is settled at `8c2bfbe7`: one captured current
+Earliest unsettled contract: the retained `seon.agent.run` owner still reads an
+ambient local connection, duplicates current-run reads in `seon.derive`, and
+interprets removed database envelopes. It must move atomically to asynchronous
+ordinary database values, native reports, and targeted Datahike CAS before
+lifecycle and schedule consumers can follow. `seon.web.serve` also still
+references deleted turn, attempt, and eval-operation coordinate fields and must
+derive historical model evidence from the parent turn's `rendered-tx` without
+compatibility projections. Autocomplete/export is settled at `8c2bfbe7`: one captured current
 database value, native `as-of` from each turn's transaction ref, and one
 application digest replace the old coordinate and manifest-identity systems.
 Focused proof passes 3 CLJS tests/9 assertions and 6 Python verifier tests.
@@ -102,8 +106,12 @@ compiles. Commit `fae81117` settles the shared read-composition seam:
 value exactly once, attaches it to every member, rejects mixed values before
 transport, and retains only `::db/results` as its application result. Focused
 proof passes 1 test/11 assertions with no owned warnings. The context families
-now consume that one value directly instead of reconstructing a removed
-coordinate response.
+consume that one value directly at `722f58b4`: menu, transcript,
+typeahead-steps, namespaces, warnings, subagents, and canvas retain their
+bounded owner-local query plans while every coordinate request, response,
+mismatch branch, and coordinate-bearing intermediate is deleted. The client
+compiles with no warning in those owners; canonical focused tests remain
+blocked by the unrelated stale `config_test.cljs` cache fixture.
 
 The JVM half of that contract is implemented. One unversioned
 `seon.db.program/compile-tx-data` owner reads one immutable Datahike value and
@@ -154,6 +162,13 @@ result cut rather than accepting an adapter. Final graduation remains one
 frozen-source full test, live browser/agent, crash/restart, packaging, and
 modest-hardware density checkpoint.
 
+The one message writer is settled at `7f732e2e`. `message!` captures one
+database value, derives sender/origin and hop data there, validates normalized
+recipients, allocates natively, and returns exactly message id plus hops or a
+direct error. Coordinate forwarding, the ambient connection, nested database
+envelopes, the message-specific success boolean, and the wrapper-level
+self-send check are deleted. Focused proof passes 11 tests/51 assertions.
+
 Message retry semantics are settled at
 [[research/message-idempotent-delivery-seam-2026-07-16]]. The public
 `message!` request and exact message-id-plus-hops result stay unchanged.
@@ -166,6 +181,16 @@ request id and frozen bytes; no caller message id, content dedupe, queue,
 outbox, sent flag, or second receipt registry is added. These two atomic domain
 transactions delete the current partial-success workflows instead of retrying
 around them.
+
+Exact ambiguous-transaction recovery is grounded at
+[[research/exact-frozen-transaction-recovery-2026-07-16]]. The one private
+`submit-transaction!` invocation retains and redelivers its frozen request;
+the UDS layer remains the bounded physical pending/framing owner and the writer
+receipt remains the sole durable result owner. The cut reuses existing
+`running?`, `canceled?`, and `recovered?` protocol data, retains transaction
+callbacks until physical completion, and never asks `db.id` to regenerate a
+candidate after transport ambiguity. No queue, second receipt, public request
+id, retained duplicate byte buffer, or versioned transaction API is added.
 
 ## Settled laws
 
