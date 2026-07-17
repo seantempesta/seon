@@ -374,9 +374,9 @@
     ;; hash, a count, a recovery handle) whenever they sit past the first N,
     ;; while keeping bulk payload strings; ranking by size elides the bulk and
     ;; keeps the navigation/handle keys. The KEPT entries then render in the
-    ;; map's NATURAL key order (REPL-faithful — an agent reading a constructed
-    ;; `{:seon.db/ok? false …}` envelope back sees the keys as it built them,
-    ;; and every retained get-in path stays valid). The `+N more keys` marker
+    ;; map's NATURAL key order (REPL-faithful — ordinary maps keep the order
+    ;; in which their retained keys were presented, and every retained get-in
+    ;; path stays valid). The `+N more keys` marker
     ;; stays honest.
     (let [sampled  (mapv (fn [[k v]] [k (sample* v opts (inc depth))]) x)
           ranked   (sort-by (fn [[i [_ sv]]] [(count (pr-str sv)) i])

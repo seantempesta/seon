@@ -39,6 +39,15 @@
       (is (= 6 (count (dissoc skel :seon.render.value/elided-keys))))
       (is (= 14 (:seon.render.value/elided-keys skel))))))
 
+(deftest direct-error-maps-use-ordinary-map-sampling
+  (let [error {:seon.error/message "writer unavailable"
+               :seon.error/kind :system
+               :seon.error/data {:operation :transact}}
+        sampled (v/sample error)]
+    (is (= error sampled))
+    (is (not (contains? sampled :seon.db/ok?)))
+    (is (not (contains? sampled :seon.db/error)))))
+
 (deftest depth-bound-prunes-nested
   (testing "nesting past max-depth becomes a typed+counted prune marker"
     (let [skel (v/sample {:a {:b {:c {:d 1 :e 2}}}} {:max-depth 3})

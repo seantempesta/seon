@@ -344,9 +344,8 @@
    [::configured {:optional true} ::configured]])
 
 (schema/register! ::error-request
-  [:map
-   [:seon.db/error :seon.db/error]
-   [::content {:optional true} ::content]])
+  [:merge :seon.db/error
+   [:map [::content {:optional true} ::content]]])
 
 (schema/register! ::hour [:int {:min 0 :max 23}])
 
@@ -685,8 +684,9 @@
    stays calm while the agent learns of the breakage by reading its own
    context."
   {:malli/schema [:=> [:cat ::error-request] :seon.render/html-response]}
-  [{error :seon.db/error wired ::content}]
-  (let [msg       (:seon.error/message error)
+  [{wired ::content :as error-data}]
+  (let [error     (dissoc error-data ::content)
+        msg       (:seon.error/message error)
         wired-str (if (symbol? wired)
                     (str wired)
                     "literal hiccup on your entity")]

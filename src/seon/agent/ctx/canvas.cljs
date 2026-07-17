@@ -237,8 +237,7 @@
     (cond
       (not (:seon.execution/ok? result))
       (assoc (canvas/error-response
-               {:seon.db/error (:seon.execution/error result)
-                ::canvas/content value})
+               (assoc (:seon.execution/error result) ::canvas/content value))
              ::canvas/wired wired)
 
       (nil? response)
@@ -249,11 +248,10 @@
 
       :else
       (assoc (canvas/error-response
-               {:seon.db/error
-                {:seon.error/message
-                 "A canvas function must return a render response map."
-                 :seon.error/kind :agent
-                 :seon.error/data {:seon.render.canvas/content value}}
+               {:seon.error/message
+                "A canvas function must return a render response map."
+                :seon.error/kind :agent
+                :seon.error/data {:seon.render.canvas/content value}
                 ::canvas/content value})
              ::canvas/wired wired))))
 

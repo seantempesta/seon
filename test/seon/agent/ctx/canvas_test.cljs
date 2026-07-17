@@ -2,6 +2,7 @@
   "Remote canvas acquisition without changing the retained local renderer."
   (:require
     [cljs.test :refer [async deftest is testing]]
+    [clojure.string :as str]
     [datahike.api :as d]
     [seon.agent.ctx.canvas :as canvas-ctx]
     [seon.db :as db]
@@ -166,6 +167,18 @@
           (.finally (fn []
                       (set! db/execute-many original-execute-many)
                       (done)))))))
+
+(deftest selected-execution-failures-use-ordinary-error-data
+  (let [wired {::canvas/source ::canvas/derived
+               ::canvas/value 'my.canvas/broken}
+        error {:seon.error/message "renderer failed"
+               :seon.error/kind :agent}
+        response (@#'canvas-ctx/selected-canvas-response
+                   wired {:seon.execution/ok? false
+                          :seon.execution/error error})]
+    (is (= error (:seon.render/error response)))
+    (is (not (contains? response :seon.db/error)))
+    (is (str/includes? (:seon.render/ai response) "renderer failed"))))
 
 (defn- probe-candidate-history!
   [conn]

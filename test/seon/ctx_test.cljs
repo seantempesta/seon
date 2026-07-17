@@ -1,5 +1,5 @@
 (ns seon.ctx-test
-  "Pure context formatting after coordinate-pinned acquisition."
+  "Pure context formatting after database-value-pinned acquisition."
   (:require
     [cljs.test :refer [deftest is]]
     [clojure.string :as str]
@@ -74,4 +74,18 @@
 
 (deftest system-text-has-no-local-database-injection
   (is (not (str/includes? ctx/system-text "db/*conn*")))
-  (is (not (str/includes? ctx/system-text ":seon.db/db"))))
+  (is (not (str/includes? ctx/system-text ":seon.db/db")))
+  (is (not (str/includes? ctx/system-text ":seon.db/ok?")))
+  (is (str/includes? ctx/system-text ":seon.error/message")))
+
+(deftest context-transactions-classify-native-database-results
+  (is (= {::ctx/ok? false
+          ::ctx/error "install! transact failed: writer unavailable"}
+         (@#'ctx/transaction-result
+           "install!" [:doctrine]
+           {:seon.error/message "writer unavailable"
+            :seon.error/kind :system})))
+  (is (= {::ctx/ok? true ::ctx/names [:doctrine]}
+         (@#'ctx/transaction-result
+           "install!" [:doctrine]
+           {:db-before {} :db-after {} :tx-data []}))))

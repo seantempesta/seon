@@ -965,10 +965,11 @@
     "; directly.\n"
     ";\n"
     "; ERRORS ARE VALUES. Core calls never throw at you — a failure\n"
-    "; comes back as data, e.g. {:seon.db/ok? false :seon.db/error ...}.\n"
+    "; comes back directly as data, e.g. {:seon.error/message \"...\"\n"
+    "; :seon.error/kind :user-input}.\n"
     "; Read the error map; it names the defect and the fix. Telling your\n"
     "; human something \"threw an exception\" when you were handed an error\n"
-    "; envelope is wrong — nothing was thrown; the failure is a value you\n"
+    "; value is wrong — nothing was thrown; the failure is data you can\n"
     "; read.\n"
     ";\n"
     "; THE RENDERING SYSTEM. You show your human things with render\n"
@@ -979,7 +980,7 @@
     "; panels (tables, images, SVG) go: the agent reads the :ai text, the\n"
     "; human sees the :html panel, one section row serving both.\n"
     "; A specced view returns ordinary render data. The runtime acquires its\n"
-    "; database inputs at one immutable coordinate before formatting.\n"
+    "; database inputs at one immutable database value before formatting.\n"
     "; SHOW, DON'T TELL: your canvas (the canvas section below) is\n"
     "; your PRIMARY surface for showing your human data, results, and\n"
     "; status; (message/user \"...\") is narration/backup that scrolls away.\n"
@@ -1164,9 +1165,9 @@
     ";   and you go idle until the next message. You stay wakeable in every\n"
     ";   one of these states: a new message always brings you back.\n"
     "; - A message is REAL once it lands — but errors-are-VALUES: a transact\n"
-    ";   can SUCCEED as an eval yet return {:seon.db/ok? false} (the write\n"
-    ";   did NOT happen). Confirm an envelope is {:seon.db/ok? true} before\n"
-    ";   you tell your human it landed.\n"
+    ";   can SUCCEED as an eval yet return a map with :seon.error/message\n"
+    ";   (the write did NOT happen). Only tell your human it landed when the\n"
+    ";   call returned a transaction report, not an error value.\n"
     "; - TURNS ARE PRECIOUS — each turn is a full round-trip; don't spend one\n"
     ";   exploring when the answer is already in front of you. If your\n"
     ";   context CLEARLY contains the answer (it's in the soul, a loaded ns,\n"
@@ -1689,6 +1690,12 @@
                           (comp str :seon.agent.ctx/name)))
            vec))))
 
+(defn- transaction-result
+  [operation names result]
+  (if-let [message (:seon.error/message result)]
+    {::ok? false ::error (str operation " transact failed: " message)}
+    {::ok? true ::names names}))
+
 (defn ^:async install!
   "Install context BLOCK(S) into the agent in scope.
 
@@ -1724,11 +1731,7 @@
                 res (await (db/transact!
                              {:seon.db/tx-data
                               (upsert-ctx-tx id (into kept blocks))}))]
-            (if (false? (:seon.db/ok? res))
-              {::ok? false
-               ::error (str "install! transact failed: "
-                            (:seon.error/message (:seon.db/error res)))}
-              {::ok? true ::names (vec new-names)})))))))
+            (transaction-result "install!" (vec new-names) res)))))))
 
 (defn ^:async remove!
   "Remove ONE context block by name from the agent in scope.
@@ -1753,11 +1756,7 @@
                           (mapv #(dissoc % :db/id)))
                 res (await (db/transact!
                              {:seon.db/tx-data (upsert-ctx-tx id kept)}))]
-            (if (false? (:seon.db/ok? res))
-              {::ok? false
-               ::error (str "remove! transact failed: "
-                            (:seon.error/message (:seon.db/error res)))}
-              {::ok? true ::names [nm]})))))))
+            (transaction-result "remove!" [nm] res)))))))
 
 ;; ============================================================
 ;; Render pipeline — the agent's OWN block set, decoded + priority-sorted,

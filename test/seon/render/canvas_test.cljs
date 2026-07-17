@@ -205,8 +205,7 @@
   (let [env {:seon.error/message "boom from tile fn"}
         {:seon.render/keys [hiccup ai error]}
         (canvas/error-response
-          {:seon.db/error                 env
-           :seon.render.canvas/content 'my.ns/broken-tile})]
+          (assoc env :seon.render.canvas/content 'my.ns/broken-tile))]
     (is (canvas/valid-hiccup? hiccup) "human sees a card, not a blank")
     ;; ISOLATION CONTRACT (tile-isolation Layer 1), asserted as MECHANISM not
     ;; placeholder wording: the failure is partitioned to the agent-facing
