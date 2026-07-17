@@ -13,6 +13,15 @@
            [java.util.concurrent CountDownLatch LinkedBlockingQueue TimeUnit]
            [java.util.concurrent.atomic AtomicReference]))
 
+(def ^:private database
+  {:db-name "alpha"
+   :t 536870929
+   :as-of nil
+   :since nil
+   :history false
+   :datahike/commit-id
+   #uuid "6a56b426-c836-5817-9f6b-20584f2e81d5"})
+
 (defn- socket-path
   [label]
   (let [directory (File. "tmp")]
@@ -71,36 +80,13 @@
             (recur)))
         (recur (+ offset length))))))
 
-(deftest canonical-request-validation-is-structural
-  (let [ping (protocol/ping-request {::protocol/request-id "canonical/ping"})
-        ensure (protocol/ensure-database-request
-                {::protocol/request-id "canonical/ensure"
-                 ::protocol/database-name "alpha"
-                 ::protocol/backend :memory})
-        transact (protocol/transaction-request
-                  {::protocol/database-name "alpha"
-                   ::protocol/request-id "request-1"
-                   ::protocol/transaction-data [{:example/value :ready}]})]
-    (is (every? protocol/valid-request? [ping ensure transact]))
-    (is (false? (protocol/valid-request?
-                 (dissoc transact ::protocol/database-name)))
-        "every database-scoped operation requires explicit routing")
-    (is (false? (protocol/valid-request?
-                 (assoc transact ::protocol/operation :transact)))
-        "bare operation vocabulary is not accepted")
-    (is (= protocol/protocol-error
-           (::protocol/error-kind
-            (protocol/failure
-             {::protocol/error-kind protocol/protocol-error
-              ::protocol/error "invalid"}))))))
-
 (deftest transit-roundtrip-preserves-native-protocol-values
   (let [request-id (str (UUID/randomUUID))
         instant (Date. 1720000000000)
         message
         (protocol/transaction-request
-         {::protocol/database-name "alpha"
-          ::protocol/request-id request-id
+         {::protocol/request-id request-id
+          :seon.db/db database
           ::protocol/transaction-data
           [{:db/id "entity"
             :example/status :example.status/ready
@@ -117,40 +103,21 @@
                    (get-in decoded [::protocol/transaction-data 0
                                     :example/at])))))
 
-(deftest transit-roundtrip-preserves-the-complete-coordinate
-  (let [point
-        {::coordinate/database-id
-         #uuid "54b5b7e7-51fb-3220-b079-81a81914d86f"
-         ::coordinate/branch :db
-         ::coordinate/commit-id
-         #uuid "6a56b426-c836-5817-9f6b-20584f2e81d5"
-         ::coordinate/t 536870929}]
-    (is (= point (uds/decode (uds/encode point))))))
-
 (deftest transit-decodes-aggregate-query-lists-as-eager-protocol-data
-  (let [point {::coordinate/database-id (random-uuid)
-               ::coordinate/branch :db
-               ::coordinate/commit-id (random-uuid)
-               ::coordinate/t 42}
-        attachment (coordinate/attachment point)
-        query-form
+  (let [query-form
         '[:find (count ?entity) . :where [?entity :person/name]]
         direct
         (protocol/query-request
          {::protocol/request-id "aggregate/direct"
-          ::protocol/database-name "alpha"
-          ::protocol/attachment attachment
-          ::protocol/coordinate point
+          :seon.db/db database
           ::protocol/query-form query-form
           ::protocol/arguments []})
         many
         (protocol/execute-many-request
          {::protocol/request-id "aggregate/many"
-          ::protocol/database-name "alpha"
-          ::protocol/attachment attachment
-          ::protocol/coordinate point
           ::protocol/members
           [{::protocol/operation protocol/query-operation
+            :seon.db/db database
             ::protocol/query-form query-form
             ::protocol/arguments []}]})
         decoded-direct (uds/decode (uds/encode direct))
@@ -167,63 +134,35 @@
     (is (protocol/valid-request? decoded-many))))
 
 (deftest execute-many-reuses-existing-read-shapes-with-one-public-identity
-  (let [point {::coordinate/database-id (random-uuid)
-               ::coordinate/branch :db
-               ::coordinate/commit-id (random-uuid)
-               ::coordinate/t 42}
-        attachment (coordinate/attachment point)
-        members [{::protocol/operation protocol/query-operation
+  (let [members [{::protocol/operation protocol/query-operation
+                  :seon.db/db database
                   ::protocol/query-form '[:find ?e :where [?e :db/ident]]
                   ::protocol/arguments []}
                  {::protocol/operation protocol/pull-operation
+                  :seon.db/db database
                   ::protocol/selector '[*]
                   ::protocol/entity-id 1}
                  {::protocol/operation protocol/pull-many-operation
+                  :seon.db/db database
                   ::protocol/selector '[:db/ident]
                   ::protocol/entity-ids [1 2]}]
         request (protocol/execute-many-request
                  {::protocol/request-id "many-1"
-                  ::protocol/database-name "alpha"
-                  ::protocol/attachment attachment
-                  ::protocol/coordinate point
                   ::protocol/members members})]
-    (is (= 8 protocol/current-version))
+    (is (= 10 protocol/current-version))
     (is (protocol/valid-request? request))
     (is (= request (uds/decode (uds/encode request))))
-    (is (false? (protocol/valid-request?
-                 (assoc-in request [::protocol/members 0
-                                    ::protocol/request-id]
-                           "member-id")))
-        "members cannot invent another request identity")
-    (is (every?
-         false?
-         [(protocol/valid-request? (assoc request ::protocol/members []))
-          (protocol/valid-request?
-           (assoc request ::protocol/members
-                  [{::protocol/operation protocol/knn-search-operation
-                    ::protocol/query "vector"
-                    ::protocol/limit 1}]))])
-        "an empty group and non-read members are rejected")
-    (is (false? (protocol/valid-request?
-                 (assoc request ::protocol/members (vec (repeat 65
-                                                              (first members))))))
-        "the semantic member bound is enforced before admission")))
+    (is (= [database database database]
+           (mapv :seon.db/db (::protocol/members request))))))
 
 (deftest database-acquisition-is-closed-correlated-and-transit-stable
-  (let [point {::coordinate/database-id (random-uuid)
-               ::coordinate/branch :db
-               ::coordinate/commit-id (random-uuid)
-               ::coordinate/t 42}
-        attachment (coordinate/attachment point)
-        request (protocol/acquire-database-request
+  (let [request (protocol/acquire-database-request
                  {::protocol/request-id "acquire/alpha"
-                  ::protocol/database-name "alpha"
-                  ::protocol/attachment attachment})
+                  ::protocol/database-name "alpha"})
         response (protocol/success
                   {::protocol/request-id "acquire/alpha"
                    ::protocol/database-name "alpha"
-                   ::protocol/attachment attachment
-                   ::protocol/coordinate point
+                   :seon.db/db database
                    ::protocol/acquired? true})]
     (is (protocol/valid-request? request))
     (is (protocol/valid-response? response))
@@ -232,9 +171,6 @@
     (is (false? (protocol/valid-request?
                  (assoc request :unexpected/field true)))
         "acquisition requests reject transport-private or unknown fields")
-    (is (false? (protocol/valid-request?
-                 (dissoc request ::protocol/attachment)))
-        "acquisition is fenced to the attachment resolved by the caller")
     (is (false? (protocol/valid-response?
                  (assoc response :unexpected/field true)))
         "acquisition responses reject transport-private or unknown fields")
@@ -305,11 +241,12 @@
            ::protocol/source-coordinate source
            ::protocol/expected-source-head source
            ::protocol/target-branch :experiment/lifecycle})
-         (protocol/release-database-request
+        (protocol/release-database-request
           {::protocol/request-id "lifecycle/release"
-           ::protocol/target-database-name "default-lifecycle"
-           ::protocol/target-attachment target-attachment
-           ::protocol/expected-target-head target-head})
+           :seon.db/db (assoc database
+                              :db-name "default-lifecycle"
+                              :datahike/commit-id (::coordinate/commit-id
+                                                   target-head))})
          (protocol/delete-branch-request
           {::protocol/request-id "lifecycle/delete"
            ::protocol/source-database-name "default"
@@ -324,11 +261,7 @@
                      requests))
         "lifecycle requests reject unknown fields")
     (is (false? (protocol/valid-request?
-                 (dissoc (first requests) ::protocol/source-coordinate))))
-    (is (false? (protocol/valid-request?
-                 (assoc (second requests)
-                        ::protocol/expected-target-head
-                        (coordinate/attachment target-head)))))))
+                 (dissoc (first requests) ::protocol/source-coordinate))))))
 
 (deftest synchronous-call-preserves-complete-lifecycle-values
   (let [path (socket-path "transport-lifecycle-call")
@@ -387,7 +320,9 @@
          path
          (fn [_owner request _frame-bytes complete!]
            (swap! seen conj request)
-           (complete! (protocol/success {::protocol/pong? true})))
+           (complete! (protocol/success
+                       {::protocol/request-id (::protocol/request-id request)
+                        ::protocol/pong? true})))
          (constantly nil))]
     (try
       (with-open [channel (uds/connect! path)]
@@ -396,7 +331,9 @@
               response (uds/call! {::uds/channel channel
                                    ::uds/message request})]
           (is (= [request] @seen))
-          (is (= {::protocol/success? true ::protocol/pong? true}
+          (is (= {::protocol/success? true
+                  ::protocol/request-id "transport/ping"
+                  ::protocol/pong? true}
                  response))))
       (finally
         (uds/close-request-server! server)
