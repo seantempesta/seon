@@ -188,6 +188,24 @@
                 (catch clojure.lang.ExceptionInfo error
                   (:seon.dev.artifact/failure (ex-data error)))))))))
 
+(deftest source-publication-replaces-an-obsolete-manifest
+  (let [published {:seon.dev.artifact/writer-digest "writer-new"
+                   :seon.dev.artifact/application-digest "application-new"}
+        config {:seon.dev.config/source-checkout? true
+                :seon.dev.config/artifact-manifest "/unused/artifact.edn"}]
+    (with-redefs-fn
+      {#'artifact/with-build-lock (fn [_ build] (build))
+       #'artifact/build-source! (fn [_])
+       #'artifact/read-manifest
+       (fn [_] (throw (ex-info "obsolete manifest" {})))
+       #'artifact/output-manifest (constantly published)
+       #'artifact/atomic-spit! (fn [_ value] value)}
+      #(is (= (assoc published
+                     :seon.dev.artifact/changed
+                     #{:seon.dev.artifact/writer
+                       :seon.dev.artifact/application})
+              (artifact/build! config (fn [])))))))
+
 (deftest source-artifact-builds-share-one-checkout-lock
   (let [directory (fs/create-temp-dir {:prefix "seon-artifact-lock-test-"})
         root (str directory)

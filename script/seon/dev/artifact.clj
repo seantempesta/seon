@@ -556,7 +556,9 @@
           ;; completed flush happens under the same checkout-wide lock as the
           ;; remaining outputs and the one final manifest publication.
           (prepare-client!)
-          (let [previous (read-manifest config)
+          (let [previous (try
+                           (read-manifest config)
+                           (catch Exception _ nil))
                 manifest (output-manifest config)
                 changed (cond-> #{}
                           (not= (:seon.dev.artifact/writer-digest previous)
