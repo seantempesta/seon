@@ -251,6 +251,12 @@ resolved.
 Commit `67cab865` removes the MCP `eval` compatibility alias from the registry,
 dispatcher, tests, and maintained runbook. The one CLJS tool is `eval_cljs`;
 the operator proof passes 15 tests/49 assertions.
+Commit `7d5ccedc` removes the finite no-containment process-record lifecycle
+after the project-local inventory proved there are no such records to retire.
+The one retained containment drain protocol is unchanged; legacy group-signal,
+stop-result, reason, status, and schema branches plus their tests are deleted.
+Focused operator proof passes 55 tests/269 assertions without running a
+lifecycle command or sending a signal.
 `3ebfcaf5` leaves one current artifact manifest/application digest and removes
 the four historical readers; `9a66bb78` leaves one generated-identity
 allocator; and `c453a5bd` makes that allocator consume the same native
