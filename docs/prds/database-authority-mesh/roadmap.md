@@ -90,9 +90,14 @@ evidence from the parent turn's `rendered-tx` without compatibility
 projections. Autocomplete/export is settled at `8c2bfbe7`: one captured current
 database value, native `as-of` from each turn's transaction ref, and one
 application digest replace the old coordinate and manifest-identity systems.
-Focused proof passes 3 CLJS tests/9 assertions and 6 Python verifier tests. The
-eval receipt implementation is the next active database-envelope/ambient-value
-cut.
+Focused proof passes 3 CLJS tests/9 assertions and 6 Python verifier tests.
+Commit `7301ec5b` settles eval on the one existing `eval-batch!` pipeline:
+native reports/direct errors, one invocation-value run fence, current cached
+database acquisition for each form transaction, and no operation capture,
+ambient connection, coordinate wrapper, or second result envelope. Focused
+proof passes 9 receipt tests/36 assertions, the runtime handoff test/3
+assertions, and the retained Promise primitive test/4 assertions; the client
+compiles.
 
 The JVM half of that contract is implemented. One unversioned
 `seon.db.program/compile-tx-data` owner reads one immutable Datahike value and
@@ -127,11 +132,11 @@ on the same one-value rule: omission acquires one current database value, then
 scope query, JVM KNN, and ordered pull-many share it; focused proof passes 5
 tests/19 assertions. Top level owns the web/turn consumer integration.
 Autocomplete/export identity and database-value unification is complete except
-for the coordinated live authority export. The eval cut is grounded at
-[[research/eval-native-result-database-value-cut-2026-07-16]] and active: it
-retains one `eval-batch!` pipeline, advances through native `:db-after`, fences
-only read-derived record writes, and deletes local operation capture rather
-than replacing it. The downstream web cut is grounded at
+for the coordinated live authority export. The eval cut grounded at
+[[research/eval-native-result-database-value-cut-2026-07-16]] is implemented;
+read-derived recording advances through native `:db-after`, stale fences
+recompile only the record transaction, and local operation capture is deleted
+rather than replaced. The downstream web cut is grounded at
 [[research/web-rendered-tx-observability-unification-2026-07-16]]: the one
 `seon.agent.debug/turn` reconstruction owner feeds the composition boundary,
 attempts inherit their parent turn's `as-of` value, and eval-operation replay
