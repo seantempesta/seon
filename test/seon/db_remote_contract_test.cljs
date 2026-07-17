@@ -663,6 +663,172 @@
                   (is false (str "listener lifecycle contract rejected: " error))
                   (done))))))
 
+(deftest listeners-restore-once-after-a-physical-session-reconnect
+  (async done
+    (-> (with-recording-authority
+          {}
+          (fn [{::keys [requests connection-options connected?]}]
+            (let [events (atom [])]
+              (-> (open!)
+                  (.then
+                   (fn [_]
+                     (reset! requests [])
+                     (db/listen! {::db/key :updates
+                                  ::db/handler #(swap! events conj %)})))
+                  (.then
+                   (fn [_]
+                     (let [closed-options @connection-options]
+                       (reset! connected? false)
+                       ((::uds/on-close! closed-options)
+                        (ex-info "physical session closed" {}))
+                       (open!))))
+                  (.then
+                   (fn [_]
+                     (let [listen-requests
+                           (operation-requests
+                            @requests protocol/listen-operation)]
+                       (is (= 2 (count listen-requests)))
+                       (is (= (mapv ::protocol/request-id listen-requests)
+                              [":updates" ":updates"])
+                           "reconnect restores the one existing interest owner")
+                       (is (= [{::protocol/event
+                                protocol/resynchronization-event
+                                ::protocol/request-id ":updates"
+                                :db-after database}]
+                              @events))
+                       ((::uds/on-event! @connection-options)
+                        {::protocol/event protocol/datoms-event
+                         ::protocol/request-id ":updates"
+                         :db-before (assoc database :t (dec (:t database)))
+                         :db-after database
+                         :tx-data [[1 :example/id "one" 536870913 true]]
+                         :tempids {}
+                         :tx-meta {}})
+                       (is (= 2 (count @events))
+                           "one physical event reaches the handler once")
+                       (db/unlisten! :updates))))))))
+        (.then (fn [_] (done)))
+        (.catch
+         (fn [error]
+           (is false (str "listener reconnect contract rejected: " error
+                          "\n" (.-stack error)))
+           (done))))))
+
+(deftest unlisten-during-reconnect-prevents-physical-restoration
+  (async done
+    (-> (with-recording-authority
+         {}
+         (fn [{::keys [requests connection-options connected? session]}]
+           (let [events (atom [])
+                 reconnect (atom nil)
+                 reconnect-started (atom nil)
+                 started
+                 (js/Promise.
+                  (fn [resolve _reject]
+                    (reset! reconnect-started resolve)))]
+             (-> (open!)
+                 (.then
+                  (fn [_]
+                    (reset! requests [])
+                    (db/listen! {::db/key :updates
+                                 ::db/handler #(swap! events conj %)})))
+                 (.then
+                  (fn [_]
+                    (let [closed-options @connection-options]
+                      (set! uds/connect!
+                            (fn [options]
+                              (reset! connection-options options)
+                              (js/Promise.
+                               (fn [resolve _reject]
+                                 (reset! reconnect resolve)
+                                 (@reconnect-started)))))
+                      (reset! connected? false)
+                      ((::uds/on-close! closed-options)
+                       (ex-info "physical session closed" {}))
+                      (let [opening (open!)]
+                        (-> started
+                            (.then (fn [_] (db/unlisten! :updates)))
+                            (.then
+                             (fn [removed?]
+                               (is (nil?
+                                    (get-in @@#'db/!session
+                                            [::db/interest-handlers
+                                             ":updates"])))
+                               (reset! connected? true)
+                               (@reconnect session)
+                               (-> opening
+                                   (.then (fn [_] removed?))))))))))
+                 (.then
+                  (fn [removed?]
+                    (is (true? removed?))
+                    (is (= 1
+                           (count
+                            (operation-requests
+                             @requests protocol/listen-operation)))
+                        "a removed handler is not restored on the new session")
+                    (is (empty? @events))))))))
+        (.then (fn [_] (done)))
+        (.catch
+         (fn [error]
+           (is false (str "unlisten during reconnect rejected: " error
+                          "\n" (.-stack error)))
+           (done))))))
+
+(deftest owner-close-during-reconnect-prevents-listener-restoration
+  (async done
+    (-> (with-recording-authority
+         {}
+         (fn [{::keys [requests connection-options connected? session]}]
+           (let [reconnect (atom nil)
+                 reconnect-started (atom nil)
+                 started
+                 (js/Promise.
+                  (fn [resolve _reject]
+                    (reset! reconnect-started resolve)))]
+             (-> (open!)
+                 (.then
+                  (fn [_]
+                    (reset! requests [])
+                    (db/listen! {::db/key :updates ::db/handler identity})))
+                 (.then
+                  (fn [_]
+                    (let [closed-options @connection-options]
+                      (set! uds/connect!
+                            (fn [options]
+                              (reset! connection-options options)
+                              (js/Promise.
+                               (fn [resolve _reject]
+                                 (reset! reconnect resolve)
+                                 (@reconnect-started)))))
+                      (reset! connected? false)
+                      ((::uds/on-close! closed-options)
+                       (ex-info "physical session closed" {}))
+                      (let [opening (open!)]
+                        (-> started
+                            (.then
+                             (fn [_]
+                               (is (false? (db/close-session!)))
+                               (reset! connected? true)
+                               (@reconnect session)
+                               opening))
+                            (.then
+                             (fn [_]
+                               (is false
+                                   "owner-closed opening unexpectedly succeeded")))
+                            (.catch
+                             (fn [_]
+                               (is (= 1
+                                      (count
+                                       (operation-requests
+                                        @requests protocol/listen-operation)))
+                                   "owner close never restores the listener"))))))))))))
+        (.then (fn [_] (done)))
+        (.catch
+         (fn [error]
+           (is false (str "owner-close listener contract rejected: " error
+                          "\n" (.-stack error)))
+           (done))))))
+
 (deftest cancel-and-release-use-public-request-and-database-values
   (async done
     (-> (with-recording-authority

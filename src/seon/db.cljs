@@ -311,11 +311,11 @@
                (fn [_]
                  (swap! !session
                         (fn [current]
-                          (if (identical? owner (::owner current))
-                            (-> current
-                                (dissoc ::session ::opening ::database-name
-                                        ::capabilities ::databases)
-                                (assoc ::interest-handlers {}))
+                          (if (and (identical? owner (::owner current))
+                                   (identical? @opened (::session current)))
+                            (dissoc current
+                                    ::session ::opening ::database-name
+                                    ::capabilities ::databases)
                             current))))}))
             _ (reset! opened session)
             _ (swap! !session
@@ -357,14 +357,45 @@
               15000))
             _ (when-not (::protocol/success? acquire-response)
                 (throw (ex-info "Acquiring the database failed." acquire-response)))
+            _ (doseq [[request-id entry] (::interest-handlers @!session)]
+                (when (and (identical? owner (::owner @!session))
+                           (identical?
+                            (::owner entry)
+                            (get-in @!session
+                                    [::interest-handlers request-id ::owner])))
+                  (let [response
+                        (await
+                         (request-on-session!
+                          session
+                          (assoc (::request entry) ::db (::db acquire-response))
+                          15000))]
+                    (when (or (error-value? response)
+                              (not (::protocol/success? response)))
+                      (throw
+                       (ex-info "Restoring a database listener failed."
+                                response)))
+                    (if (identical?
+                         (::owner entry)
+                         (get-in @!session
+                                 [::interest-handlers request-id ::owner]))
+                      (session-event!
+                       {::protocol/event protocol/resynchronization-event
+                        ::protocol/request-id request-id
+                        :db-after (::db acquire-response)})
+                      (await
+                       (request-on-session!
+                        session
+                        (protocol/unlisten-request
+                         {::protocol/request-id (str (random-uuid))
+                          ::protocol/target-request-id request-id})
+                        15000))))))
             state (-> @!session
                       (assoc ::owner owner
                              ::selection selection
                              ::session session
                              ::database-name database-name
                              ::capabilities
-                             (::protocol/capabilities capabilities-response)
-                             ::interest-handlers {})
+                             (::protocol/capabilities capabilities-response))
                       (dissoc ::opening)
                       (cache-database (::db acquire-response)))]
         (swap! !session
@@ -382,8 +413,8 @@
                (fn [current]
                  (if (identical? owner (::owner current))
                    (when-not (true? (aget owner "closed"))
-                     {::owner owner ::selection selection
-                      ::interest-handlers {}})
+                     (select-keys current
+                                  [::owner ::selection ::interest-handlers]))
                    current)))
         (throw exception)))))
 
@@ -406,8 +437,17 @@
       :else
       (let [owner (or (::owner current) (js-obj))
             opening (connect-selection! selection owner)]
-        (reset! !session {::owner owner ::selection selection
-                          ::opening opening ::interest-handlers {}})
+        (swap! !session
+               (fn [latest]
+                 (if (or (nil? latest)
+                         (identical? owner (::owner latest)))
+                   (assoc (or latest {})
+                          ::owner owner
+                          ::selection selection
+                          ::opening opening
+                          ::interest-handlers
+                          (or (::interest-handlers latest) {}))
+                   latest)))
         (await opening)))))
 
 (defn close-session!
@@ -948,7 +988,10 @@
                  (not datom-patterns)
                  (assoc ::protocol/query-form (or query all-datoms-query))))]
           (swap! !session assoc-in [::interest-handlers request-id]
-                 {::owner owner ::handler handler ::key public-key})
+                 {::owner owner
+                  ::handler handler
+                  ::key public-key
+                  ::request request})
           (let [response (await (request-on-session! session request 15000))]
             (if (and (not (error-value? response))
                      (::protocol/success? response))
@@ -983,31 +1026,34 @@
   "Remove a listener by key and report whether this session owned it."
   [input]
   (let [key (if (and (map? input) (contains? input ::key)) (::key input) input)
-        request-id (str key)]
-    (if-let [{::keys [session]} (active-session)]
-      (if-let [entry (get-in @!session [::interest-handlers request-id])]
-        (let [response
-              (await
-               (request-on-session!
-                session
-                (protocol/unlisten-request
-                 {::protocol/request-id (str (random-uuid))
-                  ::protocol/target-request-id request-id})
-                15000))]
-          (if (and (not (error-value? response)) (::protocol/success? response))
-            (do
-              (swap! !session
-                     (fn [current]
-                       (if (identical?
-                            (::owner entry)
-                            (get-in current
-                                    [::interest-handlers request-id ::owner]))
-                         (update current ::interest-handlers dissoc request-id)
-                         current)))
-              true)
-            (if (error-value? response) response (response-error response))))
-        false)
-      false)))
+        request-id (str key)
+        removed (atom nil)]
+    (swap! !session
+           (fn [current]
+             (if-let [entry
+                      (get-in current [::interest-handlers request-id])]
+               (do
+                 (reset! removed entry)
+                 (update current ::interest-handlers dissoc request-id))
+               current)))
+    (if-not @removed
+      false
+      (if-let [{::keys [session opening]} (active-session)]
+        (if opening
+          true
+          (let [response
+                (await
+                 (request-on-session!
+                  session
+                  (protocol/unlisten-request
+                   {::protocol/request-id (str (random-uuid))
+                    ::protocol/target-request-id request-id})
+                  15000))]
+            (cond
+              (error-value? response) response
+              (not (::protocol/success? response)) (response-error response)
+              :else true)))
+        true))))
 
 (defn ^:async cancel!
   "Request cancellation by the existing public request identity."
