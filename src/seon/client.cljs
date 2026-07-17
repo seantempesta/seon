@@ -691,13 +691,10 @@
    ;; The run this turn belongs to (its derived current-turn = count turns
    ;; with this run).
    :seon.agent.turn/run
+   :seon.agent.turn/rendered-tx
    :seon.agent.turn/evals
    :seon.agent.turn/llm-attempts
    :seon.ai.attempt/ordinal
-   :seon.ai.attempt/database-id
-   :seon.ai.attempt/branch
-   :seon.ai.attempt/commit-id
-   :seon.ai.attempt/t
    :seon.ai.attempt/provider
    :seon.ai.attempt/adapter
    :seon.ai.attempt/requested-model

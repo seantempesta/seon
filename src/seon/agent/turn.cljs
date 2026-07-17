@@ -6,7 +6,7 @@
    `:seon.agent.turn/run` so the run's derived current-turn count can count
    it) → render the prompt → call the LLM → parse → eval-batch the forms →
    close the turn. The per-form eval isolation (every form runs; errors are
-   envelopes) lives in [[seon.eval]]; `eval-count = n-ok + n-fail`.
+   values) lives in [[seon.eval]]; `eval-count = n-ok + n-fail`.
 
    This namespace owns the `:seon.agent.turn/*` schema (its data-owner — a
    turn is a STANDALONE entity that points UP to its run; there is no
@@ -15,8 +15,7 @@
      - `open-turn!` / `close-turn!` — the turn bracket (open-tx + close-tx)
      - `ask-and-eval!`  — LLM call + parse + eval-batch
      - `call-llm!`      — `(llm-fn prompt)` with one bounded transport retry
-     - `render-prompt`   — ctx assembly
-     - `turn-index`     — the agent's running turn number (logging)
+     - `render-prompt`  — ctx assembly
 
    Dependency direction (acyclic): it references `:seon.agent.run/*` keywords
    (global registry, no require) and transacts via `seon.db` directly, so it
@@ -27,11 +26,9 @@
     [seon.ai.tokens :as tokens]
     [seon.config :as config]
     [seon.retry :as retry]
-    [seon.agent.ctx :as ctx]
     [seon.agent.home :as home]
     [my.blob :as blob]
     [seon.db :as db]
-    [seon.db.coordinate :as coordinate]
     [seon.db.id :as db.id]
     [seon.error :as error]
     [seon.eval :as seval]
@@ -83,15 +80,10 @@
 ;; converts to tokens); the full prompt is never a datom — it lives in the
 ;; blob store via `:seon.agent.turn/prompt-blob` below.
 (schema/register! :seon.agent.turn/prompt-chars :int)
-;; Observability capture — ALWAYS ON, no debug flag (observability.md).
-;; The complete PRE-turn coordinate is the ONE fact tx-meta cannot provide:
-;; other agents' commits interleave, so the turn's own creation tx is not the
-;; database value the model saw. Commit identifies the immutable container; t
-;; selects the temporal cut inside it. These four attrs are all-or-none.
-(schema/register! :seon.agent.turn/rendered-database-id ::coordinate/database-id)
-(schema/register! :seon.agent.turn/rendered-branch      ::coordinate/branch)
-(schema/register! :seon.agent.turn/rendered-commit-id   ::coordinate/commit-id)
-(schema/register! :seon.agent.turn/rendered-t           ::coordinate/t)
+;; The transaction basis of the immutable database value used for this turn.
+;; The database's own transaction ref is sufficient for normal historical
+;; reconstruction through `db/as-of`; transaction metadata supplies provenance.
+(schema/register! :seon.agent.turn/rendered-tx :seon.db/ref)
 ;; Blob REFS to the byte ground truth (three-tier rule): the prompt blob
 ;; is what the model actually SAW (survives render-code changes); the
 ;; reply blob is the raw LLM reply (not derivable from anything). Refs to
@@ -118,14 +110,10 @@
 (schema/register! :seon.agent.turn/llm-attempts [:vector {:seon.db/component true} :seon.db/ref])
 
 ;; One bounded, queryable transport fact per provider attempt. The turn owns
-;; these component rows; the effective config remains derived from the retained
-;; coordinate and is projected here only as the non-secret values actually
-;; used. Absence remains absence.
+;; these component rows; the effective config remains derived from the parent
+;; turn's database value and is projected here only as the non-secret values
+;; actually used. Absence remains absence.
 (schema/register! :seon.ai.attempt/ordinal :int)
-(schema/register! :seon.ai.attempt/database-id ::coordinate/database-id)
-(schema/register! :seon.ai.attempt/branch ::coordinate/branch)
-(schema/register! :seon.ai.attempt/commit-id ::coordinate/commit-id)
-(schema/register! :seon.ai.attempt/t ::coordinate/t)
 (schema/register! :seon.ai.attempt/provider :seon.ai/provider)
 (schema/register! :seon.ai.attempt/adapter :seon.ai/adapter)
 (schema/register! :seon.ai.attempt/requested-model :seon.ai/model)
@@ -150,10 +138,6 @@
 (schema/register! :seon.ai.attempt/entity
   [:map {:seon.db/entity true}
    [:seon.ai.attempt/ordinal :seon.ai.attempt/ordinal]
-   [:seon.ai.attempt/database-id :seon.ai.attempt/database-id]
-   [:seon.ai.attempt/branch :seon.ai.attempt/branch]
-   [:seon.ai.attempt/commit-id :seon.ai.attempt/commit-id]
-   [:seon.ai.attempt/t :seon.ai.attempt/t]
    [:seon.ai.attempt/provider :seon.ai.attempt/provider]
    [:seon.ai.attempt/adapter :seon.ai.attempt/adapter]
    [:seon.ai.attempt/requested-model {:optional true} :seon.ai.attempt/requested-model]
@@ -186,10 +170,7 @@
    [:seon.agent.turn/run          {:optional true} :seon.agent.turn/run]
    [:seon.agent.turn/scheduled?   {:optional true} :seon.agent.turn/scheduled?]
    [:seon.agent.turn/prompt-chars {:optional true} :seon.agent.turn/prompt-chars]
-   [:seon.agent.turn/rendered-database-id {:optional true} :seon.agent.turn/rendered-database-id]
-   [:seon.agent.turn/rendered-branch      {:optional true} :seon.agent.turn/rendered-branch]
-   [:seon.agent.turn/rendered-commit-id   {:optional true} :seon.agent.turn/rendered-commit-id]
-   [:seon.agent.turn/rendered-t           {:optional true} :seon.agent.turn/rendered-t]
+   [:seon.agent.turn/rendered-tx   {:optional true} :seon.agent.turn/rendered-tx]
    [:seon.agent.turn/prompt-blob  {:optional true} :seon.agent.turn/prompt-blob]
    [:seon.agent.turn/reply-blob   {:optional true} :seon.agent.turn/reply-blob]
    [:seon.agent.turn/error        {:optional true} :seon.agent.turn/error]
@@ -200,44 +181,14 @@
    [:seon.agent.turn/evals        {:optional true} :seon.agent.turn/evals]
    [:seon.agent.turn/llm-attempts {:optional true} :seon.agent.turn/llm-attempts]])
 
-(def ^:private coordinate->turn-attr
-  {::coordinate/database-id :seon.agent.turn/rendered-database-id
-   ::coordinate/branch      :seon.agent.turn/rendered-branch
-   ::coordinate/commit-id   :seon.agent.turn/rendered-commit-id
-   ::coordinate/t           :seon.agent.turn/rendered-t})
-
-(defn- coordinate-turn-attrs [point]
-  (reduce-kv (fn [attrs coordinate-key turn-attr]
-               (assoc attrs turn-attr (get point coordinate-key)))
-             {}
-             coordinate->turn-attr))
-
-(defn rendered-coordinate
-  "Return a turn's complete frozen database coordinate."
-  {:malli/schema [:=> [:cat :map]
-                  [:or ::coordinate/coordinate :seon.db/error]]}
-  [turn]
-  (let [point (reduce-kv (fn [coordinate coordinate-key turn-attr]
-                           (cond-> coordinate
-                             (contains? turn turn-attr)
-                             (assoc coordinate-key (get turn turn-attr))))
-                         {}
-                         coordinate->turn-attr)]
-    (if (schema/valid-candidate-value? ::coordinate/coordinate point)
-      point
-      (error/->map
-        (ex-info "The turn has no complete rendered database coordinate."
-                 {::coordinate/coordinate point
-                  :seon.error/kind :user-input})))))
-
 ;; ============================================================
 ;; Turn-level logging + render-input shaping.
 ;; ============================================================
 
-(defn- log [agent-id turn-n stage & info]
+(defn- log [agent-id stage & info]
   (seon-log/info-console!
     (str "seon.agent.turn/" agent-id)
-    (str "turn " turn-n " ▸ " stage)
+    (str "turn ▸ " stage)
     (if (= 1 (count info)) (first info) (vec info))))
 
 ;; ============================================================
@@ -285,21 +236,6 @@
     (subs s 0 (min turn-error-max-chars (count s)))))
 
 ;; ============================================================
-;; Turn index — the agent's running turn number, for logging. Derived:
-;; count of ALL the agent's turns (across every run). Monotonic +
-;; unique-per-turn; nothing stored.
-;; ============================================================
-
-(defn turn-index
-  "The agent's NEXT turn number — count of every turn it owns.
-
-   Walked agent → runs → turns. Used for log lines (uniqueness, not
-   run-position). Derived, not persisted."
-  {:malli/schema [:=> [:catn [:seon.agent/id :seon.agent/id]] :int]}
-  [agent-id]
-  (count (ctx/agent-turns agent-id nil)))
-
-;; ============================================================
 ;; Prompt assembly.
 ;; ============================================================
 
@@ -315,6 +251,8 @@
    [:seon.render/text :string]
    [:seon.ai/system-prompt :string]
    [:seon.ai/config-resolution :seon.ai/config-resolution]
+   [:seon.config/repl-mode :seon.config/repl-mode]
+   [:seon.eval/ns :seon.ns/name]
    [:seon.agent.ctx/rendered-blocks {:optional true} [:vector :map]]])
 (schema/register! ::prompt-result [:or ::rendered-prompt ::prompt-error])
 
@@ -327,36 +265,36 @@
 (defn ^:async render-prompt
   "Render one agent prompt inside its isolated execution child.
 
-   The caller supplies the complete frozen database coordinate. The trusted
+   The caller supplies the immutable database value. The trusted
    compiled prompt owner performs every prompt read and selected function call
-   at that coordinate and returns the ordinary rendered prompt map. This
-   orchestration tail validates that the child did not move coordinates and
+   at that value and returns the ordinary rendered prompt map. This
+   orchestration tail validates that the child did not move database values and
    preserves the exact context and system text consumed by the LLM."
   {:malli/schema
    [:function
-    [:=> [:cat :seon.agent/id :seon.db.coordinate/coordinate]
+    [:=> [:cat :seon.agent/id :seon.db/db]
      ::prompt-result]
-    [:=> [:cat :seon.agent/id :seon.db.coordinate/coordinate
+    [:=> [:cat :seon.agent/id :seon.db/db
           :seon.agent.ctx/profile]
      ::prompt-result]]}
-  ([agent-id point]
-   (await (render-prompt agent-id point [])))
-  ([agent-id point profile]
+  ([agent-id database]
+   (await (render-prompt agent-id database [])))
+  ([agent-id database profile]
    (let [request (cond-> {:seon.agent/id agent-id}
                    (seq profile)
                    (assoc :seon.agent.ctx/profile (vec profile)))
          response
          (await
            (execution.host/invoke-compiled!
-             point agent-id render-prompt-function [request]))]
+             database agent-id render-prompt-function [request]))]
      (cond
-       (not= point (::execution/coordinate response))
+       (not= database (:seon.db/db response))
        {:seon.error/message
-        "The execution child returned a prompt from another database coordinate."
+        "The execution child returned a prompt from another database value."
         :seon.error/kind :core-bug
         :seon.error/data
-        {:seon.db/expected-coordinate point
-         :seon.db/current-coordinate (::execution/coordinate response)}}
+        {:seon.db/expected-db database
+         :seon.db/db (:seon.db/db response)}}
 
        (= execution/result-message (::execution/message response))
        (let [rendered (::execution/result response)
@@ -386,11 +324,11 @@
 (defn ^:async eval-parsed!
   "Evaluate parsed model output in the agent's existing execution child."
   {:malli/schema
-   [:=> [:cat :seon.agent/id :seon.db.coordinate/coordinate
+   [:=> [:cat :seon.agent/id :seon.db/db
          [:vector :map] :symbol :seon.agent.turn/id
          [:or :nil :seon.agent.run/id]]
     :map]}
-  [agent-id point parsed starting-ns turn-id run-id]
+  [agent-id database parsed starting-ns turn-id run-id]
   (let [request (cond-> {:seon.eval/parsed parsed
                          :seon.eval/starting-ns starting-ns
                          :seon.agent.turn/id-of-turn turn-id}
@@ -398,15 +336,15 @@
         response
         (await
          (execution.host/invoke-compiled!
-          point agent-id eval-batch-function [request]))]
+          database agent-id eval-batch-function [request]))]
     (cond
-      (not= point (::execution/coordinate response))
+      (not= database (:seon.db/db response))
       {:seon.error/message
-       "The execution child returned eval results from another database coordinate."
+       "The execution child returned eval results from another database value."
        :seon.error/kind :core-bug
        :seon.error/data
-       {:seon.db/expected-coordinate point
-        :seon.db/current-coordinate (::execution/coordinate response)}}
+       {:seon.db/expected-db database
+        :seon.db/db (:seon.db/db response)}}
 
       (and (= execution/result-message (::execution/message response))
            (map? (::execution/result response)))
@@ -449,22 +387,21 @@
    ([[seon.db/cas-assert]] on `:seon.agent/id`'s `:seon.agent/run`): a
    turn-open for a superseded/watchdog-closed run (the pointer moved or was
    retracted before the LLM call) aborts at the writer — no zombie turn entity
-   lands, and the caller sees `ok? false`. If the open-tx fails (fence or
-   otherwise) there is NO turn entity — returns the error envelope (no LLM
-   call)."
+   lands, and the caller receives the direct database error. If the open-tx
+   fails (fence or otherwise) there is NO turn entity — returns the error value
+   (no LLM call)."
   {:malli/schema [:=> [:catn [:turn-input :map] [:body-fn :any]] :any]}
   [{:seon.agent/keys [id]
     :seon.agent.run/keys [id-of-run]
     :seon.agent.turn/keys [prompt-text scheduled? prompt-blob]
-    rendered-coordinate ::coordinate/coordinate}
+    database :seon.db/db}
    body-fn]
-  (let [conn db/*conn*
-        turn-row
+  (let [turn-row
         (cond->
           {:seon.agent.turn/at           (js/Date.)
            :seon.agent.turn/status       :running
-           :seon.agent.turn/prompt-chars (count (str prompt-text))}
-          rendered-coordinate (merge (coordinate-turn-attrs rendered-coordinate))
+           :seon.agent.turn/prompt-chars (count (str prompt-text))
+           :seon.agent.turn/rendered-tx  (:t database)}
           prompt-blob    (assoc :seon.agent.turn/prompt-blob prompt-blob)
           scheduled?  (assoc :seon.agent.turn/scheduled? true)
           id-of-run  (assoc :seon.agent.turn/run [:seon.agent.run/id id-of-run]))
@@ -474,6 +411,7 @@
             {::db.id/allocations
              [{::db.id/key ::turn-allocation
                ::db.id/identity-attr :seon.agent.turn/id}]
+             :seon.db/db database
              ::db.id/transaction-builder
              (fn [{turn-id ::turn-allocation}]
                {:seon.db/tx-data
@@ -482,9 +420,8 @@
                   (conj (db/cas-assert [:seon.agent/id id] :seon.agent/run
                                        [:seon.agent.run/id id-of-run]))
                   true
-                  (conj (assoc turn-row :seon.agent.turn/id turn-id)))})
-             :seon.db/conn conn}))]
-    (if (false? (:seon.db/ok? allocation))
+                  (conj (assoc turn-row :seon.agent.turn/id turn-id)))})}))]
+    (if (:seon.error/message allocation)
       allocation
       (let [turn-id (get-in allocation [::db.id/ids ::turn-allocation])]
         (await
@@ -517,10 +454,10 @@
                                                    :seon.agent.turn/llm-attempts
                                                    :seon.agent.turn/reply-blob
                                                    :seon.agent.turn/error]))]}))]
-      (when (false? (:seon.db/ok? close))
+      (when (:seon.error/message close)
         (js/console.error
           (str "seon.agent.turn/close-turn!: turn close-tx FAILED for "
-               id " turn " id-of-turn ". " (pr-str (:seon.db/error close)))))
+               id " turn " id-of-turn ". " (pr-str close))))
       result)
     (catch :default e
       ;; Mark the turn :error best-effort, then preserve the pre-allocation
@@ -552,7 +489,7 @@
    reply and eval-batch the forms. `id` / `id-of-turn` are LOCALS threaded
    down from `run-turn!` (captured before the LLM await), so the always-on
    blob capture pairs this verbatim reply with the same turn's prompt."
-  [resp id id-of-turn run-id stream? start-ns point]
+  [resp id id-of-turn run-id stream? start-ns database]
   (let [raw-reply  (or (:text resp) "")
         ;; Always-on reply capture — the provider string is the byte ground
         ;; truth that goes to the blob store unchanged (best-effort; a lost
@@ -599,7 +536,7 @@
         ;; (namespaces-milestone rung-1 root cause, 2026-07-10: seeding home here made every
         ;; `:stream` turn silently define into my.agent.*, cursor flip-flop,
         ;; ns-interns nil, cross-ns resolution failures).
-        batch      (await (eval-parsed! id point parsed
+        batch      (await (eval-parsed! id database parsed
                                         (or start-ns (home/home-ns id))
                                         id-of-turn run-id))
         _          (when (:seon.error/message batch)
@@ -666,7 +603,7 @@
 
 (defn- attempt-row
   "One bounded queryable component row from immutable request evidence."
-  [ordinal point resolution outer-timeout-ms stream? response outer-timeout?]
+  [ordinal resolution outer-timeout-ms stream? response outer-timeout?]
   (let [config (:seon.ai/resolved-config resolution)
         raw (or (:seon.ai/raw response) response)
         credential (get-in raw [:seon.ai/config-evidence
@@ -690,10 +627,6 @@
         status (get-in response [:seon.ai/error :seon.ai/status])]
     (cond->
       {:seon.ai.attempt/ordinal ordinal
-       :seon.ai.attempt/database-id (::coordinate/database-id point)
-       :seon.ai.attempt/branch (::coordinate/branch point)
-       :seon.ai.attempt/commit-id (::coordinate/commit-id point)
-       :seon.ai.attempt/t (::coordinate/t point)
        :seon.ai.attempt/provider (:seon.ai/provider config)
        :seon.ai.attempt/adapter adapter
        :seon.ai.attempt/outer-timeout-ms outer-timeout-ms
@@ -751,7 +684,7 @@
    canonical request map. In repl-mode `:stream`, `:seon.ai/stream? true` asks
    the adapter to consume the SDK stream and stop it at the first complete
    form. Every retry gets a fresh controller."
-  [id ordinal point resolution llm-fn prompt-text system-prompt stream?]
+  [id ordinal resolution llm-fn prompt-text system-prompt stream?]
   (let [ms         (config/llm-attempt-timeout-ms)
         controller (js/AbortController.)
         signal     (.-signal controller)
@@ -775,7 +708,7 @@
               :seon.ai/timeout? true}}
             v)]
       (assoc response ::attempt-row
-             (attempt-row ordinal point resolution ms (boolean stream?)
+             (attempt-row ordinal resolution ms (boolean stream?)
                           response outer-timeout?)))))
 
 (defn ^:async ^:private call-llm!
@@ -790,7 +723,7 @@
    flows through unchanged — the turn surfaces its `:seon.ai/error` as a
    value, never a throw. When any retry fired, the resp carries
   `:seon.agent.turn/llm-retries n` so the turn record is honest."
-  [id id-of-turn point resolution llm-fn prompt-text system-prompt stream?]
+  [id id-of-turn resolution llm-fn prompt-text system-prompt stream?]
   (let [!attempts (atom [])
         {:seon.retry/keys [result retries]}
         (await
@@ -799,7 +732,7 @@
              (fn ^:async run-attempt! []
                (let [ordinal (count @!attempts)
                      response
-                     (await (bounded-llm-attempt! id ordinal point resolution
+                     (await (bounded-llm-attempt! id ordinal resolution
                                                   llm-fn prompt-text
                                                   system-prompt stream?))]
                  (swap! !attempts conj (::attempt-row response))
@@ -812,7 +745,7 @@
                                             (min llm-retry-max-delay-ms)))
              :seon.retry/on-retry
              (fn [{:seon.retry/keys [attempt delay-ms result]}]
-               (log id id-of-turn "llm transient error — retry"
+               (log id "llm transient error — retry"
                     (str attempt " in " delay-ms "ms — "
                          (get-in result [:seon.ai/error :seon.ai/msg]))))}))]
     (cond-> (assoc result :seon.agent.turn/llm-attempts @!attempts)
@@ -832,11 +765,11 @@
     run-id :seon.agent.run/id
     stream? :seon.ai/stream?
     start-ns :seon.eval/start-ns
-    point ::coordinate/coordinate
+    database :seon.db/db
     resolution :seon.ai/config-resolution
     system-prompt :seon.ai/system-prompt
-    :seon.agent.turn/keys  [id-of-turn turn-idx prompt-text]}]
-  (let [resp    (await (call-llm! id id-of-turn point resolution llm-fn
+    :seon.agent.turn/keys  [id-of-turn prompt-text]}]
+  (let [resp    (await (call-llm! id id-of-turn resolution llm-fn
                                   prompt-text system-prompt (boolean stream?)))
         retries (:seon.agent.turn/llm-retries resp)
         attempts (:seon.agent.turn/llm-attempts resp)
@@ -846,7 +779,7 @@
         pfields (:seon.ai/provider-fields raw)]
     (if-let [err (:seon.ai/error resp)]
       (do
-        (log id turn-idx "llm error — turn :error"
+        (log id "llm error — turn :error"
              (str (when retries (str "(after " retries " retry) "))
                   (:seon.ai/msg err)))
         (cond->
@@ -858,7 +791,7 @@
            :seon.agent.turn/llm-attempts attempts}
           retries (assoc :seon.agent.turn/llm-retries retries)))
       (cond-> (await (ask-and-eval-reply! resp id id-of-turn run-id
-                                          (boolean stream?) start-ns point))
+                                          (boolean stream?) start-ns database))
         true        (assoc :seon.agent.turn/llm-attempts attempts)
         retries     (assoc :seon.agent.turn/llm-retries retries)
         (seq usage) (assoc :seon.agent.turn/llm-usage (pr-str usage))
@@ -876,7 +809,7 @@
      :seon.db/db                the FROZEN db value the loop pinned for this
                                 turn (§8a — the prompt render + the loop's
                                 bound-checks share ONE basis-t); defaults to
-                                `@*conn*` when absent (bootstrap/direct callers)
+                                the session's cached latest value when absent
 
    Wraps the pipeline in a `with-tx-context` scope so every transact (incl.
    the per-form txs inside `eval-batch!`) auto-tags with the causality
@@ -886,32 +819,27 @@
    `:seon.agent.turn/id` when the turn row was already committed."
   {:malli/schema [:=> [:catn [:input :map]] :map]}
   [{:seon.agent/keys [id llm-fn] run-id :seon.agent.run/id db :seon.db/db}]
-  (let [db         (or db @db/*conn*)
+  (let [database   (or db (await (db/db)))
         ;; repl-mode read off the DB DATOM (config-through-DB), pinned to
         ;; the SAME frozen db the prompt renders from — the turn loop never
         ;; reads the config accessor.
-        stream?    (= :stream (ctx/repl-mode db))
-        turn-idx   (turn-index id)
-        rendered-coordinate (coordinate/resolved db)
-        prompt-result (await (render-prompt id rendered-coordinate))
+        prompt-result (await (render-prompt id database))
         _ (when (:seon.error/message prompt-result)
             (throw (ex-info (:seon.error/message prompt-result)
                             prompt-result)))
         prompt (:seon.render/text prompt-result)
         system-prompt (:seon.ai/system-prompt prompt-result)
         config-resolution (:seon.ai/config-resolution prompt-result)
+        stream? (= :stream (:seon.config/repl-mode prompt-result))
         full-prompt (ai/debug-full-prompt {:seon.ai/ctx prompt
                                            :seon.ai/system-prompt system-prompt})
-        ;; Always-on observability capture: the frozen db's complete coordinate
-        ;; (resolved through `db/at-coordinate`) + the assembled prompt verbatim
-        ;; as a blob. Both land on the turn's
+        ;; Always-on observability capture: the database value's basis
+        ;; transaction plus the assembled prompt verbatim as a blob. Both land on the turn's
         ;; open-tx; a failed blob write yields nil and the turn proceeds.
-        ;; Where the batch STARTS: the agent's derived current-ns over the
-        ;; SAME frozen db the prompt rendered from — so the ns the cursor
-        ;; showed the agent is the ns its forms run in (an in-ns in a prior
-        ;; turn holds; ctx/current-ns already falls back to home).
-        start-ns   (let [c (ctx/current-ns {:seon.agent/id id :seon.db/db db})]
-                     (when c (symbol (if (keyword? c) (name c) (str c)))))
+        ;; The prompt acquisition returns the current namespace from that same
+        ;; database value, so the namespace the cursor showed is where the
+        ;; batch starts.
+        start-ns (some-> (:seon.eval/ns prompt-result) name symbol)
         prompt-blob    (await (capture-blob! full-prompt :prompt))]
     ;; ctx-tokens = the assembled context ONLY; the system text rides the
     ;; adapter's system message, so it is reported as its own count here
@@ -931,11 +859,11 @@
                                  {:seon.agent/id           id
                                   :seon.agent.run/id-of-run run-id
                                   :seon.agent.turn/prompt-text   full-prompt
-                                  ::coordinate/coordinate rendered-coordinate}
+                                  :seon.db/db database}
                                  prompt-blob
                                  (assoc :seon.agent.turn/prompt-blob prompt-blob))
                                (fn ^:async run-allocated-turn! [turn-id]
-                                 (log id turn-idx "open" turn-id "+"
+                                 (log id "open" turn-id "+"
                                       (tokens/estimate prompt) "ctx-tokens" "+"
                                       (tokens/estimate
                                         system-prompt)
@@ -945,28 +873,27 @@
                                      {:seon.agent/id            id
                                       :seon.agent/llm-fn        llm-fn
                                       :seon.agent.run/id        run-id
-                                      ::coordinate/coordinate  rendered-coordinate
+                                      :seon.db/db database
                                       :seon.ai/config-resolution config-resolution
                                       :seon.ai/stream?          stream?
                                       :seon.ai/system-prompt    system-prompt
                                       :seon.eval/start-ns       start-ns
                                       :seon.agent.turn/id-of-turn turn-id
-                                      :seon.agent.turn/turn-idx turn-idx
                                       :seon.agent.turn/prompt-text prompt})))))))))]
-        (if (false? (:seon.db/ok? result))
+        (if (:seon.error/message result)
           ;; The open-tx FAILED — there is NO turn entity to pull (the
           ;; lookup-ref is unresolvable). Return the same `:error` shape the
           ;; catch returns, so the loop closes the run `:error` instead of
           ;; pulling nil → `{:seon.agent/eval-count 0}` (no status) and
           ;; recur-ing `:turn-ok` forever (a tight retry storm on a write
           ;; outage). run-turn! ALWAYS carries a status on its error paths.
-          (do (log id turn-idx "open-turn! failed → turn :error"
-                   (pr-str (:seon.db/error result)))
+          (do (log id "open-turn! failed → turn :error"
+                   (pr-str result))
               {:seon.agent.turn/status :error
-               :seon.error/data        (pr-str (:seon.db/error result))})
+               :seon.error/data        (pr-str result)})
           (let [turn-id (:seon.agent.turn/id result)
                 n-ok (or (:seon.agent/eval-count result) 0)]
-            (log id turn-idx (name (or (:seon.agent.turn/status result) :done)) n-ok
+            (log id (name (or (:seon.agent.turn/status result) :done)) n-ok
                  (if (:seon.agent.turn/status result) "llm-error" "ok"))
             (assoc (await
                      (db/pull {:seon.db/pull-pattern
@@ -980,7 +907,7 @@
         ;; A body failure carries the identity already committed by open-turn!.
         (let [failure-data (ex-data e)
               turn-id     (:seon.agent.turn/id failure-data)]
-          (log id turn-idx "run-turn! error" (str e))
+          (log id "run-turn! error" (str e))
           (cond-> {:seon.agent.turn/status :error
                    :seon.error/data        (str e)}
             turn-id (assoc :seon.agent.turn/id turn-id)))))))

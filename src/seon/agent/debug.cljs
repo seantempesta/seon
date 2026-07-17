@@ -3,7 +3,7 @@
 
    Two functions:
      - `ctx-preview` — the FULL prompt the agent would receive on its
-       next render: the coordinate-pinned system block first, then the
+       next render: the database-value-pinned system block first, then the
        assembled AI context from the same compiled child result consumed by
        `seon.agent.turn/render-prompt`. The
        `:seon.render/text` is byte-identical to what the LLM receives
@@ -16,7 +16,7 @@
      - `handlers` — the live handler registry visible to the agent
        (core + per-agent).
      - `turn` / `turn-diff` — turn replay: reconstruct any persisted
-       turn from its complete rendered database coordinate + prompt
+       turn from its rendered transaction ref + prompt
        and reply blobs; diff two turns.
      - `errors` / `error` / `repro` — error triage over the persisted
        `seon.error/record!` datoms: compact recent list → one full
@@ -35,8 +35,6 @@
     [seon.ai.tokens :as tokens]
     [seon.agent.turn :as turn]
     [seon.db :as db]
-    [seon.db.coordinate :as coordinate]
-    [seon.error :as error]
     [seon.schema :as schema]))
 
 ;; Shared success/error envelope keys — registered ONCE up front; every
@@ -49,9 +47,6 @@
   [:map
    [:seon.agent/id {:optional true} :seon.agent/id]
    [:seon.db/db {:optional true} :seon.db/db]
-   [:seon.db.coordinate/coordinate
-    {:optional true}
-    :seon.db.coordinate/coordinate]
    [:seon.render/formats {:optional true}
     [:enum #{:ai} #{:ai :html}]]])
 
@@ -115,22 +110,16 @@
    `:seon.agent.ctx/rendered-blocks` leads with the `:system` block, then the
    exact ordered context blocks with whichever render formats they declare.
    `:seon.render/token-estimate` counts the WHOLE
-   prompt (system included). An explicit complete coordinate is used as-is;
-   an immutable `:seon.db/db` only supplies its coordinate, and an omitted
-   coordinate resolves the remote head once. Errors are
+   prompt (system included). An explicit immutable `:seon.db/db` is used
+   as-is; omission uses the session's cached latest value. Errors are
    values: no id and no agent scope returns `::ok? false` plus a
    guiding `::error` — nothing throws."
   {:malli/schema [:=> [:cat :seon.agent.debug/request] :seon.agent.debug/ctx-result]}
   [{:seon.agent/keys [id]
-    dbv :seon.db/db
-    point :seon.db.coordinate/coordinate}]
+    database :seon.db/db}]
   (if-let [id (or id (db/current-agent-id))]
-    (let [point (or point
-                    (when dbv (coordinate/resolved dbv))
-                    (await (db/head-coordinate)))
-          rendered (if (:seon.error/message point)
-                     point
-                     (await (turn/render-prompt id point)))]
+    (let [database (or database (await (db/db)))
+          rendered (await (turn/render-prompt id database))]
       (if (:seon.error/message rendered)
         rendered
         (ctx-preview* rendered)))
@@ -139,7 +128,7 @@
                   ":seon.agent/id or call inside (seon.db/with-agent id ...).")}))
 
 ;;; ============================================================
-;;; Turn reconstruction — read one persisted turn from its frozen coordinate,
+;;; Turn reconstruction — read one persisted turn from its rendered transaction,
 ;;; prompt blob, and reply blob. Arbitrary eval effects are never replayed.
 ;;; ============================================================
 
@@ -149,7 +138,9 @@
 (schema/register! ::reply-tokens  :int)
 
 (schema/register! ::turn-request
-  [:map [:seon.agent.turn/id :seon.agent.turn/id]])
+  [:map
+   [:seon.agent.turn/id :seon.agent.turn/id]
+   [:seon.db/db {:optional true} :seon.db/db]])
 
 (schema/register! ::turn-response
   [:map
@@ -158,22 +149,22 @@
    [::error                          {:optional true} ::error]
    [:seon.agent.turn/status         {:optional true} :seon.agent.turn/status]
    [:seon.agent.turn/at             {:optional true} :seon.agent.turn/at]
-   [:seon.agent.turn/rendered-database-id {:optional true} :seon.agent.turn/rendered-database-id]
-   [:seon.agent.turn/rendered-branch      {:optional true} :seon.agent.turn/rendered-branch]
-   [:seon.agent.turn/rendered-commit-id   {:optional true} :seon.agent.turn/rendered-commit-id]
-   [:seon.agent.turn/rendered-t           {:optional true} :seon.agent.turn/rendered-t]
+   [:seon.agent.turn/rendered-tx    {:optional true} :seon.agent.turn/rendered-tx]
    [:seon.agent.turn/error          {:optional true} :seon.agent.turn/error]
    [::prompt        {:optional true} ::prompt]
    [::prompt-tokens {:optional true} ::prompt-tokens]
    [::reply         {:optional true} ::reply]
    [::reply-tokens  {:optional true} ::reply-tokens]])
 
-(defn- turn-eid
+(defn- ^:async turn-eid
   "The entity id stored under a turn id, or nil — query, never a
    lookup-ref (safe on a store where no turn has landed yet)."
-  [turn-id]
-  (db/query '[:find ?e . :in $ ?id :where [?e :seon.agent.turn/id ?id]]
-            turn-id))
+  [database turn-id]
+  (await
+   (db/query {:seon.db/db database
+              :seon.db/query
+              '[:find ?e . :in $ ?id :where [?e :seon.agent.turn/id ?id]]
+              :seon.db/args [turn-id]})))
 
 (defn- blob-text
   "Read a captured blob ref's content back — `{::k text ::k-tokens n}`
@@ -188,50 +179,43 @@
         {::error (str (name ref-attr) " blob " hash " unreadable: " error)}))
     {}))
 
-(defn turn
+(defn ^:async turn
   "Reconstruct one persisted turn and its captured model bytes.
 
    Map-in/map-out — `{:seon.agent.turn/id id}` returns the turn's
-   complete rendered database coordinate, the VERBATIM prompt and raw reply
+   rendered transaction ref, the VERBATIM prompt and raw reply
    read back from their blobs (with token estimates), and the turn's stored
    error when present. The durable turn/eval graph is the record; this does not
    claim that arbitrary database or external effects can be replayed. An
    unknown id or unreadable blob returns `::ok? false` plus a guiding
    `::error`; nothing throws."
   {:malli/schema [:=> [:cat ::turn-request] ::turn-response]}
-  [{turn-id :seon.agent.turn/id}]
-  (if-let [eid (turn-eid turn-id)]
-    (let [t (db/pull {:seon.db/pull-pattern
+  [{turn-id :seon.agent.turn/id database :seon.db/db}]
+  (let [database (or database (await (db/db)))]
+    (if-let [eid (await (turn-eid database turn-id))]
+      (let [t (await (db/pull {:seon.db/db database
+                      :seon.db/selector
                       [:seon.agent.turn/id :seon.agent.turn/at
                        :seon.agent.turn/status
-                       :seon.agent.turn/rendered-database-id
-                       :seon.agent.turn/rendered-branch
-                       :seon.agent.turn/rendered-commit-id
-                       :seon.agent.turn/rendered-t
+                       :seon.agent.turn/rendered-tx
                        :seon.agent.turn/error
                        {:seon.agent.turn/prompt-blob [:my.blob/hash]}
                        {:seon.agent.turn/reply-blob  [:my.blob/hash]}]
-                      :seon.db/ref eid})
+                      :seon.db/eid eid}))
           p (blob-text t :seon.agent.turn/prompt-blob ::prompt ::prompt-tokens)
           r (blob-text t :seon.agent.turn/reply-blob  ::reply  ::reply-tokens)
-          point (turn/rendered-coordinate t)
-          coordinate-error (:seon.error/message point)
-          errs (cond-> (vec (keep ::error [p r]))
-                 coordinate-error (conj coordinate-error))]
+          errs (vec (keep ::error [p r]))]
       (cond-> (merge (select-keys t [:seon.agent.turn/id :seon.agent.turn/at
                                      :seon.agent.turn/status
-                                     :seon.agent.turn/rendered-database-id
-                                     :seon.agent.turn/rendered-branch
-                                     :seon.agent.turn/rendered-commit-id
-                                     :seon.agent.turn/rendered-t
+                                     :seon.agent.turn/rendered-tx
                                      :seon.agent.turn/error])
                      (dissoc p ::error)
                      (dissoc r ::error)
                      {::ok? (empty? errs)})
         (seq errs) (assoc ::error (str/join "; " errs))))
-    {::ok? false
-     :seon.agent.turn/id turn-id
-     ::error (str "no turn stored under " (pr-str turn-id))}))
+      {::ok? false
+       :seon.agent.turn/id turn-id
+       ::error (str "no turn stored under " (pr-str turn-id))})))
 
 ;;; turn-diff — what changed between two turns, as a summary an agent can
 ;;; budget on: a lineage-safe t delta when both cuts share one containing
@@ -241,7 +225,10 @@
 (schema/register! ::to   :seon.agent.turn/id)
 
 (schema/register! ::turn-diff-request
-  [:map [::from ::from] [::to ::to]])
+  [:map
+   [::from ::from]
+   [::to ::to]
+   [:seon.db/db {:optional true} :seon.db/db]])
 
 (schema/register! ::basis-t-delta        :int)
 (schema/register! ::prompt-token-delta   :int)
@@ -270,7 +257,7 @@
                 [(+ a (max 0 d)) (+ r (max 0 (- d)))]))
             [0 0] ks)))
 
-(defn turn-diff
+(defn ^:async turn-diff
   "What changed between two persisted turns — a budgetable summary.
 
    Map-in/map-out — `{::from id ::to id}` returns both [[turn]] bundles
@@ -282,30 +269,23 @@
    `::error` when either turn is missing; partial capture degrades to
    the fields both sides carry."
   {:malli/schema [:=> [:cat ::turn-diff-request] ::turn-diff-response]}
-  [{::keys [from to]}]
-  (let [ft (turn {:seon.agent.turn/id from})
-        tt (turn {:seon.agent.turn/id to})]
-    (if (or (nil? (turn-eid from)) (nil? (turn-eid to)))
+  [{::keys [from to] database :seon.db/db}]
+  (let [database (or database (await (db/db)))
+        ft (await (turn {:seon.agent.turn/id from :seon.db/db database}))
+        tt (await (turn {:seon.agent.turn/id to :seon.db/db database}))]
+    (if (or (not (::ok? ft)) (not (::ok? tt)))
       {::ok? false
        ::error (str/join "; " (keep ::error [ft tt]))}
       (let [[added removed] (line-delta (::prompt ft) (::prompt tt))
-            fp (turn/rendered-coordinate ft)
-            tp (turn/rendered-coordinate tt)
-            same-container? (and (nil? (:seon.error/message fp))
-                                 (nil? (:seon.error/message tp))
-                                 (= (select-keys fp [::coordinate/database-id
-                                                     ::coordinate/branch
-                                                     ::coordinate/commit-id])
-                                    (select-keys tp [::coordinate/database-id
-                                                     ::coordinate/branch
-                                                     ::coordinate/commit-id])))]
+            from-tx (:seon.agent.turn/rendered-tx ft)
+            to-tx (:seon.agent.turn/rendered-tx tt)]
         (cond-> {::ok? (and (::ok? ft) (::ok? tt))
                  ::from-turn ft
                  ::to-turn   tt
                  ::prompt-lines-added   added
                  ::prompt-lines-removed removed}
-          same-container?
-          (assoc ::basis-t-delta (- (::coordinate/t tp) (::coordinate/t fp)))
+          (and (int? from-tx) (int? to-tx))
+          (assoc ::basis-t-delta (- to-tx from-tx))
           (and (::prompt-tokens ft) (::prompt-tokens tt))
           (assoc ::prompt-token-delta (- (::prompt-tokens tt)
                                          (::prompt-tokens ft)))
@@ -329,6 +309,7 @@
 (schema/register! ::errors-request
   [:map
    [:seon.error/fault {:optional true} :seon.error/fault]
+   [:seon.db/db {:optional true} :seon.db/db]
    [::limit           {:optional true} ::limit]])
 
 (schema/register! ::error-row
@@ -350,14 +331,17 @@
   "Row cap for [[errors]] when the caller names none — recent, compact."
   20)
 
-(defn- tx-agent-id
+(defn- ^:async tx-agent-id
   "The agent user whose transaction wrote error `eid`."
   [db eid]
-  (db/query '[:find ?aid . :in $ ?e
-              :where [?e :seon.error/fault _ ?tx]
-                     [?tx :seon.db/user ?author]
-                     [?author :seon.agent/id ?aid]]
-            db eid))
+  (await
+   (db/query {:seon.db/db db
+              :seon.db/query
+              '[:find ?aid . :in $ ?e
+                :where [?e :seon.error/fault _ ?tx]
+                       [?tx :seon.db/user ?author]
+                       [?author :seon.agent/id ?aid]]
+              :seon.db/args [eid]})))
 
 (defn- top-frame-str
   "\"fn (file:line)\" for the index-0 frame of pulled `frames`, or nil."
@@ -379,15 +363,15 @@
                         :seon.error.frame/file :seon.error.frame/line
                         :seon.error.frame/column]}])
 
-(defn- pull-error
+(defn- ^:async pull-error
   "The persisted error entity under `eid`, or nil when it isn't one."
   [db eid]
-  (let [e (db/pull {:seon.db/db db
-                    :seon.db/pull-pattern error-pull-pattern
-                    :seon.db/ref eid})]
+  (let [e (await (db/pull {:seon.db/db db
+                           :seon.db/selector error-pull-pattern
+                           :seon.db/eid eid}))]
     (when (:seon.error/fault e) e)))
 
-(defn errors
+(defn ^:async errors
   "List recent persisted errors, newest first — compact triage rows.
 
    Map-in/map-out (0-arity = defaults): optional `:seon.error/fault`
@@ -400,22 +384,31 @@
   {:malli/schema [:function
                   [:=> [:cat] ::errors-response]
                   [:=> [:cat ::errors-request] ::errors-response]]}
-  ([] (errors {}))
-  ([{fault :seon.error/fault limit ::limit}]
-   (let [db   @db/*conn*
-         eids (->> (db/query '[:find ?e ?f
-                               :where [?e :seon.error/fault ?f]]
-                             db)
+  ([] (await (errors {})))
+  ([{fault :seon.error/fault limit ::limit database :seon.db/db}]
+   (let [database (or database (await (db/db)))
+         rows (await (db/query {:seon.db/db database
+                                :seon.db/query
+                                '[:find ?e ?f
+                                  :where [?e :seon.error/fault ?f]]}))
+         eids (->> rows
                    (filter (fn [[_ f]] (or (nil? fault) (= fault f))))
                    (map first)
                    (sort >)                     ; eids are monotonic → newest first
-                   (take (or limit default-errors-limit)))]
+                   (take (or limit default-errors-limit))
+                   vec)
+         persisted
+         (vec (array-seq
+               (await (js/Promise.all
+                       (clj->js (mapv #(pull-error database %) eids))))))
+         agent-ids
+         (vec (array-seq
+               (await (js/Promise.all
+                       (clj->js (mapv #(tx-agent-id database %) eids))))))]
      {::errors
-      (mapv (fn [eid]
-              (let [{:seon.error/keys [fault message frames] :as persisted}
-                    (pull-error db eid)
-                    top (top-frame-str frames)
-                    aid (tx-agent-id db eid)]
+      (mapv (fn [eid persisted aid]
+              (let [{:seon.error/keys [fault message frames]} persisted
+                    top (top-frame-str frames)]
                 (cond-> (merge
                           {::eid eid
                            :seon.error/fault fault
@@ -427,9 +420,10 @@
                                         :seon.error/t]))
                   top (assoc ::top-frame top)
                   aid (assoc :seon.agent/id aid))))
-            eids)})))
+            eids persisted agent-ids)})))
 
-(schema/register! ::error-request [:map [::eid ::eid]])
+(schema/register! ::error-request
+  [:map [::eid ::eid] [:seon.db/db {:optional true} :seon.db/db]])
 
 ;; Pulled frame rows (sorted by index) — same leaf shape as the stored
 ;; component entities, re-used from seon.error's registration.
@@ -454,48 +448,44 @@
    [::turn-eid           {:optional true} ::eid]
    [:seon.agent.turn/id  {:optional true} :seon.agent.turn/id]])
 
-(defn- turn-active-at-coordinate
-  "Latest turn in the same immutable containing commit at or before `point`."
-  [db aid point]
-  (when (and aid (nil? (:seon.error/message point)))
-    (->> (db/query
-           '[:find ?turn ?turn-id ?turn-t
-             :in $ ?aid ?database-id ?branch ?commit-id ?error-t
-             :where
-             [?agent :seon.agent/id ?aid]
-             [?run :seon.agent.run/agent ?agent]
-             [?turn :seon.agent.turn/run ?run]
-             [?turn :seon.agent.turn/id ?turn-id]
-             [?turn :seon.agent.turn/rendered-database-id ?database-id]
-             [?turn :seon.agent.turn/rendered-branch ?branch]
-             [?turn :seon.agent.turn/rendered-commit-id ?commit-id]
-             [?turn :seon.agent.turn/rendered-t ?turn-t]
-             [(<= ?turn-t ?error-t)]]
-           db aid
-           (::coordinate/database-id point)
-           (::coordinate/branch point)
-           (::coordinate/commit-id point)
-           (::coordinate/t point))
+(defn- ^:async turn-active-at-t
+  "Latest turn for one agent whose rendered transaction precedes an error."
+  [db aid error-t]
+  (when (and aid (int? error-t))
+    (->> (await
+          (db/query
+           {:seon.db/db db
+            :seon.db/query
+            '[:find ?turn ?turn-id ?rendered-tx
+              :in $ ?aid ?error-t
+              :where
+              [?agent :seon.agent/id ?aid]
+              [?run :seon.agent.run/agent ?agent]
+              [?turn :seon.agent.turn/run ?run]
+              [?turn :seon.agent.turn/id ?turn-id]
+              [?turn :seon.agent.turn/rendered-tx ?rendered-tx]
+              [(<= ?rendered-tx ?error-t)]]
+            :seon.db/args [aid error-t]}))
          (sort-by #(nth % 2) >)
          first)))
 
-(defn error
+(defn ^:async error
   "Full detail for one persisted error: envelope + turn/agent joins.
 
    Map-in/map-out — `{::eid eid}` (from [[errors]]) returns the whole
    persisted projection (message, fault, complete coordinate, frames sorted by
    index, args-edn, data-edn, stack) plus the JOINS: the recording
-   agent's id and a turn proven active inside the same containing commit —
-   `::turn-eid` plus
+   agent's id and the latest turn whose rendered transaction did not follow
+   the error — `::turn-eid` plus
    `:seon.agent.turn/id` so [[turn]] composes.
    An unknown eid returns `::ok? false` with a guiding `::error`."
   {:malli/schema [:=> [:cat ::error-request] ::error-response]}
-  [{eid ::eid}]
-  (let [db @db/*conn*]
-    (if-let [e (pull-error db eid)]
-      (let [aid (tx-agent-id db eid)
-            point (error/recorded-coordinate e)
-            [teid tid] (turn-active-at-coordinate db aid point)]
+  [{eid ::eid database :seon.db/db}]
+  (let [database (or database (await (db/db)))]
+    (if-let [e (await (pull-error database eid))]
+      (let [aid (await (tx-agent-id database eid))
+            [teid tid] (await (turn-active-at-t database aid
+                                                (:seon.error/t e)))]
         (cond-> (merge {::ok? true ::eid eid}
                        (select-keys e [:seon.error/fault :seon.error/message
                                        :seon.error/database-id
@@ -517,14 +507,15 @@
 (schema/register! ::repro-expr :string)
 (schema/register! ::note       :string)
 
-(schema/register! ::repro-request [:map [::eid ::eid]])
+(schema/register! ::repro-request
+  [:map [::eid ::eid] [:seon.db/db {:optional true} :seon.db/db]])
 
 (schema/register! ::repro-response
   [:map
    [::ok?  ::ok?]
    [::eid  ::eid]
    [::error {:optional true} ::error]
-   ;; The LIVE exact db VALUE frozen at the complete coordinate — REPL use only.
+   ;; The exact database value frozen at the transaction — REPL use only.
    ;; NEVER pr-str it into agent context (it prints the whole index);
    ;; render its t and abbreviated commit instead.
    [:seon.db/db          {:optional true} :seon.db/db]
@@ -559,9 +550,10 @@
 
 (defn- repro-expr-str
   "The ready-to-eval reproduction expression for what's ACTUALLY stored."
-  [point fn-sym args-edn]
+  [transaction-id fn-sym args-edn]
   (let [resolve-expr
-        (str "(seon.db/at-coordinate seon.db/*conn* " (pr-str point) ")")]
+        (str "(.then (seon.db/db) "
+             "(fn [database] (seon.db/as-of database " transaction-id ")))")]
     (if (and fn-sym args-edn)
       (str "(.then " resolve-expr "\n"
            "  (fn [db] (apply (resolve '" fn-sym ") (cljs.reader/read-string "
@@ -572,51 +564,47 @@
   "The work-backwards bundle for one persisted error — freeze + re-run.
 
    Map-in/map-out — `{::eid eid}` returns `:seon.db/db` (the exact immutable
-   db VALUE frozen at the recorded coordinate — REPL material; never print
+   database value frozen at the recorded transaction — REPL material; never print
    it), the failing `::fn-sym` + `:seon.error/args-edn`
    when the malli envelope captured them (a `::note` says so honestly
    when absent — nothing is fabricated), the linked turn
-   (`::turn-eid` + complete rendered coordinate, composes with [[turn]]), and
+   (`::turn-eid` + rendered transaction ref, composes with [[turn]]), and
    `::repro-expr` — a ready-to-eval expression string built from what's
-   actually stored. Writable forensic branching is omitted until the operator
-   accepts complete coordinates; the legacy t-only fork command is ambiguous.
-   `::ok? false` + guiding `::error` for an unknown eid or an old error with no
-   complete point."
+   actually stored. `::ok? false` + guiding `::error` is returned for an
+   unknown eid or an old error without a transaction id."
   {:malli/schema [:=> [:cat ::repro-request] ::repro-response]}
-  [{eid ::eid}]
-  (let [db @db/*conn*]
-    (if-let [e (pull-error db eid)]
+  [{eid ::eid database :seon.db/db}]
+  (let [database (or database (await (db/db)))]
+    (if-let [e (await (pull-error database eid))]
       (let [{:seon.error/keys [args-edn data-edn]} e
-            aid      (tx-agent-id db eid)
+            aid      (await (tx-agent-id database eid))
             fn-sym   (fn-sym-from-data-edn data-edn)
             args-edn (readable-args-edn args-edn)
-            point    (error/recorded-coordinate e)]
-        (if-let [coordinate-error (:seon.error/message point)]
+            transaction-id (:seon.error/t e)]
+        (if-not (int? transaction-id)
           {::ok? false ::eid eid
-           ::error (str "error " eid " " coordinate-error
-                        " — no db value can be reconstructed")}
-          (let [historical-db (await (db/at-coordinate db/*conn* point))]
-            (if-let [resolution-error (:seon.error/message historical-db)]
-              {::ok? false ::eid eid ::error resolution-error}
-              (let [[teid tid] (turn-active-at-coordinate db aid point)]
-                (cond-> (merge
-                          {::ok? true ::eid eid
-                           :seon.db/db historical-db
-                           ::repro-expr (repro-expr-str point fn-sym args-edn)}
-                          (select-keys e [:seon.error/database-id
-                                          :seon.error/branch
-                                          :seon.error/commit-id
-                                          :seon.error/t]))
-                  fn-sym   (assoc ::fn-sym fn-sym)
-                  args-edn (assoc :seon.error/args-edn args-edn)
-                  teid     (assoc ::turn-eid teid :seon.agent.turn/id tid)
-                  true     (assoc ::note
-                                  (if (and fn-sym args-edn)
-                                    (str "exact read-only reproduction is ready; "
-                                         "coordinate-aware writable fork is pending")
-                                    (str "no captured fn/args on this error (non-malli "
-                                         "path or clipped args); use the exact frozen "
-                                         "db. Coordinate-aware writable fork is pending")))))))))
+           ::error (str "error " eid
+                        " has no transaction id — no database value can be reconstructed")}
+          (let [historical-db (db/as-of database transaction-id)
+                [teid tid]
+                (await (turn-active-at-t database aid transaction-id))]
+            (cond-> (merge
+                     {::ok? true ::eid eid
+                      :seon.db/db historical-db
+                      ::repro-expr
+                      (repro-expr-str transaction-id fn-sym args-edn)}
+                     (select-keys e [:seon.error/database-id
+                                     :seon.error/branch
+                                     :seon.error/commit-id
+                                     :seon.error/t]))
+              fn-sym (assoc ::fn-sym fn-sym)
+              args-edn (assoc :seon.error/args-edn args-edn)
+              teid (assoc ::turn-eid teid :seon.agent.turn/id tid)
+              true (assoc ::note
+                          (if (and fn-sym args-edn)
+                            "exact read-only reproduction is ready"
+                            (str "no captured fn/args on this error (non-malli "
+                                 "path or clipped args); use the exact frozen db")))))))
       {::ok? false ::eid eid
        ::error (str "no persisted error under eid " eid
                     " — list them: (seon.agent.debug/errors)")})))

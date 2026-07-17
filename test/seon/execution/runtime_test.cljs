@@ -299,15 +299,18 @@
 (deftest empty-and-missing-agents-render-the-empty-existing-shape
   (async done
     (let [observed (atom nil)
-          empty-render {:seon.render/text ""
-                        :seon.agent.ctx/rendered-blocks []
-                        :seon.ai/system-prompt "frozen system"}]
+          empty-render (fn [id]
+                         {:seon.render/text ""
+                          :seon.agent.ctx/rendered-blocks []
+                          :seon.ai/system-prompt "frozen system"
+                          :seon.config/repl-mode :batch
+                          :seon.eval/ns (keyword (str "my.agent." id))})]
       (-> (call-with-acquired-agent
            {} {:seon.agent/id "empty"} observed)
           (.then
            (fn [rendered]
              (testing "an existing agent with no prompt data"
-               (is (= empty-render
+               (is (= (empty-render "empty")
                       (dissoc rendered :seon.ai/config-resolution)))
                (is (= :deepseek
                       (get-in rendered [:seon.ai/config-resolution
@@ -318,7 +321,7 @@
           (.then
            (fn [rendered]
              (testing "a genuinely missing agent"
-               (is (= empty-render
+               (is (= (empty-render "missing")
                       (dissoc rendered :seon.ai/config-resolution))))
              (done)))
           (.catch

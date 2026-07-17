@@ -2,41 +2,46 @@
   (:require
    [cljs.test :refer [async deftest is]]
    [seon.agent.turn :as turn]
-   [seon.db.coordinate :as coordinate]
+   [seon.db :as db]
+   [seon.db.id :as db.id]
    [seon.execution :as execution]
    [seon.execution.host :as execution.host]))
 
-(def point
-  {::coordinate/database-id #uuid "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
-   ::coordinate/branch :db
-   ::coordinate/commit-id #uuid "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
-   ::coordinate/t 42})
+(def database
+  {:db-name "turn-test"
+   :t 42
+   :as-of nil
+   :since nil
+   :history false
+   :datahike/commit-id #uuid "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"})
 
 (def resolution
   {:seon.ai/resolved-config {:seon.ai/provider :deepseek}
    :seon.ai/provenance {:seon.ai/provider :default}})
 
-(deftest prompt-is-the-coordinate-pinned-child-result
+(def prompt-value
+  {:seon.render/text "remote prompt"
+   :seon.ai/system-prompt "frozen system"
+   :seon.ai/config-resolution resolution
+   :seon.config/repl-mode :batch
+   :seon.eval/ns :my.agent.agent-1})
+
+(deftest prompt-is-the-database-value-pinned-child-result
   (async done
     (let [original execution.host/invoke-compiled!
           observed (atom nil)]
       (set! execution.host/invoke-compiled!
-            (fn [coordinate agent-id function-symbol arguments]
-              (reset! observed [coordinate agent-id function-symbol arguments])
+            (fn [database agent-id function-symbol arguments]
+              (reset! observed [database agent-id function-symbol arguments])
               (js/Promise.resolve
                 {::execution/message execution/result-message
-                 ::execution/coordinate coordinate
-                 ::execution/result {:seon.render/text "remote prompt"
-                                     :seon.ai/system-prompt "frozen system"
-                                     :seon.ai/config-resolution resolution}})))
-      (-> (turn/render-prompt "agent-1" point)
+                 :seon.db/db database
+                 ::execution/result prompt-value})))
+      (-> (turn/render-prompt "agent-1" database)
           (.then
             (fn [prompt]
-              (is (= {:seon.render/text "remote prompt"
-                      :seon.ai/system-prompt "frozen system"
-                      :seon.ai/config-resolution resolution}
-                     prompt))
-              (is (= [point "agent-1"
+              (is (= prompt-value prompt))
+              (is (= [database "agent-1"
                       'seon.execution.runtime/render-prompt!
                       [{:seon.agent/id "agent-1"}]]
                      @observed))))
@@ -54,19 +59,18 @@
           observed (atom nil)
           profile [{:seon.agent.ctx/name :transcript}]]
       (set! execution.host/invoke-compiled!
-            (fn [coordinate agent-id function-symbol arguments]
-              (reset! observed [coordinate agent-id function-symbol arguments])
+            (fn [database agent-id function-symbol arguments]
+              (reset! observed [database agent-id function-symbol arguments])
               (js/Promise.resolve
                 {::execution/message execution/result-message
-                 ::execution/coordinate coordinate
-                 ::execution/result {:seon.render/text "profile prompt"
-                                     :seon.ai/system-prompt "system"
-                                     :seon.ai/config-resolution resolution}})))
-      (-> (turn/render-prompt "agent-1" point profile)
+                 :seon.db/db database
+                 ::execution/result (assoc prompt-value
+                                           :seon.render/text "profile prompt")})))
+      (-> (turn/render-prompt "agent-1" database profile)
           (.then
             (fn [prompt]
               (is (= "profile prompt" (:seon.render/text prompt)))
-              (is (= [point "agent-1"
+              (is (= [database "agent-1"
                       'seon.execution.runtime/render-prompt!
                       [{:seon.agent/id "agent-1"
                         :seon.agent.ctx/profile profile}]]
@@ -77,29 +81,27 @@
               (set! execution.host/invoke-compiled! original)
               (done)))))))
 
-(deftest prompt-rejects-a-moved-coordinate-as-data
+(deftest prompt-rejects-a-moved-database-value-as-data
   (async done
     (let [original execution.host/invoke-compiled!
-          moved (assoc point ::coordinate/t 43)]
+          moved (assoc database :t 43)]
       (set! execution.host/invoke-compiled!
             (fn [_ _ _ _]
               (js/Promise.resolve
                 {::execution/message execution/result-message
-                 ::execution/coordinate moved
-                 ::execution/result {:seon.render/text "wrong prompt"
-                                     :seon.ai/system-prompt "wrong system"
-                                     :seon.ai/config-resolution resolution}})))
-      (-> (turn/render-prompt "agent-1" point)
+                 :seon.db/db moved
+                 ::execution/result prompt-value})))
+      (-> (turn/render-prompt "agent-1" database)
           (.then
             (fn [result]
               (is (= :core-bug (:seon.error/kind result)))
-              (is (= point
+              (is (= database
                      (get-in result
                              [:seon.error/data
-                              :seon.db/expected-coordinate])))))
+                              :seon.db/expected-db])))))
           (.catch
             (fn [exception]
-              (is false (str "coordinate mismatch rejected: " exception))))
+              (is false (str "database mismatch rejected: " exception))))
           (.finally
             (fn []
               (set! execution.host/invoke-compiled! original)
@@ -112,12 +114,12 @@
                        :seon.error/kind :core-bug
                        :seon.error/data {:seon.db/results []}}]
       (set! execution.host/invoke-compiled!
-            (fn [coordinate _ _ _]
+            (fn [database _ _ _]
               (js/Promise.resolve
                 {::execution/message execution/result-message
-                 ::execution/coordinate coordinate
+                 :seon.db/db database
                  ::execution/result child-error})))
-      (-> (turn/render-prompt "agent-1" point)
+      (-> (turn/render-prompt "agent-1" database)
           (.then (fn [result] (is (= child-error result))))
           (.catch
             (fn [exception]
@@ -127,23 +129,23 @@
               (set! execution.host/invoke-compiled! original)
               (done)))))))
 
-(deftest parsed-reply-uses-the-same-agent-child-and-frozen-coordinate
+(deftest parsed-reply-uses-the-same-agent-child-and-database-value
   (async done
     (let [original execution.host/invoke-compiled!
           observed (atom nil)
           parsed [{:seon.repl/kind :form
                    :seon.repl/source "(+ 1 2)"}]]
       (set! execution.host/invoke-compiled!
-            (fn [coordinate agent-id function-symbol arguments]
-              (reset! observed [coordinate agent-id function-symbol arguments])
+            (fn [database agent-id function-symbol arguments]
+              (reset! observed [database agent-id function-symbol arguments])
               (js/Promise.resolve
                {::execution/message execution/result-message
-                ::execution/coordinate coordinate
+                :seon.db/db database
                 ::execution/result {:seon.eval/n-ok 1
                                     :seon.eval/n-fail 0
                                     :seon.eval/ids ["eval-1"]}})))
       (-> (js/Promise.resolve
-           (turn/eval-parsed! "agent-1" point parsed 'my.agent.agent-1
+           (turn/eval-parsed! "agent-1" database parsed 'my.agent.agent-1
                               "turn-1" "run-1"))
           (.then
            (fn [result]
@@ -151,7 +153,7 @@
                      :seon.eval/n-fail 0
                      :seon.eval/ids ["eval-1"]}
                     result))
-             (is (= [point "agent-1"
+             (is (= [database "agent-1"
                      'seon.execution.runtime/eval-batch!
                      [{:seon.eval/parsed parsed
                        :seon.eval/starting-ns 'my.agent.agent-1
@@ -164,4 +166,85 @@
           (.finally
            (fn []
              (set! execution.host/invoke-compiled! original)
+             (done)))))))
+
+(deftest open-turn-stores-the-basis-transaction-and-consumes-native-results
+  (async done
+    (let [original-allocate db.id/allocate!
+          original-transact db/transact!
+          original-with-context db/with-tx-context
+          observed-allocation (atom nil)
+          observed-close (atom nil)]
+      (set! db.id/allocate!
+            (fn [request]
+              (reset! observed-allocation request)
+              (let [turn-id "turn-native"
+                    built ((::db.id/transaction-builder request)
+                           {::turn/turn-allocation turn-id})]
+                (js/Promise.resolve
+                 {:db-before database
+                  :db-after (assoc database :t 43)
+                  :tx-data (:seon.db/tx-data built)
+                  :tempids {}
+                  :tx-meta {}
+                  ::db.id/ids {::turn/turn-allocation turn-id}
+                  ::db.id/eids {::turn/turn-allocation 101}}))))
+      (set! db/transact!
+            (fn [& [request]]
+              (reset! observed-close request)
+              (js/Promise.resolve
+               {:db-before (assoc database :t 43)
+                :db-after (assoc database :t 44)
+                :tx-data (:seon.db/tx-data request)
+                :tempids {}
+                :tx-meta {}})))
+      (set! db/with-tx-context
+            (fn [_context thunk] (thunk)))
+      (-> (turn/open-turn!
+           {:seon.agent/id "agent-1"
+            :seon.db/db database
+            :seon.agent.turn/prompt-text "frozen prompt"}
+           (fn [turn-id]
+             (js/Promise.resolve
+              {:seon.agent.turn/id turn-id
+               :seon.agent/eval-count 0})))
+          (.then
+           (fn [result]
+             (let [open-row
+                   (first (:seon.db/tx-data
+                           ((::db.id/transaction-builder @observed-allocation)
+                            {::turn/turn-allocation "turn-native"})))]
+               (is (= "turn-native" (:seon.agent.turn/id result)))
+               (is (= database (:seon.db/db @observed-allocation)))
+               (is (= 42 (:seon.agent.turn/rendered-tx open-row)))
+               (is (not (contains? result :seon.db/ok?)))
+               (is (= :done
+                      (get-in @observed-close
+                              [:seon.db/tx-data 0
+                               :seon.agent.turn/status]))))))
+          (.catch (fn [error] (is false (str error))))
+          (.finally
+           (fn []
+             (set! db.id/allocate! original-allocate)
+             (set! db/transact! original-transact)
+             (set! db/with-tx-context original-with-context)
+             (done)))))))
+
+(deftest open-turn-propagates-a-direct-allocation-error
+  (async done
+    (let [original db.id/allocate!
+          failure {:seon.error/message "writer unavailable"
+                   :seon.error/kind :core-bug
+                   :seon.error/data {:seon.db/request "turn"}}]
+      (set! db.id/allocate! (fn [_] (js/Promise.resolve failure)))
+      (-> (turn/open-turn!
+           {:seon.agent/id "agent-1"
+            :seon.db/db database
+            :seon.agent.turn/prompt-text "never runs"}
+           (fn [_] (is false "body must not run")))
+          (.then (fn [result] (is (= failure result))))
+          (.catch (fn [error] (is false (str error))))
+          (.finally
+           (fn []
+             (set! db.id/allocate! original)
              (done)))))))

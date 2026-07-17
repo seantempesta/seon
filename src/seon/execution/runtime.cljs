@@ -92,13 +92,15 @@
          :seon.execution.runtime/values
          (mapv #(when (::execution/ok? %) (::execution/value %)) results)}))))
 
+(defn- namespace-value [values]
+  (some #(when (and (map? %)
+                    (contains? % ::render-fns/fn-rows))
+           %)
+        values))
+
 (defn- derived-blocks
   [stored values]
-  (when-let [namespace-value
-             (some #(when (and (map? %)
-                               (contains? % ::render-fns/fn-rows))
-                      %)
-                   values)]
+  (when-let [namespace-value (namespace-value values)]
     (let [stored-pins (into #{}
                             (comp (mapcat (juxt :seon.render/ai
                                                 :seon.render/html))
@@ -142,8 +144,9 @@
     :datahike.resource/max-results 65536
    :datahike.resource/max-result-weight 3145728}
    {::protocol/operation protocol/pull-operation
-    ::protocol/selector (conj (ai/model-transport-pull-pattern)
-                              :seon.config/system-text)
+    ::protocol/selector (into (ai/model-transport-pull-pattern)
+                              [:seon.config/system-text
+                               :seon.config/repl-mode])
     ::protocol/entity-id [:seon.config/id config/cluster-config-id]
     :datahike.resource/max-work 100000
     :datahike.resource/max-results 1
@@ -216,6 +219,9 @@
                      (ctx/selected-agent-blocks entity profile))
             stored-resolution (await (resolve-blocks! id entity blocks
                                                       invoke-selected!))
+            namespace-value
+            (namespace-value (:seon.execution.runtime/values
+                              stored-resolution))
             stored-blocks (:seon.execution.runtime/blocks stored-resolution)
             derived (when (and (not (seq profile)) (nil? whole-prompt))
                       (derived-blocks blocks
@@ -241,7 +247,12 @@
             (some? whole-prompt)
             (assoc :seon.agent.ctx/whole-prompt resolved-whole-prompt)))
          :seon.ai/system-prompt system-prompt
-         :seon.ai/config-resolution config-resolution)))))
+         :seon.ai/config-resolution config-resolution
+         :seon.config/repl-mode
+         (or (:seon.config/repl-mode cluster-config-row) :batch)
+         :seon.eval/ns
+         (or (::render-fns/current-ns namespace-value)
+             (keyword (str "my.agent." id))))))))
 
 (def ^:private agent-view-members
   [{::protocol/operation protocol/pull-operation

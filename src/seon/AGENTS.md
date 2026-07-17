@@ -18,7 +18,7 @@ existing one needs strengthening IN PLACE.
 
 | Mechanism | The one owner | Never |
 |---|---|---|
-| DB access | `seon.db` (sole API; pod forwards writes to `seon.db.server`) | touch `datahike.api` outside `src/seon/db/` |
+| DB access | `seon.db` (sole API; the JVM authority owns indexed reads and writes) | touch `datahike.api` outside `src/seon/db/` |
 | Schema | `seon.schema/register!` (auto-derives datahike schema) | hand-written datahike schema, inline duplicated shapes |
 | Context unit | `:seon.agent.ctx/block` + seed-copy + `install!`/`remove!` | a second block set, render-merge, a provider/catalog |
 | Rendering | `seon.render` — one guarded walker, ai + html views | a second projection path; renders are NEVER stored |
@@ -29,8 +29,8 @@ existing one needs strengthening IN PLACE.
 | Semantic search | `seon.embed` — ONE `:seon/embedding` attr + Proximum index (database server) | a second index or embedder |
 | Token counts | `seon.ai.tokens/estimate` — sizes shown to anyone are TOKENS | printing char counts; a second estimator |
 | LLM calls + retry | providers in `seon.ai.*`; `seon.agent.turn/call-llm!` is the sole retry authority | a parallel retry/backoff path |
-| Code execution | `seon.eval` (self-host `cljs.js`), the one sandboxed exec service | a second eval path |
-| Pod process lifecycle | `seon.client/start-runtime!` + `stop-runtime!`; one retained closed launch capability and serialized phase order web/SSE → ticker/hosts → replica → admission/projection → awaited Datahike release | mode env flags, a second launcher, clearing `db/*conn*` before every inverse proves success |
+| Code execution | the per-agent `seon.execution` child invoking `seon.eval` over its retained self-host compiler | pod-side SCI/authored eval or another execution path |
+| Pod process lifecycle | `seon.client/start-runtime!` + `stop-runtime!`; one retained closed launch capability and serialized phase order web/SSE → ticker/hosts → database session → admission/projection → awaited release | mode env flags, a second launcher, or a local database replica |
 | Restore intent | `seon.dev.restore` owns the pure writer-visible immutable plan, digest, and fact-derived next command; script-only `seon.dev.restore-state` owns fsync publication | a mutable phase/status file, ambient launch/config inputs, ancestry-inferred force success, or a writer-private intent shape |
 | Capability fns | `seon.agent.fs` is the template (gating, envelope, paging) | a tool with its own arg/result conventions |
 | Big text at rest | `my.blob` content-addressed disk tier — DB holds projections + refs | large text dumps as datoms; ad-hoc log-file trees |
@@ -39,9 +39,10 @@ existing one needs strengthening IN PLACE.
 
 ## Runtime boundaries
 
-- **`.cljs` = the ACTIVE pod** (Node, HTTP 7890). This is the current focus.
-- **`db/*.clj` + `embed.clj`** = the active JVM database/heavy-work server:
-  sole Datahike writer, UDS transaction feed/replay, and embeddings.
+- **`.cljs` = the JavaScript pod and Bun execution children** (HTTP 7890);
+  Bun is the target pod runtime while the operator cut is still in progress.
+- **`db/*.clj` + `embed.clj`** = the active JVM database/heavy-work authority:
+  sole Datahike writer, shared indexed reads, selective interests, and embeddings.
 - The former JVM application was deleted and is preserved only by Git history;
   do not restore sibling JVM application namespaces.
 - `.cljc` is for genuinely portable schemas and pure mechanics. Promote a file
@@ -67,10 +68,10 @@ imperative reflexes, guessed library semantics). Ground first:
 - The pod is single-threaded: agent/user failures become values at their
   boundary. A core publication/readiness fault records once and may fail the
   development process or readiness gate; do not turn it into a standing census.
-- `seon.db/*conn*` is a single dynamic root — CORRECT by construction: one
-  pod = one cluster = one conn (isolation is the process boundary).
-  Parallelism = more clusters (`bin/seon cluster create`), never a second
-  in-pod conn.
+- `seon.db` owns one persistent authority session per process and caches its
+  latest ordinary database value. Async computation owners acquire one value
+  and pass it through every related read; no caller retains a Datahike
+  connection or reconstructs a local replica.
 - Home-ns data/function aliases (`db/`, `plan/`, `message/`, `schema/`) DO
   resolve in agent-authored `my.*` nses — `seon.eval/augment-ns-source`
   injects the real `(:require …)` into every authored `(ns …)` form at eval
@@ -78,8 +79,7 @@ imperative reflexes, guessed library semantics). Ground first:
   survives resume, #73/#56 CLOSED). NOT auto-aliased: the `my.*` toolkit
   (`my.ui/…`, `my.data/…`, `my.canvas/…`, `my.kb/…`), the `agent/` alias, and
   the lifecycle refers (`wait`/`complete`/…) — full-qualify those.
-- Turn capture is live (the all-or-none `rendered-database-id`,
-  `rendered-branch`, `rendered-commit-id`, and `rendered-t` attrs plus
+- Turn capture is live (one `:seon.agent.turn/rendered-tx` ref plus
   prompt/reply blob refs, `seon.agent.debug/turn`/`turn-diff`) and is the ONE capture
   path — the gated `seon.debug` file tree is deleted; Inspect AI and debug
   projections read prompts by blob hash (see `observability.md`).
