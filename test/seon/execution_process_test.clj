@@ -36,7 +36,15 @@
    :seon.ns/source ":string"
    :seon.fn/sym "[:string {:seon.db/identity true}]"
    :seon.fn/ns ":seon.db/ref"
-   :seon.fn/source ":string"})
+   :seon.fn/source ":string"
+   :seon.execution-proof/user
+   "[:map {:seon.db/entity true} [:seon.user/id :seon.user/id]]"
+   :seon.execution-proof/agent
+   "[:map {:seon.db/entity true} [:seon.agent/id :seon.agent/id]]"
+   :seon.execution-proof/namespace
+   "[:map {:seon.db/entity true} [:seon.ns/name :seon.ns/name] [:seon.ns/source :seon.ns/source]]"
+   :seon.execution-proof/function
+   "[:map {:seon.db/entity true} [:seon.fn/sym :seon.fn/sym] [:seon.fn/ns :seon.fn/ns] [:seon.fn/source :seon.fn/source]]"})
 
 (def old-current-source
   (str "(defn current []\n"
