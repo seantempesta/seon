@@ -342,7 +342,7 @@
                            (::launch/http-port-file descriptor-process))
                           runtime-root (assoc "SEON_RUNTIME_ROOT" runtime-root))
         java (get environment "JAVA_CMD" "java")
-        javascript-runtime (get environment "SEON_JS_RUNTIME" "node")
+        javascript-runtime (get environment "SEON_JS_RUNTIME" "bun")
         pod-spec
         (cond->
           {:seon.dev.process/id pod-id

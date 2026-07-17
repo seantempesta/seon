@@ -227,9 +227,9 @@ write_test_report() {
   local failures="$6"
   local errors="$7"
   local compile_seconds="$8"
-  local node_seconds="$9"
+  local javascript_seconds="$9"
   local namespaces="${10}"
-  local node_exit="${11}"
+  local javascript_exit="${11}"
   local core_faults="${12}"
   local requested_exact="${13:-nil}"
   local matched_exact="${14:-nil}"
@@ -248,8 +248,8 @@ write_test_report() {
     printf ' :seon.dev.test-runner/executed-exact-selectors %s\n' "$executed_exact"
     printf ' :seon.dev.test-runner/namespaces %s\n' "$namespaces"
     printf ' :seon.dev.test-runner/compile-seconds %s\n' "$compile_seconds"
-    printf ' :seon.dev.test-runner/node-seconds %s\n' "$node_seconds"
-    printf ' :seon.dev.test-runner/node-exit %s\n' "$node_exit"
+    printf ' :seon.dev.test-runner/javascript-seconds %s\n' "$javascript_seconds"
+    printf ' :seon.dev.test-runner/javascript-exit %s\n' "$javascript_exit"
     printf ' :seon.dev.test-runner/full-log "%s"}\n' "$TMPOUT"
   } > "$REPORTOUT"
   ln -sf "$(basename "$TMPOUT")" tmp/test-cljs-latest.log
@@ -351,11 +351,12 @@ if [ ! -f "out/test/test.js" ]; then
 fi
 
 echo ""
-echo "== Running tests (node out/test/test.js) =="
-NODE_START=$(date +%s)
-NODE_CMD=(node out/test/test.js)
+JS_RUNTIME="${SEON_JS_RUNTIME:-bun}"
+echo "== Running tests ($JS_RUNTIME out/test/test.js) =="
+JAVASCRIPT_START=$(date +%s)
+JAVASCRIPT_CMD=("$JS_RUNTIME" out/test/test.js)
 if [ "${#TEST_ARGS[@]}" -gt 0 ]; then
-  NODE_CMD+=("${TEST_ARGS[@]}")
+  JAVASCRIPT_CMD+=("${TEST_ARGS[@]}")
 fi
 
 # The timestamped log is the complete forensic transcript. The terminal is a
@@ -363,7 +364,7 @@ fi
 # Datahike/LLM errors and ordinary runtime info, which used to bury the one
 # assertion a human needed. Default to compact progress + final cljs.test
 # counts; `--verbose` remains the explicit live-transcript escape hatch.
-compact_node_output() {
+compact_javascript_output() {
   awk '
     /^Testing / {
       started += 1
@@ -391,14 +392,14 @@ compact_node_output() {
 }
 
 if [ "$VERBOSE" -eq 1 ]; then
-  "${NODE_CMD[@]}" 2>&1 | tee -a "$TMPOUT"
-  NODE_EXIT=${PIPESTATUS[0]}
+  "${JAVASCRIPT_CMD[@]}" 2>&1 | tee -a "$TMPOUT"
+  JAVASCRIPT_EXIT=${PIPESTATUS[0]}
 else
-  "${NODE_CMD[@]}" 2>&1 | tee -a "$TMPOUT" | compact_node_output
-  NODE_EXIT=${PIPESTATUS[0]}
+  "${JAVASCRIPT_CMD[@]}" 2>&1 | tee -a "$TMPOUT" | compact_javascript_output
+  JAVASCRIPT_EXIT=${PIPESTATUS[0]}
 fi
-NODE_END=$(date +%s)
-NODE_ELAPSED=$((NODE_END - NODE_START))
+JAVASCRIPT_END=$(date +%s)
+JAVASCRIPT_ELAPSED=$((JAVASCRIPT_END - JAVASCRIPT_START))
 
 # ---------------------------------------------------------------------------
 # Verdict — based on EXIT CODE + SUMMARY-PRESENCE + cljs.test's own
@@ -491,7 +492,7 @@ if [ "$REQUESTED_EXACT_COUNT" -gt 0 ]; then
 fi
 
 VERDICT_FAIL=0
-[ "$NODE_EXIT" -ne 0 ] && VERDICT_FAIL=1
+[ "$JAVASCRIPT_EXIT" -ne 0 ] && VERDICT_FAIL=1
 [ "$INCOMPLETE" -ne 0 ] && VERDICT_FAIL=1
 [ "$REAL_FAILS" -ne 0 ] && VERDICT_FAIL=1
 [ "$CORE_GATE_TRIPPED" -ne 0 ] && VERDICT_FAIL=1
@@ -511,14 +512,14 @@ EXECUTED_EXACT_COUNT=nil
 if [ "$INCOMPLETE" -eq 0 ] && [ "$MATCHED_EXACT_COUNT" != nil ]; then
   EXECUTED_EXACT_COUNT="$MATCHED_EXACT_COUNT"
 elif [ "$EXACT_SELECTION_INVALID" -ne 0 ] && \
-     [ "$MATCHED_EXACT_COUNT" != nil ] && [ "$NODE_EXIT" -ne 0 ]; then
+     [ "$MATCHED_EXACT_COUNT" != nil ] && [ "$JAVASCRIPT_EXIT" -ne 0 ]; then
   # The pinned Shadow runner rejects the unmatched request before executing
   # any selected var. Missing telemetry remains nil rather than inventing proof.
   EXECUTED_EXACT_COUNT=0
 fi
 write_test_report "$REPORT_STATUS" runtime "$REPORT_COMPLETE" \
   "$TEST_COUNT" "$ASSERTION_COUNT" "$FAILURE_COUNT" "$ERROR_COUNT" \
-  "$COMPILE_ELAPSED" "$NODE_ELAPSED" "$RAN" "$NODE_EXIT" "$CORE_FAULTS" \
+  "$COMPILE_ELAPSED" "$JAVASCRIPT_ELAPSED" "$RAN" "$JAVASCRIPT_EXIT" "$CORE_FAULTS" \
   "$REQUESTED_EXACT_COUNT" "$MATCHED_EXACT_COUNT" "$EXECUTED_EXACT_COUNT"
 
 END=$(date +%s)
@@ -527,7 +528,7 @@ ELAPSED=$((END - START))
 echo ""
 echo "========================================"
 echo "compile: ${COMPILE_STATUS}"
-echo "node: ${NODE_ELAPSED}s; namespaces started: ${RAN}; exit: ${NODE_EXIT}"
+echo "$JS_RUNTIME: ${JAVASCRIPT_ELAPSED}s; namespaces started: ${RAN}; exit: ${JAVASCRIPT_EXIT}"
 [ "$REQUESTED_EXACT_COUNT" -gt 0 ] && \
   echo "exact selectors: requested ${REQUESTED_EXACT_COUNT}; matched ${MATCHED_EXACT_COUNT}; executed ${EXECUTED_EXACT_COUNT}"
 [ -n "$SUMMARY_LINE" ] && echo "summary: ${SUMMARY_LINE}  ${COUNTS_LINE}"

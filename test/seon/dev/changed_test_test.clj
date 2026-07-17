@@ -95,12 +95,15 @@
              "SEON_RENDER_STRICT" "0"}}))
       "an explicit caller selection still wins, as it does in bin/test-cljs"))
 
-(deftest full-node-command-does-not-filter-shadow-test-data
+(deftest full-javascript-command-does-not-filter-shadow-test-data
   (let [artifact {:seon.dev.test.artifact/path "out/test/artifact/test.js"}]
-    (is (= ["node" "root/out/test/artifact/test.js"]
-           (changed/node-argv "root" artifact :all)))
-    (is (= ["node" "root/out/test/artifact/test.js" "--test=example.alpha-test"]
-           (changed/node-argv "root" artifact ['example.alpha-test])))))
+    (is (= ["bun" "root/out/test/artifact/test.js"]
+           (changed/javascript-argv {} "root" artifact :all)))
+    (is (= ["node" "root/out/test/artifact/test.js"
+            "--test=example.alpha-test"]
+           (changed/javascript-argv
+            {:seon.dev.config/environment {"SEON_JS_RUNTIME" "node"}}
+            "root" artifact ['example.alpha-test])))))
 
 (deftest shared-cljc-input-uses-the-shadow-graph-when-known
   (let [shared (assoc-in manifest

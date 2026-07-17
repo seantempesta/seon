@@ -581,18 +581,21 @@
     (prune-logs! log-dir)
     result))
 
-(defn node-argv
-  "Return an unfiltered full command or an explicitly focused Node command."
-  [root manifest test-namespaces]
-  (cond-> ["node" (str (fs/path root
-                                (:seon.dev.test.artifact/path manifest)))]
+(defn javascript-argv
+  "Return an unfiltered full command or an explicitly focused JavaScript command."
+  [configuration root manifest test-namespaces]
+  (cond-> [(get-in configuration
+                    [:seon.dev.config/environment "SEON_JS_RUNTIME"]
+                    "bun")
+           (str (fs/path root (:seon.dev.test.artifact/path manifest)))]
     (not= :all test-namespaces)
     (into (map #(str "--test=" %) test-namespaces))))
 
-(defn- run-node! [configuration manifest test-namespaces]
+(defn- run-javascript! [configuration manifest test-namespaces]
   (let [root (:seon.dev.config/root configuration)]
     (assoc (run-command! root :pod
-                         (node-argv root manifest test-namespaces)
+                         (javascript-argv configuration root manifest
+                                          test-namespaces)
                          (test-process-environment configuration))
            :seon.dev.changed-test/test-namespaces test-namespaces)))
 
@@ -711,7 +714,7 @@
           (conj (run-writer! root writer-tests))
 
           (and manifest (or (= :all pod-tests) (seq pod-tests)))
-          (conj (run-node! configuration manifest pod-tests))
+          (conj (run-javascript! configuration manifest pod-tests))
 
           (and (:seon.dev.changed-test/shadow? shadow) (nil? manifest))
           (conj (run-pod-fallback! configuration)))]

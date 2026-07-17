@@ -11,7 +11,7 @@
     "css:build": "tailwindcss -i resources/public/css/input.css -o resources/public/css/output.css",
     "css:watch": "tailwindcss -i resources/public/css/input.css -o resources/public/css/output.css --watch",
     "client:watch": "clj -M:cljs watch client",
-    "client:run": "node out/client/main.js",
+    "client:run": "bun out/client/main.js",
     "client:clean": "rm -rf out/client .shadow-cljs"
   },
   "keywords": [],

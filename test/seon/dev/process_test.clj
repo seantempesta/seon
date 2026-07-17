@@ -2011,21 +2011,21 @@
              (process/admit-watcher-artifact! configuration manifest))))
       (finally (fs/delete-tree directory)))))
 
-(deftest pod-runtime-is-explicitly-selectable-without-changing-the-artifact
+(deftest pod-runtime-defaults-to-bun-and-remains-explicitly-selectable
   (let [base (test-config)
         configuration
         (target-config base (:seon.dev.test/directory base))
-        node-pod (get (process/specs configuration
-                                     (target-manifest-for configuration))
-                      process/pod-id)
-        bun-configuration
+        bun-pod (get (process/specs configuration
+                                    (target-manifest-for configuration))
+                     process/pod-id)
+        node-configuration
         (update configuration :seon.dev.config/environment
-                assoc "SEON_JS_RUNTIME" "bun")
-        bun-pod (get (process/specs bun-configuration
-                                    (target-manifest-for bun-configuration))
-                     process/pod-id)]
-    (is (= "node" (first (:seon.dev.process/argv node-pod))))
+                assoc "SEON_JS_RUNTIME" "node")
+        node-pod (get (process/specs node-configuration
+                                     (target-manifest-for node-configuration))
+                      process/pod-id)]
     (is (= "bun" (first (:seon.dev.process/argv bun-pod))))
+    (is (= "node" (first (:seon.dev.process/argv node-pod))))
     (is (= (rest (:seon.dev.process/argv node-pod))
            (rest (:seon.dev.process/argv bun-pod))))
     (is (= (:seon.dev.process/artifact-digest node-pod)
