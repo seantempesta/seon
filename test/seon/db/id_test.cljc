@@ -4,10 +4,11 @@
    #?(:clj  [clojure.edn :as edn]
       :cljs [cljs.reader :as edn])
    #?(:clj  [clojure.test :refer [deftest is testing use-fixtures]]
-      :cljs [cljs.test :refer [deftest is testing use-fixtures]])
+      :cljs [cljs.test :refer [async deftest is testing use-fixtures]])
    #?@(:clj [[datahike.api :as d]])
    #?@(:clj [[datahike.writing :as writing]])
    [malli.core :as m]
+   #?@(:cljs [[seon.db :as db]])
    [seon.db.id :as id]
    [seon.schema :as schema]))
 
@@ -20,6 +21,9 @@
 (def ^:private dependent-identity-attr :idtest.namespace/name)
 (def ^:private dependent-source-attr :idtest.namespace/source)
 (def ^:private compact-generator :seon.db.id.generator/compact)
+
+(defn- error-value? [value]
+  (string? (:seon.error/message value)))
 
 #?(:clj
    (use-fixtures
@@ -262,7 +266,7 @@
              automatic-eid
              (:e (first (d/datoms (d/db conn) :avet :idtest.record/source
                                   "automatic-between")))]
-         (is (true? (:seon.db/ok? response)))
+         (is (not (error-value? response)))
          (is (= #{allocation-key other-allocation-key}
                 (set (keys (::id/ids response)))))
          (is (= #{allocation-key other-allocation-key}
@@ -309,7 +313,7 @@
                             ::id/lookup-ref
                             [dependent-identity-attr home]}]}))
                      :seon.db/conn conn})))]
-           (is (true? (:seon.db/ok? response)))
+           (is (not (error-value? response)))
            (is (= accepted-candidate
                   (get-in response [::id/ids allocation-key])))
            (is (= [rejected-candidate accepted-candidate] @!builds))
@@ -349,10 +353,9 @@
                  {:seon.db/tx-data
                   [{identity-attr (get ids allocation-key)}]})
                :seon.db/conn conn})]
-         (is (false? (:seon.db/ok? response)))
+         (is (error-value? response))
          (is (= :seon.db.id.error/unconfigured-allocation-writer
-                (get-in response [:seon.db/error :seon.error/data
-                                  ::id/error])))
+                (get-in response [:seon.error/data ::id/error])))
          (is (= before (:max-tx (d/db conn))))
          (is (empty? (d/datoms (d/db conn) :avet identity-attr)))))
 
@@ -370,11 +373,10 @@
                  (reset! builder-called? true)
                  {:seon.db/tx-data []})
                :seon.db/conn conn})]
-         (is (false? (:seon.db/ok? response)))
+         (is (error-value? response))
          (is (false? @builder-called?))
          (is (= :seon.db.id.error/unconfigured-allocation-writer
-                (get-in response [:seon.db/error :seon.error/data
-                                  ::id/error])))
+                (get-in response [:seon.error/data ::id/error])))
          (is (= before (:max-tx (d/db conn))))))
 
      (deftest allocation-options-cannot-override-writer-owned-fields
@@ -392,10 +394,9 @@
                   :seon.db/opts
                   {:tx-data [{:idtest.record/source "must-not-land"}]}})
                :seon.db/conn conn})]
-         (is (false? (:seon.db/ok? response)))
+         (is (error-value? response))
          (is (= :seon.db.id.error/reserved-request-field
-                (get-in response [:seon.db/error :seon.error/data
-                                  ::id/error])))
+                (get-in response [:seon.error/data ::id/error])))
          (is (= before (:max-tx (d/db conn))))
          (is (empty? (d/datoms (d/db conn) :avet :idtest.record/source
                                "must-not-land")))))
@@ -429,7 +430,7 @@
                  _ (reset! !conn conn)
                  _ (d/transact conn (allocation-schema-transaction))
                  first-response (allocate conn "before-reconnect")]
-             (is (true? (:seon.db/ok? first-response)))
+             (is (not (error-value? first-response)))
              (is (= :seon.db.id.writer/serialized
                     (get-in @conn [:config :writer :backend])))
              (is (not (contains? (get-in @conn [:config :writer])
@@ -440,7 +441,7 @@
                    (d/connect (id/allocation-connect-config base-config))
                    _ (reset! !conn reconnected)
                    second-response (allocate reconnected "after-reconnect")]
-               (is (true? (:seon.db/ok? second-response)))
+               (is (not (error-value? second-response)))
                (is (not= (get-in first-response [::id/ids allocation-key])
                          (get-in second-response [::id/ids allocation-key])))
                (is (= 2 (count (d/datoms (d/db reconnected)
@@ -480,13 +481,12 @@
                                       (id/allocate!
                                        (request other-allocation-key
                                                 other-identity-attr)))])
-                   failure (first (remove :seon.db/ok? responses))]
-               (is (= 1 (count (filter :seon.db/ok? responses))))
-               (is (= 1 (count (remove :seon.db/ok? responses))))
+                   failure (first (filter error-value? responses))]
+               (is (= 1 (count (remove error-value? responses))))
+               (is (= 1 (count (filter error-value? responses))))
                (is (= 17 @builder-calls))
                (is (= :seon.db.id.error/exhausted
-                      (get-in failure [:seon.db/error :seon.error/data
-                                       ::id/error])))
+                      (get-in failure [:seon.error/data ::id/error])))
                (is (= 1 (+ (count (d/datoms (d/db conn) :avet identity-attr
                                             fixed-candidate))
                            (count (d/datoms (d/db conn) :avet
@@ -499,14 +499,60 @@
        #'id/generator-policy-request)
      (def ^:private allocation-transaction-request
        #'id/allocation-transaction-request)
+     (def ^:private response-error #'db/response-error)
+
+     (def ^:private allocator-database
+       {:db-name "allocator-test"
+        :t 11
+        :as-of nil
+        :since nil
+        :history false
+        :datahike/commit-id
+        #uuid "11111111-1111-4111-8111-111111111111"})
+
+     (defn- allocator-request []
+       {::id/allocations
+        [{::id/key allocation-key
+          ::id/identity-attr identity-attr}]
+        ::id/transaction-builder
+        (fn [ids]
+          {:seon.db/tx-data
+           [{identity-attr (get ids allocation-key)}]})
+        :seon.db/db allocator-database
+        ::id/generator-policies
+        {identity-attr compact-generator}})
+
+     (defn- native-allocation-report [request]
+       {:db-before allocator-database
+        :db-after (assoc allocator-database :t 12)
+        :tx-data []
+        :tempids {}
+        :tx-meta {}
+        ::id/eids
+        {allocation-key 42}})
+
+     (defn- candidate-conflict [request]
+       {:seon.error/message "generated identity collision"
+        :seon.error/kind :user-input
+        :seon.error/data
+        {:seon.db.protocol/error-kind
+         :seon.db.protocol.error/generated-candidate-conflict
+         :seon.db.protocol/generated-candidate
+         (first (::id/generated-candidates request))}})
+
+     (defn- with-transact-stub [stub body done]
+       (let [original db/transact!]
+         (set! db/transact! (fn [& arguments] (apply stub arguments)))
+         (-> (js/Promise.resolve (body))
+             (.catch (fn [error]
+                       (is false (str "allocator proof threw: " error))))
+             (.finally
+              (fn []
+                (set! db/transact! original)
+                (done))))))
 
      (deftest allocation-uses-one-immutable-database-value
-       (let [database {:db-name "allocator-test"
-                       :t 11
-                       :as-of nil
-                       :since nil
-                       :history false
-                       :datahike/commit-id (random-uuid)}
+       (let [database allocator-database
              allocations [{::id/key allocation-key
                            ::id/identity-attr identity-attr}]
              manifest [{::id/key allocation-key
@@ -530,4 +576,93 @@
          (is (m/validate ::id/allocate-request request)
              "the ordinary database value remains optional")
          (is (= "Stored identity-generator policies, parameterized by identity attributes."
-                (:doc (meta #'id/generator-policy-query))))))))
+                (:doc (meta #'id/generator-policy-query))))))
+
+     (deftest allocation-consumes-the-native-report
+       (async done
+         (with-transact-stub
+           (fn [request]
+             (js/Promise.resolve (native-allocation-report request)))
+           (fn []
+             (-> (id/allocate! (allocator-request))
+                 (.then
+                  (fn [result]
+                    (is (= 42 (get-in result [::id/eids allocation-key])))
+                    (is (string? (get-in result [::id/ids allocation-key])))
+                    (is (not (contains? result :seon.db/ok?)))))))
+           done)))
+
+     (deftest facade-error-retains-the-conflicting-candidate
+       (let [candidate {::id/key allocation-key
+                        ::id/identity-attr identity-attr
+                        ::id/value "a12345678901"}
+             result
+             (response-error
+              {:seon.db.protocol/success? false
+               :seon.db.protocol/request-id "allocation-request"
+               :seon.db.protocol/error-kind
+               :seon.db.protocol.error/generated-candidate-conflict
+               :seon.db.protocol/error "generated identity collision"
+               :seon.db.protocol/generated-candidate candidate})]
+         (is (= candidate
+                (get-in result
+                        [:seon.error/data
+                         :seon.db.protocol/generated-candidate])))))
+
+     (deftest exact-collision-retries-the-whole-allocation
+       (async done
+         (let [!requests (atom [])]
+           (with-transact-stub
+             (fn [request]
+               (swap! !requests conj request)
+               (js/Promise.resolve
+                (if (= 1 (count @!requests))
+                  (candidate-conflict request)
+                  (native-allocation-report request))))
+             (fn []
+               (-> (id/allocate! (allocator-request))
+                   (.then
+                    (fn [result]
+                      (is (= 2 (count @!requests)))
+                      (is (= 42 (get-in result [::id/eids allocation-key])))
+                      (is (not=
+                           (get-in @!requests
+                                   [0 ::id/generated-candidates 0 ::id/value])
+                           (get-in @!requests
+                                   [1 ::id/generated-candidates 0 ::id/value])))))))
+             done))))
+
+     (deftest exact-collision-retry-is-bounded
+       (async done
+         (let [!calls (atom 0)]
+           (with-transact-stub
+             (fn [request]
+               (swap! !calls inc)
+               (js/Promise.resolve (candidate-conflict request)))
+             (fn []
+               (-> (id/allocate! (allocator-request))
+                   (.then
+                    (fn [result]
+                      (is (= 16 @!calls))
+                      (is (= :seon.db.id.error/exhausted
+                             (get-in result [:seon.error/data ::id/error])))
+                      (is (not (contains? result :seon.db/error)))))))
+             done))))
+
+     (deftest unrelated-transaction-error-is-unchanged
+       (async done
+         (let [failure {:seon.error/message "domain transaction failed"
+                        :seon.error/kind :core-bug
+                        :seon.error/data {:domain/error :unrelated}}
+               !calls (atom 0)]
+           (with-transact-stub
+             (fn [_request]
+               (swap! !calls inc)
+               (js/Promise.resolve failure))
+             (fn []
+               (-> (id/allocate! (allocator-request))
+                   (.then
+                    (fn [result]
+                      (is (= 1 @!calls))
+                      (is (= failure result))))))
+             done))))))

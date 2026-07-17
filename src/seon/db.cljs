@@ -210,7 +210,10 @@
             (::protocol/expected-coordinate response))
      (::protocol/current-coordinate response)
      (assoc ::protocol/current-coordinate
-            (::protocol/current-coordinate response)))})
+            (::protocol/current-coordinate response))
+     (::protocol/generated-candidate response)
+     (assoc ::protocol/generated-candidate
+            (::protocol/generated-candidate response)))})
 
 (defn- valid-response-for? [request response]
   (and (protocol/valid-response? response)

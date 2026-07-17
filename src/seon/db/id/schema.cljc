@@ -91,11 +91,11 @@
  :seon.db.id/allocate-response
  [:or
   [:map
-   [:seon.db/ok? [:= true]]
    [:seon.db.id/ids :seon.db.id/ids]
    [:seon.db.id/eids :seon.db.id/eids]
    [:seon.db.id/recovered-commit?
     {:optional true} :seon.db.id/recovered-commit?]]
   [:map
-   [:seon.db/ok? [:= false]]
-   [:seon.db/error :map]]])
+   [:seon.error/message :string]
+   [:seon.error/kind :keyword]
+   [:seon.error/data :map]]])

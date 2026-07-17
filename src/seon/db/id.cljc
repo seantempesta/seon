@@ -956,8 +956,11 @@
 
      (defn- matching-conflict-candidate
        [generated-candidates data]
-       (if (= :seon.db.id.error/candidate-conflict (::error data))
-         (let [candidate (::generated-candidate data)]
+       (if (or (= :seon.db.id.error/candidate-conflict (::error data))
+               (= :seon.db.protocol.error/generated-candidate-conflict
+                  (:seon.db.protocol/error-kind data)))
+         (let [candidate (or (::generated-candidate data)
+                             (:seon.db.protocol/generated-candidate data))]
            (some #(when (= candidate %) %) generated-candidates))
          (let [error (:error data)
                [attr candidate-value]
@@ -1042,11 +1045,13 @@
 
      (defn- failure
        [message kind data]
-       {:seon.db/ok? false
-        :seon.db/error
-        {:seon.error/message message
-         :seon.error/kind kind
-         :seon.error/data data}})
+       {:seon.error/message message
+        :seon.error/kind kind
+        :seon.error/data data})
+
+     (defn- error-value?
+       [value]
+       (and (map? value) (string? (:seon.error/message value))))
 
      (defn- generated-candidate-valid?
        [generator candidate]
@@ -1129,14 +1134,14 @@
               dependent-identities)))))
 
      (defn- exact-generated-conflict?
-       [envelope manifest]
+       [result manifest]
        (boolean
         (matching-conflict-candidate
          manifest
-         (get-in envelope [:seon.db/error :seon.error/data]))))
+         (:seon.error/data result))))
 
      #?(:clj
-        (defn- candidate-conflict-envelope
+        (defn- candidate-conflict-error
           [candidate]
           (failure
            "Generated identity candidate is already in use."
@@ -1342,12 +1347,12 @@
                   _ (db.internal/assert-invocation-shape! built)
                   transaction-request
                   (allocation-transaction-request database built manifest)
-                  envelope (await (db/transact! transaction-request))]
+                  result (await (db/transact! transaction-request))]
               (cond
-                (:seon.db/ok? envelope)
-                (let [eids (::eids envelope)]
+                (not (error-value? result))
+                (let [eids (::eids result)]
                   (if (= (set (keys ids)) (set (keys eids)))
-                    (assoc envelope ::ids ids)
+                    (assoc result ::ids ids)
                     (failure
                      "The sole writer committed an allocation without returning every eid."
                      :core-bug
@@ -1355,7 +1360,7 @@
                       ::ids ids
                       ::eids eids})))
 
-                (exact-generated-conflict? envelope manifest)
+                (exact-generated-conflict? result manifest)
                 (if (< attempt max-attempts)
                   (await (allocate-attempt! request (inc attempt)))
                   (failure
@@ -1365,7 +1370,7 @@
                     ::attempts attempt
                     ::allocations allocations}))
 
-                :else envelope)))))
+                :else result)))))
 
      #?(:clj
         (do
@@ -1376,15 +1381,8 @@
                             conn
                             (merge (:seon.db/opts built)
                                    {:tx-data (:seon.db/tx-data built)
-                                    ::generated-candidates manifest}))
-                    datoms (:tx-data report)]
-                {:seon.db/ok? true
-                 :seon.db/tempids (or (:tempids report) {})
-                 :seon.db/tx (:max-tx (:db-after report))
-                 :seon.db/tx-count (count datoms)
-                 :seon.db/added (count (filter :added datoms))
-                 :seon.db/retracted (count (remove :added datoms))
-                 ::eids (::generated-eids report)})
+                                    ::generated-candidates manifest}))]
+                (assoc report ::eids (::generated-eids report)))
               (catch Throwable throwable
                 (let [classified (classify-allocation-error
                                   {::generated-candidates manifest
@@ -1393,7 +1391,7 @@
                                          (::error-status classified))
                                   (::generated-candidate classified))]
                   (if candidate
-                    (candidate-conflict-envelope
+                    (candidate-conflict-error
                      candidate)
                     (throw throwable))))))
 
@@ -1408,12 +1406,12 @@
                   raw-built (transaction-builder ids)
                   [built manifest]
                   (normalize-built-allocation! candidate-manifest raw-built)]
-              (let [envelope (transact-jvm-allocation! conn built manifest)]
+              (let [result (transact-jvm-allocation! conn built manifest)]
                 (cond
-                  (:seon.db/ok? envelope)
-                  (let [eids (::eids envelope)]
+                  (not (error-value? result))
+                  (let [eids (::eids result)]
                     (if (= (set (keys ids)) (set (keys eids)))
-                      (assoc envelope ::ids ids)
+                      (assoc result ::ids ids)
                       (failure
                        "The committed allocation did not resolve every eid."
                        :core-bug
@@ -1421,7 +1419,7 @@
                         ::ids ids
                         ::eids eids})))
 
-                  (exact-generated-conflict? envelope manifest)
+                  (exact-generated-conflict? result manifest)
                   (if (< attempt max-attempts)
                     (allocate-jvm-attempt! request (inc attempt))
                     (failure
@@ -1432,7 +1430,7 @@
                       ::allocations allocations}))
 
                   :else
-                  envelope))))))
+                  result))))))
 
      #?(:cljs
         (defn ^:async allocate!
