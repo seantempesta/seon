@@ -90,8 +90,8 @@
 ;; and the Piece 2d circuit breaker windows over THIS (datahike `:db/txInstant`
 ;; cannot be backdated, so a stored close instant is what tests window over).
 (schema/register! :seon.agent.run/closed-at  :inst)
-;; Watchdog staleness threshold (ms) — a slot label for `close-stale-runs!`'s
-;; request (the value is config-dialed; see `seon.config/watchdog-stale-ms`).
+;; Watchdog staleness threshold (ms) used by the pure `stale-run-ids` scan.
+;; `close-stale-runs!` acquires it from the config singleton.
 (schema/register! :seon.agent.run/stale-ms   :int)
 
 ;; Stored entity kind — required attrs reflect what `open-run!` writes
@@ -1004,42 +1004,33 @@
              (and [?r :seon.agent.run/started-at ?anchor]
                   (not [?r :seon.agent.run/last-beat-at _])))])
 
-(defn ^:async stale-run-ids
+(schema/register! ::stale-run-row [:tuple :string :string :inst :inst])
+(schema/register! ::stale-run-rows [:sequential ::stale-run-row])
+
+(defn stale-run-ids
   "Open, non-paused run-ids whose heartbeat is stale at `now`.
 
-   A PURE fn of (db, now, stale-ms) — `now` is an argument, never an inline
-   clock, so the scan is deterministic (a test backdates beats + passes a
-   chosen `now`; zero timers). The freshness anchor is `:last-beat-at`, or
-   `:started-at` for a run that NEVER beat (a wedge before the first beat must
-   not be invisible). PAUSED runs are excluded (they legitimately don't beat)."
-  {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db]
+   A pure function of acquired rows, `now`, and `stale-ms`. The scan is
+   deterministic: a test backdates beats and passes a chosen `now`, with zero
+   timers. The freshness anchor is `:last-beat-at`, or `:started-at` for a run
+   that never beat. Paused runs are excluded by the acquisition query."
+  {:malli/schema [:=> [:catn [::stale-run-rows ::stale-run-rows]
                              [:seon.agent/now :inst]
                              [:seon.agent.run/stale-ms :seon.agent.run/stale-ms]]
-                  [:or [:vector :seon.agent.run/id] ::direct-error]]}
-  [db now stale-ms]
-  (let [rows (await (db/query {::db/db db ::db/query stale-runs-query}))]
-    (if (error-value? rows)
-      rows
-      (let [cutoff (- (.getTime ^js now) stale-ms)]
-        (->> rows
-             (keep (fn [[rid _agent-id _started anchor]]
-                     (when (< (.getTime ^js anchor) cutoff) rid)))
-             sort
-             vec)))))
-
-(defn- stale-candidates [rows now stale-ms]
+                  [:vector :seon.agent.run/id]]}
+  [rows now stale-ms]
   (let [cutoff (- (.getTime ^js now) stale-ms)]
     (->> rows
-         (keep (fn [[rid agent-id _started anchor]]
-                 (when (< (.getTime ^js anchor) cutoff)
-                   {:seon.agent.run/id rid :seon.agent/id agent-id})))
-         (sort-by :seon.agent.run/id)
+         (keep (fn [[run-id _agent-id _started-at anchor]]
+                 (when (< (.getTime ^js anchor) cutoff) run-id)))
+         sort
          vec)))
 
+(def ^:private watchdog-config-selector
+  [:seon.config/id :seon.config.watchdog/stale-ms])
+
 (schema/register! ::close-stale-request
-  [:map
-   [:seon.agent/now           :inst]
-   [:seon.agent.run/stale-ms  :seon.agent.run/stale-ms]])
+  [:map [:seon.agent/now :inst]])
 
 (defn ^:async close-stale-runs!
   "Close every open run whose heartbeat is stale at `now` as `:crashed`.
@@ -1055,32 +1046,56 @@
    now-`:closed` runs gone. `^:async`."
   {:malli/schema [:=> [:cat ::close-stale-request]
                   [:or ::close-overdue-response ::direct-error]]}
-  [{now :seon.agent/now stale-ms :seon.agent.run/stale-ms}]
+  [{now :seon.agent/now}]
   (let [database (await (db/db))]
     (if (error-value? database)
       database
-      (let [rows (await (db/query {::db/db database ::db/query stale-runs-query}))]
-        (if (error-value? rows)
-          rows
-          (let [candidates (stale-candidates rows now stale-ms)
-                ids (mapv :seon.agent.run/id candidates)]
-            (loop [[candidate & more] candidates]
-              (if-not candidate
-                {:seon.agent.run/closed ids}
-                (let [rid (:seon.agent.run/id candidate)
-                      agent-id (:seon.agent/id candidate)
-                      result
-                      (await
-                       (close-run! {:seon.agent.run/id rid
-                                    :seon.agent.run/closed-reason :crashed}))]
-                  (if (error-value? result)
-                    result
-                    (do
-                      (error/record!
-                       {:seon.error/raw
-                        (js/Error.
-                         (str "heartbeat watchdog: run " rid
-                              " (agent " agent-id ") wedged — no heartbeat progress "
-                              "for ≥" stale-ms "ms; closed :crashed"))
-                        :seon.error/fault :core})
-                      (recur more))))))))))))
+      (let [acquired
+            (await
+             (db/execute-many
+              {::db/db database
+               ::db/members
+               [(query-member database stale-runs-query [])
+                (pull-member database watchdog-config-selector
+                             [:seon.config/id config/cluster-config-id])]}))
+            members (::db/results acquired)]
+        (cond
+          (error-value? acquired) acquired
+
+          (not= 2 (count members))
+          (direct-error
+           "close-stale-runs!: database acquisition returned the wrong member count.")
+
+          (not (every? successful-member? members))
+          (failed-member "close-stale-runs! acquisition"
+                         (first (remove successful-member? members)))
+
+          :else
+          (let [[rows stored-configuration] (map member-result members)]
+            (if-not stored-configuration
+              (direct-error "close-stale-runs!: the config singleton is missing.")
+              (let [configuration (db/decode-edn-values stored-configuration)
+                    stale-ms (config/watchdog-stale-ms configuration)
+                    ids (stale-run-ids rows now stale-ms)
+                    agent-id-by-run-id (into {} (map (juxt first second)) rows)]
+                (loop [[run-id & more] ids]
+                  (if-not run-id
+                    {:seon.agent.run/closed ids}
+                    (let [agent-id (get agent-id-by-run-id run-id)
+                          result
+                          (await
+                           (close-run!
+                            {:seon.agent.run/id run-id
+                             :seon.agent.run/closed-reason :crashed}))]
+                      (if (error-value? result)
+                        result
+                        (do
+                          (error/record!
+                           {:seon.error/raw
+                            (js/Error.
+                             (str "heartbeat watchdog: run " run-id
+                                  " (agent " agent-id
+                                  ") wedged — no heartbeat progress for ≥"
+                                  stale-ms "ms; closed :crashed"))
+                            :seon.error/fault :core})
+                          (recur more))))))))))))))

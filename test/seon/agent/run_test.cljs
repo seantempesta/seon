@@ -4,6 +4,7 @@
    [cljs.test :refer [async deftest is]]
    [seon.agent.message :as message]
    [seon.agent.run :as run]
+   [seon.config :as config]
    [seon.db :as db]
    [seon.db.id :as db.id]
    [seon.db.protocol :as db.protocol]
@@ -373,22 +374,25 @@
 (deftest watchdog-scans-once-and-closes-each-candidate
   (async done
     (let [original-db db/db
-          original-query db/query
+          original-execute db/execute-many
           original-close run/close-run!
           original-record error/record!
-          queries (atom [])
-          closes (atom [])]
+          acquisitions (atom [])
+          closes (atom [])
+          rows #{["run-b" "agent-b" (js/Date. 0) (js/Date. 100)]
+                 ["run-a" "agent-a" (js/Date. 0) (js/Date. 200)]}
+          now (js/Date. 10000)]
       (set! db/db (fn ([] (js/Promise.resolve database))
                     ([_] (js/Promise.resolve database))))
-      (set! db/query
-            (fn
-              ([request]
-               (swap! queries conj request)
-               (js/Promise.resolve
-                #{["run-b" "agent-b" (js/Date. 0) (js/Date. 100)]
-                  ["run-a" "agent-a" (js/Date. 0) (js/Date. 200)]}))
-              ([query & inputs]
-               (js/Promise.resolve [query inputs]))))
+      (set! db/execute-many
+            (fn [request]
+              (swap! acquisitions conj request)
+              (js/Promise.resolve
+               {::db/results
+                [(query-result rows)
+                 (pull-result
+                  {:seon.config/id config/cluster-config-id
+                   :seon.config.watchdog/stale-ms 1000})]})))
       (set! run/close-run!
             (fn [request]
               (swap! closes conj request)
@@ -397,17 +401,30 @@
       (finish!
        done
        [[#(set! db/db %) original-db]
-        [#(set! db/query %) original-query]
+        [#(set! db/execute-many %) original-execute]
         [#(set! run/close-run! %) original-close]
         [#(set! error/record! %) original-record]]
        (fn ^:async test-watchdog []
+         (is (= ["run-a" "run-b"] (run/stale-run-ids rows now 1000)))
          (let [result
                (await
                 (run/close-stale-runs!
-                 {:seon.agent/now (js/Date. 10000)
-                  :seon.agent.run/stale-ms 1000}))]
+                 {:seon.agent/now now}))]
            (is (= ["run-a" "run-b"] (:seon.agent.run/closed result)))
-           (is (= 1 (count @queries)))
-           (is (identical? database (::db/db (first @queries))))
+           (is (= 1 (count @acquisitions)))
+           (let [acquisition (first @acquisitions)
+                 [stale-member config-member] (::db/members acquisition)]
+             (is (identical? database (::db/db acquisition)))
+             (is (= 2 (count (::db/members acquisition))))
+             (is (every? #(identical? database (::db/db %))
+                         (::db/members acquisition)))
+             (is (= db.protocol/query-operation
+                    (::db.protocol/operation stale-member)))
+             (is (= db.protocol/pull-operation
+                    (::db.protocol/operation config-member)))
+             (is (= [:seon.config/id :seon.config.watchdog/stale-ms]
+                    (::db.protocol/selector config-member)))
+             (is (= [:seon.config/id config/cluster-config-id]
+                    (::db.protocol/entity-id config-member))))
            (is (= ["run-a" "run-b"]
                   (mapv :seon.agent.run/id @closes)))))))))

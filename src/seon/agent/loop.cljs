@@ -1012,7 +1012,7 @@
    (the heartbeat watchdog — Piece 2c), then fire due schedules (driving each
    opened run). Returns a Promise; a throw anywhere is caught + logged so the
    interval survives. The watchdog rides THIS one ticker — no parallel
-   setInterval; the scan core (`run/stale-run-ids`) is a pure fn of (db, now)."
+   setInterval; the scan core (`run/stale-run-ids`) is pure over acquired rows."
   [now]
   (if-not (admission/available?)
     (js/Promise.resolve (admission/unavailable))
@@ -1020,8 +1020,7 @@
           (run/close-overdue-runs! {:seon.agent/now now}))
       (.then (fn [_]
                (run/close-stale-runs!
-                 {:seon.agent/now          now
-                  :seon.agent.run/stale-ms (config/watchdog-stale-ms)})))
+                 {:seon.agent/now now})))
       (.then (fn [_]
                (schedule/fire-due-schedules!
                  {:seon.agent/now               now
