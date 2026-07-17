@@ -53,16 +53,10 @@
 
 (defn- acquire!
   [channel database-name label]
-  (let [head
-        (call! channel
-               (protocol/resolve-head-request
-                {::protocol/request-id (str label "/head")
-                 ::protocol/database-name database-name}))]
-    (call! channel
-           (protocol/acquire-database-request
-            {::protocol/request-id (str label "/acquire")
-             ::protocol/database-name database-name
-             ::protocol/attachment (::protocol/attachment head)}))))
+  (call! channel
+         (protocol/acquire-database-request
+          {::protocol/request-id (str label "/acquire")
+           ::protocol/database-name database-name})))
 
 (defn- await-route!
   [database-name present?]
@@ -119,9 +113,7 @@
                       protocol/maximum-frame-bytes)
                (::protocol/capabilities capabilities)))
         (is (= "control/head" (::protocol/request-id head)))
-        (is (= database-name (::protocol/database-name head)))
-        (is (= (coordinate/attachment (::protocol/coordinate head))
-               (::protocol/attachment head)))
+        (is (= database-name (:db-name (:seon.db/db head))))
         (is (= {::protocol/success? true
                 ::protocol/request-id "control/cancel"
                 ::protocol/target-request-id "control/not-running"
@@ -157,53 +149,42 @@
                    (protocol/resolve-head-request
                     {::protocol/request-id "acquisition/head"
                      ::protocol/database-name database-name}))
+            database (:seon.db/db head)
             query-input
-            {::protocol/database-name database-name
-             ::protocol/attachment (::protocol/attachment head)
-             ::protocol/coordinate (::protocol/coordinate head)
+            {:seon.db/db database
              ::protocol/query-form
              '[:find ?ident :where [?entity :db/ident ?ident]]
              ::protocol/arguments []}
-            denied-read
+            initial-read
             (call! a
                    (protocol/query-request
                     (assoc query-input
-                           ::protocol/request-id "acquisition/denied-read")))
-            denied-write
-            (call! a
-                   (protocol/transaction-request
-                    {::protocol/request-id "acquisition/denied-write"
-                     ::protocol/database-name database-name
-                     ::protocol/transaction-data
-                     [{:db/ident :acquisition/value
-                       :db/valueType :db.type/string
-                       :db/cardinality :db.cardinality/one}]}))
+                           ::protocol/request-id "acquisition/initial-read")))
             acquired-a (acquire! a database-name "acquisition/a")
             duplicate-a (acquire! a database-name "acquisition/a-duplicate")
             write
             (call! a
                    (protocol/transaction-request
                     {::protocol/request-id "acquisition/write"
-                     ::protocol/database-name database-name
+                     :seon.db/db (:seon.db/db acquired-a)
                      ::protocol/transaction-data
                      [{:db/ident :acquisition/value
                        :db/valueType :db.type/string
                        :db/cardinality :db.cardinality/one}
                       {:acquisition/value "owned"}]}))
             current
-            (assoc query-input ::protocol/coordinate (::protocol/coordinate write))
-            denied-b
+            (assoc query-input :seon.db/db (:db-after write))
+            initial-b
             (call! b
                    (protocol/query-request
                     (assoc current
-                           ::protocol/request-id "acquisition/denied-b")))
+                           ::protocol/request-id "acquisition/initial-b")))
             acquired-b (acquire! b database-name "acquisition/b")]
-        (is (= protocol/not-found-error (::protocol/error-kind denied-read)))
-        (is (= protocol/not-found-error (::protocol/error-kind denied-write)))
-        (is (true? (::protocol/acquired? acquired-a)))
+        (is (::protocol/success? initial-read))
+        (is (false? (::protocol/acquired? acquired-a)))
         (is (false? (::protocol/acquired? duplicate-a)))
-        (is (= protocol/not-found-error (::protocol/error-kind denied-b)))
-        (is (true? (::protocol/acquired? acquired-b)))
+        (is (::protocol/success? initial-b))
+        (is (false? (::protocol/acquired? acquired-b)))
         (.close a)
         (is (await-route! database-name true)
             "a sibling physical connection retains the shared Datahike owner")
@@ -1090,8 +1071,19 @@
           ::writer/backend :memory
           ::writer/request-socket-path request-path})
         runtime (::writer/runtime server)
+        transport
+        (#'writer/transport-connection
+         {::uds/close! (fn [] nil) ::uds/send! (fn [_message] nil)})
         ^SocketChannel request-channel (uds/connect! request-path)]
     (try
+      (let [acquired (promise)]
+        (writer/handle-request!
+         runtime transport
+         (protocol/acquire-database-request
+          {::protocol/request-id "callback-reuse/acquire"
+           ::protocol/database-name database-name})
+         #(deliver acquired %))
+        (is (::protocol/success? (deref acquired 5000 ::not-delivered))))
       (let [head
             (call! request-channel
                    (protocol/resolve-head-request
@@ -1100,9 +1092,7 @@
             request
             (protocol/pull-request
              {::protocol/request-id "callback-reuse/read"
-              ::protocol/database-name database-name
-              ::protocol/attachment (::protocol/attachment head)
-              ::protocol/coordinate (::protocol/coordinate head)
+              :seon.db/db (:seon.db/db head)
               ::protocol/selector [:callback/value]
               ::protocol/entity-id 1})
             first-response (promise)
@@ -1115,9 +1105,11 @@
                             (.countDown entered)
                             (.await finish))
                           {:callback/value call}))]
-          (writer/handle-request! runtime request #(deliver first-response %))
+          (writer/handle-request! runtime transport request
+                                  #(deliver first-response %))
           (is (.await entered 5 java.util.concurrent.TimeUnit/SECONDS))
-          (writer/handle-request! runtime request #(deliver duplicate-response %))
+          (writer/handle-request! runtime transport request
+                                  #(deliver duplicate-response %))
           (is (= protocol/request-conflict-error
                  (::protocol/error-kind
                   (deref duplicate-response 1000 ::not-delivered))))
@@ -1125,13 +1117,15 @@
           (.countDown finish)
           (is (= {:callback/value 1}
                  (::protocol/result (deref first-response 5000 ::not-delivered))))
-          (writer/handle-request! runtime request #(deliver reused-response %))
+          (writer/handle-request! runtime transport request
+                                  #(deliver reused-response %))
           (is (= {:callback/value 2}
                  (::protocol/result (deref reused-response 5000 ::not-delivered))))
           (is (= 2 @calls))
           (is (empty? @(::writer/active-requests runtime)))))
       (finally
         (.countDown finish)
+        (#'writer/close-transport-connection! runtime transport)
         (try (.close request-channel) (catch Throwable _))
         (writer/stop! server)
         (.delete (File. request-path))
@@ -1303,22 +1297,21 @@
               (call! channel
                      (protocol/acquire-database-request
                       {::protocol/request-id "branch/acquire"
-                       ::protocol/database-name branch-name
-                       ::protocol/attachment attachment}))
+                       ::protocol/database-name branch-name}))
               transaction-response
               (call! channel
                      (protocol/transaction-request
-                      {::protocol/database-name branch-name
-                       ::protocol/request-id "branch/routed"
+                      {::protocol/request-id "branch/routed"
+                       :seon.db/db (:seon.db/db ensure-response)
                        ::protocol/transaction-data []}))]
           (is (::protocol/success? ensure-response))
+          (is (= branch-name (:db-name (:seon.db/db ensure-response))))
           (is (= attachment
-                 (coordinate/attachment
-                  (::coordinate/coordinate ensure-response))))
+                 (::registry/attachment
+                  (registry/resolve-connection
+                   {::registry/database-name (keyword branch-name)}))))
           (is (::protocol/success? transaction-response))
-          (is (= attachment
-                 (coordinate/attachment
-                  (::protocol/coordinate transaction-response))))))
+          (is (= branch-name (:db-name (:db-after transaction-response))))))
       (finally
         (writer/stop! server)
         (.delete (File. request-path))
@@ -1639,7 +1632,7 @@
             "the canonical Malli-derived receipt schema exists before writes")
         (is (true? (::protocol/success? entity-response)))
         (is (pos-int?
-             (get (::protocol/temporary-ids entity-response) "person-temp")))
+             (get (:tempids entity-response) "person-temp")))
         (is (every?
              empty?
              (for [message [schema-response entity-response]]
@@ -1910,7 +1903,7 @@
                (get-in child [:writer.schema/parent :writer.schema/id])))
         (is (= #{"schema-parent" "schema-child"
                  "component-root" "component-child"}
-               (set (keys (::protocol/temporary-ids admitted))))
+               (set (keys (:tempids admitted))))
             "derived ref schema participates in caller tempid recovery")
         (is (true? (::protocol/success? repeated)))
         (is (not-any? #(= :db/ident (second %))
