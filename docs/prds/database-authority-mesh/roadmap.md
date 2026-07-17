@@ -69,11 +69,22 @@ The current ordered spine is:
    system; and
 6. measure the final architecture, then optimize only the retained bottlenecks.
 
-Earliest unsettled contract: replace the turn's ambient connection and copied
-four-field render coordinate with one ordinary request database value and one
-persisted `:seon.agent.turn/rendered-tx` ref. Prompt acquisition, eval, child
-execution, debug reconstruction, and autocomplete must use that same value;
-there is no compatibility connection or coordinate-shaped wrapper.
+The turn contract is settled by `e5eccfec`: prompt acquisition, eval dispatch,
+child execution, turn creation, and debug reconstruction use one ordinary
+request database value; the turn persists one native
+`:seon.agent.turn/rendered-tx` ref. The copied four-field turn and attempt
+coordinates, ambient connection, derived turn-count logging, and two
+embedded-Datahike observability test systems are deleted. Focused proof passes
+7 turn tests/15 assertions, 5 debug tests/21 assertions, and 10 execution
+runtime tests/44 assertions; the maintained client compiles with no warning in
+the changed turn/debug/runtime owners.
+
+Earliest unsettled contract: complete consumers must derive historical model
+and export evidence from the parent turn's `rendered-tx`. Autocomplete/export
+and `seon.web.serve` still reference the deleted coordinate and attempt fields;
+they must move to the same ordinary database value without compatibility
+projections. The eval receipt path is the next database-envelope/ambient-value
+cut after those direct turn consumers.
 
 The JVM half of that contract is implemented. One unversioned
 `seon.db.program/compile-tx-data` owner reads one immutable Datahike value and
@@ -103,12 +114,11 @@ transaction report/direct error contract as `seon.db`. Focused proof passes 10
 CLJS tests/55 assertions and 12 writer tests/75 assertions. The duplicate-owner
 audit at [[research/duplicate-runtime-owner-audit-2026-07-16]] ranks the next
 cuts: 28 production files still teach the removed database envelope and 19
-still assume an ambient local connection. Top level owns the turn
-database-value/rendered-transaction migration. The next dependency-ready
-refill is autocomplete/export identity and database-value unification after
-the turn contract settles. Final graduation remains one frozen-source full
-test, live browser/agent, crash/restart, packaging, and modest-hardware density
-checkpoint.
+still assume an ambient local connection. Top level owns the web/turn consumer
+integration. Autocomplete/export identity and database-value unification is
+active independently, while the eval receipt cut is being source-grounded for
+the next refill. Final graduation remains one frozen-source full test, live
+browser/agent, crash/restart, packaging, and modest-hardware density checkpoint.
 
 ## Settled laws
 
