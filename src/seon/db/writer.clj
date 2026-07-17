@@ -32,6 +32,7 @@
             [seon.dev.restore :as restore]
             [seon.launch :as launch]
             [seon.schema :as schema]
+            [seon.schema.internal :as schema.internal]
             [taoensso.timbre :as log]))
 
 (set! *warn-on-reflection* true)
@@ -409,7 +410,24 @@
 
 (defn- derive-declared-schema
   [db-value transaction-data]
-  (let [attributes (set (keys (schema-form-strings transaction-data)))]
+  (let [forms
+        (into {}
+              (map (fn [[schema-key form-string]]
+                     [schema-key (read-schema-form schema-key form-string)]))
+              (schema-form-strings transaction-data))
+        attributes
+        (into #{}
+              (comp
+               (filter
+                (fn [[_schema-key form]]
+                  (and (schema.internal/map-shape? form)
+                       (:seon.db/entity
+                        (schema.internal/schema-properties form)))))
+               (mapcat (comp schema.internal/map-entries second))
+               (keep (fn [entry]
+                       (let [attribute (when (vector? entry) (first entry))]
+                         (when (qualified-keyword? attribute) attribute)))))
+              forms)]
     (if (empty? attributes)
       []
       (compile-schema-declarations db-value transaction-data attributes))))

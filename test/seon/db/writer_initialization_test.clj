@@ -39,7 +39,13 @@
    :seon.fn/doc ":string"
    :seon.fn/arglists ":string"
    :seon.fn/private? ":boolean"
-   :seon.fn/agent-facing? ":boolean"})
+   :seon.fn/agent-facing? ":boolean"
+   :seon.user/entity
+   "[:map {:seon.db/entity true} [:seon.user/id :seon.user/id]]"
+   :seon.db.protocol/cursor ":int"
+   :datahike.index-page/cursor ":seon.db.protocol/cursor"
+   :seon.db.protocol/index-page-request
+   "[:map [:datahike.index-page/cursor {:optional true} :datahike.index-page/cursor]]"})
 
 (def initialization
   {:seon.execution/artifact-digest
@@ -104,6 +110,18 @@
                       [?function :seon.fn/sym "my.core/answer"]
                       [?function :seon.fn/source ?source]]
                     (d/db connection))))
+        (is (= "[:map [:datahike.index-page/cursor {:optional true} :datahike.index-page/cursor]]"
+               (d/q '[:find ?form .
+                      :where
+                      [?schema :seon.schema/key :seon.db.protocol/index-page-request]
+                      [?schema :seon.schema/form ?form]]
+                    (d/db connection)))
+            "request schemas remain queryable program facts")
+        (is (contains? (:schema (d/db connection)) :seon.user/id)
+            "stored entity attributes are installed before initial data")
+        (is (not (contains? (:schema (d/db connection))
+                            :datahike.index-page/cursor))
+            "request fields are not installed as Datahike attributes")
         (is (= #{:seon.db.process/boot
                  :seon.db.process/config
                  :seon.db.process/repl}
