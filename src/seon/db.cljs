@@ -837,7 +837,7 @@
   {:malli/schema
    [:function
     [:=> [:catn [::request [:or ::query-request ::query-form]]] :any]
-    [:=> [:catn [::query ::query-form] [::rest [:+ :any]]] :any]]}
+    [:=> [:catn [::query ::query-form] [::rest [:* :any]]] :any]]}
   ([request]
    (await
     (query-result!

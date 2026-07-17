@@ -237,12 +237,16 @@
           {::instrument/old-projection old-projection
            ::instrument/new-projection projection})]
     (when (false? (::instrument/ok? stats))
-      (throw
-        (ex-info
-          "Committed program generation failed complete wrapper verification"
-          {:seon.instrument/stats stats
-           ::generation
-           (:seon.schema.projection/fingerprint projection)})))
+      (let [failure
+            (select-keys stats [::instrument/rejected
+                                ::instrument/verification-gaps])]
+        (throw
+          (ex-info
+            (str "Committed program generation failed complete wrapper "
+                 "verification " (pr-str failure))
+            {:seon.instrument/stats stats
+             ::generation
+             (:seon.schema.projection/fingerprint projection)}))))
     (schema/activate-projection! projection)
     {::projection projection
      ::db/coordinate (::db/coordinate acquired)
