@@ -423,6 +423,19 @@ in the changed listener, router, Datastar, debug, or route owners.
   owners. The next frozen proof must make blob retention and public blob reads
   exact over one immutable database value, then remove the remaining plan
   consumer contradictions.
+
+The blob boundary is now exact. The restore adapter acquires the pod's current
+immutable database value, verifies its basis transaction and Datahike commit
+against the selected restore target, and queries retained hashes against that
+value. `my.blob/put!` consumes the native transaction report; `stat` and `text`
+are honestly asynchronous and accept an explicit `:seon.db/db` when callers
+need one frozen view. The retained-hash materializer is pure over its acquired
+hash vector and filesystem effects. The obsolete 1,000-line embedded-Datahike
+test fixture, ambient connection mutation, and removed historical read helpers
+are deleted. Focused proof passes 15 blob tests/54 assertions, 13 serve
+tests/60 assertions, and 8 reactive-call tests/30 assertions. The next
+unsettled contract is the operation-specific `my.plan` acquisition and write
+surface; its four compiler warnings are the active caller inventory.
 - **Dependency-ready parallel portfolio:** the web/render single-owner audit is
   durable at [[research/web-render-single-owner-audit-2026-07-17]] and the
   rendered-transaction boundary at

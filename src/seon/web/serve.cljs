@@ -29,7 +29,6 @@
     [goog.object :as gobj]
     [my.blob :as blob]
     [seon.agent :as agent]
-    [seon.agent.ctx :as ctx]
     [seon.ai :as ai]
     [seon.ai.tokens :as tokens]
     [seon.agent.debug :as agent-debug]
@@ -281,87 +280,66 @@
                                   :seon.state/error
                                   message})))))))
 
+(defn- ^:async clear-agent! [agent-id]
+  (let [database (await (db/db))]
+    (if (:seon.error/message database)
+      database
+      (let [values
+            (await
+             (js/Promise.all
+              #js [(db/query
+                    {::db/db database
+                     ::db/query
+                     '[:find ?message
+                       :in $ ?agent-id
+                       :where
+                       [?agent :seon.agent/id ?agent-id]
+                       (or-join [?message ?agent]
+                         [?message :seon.agent.message/from ?agent]
+                         [?message :seon.agent.message/to ?agent])]
+                     ::db/args [agent-id]})
+                   (db/query
+                    {::db/db database
+                     ::db/query
+                     '[:find ?eval
+                       :in $ ?agent
+                       :where
+                       [?eval :seon.eval/agent ?agent]]
+                     ::db/args [[:seon.agent/id agent-id]]})]))
+            [message-rows eval-rows] (array-seq values)
+            error (some #(when (:seon.error/message %) %) values)]
+        (if error
+          error
+          (await
+           (db/transact!
+            {::db/db database
+             ::db/expected-db database
+             ::db/tx-data
+             (into []
+                   (map (fn [entity-id] [:db/retractEntity entity-id]))
+                   (concat (map first message-rows)
+                           (map first eval-rows)))})))))))
+
 (defn- handle-clear! [req res]
-  ;; Retract every :seon.agent.message AND :seon.eval entity for the agent.
-  ;; Evals contain the full source of (seon.db/transact! ...) calls
-  ;; that include the assistant message text — so retracting messages
-  ;; alone leaves the conversation visible via the timeline's eval
-  ;; rendering. Notes (`:seon.note/*`) are preserved — they ARE the
-  ;; durable memory.
-  ;;
-  ;; Agent-id resolution (audit P1 — 2026-05-24): the query param wins;
-  ;; otherwise we read `(db/current-agent-id)` from whatever ALS scope
-  ;; the HTTP handler ran inside (none, by default — Node's request
-  ;; callback runs at the event-loop root). When neither is set, 400 —
-  ;; no silent fallback to a hardcoded id.
   (let [agent-id (or (query-param req "agent") (db/current-agent-id))]
-    (when-not agent-id
+    (if-not agent-id
       (write-status! res 400 "text/plain; charset=utf-8"
                      "missing 'agent' query param (no agent-id in scope)")
-      (throw (js/Error. "handle-clear!: no agent-id resolved")))
-    (log/info-console! "seon.web.serve" "/clear ENTER" {:agent agent-id})
-    (try
-      (let [my-eid   (:db/id (db/entity {:seon.db/ref [:seon.agent/id agent-id]}))
-            ;; "My conversation" is DERIVED: from = me OR to ∋ me.
-            msg-eids (when my-eid
-                       (->> (db/query
-                              {:seon.db/query
-                               '[:find ?m
-                                 :in $ ?me
-                                 :where
-                                 (or-join [?m ?me]
-                                   [?m :seon.agent.message/from ?me]
-                                   [?m :seon.agent.message/to ?me])]
-                               :seon.db/args [my-eid]})
-                            (map first)))
-            eval-eids (->> (db/query
-                             {:seon.db/query
-                              '[:find ?e
-                                :in $ ?aid
-                                :where
-                                [?e :seon.eval/agent ?aid]]
-                              :seon.db/args [[:seon.agent/id agent-id]]})
-                           (map first))
-            retractions (concat
-                          (mapv (fn [e] [:db/retractEntity e]) msg-eids)
-                          (mapv (fn [e] [:db/retractEntity e]) eval-eids))]
-        (log/info-console! "seon.web.serve" "/clear query OK"
-                           {:agent agent-id
-                            :msg-count (count msg-eids)
-                            :eval-count (count eval-eids)})
-        ;; Retractions only — turn counts are DERIVED from the message/
-        ;; session log (the retired :seon.agent/turn-count /
-        ;; :turns-since-user attrs are unregistered; transacting them
-        ;; threw :seon.db/unregistered-attrs and broke /clear).
-        ;; ENVELOPE CONTRACT (A4): db/transact! ALWAYS resolves —
-        ;; failures arrive as `{:seon.db/ok? false :seon.db/error …}`,
-        ;; never as a rejection. Branch on the envelope; the .catch
-        ;; below only guards non-transact throws in the .then body.
-        (-> (db/transact! {:seon.db/tx-data (vec retractions)})
-            (.then (fn [{ok?   :seon.db/ok?
-                         error :seon.db/error}]
-                     (if ok?
-                       (do
-                         (log/info-console! "seon.web.serve" "/clear TRANSACT OK"
-                                            {:agent agent-id
-                                             :messages-retracted (count msg-eids)
-                                             :evals-retracted    (count eval-eids)})
-                         (write-status! res 204 "text/plain; charset=utf-8" "")
-                         (log/info-console! "seon.web.serve" "/clear RESPONSE SENT" {}))
-                       (do
-                         (log/error-console! "seon.web.serve" "/clear transact failed"
-                                             (:seon.error/message error))
-                         (write-status! res 500 "text/plain; charset=utf-8"
-                                        (str "clear failed: "
-                                             (:seon.error/message error)))))))
-            (.catch (fn [err]
-                      (log/error-console! "seon.web.serve" "/clear handler threw" err)
-                      (write-status! res 500 "text/plain; charset=utf-8"
-                                     (str "clear failed: " err))))))
-      (catch :default e
-        (log/error-console! "seon.web.serve" "/clear THREW SYNC" e)
-        (write-status! res 500 "text/plain; charset=utf-8"
-                       (str "clear failed: " e))))))
+      (-> (clear-agent! agent-id)
+          (.then
+           (fn [result]
+             (if (:seon.error/message result)
+               (do
+                 (log/error-console! "seon.web.serve" "/clear refused"
+                                     result)
+                 (write-status! res 500 "text/plain; charset=utf-8"
+                                (:seon.error/message result)))
+               (write-status! res 204 "text/plain; charset=utf-8" ""))))
+          (.catch
+           (fn [error]
+             (log/error-console! "seon.web.serve" "/clear threw" error)
+             (write-status! res 500 "text/plain; charset=utf-8"
+                            (str error))))))))
 
 (defn- handle-create-agent!
   "POST /agents — atomically mint, commit, and resume one live agent.
@@ -386,7 +364,7 @@
               (log/info-console! "seon.web.serve" "POST /agents OK"
                                  {:agent id})
               (write-status! res 200 "text/plain; charset=utf-8" (str id)))
-            (let [message (or (get-in result [:seon.db/error :seon.error/message])
+            (let [message (or (:seon.error/message result)
                               (:seon.agent.runtime/error result)
                               "agent creation returned no id")]
               (log/error-console! "seon.web.serve" "POST /agents refused" message)
@@ -422,19 +400,23 @@
    `complete` function. When the agent has no open run it is already idle → 200
    no-op. 200 + id on success, 500 with the store error otherwise."
   [_req res agent-id]
-  (-> (js/Promise.resolve
-        (if-let [r (run/current-run {:seon.agent/id agent-id})]
-          (run/close-run! {:seon.agent.run/id            (:seon.agent.run/id r)
-                           :seon.agent.run/closed-reason :completed})
-          {:seon.db/ok? true}))
-      (.then (fn [{ok? :seon.db/ok? :as env}]
-               (if ok?
+  (-> (run/current-run {:seon.agent/id agent-id})
+      (.then (fn [current]
+               (if (:seon.error/message current)
+                 current
+                 (if current
+                   (run/close-run! {:seon.agent.run/id
+                                    (:seon.agent.run/id current)
+                                    :seon.agent.run/closed-reason :completed})
+                   nil))))
+      (.then (fn [result]
+               (if-not (:seon.error/message result)
                  (do (log/info-console! "seon.web.serve"
                                         "POST /agent/<id>/complete OK"
                                         {:agent agent-id})
                      (write-status! res 200 "text/plain; charset=utf-8"
                                     (str agent-id)))
-                 (let [error (get-in env [:seon.db/error :seon.error/message])]
+                 (let [error (:seon.error/message result)]
                    (log/error-console! "seon.web.serve"
                                        "/agent/<id>/complete refused" error)
                    (write-status! res 500 "text/plain; charset=utf-8"
@@ -463,177 +445,84 @@
 ;; optional agent override that open-run! uses; the door owns no second bound.
 ;; ============================================================
 
-(defn- agent-run-timeout-ms [dbv agent-id requested]
-  (or requested
-      (run/effective-deadline-ms
-        (cond-> {:seon.db/db dbv}
-          agent-id (assoc :seon.agent/id agent-id)))))
+(defn- ^:async agent-run-timeout-ms [database agent-id requested]
+  (if requested
+    requested
+    (await
+     (run/effective-deadline-ms
+      (cond-> {::db/db database}
+        agent-id (assoc :seon.agent/id agent-id))))))
 
-(defn- latest-run-start-ms
+(defn- ^:async latest-run-start-ms
   "Wall-clock ms of the agent's MOST-RECENTLY-STARTED run (open or closed) over
    the db value `db`, or 0 when none. The /agents/run poll uses this to reject
    the agent's PRE-INJECTION state: `:idle` alone is ambiguous (an idle agent
    has no open run BEFORE our message wakes it), so we only accept an idle
    whose latest run started at/after the injection — i.e. the run our message
    woke has opened and closed."
-  [db aid]
-  (->> (db/query {:seon.db/db db
-                  :seon.db/query '[:find ?started :in $ ?aid :where
-                                   [?a :seon.agent/id ?aid]
-                                   [?r :seon.agent.run/agent ?a]
-                                   [?r :seon.agent.run/started-at ?started]]
-                  :seon.db/args [aid]})
-       (map (fn [[^js started]] (.getTime started)))
-       (reduce max 0)))
+  [database aid]
+  (let [rows (await
+              (db/query {::db/db database
+                         ::db/query '[:find ?started :in $ ?aid :where
+                                      [?a :seon.agent/id ?aid]
+                                      [?r :seon.agent.run/agent ?a]
+                                      [?r :seon.agent.run/started-at ?started]]
+                         ::db/args [aid]}))]
+    (if (:seon.error/message rows)
+      rows
+      (->> rows
+           (map (fn [[^js started]] (.getTime started)))
+           (reduce max 0)))))
 
-(defn- coordinate-json
-  "JSON-safe external projection of one complete database coordinate."
-  [point]
-  {:database_id (str (::coordinate/database-id point))
-   :branch (name (::coordinate/branch point))
-   :commit_id (str (::coordinate/commit-id point))
-   :t (::coordinate/t point)})
+(defn- database-json
+  "JSON-safe external projection of one ordinary database value."
+  [database]
+  {:db_name (:db-name database)
+   :t (:t database)
+   :as_of (:as-of database)
+   :since (:since database)
+   :history (:history database)
+   :commit_id (str (:datahike/commit-id database))})
 
-(defn- captured-turn-coordinate-json
-  "JSON-safe complete coordinate stored on one debug turn bundle."
-  [bundle]
-  (when (every? #(contains? bundle %)
-                [:seon.agent.turn/rendered-database-id
-                 :seon.agent.turn/rendered-branch
-                 :seon.agent.turn/rendered-commit-id
-                 :seon.agent.turn/rendered-t])
-    {:database_id (str (:seon.agent.turn/rendered-database-id bundle))
-     :branch (name (:seon.agent.turn/rendered-branch bundle))
-     :commit_id (str (:seon.agent.turn/rendered-commit-id bundle))
-     :t (:seon.agent.turn/rendered-t bundle)}))
-
-(defn- turn-evidence
+(defn- turn-evidence-row
   "Stable external projection of captured turn prompts and raw replies."
-  [turn-ids]
-  (mapv
-    (fn [turn-id]
-      (let [bundle (agent-debug/turn {:seon.agent.turn/id turn-id})
-            rendered-coordinate (captured-turn-coordinate-json bundle)]
-        (cond-> {:turn_id turn-id
-                 :ok (:seon.agent.debug/ok? bundle)}
-          (:seon.agent.turn/status bundle)
-          (assoc :status (name (:seon.agent.turn/status bundle)))
-          (:seon.agent.turn/at bundle)
-          (assoc :at (.toISOString ^js (:seon.agent.turn/at bundle)))
-          rendered-coordinate
-          (assoc :rendered_coordinate rendered-coordinate)
-          (contains? bundle :seon.agent.debug/prompt)
-          (assoc :prompt (:seon.agent.debug/prompt bundle))
-          (contains? bundle :seon.agent.debug/prompt-tokens)
-          (assoc :prompt_tokens (:seon.agent.debug/prompt-tokens bundle))
-          (contains? bundle :seon.agent.debug/reply)
-          (assoc :reply (:seon.agent.debug/reply bundle))
-          (contains? bundle :seon.agent.debug/reply-tokens)
-          (assoc :reply_tokens (:seon.agent.debug/reply-tokens bundle))
-          (:seon.agent.turn/error bundle)
-          (assoc :turn_error (:seon.agent.turn/error bundle))
-          (:seon.agent.debug/error bundle)
-          (assoc :capture_error (:seon.agent.debug/error bundle)))))
-    turn-ids))
+  [turn-id bundle]
+  (cond-> {:turn_id turn-id
+           :ok (:seon.agent.debug/ok? bundle)}
+    (:seon.agent.turn/status bundle)
+    (assoc :status (name (:seon.agent.turn/status bundle)))
+    (:seon.agent.turn/at bundle)
+    (assoc :at (.toISOString ^js (:seon.agent.turn/at bundle)))
+    (:seon.agent.turn/rendered-tx bundle)
+    (assoc :rendered_transaction (:seon.agent.turn/rendered-tx bundle))
+    (contains? bundle :seon.agent.debug/prompt)
+    (assoc :prompt (:seon.agent.debug/prompt bundle))
+    (contains? bundle :seon.agent.debug/prompt-tokens)
+    (assoc :prompt_tokens (:seon.agent.debug/prompt-tokens bundle))
+    (contains? bundle :seon.agent.debug/reply)
+    (assoc :reply (:seon.agent.debug/reply bundle))
+    (contains? bundle :seon.agent.debug/reply-tokens)
+    (assoc :reply_tokens (:seon.agent.debug/reply-tokens bundle))
+    (:seon.agent.turn/error bundle)
+    (assoc :turn_error (:seon.agent.turn/error bundle))
+    (:seon.agent.debug/error bundle)
+    (assoc :capture_error (:seon.agent.debug/error bundle))))
 
-(declare evidence-json-value)
-
-(defn- evidence-order-key [value]
-  (cond
-    (map? value)
-    ["09-map"
-     (->> value
-          (map (fn [[k v]] [(evidence-order-key k) (evidence-order-key v)]))
-          sort vec)]
-
-    (set? value)
-    ["08-set" (->> value (map evidence-order-key) sort vec)]
-
-    (vector? value)
-    ["06-vector" (mapv evidence-order-key value)]
-
-    (list? value)
-    ["07-list" (mapv evidence-order-key value)]
-
-    (nil? value) ["00-nil"]
-    (boolean? value) ["01-boolean" value]
-    (number? value) ["02-number" (pr-str value)]
-    (string? value) ["03-string" value]
-    (keyword? value) ["04-keyword" (str value)]
-    (symbol? value) ["05-symbol" (str value)]
-    :else ["10-unsupported" (pr-str (type value))]))
-
-(defn- evidence-json-value
-  "Lossless JSON-safe tagged projection of one normalized EDN value."
-  [value]
-  (cond
-    (map? value)
-    {:kind "map"
-     :entries
-     (mapv (fn [[k v]]
-             {:key (evidence-json-value k) :value (evidence-json-value v)})
-           (sort-by (fn [[k v]] [(evidence-order-key k)
-                                 (evidence-order-key v)])
-                    value))}
-
-    (set? value)
-    {:kind "set"
-     :items (mapv evidence-json-value (sort-by evidence-order-key value))}
-
-    (vector? value)
-    {:kind "vector" :items (mapv evidence-json-value value)}
-
-    (list? value)
-    {:kind "list" :items (mapv evidence-json-value value)}
-
-    (keyword? value)
-    {:kind "keyword" :value (str value)}
-
-    (symbol? value)
-    {:kind "symbol" :value (str value)}
-
-    (or (nil? value) (boolean? value) (number? value) (string? value))
-    {:kind "scalar" :value value}
-
-    :else
-    {:kind "unsupported"}))
-
-(defn- operation-coordinate-valid? [operation-coordinate final-coordinate]
-  (try
-    (and (map? operation-coordinate)
-         (coordinate/same-attachment? operation-coordinate final-coordinate)
-         (<= (::coordinate/t operation-coordinate)
-             (::coordinate/t final-coordinate)))
-    (catch :default _ false)))
-
-(defn- coordinate-origin-validator
-  "Memoized exact transaction-origin proof against one frozen final head."
-  [final-coordinate resolve-coordinate!]
-  (let [!resolved-by-t (atom {})]
-    (fn [point]
-      (if-not (operation-coordinate-valid? point final-coordinate)
-        (js/Promise.resolve false)
-        (let [transaction-id (::coordinate/t point)
-              resolution
-              (or (get @!resolved-by-t transaction-id)
-                  (let [pending
-                        (-> (resolve-coordinate!
-                              {::db/head-coordinate final-coordinate
-                               ::db/transaction-id transaction-id})
-                            js/Promise.resolve)]
-                    (get (swap! !resolved-by-t
-                                #(if (contains? % transaction-id)
-                                   %
-                                   (assoc % transaction-id pending)))
-                         transaction-id)))]
-          (.then resolution #(= point %)))))))
+(defn- ^:async turn-evidence
+  [database turn-ids]
+  (let [bundles
+        (await
+         (js/Promise.all
+          (clj->js
+           (mapv #(agent-debug/turn {::db/db database
+                                     :seon.agent.turn/id %})
+                 turn-ids))))]
+    (if-let [error (some #(when (:seon.error/message %) %) bundles)]
+      error
+      (mapv turn-evidence-row turn-ids bundles))))
 
 (def ^:private attempt-pull-pattern
   '[:seon.ai.attempt/ordinal
-    :seon.ai.attempt/database-id
-    :seon.ai.attempt/branch
-    :seon.ai.attempt/commit-id
-    :seon.ai.attempt/t
     :seon.ai.attempt/provider
     :seon.ai.attempt/adapter
     :seon.ai.attempt/requested-model
@@ -657,44 +546,18 @@
 
 (def ^:private required-attempt-attrs
   #{:seon.ai.attempt/ordinal
-    :seon.ai.attempt/database-id
-    :seon.ai.attempt/branch
-    :seon.ai.attempt/commit-id
-    :seon.ai.attempt/t
     :seon.ai.attempt/provider
     :seon.ai.attempt/adapter
     :seon.ai.attempt/outer-timeout-ms
     :seon.ai.attempt/stream?
     :seon.ai.attempt/outcome})
 
-(defn- attempt-coordinate [attempt]
-  {::coordinate/database-id (:seon.ai.attempt/database-id attempt)
-   ::coordinate/branch (:seon.ai.attempt/branch attempt)
-   ::coordinate/commit-id (:seon.ai.attempt/commit-id attempt)
-   ::coordinate/t (:seon.ai.attempt/t attempt)})
-
-(defn- turn-rendered-coordinate [turn]
-  (let [point {::coordinate/database-id
-               (:seon.agent.turn/rendered-database-id turn)
-               ::coordinate/branch
-               (:seon.agent.turn/rendered-branch turn)
-               ::coordinate/commit-id
-               (:seon.agent.turn/rendered-commit-id turn)
-               ::coordinate/t
-               (:seon.agent.turn/rendered-t turn)}]
-    (when (schema/valid-candidate-value? ::coordinate/coordinate point)
-      point)))
-
 (defn- attempt-json
-  [turn-id attempt final-coordinate historical-config-valid?]
-  (let [point (attempt-coordinate attempt)]
-    (cond->
+  [turn-id attempt historical-config-valid?]
+  (cond->
       {:turn_id turn-id
        :ordinal (:seon.ai.attempt/ordinal attempt)
-       :coordinate (coordinate-json point)
-       :coordinate_valid
-       (and historical-config-valid?
-            (operation-coordinate-valid? point final-coordinate))
+       :historical_config_valid historical-config-valid?
        :provider (name (:seon.ai.attempt/provider attempt))
        :adapter (name (:seon.ai.attempt/adapter attempt))
        :outer_timeout_ms (:seon.ai.attempt/outer-timeout-ms attempt)
@@ -733,7 +596,7 @@
       (contains? attempt :seon.ai.attempt/request-id)
       (assoc :request_id (:seon.ai.attempt/request-id attempt))
       (contains? attempt :seon.ai.attempt/evidence-error)
-      (assoc :evidence_error (:seon.ai.attempt/evidence-error attempt)))))
+      (assoc :evidence_error (:seon.ai.attempt/evidence-error attempt))))
 
 (def ^:private comparable-attempt-keys
   [:provider :adapter :requested_model :temperature :max_tokens :thinking
@@ -799,30 +662,46 @@
                              :seon.ai.attempt/endpoint))
           expected)))
 
-(defn- ^:async historical-attempt-config-valid?
-  [conn agent-id attempt]
-  (let [historical (await (db/at-coordinate conn (attempt-coordinate attempt)))]
-    (when (schema/valid-candidate-value? :seon.db/db-val historical)
-      (let [resolved (:seon.ai/resolved-config
-                       (ai/resolved-config
-                         {:seon.db/db historical :seon.agent/id agent-id}))]
-        (and (response-identity-valid? attempt resolved)
-             (= (:seon.ai.attempt/adapter attempt)
-                (ai/resolved-adapter resolved))
-             (attempt-config-matches?
-               attempt (resolved-attempt-config resolved)))))))
-
-(defn- ^:async historical-turn-stream-valid?
-  [conn point attempts]
-  (when point
-    (let [historical (await (db/at-coordinate conn point))]
-      (and (schema/valid-candidate-value? :seon.db/db-val historical)
-           (let [expected (= :stream (ctx/repl-mode historical))]
-             (every? #(= expected (:seon.ai.attempt/stream? %)) attempts))))))
+(defn- ^:async historical-turn-valid?
+  [database agent-id rendered-tx attempts]
+  (if-not (and (int? rendered-tx) (<= rendered-tx (:t database)))
+    false
+    (let [historical (db/as-of database rendered-tx)
+          values
+          (await
+           (js/Promise.all
+            #js [(db/pull {::db/db historical
+                           ::db/selector (ai/config-pull-pattern)
+                           ::db/eid [:seon.ai/id "config"]})
+                 (db/pull {::db/db historical
+                           ::db/selector (ai/agent-config-pull-pattern)
+                           ::db/eid [:seon.agent/id agent-id]})
+                 (db/pull {::db/db historical
+                           ::db/selector
+                           (into [:seon.config/repl-mode]
+                                 (ai/model-transport-pull-pattern))
+                           ::db/eid [:seon.config/id config/cluster-config-id]})]))
+          [config-row agent-row cluster-row] (array-seq values)]
+      (if (some :seon.error/message [config-row agent-row cluster-row])
+        false
+        (let [resolved
+              (:seon.ai/resolved-config
+               (ai/resolved-config-from-rows
+                (merge config-row cluster-row) agent-row))
+              stream? (= :stream (:seon.config/repl-mode cluster-row))]
+          (every?
+           (fn [attempt]
+             (and (= stream? (:seon.ai.attempt/stream? attempt))
+                  (response-identity-valid? attempt resolved)
+                  (= (:seon.ai.attempt/adapter attempt)
+                     (ai/resolved-adapter resolved))
+                  (attempt-config-matches?
+                   attempt (resolved-attempt-config resolved))))
+           attempts))))))
 
 (defn- project-model-transport-rows
   "Pure bounded projection over rows selected from one final database value."
-  [turn-rows rows final-coordinate pull-row historical-valid? cap]
+  [turn-rows rows pull-row historical-valid? cap]
   (let [attempt-eids-by-turn
         (reduce (fn [grouped [turn-eid attempt-eid]]
                   (update grouped turn-eid conj attempt-eid))
@@ -844,7 +723,9 @@
                       attempts (mapv pull-row attempt-eids)]
                   {:turn_id turn-id
                    :valid (and (ordered? attempts)
-                               (every? valid-row? attempts))
+                               (every? valid-row? attempts)
+                               (every? #(true? (historical-valid? %))
+                                       attempt-eids))
                    :attempts attempts
                    :attempt-eids attempt-eids}))
               (map (fn [[turn-eid turn-id & _]] [turn-eid turn-id]) turn-rows))
@@ -862,9 +743,8 @@
                     {:turn_id turn_id
                      :attempts
                      (mapv (fn [attempt-eid attempt]
-                             (attempt-json
-                               turn_id attempt final-coordinate
-                               (true? (historical-valid? attempt-eid))))
+                             (attempt-json turn_id attempt
+                                           (true? (historical-valid? attempt-eid))))
                            attempt-eids attempts)})
                   raw-turns)
             projected-attempts (mapcat :attempts projected-turns)
@@ -888,235 +768,73 @@
 
 (defn- ^:async project-model-transport-evidence
   "Bounded ordered provider-attempt proof from the run's final database value."
-  [conn dbv agent-id turn-rows origin-valid?]
-  (let [cap (config/database-edn-cap dbv)
-        turn-eids (mapv first turn-rows)
-        rows (if (seq turn-eids)
-               (db/query {:seon.db/db dbv
-                          :seon.db/query
-                          '[:find ?turn ?attempt
-                            :in $ [?turn ...] :where
-                            [?turn :seon.agent.turn/llm-attempts ?attempt]]
-                          :seon.db/args [turn-eids]})
-               [])
-        attempts (into {}
-                       (map (fn [[_ attempt-eid]]
-                              [attempt-eid
-                               (db/pull
-                                 {:seon.db/db dbv
-                                  :seon.db/pull-pattern attempt-pull-pattern
-                                  :seon.db/ref attempt-eid})]))
-                       rows)
-        turn-coordinates
-        (into {}
-              (map (fn [turn-eid]
-                     [turn-eid
-                      (turn-rendered-coordinate
-                        (db/pull
-                          {:seon.db/db dbv
-                           :seon.db/pull-pattern
-                           '[:seon.agent.turn/rendered-database-id
-                             :seon.agent.turn/rendered-branch
-                             :seon.agent.turn/rendered-commit-id
-                             :seon.agent.turn/rendered-t]
-                           :seon.db/ref turn-eid}))]))
-              turn-eids)
-        attempts-by-turn
-        (reduce (fn [grouped [turn-eid attempt-eid]]
-                  (update grouped turn-eid conj (get attempts attempt-eid)))
-                {} rows)]
-    (let [turn-stream-validity
-          (into {}
-                (await
-                  (js/Promise.all
-                    (clj->js
-                      (mapv
-                        (fn [turn-eid]
-                          (let [point (get turn-coordinates turn-eid)]
-                            (-> (js/Promise.all
-                                  #js [(origin-valid? point)
-                                       (historical-turn-stream-valid?
-                                         conn point
-                                         (get attempts-by-turn turn-eid []))])
-                                (.then
-                                  (fn [validities]
-                                    [turn-eid (every? true? validities)])))))
-                        turn-eids)))))
-          turn-eid-by-attempt
-          (into {} (map (fn [[turn attempt]] [attempt turn])) rows)
-          historical-validity
-          (into {}
-                (await
-                  (js/Promise.all
-                    (clj->js
-                      (mapv
-                        (fn [[attempt-eid attempt]]
-                          (-> (js/Promise.all
-                                #js [(origin-valid?
-                                       (attempt-coordinate attempt))
-                                     (historical-attempt-config-valid?
-                                       conn agent-id attempt)])
-                              (.then
-                                (fn [validities]
-                                  [attempt-eid
-                                   (and
-                                     (every? true? validities)
-                                     (true?
-                                       (get turn-stream-validity
-                                            (get turn-eid-by-attempt
-                                                 attempt-eid))))]))))
-                        attempts)))))]
-      (project-model-transport-rows
-        turn-rows rows (db/head-coordinate dbv)
-        #(get attempts %)
-        #(get historical-validity % false)
-        cap))))
-
-(defn- operation-json [operation final-coordinate]
-  (let [point (:seon.db/operation-coordinate operation)]
-    (cond->
-      {:position (:seon.db/operation-position operation)
-       :operation (str (:seon.db/read-operation operation))
-       :ok (true? (:seon.db/operation-ok? operation))
-       :source (str (:seon.db/read-source operation))
-       :replayable (true? (:seon.db/read-replayable? operation))
-       :coordinate_valid (operation-coordinate-valid? point final-coordinate)
-       :request (evidence-json-value (:seon.db/read-request operation))
-       :result (evidence-json-value (:seon.db/read-result operation))}
-      (map? point) (assoc :coordinate (coordinate-json point)))))
-
-(defn- valid-operation-vector? [operations]
-  (and (vector? operations)
-       (= (mapv :seon.db/operation-position operations)
-          (vec (range (count operations))))
-       (every?
-         (fn [operation]
-           (and (map? operation)
-                (schema/valid-candidate-value?
-                  :seon.db/read-observation operation)
-                (every? #(contains? operation %)
-                        [:seon.db/read-operation
-                         :seon.db/operation-position
-                         :seon.db/operation-ok?
-                         :seon.db/read-source
-                         :seon.db/read-request
-                         :seon.db/read-result
-                         :seon.db/read-replayable?])))
-         operations)))
-
-(defn- supported-evidence-json? [value]
-  (and (map? value)
-       (not= "unsupported" (:kind value))
-       (cond
-         (= "map" (:kind value))
-         (every? (fn [{:keys [key value]}]
-                   (and (supported-evidence-json? key)
-                        (supported-evidence-json? value)))
-                 (:entries value))
-
-         (contains? #{"set" "vector" "list"} (:kind value))
-         (every? supported-evidence-json? (:items value))
-
-         (contains? #{"keyword" "symbol" "scalar"} (:kind value))
-         true
-
-         :else false)))
-
-(defn- project-operation-evidence
-  "Bounded operation proof resolved from one final-snapshot blob ref."
-  [blob-row final-coordinate cap]
-  (let [hash (:my.blob/hash blob-row)
-        projected-tokens (:my.blob/tokens blob-row)
-        token-ceiling (tokens/chars->tokens cap)]
-    (cond
-      (or (not (string? hash)) (not (int? projected-tokens)))
-      (cond-> {:status "missing"}
-        (string? hash) (assoc :blob_hash hash))
-
-      (> projected-tokens token-ceiling)
-      {:status "oversized" :blob_hash hash :tokens projected-tokens}
-
-      :else
-      (let [readback (blob/get {:my.blob/hash hash})]
-        (cond
-          (or
-          (not (true? (:my.blob/ok? readback)))
-          (not (string? (:my.blob/content readback))))
-          {:status "missing" :blob_hash hash :tokens projected-tokens}
-
-          (> (count (:my.blob/content readback)) cap)
-          {:status "oversized"
-           :blob_hash hash
-           :chars (count (:my.blob/content readback))
-           :bytes (js/Buffer.byteLength (:my.blob/content readback) "utf8")
-           :tokens projected-tokens}
-
-          :else
-          (let [content (:my.blob/content readback)]
-            (if (not= projected-tokens (:my.blob/tokens readback))
-              {:status "malformed"
-               :blob_hash hash
-               :chars (count content)
-               :bytes (js/Buffer.byteLength content "utf8")
-               :tokens projected-tokens}
-              (try
-              (let [forms (reader/read-string (str "[" content "]"))
-                    operations (when (= 1 (count forms)) (first forms))]
-                (let [projected (when (valid-operation-vector? operations)
-                                  (mapv #(operation-json % final-coordinate)
-                                        operations))]
-                  (if (and projected
-                           (every? #(and (supported-evidence-json? (:request %))
-                                         (supported-evidence-json? (:result %)))
-                                   projected))
-                    {:status "inline"
-                     :blob_hash hash
-                     :chars (count content)
-                     :bytes (js/Buffer.byteLength content "utf8")
-                     :tokens projected-tokens
-                     :operations projected}
-                    {:status "malformed"
-                     :blob_hash hash
-                     :chars (count content)
-                     :bytes (js/Buffer.byteLength content "utf8")
-                     :tokens projected-tokens})))
-              (catch :default _
-                {:status "malformed"
-                 :blob_hash hash
-                 :chars (count content)
-                 :bytes (js/Buffer.byteLength content "utf8")
-                :tokens projected-tokens})))))))))
-
-(defn- json-coordinate->coordinate [point]
-  (try
-    {::coordinate/database-id (uuid (:database_id point))
-     ::coordinate/branch (keyword (:branch point))
-     ::coordinate/commit-id (uuid (:commit_id point))
-     ::coordinate/t (:t point)}
-    (catch :default _ nil)))
-
-(defn- ^:async require-exact-operation-origins
-  [proof origin-valid?]
-  (if-not (= "inline" (:status proof))
-    proof
-    (let [validities
-          (await
-            (js/Promise.all
-              (clj->js
-                (mapv (fn [operation]
-                        (origin-valid?
-                          (json-coordinate->coordinate
-                            (:coordinate operation))))
-                      (:operations proof)))))]
-      (if (every? true? validities)
-        proof
-        (-> proof
-            (assoc :status "malformed")
-            (dissoc :operations))))))
+  [database agent-id turn-rows]
+  (let [cluster-row
+        (await
+         (db/pull {::db/db database
+                   ::db/selector [:seon.config.render/database-edn-cap]
+                   ::db/eid [:seon.config/id config/cluster-config-id]}))
+        turn-eids (mapv first turn-rows)]
+    (if (:seon.error/message cluster-row)
+      {:status "malformed"}
+      (let [cap (config/database-edn-cap cluster-row)
+            rows (if (seq turn-eids)
+                   (await
+                    (db/query {::db/db database
+                               ::db/query
+                               '[:find ?turn ?attempt
+                                 :in $ [?turn ...] :where
+                                 [?turn :seon.agent.turn/llm-attempts ?attempt]]
+                               ::db/args [turn-eids]}))
+                   [])]
+        (if (:seon.error/message rows)
+          {:status "malformed"}
+          (let [attempt-eids (into [] (distinct) (map second rows))
+                pulled-attempts
+                (if (seq attempt-eids)
+                  (await
+                   (db/pull-many {::db/db database
+                                  ::db/selector attempt-pull-pattern
+                                  ::db/eids attempt-eids}))
+                  [])]
+            (if (or (:seon.error/message pulled-attempts)
+                    (some :seon.error/message pulled-attempts))
+              {:status "malformed"}
+              (let [attempts (zipmap attempt-eids pulled-attempts)
+                    attempts-by-turn
+                    (reduce (fn [grouped [turn-eid attempt-eid]]
+                              (update grouped turn-eid conj
+                                      (get attempts attempt-eid)))
+                            {} rows)
+                    rendered-tx-by-turn
+                    (into {} (map (fn [[turn-eid _ _ _ rendered-tx]]
+                                    [turn-eid rendered-tx])) turn-rows)
+                    turn-validity
+                    (into {}
+                          (await
+                           (js/Promise.all
+                            (clj->js
+                             (mapv
+                              (fn [turn-eid]
+                                (-> (historical-turn-valid?
+                                     database agent-id
+                                     (get rendered-tx-by-turn turn-eid)
+                                     (get attempts-by-turn turn-eid []))
+                                    (.then (fn [valid?] [turn-eid valid?]))))
+                              turn-eids)))))
+                    turn-eid-by-attempt
+                    (into {} (map (fn [[turn-eid attempt-eid]]
+                                    [attempt-eid turn-eid])) rows)]
+                (project-model-transport-rows
+                 turn-rows rows
+                 #(get attempts %)
+                 #(true? (get turn-validity
+                              (get turn-eid-by-attempt %)))
+                 cap)))))))))
 
 (defn- project-eval-evidence
   "Stable external projection of selected eval rows."
-  [rows turn-eids final-coordinate pull-row cap]
+  [rows turn-eids pull-row]
   (->> rows
        (filter (fn [[_ turn-eid]] (contains? turn-eids turn-eid)))
        (sort-by (fn [[_ _ _ _ _ eval-t]] eval-t))
@@ -1131,47 +849,40 @@
                (contains? row :seon.eval/source)
                (assoc :source (:seon.eval/source row))
                (contains? row :seon.eval/narration)
-               (assoc :narration (:seon.eval/narration row))
-               (contains? row :seon.eval/database-operations-blob)
-               (assoc :operation_evidence
-                      (project-operation-evidence
-                        (:seon.eval/database-operations-blob row)
-                        final-coordinate cap))))))))
+               (assoc :narration (:seon.eval/narration row))))))))
 
 (defn- ^:async eval-evidence
   "Stable external projection of one request window's evaluated forms."
-  [dbv _agent-eid turn-eids origin-valid?]
-  (let [cap (config/database-edn-cap dbv)
-        rows (db/query {:seon.db/db dbv
-                        :seon.db/query '[:find ?e ?t ?turn-id ?id ?at ?eval-t
-                                         :in $ [?t ...] :where
-                                         [?t :seon.agent.turn/id ?turn-id]
-                                         [?t :seon.agent.turn/evals ?e]
-                                         [?e :seon.eval/id ?id ?eval-t]
-                                         [?e :seon.eval/at ?at]]
-                        :seon.db/args [(vec turn-eids)]})]
-    (let [projected
-          (project-eval-evidence
-            rows turn-eids (db/head-coordinate dbv)
-            (fn [eval-eid]
-              (db/pull {:seon.db/db dbv
-                        :seon.db/pull-pattern
-                        '[:seon.eval/source :seon.eval/ok? :seon.eval/narration
-                          {:seon.eval/database-operations-blob
-                           [:my.blob/hash :my.blob/tokens]}]
-                        :seon.db/ref eval-eid}))
-            cap)]
-      (vec
-        (await
-          (js/Promise.all
-            (clj->js
-              (mapv (fn [row]
-                      (if (contains? row :operation_evidence)
-                        (-> (require-exact-operation-origins
-                              (:operation_evidence row) origin-valid?)
-                            (.then #(assoc row :operation_evidence %)))
-                        (js/Promise.resolve row)))
-                    projected))))))))
+  [database turn-eids]
+  (let [rows (if (seq turn-eids)
+               (await
+                (db/query {::db/db database
+                           ::db/query '[:find ?e ?t ?turn-id ?id ?at ?eval-t
+                                        :in $ [?t ...] :where
+                                        [?t :seon.agent.turn/id ?turn-id]
+                                        [?t :seon.agent.turn/evals ?e]
+                                        [?e :seon.eval/id ?id ?eval-t]
+                                        [?e :seon.eval/at ?at]]
+                           ::db/args [(vec turn-eids)]}))
+               [])]
+    (if (:seon.error/message rows)
+      rows
+      (let [eval-eids (mapv first rows)
+            pulled
+            (if (seq eval-eids)
+              (await
+               (db/pull-many {::db/db database
+                              ::db/selector
+                              [:seon.eval/source :seon.eval/ok?
+                               :seon.eval/narration]
+                              ::db/eids eval-eids}))
+              [])]
+        (if (or (:seon.error/message pulled)
+                (some :seon.error/message pulled))
+          (or (when (:seon.error/message pulled) pulled)
+              (some #(when (:seon.error/message %) %) pulled))
+          (let [by-eid (zipmap eval-eids pulled)]
+            (project-eval-evidence rows turn-eids #(get by-eid %))))))))
 
 (defn- model-config-json [resolved-config]
   (let [{:seon.ai/keys [provider model temperature max-tokens thinking]}
@@ -1186,179 +897,242 @@
       (contains? resolved-config :seon.ai/thinking)
       (assoc :thinking thinking))))
 
+(defn- ^:async turn-rows-with-rendered-tx
+  "Attach each turn's native rendered transaction without dropping malformed
+   turns from the final request window."
+  [database turn-rows]
+  (if (empty? turn-rows)
+    []
+    (let [pulled
+          (await
+           (db/pull-many {::db/db database
+                          ::db/selector [:seon.agent.turn/rendered-tx]
+                          ::db/eids (mapv first turn-rows)}))]
+      (cond
+        (:seon.error/message pulled) pulled
+        (not= (count pulled) (count turn-rows))
+        {:seon.error/message
+         "Turn rendered-transaction acquisition returned the wrong row count."
+         :seon.error/kind :core-bug}
+        :else
+        (mapv (fn [row turn]
+                (conj row (:seon.agent.turn/rendered-tx turn)))
+              turn-rows pulled)))))
+
+(defn- ^:async final-agent-task-result
+  [database aid injected-at elapsed timeout?]
+  (let [values
+        (await
+         (js/Promise.all
+          #js [(db/query {::db/db database
+                          ::db/query '[:find ?r ?started :in $ ?aid :where
+                                       [?agent :seon.agent/id ?aid]
+                                       [?r :seon.agent.run/agent ?agent]
+                                       [?r :seon.agent.run/started-at ?started]]
+                          ::db/args [aid]})
+               (db/query {::db/db database
+                          ::db/query '[:find ?turn ?id ?at ?run
+                                       :in $ ?aid :where
+                                       [?agent :seon.agent/id ?aid]
+                                       [?run :seon.agent.run/agent ?agent]
+                                       [?turn :seon.agent.turn/run ?run]
+                                       [?turn :seon.agent.turn/id ?id]
+                                       [?turn :seon.agent.turn/at ?at]]
+                          ::db/args [aid]})
+               (db/query {::db/db database
+                          ::db/query '[:find ?at ?content :in $ ?aid :where
+                                       [?agent :seon.agent/id ?aid]
+                                       [?user :seon.user/id "user"]
+                                       [?message :seon.agent.message/from ?agent]
+                                       [?message :seon.agent.message/to ?user]
+                                       [?message :seon.agent.message/at ?at]
+                                       [?message :seon.agent.message/content ?content]]
+                          ::db/args [aid]})
+               (db/pull {::db/db database
+                         ::db/selector (ai/config-pull-pattern)
+                         ::db/eid [:seon.ai/id "config"]})
+               (db/pull {::db/db database
+                         ::db/selector (ai/agent-config-pull-pattern)
+                         ::db/eid [:seon.agent/id aid]})
+               (db/pull {::db/db database
+                         ::db/selector (ai/model-transport-pull-pattern)
+                         ::db/eid [:seon.config/id config/cluster-config-id]})]))
+        [run-rows turn-identities reply-rows config-row agent-row cluster-row]
+        (array-seq values)
+        acquired-error
+        (some #(when (:seon.error/message %) %) (array-seq values))
+        all-turn-rows
+        (if acquired-error
+          acquired-error
+          (await (turn-rows-with-rendered-tx database turn-identities)))
+        error (or acquired-error
+                  (when (:seon.error/message all-turn-rows) all-turn-rows))]
+    (if error
+      {:error (:seon.error/message error)}
+      (let [run-eids (into #{}
+                           (keep (fn [[run-eid ^js started]]
+                                   (when (>= (.getTime started) injected-at)
+                                     run-eid)))
+                           run-rows)
+            turn-rows (->> all-turn-rows
+                           (filter #(contains? run-eids (nth % 3)))
+                           (sort-by (fn [[_ id ^js at]] [(.getTime at) id]))
+                           vec)
+            turn-eids (into #{} (map first) turn-rows)
+            turn-ids (mapv second turn-rows)
+            eval-rows (await (eval-evidence database turn-eids))
+            turn-proof (await (turn-evidence database turn-ids))
+            transport-proof
+            (await (project-model-transport-evidence database aid turn-rows))
+            evidence-error
+            (some #(when (:seon.error/message %) %)
+                  [eval-rows turn-proof transport-proof])
+            resolved
+            (:seon.ai/resolved-config
+             (ai/resolved-config-from-rows
+              (merge config-row cluster-row) agent-row))
+            reply (->> reply-rows
+                       (filter (fn [[^js at]]
+                                 (>= (.getTime at) injected-at)))
+                       (sort-by (fn [[^js at]] (.getTime at)))
+                       last second)
+            closed-reason (when-not timeout?
+                            (await (derive/last-closed-reason database aid)))]
+        (if evidence-error
+          {:error (:seon.error/message evidence-error)}
+          (cond-> {:agent_id aid
+                   :turns (count turn-eids)
+                   :evals (count eval-rows)
+                   :reply (or reply "")
+                   :elapsed_ms elapsed
+                   :database (database-json database)
+                   :turn_evidence turn-proof
+                   :model_transport_evidence transport-proof
+                   :eval_evidence eval-rows
+                   :model_config (model-config-json resolved)
+                   :closed_reason (if timeout? "timeout" (str closed-reason))}
+            timeout? (assoc :timed_out true)))))))
+
 (defn- ^:async run-agent-task!
-  "Drive ONE task through an agent in the pod's own cluster to completion.
-
-   Start-or-reuse: a nil `agent-id` calls [[seon.agent/start!]]; a supplied
-   `agent-id` reuses that agent —
-   it must already exist, and because the cluster store is durable the same
-   agent can be driven again after a pod restart (boot re-arms armable
-   agents), which multi-phase drives rely on. `input` lands via the real
-   wake path (`agent/message!`, from = the user ref); the DERIVED state is
-   polled to the `:idle` of the run our message woke (see
-   [[latest-run-start-ms]]) or `timeout-ms`; the returned map carries
-   turn/eval/reply metadata scoped to THIS request's window (runs started
-   at/after injection — a reused agent's earlier work never inflates the
-   counts). The agent's OWN FSM decides turns; this caller never does.
-
-   Timeout honesty: a timeout exit carries `:closed_reason \"timeout\"` +
-   `:timed_out true` (never a stale derived last-closed-reason), AND the
-   still-open run is closed `:superseded` so it stops burning LLM tokens.
-   A refusal (unknown agent-id, failed mint) returns `{:error <msg>}`."
+  "Drive one task and derive its response from one final database value."
   [agent-id input timeout-ms]
-  (let [conn    db/*conn*
-        reuse?  (some? agent-id)
-        exists? (when reuse?
-                  (some? (db/query {:seon.db/db @conn
-                                    :seon.db/query '[:find ?e . :in $ ?id :where
-                                                     [?e :seon.agent/id ?id]]
-                                    :seon.db/args [agent-id]})))]
-    (if (and reuse? (not exists?))
+  (let [initial-database (await (db/db))
+        reuse? (some? agent-id)
+        existing
+        (when (and reuse? (not (:seon.error/message initial-database)))
+          (await
+           (db/query {::db/db initial-database
+                      ::db/query '[:find ?agent . :in $ ?id :where
+                                   [?agent :seon.agent/id ?id]]
+                      ::db/args [agent-id]})))]
+    (cond
+      (:seon.error/message initial-database)
+      {:error (:seon.error/message initial-database)}
+
+      (:seon.error/message existing)
+      {:error (:seon.error/message existing)}
+
+      (and reuse? (nil? existing))
       {:error (str "unknown agent_id: " agent-id)}
+
+      :else
       (let [minted (when-not reuse? (await (agent/start! {})))
-            aid    (or agent-id (:seon.agent/id minted))]
-        (if (and (not reuse?)
-                 (or (false? (:seon.db/ok? minted))
-                     (false? (:seon.agent.runtime/resumed? minted))
-                     (nil? aid)))
-          {:error (str "agent mint failed: "
-                       (or (get-in minted
-                                   [:seon.db/error :seon.error/message])
-                           (:seon.agent.runtime/error minted)
-                           "mint returned no committed agent id"))}
-          ;; `injected-at` is stamped BEFORE the message lands, so the run the
-          ;; wake opens can never predate the window the reads below scope to.
-          (let [start       (js/Date.now)
-                injected-at start]
-            (log/info-console! "seon.web.serve" "POST /agents/run — task in"
-                               {:agent aid :reused reuse?
-                                :tokens (tokens/estimate (str input))})
-            (await (agent/message!
-                     {:seon.agent.message/from    agent/user-ref
-                      :seon.agent.message/to      [[:seon.agent/id aid]]
-                      :seon.agent.message/content input}))
-            (loop []
-              (await (js/Promise. (fn [r] (js/setTimeout r 1500))))
-              ;; ONE db snapshot per poll — every read below sees the same
-              ;; snapshot (a mid-poll write must not split state vs reply reads).
-              (let [db       @conn
-                    st       (derive/derive-state db aid)
-                    elapsed  (- (js/Date.now) start)
-                    done?    (and (= :idle st)
-                                  (>= (latest-run-start-ms db aid) injected-at))
-                    timeout? (> elapsed timeout-ms)]
-                (if-not (or done? timeout?)
-                  (recur)
-                  (do
-                    ;; TIMEOUT HONESTY: close the run we woke (if still open)
-                    ;; so it stops driving turns after we've given up.
-                    (when timeout?
-                      (when-let [run (derive/current-run db aid)]
-                        (await (run/close-run!
-                                 {:seon.agent.run/id            (:seon.agent.run/id run)
-                                  :seon.agent.run/closed-reason :superseded}))))
-                    ;; A timeout close is itself a commit. Refresh once after
-                    ;; that write so response metadata and its head coordinate
-                    ;; describe the same immutable final database value.
-                    (let [db        (if timeout? @conn db)
-                          agent-eid (:db/id (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id aid]}))
-                          user-eid  (:db/id (db/entity {:seon.db/db db :seon.db/ref [:seon.user/id "user"]}))
-                          ;; the runs THIS request opened (window scoping)
-                          run-eids  (->> (db/query {:seon.db/db db
-                                                    :seon.db/query '[:find ?r ?started :in $ ?ag :where
-                                                                     [?r :seon.agent.run/agent ?ag]
-                                                                     [?r :seon.agent.run/started-at ?started]]
-                                                    :seon.db/args [agent-eid]})
-                                         (keep (fn [[r ^js started]]
-                                                 (when (>= (.getTime started) injected-at) r)))
-                                         set)
-                          turn-rows (->> (db/query {:seon.db/db db
-                                                    :seon.db/query '[:find ?t ?id ?at ?r :in $ ?ag :where
-                                                                     [?r :seon.agent.run/agent ?ag]
-                                                                     [?t :seon.agent.turn/run ?r]
-                                                                     [?t :seon.agent.turn/id ?id]
-                                                                     [?t :seon.agent.turn/at ?at]]
-                                                    :seon.db/args [agent-eid]})
-                                         (filter (fn [[_ _ _ r]]
-                                                   (contains? run-eids r)))
-                                         (sort-by (fn [[_ id ^js at _]]
-                                                    [(.getTime at) id])))
-                          turn-eids (into #{} (map first) turn-rows)
-                          turn-ids  (mapv second turn-rows)
-                          final-coordinate (db/head-coordinate db)
-                          origin-valid?
-                          (coordinate-origin-validator
-                            final-coordinate
-                            db/resolve-transaction-coordinate!)
-                          eval-rows (await
-                                      (eval-evidence
-                                        db agent-eid turn-eids origin-valid?))
-                          ;; Model config — COMPUTED at response time by the
-                          ;; ONE resolver (seon.ai/resolved-config), a pure fn
-                          ;; of this poll's db snapshot: the agent's own
-                          ;; :seon.ai/agent-* overrides → the global config
-                          ;; row → shipped defaults. Derive-don't-store (owner
-                          ;; correction 2026-07-04 — supersedes the per-turn
-                          ;; llm-* stamping). Honest CURRENT intent for a
-                          ;; just-finished run; per-turn historical exactness
-                          ;; is the same resolver over (db/as-of db <turn's
-                          ;; rendered-as-of>) — see the resolver docstring.
-                          model-cfg
-                          (model-config-json
-                            (:seon.ai/resolved-config
-                              (ai/resolved-config
-                                {:seon.db/db db :seon.agent/id aid})))
-                          reply     (->> (db/query {:seon.db/db db
-                                                    :seon.db/query '[:find ?f ?to ?at ?c :where
-                                                                     [?m :seon.agent.message/from ?f]
-                                                                     [?m :seon.agent.message/to ?to]
-                                                                     [?m :seon.agent.message/at ?at]
-                                                                     [?m :seon.agent.message/content ?c]]})
-                                         (filter (fn [[from to ^js at _]]
-                                                   (and (= from agent-eid) (= to user-eid)
-                                                        (>= (.getTime at) injected-at))))
-                                         (sort-by (fn [[_ _ at _]] (.getTime ^js at)))
-                                         (map (fn [[_ _ _ c]] c)) last)]
-                      ;; On timeout report the HONEST reason — never a stale
-                      ;; derived last-closed-reason from an earlier close.
-                      (cond-> {:agent_id aid :turns (count turn-eids)
-                               :evals (count eval-rows)
-                               :reply (or reply "") :elapsed_ms elapsed
-                               :database_coordinate
-                               (coordinate-json final-coordinate)
-                               :turn_evidence (turn-evidence turn-ids)
-                               :model_transport_evidence
-                               (await
-                                 (project-model-transport-evidence
-                                   conn db aid turn-rows origin-valid?))
-                               :eval_evidence eval-rows
-                               ;; always present — the resolver always resolves
-                               ;; (worst case: all shipped defaults).
-                               :model_config model-cfg
-                               :closed_reason (if timeout?
-                                                "timeout"
-                                                (str (derive/last-closed-reason db aid)))}
-                        timeout? (assoc :timed_out true)))))))))))))
+            aid (or agent-id (:seon.agent/id minted))]
+        (if (or (:seon.error/message minted) (nil? aid))
+          {:error (or (:seon.error/message minted)
+                      (:seon.agent.runtime/error minted)
+                      "agent mint returned no id")}
+          (let [start (js/Date.now)
+                injected-at start
+                message-result
+                (await
+                 (agent/message!
+                  {:seon.agent.message/from agent/user-ref
+                   :seon.agent.message/to [[:seon.agent/id aid]]
+                   :seon.agent.message/content input}))]
+            (if (:seon.error/message message-result)
+              {:error (:seon.error/message message-result)}
+              (do
+                (log/info-console! "seon.web.serve" "POST /agents/run — task in"
+                                   {:agent aid :reused reuse?
+                                    :tokens (tokens/estimate (str input))})
+                (loop []
+                  (await (js/Promise. (fn [resolve]
+                                       (js/setTimeout resolve 1500))))
+                  (let [database (await (db/db))
+                        observations
+                        (when-not (:seon.error/message database)
+                          (await
+                           (js/Promise.all
+                            #js [(derive/derive-state database aid)
+                                 (latest-run-start-ms database aid)])))
+                        [state latest-start] (when observations
+                                               (array-seq observations))
+                        error (or (when (:seon.error/message database) database)
+                                  (when (:seon.error/message state) state)
+                                  (when (:seon.error/message latest-start)
+                                    latest-start))
+                        elapsed (- (js/Date.now) start)
+                        done? (and (= :idle state)
+                                   (>= latest-start injected-at))
+                        timeout? (> elapsed timeout-ms)]
+                    (cond
+                      error {:error (:seon.error/message error)}
+                      (not (or done? timeout?)) (recur)
+                      :else
+                      (let [current
+                            (when timeout?
+                              (await
+                               (run/current-run
+                                {::db/db database :seon.agent/id aid})))
+                            close-result
+                            (cond
+                              (:seon.error/message current) current
+                              current
+                              (await
+                               (run/close-run!
+                                {:seon.agent.run/id
+                                 (:seon.agent.run/id current)
+                                 :seon.agent.run/closed-reason :superseded}))
+                              :else nil)]
+                        (if (:seon.error/message close-result)
+                          {:error (:seon.error/message close-result)}
+                          (let [final-database (await (db/db))]
+                            (if (:seon.error/message final-database)
+                              {:error (:seon.error/message final-database)}
+                              (await
+                               (final-agent-task-result
+                                final-database aid injected-at elapsed
+                                timeout?)))))))))))))))))
 
 (defn- handle-agent-run! [req res]
   (-> (read-body req)
-      (.then (fn [body]
-               (let [parsed     (js->clj (js/JSON.parse body))
-                     input      (get parsed "input")
-                     agent-id   (get parsed "agent_id")
-                     requested-timeout-ms (get parsed "timeout_ms")
-                     timeout-ms (agent-run-timeout-ms
-                                  @db/*conn* agent-id
-                                  requested-timeout-ms)]
-                 (-> (run-agent-task! agent-id input timeout-ms)
-                     (.then
-                       (fn [result]
-                         (assoc result
-                                :effective_timeout_ms timeout-ms
-                                :timeout_source
-                                (if (some? requested-timeout-ms)
-                                  "request"
-                                  "database"))))))))
+      (.then
+       (fn [body]
+         (let [parsed (js->clj (js/JSON.parse body))
+               input (get parsed "input")
+               agent-id (get parsed "agent_id")
+               requested-timeout-ms (get parsed "timeout_ms")]
+           (-> (db/db)
+               (.then
+                (fn [database]
+                  (if (:seon.error/message database)
+                    database
+                    (agent-run-timeout-ms database agent-id
+                                          requested-timeout-ms))))
+               (.then
+                (fn [timeout-ms]
+                  (if (:seon.error/message timeout-ms)
+                    {:error (:seon.error/message timeout-ms)}
+                    (-> (run-agent-task! agent-id input timeout-ms)
+                        (.then
+                         (fn [result]
+                           (assoc result
+                                  :effective_timeout_ms timeout-ms
+                                  :timeout_source
+                                  (if (some? requested-timeout-ms)
+                                    "request"
+                                    "database"))))))))))))
       (.then (fn [result]
                (if (:error result)
                  (do
@@ -1397,17 +1171,16 @@
                      ;; The HTTP adapter is the USER's hands — stamp
                      ;; from = the user ref explicitly (no ALS agent
                      ;; scope at the event-loop root). message! is the
-                     ;; single entry point; the envelope is checked,
-                     ;; never assumed.
+                     ;; single entry point and returns concise domain data or
+                     ;; a direct error value.
                      (-> (agent/message!
                            {:seon.agent.message/from    agent/user-ref
                             :seon.agent.message/to      [[:seon.agent/id agent-id]]
                             :seon.agent.message/content text})
-                         (.then (fn [{ok?     :seon.agent.message/ok?
-                                      msg-id  :seon.agent.message/id
-                                      hops    :seon.agent.message/hops
-                                      error   :seon.db/error}]
-                                  (if ok?
+                         (.then (fn [{msg-id :seon.agent.message/id
+                                     hops :seon.agent.message/hops
+                                     :as result}]
+                                  (if-not (:seon.error/message result)
                                     (do
                                       (log/info-console! "seon.web.serve" "POST /chat"
                                                          {:agent agent-id :tokens (tokens/estimate text)})
@@ -1424,10 +1197,10 @@
                                       (write-status! res 204 "text/plain; charset=utf-8" ""))
                                     (do
                                       (log/error-console! "seon.web.serve" "/chat message! refused"
-                                                          (:seon.error/message error))
+                                                          result)
                                       (write-status! res 422 "text/plain; charset=utf-8"
                                                      (str "chat refused: "
-                                                          (:seon.error/message error)))))))
+                                                          (:seon.error/message result)))))))
                          (.catch (fn [err]
                                    (log/error-console! "seon.web.serve" "/chat message! threw" err)
                                    (write-status! res 500 "text/plain; charset=utf-8"
@@ -1447,35 +1220,33 @@
 ;; ============================================================
 
 (defn- handle-stop! [req res]
-  ;; Agent-id resolution mirrors /chat: query param wins, else the ALS scope,
-  ;; else 400 — no silent fallback.
   (let [agent-id (or (query-param req "agent") (db/current-agent-id))]
-    (when-not agent-id
+    (if-not agent-id
       (write-status! res 400 "text/plain; charset=utf-8"
                      "missing 'agent' query param (no agent-id in scope)")
-      (throw (js/Error. "handle-stop!: no agent-id resolved")))
-    (if-let [r (run/current-run {:seon.agent/id agent-id})]
-      (-> (run/pause! {:seon.agent/id     agent-id
-                       :seon.agent.run/id (:seon.agent.run/id r)})
-          (.then (fn [{ok? :seon.db/ok? error :seon.db/error}]
-                   (if ok?
-                     (do
-                       (log/info-console! "seon.web.serve" "POST /stop — paused open run"
-                                          {:agent agent-id :run (:seon.agent.run/id r)})
-                       (write-status! res 204 "text/plain; charset=utf-8" ""))
-                     (do
-                       (log/error-console! "seon.web.serve" "/stop pause! refused"
-                                           (:seon.error/message error))
-                       (write-status! res 422 "text/plain; charset=utf-8"
-                                      (str "stop refused: " (:seon.error/message error)))))))
-          (.catch (fn [err]
-                    (log/error-console! "seon.web.serve" "/stop pause! threw" err)
-                    (write-status! res 500 "text/plain; charset=utf-8"
-                                   (str "stop failed: " err)))))
-      (do
-        (log/info-console! "seon.web.serve" "POST /stop — no open run (already idle)"
-                           {:agent agent-id})
-        (write-status! res 204 "text/plain; charset=utf-8" "")))))
+      (-> (run/current-run {:seon.agent/id agent-id})
+          (.then
+           (fn [current]
+             (cond
+               (:seon.error/message current) current
+               (nil? current) nil
+               :else
+               (run/pause! {:seon.agent/id agent-id
+                            :seon.agent.run/id
+                            (:seon.agent.run/id current)}))))
+          (.then
+           (fn [result]
+             (if (:seon.error/message result)
+               (do
+                 (log/error-console! "seon.web.serve" "/stop refused" result)
+                 (write-status! res 422 "text/plain; charset=utf-8"
+                                (:seon.error/message result)))
+               (write-status! res 204 "text/plain; charset=utf-8" ""))))
+          (.catch
+           (fn [error]
+             (log/error-console! "seon.web.serve" "/stop threw" error)
+             (write-status! res 500 "text/plain; charset=utf-8"
+                            (str error))))))))
 
 ;; ============================================================
 ;; POST /resume — wake a PAUSED run. `lifecycle/resume` clears `paused-at`,
@@ -1495,14 +1266,14 @@
       (throw (js/Error. "handle-resume!: no agent-id resolved")))
     (-> (js/Promise.resolve (db/with-agent agent-id (fn [] (lifecycle/resume))))
         (.then (fn [result]
-                 ;; success = a derived state keyword (:running); failure = the
-                 ;; `{:seon.db/ok? false …}` envelope (a map).
+                 ;; Success is a derived state keyword; failures are direct
+                 ;; error values.
                  (if (keyword? result)
                    (do
                      (log/info-console! "seon.web.serve" "POST /resume — re-driving"
                                         {:agent agent-id :state result})
                      (write-status! res 204 "text/plain; charset=utf-8" ""))
-                   (let [error (get-in result [:seon.db/error :seon.error/message])]
+                   (let [error (:seon.error/message result)]
                      (log/error-console! "seon.web.serve" "/resume refused" error)
                      (write-status! res 422 "text/plain; charset=utf-8"
                                     (str "resume refused: " error))))))
@@ -1578,25 +1349,46 @@
      :my.blob/error (subs message 0 (min 1024 (count message)))}))
 
 (defn- execute-blob-operator!
-  "Resolve one local frozen database value and execute one blob request."
+  "Acquire retained hashes from one database value and execute one request."
   [request]
   (let [target-coordinate (:my.blob/target-coordinate request)]
-    (-> (db/at-coordinate db/*conn* target-coordinate)
+    (-> (db/db)
         (.then
-          (fn [target-database]
-            (if (:seon.error/message target-database)
-              (bounded-operator-error request target-database)
-              (case (:my.blob/operator-operation request)
-                :my.blob.operator.operation/observe-retained
-                (blob/observe-retained
-                  {:my.blob/target-database target-database
-                   :my.blob/target-coordinate target-coordinate})
+          (fn [database]
+            (cond
+              (:seon.error/message database)
+              database
 
-                :my.blob.operator.operation/materialize-retained
-                (blob/materialize-retained-intent!
-                  (-> request
-                      (dissoc :my.blob/operator-operation)
-                      (assoc :my.blob/target-database target-database))))))))))
+              (or (not= (:t database) (::coordinate/t target-coordinate))
+                  (not= (:datahike/commit-id database)
+                        (::coordinate/commit-id target-coordinate)))
+              {:seon.error/message
+               "The pod database value does not match the retained restore target."}
+
+              :else
+              (db/query
+               {::db/db database
+                ::db/query
+                '[:find [?hash ...]
+                  :where
+                  [_ :my.blob/hash ?hash]]
+                ::db/max-results 100000
+                ::db/max-result-weight 4194304}))))
+        (.then
+         (fn [retained-hashes]
+           (if (:seon.error/message retained-hashes)
+             (bounded-operator-error request retained-hashes)
+             (case (:my.blob/operator-operation request)
+               :my.blob.operator.operation/observe-retained
+               (blob/observe-retained
+                {:my.blob/target-coordinate target-coordinate
+                 :my.blob/retained-hashes retained-hashes})
+
+               :my.blob.operator.operation/materialize-retained
+               (blob/materialize-retained-intent!
+                (-> request
+                    (dissoc :my.blob/operator-operation)
+                    (assoc :my.blob/retained-hashes retained-hashes))))))))))
 
 (defn- handle-operator-blobs!
   "Observe or materialize an exact retained blob set and return closed EDN."

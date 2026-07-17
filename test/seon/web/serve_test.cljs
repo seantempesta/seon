@@ -10,9 +10,8 @@
     [cljs.reader :as reader]
     [cljs.test :refer [async deftest is testing]]
     [goog.object :as gobj]
-    [my.blob :as blob]
+    [seon.agent.debug :as agent-debug]
     [seon.agent.run :as run]
-    [seon.agent.ctx :as ctx]
     [seon.ai :as ai]
     [seon.db :as db]
     [seon.db.coordinate :as coordinate]
@@ -22,32 +21,41 @@
     [seon.web.router :as router]
     [seon.web.serve :as serve]))
 
+(def ^:private database
+  {:db-name "test"
+   :t 30
+   :as-of nil
+   :since nil
+   :history false
+   :datahike/commit-id #uuid "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"})
+
 (deftest agent-run-timeout-uses-explicit-value-or-run-policy
-  (with-redefs [run/effective-deadline-ms
-                (fn [request]
-                  (is (= {:seon.db/db :frozen-db
-                          :seon.agent/id "agent-1"}
-                         request))
-                  1800000)]
-    (is (= 9000
-           ((deref #'serve/agent-run-timeout-ms)
-            :frozen-db "agent-1" 9000))
-        "an explicit Inspect timeout remains an explicit experiment input")
-    (is (= 1800000
-           ((deref #'serve/agent-run-timeout-ms)
-            :frozen-db "agent-1" nil))
-        "absence derives from the database-backed run owner")))
+  (async done
+    (let [original run/effective-deadline-ms]
+      (set! run/effective-deadline-ms
+            (fn [request]
+              (is (= {:seon.db/db :frozen-db
+                      :seon.agent/id "agent-1"}
+                     request))
+              (js/Promise.resolve 1800000)))
+      (-> (js/Promise.all
+           #js [((deref #'serve/agent-run-timeout-ms)
+                 :frozen-db "agent-1" 9000)
+                ((deref #'serve/agent-run-timeout-ms)
+                 :frozen-db "agent-1" nil)])
+          (.then
+           (fn [timeouts]
+             (is (= [9000 1800000] (vec timeouts)))))
+          (.catch (fn [error] (is false (str error))))
+          (.finally
+           (fn []
+             (set! run/effective-deadline-ms original)
+             (done)))))))
 
 (deftest eval-evidence-is-request-scoped-and-stably-ordered
   (let [first-at (js/Date. 1000)
         second-at (js/Date. 2000)
         outside-at (js/Date. 3000)
-        final-coordinate {::coordinate/database-id
-                          #uuid "00000000-0000-0000-0000-000000000001"
-                          ::coordinate/branch :db
-                          ::coordinate/commit-id
-                          #uuid "00000000-0000-0000-0000-000000000002"
-                          ::coordinate/t 30}
         pulls {100 {:seon.eval/source "(first)"
                     :seon.eval/ok? true}
                101 {:seon.eval/source "(second)"
@@ -65,229 +73,145 @@
              :source "(second)"
              :narration "kept as bounded data"}]
            ((deref #'serve/project-eval-evidence)
-             [[102 12 "turn-c" "eval-c" outside-at 22]
-              [101 11 "turn-b" "eval-b" second-at 21]
-              [100 10 "turn-a" "eval-a" first-at 20]]
-             #{10 11}
-             final-coordinate
-             #(get pulls %)
-             10000)))))
+            [[102 12 "turn-c" "eval-c" outside-at 22]
+             [101 11 "turn-b" "eval-b" second-at 21]
+             [100 10 "turn-a" "eval-a" first-at 20]]
+            #{10 11}
+            #(get pulls %))))))
 
-(def ^:private evidence-coordinate
-  {::coordinate/database-id #uuid "00000000-0000-0000-0000-000000000001"
-   ::coordinate/branch :db
-   ::coordinate/commit-id #uuid "00000000-0000-0000-0000-000000000002"
-   ::coordinate/t 30})
-
-(def ^:private evidence-operations
-  [{:seon.db/read-operation :seon.db.read.operation/transact
-    :seon.db/operation-position 0
-    :seon.db/operation-ok? false
-    :seon.db/operation-coordinate (assoc evidence-coordinate ::coordinate/t 20)
-    :seon.db/read-source :seon.db.read.source/captured
-    :seon.db/read-request {:seon.db/tx-data [{:my.row/id "one"}]}
-    :seon.db/read-result {:seon.db/ok? false}
-    :seon.db/read-replayable? false}
-   {:seon.db/read-operation :seon.db.read.operation/query
-    :seon.db/operation-position 1
-    :seon.db/operation-ok? true
-    :seon.db/operation-coordinate (assoc evidence-coordinate ::coordinate/t 21)
-    :seon.db/read-source :seon.db.read.source/captured
-    :seon.db/read-request {:seon.db/query '[:find (count ?e) . :where [?e]]}
-    :seon.db/read-result 1
-    :seon.db/read-replayable? true}])
-
-(deftest operation-evidence-projection-is-bounded-lossless-and-fail-closed
-  (let [content (pr-str evidence-operations)
-        project (deref #'serve/project-operation-evidence)]
-    (with-redefs [blob/get (fn [_]
-                             {:my.blob/ok? true
-                              :my.blob/content content
-                              :my.blob/tokens 1})]
-      (let [proof (project {:my.blob/hash "proof" :my.blob/tokens 1}
-                           evidence-coordinate (inc (count content)))
-            [tx query] (:operations proof)]
-        (is (= "inline" (:status proof)))
-        (is (= [0 1] (mapv :position (:operations proof))))
-        (is (false? (:ok tx)) "failed transact remains failed")
-        (is (true? (:coordinate_valid query)))
-        (is (= {:kind "scalar" :value 1} (:result query)))
-        (is (= "map" (get-in tx [:request :kind]))
-            "namespaced request data uses the lossless tagged tree")))
-    (with-redefs [blob/get (fn [_] (throw (js/Error. "must not read")))]
-      (is (= {:status "oversized" :blob_hash "proof" :tokens 2}
-             (project {:my.blob/hash "proof" :my.blob/tokens 2}
-                      evidence-coordinate 4))
-          "token projection stops oversized evidence before disk read"))
-    (with-redefs [blob/get (constantly {:my.blob/ok? false})]
-      (is (= "missing"
-             (:status (project {:my.blob/hash "proof" :my.blob/tokens 1}
-                               evidence-coordinate 100)))))
-    (is (= {:status "missing"}
-           (project {:my.blob/tokens 1} evidence-coordinate 100))
-        "an invalid identity is omitted rather than fabricated")
-    (with-redefs [blob/get (constantly {:my.blob/ok? true
-                                        :my.blob/content "not-edn )"
-                                        :my.blob/tokens 1})]
-      (is (= "malformed"
-             (:status (project {:my.blob/hash "proof" :my.blob/tokens 1}
-                               evidence-coordinate 100)))))
-    (with-redefs [blob/get (constantly {:my.blob/ok? true
-                                        :my.blob/content "[] trailing"
-                                        :my.blob/tokens 1})]
-      (is (= "malformed"
-             (:status (project {:my.blob/hash "proof" :my.blob/tokens 1}
-                               evidence-coordinate 100)))
-          "trailing forms cannot hide behind one valid prefix"))
-    (with-redefs [blob/get (constantly {:my.blob/ok? true
-                                        :my.blob/content "[]"
-                                        :my.blob/tokens 2})]
-      (is (= "malformed"
-             (:status (project {:my.blob/hash "proof" :my.blob/tokens 1}
-                               evidence-coordinate 100)))
-          "blob bytes must match the final snapshot's token projection"))
-    (with-redefs [blob/get (constantly {:my.blob/ok? true
-                                        :my.blob/content "[12345]"
-                                        :my.blob/tokens 1})]
-      (is (= "oversized"
-             (:status (project {:my.blob/hash "proof" :my.blob/tokens 1}
-                               evidence-coordinate 4)))
-          "pathological token/char mismatch remains status-only"))))
-
-(deftest exact-transaction-origin-is-deduplicated-and-fails-closed
+(deftest turn-evidence-reuses-one-database-value-and-native-transaction
   (async done
-    (let [!calls (atom 0)
-          point (assoc evidence-coordinate ::coordinate/t 20)
-          sibling (assoc point ::coordinate/commit-id
-                         #uuid "00000000-0000-0000-0000-000000000099")
-          validate-origin
-          ((deref #'serve/coordinate-origin-validator)
-           evidence-coordinate
-           (fn [{:seon.db/keys [head-coordinate transaction-id]}]
-             (swap! !calls inc)
-             (is (= evidence-coordinate head-coordinate))
-             (is (= 20 transaction-id))
-             (js/Promise.resolve point)))
-          proof {:status "inline"
-                 :operations [{:coordinate_valid true
-                               :coordinate
-                               {:database_id
-                                (str (::coordinate/database-id point))
-                                :branch "db"
-                                :commit_id
-                                (str (::coordinate/commit-id point))
-                                :t 20}}]}]
-      (-> (js/Promise.all
-            #js [(validate-origin point)
-                 (validate-origin point)
-                 (validate-origin sibling)])
+    (let [original agent-debug/turn
+          requests (atom [])]
+      (set! agent-debug/turn
+            (fn [request]
+              (swap! requests conj request)
+              (js/Promise.resolve
+               {:seon.agent.debug/ok? true
+                :seon.agent.turn/rendered-tx
+                (if (= "turn-a" (:seon.agent.turn/id request)) 20 21)})))
+      (-> (js/Promise.resolve nil)
           (.then
-            (fn [validities]
-              (is (= [true true false] (vec validities)))
-              (is (= 1 @!calls)
-                  "one final head and transaction t resolve only once")
-              ((deref #'serve/require-exact-operation-origins)
-               proof (constantly (js/Promise.resolve false)))))
+           (fn ^:async run []
+             (let [rows
+                   (await
+                    ((deref #'serve/turn-evidence)
+                     database ["turn-a" "turn-b"]))]
+               (is (= ["turn-a" "turn-b"] (mapv :turn_id rows)))
+               (is (= [20 21] (mapv :rendered_transaction rows)))
+               (is (not-any? #(contains? % :rendered_coordinate) rows))
+               (is (every? #(identical? database (:seon.db/db %))
+                           @requests)))))
+          (.catch (fn [error] (is false (str error))))
+          (.finally
+           (fn []
+             (set! agent-debug/turn original)
+             (done)))))))
+
+(deftest missing-rendered-transaction-does-not-hide-the-turn
+  (async done
+    (let [original db/pull-many
+          at (js/Date. 1000)
+          rows [[10 "turn-a" at 1] [11 "turn-b" at 1]]]
+      (set! db/pull-many
+            (fn
+              ([request]
+               (is (identical? database (:seon.db/db request)))
+               (js/Promise.resolve
+                [{:seon.agent.turn/rendered-tx 20} {}]))
+              ([_selector _entity-ids]
+               (js/Promise.reject
+                (js/Error. "unexpected positional pull-many")))
+              ([_database _selector _entity-ids]
+               (js/Promise.reject
+                (js/Error. "unexpected positional pull-many")))))
+      (-> (js/Promise.resolve nil)
           (.then
-            (fn [rejected]
-              (is (= "malformed" (:status rejected)))
-              (is (not (contains? rejected :operations))
-                  "wrong containing/nonancestor proof never remains inline")
-              (done)))
-          (.catch
-            (fn [error]
-              (is false (str error))
-              (done)))))))
+           (fn ^:async run []
+             (let [actual
+                   (await
+                    ((deref #'serve/turn-rows-with-rendered-tx)
+                     database rows))]
+               (is (= 2 (count actual)))
+               (is (= 20 (nth (first actual) 4)))
+               (is (nil? (nth (second actual) 4))))))
+          (.catch (fn [error] (is false (str error))))
+          (.finally
+           (fn []
+             (set! db/pull-many original)
+             (done)))))))
 
-(deftest tagged-evidence-order-is-recursively-stable-and-unsupported-fails
-  (let [project-value (deref #'serve/evidence-json-value)
-        supported? (deref #'serve/supported-evidence-json?)
-        left {:outer #{(array-map :b #{3 2 1} :a {:z 1 :y 2})}}
-        right {:outer #{(array-map :a {:y 2 :z 1} :b #{1 3 2})}}
-        left-json (project-value left)
-        right-json (project-value right)]
-    (is (= left-json right-json)
-        "nested map/set construction order cannot perturb projected bytes")
-    (is (true? (supported? left-json)))
-    (is (false? (supported? (project-value #js {:runtime true})))
-        "runtime values never become inline proof")))
-
-(defn- model-attempt
-  [ordinal t]
+(defn- model-attempt [ordinal]
   {:seon.ai.attempt/ordinal ordinal
-   :seon.ai.attempt/database-id (::coordinate/database-id evidence-coordinate)
-   :seon.ai.attempt/branch (::coordinate/branch evidence-coordinate)
-   :seon.ai.attempt/commit-id (::coordinate/commit-id evidence-coordinate)
-   :seon.ai.attempt/t t
    :seon.ai.attempt/provider :deepseek
    :seon.ai.attempt/adapter :openai-compat
    :seon.ai.attempt/requested-model "small-model"
    :seon.ai.attempt/temperature 0.0
    :seon.ai.attempt/max-tokens 512
-   :seon.ai.attempt/endpoint "http://127.0.0.1:8080/v1/chat/completions"
+   :seon.ai.attempt/endpoint
+   "http://127.0.0.1:8080/v1/chat/completions"
    :seon.ai.attempt/adapter-timeout-ms 30000
    :seon.ai.attempt/outer-timeout-ms 45000
    :seon.ai.attempt/stream? false
    :seon.ai.attempt/credential-class :configured-env
-   :seon.ai.attempt/outcome (if (zero? ordinal) :provider-error :success)})
+   :seon.ai.attempt/outcome
+   (if (zero? ordinal) :provider-error :success)})
 
-(deftest historical-attempt-adapter-and-turn-stream-are-rederived
+(deftest historical-attempt-validation-uses-the-turns-database-value
   (async done
-    (let [attempt (model-attempt 0 20)
+    (let [original-pull db/pull
+          original-resolve ai/resolved-config-from-rows
+          requests (atom [])
           resolved {:seon.ai/provider :deepseek
                     :seon.ai/model "small-model"
                     :seon.ai/temperature 0.0
                     :seon.ai/max-tokens 512
                     :seon.ai/timeout-ms 30000
                     :seon.ai/base-url "http://127.0.0.1:8080/v1"
-                    :seon.config.model-transport/endpoint-cap 2048}
-          config-valid? (deref #'serve/historical-attempt-config-valid?)
-          stream-valid? (deref #'serve/historical-turn-stream-valid?)]
-      (with-redefs [db/at-coordinate
-                    (fn
-                      ([_] (js/Promise.resolve {:historical true}))
-                      ([_ _] (js/Promise.resolve {:historical true})))
-                    ai/resolved-config
-                    (fn [_] {:seon.ai/resolved-config resolved})
-                    ctx/repl-mode (constantly :batch)]
-        (-> (js/Promise.all
-              #js [(config-valid? :conn "agent" attempt)
-                   (config-valid? :conn "agent"
-                                  (assoc attempt
-                                         :seon.ai.attempt/adapter :anthropic))
-                   (stream-valid? :conn evidence-coordinate [attempt])
-                   (stream-valid?
-                     :conn evidence-coordinate
-                     [(assoc attempt :seon.ai.attempt/stream? true)])])
-            (.then
-              (fn [validities]
-                (is (= [true false true false] (vec validities))
-                    "stored adapter and stream mode must match their owners")
-                (done)))
-            (.catch
-              (fn [error]
-                (is false (str error))
-                (done))))))))
+                    :seon.config.model-transport/endpoint-cap 2048
+                    :seon.config.model-transport/response-identity-cap 128}]
+      (set! db/pull
+            (fn
+              ([request]
+               (swap! requests conj request)
+               (js/Promise.resolve
+                (if (= [:seon.config/id "cluster"] (:seon.db/eid request))
+                  {:seon.config/repl-mode :batch}
+                  {})))
+              ([_selector _entity-id]
+               (js/Promise.reject
+                (js/Error. "unexpected positional pull")))
+              ([_database _selector _entity-id]
+               (js/Promise.reject
+                (js/Error. "unexpected positional pull")))))
+      (set! ai/resolved-config-from-rows
+            (fn [_ _] {:seon.ai/resolved-config resolved}))
+      (-> (js/Promise.all
+           #js [((deref #'serve/historical-turn-valid?)
+                 database "agent-1" 20 [(model-attempt 0)])
+                ((deref #'serve/historical-turn-valid?)
+                 database "agent-1" nil [(model-attempt 0)])])
+          (.then
+           (fn [validities]
+             (is (= [true false] (vec validities)))
+             (is (= 3 (count @requests)))
+             (is (every? #(= (assoc database :as-of 20 :since nil)
+                              (:seon.db/db %))
+                         @requests))))
+          (.catch (fn [error] (is false (str error))))
+          (.finally
+           (fn []
+             (set! db/pull original-pull)
+             (set! ai/resolved-config-from-rows original-resolve)
+             (done)))))))
 
-(deftest model-transport-evidence-is-final-snapshot-ordered-and-bounded
+(deftest model-transport-projection-is-ordered-bounded-and-fail-closed
   (let [project (deref #'serve/project-model-transport-rows)
-        attempts {101 (model-attempt 1 21)
-                  100 (model-attempt 0 20)}
+        attempts {101 (model-attempt 1)
+                  100 (model-attempt 0)}
         proof (project [[10 "turn-a"]] [[10 101] [10 100]]
-                       evidence-coordinate #(get attempts %) (constantly true)
-                       10000)
+                       #(get attempts %) (constantly true) 10000)
         projected (:attempts (first (:turns proof)))
-        foreign-proof
-        (project
-          [[10 "turn-a"]] [[10 100]] evidence-coordinate
-          (fn [_]
-            (assoc (model-attempt 0 20)
-                   :seon.ai.attempt/database-id
-                   #uuid "00000000-0000-0000-0000-000000000099"))
-          (constantly true) 10000)
-        unretained-proof
-        (project [[10 "turn-a"]] [[10 100]] evidence-coordinate
-                 (fn [_] (model-attempt 0 20)) (constantly false) 10000)
         expected-config
         {:seon.ai.attempt/provider :deepseek
          :seon.ai.attempt/requested-model "small-model"
@@ -298,40 +222,35 @@
          :seon.ai.attempt/adapter-timeout-ms 30000}]
     (is (= "inline" (:status proof)))
     (is (= [0 1] (mapv :ordinal projected)))
-    (is (= 0.0 (:temperature (first projected)))
-        "present zero sampling configuration survives projection")
+    (is (= 0.0 (:temperature (first projected))))
     (is (false? (:transport_drift proof)))
-    (is (every? true? (map :coordinate_valid projected)))
+    (is (every? true? (map :historical_config_valid projected)))
     (is (= "malformed"
-           (:status (project [[10 "turn-a"]] [[10 100]] evidence-coordinate
-                             (fn [_] (model-attempt 1 20)) (constantly true)
-                             10000)))
-        "a missing ordinal zero fails closed without projecting a row")
-    (is (false? (get-in foreign-proof
-                        [:turns 0 :attempts 0 :coordinate_valid]))
-        "foreign attachment evidence remains explicit and rejectable")
-    (is (false? (get-in unretained-proof
-                        [:turns 0 :attempts 0 :coordinate_valid]))
-        "an unretained historical commit fails exact coordinate validation")
+           (:status
+            (project [[10 "turn-a"]] [[10 100]]
+                     (fn [_] (model-attempt 1))
+                     (constantly true) 10000)))
+        "a missing ordinal zero fails closed")
+    (is (= "malformed"
+           (:status
+            (project [[10 "turn-a"]] [[10 100]]
+                     #(get attempts %) (constantly false) 10000)))
+        "a failed historical reconstruction fails closed")
     (is (true? ((deref #'serve/attempt-config-matches?)
-                (model-attempt 0 20) expected-config))
-        "optional thinking remains absent on both stored and resolved config")
+                (model-attempt 0) expected-config)))
     (is (false? ((deref #'serve/attempt-config-matches?)
-                 (assoc (model-attempt 0 20)
+                 (assoc (model-attempt 0)
                         :seon.ai.attempt/max-tokens 1024)
-                 expected-config))
-        "stored request facts cannot disagree with historical resolution")
+                 expected-config)))
     (is (= "oversized"
-           (:status (project [[10 "turn-a"]] [[10 100]] evidence-coordinate
-                             (fn [_] (model-attempt 0 20)) (constantly true)
-                             4)))
-        "the database-backed evidence cap governs the response")
+           (:status
+            (project [[10 "turn-a"]] [[10 100]]
+                     #(get attempts %) (constantly true) 4))))
     (is (= {:status "absent"}
-           (project [[10 "turn-a"]] [] evidence-coordinate (constantly nil)
-                    (constantly false) 10000))
-        "absence stays distinguishable from an empty successful proof")))
+           (project [[10 "turn-a"]] []
+                    (constantly nil) (constantly false) 10000)))))
 
-(deftest historical-identity-caps-and-compatibility-config-preserve-absence
+(deftest historical-identity-caps-and-config-preserve-absence
   (let [identity-valid? (deref #'serve/response-identity-valid?)
         project-config (deref #'serve/model-config-json)
         cap-config {:seon.config.model-transport/response-identity-cap 4}]
@@ -355,7 +274,7 @@
         "present zero and false-like values never disappear by truthiness")
     (is (= {:provider "deepseek"}
            (project-config {:seon.ai/provider :deepseek}))
-        "absent optional compatibility fields remain absent")))
+        "absent optional fields remain absent")))
 
 (defn- req-with-origin
   ([origin] (req-with-origin origin nil))

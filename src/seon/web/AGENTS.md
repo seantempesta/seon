@@ -26,16 +26,17 @@ note the browser 503s long-lived SSE; verify feeds with a node gunzip client).
   birth door and `/agent/{id}/call` is the canvas action door. Route changes
   are `:seon.route/*` datom seeds, so a
   `bin/seon cluster reset default` is required for a new/renamed route to land.
-- **`datastar.cljs`** — the live channel: one tx-listener on the replica
-  derives the WHOLE element (`view = f(db)`) and pushes one gzip
-  datastar **morph**; idiomorph diffs client-side; a coalescing throttle
-  collapses tx bursts. There is NO server-side tree diff (`!last-tree` is
-  dead — don't rebuild it). Historical agent feeds require the complete
-  canonical `database-id`/`branch`/`commit-id`/`t` coordinate, resolve it
-  through `seon.db/at-coordinate`, and remain frozen outside live broadcasts.
-- **`view_unit.cljs`** — one bounded render-unit cache/invalidation owner for
-  shared database-derived HTML. Extend it rather than adding a page-specific
-  memoizer, feed registry, or dependency graph.
+- **`datastar.cljs`** — the live channel: one authority database interest
+  supplies native transaction reports and exact ordinary `:db-after` values.
+  Each semantic subscription derives the WHOLE element (`view = f(db)`) and
+  pushes one Datastar **morph**; equivalent sockets share the render and
+  serialized bytes. There is no server-side tree diff, producer catalog,
+  per-unit route, local replica, or global transaction broadcast. Historical
+  agent feeds validate the complete external database identity and use
+  `db/as-of`; they remain frozen outside the live interest.
+- **`view_unit.cljs`** — stable opaque presentation identity only. It does not
+  own rendering, caching, invalidation, database access, or a feed. Do not grow
+  it into a second renderer or dependency graph.
 - **`debug.cljs`** — `/agent/{id}/debug` renders real per-block prompt text,
   HTML twins, token breakdown, and historical `turn`/`turn-diff` projections;
   `/data` is the live indexed database browser with its own shared feed.

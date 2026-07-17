@@ -1,11 +1,12 @@
 (ns seon.web.reactive.call
-  "The `/call` route — agent fn-calls authored as hiccup, routed by NAMESPACE
+  "The `/agent/{id}/call` route — agent fn-calls authored as hiccup, routed by NAMESPACE
    into the owning agent's sandbox.
 
    This is the THIRD door of the one sandboxed-execution service (eval +
    render are the other two): an interaction is just an eval authored as
    hiccup and routed by its namespace. The browser POSTs a standard Datastar
-   `@post('/call?fn=…&args=…')` (produced by `seon.web.reactive.transform`).
+   `@post('/agent/{id}/call?fn=…&args=…')` (produced by
+   `seon.web.reactive.transform`).
    We resolve the OWNING AGENT from the fn symbol's namespace, capability-check
    that the fn is one of that agent's GRANTED fns, then invoke it through the
    agent's own eval — which transacts, and the existing reactive feed
@@ -21,14 +22,14 @@
 
    [[capability-check]] is the refusal point — it runs BEFORE any invocation:
 
-   1. [[resolve-owning-agent]] — the fn's namespace must be `my.agent.<id>`
-      for a LIVE agent (`:seon.agent/id` row). `fs/readFileSync`,
-      `seon.client/…`, a dead/absent agent → no owning agent → REFUSED.
-   2. [[granted-fn?]] — the fn must be a registered `:seon.fn` whose owning ns
-      is that agent's home ns (a fn the agent itself defined). A symbol with
-      no matching `:seon.fn` row → REFUSED.
+   1. The fn's namespace must be `my.agent.<id>` according to the canonical
+      `seon.agent.home/home-ns` round trip. `fs/readFileSync`, `seon.client/…`,
+      and other namespaces are refused without a database request.
+   2. One query at the request's immutable database value proves both that the
+      agent is live and that the fn is a registered `:seon.fn` owned by that
+      agent's home namespace. A dead agent or missing fn row is refused.
 
-   A refused call is NEVER invoked; it returns a clean error envelope (403).
+   A refused call is NEVER invoked; it returns a clean error value (403).
    This is the same surface idea as the SCI canvas sandbox that denies `fs` (the
    symbol simply doesn't resolve) — but as an explicit, queryable pre-invoke
    gate, because for an interaction the refusal IS the security claim.
@@ -38,8 +39,8 @@
    A granted call is NOT synthesized into a source string and eval'd — that
    would let an attacker-controlled arg expression execute (an arg printed into
    source then re-read as code is the classic break-out). Instead [[invoke!]]
-   resolves the granted symbol to its COMPILED runtime value
-   (`seon.eval/lookup-value`) and `(apply f args)` with the args as VALUES. The
+   resolves the granted symbol in the owning supervised Bun child and applies
+   it to the args as VALUES. The
    resolved `f` is still the always-on-instrumented var, so its own
    `:malli/schema` is enforced (no second validator to drift); a bad arg or a
    throw surfaces as a value (422), not a crash, because [[invoke!]] catches it.
@@ -57,64 +58,56 @@
     [seon.web.reactive.transform :as transform]))
 
 ;; ============================================================
-;; Capability gate — pure fns of a db value (third-party boundary).
+;; Capability gate — one query at one immutable database value.
 ;; ============================================================
 
-(defn resolve-owning-agent
-  "The agent id that OWNS `fn-sym`, via namespace-as-route, or nil.
-
-   The namespace must be `my.agent.<id>` (the canonical `seon.agent.home/home-ns`
-   mapping) AND a live agent `<id>` must exist (`:seon.agent/id` row). Any
-   other namespace — `fs`, `seon.*`, a domain ns, a dead/absent agent —
-   resolves to nil, and the caller refuses the call."
-  {:malli/schema [:=> [:catn [::db :seon.db/db] [::fn-sym :symbol]] [:maybe :string]]}
-  [db fn-sym]
+(defn- owning-agent-id
+  "Return the agent id encoded by an exact home namespace, or nil."
+  [fn-sym]
   (let [ns-str (namespace fn-sym)
         prefix "my.agent."]
     (when (and ns-str (str/starts-with? ns-str prefix))
       (let [id (subs ns-str (count prefix))]
         (when (and (seq id)
-                   (= (str (home/home-ns id)) ns-str)   ; exact round-trip
-                   (seq (db/query '[:find ?a :in $ ?id :where
-                                    [?a :seon.agent/id ?id]]
-                                  db id)))
+                   (= (str (home/home-ns id)) ns-str))
           id)))))
 
-(defn granted-fn?
-  "Whether `fn-sym` is a `:seon.fn` the agent itself defined.
-
-   True when `fn-sym` is a registered `:seon.fn` whose owning ns is
-   `agent-id`'s home ns. This is the granted surface for `/call`: an
-   interactive handler must be one of the agent's own fns. Refuses
-   `fs`/core/cross-agent symbols (no matching `:seon.fn` row in the home ns)."
-  {:malli/schema [:=> [:catn [::db :seon.db/db] [::agent-id :string] [::fn-sym :symbol]]
-                  :boolean]}
-  [db agent-id fn-sym]
-  (boolean
-    (seq (db/query '[:find ?f :in $ ?sym ?nsname :where
-                     [?f :seon.fn/sym ?sym]
-                     [?f :seon.fn/ns ?n]
-                     [?n :seon.ns/name ?nsname]]
-                   db (str fn-sym) (keyword (str (home/home-ns agent-id)))))))
-
-(defn capability-check
-  "Resolve and gate `fn-sym` against `db`.
+(defn ^:async capability-check
+  "Resolve and gate `fn-sym` against one immutable database value.
 
    Returns `{::agent-id <id>}` when the fn is granted to its owning
    agent, else `{::refused <reason>}`. Never invokes anything —
    the refusal is the security boundary, evaluated before any execution."
   {:malli/schema [:=> [:catn [::db :seon.db/db] [::fn-sym :symbol]] :map]}
-  [db fn-sym]
-  (if-let [agent-id (resolve-owning-agent db fn-sym)]
-    (if (granted-fn? db agent-id fn-sym)
-      {::agent-id agent-id}
-      {::refused
-       (str "`" fn-sym "` is not a granted :seon.fn of agent " agent-id
-            " — an interactive handler must be a fn the agent defined in its "
-            "home ns " (home/home-ns agent-id) ".")})
+  [database fn-sym]
+  (if-let [agent-id (owning-agent-id fn-sym)]
+    (let [home-ns-name (keyword (str (home/home-ns agent-id)))
+          granted
+          (await
+           (db/query
+            {:seon.db/db database
+             :seon.db/query
+             '[:find ?function .
+               :in $ ?agent-id ?function-symbol ?namespace-name
+               :where
+               [?agent :seon.agent/id ?agent-id]
+               [?agent :seon.eval/home-requires _]
+               (not [?agent :seon.agent/terminated-at _])
+               [?function :seon.fn/sym ?function-symbol]
+               [?function :seon.fn/ns ?namespace]
+               [?namespace :seon.ns/name ?namespace-name]]
+             :seon.db/args [agent-id (str fn-sym) home-ns-name]}))]
+      (cond
+        (:seon.error/message granted) granted
+        (some? granted) {::agent-id agent-id}
+        :else
+        {::refused
+         (str "`" fn-sym "` is not a granted :seon.fn of live agent " agent-id
+              " — an interactive handler must be a fn the agent defined in its "
+              "home ns " (home/home-ns agent-id) ".")}))
     {::refused
      (str "no agent owns the namespace of `" fn-sym
-          "` — /call routes only into an agent's home ns (my.agent.<id>); "
+          "` — agent calls route only into an agent's home ns (my.agent.<id>); "
           "fs / core / cross-agent symbols are refused.")}))
 
 ;; ============================================================
@@ -127,39 +120,46 @@
 (defn ^:async invoke!
   "Invoke a granted authored function in its supervised Bun child.
 
-   Captures the current database coordinate, prepares the function's authored
-   source identity at exactly that point, and sends the ordinary argument
+   Uses the request's immutable database value, prepares the function's authored
+   source identity at exactly that value, and sends the ordinary argument
    vector through `seon.execution.host/invoke!`. The child applies the function
-   inside its agent and coordinate transaction context, awaits async work, and
+   inside its agent and database transaction context, awaits async work, and
    returns one bounded ordinary result. Child or preparation failures become
    `{::ok? false ::error <message>}` values; arguments are never source text."
-  {:malli/schema [:=> [:catn [::agent-id :string] [::fn-sym :symbol]
+  {:malli/schema [:=> [:catn [::db :seon.db/db] [::agent-id :string]
+                       [::fn-sym :symbol]
                        [::args [:sequential :any]]]
                   :any]}
-  [agent-id fn-sym args]
+  [database agent-id fn-sym args]
   (if-not (admission/available?)
     (let [refusal (admission/unavailable)]
       {::ok? false
        ::unavailable? true
        ::error (get-in refusal [:seon/error :seon.error/message])})
     (try
-      (let [coordinate (await (db/head-coordinate))
-            plan (execution/invocation-plan agent-id fn-sym (vec args))
-            [invocation]
+      (let [plan (execution/invocation-plan agent-id fn-sym (vec args))
+            prepared
             (await
              (execution/prepare-invocations!
-              {::execution/coordinate coordinate
-               ::execution/invocation-plans [plan]}))
-            result (await (execution.host/invoke! invocation))]
-        (if (= execution/result-message (::execution/message result))
-          {::ok? true ::value (::execution/result result)}
-          {::ok? false
-           ::error (get-in result [::execution/error :seon.error/message])}))
+              {:seon.db/db database
+               ::execution/invocation-plans [plan]}))]
+        (if (:seon.error/message prepared)
+          {::ok? false ::error (:seon.error/message prepared)}
+          (if-let [invocation (first prepared)]
+            (let [result (await (execution.host/invoke! invocation))]
+              (if (= execution/result-message (::execution/message result))
+                {::ok? true ::value (::execution/result result)}
+                {::ok? false
+                 ::error
+                 (or (get-in result [::execution/error :seon.error/message])
+                     "The execution child returned no result.")}))
+            {::ok? false
+             ::error "Invocation preparation returned no invocation."})))
       (catch :default e
         {::ok? false ::error (err->msg e)}))))
 
 ;; ============================================================
-;; HTTP handler — POST /call. Opaque (req,res), like the debug +
+;; HTTP handler — POST /agent/{id}/call. Opaque (req,res), like the debug +
 ;; serve handlers (no Malli schema on the Ring-style boundary).
 ;; ============================================================
 
@@ -175,7 +175,7 @@
   "End a successful browser action without a redundant response payload.
 
    The database listener owns the visible update. Direct API callers retain
-   the small JSON acknowledgement for compatibility."
+   the small JSON acknowledgement."
   [^js req ^js res]
   (if (datastar-request? req)
     (do (.writeHead res 204 #js {"Cache-Control" "no-store"})
@@ -190,11 +190,11 @@
 
 (defn- read-body [^js req]
   (js/Promise.
-    (fn [resolve _reject]
+    (fn [resolve! _reject]
       (let [chunks (atom [])]
         (.on req "data" (fn [c] (swap! chunks conj c)))
         (.on req "end"
-             (fn [] (resolve (.toString (.concat js/Buffer (clj->js @chunks))))))))))
+             (fn [] (resolve! (.toString (.concat js/Buffer (clj->js @chunks))))))))))
 
 (defn- parse-signals
   "Datastar sends current signals as a JSON body on POST. Parse to a map with
@@ -225,7 +225,7 @@
     (catch :default _ {})))
 
 (defn ^:async handle!
-  "POST /call — capability-check a call descriptor and invoke if granted.
+  "POST /agent/{id}/call — gate a call descriptor and invoke if granted.
 
    Parses the call descriptor, capability-checks, and (only if
    granted) invokes. The fn symbol rides `?fn=`; the fn-CALL case carries its
@@ -241,8 +241,8 @@
   ([r]
    ;; The router's calling convention: self-extract node-req/node-res from the
    ;; Ring request and delegate to the (req res) gate UNCHANGED. The seeded
-   ;; :seon.route/agent-call AND the supplement's flat /call both resolve this
-   ;; symbol. NO logic here — extraction only.
+   ;; :seon.route/agent-call resolves this symbol. NO logic here — extraction
+   ;; only.
    (handle! (:seon.http/node-req r) (:seon.http/node-res r)))
   ([^js req ^js res]
    (if-not (admission/available?)
@@ -253,57 +253,56 @@
                    (get-in (admission/unavailable)
                            [:seon/error :seon.error/message])})
      (let [fn-str (query-val req "fn")]
-     (if (str/blank? fn-str)
-       (write-json! res 400 {::ok? false
-                             ::error "missing 'fn' query param"})
-       (let [fn-sym (symbol fn-str)
-             cap    (capability-check @db/*conn* fn-sym)]
-         (if-let [reason (::refused cap)]
-           (do
-             (log/info-console! "seon.web.reactive.call" "/call REFUSED"
-                                {:seon.web.call/fn fn-str})
-             (write-json! res 403 {::ok?      false
-                                   ::refused  reason}))
-           (let [agent-id (::agent-id cap)
-                 args-q   (query-val req "args")]
-             (-> (if (some? args-q)
-                   ;; fn-CALL — render-time args, transit-decoded DATA-ONLY from
-                   ;; ?args=. Decode INSIDE the chain (in a try): a malformed or
-                   ;; non-data ?args= becomes a written 422, never a synchronous
-                   ;; throw that escapes the chain into a hung request.
-                   (js/Promise.resolve
-                     (try {::args (transform/decode-args args-q)}
-                          (catch :default e {::arg-error (err->msg e)})))
-                   ;; fn-REF — args from click-time signals (the POST body),
-                   ;; passed as a single map argument (js->clj data, not code).
-                   (.then (read-body req)
-                          (fn [body]
-                            (let [sigs (parse-signals body)]
-                              {::args (if (seq sigs) [sigs] [])}))))
-                 (.then
-                   (fn [{args ::args arg-error ::arg-error}]
-                     (if arg-error
+       (if (str/blank? fn-str)
+         (write-json! res 400 {::ok? false
+                               ::error "missing 'fn' query param"})
+         (try
+           (let [fn-sym (symbol fn-str)
+                 database (await (db/db))
+                 cap (if (:seon.error/message database)
+                       database
+                       (await (capability-check database fn-sym)))]
+             (cond
+               (:seon.error/message cap)
+               (write-json! res 503 {::ok? false
+                                     ::unavailable? true
+                                     ::error (:seon.error/message cap)})
+
+               (::refused cap)
+               (let [reason (::refused cap)]
+                 (log/info-console! "seon.web.reactive.call" "agent call REFUSED"
+                                    {:seon.web.call/fn fn-str})
+                 (write-json! res 403 {::ok? false ::refused reason}))
+
+               :else
+               (let [agent-id (::agent-id cap)
+                     args-q (query-val req "args")
+                     {args ::args arg-error ::arg-error}
+                     (if (some? args-q)
+                       (try {::args (transform/decode-args args-q)}
+                            (catch :default e {::arg-error (err->msg e)}))
+                       (let [signals (parse-signals (await (read-body req)))]
+                         {::args (if (seq signals) [signals] [])}))]
+                 (if arg-error
+                   (do
+                     (log/info-console! "seon.web.reactive.call" "agent call BAD ARGS"
+                                        {:seon.web.call/fn fn-str
+                                         :seon.web.call/error arg-error})
+                     (write-json! res 422 {::ok? false
+                                           ::error (str "bad args: " arg-error)}))
+                   (let [{ok? ::ok? err ::error}
+                         (await (invoke! database agent-id fn-sym args))]
+                     (if ok?
                        (do
-                         (log/info-console! "seon.web.reactive.call" "/call BAD ARGS"
+                         (log/info-console! "seon.web.reactive.call" "agent call OK"
                                             {:seon.web.call/fn fn-str
-                                             :seon.web.call/error arg-error})
-                         (write-json! res 422 {::ok?   false
-                                               ::error (str "bad args: " arg-error)}))
-                       (-> (invoke! agent-id fn-sym args)
-                           (.then
-                             (fn [{ok? ::ok? err ::error}]
-                               (if ok?
-                                 (do
-                                   (log/info-console! "seon.web.reactive.call" "/call OK"
-                                                      {:seon.web.call/fn fn-str
-                                                       :seon.agent/id agent-id})
-                                   (write-success! req res))
-                                 (do
-                                   (log/error-console! "seon.web.reactive.call"
-                                                       "/call invoke error" (str err))
-                                   (write-json! res 422 {::ok?   false
-                                                         ::error (str err)})))))))))
-                 (.catch (fn [e]
-                           (log/error-console! "seon.web.reactive.call" "/call threw" e)
-                           (write-json! res 500 {::ok?   false
-                                                 ::error (str e)}))))))))))))
+                                             :seon.agent/id agent-id})
+                         (write-success! req res))
+                       (do
+                         (log/error-console! "seon.web.reactive.call"
+                                             "agent call invoke error" (str err))
+                         (write-json! res 422 {::ok? false
+                                               ::error (str err)}))))))))
+           (catch :default e
+             (log/error-console! "seon.web.reactive.call" "agent call threw" e)
+             (write-json! res 500 {::ok? false ::error (str e)}))))))))

@@ -21,9 +21,9 @@
      ; returns «map: :my.blob/ok? true, :my.blob/hash \"9f86d0…\", :my.blob/tokens 812»
      (await (my.blob/concat! {:my.blob/hashes [h1 h2 h3]}))
      ; returns «chunked put!s → ONE canonical hash with honest whole-doc totals»
-     (my.blob/stat {:my.blob/hash h})   ; DB projection — no disk touched
-     (my.blob/text {:my.blob/hash h :my.blob/from-line 41
-                    :my.blob/max-lines 40})  ; paged page, honest totals
+     (await (my.blob/stat {:my.blob/hash h})) ; DB projection — no disk touched
+     (await (my.blob/text {:my.blob/hash h :my.blob/from-line 41
+                           :my.blob/max-lines 40})) ; bounded page
      (my.blob/get  {:my.blob/hash h})   ; FULL content — bind it in code,
                                         ; never paste it into a reply"
   (:refer-clojure :exclude [get])
@@ -51,7 +51,7 @@
 (schema/register! ::content :string)
 (schema/register! ::error   :string)
 (schema/register! ::exists? :boolean)
-(schema/register! ::target-database :seon.db/db)
+(schema/register! ::retained-hashes [:vector :string])
 (schema/register! ::source-storage-view ::storage-view)
 (schema/register! ::destination-storage-view ::storage-view)
 (schema/register! ::searched-source-paths [:vector :string])
@@ -70,8 +70,8 @@
 (schema/register!
   ::materialization-request
   [:map {:closed true}
-   [::target-database ::target-database]
    [::target-coordinate ::target-coordinate]
+   [::retained-hashes ::retained-hashes]
    [::source-storage-view ::source-storage-view]
    [::destination-storage-view ::destination-storage-view]
    [::reachable-hash-digest ::reachable-hash-digest]])
@@ -126,16 +126,16 @@
 (schema/register!
   ::retained-observation-request
   [:map {:closed true}
-   [::target-database ::target-database]
-   [::target-coordinate ::target-coordinate]])
+   [::target-coordinate ::target-coordinate]
+   [::retained-hashes ::retained-hashes]])
 
 (schema/register!
   ::intent-materialization-request
   [:map {:closed true}
-   [::target-database ::target-database]
    [:seon.dev.restore/startup-identity
     :seon.dev.restore/startup-identity]
    [::target-coordinate ::target-coordinate]
+   [::retained-hashes ::retained-hashes]
    [::source-storage-view ::source-storage-view]
    [::destination-storage-view ::destination-storage-view]])
 
@@ -179,7 +179,8 @@
   [:map
    [::hash      ::hash]
    [::from-line {:optional true} ::from-line]
-   [::max-lines {:optional true} ::max-lines]])
+   [::max-lines {:optional true} ::max-lines]
+   [::db/db {:optional true} :seon.db/db]])
 
 (schema/register! ::text-response
   [:map
@@ -196,7 +197,9 @@
    [:seon.error/data    {:optional true} [:map [::media {:optional true} ::media]]]])
 
 (schema/register! ::stat-request
-  [:map [::hash ::hash]])
+  [:map
+   [::hash ::hash]
+   [::db/db {:optional true} :seon.db/db]])
 
 (schema/register! ::stat-response
   [:map
@@ -205,7 +208,8 @@
    [::exists? ::exists?]
    [::tokens  {:optional true} ::tokens]
    [::media   {:optional true} ::media]
-   [::at      {:optional true} ::at]])
+   [::at      {:optional true} ::at]
+   [::error   {:optional true} ::error]])
 
 ;;; LOCATION — one writable archive plus ordered read-only bases. This is
 ;;; process-local launch data. The atom remains the explicit hermetic-test
@@ -336,7 +340,12 @@
 
 (def ^:private node-publication-effects
   {::sync-file-descriptor! (fn [fd] (.fsyncSync nfs fd))
-   ::atomic-rename! (fn [from to] (.renameSync nfs from to))})
+   ::atomic-rename! (fn [from to] (.renameSync nfs from to))
+   ::transact! db/transact!})
+
+(def ^:private node-database-effects
+  {::current-db! db/db
+   ::query! db/query})
 
 (defn- sync-directory!
   "Synchronize a directory entry before publication reports success."
@@ -440,46 +449,29 @@
                  [::hash ::searched-source-paths ::destination-path
                   ::actual-digest])))
 
-(defn- retained-hashes
-  "Derive canonical B(T) from one exact immutable retained database value."
-  [target-database]
-  (if (contains? (db/installed-schema target-database) ::hash)
-    (->> (db/query
-           '[:find [?hash ...]
-             :where
-             [?blob :my.blob/hash ?hash]]
-           target-database)
-         distinct
-         sort
-         vec)
-    []))
+(defn- canonical-retained-hashes
+  "Canonicalize the blob hashes acquired from one immutable database value."
+  [hashes]
+  (->> hashes distinct sort vec))
 
 (defn ^:no-doc observe-retained
-  "Observe one exact retained coordinate and its bounded blob-set identity.
-
-   The caller resolves the database locally and passes that one immutable
-   value. The canonical hash vector remains inside the pod; only its digest
-   and count cross the operator boundary."
+  "Observe one immutable database value's bounded blob-set identity."
   {:malli/schema
    [:=> [:cat ::retained-observation-request]
     ::retained-observation-result]
    :seon.fn/agent-facing? false}
-  [{::keys [target-database target-coordinate]}]
+  [{::keys [target-coordinate retained-hashes]}]
   (try
-    (if-not (= target-coordinate (db/head-coordinate target-database))
+    (let [hashes (canonical-retained-hashes retained-hashes)
+          invalid-hash (first (remove valid-hash? hashes))]
+      (if invalid-hash
       {::ok? false
        ::target-coordinate target-coordinate
-       ::error "the retained database value does not resolve the requested coordinate"}
-      (let [hashes (retained-hashes target-database)
-            invalid-hash (first (remove valid-hash? hashes))]
-        (if invalid-hash
-          {::ok? false
-           ::target-coordinate target-coordinate
-           ::error "the retained database contains a malformed :my.blob/hash"}
-          {::ok? true
-           ::target-coordinate target-coordinate
-           ::reachable-hash-digest (sha256 (pr-str hashes))
-           ::hash-count (count hashes)})))
+       ::error "the retained database contains a malformed :my.blob/hash"}
+       {::ok? true
+        ::target-coordinate target-coordinate
+        ::reachable-hash-digest (sha256 (pr-str hashes))
+        ::hash-count (count hashes)}))
     (catch :default error
       {::ok? false
        ::target-coordinate target-coordinate
@@ -557,7 +549,7 @@
 
 (defn- materialize-retained-with-effects!
   "Verify and materialize one frozen intent's exact retained blob set."
-  [{::keys [target-database target-coordinate source-storage-view
+  [{::keys [target-coordinate retained-hashes source-storage-view
             destination-storage-view reachable-hash-digest]}
    effects]
   (let [source-result (normalize-storage-view source-storage-view)
@@ -589,50 +581,44 @@
 
       :else
       (try
-        (if-not (= target-coordinate (db/head-coordinate target-database))
+        (let [hashes (canonical-retained-hashes retained-hashes)
+              hash-count (count hashes)
+              invalid-hash (first (remove valid-hash? hashes))
+              derived-digest (sha256 (pr-str hashes))]
+          (cond
+            invalid-hash
           (materialization-failure
-            target-coordinate reachable-hash-digest 0
+            target-coordinate reachable-hash-digest hash-count
             :my.blob.materialization.operation/derive-retained-set
-            "the retained database value does not resolve the frozen target coordinate"
-            {})
-          (let [hashes (retained-hashes target-database)
-                hash-count (count hashes)
-                invalid-hash (first (remove valid-hash? hashes))
-                derived-digest (sha256 (pr-str hashes))]
-            (cond
-              invalid-hash
-              (materialization-failure
-                target-coordinate reachable-hash-digest hash-count
-                :my.blob.materialization.operation/derive-retained-set
-                "the retained database contains a malformed :my.blob/hash"
-                {::hash invalid-hash})
+            "the retained database contains a malformed :my.blob/hash"
+            {::hash invalid-hash})
 
-              (not= reachable-hash-digest derived-digest)
-              (materialization-failure
-                target-coordinate reachable-hash-digest hash-count
-                :my.blob.materialization.operation/derive-retained-set
-                "the retained blob set does not match the frozen intent digest"
-                {::actual-digest derived-digest})
+            (not= reachable-hash-digest derived-digest)
+            (materialization-failure
+              target-coordinate reachable-hash-digest hash-count
+              :my.blob.materialization.operation/derive-retained-set
+              "the retained blob set does not match the frozen intent digest"
+              {::actual-digest derived-digest})
 
-              :else
-              (let [result
-                    (reduce
-                      (partial materialize-hash!
-                               effects source-view destination-dir
-                               target-coordinate reachable-hash-digest
-                               hash-count)
-                      {::verified-count 0
-                       ::newly-materialized-count 0
-                       ::repaired-count 0}
-                      hashes)]
-                (if (false? (::ok? result))
-                  result
-                  (merge
-                    {::ok? true
-                     ::target-coordinate target-coordinate
-                     ::reachable-hash-digest derived-digest
-                     ::hash-count hash-count}
-                    result))))))
+            :else
+            (let [result
+                  (reduce
+                    (partial materialize-hash!
+                             effects source-view destination-dir
+                             target-coordinate reachable-hash-digest
+                             hash-count)
+                    {::verified-count 0
+                     ::newly-materialized-count 0
+                     ::repaired-count 0}
+                    hashes)]
+              (if (false? (::ok? result))
+                result
+                (merge
+                  {::ok? true
+                   ::target-coordinate target-coordinate
+                   ::reachable-hash-digest derived-digest
+                   ::hash-count hash-count}
+                  result)))))
         (catch :default e
           (materialization-failure
             target-coordinate reachable-hash-digest 0
@@ -643,9 +629,8 @@
 (defn ^:no-doc materialize-retained!
   "Internal restore boundary for exact retained blob reconstruction.
 
-   The request is extracted from one validated immutable restore intent and
-   carries the already-resolved target database value. This function performs
-   no database writes and is intentionally not agent-facing."
+   The request carries the hashes already acquired from one immutable database
+   value. This function performs no database reads or writes."
   {:malli/schema
    [:=> [:cat ::materialization-request] ::materialization-result]
    :seon.fn/agent-facing? false}
@@ -653,7 +638,7 @@
   (materialize-retained-with-effects! request node-publication-effects))
 
 (defn ^:no-doc materialize-retained-intent!
-  "Materialize one validated portable restore identity against a frozen db.
+  "Materialize one validated portable restore identity and retained hash set.
 
    This is the transport adapter for [[materialize-retained!]], not another
    materializer. It requires the portable startup identity's frozen digest to
@@ -661,14 +646,14 @@
   {:malli/schema
    [:=> [:cat ::intent-materialization-request] ::materialization-result]
    :seon.fn/agent-facing? false}
-  [{::keys [target-database target-coordinate source-storage-view
+  [{::keys [target-coordinate retained-hashes source-storage-view
             destination-storage-view]
     startup-identity :seon.dev.restore/startup-identity}]
   (let [frozen-digest
         (:seon.dev.restore/reachable-hash-digest startup-identity)]
     (materialize-retained!
-      {::target-database target-database
-       ::target-coordinate target-coordinate
+      {::target-coordinate target-coordinate
+       ::retained-hashes retained-hashes
        ::source-storage-view source-storage-view
        ::destination-storage-view destination-storage-view
        ::reachable-hash-digest frozen-digest})))
@@ -732,17 +717,18 @@
                    :else (publish! effects (::writable-dir view) hash content false))]
         (if werr
           {::ok? false ::hash hash ::error werr}
-          (let [{ok? ::db/ok? :as env}
-                (await (db/transact!
-                         {::db/tx-data [(cond-> {::hash   hash
-                                                 ::tokens toks
-                                                 ::at     (js/Date.)}
-                                          media (assoc ::media media))]}))]
-            (if ok?
+          (let [report
+                (await
+                 ((::transact! effects)
+                  {::db/tx-data [(cond-> {::hash hash
+                                          ::tokens toks
+                                          ::at (js/Date.)}
+                                   media (assoc ::media media))]}))]
+            (if-not (:seon.error/message report)
               {::ok? true ::hash hash ::tokens toks}
               {::ok? false
                ::hash hash
-               ::error (or (some-> (::db/error env) :seon.error/message)
+               ::error (or (:seon.error/message report)
                            "blob file written but the projection tx was rejected")})))))))
 
 (defn ^{:async true :seon.fn/agent-facing? true} put!
@@ -795,6 +781,17 @@
             result)
           (not-found hash))))))
 
+(defn- ^:async concat-with-effects!
+  [{::keys [hashes media]} effects]
+  (let [reads (mapv (fn [h] (get {::hash h})) hashes)]
+    (if-let [bad (first (remove ::ok? reads))]
+      (select-keys bad [::ok? ::hash ::error])
+      (await
+       (put-with-publication-effects!
+        (cond-> {::content (apply str (map ::content reads))}
+          media (assoc ::media media))
+        effects)))))
+
 (defn ^{:async true :seon.fn/agent-facing? true} concat!
   "Join stored blobs, in order, into ONE new canonical blob.
 
@@ -806,17 +803,38 @@
    malformed hash returns an error value NAMING that hash; nothing is
    written. The source chunks stay stored (append-only, no GC)."
   {:malli/schema [:=> [:cat ::concat-request] ::put-response]}
-  [{::keys [hashes media]}]
-  (let [reads (mapv (fn [h] (get {::hash h})) hashes)]
-    (if-let [bad (first (remove ::ok? reads))]
-      (select-keys bad [::ok? ::hash ::error])
-      (await (put! (cond-> {::content (apply str (map ::content reads))}
-                     media (assoc ::media media)))))))
+  [request]
+  (await (concat-with-effects! request node-publication-effects)))
 
-(defn ^:seon.fn/agent-facing? text
+(declare stat-with-effects!)
+
+(defn- ^:async text-with-effects!
+  [{::keys [hash from-line max-lines] :as request} effects]
+  (let [{ok? ::ok? :as env} (get {::hash hash})]
+    (cond
+      (not ok?)
+      (select-keys env [::ok? ::hash ::error])
+
+      (not (text-content? (::content env)))
+      (let [media (::media (await (stat-with-effects!
+                                   (select-keys request [::hash ::db/db])
+                                   effects)))]
+        (cond-> {::ok? false
+                 ::hash hash
+                 :seon.error/message "binary blob — not pageable as text"}
+          media (assoc :seon.error/data {::media media})))
+
+      :else
+      (merge {::ok? true
+              ::hash hash
+              ::tokens (::tokens env)}
+             (page-lines (::content env) from-line
+                         (or max-lines default-max-lines))))))
+
+(defn ^{:async true :seon.fn/agent-facing? true} text
   "Read a stored blob page by page, as a bounded line window.
 
-   Sync, with honest totals, never the whole document at once.
+   Resolves with honest totals, never the whole document at once.
    Defaults to the FIRST `default-max-lines` lines; pass a 1-based
    `:my.blob/from-line` + `:my.blob/max-lines` to walk the rest. The
    response always carries `:my.blob/total-lines` and the whole blob's
@@ -828,49 +846,57 @@
    recorded media, rather than returning mojibake — reach its bytes with
    [[get]] instead."
   {:malli/schema [:=> [:cat ::text-request] ::text-response]}
-  [{::keys [hash from-line max-lines] :or {max-lines default-max-lines}}]
-  (let [{ok? ::ok? :as env} (get {::hash hash})]
-    (cond
-      (not ok?)
-      (select-keys env [::ok? ::hash ::error])
+  [request]
+  (await (text-with-effects! request node-database-effects)))
 
-      ;; A binary blob (image/audio/archive) read back as UTF-8 is mojibake,
-      ;; never pageable text — refuse with an honest not-text envelope
-      ;; (naming the recorded media) instead of returning latin1 garbage
-      ;; with ok? true. get/stat still reach it as bytes.
-      (not (text-content? (::content env)))
-      (let [media (::media (stat {::hash hash}))]
-        (cond-> {::ok?               false
-                 ::hash              hash
-                 :seon.error/message "binary blob — not pageable as text"}
-          media (assoc :seon.error/data {::media media})))
+(defn- ^:async stat-with-effects!
+  [{::keys [hash] :as request} effects]
+  (let [database (or (::db/db request) (await ((::current-db! effects))))]
+    (if (:seon.error/message database)
+      {::ok? false ::hash hash ::exists? false
+       ::error (:seon.error/message database)}
+      (let [projection
+            (await
+             ((::query! effects)
+              {::db/db database
+               ::db/query
+               '[:find [?tokens ?media ?at]
+                 :in $ ?hash
+                 :where
+                 [?entity :my.blob/hash ?hash]
+                 [?entity :my.blob/tokens ?tokens]
+                 [?entity :my.blob/at ?at]
+                 [(get-else $ ?entity :my.blob/media nil) ?media]]
+               ::db/args [hash]}))]
+        (cond
+          (:seon.error/message projection)
+          {::ok? false ::hash hash ::exists? false
+           ::error (:seon.error/message projection)}
 
-      :else
-      (merge {::ok?    true
-              ::hash   hash
-              ::tokens (::tokens env)}
-             (page-lines (::content env) from-line max-lines)))))
+          (nil? projection)
+          {::ok? true ::hash hash ::exists? false}
 
-(defn ^:seon.fn/agent-facing? stat
+          :else
+          (let [[tokens media at] projection]
+            (cond-> {::ok? true
+                     ::hash hash
+                     ::exists? true
+                     ::tokens tokens
+                     ::at at}
+              media (assoc ::media media))))))))
+
+(defn ^{:async true :seon.fn/agent-facing? true} stat
   "Check whether a blob exists, and its size, without reading it.
 
    The blob's DB projection — exists?, tokens, media, at; no disk
    touched. `exists?` answers \"is this hash recorded?\" — a missing hash is
    `{:my.blob/ok? true :my.blob/exists? false}`, an answer, not an error.
    Budget on `:my.blob/tokens` BEFORE reading: page a big blob with
-   [[text]] instead of pulling it whole."
+   [[text]] instead of pulling it whole. Pass `:seon.db/db` to keep related
+   reads on one immutable database value."
   {:malli/schema [:=> [:cat ::stat-request] ::stat-response]}
-  [{::keys [hash]}]
+  [request]
   ;; FIND by attribute presence (never a lookup-ref here: on a store no
   ;; put! has touched yet the attr isn't installed and a lookup-ref throws;
   ;; a query just returns nothing).
-  (if-let [e (some-> (db/query '[:find ?e . :in $ ?h :where [?e ::hash ?h]]
-                               hash)
-                     db/entity)]
-    (cond-> {::ok?     true
-             ::hash    hash
-             ::exists? true
-             ::tokens  (::tokens e)
-             ::at      (::at e)}
-      (::media e) (assoc ::media (::media e)))
-    {::ok? true ::hash hash ::exists? false}))
+  (await (stat-with-effects! request node-database-effects)))

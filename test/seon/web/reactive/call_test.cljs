@@ -1,32 +1,23 @@
 (ns seon.web.reactive.call-test
-  "The /call security boundary + the namespace-routed invoke.
+  "The agent-call security boundary and namespace-routed invocation.
 
-   (b) The capability gate (`capability-check` / `resolve-owning-agent` /
-       `granted-fn?`) — pure fns of a db value. A granted home-ns fn
-       resolves + is allowed; a fn NOT granted to the owning agent, a
+   (b) The capability gate performs one query at one immutable database value.
+       A granted home-ns fn resolves + is allowed; a fn NOT granted to the owning agent, a
        cross-agent/dead-agent namespace, and `fs`/core symbols are REFUSED
        (no owning agent or no `:seon.fn` row) — never invoked.
 
-   (c) A granted /call captures one database coordinate and sends one ordinary
+   (c) A granted call captures one immutable database value and sends one ordinary
        positional invocation through the supervised execution child."
   (:require
     [clojure.string :as str]
-    [cljs.test :refer [deftest is testing async use-fixtures]]
+    [cljs.test :refer [async deftest is]]
     [seon.agent.home :as home]
-    [seon.client :as client]
     [seon.db :as db]
-    [seon.db.coordinate :as db.coordinate]
     [seon.execution :as execution]
     [seon.execution.host :as execution.host]
     [seon.runtime.admission :as admission]
-    [seon.schema :as schema]
-    [seon.web.reactive.call :as call]))
-
-(def ^:private !schema-state (atom nil))
-
-(use-fixtures :each
-  {:before #(reset! !schema-state (schema/snapshot-state))
-   :after  #(schema/restore-state! @!schema-state)})
+    [seon.web.reactive.call :as call]
+    [seon.web.reactive.transform :as transform]))
 
 ;; A valid 14-char id (`:seon.db/id` is [:string {:min 14 :max 14}]).
 (def ^:private agent-id "tst-2606260000")
@@ -35,26 +26,13 @@
 
 (def ^:private granted-sym (symbol (str home-ns) "set-purpose!"))
 
-(def ^:private set-purpose-source
-  ;; Transacts onto the agent's OWN entity. Uses (current-agent-id) — proving
-  ;; invoke! ran the form inside the agent's with-agent scope.
-  (str "(defn set-purpose! [p]\n"
-       "  (seon.db/transact!\n"
-       "    {:seon.db/tx-data [{:seon.agent/id (seon.db/current-agent-id)\n"
-       "                        :seon.agent/purpose p}]}))"))
-
-(defn- seed!
-  "Transact the agent + its home ns + the one granted fn row."
-  []
-  (db/transact!
-    {:seon.db/tx-data
-     [{:seon.agent/id agent-id}
-      {:seon.ns/name   home-kw
-       :seon.ns/source (str "(ns " home-ns ")")}
-      {:seon.fn/sym        (str granted-sym)
-       :seon.fn/ns         {:seon.ns/name home-kw}
-       :seon.fn/source     set-purpose-source
-       :seon.fn/created-at (js/Date.)}]}))
+(def ^:private database
+  {:db-name "test"
+   :t 42
+   :as-of nil
+   :since nil
+   :history false
+   :datahike/commit-id #uuid "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"})
 
 ;; ---------------------------------------------------------------------------
 ;; (b) Capability gate — pure, no bootstrap.
@@ -62,99 +40,105 @@
 
 (deftest capability-gate-allows-granted-refuses-everything-else
   (async done
-    (-> (client/open-agent-conn!)
-        (.then
-          (fn [conn]
-            (binding [db/*conn* conn]
-              (.then
-                (seed!)
-                (fn [_]
-                  (let [db @conn]
-                    (testing "namespace IS the route — owning agent resolves from my.agent.<id>"
-                      (is (= agent-id (call/resolve-owning-agent db granted-sym))))
-                    (testing "fs / core / cross-agent namespaces resolve to NO owning agent"
-                      (is (nil? (call/resolve-owning-agent db 'fs/readFileSync)))
-                      (is (nil? (call/resolve-owning-agent db 'seon.client/start-agent!)))
-                      (is (nil? (call/resolve-owning-agent db 'my.agent.nobody-here1/x))))
-                    (testing "GRANTED — a home-ns fn the agent defined passes the gate"
-                      (let [r (call/capability-check db granted-sym)]
-                        (is (= agent-id (::call/agent-id r)))
-                        (is (nil? (::call/refused r)))))
-                    (testing "REFUSED — fs symbol (no owning agent), never reaches invoke"
-                      (let [r (call/capability-check db 'fs/readFileSync)]
-                        (is (some? (::call/refused r)))
-                        (is (nil? (::call/agent-id r)))))
-                    (testing "REFUSED — a symbol in the home ns with NO :seon.fn row"
-                      (let [ghost (symbol (str home-ns) "not-a-real-fn")
-                            r     (call/capability-check db ghost)]
-                        (is (some? (::call/refused r)))
-                        (is (nil? (::call/agent-id r)))
-                        (is (false? (call/granted-fn? db agent-id ghost)))))
-                    (testing "REFUSED — a fn in another agent's home ns (dead/absent)"
-                      (let [r (call/capability-check db 'my.agent.someone-else9/do-it)]
-                        (is (some? (::call/refused r)))
-                        (is (nil? (::call/agent-id r)))))))))))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+    (let [original-query db/query
+          requests (atom [])
+          ghost (symbol (str home-ns) "not-a-real-fn")]
+      (set! db/query
+            (fn
+              ([request]
+               (swap! requests conj request)
+               (js/Promise.resolve
+                (when (= (str granted-sym)
+                         (second (:seon.db/args request)))
+                  101)))
+              ([query-form & inputs]
+               (js/Promise.reject
+                (ex-info "unexpected positional query"
+                         {:seon.db/query query-form
+                          :seon.db/args inputs})))))
+      (-> (js/Promise.all
+           (clj->js
+            [(call/capability-check database granted-sym)
+             (call/capability-check database 'fs/readFileSync)
+             (call/capability-check database 'seon.client/start-agent!)
+             (call/capability-check database ghost)
+             (call/capability-check
+              database 'my.agent.someone-else9/do-it)]))
+          (.then
+           (fn [results]
+             (let [[granted fs core missing dead]
+                   (vec (array-seq results))
+                   query (:seon.db/query (first @requests))]
+               (is (= agent-id (::call/agent-id granted)))
+               (is (= database (:seon.db/db (first @requests))))
+               (is (= [agent-id (str granted-sym) home-kw]
+                      (:seon.db/args (first @requests))))
+               (is (some #{'[?agent :seon.eval/home-requires _]} query))
+               (is (some #{'(not [?agent :seon.agent/terminated-at _])}
+                         query))
+               (is (some? (::call/refused fs)))
+               (is (some? (::call/refused core)))
+               (is (some? (::call/refused missing)))
+               (is (some? (::call/refused dead)))
+               (is (= 3 (count @requests))))))
+          (.catch (fn [error] (is false (str error))))
+          (.finally
+           (fn []
+             (set! db/query original-query)
+             (done)))))))
 
 ;; ---------------------------------------------------------------------------
-;; (c) Granted invoke crosses one coordinate-pinned child boundary.
+;; (c) Granted invoke crosses one database-value-pinned child boundary.
 ;; ---------------------------------------------------------------------------
 
-(deftest call-invokes-through-one-coordinate-pinned-child-plan
+(deftest call-invokes-through-one-database-value-pinned-child-plan
   (async done
-    (let [coordinate
-          {::db.coordinate/database-id
-           #uuid "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
-           ::db.coordinate/branch :db
-           ::db.coordinate/commit-id
-           #uuid "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
-           ::db.coordinate/t 42}
+    (let [original-prepare execution/prepare-invocations!
+          original-invoke execution.host/invoke!
           prepared (atom nil)]
-      (with-redefs
-        [db/head-coordinate (fn [] (js/Promise.resolve coordinate))
-         execution/prepare-invocations!
-         (fn [request]
-           (reset! prepared request)
-           (js/Promise.resolve
-            [{::execution/message execution/invoke-message
-              ::execution/protocol-version execution/protocol-version
-              ::execution/agent-id agent-id
-              ::execution/invocation-id "call-test"
-              ::execution/coordinate coordinate
-              ::execution/function-source-identity
-              {::execution/function-symbol granted-sym
-               ::execution/source-digest (apply str (repeat 64 "a"))}
-              ::execution/arguments ["hello from call"]
-              ::execution/deadline-ms 9999999999999
-              ::execution/result-limit-bytes 4096}]))
-         execution.host/invoke!
-         (fn [_]
-           (js/Promise.resolve
-            {::execution/message execution/result-message
-             ::execution/protocol-version execution/protocol-version
-             ::execution/invocation-id "call-test"
-             ::execution/coordinate coordinate
-             ::execution/result {:seon.db/ok? true}
-             ::execution/result-bytes 32}))]
-        (-> (call/invoke! agent-id granted-sym ["hello from call"])
-            (.then
-             (fn [env]
-               (is (true? (::call/ok? env)))
-               (is (= coordinate (::execution/coordinate @prepared)))
-               (is (= ["hello from call"]
-                      (get-in @prepared
-                              [::execution/invocation-plans 0
-                               ::execution/arguments])))
-               (done)))
-            (.catch
-             (fn [e]
-               (is false (str "threw — " e))
-               (done))))))))
+      (set! execution/prepare-invocations!
+            (fn [request]
+              (reset! prepared request)
+              (js/Promise.resolve
+               [{::execution/message execution/invoke-message
+                 ::execution/protocol-version execution/protocol-version
+                 ::execution/agent-id agent-id
+                 ::execution/invocation-id "call-test"
+                 :seon.db/db database
+                 ::execution/function-identity
+                 {::execution/function-symbol granted-sym
+                  ::execution/source-digest (apply str (repeat 64 "a"))}
+                 ::execution/arguments ["hello from call"]
+                 ::execution/deadline-ms 9999999999999
+                 ::execution/result-limit-bytes 4096}])))
+      (set! execution.host/invoke!
+            (fn [_]
+              (js/Promise.resolve
+               {::execution/message execution/result-message
+                ::execution/protocol-version execution/protocol-version
+                ::execution/invocation-id "call-test"
+                :seon.db/db database
+                ::execution/result {:my.result/accepted? true}
+                ::execution/result-bytes 32})))
+      (-> (call/invoke! database agent-id granted-sym ["hello from call"])
+          (.then
+           (fn [result]
+             (is (true? (::call/ok? result)) (pr-str result))
+             (is (identical? database (:seon.db/db @prepared)))
+             (is (= ["hello from call"]
+                    (get-in @prepared
+                            [::execution/invocation-plans 0
+                             ::execution/arguments])))))
+          (.catch (fn [error] (is false (str error))))
+          (.finally
+           (fn []
+             (set! execution/prepare-invocations! original-prepare)
+             (set! execution.host/invoke! original-invoke)
+             (done)))))))
 
 ;; ---------------------------------------------------------------------------
-;; (d) HTTP boundary — the /call RCE is neutralized + malformed args never hang.
-;; The PoC: POST /call?fn=<granted>&args=<transit that decodes to a LIST>. In
+;; (d) HTTP boundary — agent-call injection is refused and malformed args end.
+;; The PoC sends a transit value that decodes to a list.
 ;; the old synthesize-and-eval invoke!, the list spliced in as code and ran
 ;; (`(js/require "child_process")` etc.). Now the ?args= decode is DATA-ONLY
 ;; and invoke! is resolve-and-apply — the injected expression can never run.
@@ -169,10 +153,10 @@
                   :end       (fn [body] (swap! state assoc :body body :ended? true))}}))
 
 (defn- call-req
-  "A mock POST /call req carrying ?fn= and (optional) ?args= url-encoded, as
-   handle! reads them via query-val."
+  "A mock agent-call request carrying encoded fn and optional args."
   [fn-sym args-str]
-  (let [base (str "/call?fn=" (js/encodeURIComponent (str fn-sym)))]
+  (let [base (str "/agent/" agent-id "/call?fn="
+                  (js/encodeURIComponent (str fn-sym)))]
     #js {:method "POST"
          :url    (if args-str
                    (str base "&args=" (js/encodeURIComponent args-str))
@@ -205,53 +189,119 @@
                 {::admission/status :available
                  ::admission/generation 0})))))
 
-(defn- with-seeded-conn
-  "Open a fresh agent conn, seed!, run `(f conn)` (a Promise), restore *conn*."
-  [f]
-  (let [prev db/*conn*]
-    (-> (client/open-agent-conn!)
-        (.then (fn [conn]
-                 (set! db/*conn* conn)
-                 (-> (seed!) (.then (fn [_] (f conn))))))
-        (.finally (fn [] (set! db/*conn* prev))))))
+(deftest database-failure-is-unavailable-not-a-capability-refusal
+  (async done
+    (let [{state ::state res ::res} (mock-res)
+          original-db db/db
+          original-capability call/capability-check
+          checks (atom 0)]
+      (set! db/db
+            (fn
+              ([] (js/Promise.resolve
+                   {:seon.error/message "authority unavailable"}))
+              ([_] (js/Promise.resolve
+                    {:seon.error/message "authority unavailable"}))))
+      (set! call/capability-check
+            (fn [& _] (swap! checks inc)))
+      (-> (call/handle! (call-req granted-sym
+                                  (transform/encode-args [])) res)
+          (.then
+           (fn [_]
+             (is (= 503 (:code @state)))
+             (is (zero? @checks))
+             (is (str/includes? (:body @state) "authority unavailable"))))
+          (.catch (fn [error] (is false (str error))))
+          (.finally
+           (fn []
+             (set! db/db original-db)
+             (set! call/capability-check original-capability)
+             (done)))))))
+
+(deftest successful-http-call-reuses-the-acquired-database-value
+  (async done
+    (let [{state ::state res ::res} (mock-res)
+          original-db db/db
+          original-capability call/capability-check
+          original-invoke call/invoke!
+          observed (atom [])]
+      (set! db/db
+            (fn
+              ([] (js/Promise.resolve database))
+              ([_] (js/Promise.resolve database))))
+      (set! call/capability-check
+            (fn [database-value _]
+              (swap! observed conj database-value)
+              (js/Promise.resolve {::call/agent-id agent-id})))
+      (set! call/invoke!
+            (fn [database-value _ _ _]
+              (swap! observed conj database-value)
+              (js/Promise.resolve {::call/ok? true})))
+      (-> (call/handle! (call-req granted-sym
+                                  (transform/encode-args ["value"])) res)
+          (.then
+           (fn [_]
+             (is (= 200 (:code @state)))
+             (is (= 2 (count @observed)))
+             (is (every? #(identical? database %) @observed))))
+          (.catch (fn [error] (is false (str error))))
+          (.finally
+           (fn []
+             (set! db/db original-db)
+             (set! call/capability-check original-capability)
+             (set! call/invoke! original-invoke)
+             (done)))))))
 
 (deftest call-refuses-injected-list-arg-and-never-invokes
   ;; A granted fn (capability passes) called with the list-shaped ?args=. The
   ;; data-only whitelist refuses it with a 422 "bad args" BEFORE invoke!, so the
   ;; injected expression never executes and the granted fn never runs.
   (async done
-    (-> (with-seeded-conn
-          (fn [conn]
-            (let [{state ::state res ::res} (mock-res)
-                  payload "[[\"~#list\",[\"~$js/require\",\"child_process\"]]]"]
-              (-> (call/handle! (call-req granted-sym payload) res)
-                  (.then
-                    (fn [_]
-                      (testing "refused with a 422 bad-args envelope (before invoke)"
-                        (is (= 422 (:code @state)))
-                        (is (str/includes? (str (:body @state)) "bad args")))
-                      (testing "the granted fn was NEVER invoked — no purpose datom"
-                        (is (nil? (ffirst
-                                    (db/query
-                                      '[:find ?p :in $ ?id :where
-                                        [?a :seon.agent/id ?id]
-                                        [?a :seon.agent/purpose ?p]]
-                                      @conn agent-id)))))))))))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+    (let [{state ::state res ::res} (mock-res)
+          payload "[[\"~#list\",[\"~$js/require\",\"child_process\"]]]"
+          invocations (atom 0)
+          original-db db/db
+          original-capability call/capability-check
+          original-invoke call/invoke!]
+      (set! db/db (fn
+                    ([] (js/Promise.resolve database))
+                    ([_] (js/Promise.resolve database))))
+      (set! call/capability-check
+            (fn [_ _] (js/Promise.resolve {::call/agent-id agent-id})))
+      (set! call/invoke! (fn [& _] (swap! invocations inc)))
+      (-> (call/handle! (call-req granted-sym payload) res)
+          (.then
+           (fn [_]
+             (is (= 422 (:code @state)))
+             (is (str/includes? (str (:body @state)) "bad args"))
+             (is (zero? @invocations))))
+          (.catch (fn [error] (is false (str error))))
+          (.finally
+           (fn []
+             (set! db/db original-db)
+             (set! call/capability-check original-capability)
+             (set! call/invoke! original-invoke)
+             (done)))))))
 
 (deftest call-malformed-args-writes-response-not-hang
   ;; Garbage ?args= (not valid transit) → a written 422, not an uncaught
   ;; rejection / hung request. handle! resolves and the response is ended.
   (async done
-    (-> (with-seeded-conn
-          (fn [_conn]
-            (let [{state ::state res ::res} (mock-res)]
-              (-> (call/handle! (call-req granted-sym "not-valid-transit-%%%") res)
-                  (.then
-                    (fn [_]
-                      (testing "handle! writes a 422 and ends the response (no hang)"
-                        (is (true? (:ended? @state)))
-                        (is (= 422 (:code @state))))))))))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+    (let [{state ::state res ::res} (mock-res)
+          original-db db/db
+          original-capability call/capability-check]
+      (set! db/db (fn
+                    ([] (js/Promise.resolve database))
+                    ([_] (js/Promise.resolve database))))
+      (set! call/capability-check
+            (fn [_ _] (js/Promise.resolve {::call/agent-id agent-id})))
+      (-> (call/handle! (call-req granted-sym "not-valid-transit-%%%") res)
+          (.then
+           (fn [_]
+             (is (true? (:ended? @state)))
+             (is (= 422 (:code @state)))))
+          (.catch (fn [error] (is false (str error))))
+          (.finally
+           (fn []
+             (set! db/db original-db)
+             (set! call/capability-check original-capability)
+             (done)))))))
