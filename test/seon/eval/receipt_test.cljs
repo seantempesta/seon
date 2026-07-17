@@ -5,6 +5,7 @@
     [malli.core :as m]
     [seon.db :as db]
     [seon.db.id :as db.id]
+    [seon.db.protocol :as protocol]
     [seon.eval :as seval]
     [seon.eval.internal :as receipt]
     [seon.runtime.admission :as admission]))
@@ -50,6 +51,17 @@
    ::seval/tee []
    ::db/db database
    ::db/expected-db database})
+
+(defn- call-record-eval!
+  "Return the asynchronous eval-recording operation without CPS awaiting it."
+  [request]
+  (seval/record-eval! request))
+
+(defn- call-retry-eval-record!
+  "Return the asynchronous stale-publication retry without CPS awaiting it."
+  [frozen acquire! compile-tee record!]
+  ((deref #'seval/retry-eval-record!)
+   frozen acquire! compile-tee record!))
 
 (deftest receipt-schemas-are-closed-and-terminal-states-are-bounded
   (is (m/validate ::receipt/start-request start))
@@ -143,7 +155,7 @@
              (is (= database (::db/expected-db @observed)))
              (is (= database-after (:db-after result)))
              (is (= "EVLreceipt0001" (:seon.eval/id result)))
-             (is (true? (::seval/tee-recorded? result)))
+             (is (not (contains? result ::seval/tee-recorded?)))
              (is (= 3 (::seval/retained-value result)))
              (is (not (contains? result :seon.db/ok?)))))
           (.catch (fn [error] (is false (str error))))
@@ -151,6 +163,111 @@
            (fn []
              (set! db/transact! original)
              (done)))))))
+
+(deftest failed-program-publication-does-not-commit-a-transcript
+  (async done
+    (let [original-transact db/transact!
+          original-pull db/pull
+          calls (atom [])
+          tee-row {:seon.fn/sym "my.agent.receipt/example"
+                   :seon.fn/source "(defn example [] 3)"}
+          transaction-error
+          {:seon.error/message "program row rejected"
+           :seon.error/data {}}]
+      (set! db/transact!
+            (fn [& [request]]
+              (swap! calls conj [:transact request])
+              (js/Promise.resolve transaction-error)))
+      (set! db/pull
+            (fn
+              ([request]
+               (swap! calls conj [:pull request])
+               (js/Promise.resolve {:seon.eval/status :running}))
+              ([_selector _ref]
+               (js/Promise.reject
+                (js/Error. "unexpected positional pull")))
+              ([_database _selector _ref]
+               (js/Promise.reject
+                (js/Error. "unexpected database positional pull")))))
+      (-> (js/Promise.resolve nil)
+          (.then
+           (fn [_]
+             (call-record-eval!
+              (assoc record-request ::seval/tee [tee-row]))))
+          (.then
+           (fn [result]
+             (let [transactions (filter #(= :transact (first %)) @calls)
+                   tx-data (get-in (first transactions)
+                                   [1 :seon.db/tx-data])]
+               (is (= transaction-error result))
+               (is (= [:transact :pull] (mapv first @calls)))
+               (is (= 1 (count transactions))
+                   "a rejected program row cannot trigger a transcript write")
+               (is (= :db.fn/cas (ffirst tx-data)))
+               (is (= "EVLreceipt0001" (:seon.eval/id (second tx-data))))
+               (is (= tee-row (nth tx-data 2))
+                   "receipt outcome and program row share one transaction")
+               (is (not (contains? result ::seval/retained-value)))
+               (is (not (contains? result ::seval/tee-recorded?))))))
+          (.catch (fn [error] (is false (str error))))
+          (.finally
+           (fn []
+             (set! db/transact! original-transact)
+             (set! db/pull original-pull)
+             (done)))))))
+
+(deftest stale-publication-rebuilds-from-the-frozen-result
+  (async done
+    (let [value (js-obj)
+          calls (atom [])
+          attempt (atom 0)
+          frozen {::seval/tee-entities
+                  [{:seon.fn/sym "my.agent.receipt/example"}]
+                  ::seval/source "(defn example [] value)"
+                  ::seval/ending-ns 'my.agent.receipt
+                  ::seval/result {::seval/ok? true ::seval/value value}
+                  ::seval/eval-id "EVLreceipt0001"
+                  :seon.agent.turn/id-of-turn "TRNreceipt0001"}
+          acquire!
+          (fn [_request]
+            (let [n (swap! attempt inc)]
+              (swap! calls conj [:acquire n])
+              (js/Promise.resolve {::db/db (assoc database :t (+ 41 n))})))
+          compile-tee
+          (fn [frozen-value acquired]
+            (swap! calls conj [:compile (::db/db acquired)])
+            {::seval/tee [{:seon.fn/sym "my.agent.receipt/example"}]
+             ::seval/result (::seval/result frozen-value)
+             ::seval/pending? false
+             ::seval/changed-schemas #{}})
+          record!
+          (fn [request]
+            (swap! calls conj [:record request])
+            (js/Promise.resolve
+             (if (= 1 (count (filter #(= :record (first %)) @calls)))
+               {:seon.error/message "database advanced"
+                :seon.error/data
+                {::protocol/error-kind protocol/stale-coordinate-error}}
+               transaction-report)))]
+      (-> (call-retry-eval-record!
+           frozen acquire! compile-tee record!)
+          (.then
+           (fn [{::seval/keys [recorded]}]
+             (let [requests (mapv second
+                                  (filter #(= :record (first %)) @calls))]
+               (is (= transaction-report recorded))
+               (is (= 2 (count (filter #(= :acquire (first %)) @calls))))
+               (is (= 2 (count requests)))
+               (is (every? #(identical? value
+                                        (get-in % [::seval/result
+                                                   ::seval/value]))
+                           requests)
+                   "both publications reuse the already-executed value")
+               (is (not= (::db/expected-db (first requests))
+                         (::db/expected-db (second requests)))
+                   "the retry reacquires and recompiles at the new database"))))
+          (.catch (fn [error] (is false (str error))))
+          (.finally (fn [] (done)))))))
 
 (deftest failed-terminal-status-read-remains-a-direct-database-error
   (async done

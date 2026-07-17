@@ -2921,14 +2921,6 @@
               true)))
         tee-entities))))
 
-;; Stamped on a partially-recorded eval row when its program-graph tee
-;; rows could not be persisted (record-eval! stage-2 recovery) — the
-;; honest record of the dropped tee. Registered here: seon.eval owns
-;; the :seon.eval keyword namespace. Transacted TOP-LEVEL (identity
-;; upsert on :seon.eval/id), so lazy attr-install covers it without a
-;; boot-schema entry.
-(schema/register! :seon.eval/record-error :string)
-
 (def database-edn-cap
   "Store-time char cap for any pr-str'd string persisted as a datom
    (`:seon.eval/result-edn`, `:seon.eval/error`). Override with
@@ -3135,16 +3127,6 @@
   [value]
   (and (map? value) (string? (:seon.error/message value))))
 
-(defn- unsafe-to-reallocate?
-  [result]
-  (let [data (:seon.error/data result)
-        error-tag (::db.id/error data)
-        transaction-status (::db.protocol/status data)]
-    (or (= "seon.db.id.error" (some-> error-tag namespace))
-        (contains? #{db.protocol/unknown-status
-                     db.protocol/committed-status}
-                   transaction-status))))
-
 (defn- stale-database-failure?
   [result]
   (= db.protocol/stale-coordinate-error
@@ -3198,11 +3180,11 @@
    `:running` CAS fence, so recovery or a late completion can win exactly once.
    Non-executing historical paths may omit the id and retain the allocator path.
 
-   A non-allocator transaction failure with a nonempty tee gets one transcript-
-   first retry using the same frozen outcome and no tee. A
-   prestarted receipt always retains its identity; the legacy allocator path
-   may commit a different fallback id. Allocator/protocol failures never enter
-   the fallback. No result handle is bound here."
+   Receipt, terminal outcome, turn connection, and every accepted program row
+   are one transaction. A failure returns the database error without writing a
+   transcript-only success. Stale-coordinate recovery belongs to the caller,
+   which may reacquire and rebuild this transaction from the frozen execution
+   result without rerunning the form. No result handle is bound here."
   {:malli/schema [:=> [:catn [::record-request :map]] :any]}
   [{::keys [at narration source result duration-ms tee output pending? eval-id]
     database ::db/db
@@ -3315,16 +3297,15 @@
       (not (database-error? primary))
       (cond->
         (assoc primary
-               :seon.eval/id committed-id
-               ::tee-recorded? true)
+               :seon.eval/id committed-id)
         (and (::ok? result) (not pending?))
         (assoc ::retained-value (::value result)))
 
       (stale-database-failure? primary)
       ;; The caller may reacquire the small read-dependent program state and
-      ;; recompile this frozen outcome. Do not inspect the receipt or enter the
-      ;; transcript-without-tee fallback: neither can make a stale transaction
-      ;; correct, and the agent form must never run again.
+      ;; recompile this frozen outcome. Do not inspect the receipt: that cannot
+      ;; make a stale transaction correct, and the agent form must never run
+      ;; again.
       primary
 
       (:seon.error/message settled-read)
@@ -3348,46 +3329,7 @@
                             (config/eval-render-cap))
                           "— source:"
                           (cap-edn source (config/eval-render-cap)))
-        (if (and (seq tee) (not (unsafe-to-reallocate? primary)))
-          (let [fallback (await (transact-record! []))]
-            (if-not (database-error? fallback)
-              (let [eval-id (or eval-id
-                                (get-in fallback
-                                        [::db.id/ids ::eval-allocation]))
-                    reason (cap-edn
-                             (str (count tee) " program-graph tee row(s) "
-                                  "DROPPED (will not survive a restart) — "
-                                  "tee tx failed: "
-                                  (:seon.error/message primary)))
-                    stamped (await
-                              (db/transact!
-                                {::db/db (:db-after fallback)
-                                 :seon.db/tx-data
-                                 [{:seon.eval/id eval-id
-                                   :seon.eval/record-error reason}]}))]
-                (js/console.error
-                  "[seon.eval/record-eval!] eval row RECOVERED without tee —"
-                  (count tee) "program-graph tee row(s) DROPPED for eval"
-                  eval-id)
-                (when (database-error? stamped)
-                  (js/console.error
-                    "[seon.eval/record-eval!] could not stamp"
-                    ":seon.eval/record-error on eval" eval-id ":"
-                    (:seon.error/message stamped)))
-                (cond->
-                  (assoc fallback
-                         :seon.eval/id eval-id
-                         ::tee-recorded? false)
-                  (and (::ok? result) (not pending?))
-                  (assoc ::retained-value (::value result))))
-              (do
-                (js/console.error
-                  "[seon.eval/record-eval!] DATA LOSS — eval row could not be"
-                  "persisted even without tee:"
-                  (:seon.error/message fallback)
-                  "— source:" source)
-                fallback)))
-          primary)))))
+        primary))))
 
 ;; ============================================================
 ;; REPL-parity intercepts (unit #23 fix d, per the plan's REPL-PARITY
@@ -4613,8 +4555,7 @@
               eval-id (:seon.eval/id recorded)
               new-projection
               (when (and (::candidate-projection candidate-outcome)
-                         (not (database-error? recorded))
-                         (::tee-recorded? recorded))
+                         (not (database-error? recorded)))
                 (::candidate-projection candidate-outcome))
               publication
               (cond
@@ -4631,12 +4572,9 @@
               publication-ok?
               (true? (::admission/published? publication))]
           ;; A declaration becomes runtime-authoritative only when its schema
-          ;; fact landed in the same accepted transaction. record-eval! may
-          ;; preserve the transcript by retrying without a broken tee; in that
-          ;; recovery case the database did NOT accept the declaration, so the
-          ;; collector must roll back instead of leaving a process-only schema.
-          ;; Bind only the committed id. A failed recorder leaves no orphaned
-          ;; result slot; a rejected allocation candidate is never observable.
+          ;; fact landed in the accepted transaction. Bind only the committed
+          ;; id. A failed recorder leaves no orphaned result slot; a rejected
+          ;; allocation candidate is never observable.
           (when (and publication-ok?
                      (not (database-error? recorded))
                      (::ok? result))
@@ -4651,8 +4589,8 @@
                     (.catch (fn [_] nil))))))
           ;; Queryable fix datoms (the A/B substrate — fix volume / class
           ;; mix / revert rate = one Datalog query). A SEPARATE top-level
-          ;; tx: nested attrs need a boot-schema entry, top-level attrs
-          ;; lazy-install (the :seon.eval/record-error precedent).
+          ;; tx: nested attrs need a boot-schema entry; top-level attrs
+          ;; lazy-install.
           (when (and (not (database-error? recorded)) fixed?)
             (let [fixes (:seon.repair/fixes pre)
                   r     (await
@@ -4672,7 +4610,6 @@
           ;; Tests run only after the declaration transaction and exact
           ;; program projection publication both complete.
           (when (and (not (database-error? recorded))
-                     (::tee-recorded? recorded)
                      publication-ok?
                      (::ok? result))
             ;; Phase 4 (mvp-completion-plan 2026-05-27) —
