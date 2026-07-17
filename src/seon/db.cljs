@@ -271,7 +271,7 @@
    ::capabilities (::capabilities state)})
 
 (defn- ^:async connect-selection! [selection owner]
-  (let [{::keys [socket-path database-name backend database-path
+  (let [{::keys [socket-path database-name backend database-path attachment
                  initialization]}
         selection
         opened (atom nil)]
@@ -311,6 +311,7 @@
                         ::protocol/database-name database-name
                         ::protocol/backend backend}
                  database-path (assoc ::protocol/database-path database-path)
+                 attachment (assoc ::db.coordinate/attachment attachment)
                  initialization (assoc ::initialization initialization)))
               15000))
             _ (when-not (::protocol/success? ensure-response)

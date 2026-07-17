@@ -123,6 +123,20 @@
                         :seon.db/initial-data [{:bare-key true}]))))
         "initial fact maps require namespaced attribute keys")))
 
+(deftest ensure-database-preserves-an-explicit-branch-attachment
+  (let [attachment {::coordinate/database-id
+                    #uuid "ca2dd867-e51c-4165-b3b7-430bfe199f2e"
+                    ::coordinate/branch :experiment/program}
+        request
+        (protocol/ensure-database-request
+         {::protocol/request-id "ensure/branch"
+          ::protocol/database-name "experiment"
+          ::protocol/backend :memory
+          ::coordinate/attachment attachment})]
+    (is (protocol/valid-request? request))
+    (is (= attachment (::coordinate/attachment request)))
+    (is (= request (transit-roundtrip request)))))
+
 (deftest index-pages-use-datahikes-native-eager-shape
   (let [request (protocol/index-page-request
                  {::protocol/request-id "index/page"

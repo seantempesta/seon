@@ -66,6 +66,13 @@
     [?namespace :seon.ns/name ?name]
     [?namespace :seon.ns/source ?source]])
 
+(def ^:private current-namespace-without-edges-query
+  '[:find ?name ?source ?pulled
+    :where
+    [?namespace :seon.ns/name ?name]
+    [?namespace :seon.ns/source ?source]
+    [(ground {}) ?pulled]])
+
 (def ^:private boot-program-row-query
   '[:find ?entity ?identity-attr ?identity ?source
     :where
@@ -93,7 +100,11 @@
    :boot-functions (set (d/q boot-function-query db-value))
    :current-schemas (d/q current-schema-query db-value)
    :boot-schemas (set (d/q boot-schema-query db-value))
-   :current-namespaces (d/q current-namespace-query db-value)
+   :current-namespaces
+   (d/q (if (contains? (:schema db-value) :seon.ns/require-edges)
+          current-namespace-query
+          current-namespace-without-edges-query)
+        db-value)
    :boot-program-rows (d/q boot-program-row-query db-value)
    :agent-ids (d/q agent-id-query db-value)})
 

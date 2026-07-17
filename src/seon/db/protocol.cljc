@@ -587,6 +587,7 @@
   [::database-name ::database-name]
   [::backend ::backend]
   [::database-path {:optional true} ::database-path]
+  [::coordinate/attachment {:optional true} ::coordinate/attachment]
   [:seon.db/initialization {:optional true} :seon.db/initialization]])
 (schema/register!
  ::acquire-database-request
@@ -915,6 +916,7 @@
   [::database-name ::database-name]
   [::backend ::backend]
   [::database-path {:optional true} ::database-path]
+  [::coordinate/attachment {:optional true} ::coordinate/attachment]
   [:seon.db/initialization {:optional true} :seon.db/initialization]])
 (schema/register!
  ::acquire-database-request-input
@@ -1156,12 +1158,15 @@
   {:malli/schema [:=> [:cat ::ensure-request-input]
                   ::ensure-database-request]}
   [{::keys [request-id database-name backend database-path]
-    :seon.db/keys [initialization]}]
+    :seon.db/keys [initialization]
+    :as input}]
   (cond-> {::operation ensure-database-operation
            ::request-id request-id
            ::database-name database-name
            ::backend backend}
     database-path (assoc ::database-path database-path)
+    (::coordinate/attachment input)
+    (assoc ::coordinate/attachment (::coordinate/attachment input))
     initialization (assoc :seon.db/initialization initialization)))
 
 (defn acquire-database-request

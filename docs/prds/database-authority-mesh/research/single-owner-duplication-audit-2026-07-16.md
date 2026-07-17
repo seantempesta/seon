@@ -106,7 +106,7 @@ admission.
 `compile-core-program-tx`, `core-program-tx`, `commit-core-program!`,
 `seed-core!`, and `boot-seed!`. `start-runtime-impl!` separately opens the
 session, performs boot writes, publishes the committed projection, recovers,
-and creates agents. Meanwhile `src/seon/db/program.cljc` now implements the
+and creates agents. Meanwhile `src/seon/db/program.clj` now implements the
 same desired-versus-current program delta for authority initialization.
 
 This is true overlapping ownership, not merely shared pure code: schema and

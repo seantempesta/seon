@@ -74,13 +74,28 @@ compiled program, and required initial facts before publishing a usable
 database value. The integrated proof is fresh/full, partial/delta, and
 converged/no-write initialization followed by child whole-namespace execution.
 
+The JVM half of that contract is implemented. One unversioned
+`seon.db.program/compile-tx-data` owner reads one immutable Datahike value and
+computes the exact program delta. Database ensure accepts optional package
+initialization, performs the source-proven two-transaction fresh sequence
+(minimal unattributed root/process genesis, then one root/boot native-schema +
+program + initial-data transaction), reruns the same idempotent reconciliation
+for an already-open database, refuses branch initialization, and returns the
+database value that admitted that request. Focused real-Datahike proof covers
+fresh two-commit admission, converged zero-write reopen, failed fresh
+publication, and branch head preservation. The remaining half is to build the
+canonical package data once in the Bun host, pass it during session open, and
+delete the pod-side schema/program/seed writers in the same cut.
+
 Current parallel portfolio:
 
-- top level integrates the recovery plan and schema/init boundary;
-- the authority-init lane specifies the exact ensure/open move and deletion;
-- the consumer lane inventories coherent behavior migrations and obsolete
-  tests; and
-- the observability lane corrected historical turn evidence to one native
+- top level wires the Bun host to the settled authority initialization and
+  deletes the pod-side schema/program/seed transaction owners;
+- the duplication audit orders later ambient-database, renderer, eval, test,
+  artifact, and process deletions by dependency and impact;
+- the Datahike transaction probe proves why provenance genesis and the
+  boot-attributed program transaction are exactly two fresh commits; and
+- historical turn evidence remains one native
   `:seon.agent.turn/rendered-tx` ref. Request-scoped `:seon.db/db` maps are not
   persisted as domain state.
 

@@ -23,6 +23,8 @@
             [seon.db.datahike.schema :as datahike.schema]
             [seon.db.executor :as executor]
             [seon.db.id :as id]
+            [seon.db.process :as process]
+            [seon.db.program :as program]
             [seon.db.protocol :as protocol]
             [seon.db.registry :as registry]
             [seon.db.restore-admin :as restore-admin]
@@ -105,6 +107,8 @@
 (schema/register! ::release-results :seon.db.protocol/writer-release-results)
 (schema/register! ::stop-response :seon.db.protocol/writer-stop-response)
 (schema/register! ::database-initialized? :boolean)
+(schema/register! ::initialization :seon.db/initialization)
+(schema/register! ::initialized-db-value :any)
 (schema/register!
  ::initialize-request
  [:map
@@ -112,7 +116,8 @@
   [::registry/conn ::connection]
   [::registry/database-name ::registry/database-name]
   [::registry/attachment ::coordinate/attachment]
-  [::registry/open-intent ::registry/open-intent]])
+  [::registry/open-intent ::registry/open-intent]
+  [::initialization {:optional true} ::initialization]])
 
 ;;; Datahike values and transaction shapes
 
@@ -334,27 +339,10 @@
   [declaration]
   (select-keys declaration schema-properties))
 
-(defn- derive-transaction-schema
-  [db-value transaction-data]
+(defn- compile-schema-declarations
+  [db-value transaction-data candidates]
   (let [installed (:schema db-value)
-        admitted (set (keys (schema-form-strings transaction-data)))
-        directly-declared (transaction-schema-identifiers transaction-data)
-        missing-used
-        (into #{}
-              (comp
-               (filter qualified-keyword?)
-               (remove #(= "db" (namespace %)))
-               (remove directly-declared)
-               (remove #(contains? installed %)))
-              (transaction-attributes transaction-data))
-        candidates (set/union missing-used
-                              (generated-schema-attributes transaction-data)
-                              (set/intersection admitted
-                                                (set (keys installed))))]
-    (if (empty? candidates)
-      []
-      (let [forms (canonical-schema-forms
-                   db-value transaction-data candidates)
+        forms (canonical-schema-forms db-value transaction-data candidates)
             unresolved (vec (sort-by str (remove #(contains? forms %)
                                                   candidates)))
             _ (when (seq unresolved)
@@ -396,7 +384,35 @@
                      :seon.error/kind :user-input})))
         (into []
               (remove #(contains? installed (:db/ident %)))
-              declarations)))))
+              declarations)))
+
+(defn- derive-transaction-schema
+  [db-value transaction-data]
+  (let [installed (:schema db-value)
+        admitted (set (keys (schema-form-strings transaction-data)))
+        directly-declared (transaction-schema-identifiers transaction-data)
+        missing-used
+        (into #{}
+              (comp
+               (filter qualified-keyword?)
+               (remove #(= "db" (namespace %)))
+               (remove directly-declared)
+               (remove #(contains? installed %)))
+              (transaction-attributes transaction-data))
+        candidates (set/union missing-used
+                              (generated-schema-attributes transaction-data)
+                              (set/intersection admitted
+                                                (set (keys installed))))]
+    (if (empty? candidates)
+      []
+      (compile-schema-declarations db-value transaction-data candidates))))
+
+(defn- derive-declared-schema
+  [db-value transaction-data]
+  (let [attributes (set (keys (schema-form-strings transaction-data)))]
+    (if (empty? attributes)
+      []
+      (compile-schema-declarations db-value transaction-data attributes))))
 
 (defn- assert-protocol-attributes-free!
   [transaction-data transaction-meta]
@@ -585,21 +601,36 @@
      :tx-meta (public-transaction-meta (:tx-meta report))
      ::protocol/request-id request-id}))
 
+(declare initialize-program!)
+
 (defn initialize-connection!
   "Initialize one database connection from the composed writer runtime."
   {:malli/schema [:=> [:cat ::initialize-request]
                   [:map
-                   [::database-initialized? ::database-initialized?]]]}
-  [{::keys [runtime]
+                   [::database-initialized? ::database-initialized?]
+                   [::initialized-db-value {:optional true}
+                    ::initialized-db-value]]]}
+  [{::keys [runtime initialization]
     connection ::registry/conn
     database-name ::registry/database-name
+    attachment ::registry/attachment
     open-intent ::registry/open-intent}]
   (assert-protocol-native-schema! (d/db connection))
   (when (= :seon.db.registry.open/branch open-intent)
-    (assert-declared-secondary-indices-live! (d/db connection)))
+    (assert-declared-secondary-indices-live! (d/db connection))
+    (when initialization
+      (throw
+       (ex-info "A branch database cannot initialize a compiled program."
+                {::failure-kind protocol/protocol-error
+                 ::registry/database-name database-name
+                 ::registry/attachment attachment}))))
   (when (= :seon.db.registry.open/main open-intent)
+    (when initialization
+      (initialize-program! runtime connection (name database-name) attachment
+                           initialization))
     ((::database-initializer runtime) connection database-name))
-  {::database-initialized? true})
+  (cond-> {::database-initialized? true}
+    initialization (assoc ::initialized-db-value (d/db connection))))
 
 (defn- committed-scope
   [database-name attachment db-value]
@@ -1268,6 +1299,137 @@
               (catch Throwable throwable throwable)))))
         completion))))
 
+(def ^:private maximum-program-initialization-attempts 3)
+
+(def ^:private genesis-attributes
+  #{:seon.agent/id
+    :seon.db.process/id
+    :seon.db/user
+    :seon.db/process})
+
+(defn- present-root?
+  [db-value]
+  (boolean
+   (d/q '[:find ?root .
+          :where
+          [?root :seon.agent/id "root"]]
+        db-value)))
+
+(defn- present-process-ids
+  [db-value]
+  (set
+   (d/q '[:find [?id ...]
+          :where
+          [_ :seon.db.process/id ?id]]
+        db-value)))
+
+(defn- genesis-data
+  "Derive the native schema and missing provenance identities required before
+   the compiled program can transact with root/boot metadata."
+  [db-value desired-program]
+  (let [processes (process/genesis-entities)
+        schema-declarations
+        (compile-schema-declarations db-value desired-program
+                                     genesis-attributes)
+        installed-processes (present-process-ids db-value)]
+    (cond-> (vec schema-declarations)
+      (not (present-root? db-value))
+      (conj {:seon.agent/id "root"})
+
+      true
+      (into (remove #(contains? installed-processes
+                                (:seon.db.process/id %)))
+            processes))))
+
+(defn- identity-attribute
+  [db-value declarations row]
+  (let [schema
+        (into (:schema db-value)
+              (map (juxt :db/ident identity))
+              declarations)
+        attributes
+        (into []
+              (filter #(= :db.unique/identity
+                          (get-in schema [% :db/unique])))
+              (keys row))]
+    (when-not (= 1 (count attributes))
+      (throw
+       (ex-info "Initial database data must carry one identity attribute."
+                {::initial-data-row row
+                 ::identity-attributes attributes
+                 :seon.error/kind :core-bug})))
+    (first attributes)))
+
+(defn- missing-initial-data
+  [db-value declarations initial-data]
+  (into []
+        (remove
+         (fn [row]
+           (let [attribute (identity-attribute db-value declarations row)]
+             (and (contains? (:schema db-value) attribute)
+                  (some? (d/entity db-value
+                                   [attribute (get row attribute)]))))))
+        initial-data))
+
+(defn- transact-initialization!
+  [runtime connection database-name attachment db-value transaction-data
+   transaction-meta]
+  (when (seq transaction-data)
+    (transact-once!
+     runtime connection database-name attachment
+     (protocol/transaction-request
+      (cond-> {::protocol/request-id
+               (str "database-initialization/" (random-uuid))
+               ::protocol/database-name (name database-name)
+               ::protocol/transaction-data transaction-data
+               :seon.db/expected-db (database-value (name database-name)
+                                                   db-value)}
+        transaction-meta
+        (assoc ::protocol/transaction-meta transaction-meta))))))
+
+(defn initialize-program!
+  "Admit one compiled program and its required initial entities atomically.
+   No other write is prepared for this connection during admission."
+  [runtime connection database-name attachment initialization]
+  (let [desired-program (:seon.db/program initialization)
+        initial-data (:seon.db/initial-data initialization)
+        boot-meta {:seon.db/user [:seon.agent/id "root"]
+                   :seon.db/process
+                   (process/lookup-ref :seon.db.process/boot)}]
+    (locking connection
+      (loop [attempt 1]
+        (let [result
+              (try
+                (let [before-genesis (d/db connection)
+                      genesis (genesis-data before-genesis desired-program)
+                      _ (transact-initialization!
+                         runtime connection database-name attachment
+                         before-genesis genesis nil)
+                      before-program (d/db connection)
+                      schema-declarations
+                      (derive-declared-schema before-program desired-program)
+                      transaction-data
+                      (into (vec schema-declarations)
+                            (concat
+                             (program/compile-tx-data before-program
+                                                      desired-program)
+                             (missing-initial-data before-program
+                                                   schema-declarations
+                                                   initial-data)))]
+                  (transact-initialization!
+                   runtime connection database-name attachment before-program
+                   transaction-data boot-meta)
+                  (d/db connection))
+                (catch Throwable throwable throwable))]
+          (if (and (instance? Throwable result)
+                   (= protocol/stale-coordinate-error
+                      (::failure-kind (ex-data result)))
+                   (< attempt maximum-program-initialization-attempts))
+            (recur (inc attempt))
+            (if (instance? Throwable result)
+              (throw result)
+              result)))))))
+
 (defn- handle-resolve-transaction-coordinate
   [connection request]
   (protocol/success
@@ -1290,14 +1452,21 @@
     database-path (assoc ::registry/path database-path)))
 
 (defn- connection-initializer
-  [runtime]
+  [runtime initialization initialized-db]
   (fn [initialize-request]
-    (initialize-connection!
-     (assoc initialize-request ::runtime runtime))))
+    (let [result
+          (initialize-connection!
+           (cond-> (assoc initialize-request ::runtime runtime)
+             initialization (assoc ::initialization initialization)))]
+      (when-let [db-value (::initialized-db-value result)]
+        (vreset! initialized-db db-value))
+      result)))
 
 (defn- handle-ensure-database
   [runtime request]
   (let [database-name (::protocol/database-name request)
+        initialization (:seon.db/initialization request)
+        initialized-db (volatile! nil)
         entry
         (registry/ensure-database!
          (registry-request
@@ -1305,17 +1474,30 @@
           (::protocol/backend request)
           (::protocol/database-path request)
           (::coordinate/attachment request)
-          (connection-initializer runtime)))
+          (connection-initializer runtime initialization initialized-db)))
+        attachment (::registry/attachment entry)
+        _ (when (and initialization
+                     (not= :db (::coordinate/branch attachment)))
+            (throw
+             (ex-info "A branch database cannot initialize a compiled program."
+                      {::failure-kind protocol/protocol-error
+                       ::registry/database-name (keyword database-name)
+                       ::registry/attachment attachment})))
+        connection (::registry/conn entry)
+        _ (when (and initialization (nil? @initialized-db))
+            (vreset! initialized-db
+                     (initialize-program! runtime connection
+                                          database-name attachment
+                                          initialization)))
         backend-kind (::registry/backend entry)
         database-path (::registry/path entry)]
     (enqueue-embedding-backfill! runtime database-name
-                                 (::registry/attachment entry)
-                                 (::registry/conn entry))
+                                 attachment connection)
     (protocol/success
      (cond->
        {::protocol/database-name database-name
         :seon.db/db (database-value database-name
-                                    (d/db (::registry/conn entry)))
+                                    (or @initialized-db (d/db connection)))
         ::protocol/backend backend-kind}
        database-path
        (assoc ::protocol/database-path database-path)))))
@@ -1333,7 +1515,7 @@
           (::protocol/expected-source-head request)
           ::registry/target-branch (::protocol/target-branch request)
           ::registry/initialize-connection!
-          (connection-initializer runtime)})]
+          (connection-initializer runtime nil (volatile! nil))})]
     (protocol/success
      (cond-> {::protocol/target-database-name
               (::protocol/target-database-name request)
