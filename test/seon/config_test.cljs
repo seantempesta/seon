@@ -24,6 +24,10 @@
   [{:seon.route/name :seon.route/root  :seon.route/pattern "/"}
    {:seon.route/name :seon.route/legacy-page :seon.route/pattern "/legacy"}])
 
+(defn- selected-configuration
+  []
+  (config/resolve-config-singleton (or (config/load-manifest) {})))
+
 (deftest manifest-schema-validity
   (testing "a representative manifest validates against :seon.config/manifest"
     (is (m/validate :seon.config/manifest
@@ -53,8 +57,8 @@
                                         :seon.agent.ctx/priority 100}]}
                      :seon.config/root-context {}}))))
 
-(deftest database-arity-function-schemas-are-pure-data
-  (doseq [v [#'config/config-view #'config/database-edn-cap]]
+(deftest config-function-schemas-are-pure-data
+  (doseq [v [#'config/namespaces-policy #'config/database-edn-cap]]
     (let [form (:malli/schema (meta v))]
       (is (some? (m/schema form)))
       (is (not-any? #(and (seq? %) (= 'quote (first %)))
@@ -88,16 +92,17 @@
                       :seon.config.render/line-numbers   true}})))
   (testing "an absent section defaults to today's byte-identical render"
     ;; The redefed empty manifest drives the pre-attach defaults.
-    (with-redefs [config/load-manifest (fn [] {})]
-      (is (= :raw        (config/render-whitespace)))
-      (is (= :literal    (config/render-tabs)))
-      (is (= :off        (config/render-trailing-ws)))
-      (is (= :structured (config/render-content-layout)))
-      (is (false?        (config/render-line-numbers?))))))
+    (let [configuration (config/resolve-config-singleton {})]
+      (is (= :raw        (config/render-whitespace configuration)))
+      (is (= :literal    (config/render-tabs configuration)))
+      (is (= :off        (config/render-trailing-ws configuration)))
+      (is (= :structured (config/render-content-layout configuration)))
+      (is (false?        (config/render-line-numbers? configuration))))))
 
 (defn- ctx-block-names [id override]
   (into #{} (map :seon.agent.ctx/name)
-        (:seon.agent/ctx (config/resolve-agent-context id override))))
+        (:seon.agent/ctx
+         (config/resolve-agent-context id override (selected-configuration)))))
 
 (deftest absent-config-has-no-hidden-context-default
   (with-redefs [config/load-manifest (fn [] {})]
@@ -135,15 +140,18 @@
 (deftest agent-level-dials-are-override-only
   (with-redefs [config/load-manifest (fn [] {})]
     (testing "a default agent-context carries NEITHER wake? nor home-requires (consumer owns the default)"
-      (let [ctx (config/resolve-agent-context "worker-x" nil)]
+      (let [ctx (config/resolve-agent-context
+                 "worker-x" nil (selected-configuration))]
         (is (not (contains? ctx :seon.agent.runtime/wake?))
             "no wake? datom on a default agent → seed transacts nothing → parity")
         (is (not (contains? ctx :seon.eval/home-requires))
             "no home-requires datom on a default agent → home-requires-for uses the const")))
     (testing "a per-mint override carries the key into the atomic birth map"
-      (let [ctx (config/resolve-agent-context "worker-x"
-                                              {:seon.agent.runtime/wake? false
-                                               :seon.eval/home-requires '[[seon.db :as db]]})]
+      (let [ctx (config/resolve-agent-context
+                 "worker-x"
+                 {:seon.agent.runtime/wake? false
+                  :seon.eval/home-requires '[[seon.db :as db]]}
+                 (selected-configuration))]
         (is (false? (:seon.agent.runtime/wake? ctx)))
         (is (= '[[seon.db :as db]] (:seon.eval/home-requires ctx)))))))
 
@@ -165,7 +173,9 @@
                           {:seon.agent/ctx
                            [{:seon.agent.ctx/name :canvas
                              :seon.render.canvas/content [:div "ACME-CUSTOM"]}]}})]
-      (let [blocks (:seon.agent/ctx (config/resolve-agent-context "root" nil))
+      (let [blocks (:seon.agent/ctx
+                    (config/resolve-agent-context
+                     "root" nil (selected-configuration)))
             lt     (first (filter #(= :canvas (:seon.agent.ctx/name %)) blocks))]
         (is (= [:div "ACME-CUSTOM"] (:seon.render.canvas/content lt))
             "the overridden sub-key wins")
@@ -201,19 +211,20 @@
          {:seon.eval/home-requires
           '[[seon.agent :as agent]
             [seon.db :as database]]}}]
-    (with-redefs [config/config-view (fn ([] manifest) ([_] manifest))]
+    (let [configuration (config/resolve-config-singleton manifest)]
       (is (= '[[seon.db :as db]
                [seon.agent.message :as message]
                [acme.brand :as brand]]
              (:seon.eval/home-requires
-               (config/resolve-agent-context "worker-x" nil)))
+               (config/resolve-agent-context
+                "worker-x" nil configuration)))
           "an ordinary agent keeps the exact configured toolbelt")
       (is (= '[[seon.db :as database]
                [seon.agent.message :as message]
                [acme.brand :as brand]
                [seon.agent :as agent]]
              (:seon.eval/home-requires
-               (config/resolve-agent-context "root" nil)))
+               (config/resolve-agent-context "root" nil configuration)))
           "root inherits downstream capabilities, refines by ns, and appends"))))
 
 ;;; The `#merge` COMPOSITION trap (config-merge, 2026-07-11) — a per-cluster
@@ -289,8 +300,10 @@
   (with-env
     "SEON_CONFIG" "config/system.edn"
     (fn []
-      (let [ordinary (config/resolve-agent-context "worker-x" nil)
-              root (config/resolve-agent-context "root" nil)
+      (let [configuration (selected-configuration)
+              ordinary (config/resolve-agent-context
+                        "worker-x" nil configuration)
+              root (config/resolve-agent-context "root" nil configuration)
               order (fn [context]
                       (->> (:seon.agent/ctx context)
                            (sort-by (juxt :seon.agent.ctx/priority
@@ -318,8 +331,10 @@
   (with-env
     "SEON_CONFIG" "config/acme.edn"
     (fn []
-      (let [ordinary (config/resolve-agent-context "acme-worker" nil)
-              root     (config/resolve-agent-context "root" nil)
+      (let [configuration (selected-configuration)
+              ordinary (config/resolve-agent-context
+                        "acme-worker" nil configuration)
+              root     (config/resolve-agent-context "root" nil configuration)
               targets  (fn [context]
                          (into #{} (map first)
                                (:seon.eval/home-requires context)))
@@ -349,18 +364,20 @@
   ;; These are pure pre-attach manifest resolver tests. Authority-backed
   ;; config reads belong to the database facade contract, not a local conn.
   (testing "an absent :seon.config/render section → the accessor's literal fallback"
-    (with-redefs [config/load-manifest (fn [] {})]
-      (is (= 72 (config/value-width)))
-      (is (= 16384 (config/database-edn-cap)))
-      (is (= 3 (config/value-max-depth)))))
+    (let [configuration (config/resolve-config-singleton {})]
+      (is (= 72 (config/value-width configuration)))
+      (is (= 16384 (config/database-edn-cap configuration)))
+      (is (= 3 (config/value-max-depth configuration)))))
   (testing "a manifest value overrides the fallback"
-    (with-redefs [config/load-manifest
-                  (fn [] {:seon.config/render {:seon.config.render/value-width 40
-                                               :seon.config.render/database-edn-cap 999}})]
-      (is (= 40 (config/value-width)))
-      (is (= 999 (config/database-edn-cap)))
+    (let [configuration
+          (config/resolve-config-singleton
+           {:seon.config/render
+            {:seon.config.render/value-width 40
+             :seon.config.render/database-edn-cap 999}})]
+      (is (= 40 (config/value-width configuration)))
+      (is (= 999 (config/database-edn-cap configuration)))
       ;; an unset key in a present section still falls back to the literal
-      (is (= 3 (config/value-max-depth))))))
+      (is (= 3 (config/value-max-depth configuration))))))
 
 ;;; ENV KNOBS — the few knobs that stay env-only (launch/process). These tests
 ;;; pin the COERCION + the :seon.config/dirs precedence, not live env values.
@@ -391,14 +408,14 @@
 
 (deftest skills-dir-precedence
   (testing "manifest :seon.config/dirs wins over env, which wins over the default"
-    (with-redefs [config/load-manifest
-                  (fn [] {:seon.config/skills {:seon.config/dirs ["from/manifest"]}})]
-      (is (= "from/manifest" (config/skills-dir))))
-    (with-redefs [config/load-manifest (fn [] {})]
-      (with-env "SEON_SKILLS_DIR" "from/env"
-        #(is (= "from/env" (config/skills-dir))))
-      (with-env "SEON_SKILLS_DIR" nil
-        #(is (= ".claude/skills" (config/skills-dir)))))))
+    (is (= "from/manifest"
+           (config/skills-dir
+            {:seon.config/skills
+             {:seon.config/dirs ["from/manifest"]}})))
+    (with-env "SEON_SKILLS_DIR" "from/env"
+      #(is (= "from/env" (config/skills-dir {}))))
+    (with-env "SEON_SKILLS_DIR" nil
+      #(is (= ".claude/skills" (config/skills-dir {}))))))
 
 ;;; ============================================================
 ;;; CONFIG → DB (config-db-migration 2026-07-10). `resolve-config-singleton` is
@@ -462,16 +479,22 @@
       (is (= agent-context (:seon.config/agent-context s)))
       (is (= root-context (:seon.config/root-context s))))))
 
-(deftest agent-context-is-derived-from-the-database-config-view
-  (let [stored {:seon.config/agent-context
+(deftest agent-context-is-derived-from-explicit-config-data
+  (let [stored {:seon.config/id config/cluster-config-id
+                :seon.config/agent-context
                 {:seon.agent/ctx [{:seon.agent.ctx/name :transcript}]}
                 :seon.config/root-context
                 {:seon.agent/ctx [{:seon.agent.ctx/name :canvas}]}}]
-    (with-redefs [config/config-view (fn ([] stored) ([_] stored))
-                  config/load-manifest
+    (with-redefs [config/load-manifest
                   (fn [] (throw (js/Error. "external config must not be read")))]
-      (is (= #{:transcript} (ctx-block-names "worker-x" nil)))
-      (is (= #{:transcript :canvas} (ctx-block-names "root" nil))))))
+      (is (= #{:transcript}
+             (into #{} (map :seon.agent.ctx/name)
+                   (:seon.agent/ctx
+                    (config/resolve-agent-context "worker-x" nil stored)))))
+      (is (= #{:transcript :canvas}
+             (into #{} (map :seon.agent.ctx/name)
+                   (:seon.agent/ctx
+                    (config/resolve-agent-context "root" nil stored))))))))
 
 (deftest repl-mode-default-is-per-model
   ;; The manifest-absent repl-mode default is computed from the model

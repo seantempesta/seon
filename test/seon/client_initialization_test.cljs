@@ -1,13 +1,16 @@
 (ns seon.client-initialization-test
   (:require
    [cljs.test :refer [async deftest is testing]]
+   [my.skills :as skills]
    [seon.agent :as agent]
    [seon.agent.loop :as agent-loop]
    [seon.client :as client]
+   [seon.config :as config]
    [seon.db :as db]
    [seon.launch :as launch]
    [seon.runtime.admission :as admission]
-   [seon.runtime.recovery :as recovery]))
+   [seon.runtime.recovery :as recovery]
+   [seon.state :as state]))
 
 (def ^:private digest
   "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
@@ -15,11 +18,14 @@
 (defn- descriptor []
   {::launch/runtime {::launch/execution-digest digest}})
 
+(def ^:private configuration
+  (config/resolve-config-singleton {}))
+
 (defn- with-program-builders
   [core schemas body]
   (let [original-core client/index-core!
         original-schemas client/index-schemas]
-    (set! client/index-core! (fn [] core))
+    (set! client/index-core! (fn [_configuration] core))
     (set! client/index-schemas (fn [] schemas))
     (try
       (body)
@@ -46,12 +52,12 @@
         (with-program-builders
           [function-row namespace-row]
           [schema-row]
-          #(build (descriptor)))
+          #(build (descriptor) configuration))
         reverse
         (with-program-builders
           [namespace-row function-row]
           [schema-row]
-          #(build (descriptor)))]
+          #(build (descriptor) configuration))]
     (is (= forward reverse))
     (is (= digest (:seon.execution/artifact-digest forward)))
     (is (= [:seon.ns/name :seon.fn/sym :seon.schema/key]
@@ -84,6 +90,129 @@
     (is (identical? domain-result (recovery-result! domain-result)))
     (is (= direct-error (ex-data thrown)))))
 
+(deftest config-free-startup-initializes-from-retained-config
+  (async done
+    (let [open-startup! (deref #'client/open-startup-session!)
+          original-open client/open-database-session!
+          original-db db/db
+          original-entity db/entity
+          original-resolve config/resolve-config-singleton
+          retained (assoc configuration
+                          :seon.config/always #{:custom.core}
+                          :seon.config/current-ns :off)
+          stored (update retained :seon.config/always pr-str)
+          cleanup!
+          (fn []
+            (set! client/open-database-session! original-open)
+            (set! db/db original-db)
+            (set! db/entity original-entity)
+            (set! config/resolve-config-singleton original-resolve)
+            (done))
+          requests (atom [])]
+      (set! client/open-database-session!
+            (fn [request]
+              (swap! requests conj request)
+              (js/Promise.resolve {::db/db {:db-name "default"}})))
+      (set! db/db
+            (fn
+              ([] (js/Promise.resolve {:db-name "default"}))
+              ([_request] (js/Promise.resolve {:db-name "default"}))))
+      (set! db/entity
+            (fn
+              ([_entity-id] (js/Promise.resolve stored))
+              ([_database _entity-id] (js/Promise.resolve stored))))
+      (set! config/resolve-config-singleton
+            (fn [_]
+              (throw
+               (js/Error. "config-free reopen must not resolve defaults"))))
+      (try
+        (-> (open-startup! true nil)
+            (.then
+             (fn [_]
+               (is (= [{::client/initialize? false}
+                       {::client/initialize? true
+                        ::client/configuration retained}]
+                      @requests)
+                   "attach first, then initialize from the retained decoded policy")))
+            (.catch
+             (fn [error]
+               (is false (str "config-free startup rejected: " error
+                              "\n" (.-stack error)))))
+            (.finally cleanup!))
+        (catch :default error
+          (is false (str "config-free startup threw synchronously: " error))
+          (cleanup!))))))
+
+(deftest selected-startup-shares-one-resolved-configuration
+  (async done
+    (let [select-configuration
+          (deref #'client/selected-startup-configuration)
+          open-startup! (deref #'client/open-startup-session!)
+          original-resolve config/resolve-config-singleton
+          original-open client/open-database-session!
+          original-skills skills/seed-skills-tx-data
+          original-reconcile state/reconcile!
+          resolved (assoc configuration :seon.config/current-ns :off)
+          resolve-count (atom 0)
+          opened-configuration (atom nil)
+          applied-configuration (atom nil)
+          cleanup!
+          (fn []
+            (set! config/resolve-config-singleton original-resolve)
+            (set! client/open-database-session! original-open)
+            (set! skills/seed-skills-tx-data original-skills)
+            (set! state/reconcile! original-reconcile)
+            (done))
+          manifest {:seon.config/namespaces
+                    {:seon.config/current-ns :off}}]
+      (set! config/resolve-config-singleton
+            (fn [_]
+              (swap! resolve-count inc)
+              resolved))
+      (set! client/open-database-session!
+            (fn [request]
+              (reset! opened-configuration (::client/configuration request))
+              (js/Promise.resolve {::db/db {:db-name "default"}})))
+      (set! skills/seed-skills-tx-data
+            (fn
+              ([] [])
+              ([_directory] [])))
+      (set! state/reconcile!
+            (fn [request]
+              (reset! applied-configuration
+                      (last (:seon.state/desired request)))
+              (js/Promise.resolve
+               {:seon.state/ok? true
+                :seon.state/changed? false
+                :seon.state/operations 0
+                :seon.state/attempts 1
+                :seon.state/coordinate
+                {:db-id #uuid "00000000-0000-0000-0000-000000000001"
+                 :branch :db
+                 :commit-id #uuid "00000000-0000-0000-0000-000000000002"
+                 :t 1}})))
+      (try
+        (let [selected (select-configuration manifest)]
+          (-> (open-startup! true selected)
+              (.then
+               (fn [_]
+                 (client/apply-config!
+                  {:seon.config/manifest manifest
+                   ::client/configuration selected})))
+              (.then
+               (fn [_]
+                 (is (= 1 @resolve-count))
+                 (is (identical? selected @opened-configuration))
+                 (is (identical? selected @applied-configuration))))
+              (.catch
+               (fn [error]
+                 (is false (str "selected startup rejected: " error
+                                "\n" (.-stack error)))))
+              (.finally cleanup!)))
+        (catch :default error
+          (is false (str "selected startup threw synchronously: " error))
+          (cleanup!))))))
+
 (deftest invalid-complete-program-fails-before-session-open
   (async done
     (let [original-descriptor launch/process-launch-descriptor
@@ -93,7 +222,7 @@
           opened? (atom false)]
       (set! launch/process-launch-descriptor (descriptor))
       (set! client/index-core!
-            (fn []
+            (fn [_configuration]
               [{:seon.ns/name :example.core
                 :seon.ns/source "(ns example.core)"}
                {:seon.fn/sym "example.core/broken"
@@ -109,7 +238,8 @@
               (reset! opened? true)
               (js/Promise.resolve {})))
       (-> (client/open-database-session!
-           {:seon.client/initialize? true})
+           {:seon.client/initialize? true
+            :seon.client/configuration configuration})
           (.then
            (fn [_]
              (is false "invalid complete projection was admitted")))
@@ -138,6 +268,8 @@
   (async done
     (let [original-state @client/!state
           original-attached? db/attached?
+          original-db db/db
+          original-entity db/entity
           original-open client/open-database-session!
           original-begin admission/begin-publication!
           original-publish admission/publish-committed!
@@ -155,6 +287,18 @@
           finished (js/Promise. (fn [resolve _] (reset! finish resolve)))]
       (reset! client/!state (shadow-ready-state))
       (set! db/attached? (constantly true))
+      (set! db/db
+            (fn
+              ([] (js/Promise.resolve {:db-name "default"}))
+              ([_request] (js/Promise.resolve {:db-name "default"}))))
+      (set! db/entity
+            (fn
+              ([_entity-id]
+               (js/Promise.resolve
+                (update configuration :seon.config/always pr-str)))
+              ([_database _entity-id]
+               (js/Promise.resolve
+                (update configuration :seon.config/always pr-str)))))
       (set! admission/begin-publication!
             (fn [] (swap! effects conj :close) true))
       (set! client/open-database-session!
@@ -188,7 +332,9 @@
           (.then
            (fn [_]
              (is (= [:close
-                     [::ensure-acquire {::client/initialize? true}]
+                     [::ensure-acquire
+                      {::client/initialize? true
+                       ::client/configuration configuration}]
                      :publish
                      [::resume {:seon.agent/id "root"}]]
                     @effects)
@@ -200,7 +346,9 @@
           (.then
            (fn [_]
              (is (= [:close
-                     [::ensure-acquire {::client/initialize? true}]
+                     [::ensure-acquire
+                      {::client/initialize? true
+                       ::client/configuration configuration}]
                      :publish
                      [::resume {:seon.agent/id "root"}]
                      :ticker
@@ -215,6 +363,8 @@
            (fn []
              (reset! client/!state original-state)
              (set! db/attached? original-attached?)
+             (set! db/db original-db)
+             (set! db/entity original-entity)
              (set! client/open-database-session! original-open)
              (set! admission/begin-publication! original-begin)
              (set! admission/publish-committed! original-publish)
@@ -224,10 +374,12 @@
              (set! client/start-heartbeat! original-heartbeat)
              (done)))))))
 
-(deftest failed-reload-ensure-keeps-admission-closed-and-skips-rehost
+(deftest missing-reload-config-keeps-admission-closed-and-skips-rehost
   (async done
     (let [original-state @client/!state
           original-attached? db/attached?
+          original-db db/db
+          original-entity db/entity
           original-open client/open-database-session!
           original-begin admission/begin-publication!
           original-publish admission/publish-committed!
@@ -241,6 +393,14 @@
           finished (js/Promise. (fn [resolve _] (reset! finish resolve)))]
       (reset! client/!state (shadow-ready-state))
       (set! db/attached? (constantly true))
+      (set! db/db
+            (fn
+              ([] (js/Promise.resolve {:db-name "default"}))
+              ([_request] (js/Promise.resolve {:db-name "default"}))))
+      (set! db/entity
+            (fn
+              ([_entity-id] (js/Promise.resolve nil))
+              ([_database _entity-id] (js/Promise.resolve nil))))
       (set! admission/begin-publication!
             (fn []
               (reset! admission-open? false)
@@ -275,16 +435,18 @@
           (.then
            (fn [_]
              (is (false? @admission-open?))
-             (is (= [:close :ensure-acquire :unavailable] @effects)
-                 "failed ensure cannot publish, rehost, tick, or heartbeat")))
+             (is (= [:close :unavailable] @effects)
+                 "missing retained config cannot ensure, publish, rehost, tick, or heartbeat")))
           (.catch
            (fn [error]
-             (is false (str "failed ensure proof rejected: " error
+             (is false (str "missing config proof rejected: " error
                             "\n" (.-stack error)))))
           (.finally
            (fn []
              (reset! client/!state original-state)
              (set! db/attached? original-attached?)
+             (set! db/db original-db)
+             (set! db/entity original-entity)
              (set! client/open-database-session! original-open)
              (set! admission/begin-publication! original-begin)
              (set! admission/publish-committed! original-publish)

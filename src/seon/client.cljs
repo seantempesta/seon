@@ -530,6 +530,29 @@
             (keep :ns))
           sources)))
 
+(defn- ^:async acquire-configuration!
+  "Acquire and decode the retained config singleton at one database value."
+  []
+  (let [database (await (db/db))]
+    (when (:seon.error/message database)
+      (throw (ex-info "Config database acquisition failed." database)))
+    (let [stored
+          (await
+           (db/entity database
+                      [:seon.config/id config/cluster-config-id]))]
+      (when (:seon.error/message stored)
+        (throw (ex-info "Config singleton acquisition failed." stored)))
+      (when-not stored
+        (throw
+         (ex-info "The attached database has no config singleton."
+                  {:seon.config/id config/cluster-config-id
+                   :seon.error/kind :core-bug})))
+      (reduce-kv
+       (fn [result attribute value]
+         (assoc result attribute (db/decode-edn-value attribute value)))
+       {}
+       stored))))
+
 (defn shadow-build-notify!
   "Close on build start; reconstruct and rehost only after a complete build."
   {:malli/schema [:=> [:catn [::message :any]] :boolean]}
@@ -549,7 +572,12 @@
          ::admission/reason "Shadow build failed"})
 
       :build-complete
-      (-> (open-database-session! {::initialize? true})
+      (-> (acquire-configuration!)
+          (.then
+           (fn [configuration]
+             (open-database-session!
+              {::initialize? true
+               ::configuration configuration})))
           (.then
            (fn [_]
              (admission/publish-committed!)))
@@ -863,9 +891,11 @@
 (declare database-initialization)
 
 (schema/register! ::initialize? :boolean)
+(schema/register! ::configuration :seon.config/singleton)
 (schema/register! ::open-database-session-request
   [:map {:closed true}
-   [::initialize? ::initialize?]])
+   [::initialize? ::initialize?]
+   [::configuration {:optional true} ::configuration]])
 
 (defn- session-selection
   "Project one validated launch descriptor into a database session request."
@@ -895,12 +925,17 @@
    connection, index, replay cursor, or publisher socket."
   {:malli/schema
    [:=> [:cat ::open-database-session-request] :any]}
-  [{::keys [initialize?]}]
+  [{::keys [initialize? configuration]}]
   (let [descriptor launch/process-launch-descriptor
         writer-owner (::launch/writer-owner descriptor)
         database (::launch/database descriptor)
-        initialization (when initialize?
-                         (database-initialization descriptor))
+        initialization
+        (when initialize?
+          (when-not configuration
+            (throw
+             (ex-info "Database initialization requires explicit config data."
+                      {:seon.error/kind :core-bug})))
+          (database-initialization descriptor configuration))
         opened (await (db/open-session!
                        (session-selection descriptor initialization)))]
     (log/info-console! "seon.client/open-database-session!"
@@ -1183,12 +1218,12 @@
    set is shown); the stub keeps the `:seon.ns/name` row + lookup-ref
    target for indexed members and the on-demand `render-namespace` path,
    and keeps the no-replay invariant trivially cheap to reason about."
-  [ns-sym-str]
+  [configuration ns-sym-str]
   (let [stub  (str "(ns " ns-sym-str ")")
         ;; Extra-core nses (downstream SEON_EXTRA_SRC code) are
         ;; full-source by rule, like my.* — closes the render-as-stubs
         ;; gap for the extra root.
-        full? (or (nss/full-source-ns? ns-sym-str)
+        full? (or (nss/full-source-ns? configuration ns-sym-str)
                   (contains? (extra-core-ns-strs) ns-sym-str)
                   (contains? (extra-src-ns-strs) ns-sym-str))
         src   (if full?
@@ -1659,8 +1694,8 @@
 
    Fns whose source can't be read are OMITTED, not stubbed — the corpus stays
    honest. Returns the tx-data vector; caller transacts as root/boot."
-  {:malli/schema [:=> [:cat] :any]}
-  []
+  {:malli/schema [:=> [:cat :seon.config/singleton] :any]}
+  [configuration]
   (let [now     (js/Date.)
         ;; Downstream extra-core vars join the indexed vars after the
         ;; sym-dedup against core-vars; the reserved-prefix guard
@@ -1691,7 +1726,7 @@
         ns-syms (into (into compiled-first-party-ns-strs (extra-src-ns-strs))
                       (map #(first (str/split (:seon.fn/sym %) #"/" 2)))
                       fn-rows)
-        ns-rows (map ns-row (sort ns-syms))]
+        ns-rows (map #(ns-row configuration %) (sort ns-syms))]
     (vec (concat ns-rows fn-rows))))
 
 (defn index-schemas
@@ -1742,11 +1777,11 @@
 
 (defn- database-initialization
   "Build the complete deterministic database initialization value."
-  [descriptor]
+  [descriptor configuration]
   (let [artifact-digest
         (get-in descriptor [::launch/runtime ::launch/execution-digest])
         program
-        (->> (concat (index-core!) (index-schemas))
+        (->> (concat (index-core! configuration) (index-schemas))
              (map #(apply dissoc % compiled-program-wall-clock-attrs))
              (sort-by compiled-program-sort-key)
              vec)
@@ -1800,7 +1835,8 @@
 
 (schema/register! ::apply-config-request
   [:map {:closed true}
-   [:seon.config/manifest :seon.config/manifest]])
+   [:seon.config/manifest :seon.config/manifest]
+   [::configuration {:optional true} ::configuration]])
 
 (defn ^:async apply-config!
   "Reconcile one resolved manifest into the config-managed database subset.
@@ -1812,8 +1848,9 @@
    ambient process state."
   {:malli/schema [:=> [:cat ::apply-config-request]
                   :seon.state/reconcile-response]}
-  [{manifest :seon.config/manifest}]
-  (let [singleton    (config/resolve-config-singleton manifest)
+  [{manifest :seon.config/manifest configuration ::configuration}]
+  (let [singleton    (or configuration
+                         (config/resolve-config-singleton manifest))
         desired      (-> (vec (config/resolve-routes
                                 (route/core-routes-tx)
                                 manifest))
@@ -1944,6 +1981,27 @@
                    {:seon.client/missing-restore-schema missing-schema
                     :seon.error/kind :core-bug}))))))
 
+(defn- ^:async open-startup-session!
+  "Open startup from selected desired config or retained database config."
+  [startup? selected-configuration]
+  (if (some? selected-configuration)
+    (open-database-session!
+     {::initialize? true
+      ::configuration selected-configuration})
+    (let [opened (await (open-database-session! {::initialize? false}))]
+      (if startup?
+        (let [retained-configuration (await (acquire-configuration!))]
+          (open-database-session!
+           {::initialize? true
+            ::configuration retained-configuration}))
+        opened))))
+
+(defn- selected-startup-configuration
+  "Resolve one explicitly selected startup manifest exactly once."
+  [selected-manifest]
+  (when (some? selected-manifest)
+    (config/resolve-config-singleton selected-manifest)))
+
 (defn- ^:async start-runtime-impl!
   "Cold-start the cluster process or refresh attached read-surface readiness.
 
@@ -1965,6 +2023,10 @@
         attached? (db/attached?)
         restore-startup
         (validate-restore-launch! descriptor capability)
+        startup? (and (not attached?) autonomous? (nil? restore-startup))
+        selected-manifest (when startup? (config/load-manifest))
+        selected-configuration
+        (selected-startup-configuration selected-manifest)
         restore-completion-claim
         (when restore-startup
           (db.restore/completion-from-launch
@@ -1995,29 +2057,27 @@
          :seon.client/created-ids []
          :seon.web/port port
          :seon.web/port-file port-file})
-      (let [session-open (await
-                   (open-database-session!
-                    {::initialize? (and autonomous?
-                                        (nil? restore-startup))}))
+      (let [session-open
+            (await (open-startup-session! startup? selected-configuration))
             _ (await
                (validate-restore-attachment!
                 descriptor restore-startup restore-completion-claim))
             _ (await
                (db/assert-preconditions!
                 {::db/coordinate (::db/coordinate session-open)}))]
-        (when (and autonomous? (nil? restore-startup))
-          (when-let [manifest (config/load-manifest)]
-            (let [reconciled
-                  (await (apply-config!
-                          {:seon.config/manifest manifest}))]
-              (when (or (string? (:seon.error/message reconciled))
-                        (false? (:seon.state/ok? reconciled)))
-                (throw
-                 (ex-info "Startup config reconciliation failed."
-                          {:seon.error/kind :core-bug
-                           :seon.state/error
-                           (or (:seon.state/error reconciled)
-                               (:seon.error/message reconciled))}))))))
+        (when (some? selected-manifest)
+          (let [reconciled
+                (await (apply-config!
+                        {:seon.config/manifest selected-manifest
+                         ::configuration selected-configuration}))]
+            (when (or (string? (:seon.error/message reconciled))
+                      (false? (:seon.state/ok? reconciled)))
+              (throw
+               (ex-info "Startup config reconciliation failed."
+                        {:seon.error/kind :core-bug
+                         :seon.state/error
+                         (or (:seon.state/error reconciled)
+                             (:seon.error/message reconciled))})))))
         (when autonomous?
           (let [recovered
                 (await

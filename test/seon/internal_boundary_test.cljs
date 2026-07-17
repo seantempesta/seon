@@ -18,6 +18,7 @@
     [cljs.test :refer [deftest is]]
     [seon.agent.internal :as agent.internal]
     [seon.agent.ctx.namespaces :as ns]
+    [seon.config :as config]
     [seon.db :as db]
     [seon.db.internal :as db.internal]))
 
@@ -29,13 +30,16 @@
    :seon.agent.search.internal
    :seon.agent.fs.internal])
 
+(def ^:private configuration
+  (config/resolve-config-singleton {}))
+
 (deftest internal-nses-never-render-full
   (doseq [n internal-nses]
-    (is (false? (ns/full-source-ns? n))
+    (is (false? (ns/full-source-ns? configuration n))
         (str "full-source-ns? never inlines " n " — .internal is hidden"))
     ;; the `.internal` suffix beats the config policy: even if a (mistaken)
     ;; manifest listed it in `:seon.config/always`, the hidden-ns rule wins.
-    (is (false? (ns/full-source-ns? (str (name n))))
+    (is (false? (ns/full-source-ns? configuration (str (name n))))
         (str "full-source-ns? rejects the string form of " n " too"))))
 
 (deftest included-ns-excludes-internal-keeps-the-public-parent

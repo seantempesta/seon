@@ -931,16 +931,16 @@ datom. No selection means no config transaction; it is not an empty manifest and
 does not fall back to `config/system.edn`. After a successful apply, later
 config-free boots use the committed database facts.
 
-After database acquisition every runtime read is a database query via
-`config/config-view` (the accessors keep their names + arities; one projection is
-threaded per database value or cached by the complete ordinary database value,
-never by a native Datahike object). A tiny compiled kernel fallback may serve only the pre-connection
-database-connect/error path and is never exposed as attached runtime config. A
+After database acquisition, each coherent runtime operation acquires the
+singleton once at its immutable database value, decodes its EDN slots once,
+and passes that ordinary map to pure `seon.config` accessors. There is no
+ambient reader, injected function, or second config cache. Explicitly selected
+manifest data or resolved code defaults serve only pre-attachment package
+initialization and are never exposed as attached runtime config. A
 required missing DB fact after acquisition is a typed readiness error, not a
 silent current default. Every manifest section is `{:optional true}`, so `{}` is
 a valid explicitly selected desired value; an unknown key fails loud. The full boot/read
-mechanics — the require-direction db→error→config, `seon.db` injecting the
-reader, replay-visible + live-tunable dials — live in [[context]]
+mechanics and replay-visible + live-tunable dials live in [[context]]
 §"Config-through-DB"; this section is the schema of record.
 
 Config owns only its declared populations/attributes. A selected startup or explicit apply
@@ -979,7 +979,8 @@ concern = ONE `:seon.config/<section>` schema + one resolver fn + one key here:
 Each key resolves onto the flat `:seon.config/singleton` entity (`config.cljs`,
 every knob `{:optional true}`, `:seon.config/id` the only required key), so the
 render caps, `repl-mode`, `system-text`, `on-core-error`, and the multi-agent
-dials are all datoms an agent's turn reads through `config-view`. `resolve-routes`
+dials are all datoms acquired with the agent turn's other database inputs.
+`resolve-routes`
 produces canonical desired maps reconciled exactly when selected; absence from the
 final route population means removal. The optional skills section is an
 **import input**, not a loadout: it freezes and validates selected `SKILL.md`

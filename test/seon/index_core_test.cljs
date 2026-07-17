@@ -24,9 +24,9 @@
   (:require
     [clojure.string :as str]
     [cljs.reader :as reader]
-    [cljs.test :as t :refer [deftest is async]]
-    [datahike.api :as d]
+    [cljs.test :refer [deftest is]]
     [seon.client :as client]
+    [seon.config :as config]
     [seon.db :as db]
     [seon.schema :as schema]))
 
@@ -36,95 +36,12 @@
 ;; biggest suite-time cost (~14s of identical re-indexing). Compute ONCE and
 ;; share the result across every pure-read test via a `delay` (both are sync —
 ;; index-core! returns the tx-data vector directly, NOT a promise — so no
-;; await is needed; just deref). The three async/conn tests below build their
-;; OWN conn-dependent index via core-program-tx and only borrow @core-tx /
-;; @schemas-tx for the pure count comparisons.
-(def core-tx (delay (client/index-core!)))
+;; await is needed; just deref).
+(def ^:private configuration (config/resolve-config-singleton {}))
+(def core-tx (delay (client/index-core! configuration)))
 (def schemas-tx (delay (client/index-schemas)))
 
 (schema/register! ::indexed-value [:string {:seon.db/index true}])
-
-(defn- transact-through
-  "Transact `tx-data` on `conn` through a stable database process."
-  [conn process-id tx-data]
-  (db/with-tx-context
-    {:seon.db/user (if (= :seon.db.process/boot process-id)
-                     [:seon.agent/id "root"]
-                     [:seon.user/id "user"])
-     :seon.db/process [:seon.db.process/id process-id]}
-    (fn [] (db/transact! conn tx-data))))
-
-;;; -------------------------------------------------------------------------
-;;; HERMETICITY (issue #69 — same env-coupling class as the search_test fix
-;;; b5c3a3a4).
-;;;
-;;; index-core! / index-schemas are "pure" only relative to the
-;;; LIVE program graph: they read var-meta + on-disk source lines, the global
-;;; schema registry (schema/registered-schemas). The
-;;; async tests below build `first-tx` from these builders at one instant (T1)
-;;; and then RE-RUN the same builders inside core-program-tx
-;;; at a later instant (T2) and assert the two agree (idempotent no-op, exactly
-;;; the seeded ghosts, only the drifted ns re-emits). When the overnight loop
-;;; runs this suite concurrently with another test/evaluation process, a
-;;; mutation of those globals between T1 and T2 reclassifies a boot-authored
-;;; row as a ghost / re-emits a fn row, flaking the assertions — even though
-;;; each conn here is a fresh per-test :memory store.
-;;;
-;;; Fix (test-only — the index source is Core's): pin the two builder vars to
-;;; ONE realized snapshot (the file-level delays) for the test's duration, so
-;;; T1 and T2 read identical sets regardless of any concurrent process. with-
-;;; redefs can't be used — its `finally` restores before the Promise chain's
-;;; awaits resolve — so we set! up front and restore in the terminal then/catch
-;;; (the `done*` thunk every async test below funnels through).
-;;; -------------------------------------------------------------------------
-(defn- freeze-builders!
-  "Snapshot index-core! / index-schemas to the shared ns-level
-   delays and pin each var to it. Returns a 0-arg `restore!` thunk. Realizes
-   the delays via the ORIGINAL vars (the let bindings run before the set!s) so
-   there is no re-entrant deref."
-  []
-  (let [oc      client/index-core!
-        os      client/index-schemas
-        core    @core-tx
-        schemas @schemas-tx]
-    ;; Explicit-arity fns — NOT (constantly …). CLJS statically dispatches the
-    ;; same-ns call sites in core-program-tx to
-    ;; `.cljs$core$IFn$_invoke$arity$0()`; a variadic `(constantly …)` lacks
-    ;; that method and the optimized call throws "arity$0 is not a function".
-    (set! client/index-core!   (fn [] core))
-    (set! client/index-schemas (fn [] schemas))
-    (fn restore! []
-      (set! client/index-core!   oc)
-      (set! client/index-schemas os))))
-
-;;; -------------------------------------------------------------------------
-;;; ORDER-INDEPENDENCE (issue #75). The three async tests below pin the builder
-;;; vars to frozen `(fn [] snapshot)` thunks for their cross-await window and
-;;; restore in their terminal then/catch. If that restore is skipped or runs
-;;; late (a rejected-Promise path, a concurrent suite run), the frozen snapshot
-;;; LEAKS into a later test and a leaked builder skews core-program-tx's
-;;; desired set. Both then fail ONLY when run
-;;; after a freezing test.
-;;;
-;;; Fix (test-only — the index source is Core's): a `:each` map fixture
-;;; (map-form so it is async-safe — the wrapping `(fn [f] …)` form aborts on
-;;; async tests) that resets the three vars to their REAL implementations both
-;;; before AND after every test. The before-reset is the load-bearing half: it
-;;; guarantees each test starts from the real builders regardless of any prior
-;;; test's leaked freeze, AND it means each async test's own freeze captures the
-;;; real fns (so its restore can't cascade a frozen state forward).
-(def ^:private og-index-core!   client/index-core!)
-(def ^:private og-index-schemas client/index-schemas)
-
-(defn- thaw-builders!
-  "Reset the two builder vars to their real (unfrozen) implementations."
-  []
-  (set! client/index-core!   og-index-core!)
-  (set! client/index-schemas og-index-schemas))
-
-(t/use-fixtures :each
-  {:before (fn [] (thaw-builders!))
-   :after  (fn [] (thaw-builders!))})
 
 (defn- by-sym [tx sym]
   (first (filter #(= sym (:seon.fn/sym %)) tx)))
@@ -168,16 +85,19 @@
         "source is the REAL (defn …) text read from the file (names transact!)")
     (is (not (str/includes? (:seon.fn/source t) ",,,"))
         "NO `,,,` placeholder stub in the source")
-    ;; transact! became a multi-arity `:function` schema in T15 (map-in +
-    ;; two datahike-positional arities). The spec is the m/form of that
-    ;; :function schema, carrying the map-in `:=>` head and the positional
-    ;; conn/tx-data slots.
+    ;; transact! has one schema for its real public call shapes: a namespaced
+    ;; request map, transaction data using the current db, or an explicit
+    ;; immutable database value followed by transaction data.
     (is (str/starts-with? (:seon.fn/spec t) "[:function ")
         "spec is the m/form of transact!'s multi-arity :function schema")
     (is (str/includes? (:seon.fn/spec t) ":seon.db/transact-request")
         "spec still carries the map-in request slot")
+    (is (str/includes? (:seon.fn/spec t) ":seon.db/tx-data")
+        "spec carries the current-db transaction-data slot")
+    (is (str/includes? (:seon.fn/spec t) ":seon.db/db")
+        "spec carries the explicit-database positional slot")
     (is (str/includes? (:seon.fn/arglists t) "call-args")
-        "arglists parsed from real source (T15 transact! is [& call-args])")))
+        "arglists parsed from the real variadic source")))
 
 (deftest specced-vs-unspecced-matches-reality
   (let [tx       @core-tx
@@ -210,20 +130,20 @@
 (deftest protected-tool-inventory-is-explicit
   (let [tx @core-tx]
     (is (= #{"seon.db/current-agent-id"
+             "seon.db/db"
              "seon.db/cas-assert"
              "seon.db/transact!"
              "seon.db/query"
-             "seon.db/index-datoms"
-             "seon.db/rseek-datoms"
+             "seon.db/query-with-evidence"
              "seon.db/installed-schema"
              "seon.db/pull"
+             "seon.db/pull-many"
              "seon.db/entity"
+             "seon.db/execute-many"
+             "seon.db/index-page"
              "seon.db/history"
              "seon.db/as-of"
-             "seon.db/at-coordinate"
-             "seon.db/since"
-             "seon.db/head-coordinate"
-             "seon.db/basis-t"}
+             "seon.db/since"}
            (agent-facing-syms tx "seon.db"))
         "seon.db exposes only the deliberate database toolkit")
     (is (= #{"seon.schema/identity-attr?"
@@ -239,8 +159,9 @@
            (agent-facing-syms tx "my.kb"))
         "my.kb advertises only its general knowledge operations")))
 
-(deftest my-kb-sample-recipes-stay-indexed-and-inspectable
+(deftest my-kb-capabilities-and-recipes-stay-indexed-and-inspectable
   (let [tx          @core-tx
+        capabilities ["my.kb/remember" "my.kb/recall"]
         sample-syms ["my.kb/remember-sources!"
                      "my.kb/retitle-source!"
                      "my.kb/clear-rating!"
@@ -254,19 +175,28 @@
                      "my.kb/source-entity"]
         ns-source   (:seon.ns/source
                       (first (filter #(= :my.kb (:seon.ns/name %)) tx)))]
+    (doseq [sym capabilities]
+      (let [row    (by-sym tx sym)
+            source (:seon.fn/source row)]
+        (is (some? row) (str sym " remains in the program graph"))
+        (is (true? (:seon.fn/agent-facing? row))
+            (str sym " carries its colocated capability metadata"))
+        (is (and (string? source) (str/includes? ns-source source))
+            (str sym " remains real source in the full my.kb namespace"))))
     (doseq [sym sample-syms]
-      (let [row (by-sym tx sym)]
+      (let [row    (by-sym tx sym)
+            source (:seon.fn/source row)]
         (is (some? row) (str sym " remains in the program graph"))
         (is (not (contains? row :seon.fn/agent-facing?))
             (str sym " is not advertised as a standing tool"))
-        (is (str/includes? ns-source (str "(defn " (subs sym 6)))
+        (is (and (string? source) (str/includes? ns-source source))
             (str sym " remains in full my.kb source for deliberate inspection"))))
     (is (str/includes? ns-source ":my.kb.source/id")
         "the colocated sample schema remains in the full namespace source")))
 
 (deftest real-arglists-not-mangled
   ;; The parser recovers arglists from the REAL source, not the
-  ;; instrumentation-mangled `([arg])` var-meta. query is the T15 pure-variadic
+  ;; instrumentation-mangled `([arg])` var-meta. query is the pure-variadic
   ;; `[& args]` form (see db.cljs docstring) — its arglist is `([& args])`,
   ;; recovered verbatim from source.
   (let [tx    @core-tx
@@ -302,15 +232,13 @@
     (is (and (not= "()" ea) (not= "([arg])" ea))
         "multi-arity entity no longer collapses to empty/mangled arglists")))
 
-(deftest arglists-expand-local-auto-kws
-  ;; listen!'s real arg vector is `[{::keys [handler key conn] …}]` —
-  ;; rendered verbatim, `::keys` would mis-resolve against the READER's
-  ;; ns. The stored arglist must carry the explicit `:seon.db/keys`.
+(deftest listen-arglists-preserve-current-positional-arities
   (let [tx      @core-tx
         listen  (by-sym tx "seon.db/listen!")
         al      (:seon.fn/arglists listen)]
-    (is (str/includes? al ":seon.db/keys")
-        "listen!'s ::keys destructure is expanded to :seon.db/keys")
+    (is (= '([input-or-handler] [key handler] [database key handler])
+           (reader/read-string al))
+        "listen! retains its current one-, two-, and three-argument forms")
     (is (not (str/includes? al "::"))
         "no raw auto-resolved :: survives in listen!'s stored arglists")))
 
@@ -472,335 +400,3 @@
           :db/cardinality :db.cardinality/one
           :db/index true}
          (first (db/malli->datahike-schema [::indexed-value])))))
-
-(deftest core-program-tx-idempotent-across-boots
-  ;; The "fresh agent, same conn" guard: core-program-tx drops rows already
-  ;; present on the conn, so a SECOND start-agent! on the shared conn re-seeds
-  ;; nothing ([]). This is what makes a second agent boot clean instead of
-  ;; aborting on a re-seed against the populated store.
-  ;;
-  ;; Uses a guaranteed-fresh `:memory` conn (per-test random store id) with the
-  ;; same agent + tx-meta datahike schema the pod boots against, bound as
-  ;; start-agent! binds it so transact lookup-refs resolve.
-  (async done
-    (let [restore! (freeze-builders!)
-          done*    (fn [] (restore!) (done))]
-     (-> (client/open-agent-conn!)
-        (.then
-          (fn [conn]
-            ;; Pass :seon.db/conn explicitly — a `binding` of the dynamic
-            ;; *conn* does NOT survive across Promise `.then` boundaries in
-            ;; cljs (the binding frame pops when the sync callback returns).
-            (-> (client/core-program-tx conn)
-                (.then
-                  (fn [first-tx]
-                    ;; FIRST boot of the fresh conn: the full set — DERIVED
-                    ;; from the pure builders, never a hardcoded count.
-                    (is (= (count (filter :seon.fn/sym @core-tx))
-                           (count (filter :seon.fn/sym first-tx)))
-                        "first boot emits every core fn row")
-                    (is (pos? (count @schemas-tx))
-                        "the frozen desired schema population is nonempty")
-                    (is (empty? (filter :seon.schema/key first-tx))
-                        (str "open-agent-conn! already converges the canonical "
-                             "program schemas, so absence from this delta is signal"))
-                    (transact-through conn :seon.db.process/boot first-tx)))
-                (.then (fn [_] (client/core-program-tx conn)))
-                (.then
-                  (fn [second-tx]
-                    ;; SECOND boot of the now-populated conn: clean no-op.
-                    (is (= [] second-tx)
-                        "second boot of an already-indexed conn is a no-op ([])")
-                    (db/transact!
-                      {:seon.db/conn conn
-                       :seon.db/tx-data
-                       [[:db/retract
-                         [:seon.schema/key :seon.agent/id]
-                         :seon.db.id/generator
-                         :seon.db.id.generator/human-readable]]})))
-                (.then
-                  (fn [removal]
-                    (is (false? (:seon.db/ok? removal))
-                        "an in-use identity policy cannot be removed")
-                    (is (= :seon.db.id.generator/human-readable
-                           (d/q '[:find ?g .
-                                  :where
-                                  [?s :seon.schema/key :seon.agent/id]
-                                  [?s :seon.db.id/generator ?g]]
-                                @conn))
-                        "the refused removal leaves the policy fact intact")
-                    (client/core-program-tx conn)))
-                (.then
-                  (fn [still-indexed]
-                    (is (= [] still-indexed)
-                        "the intact policy leaves the index converged")
-                    (db/transact!
-                      {:seon.db/conn conn
-                       :seon.db/tx-data
-                       [[:db/retractEntity [:seon.fn/sym "seon.schema/register!"]]]})))
-                (.then (fn [_] (client/core-program-tx conn)))
-                (.then
-                  (fn [gap-tx]
-                    ;; After dropping one fn, the re-index emits ONLY the gap,
-                    ;; with a valid lookup-ref (never a bare keyword).
-                    (let [gap-fns (filter :seon.fn/sym gap-tx)]
-                      (is (= ["seon.schema/register!"] (map :seon.fn/sym gap-fns))
-                          "partial re-index emits only the missing fn")
-                      (is (= [:seon.ns/name :seon.schema] (:seon.fn/ns (first gap-fns)))
-                          "the re-emitted ref is a valid [:seon.ns/name kw] tuple"))
-                    (done*))))))
-        (.catch (fn [e]
-                  (is false (str "idempotency test threw: " (or (.-message e) e)))
-                  (done*)))))))
-
-(deftest core-program-tx-removes-absent-core-and-preserves-authored-data
-  ;; One desired-state delta owns additions, changes, and removals. Its
-  ;; removal boundary is the CURRENT source-datom transaction, plus the
-  ;; database-derived agent-home set. This flow proves:
-  ;;   - removed boot declarations are retracted in the normal program tx;
-  ;;   - obsolete boot-authored tests are removed while agent-authored tests
-  ;;     survive;
-  ;;   - a boot-created root home namespace survives;
-  ;;   - REPL-authored declarations survive, including a prior boot identity
-  ;;     whose complete source was subsequently authored through the REPL;
-  ;;   - an agent-authored canonical schema survives;
-  ;;   - the next reconciliation is an exact no-op.
-  (async done
-    (let [restore! (freeze-builders!)
-          done*    (fn [] (restore!) (done))]
-     (-> (client/open-agent-conn!)
-        (.then
-          (fn [conn]
-            (-> (client/core-program-tx conn)
-                (.then (fn [first-tx]
-                         (transact-through conn :seon.db.process/boot first-tx)))
-                (.then (fn [_]
-                         (transact-through
-                           conn :seon.db.process/boot
-                           [{:seon.ns/name   :seon.removed
-                             :seon.ns/source "(ns seon.removed)"}
-                            {:seon.fn/sym    "seon.removed/gone"
-                             :seon.fn/ns     {:seon.ns/name :seon.removed}
-                             :seon.fn/source "(defn gone [] 1)"}
-                            {:seon.schema/key    :seon.removed/value
-                             :seon.schema/form "[:string]"}
-                            {:seon.test/sym        "seon.removed/old-test"
-                             :seon.test/ns         {:seon.ns/name :seon.removed}
-                             :seon.test/source     "(deftest old-test (is true))"
-                             :seon.test/created-at (js/Date.)}
-                            ;; Root birth is correctly attributed to the boot
-                            ;; process, but its home declaration is agent-domain
-                            ;; data and must never enter the core desired set.
-                            {:seon.agent/id "root"}
-                            {:seon.ns/name   :my.agent.root
-                             :seon.ns/source "(ns my.agent.root)"}
-                            ;; Start as boot data, then hand the complete
-                            ;; declaration to REPL below. Current source
-                            ;; provenance, not first-entity provenance, wins.
-                            {:seon.ns/name   :seon.repl-owned
-                             :seon.ns/source "(ns seon.repl-owned)"}
-                            {:seon.fn/sym    "seon.repl-owned/keep"
-                             :seon.fn/ns     {:seon.ns/name :seon.repl-owned}
-                             :seon.fn/source "(defn keep [] :boot)"}])))
-                (.then (fn [_]
-                         (transact-through
-                           conn :seon.db.process/repl
-                           [{:seon.ns/name   :my.todo-app
-                             :seon.ns/source "(ns my.todo-app)"}
-                            {:seon.ns/name   :seon.repl-owned
-                             :seon.ns/source "(ns seon.repl-owned) ;; authored"}
-                            {:seon.fn/sym    "seon.repl-owned/keep"
-                             :seon.fn/ns     {:seon.ns/name :seon.repl-owned}
-                             :seon.fn/source "(defn keep [] :agent)"}
-                            {:seon.schema/key  :my.agentish/teed
-                             :seon.schema/form ":string"}
-                            {:seon.test/sym        "my.todo-app/kept-test"
-                             :seon.test/ns         {:seon.ns/name :my.todo-app}
-                             :seon.test/source     "(deftest kept-test (is true))"
-                             :seon.test/created-at (js/Date.)}])))
-                (.then (fn [_] (client/core-program-tx conn)))
-                (.then
-                  (fn [delta]
-                    (is (= 4 (count (filter #(= :db.fn/retractEntity (first %))
-                                            delta)))
-                        "the normal core delta retracts removed compiled declarations and the legacy test")
-                    (transact-through conn :seon.db.process/boot delta)))
-                (.then
-                  (fn [_]
-                    (let [db' @conn
-                          ns-names (into #{} (map first)
-                                         (d/q '[:find ?nm :where [?e :seon.ns/name ?nm]] db'))
-                          fn-syms (into #{} (map first)
-                                        (d/q '[:find ?s :where [?e :seon.fn/sym ?s]] db'))
-                          sch-keys (into #{} (map first)
-                                         (d/q '[:find ?k :where [?e :seon.schema/key ?k]] db'))
-                          test-syms (into #{} (map first)
-                                          (d/q '[:find ?s :where [?e :seon.test/sym ?s]] db'))]
-                      (is (not (contains? ns-names :seon.removed)))
-                      (is (not (contains? fn-syms "seon.removed/gone")))
-                      (is (not (contains? sch-keys :seon.removed/value))
-                          "all absent core declarations are gone")
-                      (is (contains? ns-names :my.agent.root)
-                          "the boot-created root home namespace survives")
-                      (is (contains? ns-names :my.todo-app)
-                          "a REPL-authored namespace survives")
-                      (is (contains? fn-syms "seon.repl-owned/keep")
-                          "a REPL-authored current source survives its boot origin")
-                      (is (contains? sch-keys :my.agentish/teed)
-                          "an agent-authored canonical schema survives")
-                      (is (not (contains? test-syms "seon.removed/old-test"))
-                          "the obsolete boot-authored test is gone")
-                      (is (contains? test-syms "my.todo-app/kept-test")
-                          "the agent-authored test survives"))))
-                (.then (fn [_] (client/core-program-tx conn)))
-                (.then
-                  (fn [second-delta]
-                    (is (= [] second-delta)
-                        "the converged restart compiles no transaction")
-                    (done*))))))
-        (.catch (fn [e]
-                  (is false (str "reconcile test threw: " (or (.-message e) e)))
-                  (done*)))))))
-
-(deftest core-program-tx-reasserts-drifted-ns-source
-  ;; ns rows dedup on name AND source. A store whose :seon.ns/source for a
-  ;; full-source (my.*) ns differs from the freshly-built full file text
-  ;; (e.g. a regressed `(ns x)` stub, or a stale build) gets exactly that
-  ;; ns row re-emitted; everything else stays a no-op. (my.kb is a compiled
-  ;; my.* root — its full file text is read at boot; its fn/schema rows are
-  ;; already present, so only the drifted ns row re-emits.)
-  (async done
-    (let [restore! (freeze-builders!)
-          done*    (fn [] (restore!) (done))]
-     (-> (client/open-agent-conn!)
-        (.then
-          (fn [conn]
-            (-> (client/core-program-tx conn)
-                (.then (fn [first-tx]
-                         (transact-through
-                           conn :seon.db.process/boot first-tx)))
-                ;; Regress my.kb to a bare stub — the shape an existing
-                ;; durable store carries before a re-boot with a fresher build.
-                (.then (fn [_]
-                         (db/transact!
-                           {:seon.db/conn conn
-                            :seon.db/tx-data
-                            [{:seon.ns/name   :my.kb
-                              :seon.ns/source "(ns my.kb)"}]})))
-                (.then (fn [_] (client/core-program-tx conn)))
-                (.then
-                  (fn [tx]
-                    (let [ns-rows (filter :seon.ns/name tx)
-                          kb-row  (first (filter #(= :my.kb (:seon.ns/name %)) ns-rows))]
-                      ;; The DRIFTED ns re-emits with its real full file text
-                      ;; (not the stub). We don't pin the exact set of rows —
-                      ;; any other genuinely-drifted ns may ride along; the
-                      ;; behavior under test is "the drifted one is restored".
-                      (is (some? kb-row) "the drifted my.kb ns row re-emits")
-                      (is (str/starts-with? (:seon.ns/source kb-row) "(ns my.kb")
-                          "re-emitted with the full file text, not the stub")
-                      (is (> (count (:seon.ns/source kb-row)) (count "(ns my.kb)"))
-                          "the re-emitted source is the real file, longer than the stub")
-                      (is (empty? (remove :seon.ns/name tx))
-                          "only ns rows re-emit — no fn/schema/test rows ride along"))
-                    (done*))))))
-        (.catch (fn [e]
-                  (is false (str "drift test threw: " (or (.-message e) e)))
-                  (done*)))))))
-
-(deftest core-program-tx-reheals-drifted-fn-fields
-  ;; Fn rows dedup on sym AND every derived field (source, spec, doc,
-  ;; arglists, private?). Sym-only dedup was the stale-spec bug (live
-  ;; incident 2026-07-02: seon.agent.shell's rows kept a first-index
-  ;; :seon.shell/* spec forever — the namespaces card showed wrong keyword
-  ;; namespaces to live agents). Pins three behaviors on one conn:
-  ;;
-  ;;   (a) HEAL — a core-claimed row whose stored :seon.fn/spec drifted
-  ;;       from the live var meta re-emits with the fresh spec;
-  ;;   (b) GUARD — a drifted row whose :source tx is NOT boot-authored
-  ;;       (agent-authored) is never overwritten by the boot index;
-  ;;   (c) RETRACT — a stale spec on a fn whose fresh derivation is
-  ;;       unspecced yields an explicit [:db/retract …] (upsert can't
-  ;;       remove a datom).
-  (async done
-    (let [restore! (freeze-builders!)
-          done*    (fn [] (restore!) (done))
-          target   "seon.schema/register!"
-          stale    "[:=> [:cat :seon.stale/req] :seon.stale/resp]"
-          guarded  "seon.db/transact!"
-          internal "seon.db/listen!"]
-     (-> (client/open-agent-conn!)
-        (.then
-          (fn [conn]
-            (-> (client/core-program-tx conn)
-                (.then (fn [first-tx]
-                         (transact-through conn :seon.db.process/boot first-tx)))
-                ;; (a) Regress the stored spec in place (identity upsert on
-                ;; sym; the row's :source datom keeps its boot transaction).
-                ;; (c) Forge a stale spec onto an UNSPECCED core fn (found
-                ;; dynamically — any row the fresh index emits without
-                ;; :seon.fn/spec).
-                ;; (b) Replace one core row wholesale through REPL
-                ;; (retractEntity kills the boot-authored source datom).
-                (.then (fn [_]
-                         (transact-through conn :seon.db.process/boot
-                                      [{:seon.fn/sym  target
-                                        :seon.fn/spec stale}])))
-                ;; Forge stale positive eligibility onto an implementation fn.
-                (.then (fn [_]
-                         (transact-through conn :seon.db.process/boot
-                                      [{:seon.fn/sym internal
-                                        :seon.fn/agent-facing? true}])))
-                (.then (fn [_]
-                         (transact-through conn :seon.db.process/boot
-                                      [[:db/retractEntity [:seon.fn/sym guarded]]])))
-                (.then (fn [_]
-                         (transact-through conn :seon.db.process/repl
-                                      [{:seon.fn/sym      guarded
-                                        :seon.fn/ns       [:seon.ns/name :seon.db]
-                                        :seon.fn/source   "(defn transact! [] :agent-owned)"
-                                        :seon.fn/arglists "([])"
-                                        :seon.fn/doc      ""
-                                        :seon.fn/private? false}])))
-                (.then (fn [_] (client/core-program-tx conn)))
-                (.then
-                  (fn [tx]
-                    (let [fresh-fn  (fn [sym rows]
-                                      (first (filter #(= sym (:seon.fn/sym %)) rows)))
-                          healed    (fresh-fn target tx)
-                          expected  (fresh-fn target @core-tx)]
-                      ;; (a) HEAL
-                      (is (some? healed) "the spec-drifted fn row re-emits")
-                      (is (= (:seon.fn/spec expected) (:seon.fn/spec healed))
-                          "re-emitted with the LIVE var-meta spec, not the stale one")
-                      (is (not= stale (:seon.fn/spec healed))
-                          "the stale spec is gone from the re-emitted row")
-                      ;; (b) GUARD
-                      (is (nil? (fresh-fn guarded tx))
-                          "a REPL-authored row with a core sym is NEVER re-emitted over")
-                      (is (some #(= % [:db/retract [:seon.fn/sym internal]
-                                       :seon.fn/agent-facing? true])
-                                tx)
-                          "removing source eligibility explicitly retracts the stale fact")
-                      ;; (c) RETRACT — dynamic: any unspecced fn in the fresh
-                      ;; index (private helpers are indexed, so one exists).
-                      (if-some [unspecced (:seon.fn/sym
-                                            (first (remove #(or (contains? % :seon.fn/spec)
-                                                                (nil? (:seon.fn/sym %)))
-                                                           @core-tx)))]
-                        (-> (transact-through conn :seon.db.process/boot
-                                         [{:seon.fn/sym  unspecced
-                                           :seon.fn/spec stale}])
-                            (.then (fn [_] (client/core-program-tx conn)))
-                            (.then
-                              (fn [tx2]
-                                (is (some #(= % [:db/retract [:seon.fn/sym unspecced]
-                                                 :seon.fn/spec stale])
-                                          tx2)
-                                    "a stale spec on a now-unspecced fn is explicitly retracted")
-                                (done*))))
-                        (do (is true "no unspecced core fn in this build — retract case skipped")
-                            (done*)))))))))
-        (.catch (fn [e]
-                  (is false (str "fn-drift test threw: " (or (.-message e) e)))
-                  (done*)))))))

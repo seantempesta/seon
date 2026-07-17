@@ -16,7 +16,8 @@
    function contracts are invalid without the schemas they reference."
   (:require
     [clojure.string :as str]
-    [seon.client :as client]))
+    [seon.client :as client]
+    [seon.config :as config]))
 
 (def ^:private !my-core-rows
   (delay
@@ -25,7 +26,7 @@
                  (let [s (or (:seon.fn/sym row)
                              (some-> (:seon.ns/name row) name))]
                    (and s (str/starts-with? (str s) "my."))))
-               (client/index-core!))
+               (client/index-core! (config/resolve-config-singleton {})))
       (client/index-schemas))))
 
 (defn my-core-rows

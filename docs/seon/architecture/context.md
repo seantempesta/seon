@@ -505,17 +505,14 @@ restores the declared config singleton/routes/root-context/skill-import subset. 
 stale exclusive rows retract; outside facts remain untouched; equal state emits
 no transaction. A config-free boot skips this transition. The write is
 `{user root, process config}`. From attachment onward every
-runtime read is a
-db query: the accessors (`config/eval-render-cap`, `config/on-core-error`,
-`config/web-policy`, `config/namespaces-policy`, the dials …) keep their names
-and arities but read `config/config-view` — the seeded singleton datom (a
-projection is threaded once per snapshot or cached only by a branch-qualified
-basis/commit coordinate—never by a db value). Only a tiny compiled kernel policy
-  may serve the pre-connection database-connect/error path; after attachment, missing
-required config is a typed readiness error, never manifest/default fallback.
-`seon.config` cannot require `seon.db`
-(the require dir is db→error→config), so `seon.db` INJECTS the reader — the
-same seam pattern as `seon.error`'s db-hooks. Three collection knobs
+runtime read is an ordinary singleton acquisition at the operation's immutable
+database value. The operation decodes its EDN slots once and passes that map to
+pure accessors such as `config/eval-render-cap`, `config/on-core-error`,
+`config/web-policy`, and `config/namespaces-policy`. No accessor owns an atom,
+injected reader, manifest fallback, or second projection cache. Explicitly
+selected manifest data or resolved code defaults are valid only before
+attachment; afterward missing required config is a typed readiness error.
+Collection knobs
 (`:seon.config/always`, `:seon.config.repair/classes`,
 `:seon.agent.web/allowed-domains`) ride the mixed-`:or` EDN-slot bridge (the
 `home-requires` precedent) — one cardinality-one datom that upsert replaces.

@@ -152,9 +152,10 @@
    the boot indexer stores these nses' real file source so a per-agent
    `::full-source` pin CAN promote them to full. It does NOT itself render
    anything full — per-agent SELECTION lives in [[namespaces-block]]. The
-   policy read is memoized — no per-call file read."
-  [ns-name]
-  (contains? (:seon.config/always (config/namespaces-policy))
+   policy is ordinary config data supplied by the boot indexer."
+  [configuration ns-name]
+  (contains? (:seon.config/always
+               (config/namespaces-policy configuration))
              (if (keyword? ns-name) ns-name (keyword (str ns-name)))))
 
 (defn full-source-ns?
@@ -181,13 +182,14 @@
    Third-party (`acme`) roots are full-source too, gated separately by
    `seon.client/extra-src-ns-strs` (the same file read). Every other ns gets
    the minimal `(ns x)` stub at boot (still indexed + searchable)."
-  {:malli/schema [:=> [:cat [:or :string :keyword :symbol]] :boolean]}
-  [ns-name]
+  {:malli/schema [:=> [:cat :seon.config/singleton
+                       [:or :string :keyword :symbol]] :boolean]}
+  [configuration ns-name]
   (let [s    (if (keyword? ns-name) (name ns-name) (str ns-name))
         base (base-ns-name s)]
     (boolean (or (my-ns-name? base)
                  (and (not (hidden-ns-name? s))
-                      (always-full? base))))))
+                      (always-full? configuration base))))))
 
 (defn- seon-framework-ns?
   "True when `ns-name` (string/keyword/symbol) is a `seon.*` framework ns —

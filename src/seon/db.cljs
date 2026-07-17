@@ -581,6 +581,7 @@
 
 (defn ^:seon.fn/agent-facing? current-agent-id
   "Return this async fiber's agent id, if one is active."
+  {:malli/schema [:=> [:cat] [:maybe :string]]}
   []
   (internal/current-agent-id))
 
@@ -756,8 +757,10 @@
   "Commit ordinary transaction data through the authoritative writer."
   {:malli/schema
    [:function
-    [:=> [:catn [::request ::transact-request]] ::transact-response]
-    [:=> [:catn [::tx-data ::tx-data]] ::transact-response]]}
+    [:=> [:catn [::request [:or ::transact-request ::tx-data]]]
+     ::transact-response]
+    [:=> [:catn [::db :seon.db/db] [::tx-data ::tx-data]]
+     ::transact-response]]}
   [& call-args]
   (try
     (let [arg (cond

@@ -37,6 +37,7 @@
     [malli.core :as m]
     [my.kb.shared :as kb]
     [seon.client :as client]
+    [seon.config :as config]
     [seon.agent.ctx :as ctx]
     [seon.db :as db]
     [seon.error :as err]
@@ -70,7 +71,7 @@
     seon.error seon.error.instrument my.kb.shared])
 
 (def ^:private exact-targets
-  (->> (client/index-core!)
+  (->> (client/index-core! (config/resolve-config-singleton {}))
        (keep (fn [{sym-str :seon.fn/sym spec-str :seon.fn/spec}]
                (when (and sym-str spec-str)
                  (let [sym (symbol sym-str)]
