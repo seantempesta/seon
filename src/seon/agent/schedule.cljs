@@ -26,6 +26,7 @@
     [seon.config :as config]
     [seon.db :as db]
     [seon.db.id :as db.id]
+    [seon.db.protocol :as db.protocol]
     [seon.derive :as derive]
     [seon.runtime.admission :as admission]
     [seon.schema :as schema]))
@@ -244,7 +245,7 @@
 ;; scope, so the agent's first driven turn re-reads "the schedule fired and ran
 ;; THIS" instead of waking blind. That turn is stamped
 ;; `:seon.agent.turn/scheduled? true` — it renders in the transcript but does
-;; NOT count toward turn-limit ([[seon.derive/run-turn-count]] excludes it, #66).
+;; NOT count toward the run's work bound (scheduled turns are excluded).
 ;; A broken scheduled fn records a failed eval (errors are values) and never
 ;; crashes the ticker. Absent exec-fn! (tests) ⇒ open-only.
 ;;
@@ -293,41 +294,140 @@
    [:seon.agent.schedule/fired [:vector ::fired-entry]]
    [:seon/error {:optional true} :map]])
 
+(schema/register! ::direct-error
+  [:map [:seon.error/message :string]])
+
+(defn- error-value? [value]
+  (and (map? value) (string? (:seon.error/message value))))
+
+(defn- query-member [database query arguments]
+  {::db.protocol/operation db.protocol/query-operation
+   ::db/db database
+   ::db.protocol/query-form query
+   ::db.protocol/arguments arguments})
+
+(defn- successful-member? [member]
+  (true? (::db.protocol/success? member)))
+
+(defn- member-result [member]
+  (:datahike.query/result member))
+
+(defn- failed-member [member]
+  {:seon.error/message
+   (str "Schedule acquisition failed: "
+        (or (::db.protocol/error member)
+            "the database returned no error message."))})
+
+(def ^:private schedule-rows-query
+  '[:find ?id
+           (pull ?agent
+                 [:seon.agent/terminated-at
+                  {:seon.agent/run
+                   [:seon.agent.run/status :seon.agent.run/paused-at]}])
+           ?cron ?function
+    :where
+    [?agent :seon.agent/id ?id]
+    [?agent :seon.agent/schedules ?schedule]
+    [?schedule :seon.agent.schedule/cron ?cron]
+    [?schedule :seon.agent.schedule/fn ?function]])
+
+(def ^:private crashed-runs-query
+  '[:find ?id ?closed-at
+    :where
+    [?agent :seon.agent/id ?id]
+    [?agent :seon.agent/schedules _]
+    [?run :seon.agent.run/agent ?agent]
+    [?run :seon.agent.run/closed-reason :crashed]
+    [?run :seon.agent.run/closed-at ?closed-at]])
+
+(def ^:private scheduled-starts-query
+  '[:find ?id ?started-at
+    :where
+    [?agent :seon.agent/id ?id]
+    [?agent :seon.agent/schedules _]
+    [?run :seon.agent.run/agent ?agent]
+    [?run :seon.agent.run/trigger :schedule]
+    [?run :seon.agent.run/started-at ?started-at]])
+
+(defn ^:async ^:private acquire-schedule-facts [database]
+  (let [acquired
+        (await
+         (db/execute-many
+          {::db/db database
+           ::db/members
+           [(query-member database schedule-rows-query [])
+            (query-member database crashed-runs-query [])
+            (query-member database scheduled-starts-query [])]
+           ::db/max-result-weight 1048576}))
+        members (::db/results acquired)]
+    (cond
+      (error-value? acquired) acquired
+      (not= 3 (count members))
+      {:seon.error/message
+       "Schedule acquisition returned the wrong member count."}
+      (not (every? successful-member? members))
+      (failed-member (first (remove successful-member? members)))
+      :else
+      (let [[schedules crashes starts] (map member-result members)]
+        {:seon.agent.schedule/schedules schedules
+         :seon.agent.schedule/crashes crashes
+         :seon.agent.schedule/starts starts}))))
+
 (defn- minute-of
   "Whole-minute bucket of a Date — its epoch-ms floored to the minute."
   [d]
   (Math/floor (/ (.getTime d) 60000)))
 
 (defn- fired-this-minute?
-  "Does agent `agent-eid` already have a `:schedule`-triggered run STARTED in
-   the same wall-clock minute as `now`? The double-fire guard."
-  [agent-eid now]
+  "Did one of the agent's schedule runs start in this wall-clock minute?"
+  [started-at now]
   (let [nm (minute-of now)]
-    (boolean
-      (some (fn [started] (= nm (minute-of started)))
-            (db/query {:seon.db/query
-                       '[:find [?started ...]
-                         :in $ ?a
-                         :where
-                         [?r :seon.agent.run/agent ?a]
-                         [?r :seon.agent.run/trigger :schedule]
-                         [?r :seon.agent.run/started-at ?started]]
-                       :seon.db/args [agent-eid]})))))
+    (boolean (some #(= nm (minute-of %)) started-at))))
 
-(defn- agent-schedule-pairs
-  "Every `[cron fn]` pair agent `id` owns (cron + fn are both required on a
-   schedule, so this misses none). The fire path filters these by `due?` to get
-   the fns to run."
-  [id]
-  (db/query {:seon.db/query
-             '[:find ?cron ?fn
-               :in $ ?id
-               :where
-               [?a :seon.agent/id ?id]
-               [?a :seon.agent/schedules ?s]
-               [?s :seon.agent.schedule/cron ?cron]
-               [?s :seon.agent.schedule/fn ?fn]]
-             :seon.db/args [id]}))
+(defn- derived-state [agent]
+  (let [run (:seon.agent/run agent)]
+    (derive/state-from-primitives
+     (cond-> {:seon.agent.run/open? (= :open (:seon.agent.run/status run))}
+       (:seon.agent/terminated-at agent)
+       (assoc :seon.agent/terminated-at (:seon.agent/terminated-at agent))
+       (:seon.agent.run/paused-at run)
+       (assoc :seon.agent.run/paused-at (:seon.agent.run/paused-at run))))))
+
+(defn- breaker-tripped? [closed-at cutoff n]
+  (>= (count (filter #(>= (.getTime ^js %) cutoff) closed-at)) n))
+
+(defn- due-functions [rows started-at now]
+  (let [agent (second (first rows))]
+    (when (and (= :idle (derived-state agent))
+               (not (fired-this-minute? started-at now)))
+      (->> rows
+           (map (fn [[_ _ cron function]] [cron function]))
+           (filter (fn [[cron _]]
+                     (due? {:seon.agent.schedule/cron cron
+                            :seon.agent.schedule/now now})))
+           (mapv second)))))
+
+(defn ^:async ^:private fire-schedule! [id due-fns exec-fn! drive!]
+  (let [snapshot
+        (await
+         (run/open-run! {:seon.agent/id id
+                         :seon.agent.run/trigger :schedule}))]
+    (if (error-value? snapshot)
+      (let [current (await (run/current-run {:seon.agent/id id}))]
+        (cond
+          (error-value? current) current
+          current nil
+          :else snapshot))
+      (if-not (admission/available?)
+        {:seon/error (:seon/error (admission/unavailable))}
+        (do
+          (when exec-fn!
+            (await (exec-fn! {:seon.agent/id id
+                              :seon.agent.schedule/fns due-fns})))
+          (when (fn? drive!)
+            (drive! {:seon.agent/id id}))
+          {:seon.agent/id id
+           :seon.agent.run/id (:seon.agent.run/id snapshot)})))))
 
 (defn ^:async fire-due-schedules!
   "Open, run, and drive a `:schedule` run for every due :idle agent.
@@ -342,87 +442,64 @@
    `{:seon.agent.schedule/fired [{:seon.agent/id _ :seon.agent.run/id _} …]}` for
    the runs it opened. A pure function of the DB otherwise (no stored firing
    state). `^:async`."
-  {:malli/schema [:=> [:cat ::fire-due-request] ::fire-due-response]}
+  {:malli/schema [:=> [:cat ::fire-due-request]
+                  [:or ::fire-due-response ::direct-error]]}
   [{now :seon.agent/now exec-fn! :seon.agent.schedule/exec-fn!
     drive! :seon.agent.schedule/drive!}]
   (if-not (admission/available?)
     {:seon.agent.schedule/fired []
      :seon/error (:seon/error (admission/unavailable))}
-    (let [ids (db/query {:seon.db/query
-                         '[:find [?id ...]
-                           :where
-                           [?a :seon.agent/id ?id]
-                           [?a :seon.agent/schedules _]]})
-          ;; Piece 2d dials read ONCE per pass (config is boot-stable); the pure
-          ;; breaker check takes them as args.
-          breaker-n  (config/schedule-breaker-crash-count)
-          breaker-w  (config/schedule-breaker-window-ms)]
-      (loop [[id & more] ids
-             fired []]
-      (if (nil? id)
-        {:seon.agent.schedule/fired fired}
-        (let [a-eid (:db/id (db/entity {:seon.db/ref [:seon.agent/id id]}))
-              ;; SCHEDULE-WAKE CIRCUIT BREAKER (Piece 2d): with no auto-rewake,
-              ;; a schedule is the ONE autonomous repeat-wake source — so a
-              ;; deterministic wedge + a periodic schedule is a crash loop.
-              ;; Refuse the schedule wake for an agent with ≥N recent :crashed
-              ;; closes (derived, no stored state — the window sliding past
-              ;; re-enables it). Human/agent MESSAGES still wake it (that path
-              ;; is untouched); only THIS schedule gate is gated.
-              tripped? (derive/schedule-breaker-tripped? @db/*conn* id now
-                                                         breaker-n breaker-w)
-              ;; The DUE schedules' fns at `now` (idle + double-fire gated),
-              ;; BEFORE the breaker. A non-empty vector both decides `fire?` AND
-              ;; is what exec-fn! runs; an agent with two schedules due this
-              ;; minute runs BOTH on the one per-minute run.
-              due-raw (when (and a-eid
-                                 (derive/agent-idle? @db/*conn* id)
-                                 (not (fired-this-minute? a-eid now)))
-                        (->> (agent-schedule-pairs id)
-                             (filter (fn [[cron _]]
-                                       (due? {:seon.agent.schedule/cron cron
-                                              :seon.agent.schedule/now  now})))
-                             (mapv second)))
-              ;; Breaker refusal (Piece 2d): visible on an ACTUAL refusal (a
-              ;; schedule WAS due) — not per idle tick.
-              _        (when (and tripped? (seq due-raw))
-                         (js/console.warn
-                           (str "seon.agent.schedule: schedule wake REFUSED for "
+    (let [database (await (db/db))]
+      (if (error-value? database)
+        database
+        (let [facts (await (acquire-schedule-facts database))]
+          (if (error-value? facts)
+            facts
+            (let [schedule-rows (:seon.agent.schedule/schedules facts)
+                  schedules-by-id (group-by first schedule-rows)
+                  crashes-by-id (->> (:seon.agent.schedule/crashes facts)
+                                     (group-by first)
+                                     (reduce-kv
+                                      (fn [result id rows]
+                                        (assoc result id (mapv second rows)))
+                                      {}))
+                  starts-by-id (->> (:seon.agent.schedule/starts facts)
+                                    (group-by first)
+                                    (reduce-kv
+                                     (fn [result id rows]
+                                       (assoc result id (mapv second rows)))
+                                     {}))
+                  ids (sort (keys schedules-by-id))
+                  breaker-n (config/schedule-breaker-crash-count)
+                  breaker-w (config/schedule-breaker-window-ms)
+                  crash-cutoff (- (.getTime ^js now) breaker-w)]
+              (loop [[id & more] ids
+                     fired []]
+                (if (nil? id)
+                  {:seon.agent.schedule/fired fired}
+                  (let [rows (get schedules-by-id id)
+                        tripped?
+                        (breaker-tripped? (get crashes-by-id id [])
+                                          crash-cutoff breaker-n)
+                        due-raw
+                        (due-functions rows (get starts-by-id id []) now)
+                        _
+                        (when (and tripped? (seq due-raw))
+                          (js/console.warn
+                           (str "seon.agent.schedule: schedule wake refused for "
                                 id " — circuit breaker tripped (≥" breaker-n
-                                " :crashed closes in the last " breaker-w
-                                "ms). A human/agent message still wakes it; the "
-                                "window sliding past re-enables schedules.")))
-              due-fns  (when-not tripped? due-raw)]
-          (if-not (seq due-fns)
-            (recur more fired)
-            (let [snap (await (run/open-run!
-                                {:seon.agent/id          id
-                                 :seon.agent.run/trigger :schedule}))]
-              (if (false? (:seon.db/ok? snap))
-                (do
-                  ;; open-run! is CAS-guarded (atomic idle→running). A failure
-                  ;; here is usually BENIGN: a message woke the agent between
-                  ;; agent-idle? above and this open (the wake race), so the
-                  ;; CAS lost. If a run now exists that's the cause — skip
-                  ;; quietly. Otherwise it's a real failure worth surfacing.
-                  (when-not (derive/current-run @db/*conn* id)
-                    (js/console.error
-                      (str "seon.agent.schedule/fire-due-schedules!: open-run! "
-                           "FAILED for " id ": "
-                           (:seon.error/message (:seon.db/error snap)))))
-                  (recur more fired))
-                (do
-                  ;; RUN the due fns on the just-opened run FIRST (awaited, so
-                  ;; the result is in the transcript before the LLM drive renders
-                  ;; its prompt), THEN kick the loop (same as a wake).
-                  (if-not (admission/available?)
-                    {:seon.agent.schedule/fired fired
-                     :seon/error (:seon/error (admission/unavailable))}
-                    (do
-                      (when exec-fn!
-                        (await (exec-fn! {:seon.agent/id           id
-                                          :seon.agent.schedule/fns due-fns})))
-                      (when (fn? drive!) (drive! {:seon.agent/id id}))
-                      (recur more
-                             (conj fired {:seon.agent/id     id
-                                          :seon.agent.run/id (:seon.agent.run/id snap)}))))))))))))))
+                                " crashed closes in the last " breaker-w
+                                "ms). A human or agent message still wakes it; "
+                                "the sliding window re-enables schedules.")))
+                        due-fns (when-not tripped? due-raw)]
+                    (if-not (seq due-fns)
+                      (recur more fired)
+                      (let [outcome
+                            (await
+                             (fire-schedule! id due-fns exec-fn! drive!))]
+                        (cond
+                          (error-value? outcome) outcome
+                          (:seon/error outcome)
+                          (assoc outcome :seon.agent.schedule/fired fired)
+                          outcome (recur more (conj fired outcome))
+                          :else (recur more fired))))))))))))))

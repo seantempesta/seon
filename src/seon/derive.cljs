@@ -1,14 +1,15 @@
 (ns seon.derive
-  "Pure transformations and the remaining database-derived projections.
+  "Pure transformations and asynchronous database-derived projections.
 
-   The agent's derived state, turn counts, current-run, and the
+   The agent's derived state, turn counts, and the
    armable-agent ID query were each re-implemented 5+ times across `seon.agent`,
    `seon.agent.ctx`, `seon.render.default`, `seon.agent.run`, and
    `seon.agent.schedule`, every copy justified by dodging the
    `agent → ctx → render` require cycle. A pure `(derive-x db id)` needs
    NOTHING from those namespaces — only `seon.db` to read and `seon.schema`
    to name the shapes — so it sits BELOW all of them and the cycle evaporates.
-   Every consumer requires THIS ns and passes the db value it already holds.
+   Every consumer requires THIS ns, passes the database value it already
+   holds, and awaits database-backed projections.
 
    The ONE state rule is [[state-from-primitives]] (terminated → :idle →
    :paused → :running); [[derive-state]] reads the primitives off a db and
@@ -76,10 +77,26 @@
     :else         :running))
 
 ;; ============================================================
-;; Legacy derived readers below are migrated by their owning consumer cuts.
+;; Database-backed projections are async. They remain referentially transparent
+;; over the explicit immutable database value, while the JVM owns every read.
 ;; ============================================================
 
-(defn derive-state
+(schema/register! ::direct-error
+  [:map [:seon.error/message :string]])
+
+(defn- error-value? [value]
+  (and (map? value) (string? (:seon.error/message value))))
+
+(defn- primitives-from-agent [agent]
+  (let [run (:seon.agent/run agent)]
+    (cond-> {:seon.agent.run/open? (= :open (:seon.agent.run/status run))}
+      (:seon.agent/terminated-at agent)
+      (assoc :seon.agent/terminated-at (:seon.agent/terminated-at agent))
+
+      (:seon.agent.run/paused-at run)
+      (assoc :seon.agent.run/paused-at (:seon.agent.run/paused-at run)))))
+
+(defn ^:async derive-state
   "The agent's DERIVED FSM state over the db value `db`.
 
    One of :idle/:running/:paused/:terminated. Reads `terminated-at`,
@@ -88,18 +105,21 @@
    wake gate share."
   {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db]
                              [:seon.agent/id :seon.agent/id]]
-                  :seon.derive/state]}
-  [db agent-id]
-  (let [a   (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id agent-id]})
-        run (current-run db agent-id)]
-    (state-from-primitives
-      (cond-> {:seon.agent.run/open? (some? run)}
-        (:seon.agent/terminated-at a)   (assoc :seon.agent/terminated-at
-                                               (:seon.agent/terminated-at a))
-        (:seon.agent.run/paused-at run) (assoc :seon.agent.run/paused-at
-                                               (:seon.agent.run/paused-at run))))))
+                  [:or :seon.derive/state ::direct-error]]}
+  [database agent-id]
+  (let [agent (await
+               (db/pull
+                {:seon.db/db database
+                 :seon.db/selector
+                 [:seon.agent/terminated-at
+                  {:seon.agent/run
+                   [:seon.agent.run/status :seon.agent.run/paused-at]}]
+                 :seon.db/eid [:seon.agent/id agent-id]}))]
+    (if (error-value? agent)
+      agent
+      (state-from-primitives (primitives-from-agent agent)))))
 
-(defn run-form-count
+(defn ^:async run-form-count
   "How many FORMS (persisted evals) ran under run `run-id`.
 
    The repl-mode `:stream` work budget: a stream turn evals at most one
@@ -110,20 +130,22 @@
    db value; excludes schedule-fire turns."
   {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db]
                              [:seon.agent.run/id :seon.agent.run/id]]
-                  :int]}
-  [db run-id]
-  (or (db/query {:seon.db/db db
-                 :seon.db/query
-                 '[:find (count ?e) . :in $ ?rid
-                   :where
-                   [?r :seon.agent.run/id ?rid]
-                   [?t :seon.agent.turn/run ?r]
-                   (not [?t :seon.agent.turn/scheduled? true])
-                   [?t :seon.agent.turn/evals ?e]]
-                 :seon.db/args [run-id]})
-      0))
+                  [:or :int ::direct-error]]}
+  [database run-id]
+  (let [result
+        (await
+         (db/query {:seon.db/db database
+                    :seon.db/query
+                    '[:find (count ?e) . :in $ ?rid
+                      :where
+                      [?r :seon.agent.run/id ?rid]
+                      [?t :seon.agent.turn/run ?r]
+                      (not [?t :seon.agent.turn/scheduled? true])
+                      [?t :seon.agent.turn/evals ?e]]
+                    :seon.db/args [run-id]}))]
+    (if (error-value? result) result (or result 0))))
 
-(defn agent-turn-count
+(defn ^:async agent-turn-count
   "Turn count for an agent across ALL its runs.
 
    agent ← run
@@ -132,58 +154,82 @@
    pulled/touched agent map and on a FilteredDB."
   {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db]
                              [:seon.agent/id :seon.agent/id]]
-                  :int]}
-  [db agent-id]
-  (or (db/query {:seon.db/db db
-                 :seon.db/query
-                 '[:find (count ?t) . :in $ ?aid
-                   :where
-                   [?a :seon.agent/id ?aid]
-                   [?r :seon.agent.run/agent ?a]
-                   [?t :seon.agent.turn/run ?r]]
-                 :seon.db/args [agent-id]})
-      0))
+                  [:or :int ::direct-error]]}
+  [database agent-id]
+  (let [result
+        (await
+         (db/query {:seon.db/db database
+                    :seon.db/query
+                    '[:find (count ?t) . :in $ ?aid
+                      :where
+                      [?a :seon.agent/id ?aid]
+                      [?r :seon.agent.run/agent ?a]
+                      [?t :seon.agent.turn/run ?r]]
+                    :seon.db/args [agent-id]}))]
+    (if (error-value? result) result (or result 0))))
 
-(defn last-beat
+(defn ^:async last-beat
   "The run's heartbeat instant over `db`, or nil.
 
    `:seon.agent.run/last-beat-at`; nil when the run never beat / doesn't resolve."
   {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db]
                              [:seon.agent.run/id :seon.agent.run/id]]
-                  [:maybe :inst]]}
-  [db run-id]
-  (:seon.agent.run/last-beat-at
-    (db/entity {:seon.db/db db :seon.db/ref [:seon.agent.run/id run-id]})))
+                  [:or [:maybe :inst] ::direct-error]]}
+  [database run-id]
+  (let [run (await
+             (db/pull {:seon.db/db database
+                       :seon.db/selector [:seon.agent.run/last-beat-at]
+                       :seon.db/eid [:seon.agent.run/id run-id]}))]
+    (if (error-value? run) run (:seon.agent.run/last-beat-at run))))
 
-(defn agent-idle?
+(defn ^:async agent-idle?
   "Is the agent DERIVED `:idle` (wakeable)?
 
    Not terminated, no open run. A
    FILTER over [[derive-state]], never a re-encoding of the rule."
   {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db]
                              [:seon.agent/id :seon.agent/id]]
-                  :boolean]}
-  [db agent-id]
-  (= :idle (derive-state db agent-id)))
+                  [:or :boolean ::direct-error]]}
+  [database agent-id]
+  (let [state (await (derive-state database agent-id))]
+    (if (error-value? state) state (= :idle state))))
 
-(defn armable-agent-ids
-  "Born agent ids whose DERIVED state is `:idle` — the agents a trigger can
-   WAKE. Birth is the presence of the durable `:seon.eval/home-requires` fact;
+(defn ^:async armable-agent-ids
+  "Born agent ids whose derived state is `:idle`.
+
+   These are the agents a trigger can wake. Birth is the presence of the
+   durable `:seon.eval/home-requires` fact;
    an identity-only lookup target such as provenance genesis's reserved root
    stub is not yet a runnable agent. A FILTER over [[derive-state]] (one rule,
    never a re-encoded idle query), sorted asc for deterministic boot logs."
-  {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db]] [:vector :seon.agent/id]]}
-  [db]
-  (->> (db/query {:seon.db/db db
-                  :seon.db/query '[:find [?id ...]
-                                   :where
-                                   [?a :seon.agent/id ?id]
-                                   [?a :seon.eval/home-requires _]]})
-       (filter #(= :idle (derive-state db %)))
-       sort
-       vec))
+  {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db]]
+                  [:or [:vector :seon.agent/id] ::direct-error]]}
+  [database]
+  (let [rows
+        (await
+         (db/query
+          {:seon.db/db database
+           :seon.db/query
+           '[:find ?id
+                    (pull ?agent
+                          [:seon.agent/terminated-at
+                           {:seon.agent/run
+                            [:seon.agent.run/status
+                             :seon.agent.run/paused-at]}])
+             :where
+             [?agent :seon.agent/id ?id]
+             [?agent :seon.eval/home-requires _]]}))]
+    (if (error-value? rows)
+      rows
+      (->> rows
+           (keep (fn [[id agent]]
+                   (when (= :idle
+                            (state-from-primitives (primitives-from-agent agent)))
+                     id)))
+           sort
+           vec))))
 
-(defn resumable-agent-ids
+(defn ^:async resumable-agent-ids
   "Born agent ids whose derived state is not `:terminated`.
 
    These are the agent IDs this process must host, distinct from [[armable-agent-ids]]: a
@@ -192,17 +238,19 @@
    lookup targets are not hosts; birth requires `:seon.eval/home-requires`.
    Among born agents the only exclusion is the durable termination fact."
   {:malli/schema
-   [:=> [:catn [:seon.db/db :seon.db/db]] [:vector :seon.agent/id]]}
-  [db]
-  (->> (db/query {:seon.db/db db
-                  :seon.db/query
-                  '[:find [?id ...]
-                    :where
-                    [?a :seon.agent/id ?id]
-                    [?a :seon.eval/home-requires _]
-                    (not [?a :seon.agent/terminated-at _])]})
-       sort
-       vec))
+   [:=> [:catn [:seon.db/db :seon.db/db]]
+    [:or [:vector :seon.agent/id] ::direct-error]]}
+  [database]
+  (let [result
+        (await
+         (db/query {:seon.db/db database
+                    :seon.db/query
+                    '[:find [?id ...]
+                      :where
+                      [?a :seon.agent/id ?id]
+                      [?a :seon.eval/home-requires _]
+                      (not [?a :seon.agent/terminated-at _])]}))]
+    (if (error-value? result) result (->> result sort vec))))
 
 ;; ============================================================
 ;; Schedule-wake circuit breaker (multi-agent-context Piece 2d) — a derived
@@ -215,7 +263,7 @@
 ;; schedules on its own (worst case one wedge per window while the cause lasts).
 ;; ============================================================
 
-(defn recent-crash-count
+(defn ^:async recent-crash-count
   "Count of this agent's runs closed `:crashed` at/after `since` over `db`.
 
    Windows over the stored `:seon.agent.run/closed-at` instant (`:db/txInstant`
@@ -224,21 +272,26 @@
   {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db]
                              [:seon.agent/id :seon.agent/id]
                              [:since :inst]]
-                  :int]}
-  [db agent-id since]
-  (->> (db/query {:seon.db/db db
-                  :seon.db/query
-                  '[:find [?at ...] :in $ ?aid
-                    :where
-                    [?a :seon.agent/id ?aid]
-                    [?r :seon.agent.run/agent ?a]
-                    [?r :seon.agent.run/closed-reason :crashed]
-                    [?r :seon.agent.run/closed-at ?at]]
-                  :seon.db/args [agent-id]})
-       (filter #(>= (.getTime ^js %) (.getTime ^js since)))
-       count))
+                  [:or :int ::direct-error]]}
+  [database agent-id since]
+  (let [result
+        (await
+         (db/query {:seon.db/db database
+                    :seon.db/query
+                    '[:find [?at ...] :in $ ?aid
+                      :where
+                      [?a :seon.agent/id ?aid]
+                      [?r :seon.agent.run/agent ?a]
+                      [?r :seon.agent.run/closed-reason :crashed]
+                      [?r :seon.agent.run/closed-at ?at]]
+                    :seon.db/args [agent-id]}))]
+    (if (error-value? result)
+      result
+      (->> result
+           (filter #(>= (.getTime ^js %) (.getTime ^js since)))
+           count))))
 
-(defn schedule-breaker-tripped?
+(defn ^:async schedule-breaker-tripped?
   "Is the schedule-wake circuit breaker TRIPPED for this agent at `now`?
 
    True when ≥`n` of its runs closed `:crashed` within the last `window-ms`
@@ -251,25 +304,20 @@
                              [:seon.agent/now :inst]
                              [:seon.config.breaker/crash-count :int]
                              [:seon.config.breaker/window-ms :int]]
-                  :boolean]}
-  [db agent-id now n window-ms]
-  (>= (recent-crash-count db agent-id (js/Date. (- (.getTime ^js now) window-ms)))
-      n))
+                  [:or :boolean ::direct-error]]}
+  [database agent-id now n window-ms]
+  (let [crashes (await
+                 (recent-crash-count
+                  database agent-id
+                  (js/Date. (- (.getTime ^js now) window-ms))))]
+    (if (error-value? crashes) crashes (>= crashes n))))
 
 ;; ============================================================
-;; The agent FINGERPRINT — one map of the whole derived state. A pure DERIVED
-;; READ (no writes); state via [[state-from-primitives]], run/turn/step fields
-;; via cheap queries. Run-scoped fields are present only while a run is open.
-;; One `@*conn*` deref is threaded through every read so the fingerprint is
-;; one db view.
+;; The agent status is one asynchronous projection over one immutable database
+;; value. Every member remains an ordinary Datahike read owned by the JVM.
 ;; ============================================================
 
-(defn- total-turns
-  "Count of every turn the agent owns across all its runs (= [[agent-turn-count]])."
-  [db id]
-  (agent-turn-count db id))
-
-(defn- open-step-count
+(defn ^:async ^:private open-step-count
   "Count of the agent's unfinished LEAF steps — the real work still owed.
    With `my.plan` trees, milestone PARENTS stay stored `:open` (their
    done-ness is DERIVED — done once every child is), so a flat status count
@@ -278,36 +326,37 @@
    acyclic seon.db/seon.schema-only dependency) yields the actionable work.
    :active and :blocked leaves are still owed, so they count (use `next` for
    the READY-only focus queue)."
-  [db id]
-  (or (db/query {:seon.db/db db
-                 :seon.db/query
-                 '[:find (count ?step) . :in $ ?aid
-                   :where
-                   [?a :seon.agent/id ?aid]
-                   [?step :my.plan/agent ?a]
-                   [?step :my.plan/status ?s]
-                   [(!= ?s :done)]
-                   (not-join [?step] [?child :my.plan/parent ?step])]
-                 :seon.db/args [id]})
-      0))
+  [database id]
+  (let [result
+        (await
+         (db/query {:seon.db/db database
+                    :seon.db/query
+                    '[:find (count ?step) . :in $ ?aid
+                      :where
+                      [?a :seon.agent/id ?aid]
+                      [?step :my.plan/agent ?a]
+                      [?step :my.plan/status ?s]
+                      [(!= ?s :done)]
+                      (not-join [?step] [?child :my.plan/parent ?step])]
+                    :seon.db/args [id]}))]
+    (if (error-value? result) result (or result 0))))
 
-(defn- last-human-inbound-at
+(defn ^:async ^:private last-human-inbound-at
   "The `:at` of the latest inbound `:human`-origin message to the agent, or
    nil when none."
-  [db id]
-  (let [my-eid (:db/id (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id id]}))]
-    (when my-eid
-      (->> (db/query {:seon.db/db db
-                      :seon.db/query
-                      '[:find ?at :in $ ?me
-                        :where
-                        [?m :seon.agent.message/to ?me]
-                        [?m :seon.agent.message/origin :human]
-                        [?m :seon.agent.message/at ?at]]
-                      :seon.db/args [my-eid]})
-           (map first)
-           (sort-by #(.getTime ^js %))
-           last))))
+  [database id]
+  (let [result
+        (await
+         (db/query {:seon.db/db database
+                    :seon.db/query
+                    '[:find (max ?at) . :in $ ?aid
+                      :where
+                      [?agent :seon.agent/id ?aid]
+                      [?message :seon.agent.message/to ?agent]
+                      [?message :seon.agent.message/origin :human]
+                      [?message :seon.agent.message/at ?at]]
+                    :seon.db/args [id]}))]
+    (if (error-value? result) result result)))
 
 (schema/register! :seon.derive/closed-run
   [:map
@@ -318,7 +367,7 @@
    [:seon.agent.run/result {:optional true} :string]
    [:seon.agent.run/result-ref {:optional true} :seon.db/ref]])
 
-(defn latest-closed-run
+(defn ^:async latest-closed-run
   "The agent's most-recently-started closed run entity, or nil.
 
    This is the one immutable run-outcome projection used by status, child
@@ -326,40 +375,63 @@
    installed so old/unseeded database values omit the fact cleanly."
   {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db]
                              [:seon.agent/id :string]]
-                  [:or :nil :seon.derive/closed-run]]}
-  [db id]
-  (when (contains? (db/installed-schema db) :seon.agent.run/closed-reason)
-    (some->> (db/query {:seon.db/db db
+                  [:or :nil :seon.derive/closed-run ::direct-error]]}
+  [database id]
+  (let [installed (await (db/installed-schema database))]
+    (cond
+      (error-value? installed) installed
+      (not (contains? installed :seon.agent.run/closed-reason)) nil
+      :else
+      (let [rows
+            (await
+             (db/query {:seon.db/db database
                         :seon.db/query
-                        '[:find ?r ?started :in $ ?aid
+                        '[:find ?run ?started :in $ ?aid
                           :where
-                          [?a :seon.agent/id ?aid]
-                          [?r :seon.agent.run/agent ?a]
-                          [?r :seon.agent.run/closed-reason]
-                          [?r :seon.agent.run/started-at ?started]]
-                        :seon.db/args [id]})
-             (sort-by #(.getTime ^js (second %)))
-             last
-             first
-             (#(db/entity {:seon.db/db db :seon.db/ref %}))
-             ((fn [run]
-                (cond-> (select-keys run
-                                     [:seon.agent.run/id
-                                      :seon.agent.run/started-at
-                                      :seon.agent.run/closed-reason
-                                      :seon.agent.run/closed-at
-                                      :seon.agent.run/result
-                                      :seon.agent.run/result-ref])
-                  (:seon.agent.run/result-ref run)
-                  (update :seon.agent.run/result-ref :db/id)))))))
+                          [?agent :seon.agent/id ?aid]
+                          [?run :seon.agent.run/agent ?agent]
+                          [?run :seon.agent.run/closed-reason]
+                          [?run :seon.agent.run/started-at ?started]]
+                        :seon.db/args [id]}))]
+        (if (error-value? rows)
+          rows
+          (when-let [run-eid (some->> rows
+                                      (sort-by #(.getTime ^js (second %)))
+                                      last
+                                      first)]
+            (let [run (await
+                       (db/pull
+                        {:seon.db/db database
+                         :seon.db/selector
+                         [:seon.agent.run/id :seon.agent.run/started-at
+                          :seon.agent.run/closed-reason
+                          :seon.agent.run/closed-at :seon.agent.run/result
+                          :seon.agent.run/result-ref]
+                         :seon.db/eid run-eid}))]
+              (if (error-value? run) run run))))))))
 
-(defn last-closed-reason
+(defn ^:async last-closed-reason
   "The `closed-reason` of the agent's latest closed run, or nil."
   {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db]
                              [:seon.agent/id :seon.agent/id]]
-                  [:maybe :seon.agent.run/closed-reason]]}
-  [db id]
-  (:seon.agent.run/closed-reason (latest-closed-run db id)))
+                  [:or [:maybe :seon.agent.run/closed-reason] ::direct-error]]}
+  [database id]
+  (let [run (await (latest-closed-run database id))]
+    (if (error-value? run) run (:seon.agent.run/closed-reason run))))
+
+(defn ^:async ^:private open-turn-count [database id]
+  (let [result
+        (await
+         (db/query {:seon.db/db database
+                    :seon.db/query
+                    '[:find (count ?turn) . :in $ ?aid
+                      :where
+                      [?agent :seon.agent/id ?aid]
+                      [?agent :seon.agent/run ?run]
+                      [?turn :seon.agent.turn/run ?run]
+                      (not [?turn :seon.agent.turn/scheduled? true])]
+                    :seon.db/args [id]}))]
+    (if (error-value? result) result (or result 0))))
 
 (schema/register! :seon.derive/status-request
   [:map
@@ -397,54 +469,76 @@
    [:seon.agent.run/ms-remaining    {:optional true} :int]
    [:seon.agent.message/last-human-at {:optional true} :inst]])
 
-(defn derive-status
+(defn ^:async derive-status
   "The agent's full DERIVED status in one map (map-in / map-out).
 
    A pure
    DERIVED READ — no writes. State comes from [[state-from-primitives]] over
    the primitives; run/turn/step fields derive from cheap queries against ONE
-   threaded db value. Pass `:seon.db/db` to freeze the read; omission uses the
-   current connection for interactive calls. Run-scoped fields are present only
+   threaded database value. Pass `:seon.db/db` to freeze the read; omission
+   acquires the current cached value once. Run-scoped fields are present only
    while there IS an open run; `:seon.agent/now` fixes `ms-remaining`."
-  {:malli/schema [:=> [:cat :seon.derive/status-request] :seon.derive/status]}
+  {:malli/schema [:=> [:cat :seon.derive/status-request]
+                  [:or :seon.derive/status ::direct-error]]}
   [{database :seon.db/db id :seon.agent/id now :seon.agent/now}]
-  (let [now           (or now (js/Date.))
-        db            (or database @db/*conn*)
-        a             (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id id]})
-        terminated-at (:seon.agent/terminated-at a)
-        cur           (current-run db id)
-        paused-at     (:seon.agent.run/paused-at cur)
-        state         (state-from-primitives
-                        (cond-> {:seon.agent.run/open? (some? cur)}
-                          terminated-at (assoc :seon.agent/terminated-at terminated-at)
-                          paused-at     (assoc :seon.agent.run/paused-at paused-at)))
-        last-human    (last-human-inbound-at db id)
-        last-closed   (last-closed-reason db id)
-        base          (cond-> {:seon.agent/state           state
-                               :seon.agent/total-turns     (total-turns db id)
-                               :my.plan/open-count (open-step-count db id)}
-                        last-human  (assoc :seon.agent.message/last-human-at last-human)
-                        last-closed (assoc :seon.agent.run/closed-reason last-closed))]
-    (if-not cur
-      base
-      (let [run-id     (:seon.agent.run/id cur)
-            turn-cnt   (run-turn-count db run-id)
-            turn-limit (:seon.agent.run/turn-limit cur)
-            deadline   (:seon.agent.run/deadline cur)
-            last-beat  (:seon.agent.run/last-beat-at cur)]
-        (cond-> (assoc base
-                       :seon.agent.run/status          (:seon.agent.run/status cur)
-                       :seon.agent.run/trigger         (:seon.agent.run/trigger cur)
-                       :seon.agent.run/turn-limit      turn-limit
-                       :seon.agent.run/deadline        deadline
-                       :seon.agent.run/turn            turn-cnt
-                       :seon.agent.run/turns-remaining (max 0 (- turn-limit turn-cnt)))
-          last-beat (assoc :seon.agent.run/last-beat-at last-beat)
-          deadline  (assoc :seon.agent.run/ms-remaining
-                           (if paused-at
-                             ;; Paused: the wall clock is FROZEN — surface the
-                             ;; budget banked at pause time (`remaining-ms`),
-                             ;; not deadline−now (which keeps decaying / goes
-                             ;; negative while the run is held).
-                             (or (:seon.agent.run/remaining-ms cur) 0)
-                             (- (.getTime ^js deadline) (.getTime ^js now)))))))))
+  (let [now (or now (js/Date.))
+        database (or database (await (db/db)))]
+    (if (error-value? database)
+      database
+      (let [values
+            (await
+             (js/Promise.all
+              #js [(db/pull
+                    {:seon.db/db database
+                     :seon.db/selector
+                     [:seon.agent/terminated-at
+                      {:seon.agent/run
+                       [:seon.agent.run/id :seon.agent.run/status
+                        :seon.agent.run/trigger :seon.agent.run/turn-limit
+                        :seon.agent.run/deadline
+                        :seon.agent.run/last-beat-at
+                        :seon.agent.run/paused-at
+                        :seon.agent.run/remaining-ms]}]
+                     :seon.db/eid [:seon.agent/id id]})
+                   (agent-turn-count database id)
+                   (open-step-count database id)
+                   (last-human-inbound-at database id)
+                   (last-closed-reason database id)
+                   (open-turn-count database id)]))
+            [agent total-turns open-count last-human last-closed turn-count]
+            (array-seq values)
+            failure (first (filter error-value? (array-seq values)))]
+        (if failure
+          failure
+          (let [run (:seon.agent/run agent)
+                paused-at (:seon.agent.run/paused-at run)
+                state (state-from-primitives (primitives-from-agent agent))
+                base (cond-> {:seon.agent/state state
+                              :seon.agent/total-turns total-turns
+                              :my.plan/open-count open-count}
+                       last-human
+                       (assoc :seon.agent.message/last-human-at last-human)
+                       last-closed
+                       (assoc :seon.agent.run/closed-reason last-closed))]
+            (if-not (= :open (:seon.agent.run/status run))
+              base
+              (let [turn-limit (:seon.agent.run/turn-limit run)
+                    deadline (:seon.agent.run/deadline run)
+                    last-beat (:seon.agent.run/last-beat-at run)]
+                (cond->
+                 (assoc base
+                        :seon.agent.run/status (:seon.agent.run/status run)
+                        :seon.agent.run/trigger (:seon.agent.run/trigger run)
+                        :seon.agent.run/turn-limit turn-limit
+                        :seon.agent.run/deadline deadline
+                        :seon.agent.run/turn turn-count
+                        :seon.agent.run/turns-remaining
+                        (max 0 (- turn-limit turn-count)))
+                  last-beat
+                  (assoc :seon.agent.run/last-beat-at last-beat)
+                  deadline
+                  (assoc :seon.agent.run/ms-remaining
+                         (if paused-at
+                           (or (:seon.agent.run/remaining-ms run) 0)
+                           (- (.getTime ^js deadline)
+                              (.getTime ^js now)))))))))))))

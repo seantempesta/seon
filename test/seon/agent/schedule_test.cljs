@@ -1,10 +1,15 @@
 (ns seon.agent.schedule-test
   "Pure cron-logic tests — parse / due? / next-fire-at against FIXED local
    instants (no system clock). June 25 2026 is a Thursday; June 26 2026 a
-   Friday — used for the workday-cron cases."
+  Friday — used for the workday-cron cases."
   (:require
-    [cljs.test :refer [deftest is]]
-    [seon.agent.schedule :as sched]))
+    [cljs.test :refer [async deftest is]]
+    [seon.agent.run :as run]
+    [seon.agent.schedule :as sched]
+    [seon.config :as config]
+    [seon.db :as db]
+    [seon.db.protocol :as protocol]
+    [seon.runtime.admission :as admission]))
 
 (deftest parse-expands-fields
   (let [p (sched/parse {:seon.agent.schedule/cron "*/5 * * * *"})]
@@ -56,3 +61,73 @@
   (is (nil? (sched/next-fire-at {:seon.agent.schedule/cron "bad cron"
                                  :seon.agent.schedule/after (js/Date.)}))
       "unparseable ⇒ nil"))
+
+(deftest firing-acquires-one-database-value-and-one-query-batch
+  (async done
+    (let [database ::database
+          now (js/Date. 2026 5 25 9 0 0)
+          requests (atom [])
+          effects (atom [])
+          originals [[#(set! admission/available? %) admission/available?]
+                     [#(set! config/schedule-breaker-crash-count %)
+                      config/schedule-breaker-crash-count]
+                     [#(set! config/schedule-breaker-window-ms %)
+                      config/schedule-breaker-window-ms]
+                     [#(set! db/db %) db/db]
+                     [#(set! db/execute-many %) db/execute-many]
+                     [#(set! run/open-run! %) run/open-run!]]]
+      (set! admission/available? (constantly true))
+      (set! config/schedule-breaker-crash-count (constantly 3))
+      (set! config/schedule-breaker-window-ms (constantly 1800000))
+      (set! db/db (fn ([] (swap! effects conj :db)
+                          (js/Promise.resolve database))
+                    ([_] (js/Promise.resolve database))))
+      (set! db/execute-many
+            (fn [request]
+              (swap! requests conj request)
+              (js/Promise.resolve
+               {::db/results
+                [{::protocol/success? true
+                  :datahike.query/result
+                  [["agent-a" {} "0 9 * * *" 'my.jobs/run]]}
+                 {::protocol/success? true :datahike.query/result []}
+                 {::protocol/success? true :datahike.query/result []}]})))
+      (set! run/open-run!
+            (fn [_]
+              (swap! effects conj :open)
+              (js/Promise.resolve
+               {:seon.agent.run/id "run-a"
+                :seon.agent.run/status :open
+                :seon.agent.run/trigger :schedule
+                :seon.agent.run/started-at now
+                :seon.agent.run/turn-limit 20
+                :seon.agent.run/deadline
+                (js/Date. (+ (.getTime now) 60000))})))
+      (-> (sched/fire-due-schedules!
+             {:seon.agent/now now
+              :seon.agent.schedule/exec-fn!
+              (fn [request]
+                (swap! effects conj [:exec (:seon.agent.schedule/fns request)])
+                (js/Promise.resolve request))
+              :seon.agent.schedule/drive!
+              (fn [request] (swap! effects conj [:drive request]))})
+            (.then
+             (fn [result]
+               (is (= [{:seon.agent/id "agent-a"
+                        :seon.agent.run/id "run-a"}]
+                      (:seon.agent.schedule/fired result)))
+               (is (= 1 (count @requests)))
+               (let [request (first @requests)]
+                 (is (identical? database (::db/db request)))
+                 (is (= 3 (count (::db/members request))))
+                 (is (every? #(identical? database (::db/db %))
+                             (::db/members request))))
+               (is (= [:db :open [:exec ['my.jobs/run]]
+                       [:drive {:seon.agent/id "agent-a"}]]
+                      @effects))))
+            (.catch (fn [exception]
+                      (is false (str "fire-due-schedules! threw: " exception))))
+            (.finally
+             (fn []
+               (doseq [[restore value] originals] (restore value))
+               (done)))))))
