@@ -706,22 +706,19 @@
     thinking))
 
 ;; ============================================================
-;; Shared system-prompt resolution — request override → the cluster's
-;; `:seon.config/system-text` DATOM → the shipped default. Both providers
-;; send the same one.
+;; Shared provider-boundary system-prompt resolution — the prompt compiler
+;; supplies the cluster's frozen `:seon.config/system-text` value as the
+;; request override; a direct adapter call without one uses the shipped
+;; default. Both providers send the same ordinary string and never read the
+;; database themselves.
 ;;
 ;; The system role message is NOT the soul and NOT any file: it is the
-;; environment orientation + REPL doctrine the cluster runs under. A cluster
-;; that seeds `:seon.config/system-text` (manifest → the `:seon.config`
-;; singleton datom at boot — config-through-DB) owns its system message as
-;; DB state (live-tunable by a transact, replay-visible); absent the datom,
-;; the shipped default is `seon.agent.ctx/system-text` (byte-identical to
-;; the pre-datom database state). SOUL.md / AGENTS.md are FILE-LOADED CONTEXT
-;; sections (`seon.agent.ctx/file-block`), wired into
-;; the manifest-declared context blocks — they ride the user-message context,
-;; not here. There is NO per-call file read in this path: the datom read is
-;; `seon.config/config-view` (the db singleton post-conn; the boot manifest
-;; resolve is only the pre-conn sliver).
+;; environment orientation + REPL doctrine the cluster runs under. The prompt
+;; compiler resolves the cluster singleton at the turn's immutable database
+;; value and passes the resulting system message here. SOUL.md / AGENTS.md are
+;; file-loaded context sections (`seon.agent.ctx/file-block`) wired into the
+;; manifest-declared context blocks; they ride the user-message context, not
+;; here. There is no database or file read in this provider-boundary function.
 ;; ============================================================
 
 (schema/register! ::prompt-request
@@ -747,20 +744,14 @@
 (defn effective-system-prompt
   "The system message content for a call.
 
-   One `or` chain: the request's explicit `:seon.ai/system-prompt` override
-   when given, else the cluster's `:seon.config/system-text` datom (the
-   `:seon.config` singleton via `seon.config/config-view` —
-   config-through-DB, seeded from the manifest at boot, live-tunable by a
-   transact), else the shipped default (`seon.agent.ctx/system-text`). All
-   three are byte-stable within a cluster, the same for every agent and
-   turn, so the system block caches. This is NOT the soul and NOT a file —
-   SOUL.md / AGENTS.md are context sections, decoupled from the system
-   message. Never throws."
+   The request's explicit `:seon.ai/system-prompt` is the prompt compiler's
+   frozen cluster value. A direct adapter call without that value uses the
+   shipped default (`seon.agent.ctx/system-text`). This function is pure: it
+   never reads the database or a file. The system message is not the soul;
+   SOUL.md / AGENTS.md remain context sections."
   {:malli/schema [:=> [:cat ::prompt-request] ::system-prompt]}
   [{::keys [system-prompt]}]
-  (or system-prompt
-      (:seon.config/system-text (config/config-view))
-      ctx/system-text))
+  (or system-prompt ctx/system-text))
 
 (defn debug-full-prompt
   "The FULL prompt as the agent sees it.
@@ -874,7 +865,7 @@
               (await
                 (db/transact!
                   {::db/tx-data tx
-                   ::db/expected-coordinate (::db/coordinate acquired)}))]
+                   ::db/expected-db (::db/db acquired)}))]
           (if ok?
             (log/info-console! "seon.ai" "LLM config row seeded from env (DB owns it now)"
                                {:tx-ops (count tx)})

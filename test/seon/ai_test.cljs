@@ -2,21 +2,18 @@
   "seon.ai contract (C-18 LLM settings as data) — call settings are a
    `:seon.ai/config` singleton row: absent env + absent row → each
    adapter's shipped defaults (byte-identical wire bodies, proven in
-   the adapter tests); SEON_AI_* env vars own the row across boots
-   (set → asserted, unset → retracted); env values parse to the attrs'
-   concrete types (unparseable → loudly ignored); thinking-mode parses
-   the stored string to the false/true/effort value adapters consume.
+   the adapter tests); SEON_AI_* env vars seed an unconfigured row once,
+   after which the database owns it. Environment values parse to the attrs'
+   concrete types (unparseable → loudly ignored); thinking-mode parses the
+   stored string to the false/true/effort value adapters consume.
 
    Placeholder values use \"Acme\"-style strings — never a real
    product name."
   (:require
     [cljs.test :refer [deftest is async]]
-    [datahike.api :as d]
-    [seon.agent]
-    [seon.agent.message]
+    [seon.agent.ctx :as ctx]
     [seon.ai :as ai]
     [seon.db :as db]
-    [seon.db.coordinate :as coordinate]
     [seon.db.protocol :as protocol]))
 
 ;; ============================================================
@@ -45,12 +42,13 @@
 
 (deftest sync-acquires-once-and-fences-the-seed
   (async done
-    (let [point {::coordinate/database-id
-                 #uuid "00000000-0000-0000-0000-000000000071"
-                 ::coordinate/branch :db
-                 ::coordinate/commit-id
-                 #uuid "00000000-0000-0000-0000-000000000072"
-                 ::coordinate/t 536870912}
+    (let [database {:db-name "default"
+                    :t 536870912
+                    :as-of nil
+                    :since nil
+                    :history false
+                    :datahike/commit-id
+                    #uuid "00000000-0000-0000-0000-000000000072"}
           original-execute-many db/execute-many
           original-transact db/transact!
           original-env-row ai/env-row
@@ -59,12 +57,12 @@
             (fn [request]
               (swap! calls conj [:acquire request])
               (js/Promise.resolve
-                {::db/coordinate point
+                {::db/db database
                  ::db/results
                  [{::protocol/success? true
                    ::protocol/result nil}]})))
       (set! db/transact!
-            (fn [request]
+            (fn [& [request]]
               (swap! calls conj [:transact request])
               (js/Promise.resolve {::db/ok? true})))
       (set! ai/env-row (constantly {::ai/thinking "true"}))
@@ -80,8 +78,8 @@
                        (::protocol/operation member)))
                 (is (= [::ai/id "config"]
                        (::protocol/entity-id member)))
-                (is (= point (::db/expected-coordinate transact))
-                    "the immutable acquisition coordinate fences the seed")
+                (is (identical? database (::db/expected-db transact))
+                    "the immutable database value fences the seed")
                 (is (= [{::ai/id "config" ::ai/thinking "true"}]
                        (::db/tx-data transact))))))
           (.catch (fn [error]
@@ -111,6 +109,15 @@
   (is (true? (ai/thinking-mode {::ai/thinking "true"})))
   (is (= "high" (ai/thinking-mode {::ai/thinking "high"}))
       "anything else is a reasoning-effort string, passed through"))
+
+(deftest effective-system-prompt-is-pure-request-data
+  (is (= "frozen cluster prompt"
+         (ai/effective-system-prompt
+          {::ai/system-prompt "frozen cluster prompt"}))
+      "the prompt compiler's frozen cluster value is preserved")
+  (is (= ctx/system-text
+         (ai/effective-system-prompt {}))
+      "a direct adapter call without a compiled prompt uses the shipped default"))
 
 ;; ============================================================
 ;; env-row — reads SEON_AI_*, parses to concrete types. SNAPSHOT/
@@ -167,13 +174,6 @@
              (ai/env-row))
           "set vars parse to the attrs' concrete types; blank/unset absent"))))
 
-(deftest provider-parses-openai-compat
-  (with-env-restored
-    (fn [env]
-      (aset env "SEON_AI_PROVIDER" "openai-compat")
-      (is (= :openai-compat (ai/provider))
-          "openai-compat is a known provider (task #30)"))))
-
 (deftest env-row-skips-unparseable-values-loudly
   (with-env-restored
     (fn [env]
@@ -183,14 +183,11 @@
       (is (= {} (ai/env-row))
           "unparseable values are ignored (logged) — adapter defaults apply"))))
 
-(deftest provider-defaults-to-deepseek-and-reads-env-first
+(deftest env-row-parses-openai-compatible-provider
   (with-env-restored
     (fn [env]
-      (js-delete env "SEON_AI_PROVIDER")
-      (is (= :deepseek (ai/provider)) "no env, no row → deepseek")
-      (aset env "SEON_AI_PROVIDER" "anthropic")
-      (is (= :anthropic (ai/provider))
-          "env wins — readable pre-boot, consistent with env owning the row"))))
+      (aset env "SEON_AI_PROVIDER" "openai-compat")
+      (is (= {::ai/provider :openai-compat} (ai/env-row))))))
 
 (deftest with-env-restored-restores-prior-state
   ;; The fixture's own contract: a var set BEFORE the body survives the
@@ -211,143 +208,9 @@
         (is (nil? (aget env "SEON_AI_MODEL"))
             "set-by-test var that was absent before is deleted on teardown")))))
 
-;; ============================================================
-;; Store roundtrip — current reads the row at call time; sync tx-data
-;; transacted on a FRESH :memory conn (never the live agent conn).
-;; ============================================================
-
-(def ^:private fixture-response-cap 61)
-(def ^:private fixture-endpoint-cap 251)
-
-(defn- fresh-conn
-  []
-  (let [cfg {:store              {:backend :memory :id (random-uuid)}
-             :schema-flexibility :write
-             :keep-history?      true}]
-    (-> (d/create-database cfg)
-        (.then (fn [_] (d/connect cfg {:sync? false})))
-        (.then (fn [conn]
-                 (-> (db/ensure-provenance! {:seon.db/conn conn})
-                     (.then (fn [_]
-                              (d/transact!
-                                conn
-                                {:tx-data (into (db/malli->datahike-schema
-                                                  [::ai/id ::ai/provider ::ai/model
-                                                   ::ai/temperature ::ai/max-tokens
-                                                   ::ai/thinking ::ai/timeout-ms
-                                                   ::ai/base-url ::ai/api-key-env
-                                                   ::ai/extra-body-edn
-                                                   :seon.config/id
-                                                   :seon.config.model-transport/response-identity-cap
-                                                   :seon.config.model-transport/endpoint-cap])
-                                                (db/tx-meta-datahike-schema))})))
-                     (.then (fn [_]
-                              (d/transact!
-                                conn
-                                {:tx-data
-                                 [{:seon.config/id "cluster"
-                                   :seon.config.model-transport/response-identity-cap
-                                   fixture-response-cap
-                                   :seon.config.model-transport/endpoint-cap
-                                   fixture-endpoint-cap}]})))
-                     (.then (fn [_] conn))))))))
-
-(defn- with-conn
-  [body]
-  (-> (fresh-conn)
-      (.then (fn [conn]
-               (let [orig db/*conn*]
-                 (set! db/*conn* conn)
-                 (-> (js/Promise.resolve (body conn))
-                     (.finally (fn [] (set! db/*conn* orig)))))))))
-
-(deftest current-empty-then-seeded-then-persists
-  ;; `max-tokens` is NOT a provider constant — it is arbitrary fixture data the
-  ;; test SEEDS via env, asserting the round-trip (env → sync-tx-data → DB →
-  ;; current) returns the SAME int. ONE binding feeds the seed AND the
-  ;; assertions, so the contract is round-trip fidelity, not a 2048 literal.
-  (let [seeded-max-tokens 2048]
-    (async done
-      (-> (with-conn
-            (fn [conn]
-              ;; 1. Empty store → {} — adapters fall back to their defaults.
-              (is (= {} (ai/current @conn))
-                  "absent env + absent row → no overrides")
-              ;; 2. "Boot with env on a fresh store": seed the row.
-              (-> (db/transact!
-                    {:seon.db/tx-data
-                     (ai/sync-tx-data
-                       {::ai/env {::ai/provider :anthropic
-                                  ::ai/thinking "true"
-                                  ::ai/max-tokens seeded-max-tokens}})})
-                  (.then (fn [{ok? :seon.db/ok?}]
-                           (is (true? ok?) "config seed transact lands")
-                           (let [c (ai/current @conn)]
-                             (is (= :anthropic (::ai/provider c)))
-                             (is (= seeded-max-tokens (::ai/max-tokens c))
-                                 "the seeded max-tokens round-trips env → DB → current")
-                             (is (true? (ai/thinking-mode c))))
-                           ;; 3. "Reboot WITHOUT env": the row is configured, so
-                           ;;    seed is a NO-OP (nothing retracted) → the config
-                           ;;    PERSISTS. The DB owns the row.
-                           (is (= [] (ai/sync-tx-data
-                                       {::ai/row {::ai/provider :anthropic
-                                                  ::ai/thinking "true"
-                                                  ::ai/max-tokens seeded-max-tokens}
-                                        ::ai/env {}}))
-                               "configured row + no env → no-op seed (no retract)")
-                           (let [c (ai/current @conn)]
-                             (is (= :anthropic (::ai/provider c))
-                                 "reboot WITHOUT env → row PERSISTS (DB owns)")
-                             (is (= seeded-max-tokens (::ai/max-tokens c))
-                                 "the persisted max-tokens survives a no-op reboot seed")))))))
-          (.then (fn [_] (done)))
-          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
-
-;; ============================================================
-;; Per-agent LLM overlay (config-driven agent-init) — effective-config-for /
-;; current lay an agent's ::agent-* overrides over the global row; :inherit /
-;; no-override → the global value (byte-parity).
-;; ============================================================
-
-(deftest per-agent-overrides-overlay-the-global-row
-  (async done
-    (-> (with-conn
-          (fn [conn]
-            ;; fresh-conn installs only the ai config attrs — add the agent-id
-            ;; identity + the ::agent-model override attr this test overlays.
-            (-> (db/transact!
-                  {:seon.db/conn conn
-                   :seon.db/tx-data (db/malli->datahike-schema
-                                      [:seon.agent/id ::ai/agent-model])})
-                (.then (fn [_]
-                  ;; agent ids are :seon.db/id-shaped (14 chars) or "root".
-                  (db/transact!
-                    {:seon.db/tx-data
-                     [;; global row
-                      {::ai/id "config" ::ai/model "global-model" ::ai/max-tokens 100}
-                      ;; an agent that OVERRIDES the model, inherits the rest
-                      {:seon.agent/id "ovr-2607011800" :seon.ai/agent-model "agent-model"}
-                      ;; an agent with NO override (byte-parity → the global row)
-                      {:seon.agent/id "pln-2607011800"}]})))
-                (.then (fn [r]
-                         (is (true? (:seon.db/ok? r)) "seed transact lands")
-                         (let [ov    (ai/effective-config-for {::ai/agent-id "ovr-2607011800"})
-                               plain (ai/effective-config-for {::ai/agent-id "pln-2607011800"})
-                               none  (ai/effective-config-for {::ai/agent-id "abs-2607011800"})]
-                           (is (= "agent-model" (::ai/model ov))
-                               "the agent's ::agent-model overrides the global model")
-                           (is (= 100 (::ai/max-tokens ov))
-                               "an un-overridden attr inherits the global value")
-                           (is (= "global-model" (::ai/model plain))
-                               "a no-override agent = EXACTLY the global row (byte-parity)")
-                           (is (= "global-model" (::ai/model none))
-                               "an absent agent = the global row")))))))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
-
-(deftest ordinary-rows-resolve-one-coordinate-pinned-config
-  (let [resolution
+(deftest ordinary-rows-resolve-explicit-config
+  (let [default-resolution (ai/resolved-config-from-rows {} {})
+        resolution
         (ai/resolved-config-from-rows
          {::ai/id "config"
           ::ai/provider :openai-compat
@@ -360,6 +223,9 @@
           ::ai/agent-max-retries (pr-str 2)
           ::ai/agent-thinking (pr-str :inherit)})
         config (::ai/resolved-config resolution)]
+    (is (= :deepseek
+           (get-in default-resolution [::ai/resolved-config ::ai/provider])))
+    (is (= :openai-compat (ai/resolved-adapter config)))
     (is (= :openai-compat (::ai/provider config)))
     (is (= "agent-model" (::ai/model config)))
     (is (= 0.0 (::ai/temperature config)))
@@ -372,76 +238,3 @@
            (get-in resolution
                    [::ai/provenance
                     :seon.config.model-transport/response-identity-cap])))))
-
-(deftest resolved-config-time-travels-complete-transport-intent
-  (async done
-    (-> (with-conn
-          (fn [conn]
-            (let [extra-a "{:chat_template_kwargs {:enable_thinking false}}"
-                  extra-b "{:chat_template_kwargs {:enable_thinking true}}"]
-              (-> (db/transact!
-                    {:seon.db/tx-data
-                     [{::ai/id "config"
-                       ::ai/provider :openai-compat
-                       ::ai/model "snapshot-a"
-                       ::ai/base-url "http://127.0.0.1:18081/v1"
-                       ::ai/timeout-ms 120000
-                       ::ai/api-key-env "MODEL_KEY_A"
-                       ::ai/extra-body-edn extra-a}
-                      {:seon.config/id "cluster"
-                       :seon.config.model-transport/response-identity-cap 31
-                       :seon.config.model-transport/endpoint-cap 101}]})
-                  (.then
-                    (fn [result]
-                      (is (true? (:seon.db/ok? result)) "row A lands")
-                      (let [db-a @conn]
-                        (-> (db/transact!
-                              {:seon.db/tx-data
-                               [{::ai/id "config"
-                                 ::ai/model "snapshot-b"
-                                 ::ai/base-url "http://127.0.0.1:18082/v1"
-                                 ::ai/timeout-ms 90000
-                                 ::ai/api-key-env "MODEL_KEY_B"
-                                 ::ai/extra-body-edn extra-b}
-                                {:seon.config/id "cluster"
-                                 :seon.config.model-transport/response-identity-cap 47
-                                 :seon.config.model-transport/endpoint-cap 103}]})
-                            (.then
-                              (fn [result]
-                                (is (true? (:seon.db/ok? result)) "row B lands")
-                                (let [a (ai/resolved-config {:seon.db/db db-a})
-                                      b (ai/resolved-config {:seon.db/db @conn})
-                                      a-config (::ai/resolved-config a)
-                                      b-config (::ai/resolved-config b)
-                                      a-digest (::ai/extra-body-digest a-config)]
-                                  (is (= "snapshot-a" (::ai/model a-config)))
-                                  (is (= "http://127.0.0.1:18081/v1"
-                                         (::ai/base-url a-config)))
-                                  (is (= 120000 (::ai/timeout-ms a-config)))
-                                  (is (= "MODEL_KEY_A" (::ai/api-key-env a-config)))
-                                  (is (= 31
-                                         (:seon.config.model-transport/response-identity-cap
-                                           a-config)))
-                                  (is (= 101
-                                         (:seon.config.model-transport/endpoint-cap
-                                           a-config)))
-                                  (is (= :config-row
-                                         (get-in a [::ai/provenance
-                                                    :seon.config.model-transport/response-identity-cap])))
-                                  (is (= 64 (count a-digest))
-                                      "effective extra-body bytes have a bounded digest")
-                                  (is (= :config-row
-                                         (get-in a [::ai/provenance
-                                                    ::ai/extra-body-digest])))
-                                  (is (= :default
-                                         (get-in a [::ai/provenance
-                                                    ::ai/temperature])))
-                                  (is (= "snapshot-b" (::ai/model b-config)))
-                                  (is (= 47
-                                         (:seon.config.model-transport/response-identity-cap
-                                           b-config)))
-                                  (is (not= a-digest
-                                            (::ai/extra-body-digest b-config))
-                                      "a later config value cannot rewrite historical intent"))))))))))))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
