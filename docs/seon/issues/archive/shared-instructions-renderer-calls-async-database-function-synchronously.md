@@ -1,11 +1,32 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, agent, database, web]
 ---
 
 # Shared instructions renderer calls an async database function synchronously
+
+## Resolution
+
+Resolved in the commit that archives this note. `my.kb.shared/instructions`
+now has one zero-argument operation that reuses the execution child's pinned
+database value and one fully namespaced request-map operation for an explicit
+ordinary database value. Both operations run the same pinned query, preserve a
+direct database error unchanged, and otherwise return the ordered instruction
+texts.
+
+The existing `instructions-block` owner is asynchronous and awaits acquisition
+before calling one pure formatter. Empty data omits the block. A database error
+is raised into the existing selected-function failure boundary with the
+authority's message and error data, so neither a Promise nor an error map can
+enter the render tree.
+
+`tmp/test-cljs-20260717-032540-45932.log` compiled the focused `my.kb-test`
+namespace and ran 14 tests with 63 assertions, zero failures, zero errors, and
+zero core faults. Its one compile warning is the independently owned
+zero-argument `seon.config/on-core-error` migration at
+`src/seon/error.cljs:496`; this change adds no shared-instructions warning.
 
 ## Problem
 

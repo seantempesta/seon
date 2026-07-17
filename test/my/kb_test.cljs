@@ -1,6 +1,7 @@
 (ns my.kb-test
   "Current `my.kb` schema and immutable database-value behavior."
   (:require
+    [clojure.string :as str]
     [cljs.test :refer [deftest is async]]
     [my.data :as data]
     [my.kb :as kb]
@@ -76,6 +77,15 @@
                 (is false (str "threw — " error))
                 (done)))))
 
+(def ^:private shared-database
+  {:db-name "default"
+   :t 42
+   :as-of nil
+   :since nil
+   :history false
+   :datahike/commit-id
+   #uuid "00000000-0000-0000-0000-000000000042"})
+
 (defn- with-recall-fakes
   [{database-fn ::database-fn
     installed-schema-fn ::installed-schema-fn
@@ -120,21 +130,90 @@
 (deftest shared-instructions-remain-ordered-derived-data
   (async done
     (let [later (js/Date. 2000)
-          earlier (js/Date. 1000)]
+          earlier (js/Date. 1000)
+          requests (atom [])]
       (finish
         (with-kb-fakes
           {::query-fn
-           (fn [_]
+           (fn [request]
+             (swap! requests conj request)
              (js/Promise.resolve
                #{[later "Prefer the existing schema."]
                  [earlier "Store provenance."]}))}
-          #(-> (kb-shared/instructions)
+          #(-> (kb-shared/instructions {::db/db shared-database})
                (.then
                  (fn [result]
                    (is (= ["Store provenance."
                            "Prefer the existing schema."]
-                          result))))))
+                          result))
+                   (is (= 1 (count @requests)))
+                   (is (identical? shared-database
+                                   (::db/db (first @requests))))))))
         done))))
+
+(deftest shared-instructions-pure-formatter-orders-and-omits
+  (let [format-block (deref #'kb-shared/format-instructions-block)]
+    (is (= "" (format-block [])))
+    (is (= [";   1. First." ";   2. Second."]
+           (take-last 2
+                      (str/split-lines
+                       (format-block ["First." "Second."])))))))
+
+(deftest shared-instructions-block-awaits-acquisition-before-rendering
+  (async done
+    (let [query-request (atom nil)
+          pending
+          (with-kb-fakes
+            {::query-fn
+            (fn [request]
+               (reset! query-request request)
+               (js/Promise.resolve
+                #{[(js/Date. 1000) "Use the one existing owner."]}))}
+            #(db/with-tx-context
+              {::db/db shared-database}
+              (fn [] (kb-shared/instructions-block {}))))]
+      (is (instance? js/Promise pending))
+      (finish
+       (-> pending
+           (.then
+            (fn [rendered]
+              (is (string? rendered))
+              (is (str/ends-with?
+                   rendered ";   1. Use the one existing owner."))
+              (is (identical? shared-database
+                              (::db/db @query-request))))))
+       done))))
+
+(deftest shared-instructions-preserve-a-direct-query-error
+  (async done
+    (let [database-error {:seon.error/message "query unavailable"
+                          :seon.error/kind :core-bug}]
+      (finish
+       (with-kb-fakes
+        {::query-fn (fn [_] (js/Promise.resolve database-error))}
+        #(-> (kb-shared/instructions {::db/db shared-database})
+             (.then
+              (fn [result]
+                (is (identical? database-error result))))))
+       done))))
+
+(deftest shared-instructions-block-routes-database-errors-to-render-failure
+  (async done
+    (let [database-error {:seon.error/message "query unavailable"
+                          :seon.error/kind :core-bug}]
+      (-> (with-kb-fakes
+           {::query-fn (fn [_] (js/Promise.resolve database-error))}
+           #(kb-shared/instructions-block {::db/db shared-database}))
+          (.then
+           (fn [_]
+             (is false "a database error reached the render tree")))
+          (.catch
+           (fn [exception]
+             (is (= "query unavailable"
+                    (.-message exception)))
+             (is (identical? database-error
+                             (ex-data exception)))))
+          (.finally done)))))
 
 (deftest knowledge-base-write-recipes-keep-one-canonical-transaction-shape
   (async done
