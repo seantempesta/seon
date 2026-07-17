@@ -342,31 +342,37 @@
   (if-not (identical? owner (::advertisement-owner @!state))
     (js/Promise.resolve false)
     (let [refresh
-          (-> (derive/resumable-agent-ids database)
+          (-> (agent/resumable-agent-ids! {::db/db database})
               (.then
                (fn [ids]
                  (when (:seon.error/message ids)
                    (throw
                     (ex-info "Runtime advertisement projection failed." ids)))
-                 (when (and (identical? owner
-                                        (::advertisement-owner @!state))
-                            (identical? database
-                                        (::advertisement-db @!state)))
-                   (swap! !state assoc ::resumable-agent-ids ids)
-                   true))))]
+                 (if-not (identical? owner
+                                     (::advertisement-owner @!state))
+                   false
+                   (-> (db/db)
+                       (.then
+                        (fn [latest]
+                          (when (:seon.error/message latest)
+                            (throw
+                             (ex-info
+                              "Runtime advertisement database read failed."
+                              latest)))
+                          (if (and
+                               (identical?
+                                owner (::advertisement-owner @!state))
+                               (= database latest))
+                            (do
+                              (swap! !state assoc ::resumable-agent-ids ids)
+                              true)
+                            false))))))))]
       (swap! !state
              (fn [state]
                (if (identical? owner (::advertisement-owner state))
-                 (assoc state
-                        ::advertisement-db database
-                        ::advertisement-refresh refresh)
+                 (assoc state ::advertisement-refresh refresh)
                  state)))
       refresh)))
-
-(def ^:private runtime-advertisement-datom-patterns
-  [{:seon.db/a :seon.agent/id}
-   {:seon.db/a :seon.eval/home-requires}
-   {:seon.db/a :seon.agent/terminated-at}])
 
 (defn- runtime-advertisement-event!
   [owner event]
@@ -387,7 +393,7 @@
               (await
                (db/listen!
                 {::db/key ::runtime-advertisement
-                 ::db/datom-patterns runtime-advertisement-datom-patterns
+                 ::db/query derive/resumable-agent-ids-query
                  ::db/handler #(runtime-advertisement-event! owner %)}))]
           (when (:seon.error/message interest-key)
             (throw (ex-info "Runtime advertisement interest failed."
@@ -417,7 +423,6 @@
                      (dissoc state
                              ::advertisement-owner
                              ::advertisement-interest-key
-                             ::advertisement-db
                              ::advertisement-refresh
                              ::advertisement-attaching
                              ::resumable-agent-ids)
@@ -457,7 +462,6 @@
     (swap! !state dissoc
            ::advertisement-owner
            ::advertisement-interest-key
-           ::advertisement-db
            ::advertisement-refresh
            ::advertisement-attaching
            ::resumable-agent-ids)

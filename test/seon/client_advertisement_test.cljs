@@ -1,6 +1,7 @@
 (ns seon.client-advertisement-test
   (:require
    [cljs.test :refer [async deftest is testing]]
+   [seon.agent :as agent]
    [seon.client :as client]
    [seon.db :as db]
    [seon.derive :as derive]))
@@ -31,6 +32,14 @@
     ([_request]
      (js/Promise.reject (js/Error. "unexpected database selection")))))
 
+(defn- resumable-stub
+  [read-explicit]
+  (fn
+    ([]
+     (js/Promise.reject
+      (js/Error. "unexpected implicit resumable-agent-ids! read")))
+    ([request] (read-explicit request))))
+
 (defn- attach-advertisement!
   []
   ((deref #'client/attach-runtime-advertisement!)))
@@ -45,12 +54,13 @@
           original-listen db/listen!
           original-unlisten db/unlisten!
           original-db db/db
-          original-resumable derive/resumable-agent-ids
+          original-resumable agent/resumable-agent-ids!
           requests (atom [])
           removed (atom [])
           database-0 {:t 0}
           database-1 {:t 1}
-          database-2 {:t 2}]
+          database-2 {:t 2}
+          latest (atom database-0)]
       (reset! client/!state {})
       (set! db/listen!
             (listen-stub
@@ -61,14 +71,16 @@
             (fn [interest-key]
               (swap! removed conj interest-key)
               (js/Promise.resolve true)))
-      (set! db/db (db-stub #(js/Promise.resolve database-0)))
-      (set! derive/resumable-agent-ids
-            (fn [database]
-              (js/Promise.resolve
-               (case (:t database)
-                 0 ["root"]
-                 1 ["root" "task-a"]
-                 2 ["task-b"]))))
+      (set! db/db (db-stub #(js/Promise.resolve @latest)))
+      (set! agent/resumable-agent-ids!
+            (resumable-stub
+             (fn [request]
+               (let [database (::db/db request)]
+                 (js/Promise.resolve
+                  (case (:t database)
+                    0 ["root"]
+                    1 ["root" "task-a"]
+                    2 ["task-b"]))))))
       (let [first-attach (attach-advertisement!)
             second-attach (attach-advertisement!)]
         (is (identical? first-attach second-attach)
@@ -79,10 +91,10 @@
                (is (= :runtime-advertisement interest-key))
                (is (= ["root"] (::client/resumable-agent-ids @client/!state)))
                (is (= 1 (count @requests)))
-               (is (= #{{:seon.db/a :seon.agent/id}
-                        {:seon.db/a :seon.eval/home-requires}
-                        {:seon.db/a :seon.agent/terminated-at}}
-                      (set (::db/datom-patterns (first @requests)))))
+               (is (= derive/resumable-agent-ids-query
+                      (::db/query (first @requests))))
+               (is (not (contains? (first @requests) ::db/datom-patterns)))
+               (reset! latest (with-meta database-1 {:decoded-copy true}))
                ((::db/handler (first @requests))
                 {:db-before database-0
                  :db-after database-1
@@ -92,6 +104,7 @@
                (testing "a native transaction report refreshes the cached ids"
                  (is (= ["root" "task-a"]
                         (::client/resumable-agent-ids @client/!state))))
+               (reset! latest database-2)
                ((::db/handler (first @requests))
                 {:seon.db.protocol/event
                  :seon.db.protocol/resynchronization
@@ -124,7 +137,7 @@
                (set! db/listen! original-listen)
                (set! db/unlisten! original-unlisten)
                (set! db/db original-db)
-               (set! derive/resumable-agent-ids original-resumable)
+               (set! agent/resumable-agent-ids! original-resumable)
                (done))))))))
 
 (deftest older-derivation-cannot-overwrite-a-newer-database-value
@@ -133,13 +146,14 @@
           original-listen db/listen!
           original-unlisten db/unlisten!
           original-db db/db
-          original-resumable derive/resumable-agent-ids
+          original-resumable agent/resumable-agent-ids!
           handler (atom nil)
           database-0 {:t 0}
           database-1 {:t 1}
           database-2 {:t 2}
           older (deferred)
-          newer (deferred)]
+          newer (deferred)
+          latest (atom database-0)]
       (reset! client/!state {})
       (set! db/listen!
             (listen-stub
@@ -147,24 +161,28 @@
                (reset! handler (::db/handler request))
                (js/Promise.resolve :runtime-advertisement))))
       (set! db/unlisten! (fn [_] (js/Promise.resolve true)))
-      (set! db/db (db-stub #(js/Promise.resolve database-0)))
-      (set! derive/resumable-agent-ids
-            (fn [database]
-              (case (:t database)
-                0 (js/Promise.resolve ["initial"])
-                1 (:promise older)
-                2 (:promise newer))))
+      (set! db/db (db-stub #(js/Promise.resolve @latest)))
+      (set! agent/resumable-agent-ids!
+            (resumable-stub
+             (fn [request]
+               (let [database (::db/db request)]
+                 (case (:t database)
+                   0 (js/Promise.resolve ["initial"])
+                   1 (:promise older)
+                   2 (:promise newer))))))
       (-> (attach-advertisement!)
           (.then
            (fn [_]
-             (let [older-refresh (@handler {:db-after database-1})
-                   newer-refresh (@handler {:db-after database-2})]
-               ((:resolve! newer) ["newer"])
-               (-> newer-refresh
-                   (.then
-                    (fn [_]
-                      ((:resolve! older) ["older"])
-                      older-refresh))))))
+             (reset! latest database-1)
+             (let [older-refresh (@handler {:db-after database-1})]
+               (reset! latest database-2)
+               (let [newer-refresh (@handler {:db-after database-2})]
+                 ((:resolve! newer) ["newer"])
+                 (-> newer-refresh
+                     (.then
+                      (fn [_]
+                        ((:resolve! older) ["older"])
+                        older-refresh)))))))
           (.then
            (fn [_]
              (is (= ["newer"]
@@ -180,7 +198,7 @@
              (set! db/listen! original-listen)
              (set! db/unlisten! original-unlisten)
              (set! db/db original-db)
-             (set! derive/resumable-agent-ids original-resumable)
+             (set! agent/resumable-agent-ids! original-resumable)
              (done)))))))
 
 (deftest initial-read-cannot-overwrite-an-event-that-arrives-after-listen
@@ -189,12 +207,14 @@
           original-listen db/listen!
           original-unlisten db/unlisten!
           original-db db/db
-          original-resumable derive/resumable-agent-ids
+          original-resumable agent/resumable-agent-ids!
           handler (atom nil)
           initial-read (deferred)
           db-read-started (deferred)
           database-0 {:t 0}
-          database-1 {:t 1}]
+          database-1 {:t 1}
+          latest (atom database-0)
+          db-reads (atom 0)]
       (reset! client/!state {})
       (set! db/listen!
             (listen-stub
@@ -205,20 +225,26 @@
       (set! db/db
             (db-stub
              (fn []
-               ((:resolve! db-read-started) true)
-               (:promise initial-read))))
-      (set! derive/resumable-agent-ids
-            (fn [database]
-              (js/Promise.resolve
-               (if (identical? database database-0)
-                 ["initial"]
-                 ["event"]))))
+               (if (= 1 (swap! db-reads inc))
+                 (do
+                   ((:resolve! db-read-started) true)
+                   (:promise initial-read))
+                 (js/Promise.resolve @latest)))))
+      (set! agent/resumable-agent-ids!
+            (resumable-stub
+             (fn [request]
+               (let [database (::db/db request)]
+                 (js/Promise.resolve
+                  (if (identical? database database-0)
+                    ["initial"]
+                    ["event"]))))))
       (let [attached (attach-advertisement!)]
         (-> (:promise db-read-started)
             (.then
              (fn [_]
                ;; listen! has installed its handler while the latest database
                ;; read is pending.
+               (reset! latest database-1)
                (@handler {:db-after database-1})))
             (.then
              (fn [_]
@@ -228,8 +254,6 @@
              (fn [_]
                (is (= ["event"]
                       (::client/resumable-agent-ids @client/!state)))
-               (is (identical? database-1
-                               (::client/advertisement-db @client/!state)))
                (detach-advertisement!)))
             (.catch
              (fn [error]
@@ -241,7 +265,7 @@
                (set! db/listen! original-listen)
                (set! db/unlisten! original-unlisten)
                (set! db/db original-db)
-               (set! derive/resumable-agent-ids original-resumable)
+               (set! agent/resumable-agent-ids! original-resumable)
                (done))))))))
 
 (deftest advertisement-errors-release-the-single-owner
@@ -250,7 +274,7 @@
           original-listen db/listen!
           original-unlisten db/unlisten!
           original-db db/db
-          original-resumable derive/resumable-agent-ids
+          original-resumable agent/resumable-agent-ids!
           removed (atom [])]
       (reset! client/!state {})
       (set! db/listen!
@@ -272,10 +296,11 @@
                    (listen-stub
                     (fn [_] (js/Promise.resolve :runtime-advertisement))))
              (set! db/db (db-stub #(js/Promise.resolve {:t 0})))
-             (set! derive/resumable-agent-ids
-                   (fn [_]
-                     (js/Promise.resolve
-                      {:seon.error/message "projection refused"})))
+             (set! agent/resumable-agent-ids!
+                   (resumable-stub
+                    (fn [_request]
+                      (js/Promise.resolve
+                       {:seon.error/message "projection refused"}))))
              (attach-advertisement!)))
           (.then (fn [_] (is false "a projection error must reject attach")))
           (.catch
@@ -289,5 +314,61 @@
              (set! db/listen! original-listen)
              (set! db/unlisten! original-unlisten)
              (set! db/db original-db)
-             (set! derive/resumable-agent-ids original-resumable)
+             (set! agent/resumable-agent-ids! original-resumable)
+             (done)))))))
+
+(deftest unrelated-session-advance-rejects-an-older-membership-result
+  (async done
+    (let [original-state @client/!state
+          original-listen db/listen!
+          original-unlisten db/unlisten!
+          original-db db/db
+          original-resumable agent/resumable-agent-ids!
+          handler (atom nil)
+          database-0 {:t 0}
+          database-1 {:t 1}
+          database-2 {:t 2}
+          latest (atom database-0)
+          older (deferred)]
+      (reset! client/!state {})
+      (set! db/listen!
+            (listen-stub
+             (fn [request]
+               (reset! handler (::db/handler request))
+               (js/Promise.resolve :runtime-advertisement))))
+      (set! db/unlisten! (fn [_] (js/Promise.resolve true)))
+      (set! db/db (db-stub #(js/Promise.resolve @latest)))
+      (set! agent/resumable-agent-ids!
+            (resumable-stub
+             (fn [request]
+               (case (:t (::db/db request))
+                 0 (js/Promise.resolve ["initial"])
+                 1 (:promise older)))))
+      (-> (attach-advertisement!)
+          (.then
+           (fn [_]
+             (reset! latest database-1)
+             (let [refresh (@handler {:db-after database-1})]
+               ;; This transaction changes no membership dependency, so the
+               ;; selective handler does not run. The session still caches T2.
+               (reset! latest database-2)
+               ((:resolve! older) ["stale"])
+               refresh)))
+          (.then
+           (fn [accepted?]
+             (is (false? accepted?))
+             (is (= ["initial"]
+                    (::client/resumable-agent-ids @client/!state)))
+             (detach-advertisement!)))
+          (.catch
+           (fn [error]
+             (is false (str "stale membership fence rejected: " error
+                            "\n" (.-stack error)))))
+          (.finally
+           (fn []
+             (reset! client/!state original-state)
+             (set! db/listen! original-listen)
+             (set! db/unlisten! original-unlisten)
+             (set! db/db original-db)
+             (set! agent/resumable-agent-ids! original-resumable)
              (done)))))))

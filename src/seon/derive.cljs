@@ -229,6 +229,14 @@
            sort
            vec))))
 
+(def resumable-agent-ids-query
+  "Born, nonterminated process hosts used by resume and runtime discovery."
+  '[:find [?id ...]
+    :where
+    [?a :seon.agent/id ?id]
+    [?a :seon.eval/home-requires _]
+    (not [?a :seon.agent/terminated-at _])])
+
 (defn ^:async resumable-agent-ids
   "Born agent ids whose derived state is not `:terminated`.
 
@@ -244,12 +252,7 @@
   (let [result
         (await
          (db/query {:seon.db/db database
-                    :seon.db/query
-                    '[:find [?id ...]
-                      :where
-                      [?a :seon.agent/id ?id]
-                      [?a :seon.eval/home-requires _]
-                      (not [?a :seon.agent/terminated-at _])]}))]
+                    :seon.db/query resumable-agent-ids-query}))]
     (if (error-value? result) result (->> result sort vec))))
 
 ;; ============================================================

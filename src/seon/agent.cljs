@@ -301,11 +301,13 @@
 ;; below acquire an ordinary database value and call the owning async readers.
 ;; ============================================================
 
-(schema/register! ::armable-agent-ids-request [:map [:seon.db/db {:optional true} :seon.db/db]])
+(schema/register!
+ ::agent-ids-request
+ [:map {:closed true}
+  [:seon.db/db {:optional true} :seon.db/db]])
 (schema/register! ::agent-ids-response [:vector :seon.agent/id])
 (schema/register! ::direct-error [:map [:seon.error/message :string]])
 (schema/register! ::agent-ids-result [:or ::agent-ids-response ::direct-error])
-(schema/register! ::resumable-agent-ids-response [:vector :seon.agent/id])
 (schema/register! ::initial-created? :boolean)
 (schema/register! ::root-created? :boolean)
 (schema/register! ::ensure-initial-agent-request [:map])
@@ -327,7 +329,7 @@
    resume pass + the wake re-arm both read this. Map-in `:seon.db/db` adapter
    over [[seon.derive/armable-agent-ids]] (the one filter-over-derive-state
    rule); `:seon.db/db` optional (defaults to the session's latest value)."
-  {:malli/schema [:=> [:cat ::armable-agent-ids-request] ::agent-ids-result]}
+  {:malli/schema [:=> [:cat ::agent-ids-request] ::agent-ids-result]}
   [{:seon.db/keys [db]}]
   (let [database (or db (await (db/db)))]
     (if (:seon.error/message database)
@@ -340,12 +342,16 @@
    Running and paused agents are included because they still need fresh
    process handles after a cold start or reload. Identity-only provenance
    targets are not born and are omitted."
-  {:malli/schema [:=> [:cat] ::agent-ids-result]}
-  []
-  (let [database (await (db/db))]
-    (if (:seon.error/message database)
-      database
-      (await (derive/resumable-agent-ids database)))))
+  {:malli/schema
+   [:function
+    [:=> [:cat] ::agent-ids-result]
+    [:=> [:cat ::agent-ids-request] ::agent-ids-result]]}
+  ([] (await (resumable-agent-ids! {})))
+  ([{:seon.db/keys [db]}]
+   (let [database (or db (await (db/db)))]
+     (if (:seon.error/message database)
+       database
+       (await (derive/resumable-agent-ids database))))))
 
 (def ^:private ordinary-agent-ever-born-query
   '[:find ?agent .

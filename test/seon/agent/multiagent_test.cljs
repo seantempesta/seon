@@ -39,10 +39,13 @@
     (let [db! db/db
           armable derive/armable-agent-ids
           resumable derive/resumable-agent-ids
+          db-calls (atom 0)
           calls (atom [])]
       (set! db/db
             (fn
-              ([] (js/Promise.resolve database))
+              ([]
+               (swap! db-calls inc)
+               (js/Promise.resolve database))
               ([_] (js/Promise.resolve database))))
       (set! derive/armable-agent-ids
             (fn [db-value]
@@ -56,10 +59,20 @@
        (-> (agent/armable-agent-ids {})
            (.then (fn [ids]
                     (is (= ["idle"] ids))
+                    (agent/resumable-agent-ids!
+                     {:seon.db/db database-after})))
+           (.then (fn [ids]
+                    (is (= ["idle" "running"] ids))
+                    (is (= 1 @db-calls)
+                        "an explicit database value performs no ambient read")
                     (agent/resumable-agent-ids!)))
            (.then (fn [ids]
                     (is (= ["idle" "running"] ids))
-                    (is (every? #(identical? database (second %)) @calls)))))
+                    (is (= 2 @db-calls))
+                    (is (= [[:armable database]
+                            [:resumable database-after]
+                            [:resumable database]]
+                           @calls)))))
        done
        [[#(set! db/db %) db!]
         [#(set! derive/armable-agent-ids %) armable]
