@@ -2,7 +2,7 @@
   "Behavioral coverage for the one agent home-namespace data owner."
   (:require
     [cljs.reader :as reader]
-    [cljs.test :refer [deftest is testing]]
+    [cljs.test :refer [async deftest is]]
     [malli.core :as m]
     [seon.agent.home :as home]
     [seon.config :as config]
@@ -29,15 +29,122 @@
     (is (= 'my.agent.probe (second form)))
     (is (= (cons :require specs) (nth form 2)))))
 
-(deftest home-requires-precedence-falls-from-config-to-canonical-data
-  (binding [db/*conn* nil]
-    (testing "a per-agent config value wins before the entity exists"
-      (with-redefs [config/resolve-agent-context
-                    (fn [_id _override]
-                      {:seon.eval/home-requires '[[seon.db :as db]]})]
-        (is (= '[[seon.db :as db]]
-               (home/home-requires-for "probe")))))
-    (testing "an absent config value returns the canonical require data"
-      (with-redefs [config/resolve-agent-context (fn [_id _override] {})]
-        (is (= home/home-ns-require-specs
-               (home/home-requires-for "probe")))))))
+(defn- current-home-functions []
+  [db/db db/installed-schema db/entity config/resolve-agent-context])
+
+(defn- restore-home-functions!
+  [[db-fn installed-schema-fn entity-fn resolve-agent-context-fn]]
+  (set! db/db db-fn)
+  (set! db/installed-schema installed-schema-fn)
+  (set! db/entity entity-fn)
+  (set! config/resolve-agent-context resolve-agent-context-fn))
+
+(deftest home-requires-precedence-uses-one-database-value
+  (async done
+    (let [database {:db-name "home-test"
+                    :t 7
+                    :as-of nil
+                    :since nil
+                    :history false
+                    :datahike/commit-id (random-uuid)}
+          calls (atom [])]
+      (let [originals (current-home-functions)]
+        (set! db/db
+              (fn
+                ([]
+                 (swap! calls conj [:db])
+                 (js/Promise.resolve database))
+                ([_request]
+                 (js/Promise.resolve database))))
+        (set! db/installed-schema
+              (fn
+                ([] (js/Promise.resolve {}))
+                ([received]
+                 (swap! calls conj [:installed-schema received])
+                 (js/Promise.resolve
+                  {:seon.eval/home-requires {:db/valueType :db.type/string}}))))
+        (set! db/entity
+              (fn
+                ([_request] (js/Promise.resolve nil))
+                ([received ref]
+                 (swap! calls conj [:entity received ref])
+                 (js/Promise.resolve
+                  {:seon.eval/home-requires
+                   '[[seon.db :as persisted-db]]}))))
+        (set! config/resolve-agent-context
+              (fn [_id _override]
+                {:seon.eval/home-requires '[[seon.db :as config-db]]}))
+        (-> (home/home-requires-for "probe")
+            (.then
+             (fn [requires]
+               (is (= '[[seon.db :as persisted-db]] requires)
+                   "persisted data retains precedence over configuration")
+               (is (= [[:db]
+                       [:installed-schema database]
+                       [:entity database [:seon.agent/id "probe"]]]
+                      @calls)
+                   "one database value is reused for every related read")))
+            (.catch (fn [error]
+                      (is false (str "home require acquisition rejected: " error))))
+            (.finally (fn [] (restore-home-functions! originals)))
+            (.then (fn [_] (done)))
+            (.catch (fn [error]
+                      (is false (str "home require cleanup rejected: " error))
+                      (done))))))))
+
+(deftest home-requires-falls-from-config-to-canonical-data
+  (async done
+    (let [database {:db-name "home-test"
+                    :t 7
+                    :as-of nil
+                    :since nil
+                    :history false
+                    :datahike/commit-id (random-uuid)}]
+      (let [originals (current-home-functions)]
+        (set! db/db
+              (fn
+                ([] (js/Promise.resolve database))
+                ([_request] (js/Promise.resolve database))))
+        (set! db/installed-schema
+              (fn
+                ([] (js/Promise.resolve {}))
+                ([_database] (js/Promise.resolve {}))))
+        (set! config/resolve-agent-context
+              (fn [_id _override]
+                {:seon.eval/home-requires '[[seon.db :as db]]}))
+        (-> (home/home-requires-for "probe")
+            (.then
+             (fn [requires]
+               (is (= '[[seon.db :as db]] requires)
+                   "configuration supplies a fresh agent before its datom exists")
+               (set! config/resolve-agent-context (fn [_id _override] {}))
+               (home/home-requires-for "probe")))
+            (.then
+             (fn [requires]
+               (is (= home/home-ns-require-specs requires)
+                   "the canonical data is the final fallback")))
+            (.catch (fn [error]
+                      (is false (str "home require fallback rejected: " error))))
+            (.finally (fn [] (restore-home-functions! originals)))
+            (.then (fn [_] (done)))
+            (.catch (fn [error]
+                      (is false (str "home require cleanup rejected: " error))
+                      (done))))))))
+
+(deftest home-requires-propagates-database-errors
+  (async done
+    (let [error {:seon.error/message "database unavailable"}
+          originals (current-home-functions)]
+      (set! db/db
+            (fn
+              ([] (js/Promise.resolve error))
+              ([_request] (js/Promise.resolve error))))
+      (-> (home/home-requires-for "probe")
+          (.then (fn [result] (is (= error result))))
+          (.catch (fn [failure]
+                    (is false (str "home require error rejected: " failure))))
+          (.finally (fn [] (restore-home-functions! originals)))
+          (.then (fn [_] (done)))
+          (.catch (fn [failure]
+                    (is false (str "home require cleanup rejected: " failure))
+                    (done)))))))

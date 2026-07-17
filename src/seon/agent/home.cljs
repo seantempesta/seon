@@ -24,6 +24,8 @@
    [:seon.ns.require/alias {:optional true} :symbol]
    [:seon.ns.require/refers {:optional true} [:set :symbol]]])
 (schema/register! ::require-edges [:set ::require-edge])
+(schema/register! ::error [:map [:seon.error/message :string]])
+(schema/register! ::home-requires-result [:or ::require-specs ::error])
 
 (defn home-ns
   "Return the deterministic home-ns symbol for an agent id.
@@ -50,7 +52,7 @@
     [seon.db :as db]
     [my.plan :as plan]])
 
-(defn home-requires-for
+(defn ^:async home-requires-for
   "The require specs for agent `id`'s home ns.
 
    REACTIVE config-on-record
@@ -72,23 +74,33 @@
         fresh-MINT case, before the datom is written (the config/manifest value).
      3. else the [[home-ns-require-specs]] const (= byte-parity for a no-config
         agent). The const is the DEFAULT VALUE only."
-  {:malli/schema [:=> [:catn [::id ::id]] ::require-specs]}
+  {:malli/schema [:=> [:catn [::id ::id]] ::home-requires-result]}
   [id]
-  (or (when id
-        ;; (1) the persisted datom, if the entity carries it (re-arm).
-        (let [db (some-> db/*conn* deref)]
-          (when (and db (contains? (db/installed-schema db) :seon.eval/home-requires))
-            (some->> (:seon.eval/home-requires
-                       (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id id]}))
-                     (db/decode-edn-value :seon.eval/home-requires)
-                     seq
-                     vec))))
-      ;; (2) the config/manifest value (fresh mint — datom not yet written).
-      (when id
-        (let [reqs (:seon.eval/home-requires (config/resolve-agent-context id nil))]
-          (when (seq reqs) (vec reqs))))
-      ;; (3) the const default.
-      home-ns-require-specs))
+  (if-not id
+    home-ns-require-specs
+    (let [database (await (db/db))]
+      (if (:seon.error/message database)
+        database
+        (let [installed (await (db/installed-schema database))]
+          (if (:seon.error/message installed)
+            installed
+            (let [agent
+                  (when (contains? installed :seon.eval/home-requires)
+                    (await (db/entity database [:seon.agent/id id])))]
+              (if (:seon.error/message agent)
+                agent
+                (or
+                 ;; (1) the persisted datom, if the entity carries it (re-arm).
+                 (some->> (:seon.eval/home-requires agent)
+                          (db/decode-edn-value :seon.eval/home-requires)
+                          seq
+                          vec)
+                 ;; (2) the config/manifest value (fresh mint).
+                 (let [reqs (:seon.eval/home-requires
+                              (config/resolve-agent-context id nil))]
+                   (when (seq reqs) (vec reqs)))
+                 ;; (3) the const default.
+                 home-ns-require-specs)))))))))
 
 (defn home-ns-form
   "The exact `(ns …)` SOURCE wired into an agent's home ns.
