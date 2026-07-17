@@ -123,8 +123,8 @@
        last
        ::surface-sym))
 
-(defn ^:async ^:private acquire-canvas!
-  "Acquire the canvas identity from ordinary discovery data at one database value."
+(defn ^:async acquire-canvas!
+  "Acquire canvas identity from ordinary discovery data at one database value."
   [id agent database]
   (let [{entity :seon.render/entity
          :as state} (discovery-state agent)
@@ -243,13 +243,17 @@
       (nil? response)
       {::canvas/wired wired}
 
+      (vector? response)
+      {:seon.render/hiccup response
+       ::canvas/wired wired}
+
       (map? response)
       (assoc response ::canvas/wired wired)
 
       :else
       (assoc (canvas/error-response
                {:seon.error/message
-                "A canvas function must return a render response map."
+                "A canvas function must return hiccup or a render response map."
                 :seon.error/kind :agent
                 :seon.error/data {:seon.render.canvas/content value}
                 ::canvas/content value})
@@ -321,8 +325,8 @@
        ::render-fns/pinned-syms
        (cond-> #{} (symbol? value) (conj value))})
     ;; CONTRACT: this section NEVER vanishes and NEVER surfaces a bare
-    ;; ⚠/malli code. `render-agent-canvas` is already throw-safe, so this
-    ;; backstop only fires on an UNEXPECTED failure (e.g. a db read) —
+    ;; ⚠/malli code. Selected execution already returns ordinary error data,
+    ;; so this backstop only fires on an UNEXPECTED acquisition failure —
     ;; and even then the agent reads a clear, actionable safe-state, not
     ;; a swallowed error keyword. Self-heals on the next clean render.
     (catch :default e

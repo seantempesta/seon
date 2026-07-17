@@ -179,9 +179,10 @@
    the SCI cage) and the cage rebuilds a fn's lexical environment — its
    `:require` `:as` aliases — from the stored `:seon.ns/source`; a
    `(ns x)` stub loses the aliases and the fn cannot run BOUNDED.
-   Third-party (`acme`) roots are full-source too, gated separately by
-   `seon.client/extra-src-ns-strs` (the same file read). Every other ns gets
-   the minimal `(ns x)` stub at boot (still indexed + searchable)."
+   Third-party (`acme`) roots are full-source too, gated separately by the
+   extra source map acquired by `seon.client/extra-src-ns->source` (the same
+   file read). Every other ns gets the minimal `(ns x)` stub at boot (still
+   indexed + searchable)."
   {:malli/schema [:=> [:cat :seon.config/singleton
                        [:or :string :keyword :symbol]] :boolean]}
   [configuration ns-name]

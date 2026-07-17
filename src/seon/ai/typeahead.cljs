@@ -787,18 +787,14 @@
 
 (defn- injected-request
   "The standard empty request for projection fn `sym`, its DECLARED
-   injectable keys filled from the ambient scope — the same boundary
-   rule `seon.instrument/injecting-fschema` applies at eval time (works
-   whether or not the live var is wrapped; explicit keys win in the
-   wrapper). {} when the fn's program-graph spec is unavailable."
+   injectable keys filled by the one instrumentation boundary (works whether
+   or not the live var is wrapped). {} when the fn's program-graph spec is
+   unavailable."
   [spec]
   (let [inj  (try (some-> spec reader/read-string m/schema
                           instrument/declared-injectables)
                   (catch :default _ nil))]
-    (reduce (fn [request k]
-              (let [v ((instrument/injectables k) nil)]
-                (if (some? v) (assoc request k v) request)))
-            {} (or inj #{}))))
+    (instrument/inject-request {} (or inj #{}))))
 
 (defn- projection-doc?
   "Whether a projection result is a renderable document: node map(s)

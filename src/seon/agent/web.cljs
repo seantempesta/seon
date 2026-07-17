@@ -41,7 +41,7 @@
 
    ## Worked examples
 
-     (seon.agent.web/grants)   ; the SEON_WEB grant + reachability policy
+     (seon.agent.web/grants {}) ; the SEON_WEB grant + reachability policy
      (await (seon.agent.web/fetch {:seon.agent.web/url \"https://example.com\"}))
      ; ⟹ «map: ::ok? true, ::status 200, ::title \"Example Domain\", ::extractor :readability, ::total-tokens 84, ::preview \"# …\", ::blob-hash \"9f86d0…\", …»
      (my.blob/text {:my.blob/hash \"9f86d0…\"})   ; page the FULL document
@@ -108,6 +108,7 @@
 (schema/register! ::fetch-request
   [:map
    [::url                ::url]
+   [:seon.config/configuration {:optional true} :seon.config/singleton]
    [::timeout-ms         {:optional true} ::timeout-ms]
    [::max-preview-tokens {:optional true} ::max-preview-tokens]
    [::max-age-ms         {:optional true} ::max-age-ms]])
@@ -165,6 +166,7 @@
 (schema/register! ::search-request
   [:map
    [::query       ::query]
+   [:seon.config/configuration {:optional true} :seon.config/singleton]
    [::max-results {:optional true} ::max-results]
    [::timeout-ms  {:optional true} ::timeout-ms]])
 
@@ -194,6 +196,10 @@
    [::allowed-domains ::allowed-domains]
    [::search-backend  ::search-backend]])
 
+(schema/register! ::grants-request
+  [:map {:closed true}
+   [:seon.config/configuration {:optional true} :seon.config/singleton]])
+
 ;; ============================================================
 ;; Grant + policy — inspect what web access I have (read-only; the policy
 ;; is host-owned config the agent CANNOT widen at runtime).
@@ -212,10 +218,10 @@
    is absent from the env so no search can run). The policy + backend are
    cluster CONFIG (`config/system.edn`'s `:seon.config/web`); nothing inside
    the pod can loosen them."
-  {:malli/schema [:=> [:cat] ::grants-response]}
-  []
-  (let [p (int/policy)
-        {::keys [search-backend]} (int/search-config)
+  {:malli/schema [:=> [:cat ::grants-request] ::grants-response]}
+  [{configuration :seon.config/configuration}]
+  (let [p (int/policy configuration)
+        {::keys [search-backend]} (int/search-config configuration)
         has-key? (case search-backend
                    :gemini-grounding (some? (int/gemini-key))
                    :serper           (some? (int/serper-key))
@@ -299,6 +305,7 @@
      ; ⟹ «map: ::ok? true, ::status 200, ::extractor :readability, ::total-tokens 84, ::blob-hash \"9f86d0…\", ::preview \"# …\"»"
   {:malli/schema [:=> [:cat ::fetch-request] ::fetch-response]}
   [{::keys [url timeout-ms max-preview-tokens max-age-ms]
+    configuration :seon.config/configuration
     :or {timeout-ms         int/default-timeout-ms
          max-preview-tokens int/default-max-preview-tokens
          max-age-ms         0}}]
@@ -314,10 +321,12 @@
       (int/err url ":seon.agent.web/url is required and must be non-blank.")
 
       :else
-      (if-let [cached (and (pos? max-age-ms) (int/fresh-projection url max-age-ms))]
-        (projection->response cached max-preview-tokens)
-        (let [res (await (int/transport url timeout-ms int/default-max-bytes
-                                        int/default-max-redirects))]
+      (let [policy (int/policy configuration)]
+        (if-let [cached (and (pos? max-age-ms) (int/fresh-projection url max-age-ms))]
+          (projection->response cached max-preview-tokens)
+          (let [res (await (int/transport policy url timeout-ms
+                                          int/default-max-bytes
+                                          int/default-max-redirects))]
           (cond
             (not (::ok? res))
             res
@@ -372,7 +381,7 @@
                     (< total 40)     (assoc ::hint (str "extracted only ~" total
                                                         " tokens — the page may be "
                                                         "script-rendered; a browser tier is "
-                                                        "needed for JS-built content."))))))))))
+                                                        "needed for JS-built content.")))))))))))
     (catch :default e
       (int/err url (str "unexpected error in seon.agent.web/fetch: "
                         (or (some-> e .-message) (str e)))))))
@@ -426,7 +435,7 @@
    are grounding-redirect URIs — the intended loop is search → pick a ::url
    → (seon.agent.web/fetch {:seon.agent.web/url …}) (full page → blob) →
    (my.blob/text …) / (seon.agent.search/grep …). Inspect the live backend
-   with (seon.agent.web/grants).
+   with (seon.agent.web/grants {}).
 
    NOT every ok? true search grounds: conceptual/how-to queries often return
    an ::answer the model wrote WITHOUT searching, so ::results is EMPTY (no
@@ -440,6 +449,7 @@
      ; then fetch a row's ::url to page the real page into a blob."
   {:malli/schema [:=> [:cat ::search-request] ::search-response]}
   [{::keys [query max-results timeout-ms]
+    configuration :seon.config/configuration
     :or {max-results int/default-search-results
          timeout-ms  int/default-timeout-ms}}]
   (try
@@ -454,7 +464,8 @@
       (int/search-err query ":seon.agent.web/query is required and must be non-blank.")
 
       :else
-      (let [{backend ::search-backend model ::search-model} (int/search-config)
+      (let [{backend ::search-backend model ::search-model}
+            (int/search-config configuration)
             n (max 1 (min max-results int/max-search-results))]
         (case backend
           :gemini-grounding
@@ -463,7 +474,7 @@
               (int/search-err query
                               (str "no search backend key — GEMINI_API_KEY is unset "
                                    "in the pod's env; the :gemini-grounding backend "
-                                   "cannot run. Inspect with (seon.agent.web/grants)."))
+                                   "cannot run. Inspect with (seon.agent.web/grants {})."))
               (let [res (await (int/gemini-request query model key timeout-ms))]
                 (if-not (::ok? res)
                   res
@@ -504,7 +515,7 @@
               (int/search-err query
                               (str "no search backend key — SERPER_API_KEY is unset "
                                    "in the pod's env; the :serper backend cannot run. "
-                                   "Inspect with (seon.agent.web/grants)."))
+                                   "Inspect with (seon.agent.web/grants {})."))
               (let [res (await (int/serper-request query n timeout-ms))]
                 (if-not (::ok? res)
                   res

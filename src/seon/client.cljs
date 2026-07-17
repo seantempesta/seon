@@ -71,12 +71,11 @@
     ;; (walks goog-global with cljs.core/munge); no boot-time wire-up
     ;; needed.
     [seon.render]
-    [seon.render.default]
     ;; Canvas render namespace — required so the build includes it.
     [seon.render.canvas]
     ;; Root's SYSTEM VIEW — the `/` dashboard = root's canvas content.
     ;; Required so the build includes it and `system-view`'s symbol resolves
-    ;; via eval/lookup-value when render-agent-canvas renders root.
+    ;; when the execution child materializes the root canvas.
     [seon.render.system]
     [seon.runtime.admission :as admission]
     [seon.runtime.lifecycle :as runtime.lifecycle]

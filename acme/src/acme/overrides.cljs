@@ -7,8 +7,8 @@
 
    Two error seams, both branded calm. Core split the one error contract
    into two vars:
-   - `error-response` — the canvas HERO (`seon.render/render-agent-canvas`'s
-     catch): returns the FULL `:seon.render/html-response` map, so we
+   - `error-response` — the canvas execution failure response: returns the
+     FULL `:seon.render/html-response` map, so we
      preserve the agent-facing `:seon.render/ai` + `:seon.render/error` and
      swap only the human-facing hiccup.
    - `error-card` — the slot/entity/block error-card surfaces

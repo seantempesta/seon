@@ -5,7 +5,7 @@
    bare fn-ref) in an event-handler slot of their hiccup. The browser only
    ever sees STANDARD Datastar — there is no bespoke client macro. This is a
    server-side postwalk that runs at render time over AGENT-authored hiccup
-   (see `seon.render/render-agent-canvas`); trusted/core hiccup is unaffected.
+   acquired by `seon.agent.ctx.canvas`; trusted/core hiccup is unaffected.
 
    ## Two authoring shapes
 

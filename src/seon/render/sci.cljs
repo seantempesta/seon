@@ -4,9 +4,8 @@
    ## Why this exists
 
    The pod is a SINGLE Node thread. A canvas lets an agent point
-   `:seon.render.canvas/content` at a fn symbol that is invoked
-   SYNCHRONOUSLY in the render path (`seon.render/html-render` →
-   `(f input-map)`). A non-terminating agent canvas fn (a sync
+   `:seon.render.canvas/content` at a fn symbol selected by the
+   execution child. A non-terminating agent canvas fn (a sync
    `(loop [] (recur))` / `(while true)` / runaway interpreted recursion)
    blocks the one thread and freezes the WHOLE pod — heartbeat, HTTP, SSE,
    every other agent — with no recovery but a manual restart. `try/catch`
@@ -379,9 +378,8 @@
      :seon.render/ai                — a map, a bare STRING, or nil.
    Anything else is a broken render fn → a `:seon/error` block in place
    (fail-loud; re-running it on the unbounded compiled path is banned).
-   The canvas caller (`seon.render/render-agent-canvas`) additionally requires
-   the map envelope and fail-louds a bare value itself — the envelope-vs-
-   bare tolerance is the caller's contract, not SCI's."
+   Callers use `seon.render/unwrap-response` for the one envelope extraction
+   contract and accept bare values appropriate to the selected view."
   [view r]
   (or (nil? r)
       (map? r)

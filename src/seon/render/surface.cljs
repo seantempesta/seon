@@ -52,26 +52,6 @@
                           :expanded "seon-card-expanded"))
       hiccup))
 
-(defn renderer-value
-  "Normalize one selected-function result to hiccup; failures stay visible."
-  [block result]
-  (if (:seon.execution/ok? result)
-    (let [value (:seon.execution/value result)]
-      (cond
-        (and (map? value) (contains? value :seon.render/hiccup))
-        (:seon.render/hiccup value)
-
-        (vector? value) value
-        (nil? value) nil
-        :else
-        [:div {:class "text-error text-xs font-mono"}
-         (str "render error: expected hiccup from "
-              (:seon.render/html block))]))
-    [:div {:class "text-error text-xs font-mono"}
-     (str "render error: "
-          (or (get-in result [:seon.execution/error :seon.error/message])
-              "selected function failed"))]))
-
 (defn materialized
   "Build one ordinary dual-face surface from a resolved hiccup value."
   [block hiccup]

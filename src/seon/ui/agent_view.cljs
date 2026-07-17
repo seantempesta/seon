@@ -79,8 +79,12 @@
      header/header-spacer
      (agent-header agent-id state)
      [:div {:id "agent-view-layout" :class "grid grid-cols-3 gap-2 min-h-0 flex-1"}
-      [:div {:id "agent-view-primary" :class "col-span-2 min-h-0 h-full overflow-hidden"}
-       (mapv primary-panel surfaces)]
-      [:aside {:id "agent-view-context"
-               :class "agent-view-rail col-span-1 flex flex-col gap-2 min-h-0 h-full overflow-y-auto"}
-       (mapv rail-button surfaces)]]]))
+      (into [:div {:id "agent-view-primary"
+                   :class "col-span-2 min-h-0 h-full overflow-hidden"}]
+            (map primary-panel)
+            surfaces)
+      (into [:aside {:id "agent-view-context"
+                     :class (str "agent-view-rail col-span-1 flex flex-col "
+                                 "gap-2 min-h-0 h-full overflow-y-auto")}]
+            (map rail-button)
+            surfaces)]]))

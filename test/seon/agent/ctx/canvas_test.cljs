@@ -4,9 +4,11 @@
     [cljs.test :refer [async deftest is testing]]
     [clojure.string :as str]
     [datahike.api :as d]
+    [seon.agent]
     [seon.agent.ctx.canvas :as canvas-ctx]
     [seon.db :as db]
     [seon.db.protocol :as protocol]
+    [seon.eval]
     [seon.render.canvas :as canvas]))
 
 (def ^:private agent-id "tst-canvas-remote")
@@ -94,7 +96,7 @@
     (let [calls (atom 0)
           original-execute-many db/execute-many
           acquire! (fn [agent]
-                     (@#'canvas-ctx/acquire-canvas! agent-id agent nil))]
+                     (canvas-ctx/acquire-canvas! agent-id agent nil))]
       (set! db/execute-many
             (fn [_]
               (swap! calls inc)
@@ -144,7 +146,7 @@
                 (swap! responses subvec 1)
                 (js/Promise.resolve response))))
       (-> (js/Promise.resolve
-            (@#'canvas-ctx/acquire-canvas!
+            (canvas-ctx/acquire-canvas!
               agent-id {:seon.agent/id agent-id} database))
           (.then
             (fn [result]
@@ -155,7 +157,7 @@
                         [{::protocol/success? false
                           ::protocol/error
                           {:seon.error/message "candidate failed"}}]}])
-              (@#'canvas-ctx/acquire-canvas!
+              (canvas-ctx/acquire-canvas!
                 agent-id {:seon.agent/id agent-id} database)))
           (.then
             (fn [result]
@@ -179,6 +181,16 @@
     (is (= error (:seon.render/error response)))
     (is (not (contains? response :seon.db/error)))
     (is (str/includes? (:seon.render/ai response) "renderer failed"))))
+
+(deftest selected-canvas-response-accepts-bare-hiccup
+  (let [wired {::canvas/source ::canvas/derived
+               ::canvas/value 'my.canvas/view}
+        response (@#'canvas-ctx/selected-canvas-response
+                  wired
+                  {:seon.execution/ok? true
+                   :seon.execution/value [:div "canvas"]})]
+    (is (= [:div "canvas"] (:seon.render/hiccup response)))
+    (is (= wired (:seon.render.canvas/wired response)))))
 
 (defn- probe-candidate-history!
   [conn]
@@ -221,13 +233,13 @@
                         (.then
                           (fn [touch-report]
                             {:seon.canvas-test/candidate
-                             (d/q {:query (@#'canvas-ctx/candidate-query)
+                             (d/q {:query @#'canvas-ctx/candidate-query
                                    :args [@conn agent-id]
                                    :max-work 2000000
                                    :max-results 32768
                                    :max-result-weight 1048576})
                              :seon.canvas-test/history
-                             (d/q {:query (@#'canvas-ctx/history-query)
+                             (d/q {:query @#'canvas-ctx/history-query
                                    :args [(d/history @conn) agent-id
                                           [:seon.agent/purpose]]
                                    :max-work 4000000
@@ -251,7 +263,7 @@
             (is (every? #(re-find #"^my\.canvas/view-" (first %)) candidate))
             (is (= #{:seon.agent/purpose}
                    (set (:seon.fn/read-attrs (nth (first candidate) 4)))))
-            (is (= #{[:seon.agent/purpose touch-tx]} history))
+            (is (= #{[:seon.agent/purpose touch-tx]} (set history)))
             (is (< source-tx touch-tx))))
         (.then (fn [_] (done)))
         (.catch (fn [error]

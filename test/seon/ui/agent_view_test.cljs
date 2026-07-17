@@ -21,11 +21,3 @@
     (is (re-find #"small" markup))
     (is (re-find #"large" markup))
     (is (re-find #"data-agent-state=\"running\"" markup))))
-
-(deftest renderer-failure-is-visible-hiccup
-  (is (re-find #"render error: boom"
-               (html/->string
-                (surface/renderer-value
-                 {:seon.render/html 'my.agent.a/view}
-                 {:seon.execution/ok? false
-                  :seon.execution/error {:seon.error/message "boom"}})))))

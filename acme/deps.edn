@@ -4,5 +4,5 @@
 ;; compiles INTO the pod bundle (Path B — docs/seon/components/extra-src.md).
 ;; Add the third party's own mvn/git/npm deps here; no seon dep is needed
 ;; (seon supplies the classpath via the injection).
-{:paths ["src"]
+{:paths ["src" "test"]
  :deps  {}}

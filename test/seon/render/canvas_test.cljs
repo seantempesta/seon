@@ -1,54 +1,15 @@
 (ns seon.render.canvas-test
-  "Tests for seon.render.canvas — the tile key, resolution
-   provenance, the welcome, and the legible-error contract — plus the
-   render-agent-canvas integration (canvas PRD 2026-06-11, U1):
-
-     • greeting — time-of-day boundaries
-     • wired-content — ::content wins (legacy :seon.render/html tile
-       fallback DELETED, PRD §8.1) → welcome default; pr-str-encoded
-       values decode
-     • welcome — .seon-card compact+expanded blocks, date, purpose,
-       tile line, :seon.render/ai render
-     • error-response — fallback tile + envelope + render (never vanish)
-     • render-agent-canvas — unwired→welcome, literal hiccup via the new
-       key, throwing fn → error-response, ::content EDN roundtrip
-
-   Fresh isolated conn per integration test (client/open-agent-conn!)
-   — NEVER the live pod conn."
+  "Tests for the pure canvas projection surface: resolution, welcome
+   formatting, validation/error shapes, CSS vocabulary, and creation wiring."
   (:require
     [cljs.reader :as reader]
-    [cljs.test :as t :refer [deftest is testing async]]
+    [cljs.test :refer [deftest is testing]]
     [clojure.string :as str]
     [malli.core :as m]
-    [seon.agent :as agent]
-    [seon.client :as client]
-    [seon.db :as db]
-    [seon.error :as error]
-    [seon.render :as render]
     [seon.render.canvas :as canvas]
-    [seon.render.sci :as render-sci]
     [seon.repl.internal :as repl.internal]
     [seon.schema :as schema]
     [seon.ui.html :as html]))
-
-;; The render-agent-canvas degradation tests assert the graceful PROD fallback
-;; (throw / broken hiccup → calm banner, never a crash). Under the harness
-;; strict default (SEON_RENDER_STRICT=1) those renders THROW by design, so
-;; force the fail-loud dial OFF for this ns (process-global env, async-safe —
-;; a scoped with-redefs would restore before an async body runs). Restore the
-;; CALLER's value, not a hardcoded "1" — an isolated bare-node run (env unset)
-;; must not leave the dial flipped ON for whatever runs next.
-(defonce ^:private prior-strict-env
-  (atom nil))
-
-(t/use-fixtures :once
-  {:before (fn []
-             (reset! prior-strict-env
-                     (.. js/globalThis -process -env -SEON_RENDER_STRICT))
-             (set! (.. js/globalThis -process -env -SEON_RENDER_STRICT) "0"))
-   :after  (fn []
-             (set! (.. js/globalThis -process -env -SEON_RENDER_STRICT)
-                   (or @prior-strict-env "")))})
 
 ;; ============================================================
 ;; greeting — pure time-of-day boundaries.
@@ -146,7 +107,8 @@
 
 (deftest welcome-emits-tagged-blocks-and-twin
   (let [{:seon.render/keys [hiccup ai]}
-        (canvas/welcome {:seon.db/db nil :seon.agent/id "wlcm-2206110001"})
+        (canvas/welcome {:seon.agent/id "wlcm-2206110001"
+                         :seon.agent/entity {:seon.agent/id "wlcm-2206110001"}})
         classes (->> (flatten hiccup) (filter map?) (keep :class))]
     (is (canvas/valid-hiccup? hiccup))
     (is (= "seon-card" (:class (second hiccup)))
@@ -170,9 +132,8 @@
 
 (deftest welcome-uses-purpose-when-present
   (let [{:seon.render/keys [hiccup ai]}
-        (canvas/welcome {:seon.db/db nil
-                       :seon.agent/id "wlcm-2206110002"
-                       :seon.render/entity
+        (canvas/welcome {:seon.agent/id "wlcm-2206110002"
+                         :seon.agent/entity
                        {:seon.agent/id      "wlcm-2206110002"
                         :seon.agent/purpose "track your workouts"}})]
     (is (some #(re-find #"track your workouts" %) (hiccup-strings hiccup)))
@@ -181,21 +142,34 @@
 
 (deftest welcome-generic-without-purpose-or-name
   (let [{:seon.render/keys [hiccup]}
-        (canvas/welcome {:seon.db/db nil :seon.agent/id "wlcm-2206110003"})]
+        (canvas/welcome {:seon.agent/id "wlcm-2206110003"
+                         :seon.agent/entity {:seon.agent/id "wlcm-2206110003"}})]
     (is (some #(re-find #"finding my purpose" %) (hiccup-strings hiccup))
         "gracefully generic — no purpose, no name, still elegant")))
 
 (deftest welcome-compact-shows-purpose-id-and-truthful-twin
   (let [{:seon.render/keys [hiccup ai]}
-        (canvas/welcome {:seon.db/db nil
-                       :seon.agent/id "wlcm-2206110004"
-                       :seon.render/entity
+        (canvas/welcome {:seon.agent/id "wlcm-2206110004"
+                         :seon.agent/entity
                        {:seon.agent/id      "wlcm-2206110004"
                         :seon.agent/purpose "track your workouts"}})]
     (is (some #(= "wlcm-2206110004" %) (hiccup-strings hiccup))
         "the agent's id renders on the default tile (canvas U3)")
     (is (re-find #"track your workouts" ai)
         "the twin reports the meaningful content visible to the human")))
+
+(deftest welcome-formats-acquired-name-and-last-reply
+  (let [{:seon.render/keys [hiccup ai]}
+        (canvas/welcome
+          {:seon.agent/id "wlcm-2206110005"
+           :seon.agent/entity {:seon.agent/id "wlcm-2206110005"}
+           :seon.user/name "Sean"
+           :seon.render.chat/last-reply "I found 3 workouts this week"})]
+    (is (some #{"I found 3 workouts this week"} (hiccup-strings hiccup)))
+    (is (some #(str/includes? % "Sean") (hiccup-strings hiccup)))
+    (is (str/includes? ai "I found 3 workouts this week"))
+    (is (not (str/includes? ai ":seon.db/db"))
+        "welcome formats ordinary acquired data without a database handle")))
 
 ;; ============================================================
 ;; error-response — a broken tile is LEGIBLE on both sides.
@@ -251,8 +225,8 @@
                'a-symbol-child])))
   (is (nil? (canvas/hiccup-structure-error
               (:seon.render/hiccup
-                (canvas/welcome {:seon.db/db nil
-                               :seon.agent/id "structok-000001"}))))
+                (canvas/welcome {:seon.agent/id "structok-000001"
+                                 :seon.agent/entity {:seon.agent/id "structok-000001"}}))))
       "the core welcome passes its own gate"))
 
 (deftest structure-error-locates-vector-of-vectors
@@ -319,9 +293,6 @@
              :seon.render.canvas/wired-response
              :seon.render.canvas/error-request
              :seon.render/html
-             :seon.render/html-response
-             :seon.render/ai-response
-             :seon.agent.ctx/render-namespace-response
              :seon.db/db
              :seon.db/listen-request]]
     (testing (str k)
@@ -341,377 +312,6 @@
     (is (not (valid? [])) "empty vector is not hiccup")
     (is (not (valid? '(:h1 "x"))) "a list is not hiccup")
     (is (not (valid? "string")) "bare string rejected")))
-
-;; ============================================================
-;; render-agent-canvas integration — fresh conn, never the live pod.
-;; ============================================================
-
-(defn throwing-tile
-  "Test tile renderer that always throws — the error-envelope target."
-  {:malli/schema [:=> [:cat :seon.render/system-input] :seon.render/html-response]}
-  [_input]
-  (throw (ex-info "deliberate tile failure" {:seon.render.canvas/test true})))
-
-(defn twin-tile
-  "Test tile renderer returning BOTH twins — the twin-contract target."
-  {:malli/schema [:=> [:cat :seon.render/system-input] :seon.render/html-response]}
-  [_input]
-  {:seon.render/hiccup [:div.seon-card [:span "3 workouts this week"]]
-   :seon.render/ai     "3 workouts this week: Mon, Wed, Fri — trending up."})
-
-(defn- with-agent-conn
-  "Open a fresh conn, seed one agent row, and call `body` with the conn HELD via set! for the WHOLE
-   promise chain (restored in .finally) — `binding` unwinds before an
-   async body's awaits run (the *conn*-unbound trap chat_test's
-   with-conn already dodges). Returns a Promise."
-  [agent-id body]
-  (-> (client/open-agent-conn!)
-      (.then (fn [conn]
-               (let [orig db/*conn*]
-                 (set! db/*conn* conn)
-                 (-> (db/transact!
-                       {:seon.db/tx-data
-                        [{:seon.agent/id agent-id}]})
-                     (.then (fn [_] (body conn)))
-                     (.finally (fn [] (set! db/*conn* orig)))))))))
-
-(deftest render-agent-canvas-unwired-renders-welcome
-  (async done
-    (-> (with-agent-conn "tilewlc-000001"
-          (fn [conn]
-            (let [{:seon.render/keys [hiccup ai]
-                   wired :seon.render.canvas/wired}
-                  (render/render-agent-canvas {:seon.db/db @conn
-                                             :seon.agent/id "tilewlc-000001"})]
-              ;; DISPATCH MECHANISM, not the greeting prose: an unwired agent
-              ;; resolves to the welcome renderable, which ALWAYS returns the
-              ;; html-response twin pair. Assert the twin is present and
-              ;; non-blank, and that it's the WELCOME twin specifically — its
-              ;; stable contract is naming how to repoint the tile
-              ;; (:seon.render.canvas/content), not any time-of-day wording.
-              (is (= "seon-card" (:class (second hiccup)))
-                  "unwired agent dispatches to the core welcome renderable")
-              (is (and (string? ai) (seq ai))
-                  "the welcome twin (the ai-format string) rides the response")
-              (is (= {:seon.render.canvas/source :seon.render.canvas/welcome
-                      :seon.render.canvas/value canvas/welcome-sym}
-                     wired)
-                  "the response records the exact renderer it used"))))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
-
-(deftest render-agent-canvas-uses-configured-block-default
-  (async done
-    (-> (with-agent-conn "tilecfg-000001"
-          (fn [conn]
-            (-> (db/transact!
-                  {:seon.db/tx-data
-                   [{:seon.agent/id "tilecfg-000001"
-                     :seon.agent/ctx
-                     [{:seon.agent.ctx/name :canvas
-                       :seon.render.canvas/content
-                       'seon.render.canvas-test/twin-tile}]}]})
-                (.then
-                  (fn [{ok? :seon.db/ok? :as tx}]
-                    (is (true? ok?) (pr-str tx))
-                    (binding [db/*conn* conn]
-                      (let [{:seon.render/keys [hiccup ai]
-                             wired :seon.render.canvas/wired}
-                            (render/render-agent-canvas
-                              {:seon.db/db @conn
-                               :seon.agent/id "tilecfg-000001"})]
-                        (is (= [:div.seon-card
-                                [:span "3 workouts this week"]]
-                               hiccup))
-                        (is (= "3 workouts this week: Mon, Wed, Fri — trending up."
-                               ai))
-                        (is (= :seon.render.canvas/configured
-                               (:seon.render.canvas/source wired)))
-                        (is (= 'seon.render.canvas-test/twin-tile
-                               (:seon.render.canvas/value wired))))))))))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
-
-(deftest welcome-compact-shows-the-last-reply
-  (async done
-    (-> (with-agent-conn "wlcmrpl-000001"
-          (fn [conn]
-            (-> (db/transact! {:seon.db/tx-data [{:seon.user/id "user"}]})
-                (.then (fn [_]
-                         (binding [db/*conn* conn]
-                           (agent/message!
-                             {:seon.agent.message/from    agent/user-ref
-                              :seon.agent.message/to      [:seon.agent/id "wlcmrpl-000001"]
-                              :seon.agent.message/content "how's it going?"}))))
-                (.then (fn [_]
-                         (binding [db/*conn* conn]
-                           (agent/message!
-                             {:seon.agent.message/from    [:seon.agent/id "wlcmrpl-000001"]
-                              :seon.agent.message/to      [:seon.user/id "user"]
-                              :seon.agent.message/content "I found 3 workouts this week"}))))
-                (.then (fn [_]
-                         ;; the per-turn transcript SELF-message (from =
-                         ;; to = the agent, raw eval source) lands AFTER
-                         ;; the reply — the kXQ root-tile bug 2026-06-11:
-                         ;; this row rendered as the "last reply"
-                         (binding [db/*conn* conn]
-                           (agent/message!
-                             {:seon.agent.message/from    [:seon.agent/id "wlcmrpl-000001"]
-                              :seon.agent.message/to      [:seon.agent/id "wlcmrpl-000001"]
-                              :seon.agent.message/content ";; The user asked …\n(seon.agent/reply! {…})"}))))
-                (.then
-                  (fn [_]
-                    (binding [db/*conn* conn]
-                      (let [{:seon.render/keys [hiccup ai]}
-                            (canvas/welcome
-                              {:seon.db/db @conn
-                               :seon.agent/id "wlcmrpl-000001"
-                               :seon.render/entity {:seon.agent/id "wlcmrpl-000001"}})]
-                        (is (some #(= "I found 3 workouts this week" %)
-                                  (hiccup-strings hiccup))
-                            "the last REPLY renders as readable text (not raw message data)")
-                        (is (not-any? #(re-find #"reply!" (str %))
-                                      (hiccup-strings hiccup))
-                            "transcript self-narration never shows as the last reply")
-                        (is (re-find #"I found 3 workouts this week" ai)
-                            "the twin tells the agent its reply is on display"))))))))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
-
-(deftest render-agent-canvas-content-key-literal-hiccup
-  (async done
-    (-> (with-agent-conn "tilelit-000001"
-          (fn [conn]
-            (-> (db/transact!
-                  {:seon.db/tx-data
-                   [{:seon.agent/id "tilelit-000001"
-                     :seon.render.canvas/content [:h1 "wired!"]}]})
-                (.then (fn [_]
-                         (binding [db/*conn* conn]
-                           (let [{:seon.render/keys [hiccup]}
-                                 (render/render-agent-canvas
-                                   {:seon.db/db @conn
-                                    :seon.agent/id "tilelit-000001"})]
-                             (is (= [:h1 "wired!"] hiccup)
-                                 "literal hiccup on ::content roundtrips the EDN bridge and renders as-is"))))))))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
-
-(deftest render-agent-canvas-literal-hiccup-interactive-gets-transform
-  ;; #22 B.1 — a LITERAL-HICCUP tile with an :on-click handler is
-  ;; agent-authored too, so its handler MUST be rewritten to a Datastar
-  ;; @post pointing at the agent's OWN /call door. Before the fix the
-  ;; transform gated on `agent-authored-sym?` (a SYMBOL), so literal
-  ;; hiccup fell through untouched → a dead button.
-  (async done
-    (-> (with-agent-conn "tileint-000001"
-          (fn [conn]
-            (-> (db/transact!
-                  {:seon.db/tx-data
-                   [{:seon.agent/id "tileint-000001"
-                     :seon.render.canvas/content
-                     [:button {:on-click (list 'bump! "row-1")} "+1"]}]})
-                (.then (fn [_]
-                         (binding [db/*conn* conn]
-                           (let [{:seon.render/keys [hiccup]}
-                                 (render/render-agent-canvas
-                                   {:seon.db/db @conn
-                                    :seon.agent/id "tileint-000001"})
-                                 attrs (second hiccup)
-                                 action (:data-on:click attrs)]
-                             (is (nil? (:on-click attrs))
-                                 "the raw :on-click slot is gone — rewritten, not emitted verbatim")
-                             (is (string? action)
-                                 "a literal-hiccup :on-click becomes a Datastar @post (no dead button)")
-                             (is (str/includes?
-                                   action "@post('/agent/tileint-000001/call?fn=")
-                                 "routes to the agent's OWN /call door")
-                             (is (str/includes?
-                                   action "my.agent.tileint-000001%2Fbump!")
-                                 "the bare handler qualifies to the agent's home ns")
-                             (is (str/includes? action "args=")
-                                 "the fn-CALL render-time arg rides ?args="))))))))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
-
-(deftest render-agent-canvas-twin-fn-carries-both-keys
-  (async done
-    (-> (with-agent-conn "tiletwn-000001"
-          (fn [conn]
-            (-> (db/transact!
-                  {:seon.db/tx-data
-                   [{:seon.agent/id "tiletwn-000001"
-                     :seon.render.canvas/content
-                     'seon.render.canvas-test/twin-tile}]})
-                (.then (fn [_]
-                         (binding [db/*conn* conn]
-                           (let [{:seon.render/keys [hiccup ai]}
-                                 (render/render-agent-canvas
-                                   {:seon.db/db @conn
-                                    :seon.agent/id "tiletwn-000001"})]
-                             (is (= [:div.seon-card [:span "3 workouts this week"]]
-                                    hiccup))
-                             (is (= "3 workouts this week: Mon, Wed, Fri — trending up."
-                                    ai)
-                                 "response carries BOTH twins"))))))))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
-
-(deftest render-agent-canvas-throwing-fn-is-legible
-  (async done
-    (-> (with-agent-conn "tileerr-000001"
-          (fn [conn]
-            (-> (db/transact!
-                  {:seon.db/tx-data
-                   [{:seon.agent/id "tileerr-000001"
-                     :seon.render.canvas/content
-                     'seon.render.canvas-test/throwing-tile}]})
-                (.then (fn [_]
-                         (binding [db/*conn* conn]
-                           ;; throwing-tile is seon.* → :core fault; deliberate,
-                           ;; so bracket EXPECTED (render is sync; the alias
-                           ;; resolves before the local `error` destructure).
-                           (let [{:seon.render/keys [hiccup ai error]}
-                                 (error/expecting-core-fault!
-                                   (fn []
-                                     (render/render-agent-canvas
-                                       {:seon.db/db @conn
-                                        :seon.agent/id "tileerr-000001"})))]
-                             (is (= "seon-card" (:class (second hiccup)))
-                                 "human sees a valid fallback card rather than a vanish")
-                             (is (re-find #"deliberate tile failure"
-                                          (:seon.error/message error))
-                                 "response carries the error envelope")
-                             (is (re-find #"throwing-tile" (str ai))
-                                 "twin names the broken renderer"))))))))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
-
-(deftest render-agent-canvas-sci-envelope-is-not-recorded-again
-  ;; `invoke-bounded` owns recording and deduping an SCI failure. The canvas
-  ;; guard wraps its returned envelope in a fresh ex-info so it can enter the
-  ;; normal fallback path; that wrapper must not look like a new occurrence.
-  ;; Before the regression fix, every reactive render called record! here,
-  ;; whose transaction invalidated the same view and formed an unbounded
-  ;; render→error→render loop.
-  (async done
-    (-> (with-agent-conn "tilelop-000001"
-          (fn [conn]
-            (let [outer-records (atom [])
-                  envelope {:seon.error/message "bounded fixture failed"}]
-              (with-redefs
-                [canvas/wired-content
-                 (fn [_]
-                   {:seon.render.canvas/value
-                    'my.agent.tilelop-000001/broken-canvas})
-                 render-sci/bounding-enabled? (constantly true)
-                 render-sci/invoke-bounded
-                 (fn
-                   ([_ _] {:seon.render.sci/error envelope})
-                   ([_ _ _] {:seon.render.sci/error envelope})
-                   ([_ _ _ _] {:seon.render.sci/error envelope}))
-                 error/record! #(swap! outer-records conj %)]
-                (binding [db/*conn* conn]
-                  (dotimes [_ 2]
-                    (let [{:seon.render/keys [hiccup error]}
-                          (render/render-agent-canvas
-                            {:seon.db/db @conn
-                             :seon.agent/id "tilelop-000001"})]
-                      (is (vector? hiccup)
-                          "the agent still receives the graceful error surface")
-                      (is (= envelope
-                             (get-in error [:seon.error/data :seon/error]))
-                          "the fallback preserves the source SCI envelope as its cause")))))
-              (is (empty? @outer-records)
-                  "the outer canvas guard never records the same SCI occurrence"))))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
-
-;; ============================================================
-;; Serialization errors join the guarded path (serialization-boundary hardening): a
-;; tile whose FN CALL succeeds but whose hiccup can't serialize must
-;; degrade to error-response — the page (and the chat on it) never
-;; 500s for a tile problem, and the response hiccup itself is PROVEN
-;; serializable.
-;; ============================================================
-
-(defn vector-of-vectors-tile
-  "Test tile reproducing the vector-of-vectors incident: the call
-   SUCCEEDS, the hiccup is structurally broken."
-  {:malli/schema [:=> [:cat :seon.render/system-input] :seon.render/html-response]}
-  [_input]
-  {:seon.render/hiccup vov-repro-hiccup
-   :seon.render/ai     "header rows"})
-
-(defn unparseable-tag-tile
-  "Test tile whose hiccup passes the structural walk (keyword tag)
-   but still makes ->string throw (`:#foo` has no tag name) — the
-   backstop-serialization target."
-  {:malli/schema [:=> [:cat :seon.render/system-input] :seon.render/html-response]}
-  [_input]
-  ;; (keyword "#foo") — the literal `:#foo` is reader-undefined.
-  {:seon.render/hiccup [:div [(keyword "#foo") "no tag name"]]})
-
-(defn- tile-degrades-legibly
-  "Shared assertion body: wire `content` onto a fresh agent, render,
-   and require the FULL degradation contract — error-response card,
-   `re` in both the twin and the envelope message, and a response
-   hiccup that PROVABLY serializes (the page can embed it safely)."
-  [agent-id content re]
-  (with-agent-conn agent-id
-    (fn [conn]
-      (-> (db/transact!
-            {:seon.db/tx-data
-             [{:seon.agent/id                 agent-id
-               :seon.render.canvas/content content}]})
-          (.then
-            (fn [_]
-              (binding [db/*conn* conn]
-                ;; A structurally-broken tile is a :core fault (the render
-                ;; machinery is seon.*); deliberate across vov / literal-broken
-                ;; / backstop, so bracket EXPECTED (sync render).
-                (let [{:seon.render/keys [hiccup ai error]}
-                      (error/expecting-core-fault!
-                        (fn []
-                          (render/render-agent-canvas
-                            {:seon.db/db @conn :seon.agent/id agent-id})))]
-                  (is (= "seon-card" (:class (second hiccup)))
-                      "human sees a valid fallback card and the page never 500s")
-                  (is (re-find re (:seon.error/message error))
-                      "envelope carries the legible structure error")
-                  (is (re-find re (str ai))
-                      "the twin tells the agent exactly what broke")
-                  (is (string? (html/->string hiccup))
-                      "the fallback hiccup itself serializes")))))))))
-
-(deftest render-agent-canvas-vector-of-vectors-degrades-to-banner
-  (async done
-    (-> (tile-degrades-legibly
-          "tilevov-000001"
-          'seon.render.canvas-test/vector-of-vectors-tile
-          #"vector-of-vectors")
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
-
-(deftest render-agent-canvas-literal-broken-hiccup-degrades-to-banner
-  ;; The literal-hiccup arm of html-render never CALLS anything — the
-  ;; old guard couldn't fire at all. Same seam covers it.
-  (async done
-    (-> (tile-degrades-legibly
-          "tilevov-000002" vov-repro-hiccup #"vector-of-vectors")
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
-
-(deftest render-agent-canvas-serializer-backstop-catches-walk-misses
-  ;; Falsifies the backstop layer specifically: a defect the walk
-  ;; doesn't model (unparseable keyword tag) still degrades.
-  (async done
-    (-> (tile-degrades-legibly
-          "tilevov-000003"
-          'seon.render.canvas-test/unparseable-tag-tile
-          #"Unparseable tag")
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
 ;; ============================================================
 ;; CSS contract — the core stylesheet honors what the ns

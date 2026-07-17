@@ -3,7 +3,7 @@
 
    The agent's derived state, turn counts, and the
    armable-agent ID query were each re-implemented 5+ times across `seon.agent`,
-   `seon.agent.ctx`, `seon.render.default`, `seon.agent.run`, and
+   `seon.agent.ctx`, the former host renderer, `seon.agent.run`, and
    `seon.agent.schedule`, every copy justified by dodging the
    `agent → ctx → render` require cycle. A pure `(derive-x db id)` needs
    NOTHING from those namespaces — only `seon.db` to read and `seon.schema`

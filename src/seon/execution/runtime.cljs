@@ -3,7 +3,7 @@
   (:require
    [my.plan.internal]
    [seon.agent.ctx :as ctx]
-   [seon.agent.ctx.canvas]
+   [seon.agent.ctx.canvas :as ctx-canvas]
    [seon.agent.ctx.menu]
    [seon.agent.ctx.namespaces]
    [seon.agent.ctx.render-fns :as render-fns]
@@ -11,6 +11,7 @@
    [seon.agent.ctx.transcript]
    [seon.agent.ctx.typeahead-steps]
    [seon.agent.ctx.warnings]
+   [seon.agent.message :as message]
    [seon.ai :as ai]
    [seon.config :as config]
    [seon.db :as db]
@@ -19,6 +20,8 @@
    [seon.execution :as execution]
    [seon.error :as error]
    [seon.eval :as eval]
+   [seon.render :as render]
+   [seon.render.canvas :as canvas]
    [seon.render.surface :as surface]
    [seon.render.system]
    [seon.schema :as schema]))
@@ -54,9 +57,26 @@
 
 (defn- ai-value
   [value]
-  (if (and (map? value) (contains? value :seon.render/ai))
-    (:seon.render/ai value)
-    value))
+  (render/unwrap-response :seon.render/ai value))
+
+(defn- html-value
+  [block result]
+  (if (::execution/ok? result)
+    (let [value (render/unwrap-response
+                 :seon.render/html
+                 (::execution/value result))]
+      (cond
+        (or (vector? value) (nil? value))
+        value
+
+        :else
+        (canvas/error-card
+         {:seon.error/message
+          (str "expected hiccup from " (:seon.render/html block))})))
+    (canvas/error-card
+     {:seon.error/message
+      (or (get-in result [::execution/error :seon.error/message])
+          "selected function failed")})))
 
 (defn- block-call
   [id entity configuration block]
@@ -322,10 +342,13 @@
   {::execution/function-symbol renderer
    ::execution/invoke-selected? true
    ::execution/arguments
-   [{:seon.agent/id id
-     :seon.agent/entity entity
-     :seon.config/configuration configuration
-     :seon.render/node block}]})
+   [(cond-> {:seon.agent/id id
+             :seon.agent/entity entity
+             :seon.config/configuration configuration
+             :seon.render/node block}
+      (contains? block :seon.render.chat/last-reply)
+      (assoc :seon.render.chat/last-reply
+             (:seon.render.chat/last-reply block)))]})
 
 (defn- page-state [entity]
   (let [run (:seon.agent/run entity)
@@ -340,73 +363,150 @@
 (defn ^:async render-agent-view!
   "Acquire one page projection and resolve its surfaces inside the child."
   [{:seon.agent/keys [id]} invoke-selected!]
-  (let [members (assoc-in agent-view-members [0 ::protocol/entity-id]
-                          [:seon.agent/id id])
-        acquired (await (db/execute-many {::db/members members
-                                          ::db/max-result-weight 3670016}))
-        [agent-member agent-count-member config-member] (::db/results acquired)]
-    (if-not (every? #(true? (::protocol/success? %)) (::db/results acquired))
-      (prompt-acquisition-error acquired (::db/results acquired))
-      (let [entity (or (acquired-member agent-member) {})
-            configuration
-            (db/decode-edn-values
-              (or (acquired-member config-member) {}))
-            blocks (->> (ctx/selected-agent-blocks entity nil)
-                        (keep (fn [block]
-                                (when-let [renderer (html-slot (:seon.render/html block))]
-                                  (assoc block :seon.render/html renderer))))
-                        vec)
-            canvas-value (when-let [stored (:seon.render.canvas/content entity)]
-                           (db/decode-edn-value
-                            :seon.render.canvas/content stored))
-            canvas-block {:seon.render.surface/selection "canvas"
+  (let [database (or (::db/db (db/current-tx-context))
+                     (await (db/db)))
+        members (assoc-in agent-view-members [0 ::protocol/entity-id]
+                          [:seon.agent/id id])]
+    (if (:seon.error/message database)
+      database
+      (let [acquired (await
+                      (db/execute-many
+                       {::db/db database
+                        ::db/members members
+                        ::db/max-result-weight 3670016}))
+            [agent-member agent-count-member config-member]
+            (::db/results acquired)]
+        (cond
+          (:seon.error/message acquired)
+          acquired
+
+          (not= 3 (count (::db/results acquired)))
+          (prompt-acquisition-error acquired (::db/results acquired))
+
+          (not-every? #(true? (::protocol/success? %))
+                      (::db/results acquired))
+          (prompt-acquisition-error acquired (::db/results acquired))
+
+          :else
+          (let [entity (or (acquired-member agent-member) {})
+                configuration
+                (db/decode-edn-values
+                 (or (acquired-member config-member) {}))
+                canvas-acquisition
+                (await (ctx-canvas/acquire-canvas! id entity database))]
+            (if (:seon.error/message canvas-acquisition)
+              canvas-acquisition
+              (let [canvas-wired
+                    (:seon.render.canvas/wired canvas-acquisition)
+                    canvas-value
+                    (:seon.render.canvas/value canvas-wired)
+                    recent-messages
+                    (when (= canvas/welcome-sym canvas-value)
+                      (await
+                       (message/recent
+                        {::db/db database
+                         :seon.agent/id id
+                         :seon.agent.message/recent-limit 50})))]
+                (if (:seon.error/message recent-messages)
+                  recent-messages
+                  (let [last-reply
+                        (when (vector? recent-messages)
+                          (some->> recent-messages
+                                   (filter
+                                    (fn [message]
+                                      (and
+                                       (= id
+                                          (get-in
+                                           message
+                                           [:seon.agent.message/from
+                                            :seon.agent/id]))
+                                       (some
+                                        :seon.user/id
+                                        (:seon.agent.message/to message)))))
+                                   last
+                                   :seon.agent.message/content))
+                        blocks
+                        (->> (ctx/selected-agent-blocks entity nil)
+                             (keep
+                              (fn [block]
+                                (when-let [renderer
+                                           (html-slot
+                                            (:seon.render/html block))]
+                                  (assoc block
+                                         :seon.render/html renderer))))
+                             vec)
+                        canvas-block
+                        (cond->
+                         {:seon.render.surface/selection "canvas"
                           :seon.render.surface/label "canvas"
-                          :seon.render/html canvas-value}
-            all-blocks (conj blocks canvas-block)
-            targets (->> all-blocks
-                         (keep-indexed (fn [index block]
-                                         (when (symbol? (:seon.render/html block))
-                                           {:index index
-                                            :call (html-call id entity
-                                                             configuration block
-                                                             (:seon.render/html block))})))
-                         vec)
-            results (if (seq targets)
-                      (await (error/with-configuration
-                               configuration
-                               #(invoke-selected! (mapv :call targets))))
-                      [])
-            result-by-index (into {} (map (juxt :index identity))
-                                  (map (fn [target result]
-                                         (assoc target :result result))
-                                       targets results))
-            surfaces
-            (->> all-blocks
-                 (keep-indexed
-                  (fn [index block]
-                    (let [renderer (:seon.render/html block)
-                          hiccup (cond
-                                   (vector? renderer) renderer
-                                   (symbol? renderer)
-                                   (surface/renderer-value
-                                    block (:result (get result-by-index index)))
-                                   (= "canvas" (:seon.render.surface/selection block))
-                                   [:div {:class "p-2 text-text-500 text-xs"}
-                                    "No canvas render yet."]
-                                   :else nil)]
-                      (surface/materialized block hiccup))))
-                 vec)]
-        {:seon.agent/id id
-         :seon.ui.agent-view/state (if (seq entity) (page-state entity) :unknown)
-         ::surface/surfaces surfaces
-         :seon.web.datastar/dependencies
-         (into agent-view-fixed-dependencies
-               (mapcat ::surface/read-attrs)
-               surfaces)
-         :seon.ui.header/projection
-         {:seon.ui.header/brand-name "seon"
-          :seon.ui.header/agent-count (or (query-member-value agent-count-member) 0)
-          :seon.ui.header/running-count (if (= :running (page-state entity)) 1 0)}}))))
+                          :seon.render/html canvas-value
+                          :seon.render/entity
+                          (:seon.render/entity canvas-acquisition)}
+                          (some? last-reply)
+                          (assoc :seon.render.chat/last-reply last-reply))
+                        all-blocks (conj blocks canvas-block)
+                        targets
+                        (->> all-blocks
+                             (keep-indexed
+                              (fn [index block]
+                                (when (symbol? (:seon.render/html block))
+                                  {:index index
+                                   :call
+                                   (html-call
+                                    id
+                                    (or (:seon.render/entity block) entity)
+                                    configuration
+                                    block
+                                    (:seon.render/html block))})))
+                             vec)
+                        results
+                        (if (seq targets)
+                          (await
+                           (error/with-configuration
+                            configuration
+                            #(invoke-selected! (mapv :call targets))))
+                          [])
+                        hiccup-by-index
+                        (into {}
+                              (map
+                               (fn [{:keys [index]} result]
+                                 [index
+                                  (html-value
+                                   (nth all-blocks index)
+                                   result)])
+                               targets
+                               results))
+                        surfaces
+                        (->> all-blocks
+                             (keep-indexed
+                              (fn [index block]
+                                (let [renderer (:seon.render/html block)
+                                      hiccup
+                                      (cond
+                                        (vector? renderer)
+                                        renderer
+
+                                        (symbol? renderer)
+                                        (get hiccup-by-index index)
+
+                                        :else
+                                        nil)]
+                                  (surface/materialized block hiccup))))
+                             vec)]
+                    {:seon.agent/id id
+                     :seon.ui.agent-view/state
+                     (if (seq entity) (page-state entity) :unknown)
+                     ::surface/surfaces surfaces
+                     :seon.web.datastar/dependencies
+                     (into agent-view-fixed-dependencies
+                           (mapcat ::surface/read-attrs)
+                           surfaces)
+                     :seon.ui.header/projection
+                     {:seon.ui.header/brand-name "seon"
+                      :seon.ui.header/agent-count
+                      (or (query-member-value agent-count-member) 0)
+                      :seon.ui.header/running-count
+                      (if (= :running (page-state entity)) 1 0)}}))))))))))
 
 (defn ^:async eval-batch!
   "Evaluate one parsed batch in this agent's retained child compiler."
@@ -422,7 +522,8 @@
     (error/with-configuration
       configuration
       #(db/with-tx-context
-         {::db/db nil}
+         {::db/db nil
+          :seon.config/configuration configuration}
          (fn ^:async run-with-current-database! []
            (await
             (apply eval/eval-batch!

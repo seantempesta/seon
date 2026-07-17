@@ -75,18 +75,10 @@
 ;; so a downstream inheritor is never SSRF-open by accident.
 ;; ============================================================
 
-;; Test seam — a hermetic test resets this to a literal policy map instead of
-;; staging a config file (the [[!fetch-impl]]/[[!lookup-impl]] pattern). nil =
-;; read the live config.
-(defonce !policy-override (atom nil))
-
 (defn policy
-  "The resolved web-access policy map (mode + allowed-domains) every hop
-   enforces — the config value, or the [[!policy-override]] test seam.
-   Normalized so both keys are always present (allowed-domains defaults to
-   `[]`), regardless of a sparse override."
-  []
-  (let [p (or @!policy-override (config/web-policy))]
+  "The resolved web-access policy enforced by every redirect hop."
+  [configuration]
+  (let [p (config/web-policy configuration)]
     {::web/policy          (::web/policy p)
      ::web/allowed-domains (vec (::web/allowed-domains p))}))
 
@@ -122,7 +114,7 @@
   (err url (str "web access is not granted (default-deny) — the host must "
                 "set the SEON_WEB env var (any value but \"0\") before the "
                 "pod starts; nothing inside the pod can grant it. Inspect "
-                "with (seon.agent.web/grants).")))
+                "with (seon.agent.web/grants {}).")))
 
 (defn search-err
   "ok?-false SEARCH envelope — the same :seon.error/* shape as [[err]], but
@@ -142,7 +134,7 @@
               (str "web access is not granted (default-deny) — search rides "
                    "the SAME SEON_WEB grant as fetch; the host must set "
                    "SEON_WEB (any value but \"0\") before the pod starts. "
-                   "Inspect with (seon.agent.web/grants).")))
+                   "Inspect with (seon.agent.web/grants {}).")))
 
 ;; ============================================================
 ;; SSRF / target guard — the ONE per-hop reachability check, driven by the
@@ -463,7 +455,7 @@
    problem); an ok?-true map {::status ::final-url ::content-type ::lane
    ::body ::truncated?} for a text-ish response; the same with ::binary?
    true (no body) for binary."
-  [url timeout-ms max-bytes max-redirects]
+  [policy url timeout-ms max-bytes max-redirects]
   (loop [current url, hops 0, visited #{}]
     (let [parsed (try (js/URL. current) (catch :default _ nil))]
       (cond
@@ -475,8 +467,7 @@
                       (.-protocol parsed) ") — file: is seon.agent.fs's job."))
 
         :else
-        (let [pol   (policy)
-              block (await (host-block-reason parsed pol))]
+        (let [block (await (host-block-reason parsed policy))]
           (cond
             (= block ::dns-fail)
             (err url (str "could not resolve host " (.-hostname parsed)
@@ -484,8 +475,8 @@
 
             (string? block)
             (err url (str "web policy refused this target: " block
-                          " — inspect the policy with (seon.agent.web/grants).")
-                 {::web/final-url current ::web/policy (::web/policy pol)})
+                          " — inspect the policy with (seon.agent.web/grants {}).")
+                 {::web/final-url current ::web/policy (::web/policy policy)})
 
             :else
             (let [ctrl   (js/AbortController.)
@@ -571,18 +562,10 @@
 ;; behind the SAME schema later.
 ;; ============================================================
 
-;; Test seam — a hermetic test resets this to a literal
-;; {::web/search-backend <kw> ::web/search-model <s>} map instead of staging
-;; a config file. nil = read the live config.
-(defonce !search-config-override (atom nil))
-
 (defn search-config
-  "The resolved search backend + model — the config value (via
-   [[seon.config/web-search-config]]) or the [[!search-config-override]]
-   test seam, normalized to `{::web/search-backend <kw> ::web/search-model
-   <s>}`."
-  []
-  (let [c (or @!search-config-override (config/web-search-config))]
+  "The resolved web-search backend and model for one operation."
+  [configuration]
+  (let [c (config/web-search-config configuration)]
     {::web/search-backend (:seon.agent.web/search-backend c)
      ::web/search-model   (:seon.agent.web/search-model c)}))
 

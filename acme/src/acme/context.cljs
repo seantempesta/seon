@@ -1,17 +1,14 @@
 (ns acme.context
-  "Acme's overlay of the agent page's canvas + supporting context surfaces
-   (Lane-U verification).
+  "Acme's overlay of the agent page's canvas and context surfaces.
 
-   The per-agent page (`/agent/{id}`, rendered by `seon.ui.agent_view` +
-   `seon.web.datastar/agent-view`) has a focal **canvas** — the ONE value
-   the agent is currently conveying to its human, wired on
-   `:seon.render.canvas/content` and rendered by
-   `seon.render/render-agent-canvas`. Below it, a
-   `:seon.agent.ctx/priority`-ordered scroll shows every `:seon.agent/ctx`
-   block that carries a `:seon.render/html` render, each placed through the
-   `seon.render/slot` primitive (decision #19 — the canvas is the
-   `:seon.render.canvas/content` pin, NOT a ctx block; a block named
-   `:canvas` would just be another supporting surface).
+   The execution child builds the per-agent page's ordinary surface projection
+   from `:seon.render.canvas/content` plus the priority-ordered
+   `:seon.agent/ctx` blocks carrying `:seon.render/html`.
+   `seon.render.surface/materialized` normalizes each result and
+   `seon.ui.agent-view/render-agent-view` lays out the selected expanded
+   surface with the remaining compact surfaces in the rail. The canvas is the
+   `:seon.render.canvas/content` pin, not a context block; a block named
+   `:canvas` would remain an ordinary context surface.
 
    So a third party shapes an agent's whole page with ZERO src/seon edits,
    using two extension surfaces:
@@ -54,43 +51,58 @@
   [id]
   (db/with-agent id
     (fn ^:async install-context []
-      (await (ctx/remove! :acme-broken))
-      ;; Wire the consumer's healthy dashboard into the focal canvas.
-      (await
-        (db/transact!
-          {:seon.db/tx-data
-           [{:seon.agent/id id
-             :seon.render.canvas/content 'acme.widget/dash}]}))
-      (await
-        (ctx/install!
-          [{:seon.agent.ctx/name     :acme-surface
-            :seon.agent.ctx/priority 50
-            :seon.render/html        'acme.context/overlay-surface}
-           ;; The existing Acme dashboard (returns an HTML-response map,
-           ;; the canvas render contract) installed onto the context block
-           ;; `:seon.render/html` slot — does the slot path consume the
-           ;; html-response map contract?
-           {:seon.agent.ctx/name     :acme-widget
-            :seon.agent.ctx/priority 55
-            :seon.render/html        'acme.widget/dash}])))))
+      (let [removed (await (ctx/remove! :acme-broken))]
+        (if (false? (::ctx/ok? removed))
+          removed
+          (let [canvas
+                (await
+                  (db/transact!
+                    {:seon.db/tx-data
+                     [{:seon.agent/id id
+                       :seon.render.canvas/content 'acme.widget/dash}]}))]
+            (if (:seon.error/message canvas)
+              canvas
+              (await
+                (ctx/install!
+                  [{:seon.agent.ctx/name     :acme-surface
+                    :seon.agent.ctx/priority 50
+                    :seon.render/html        'acme.context/overlay-surface}
+                   {:seon.agent.ctx/name     :acme-widget
+                    :seon.agent.ctx/priority 55
+                    :seon.render/html        'acme.widget/dash}])))))))))
 
 (defn ^:async install-all!
   "Install Acme's context blocks into every live agent.
 
-   Scheduled from acme.pod after boot (the conn + agent roster are up). Best-effort +
-   logged — a failure must never take the pod down."
+   Scheduled from acme.pod after boot, when the database session and agent
+   roster are available. The roster is read from one immutable database value;
+   each agent installation then uses the current database so its sequential
+   writes observe the preceding write. Database failures return as data."
   []
-  (try
-    (let [db  @db/*conn*
-          ids (map first
-                   (db/query {:seon.db/db    db
+  (let [database (await (db/db))]
+    (if (:seon.error/message database)
+      database
+      (let [rows (await
+                   (db/query {:seon.db/db database
                               :seon.db/query '[:find ?id :where
-                                               [?a :seon.agent/id ?id]]}))]
-      (log/info-console! "acme.context" "installing acme context blocks"
-                         {:agents (vec ids)})
-      (doseq [id ids]
-        (-> (js/Promise.resolve (install-into! id))
-            (.then  (fn [r] (log/info-console! "acme.context" "installed" {:agent id :result r})))
-            (.catch (fn [e] (log/error-console! "acme.context" "install failed" e))))))
-    (catch :default e
-      (log/error-console! "acme.context" "install-all! threw" e))))
+                                               [?agent :seon.agent/id ?id]]}))]
+        (if (:seon.error/message rows)
+          rows
+          (let [ids (mapv first rows)]
+            (log/info-console! "acme.context" "installing acme context blocks"
+                               {:agents ids})
+            (letfn [(install-next [remaining]
+                      (if-let [id (first remaining)]
+                        (-> (install-into! id)
+                            (.then
+                              (fn [result]
+                                (if (or (:seon.error/message result)
+                                        (false? (::ctx/ok? result)))
+                                  result
+                                  (do
+                                    (log/info-console!
+                                      "acme.context" "installed"
+                                      {:agent id :result result})
+                                    (install-next (next remaining)))))))
+                        (js/Promise.resolve ids)))]
+              (await (install-next ids)))))))))

@@ -118,7 +118,6 @@
 (def host-timezone ctx/host-timezone)
 (def truncate-edn ctx/truncate-edn)
 (def message-label ctx/message-label)
-(def eval-render-cap ctx/eval-render-cap)
 (def cap-result ctx/cap-result)
 (def cap-result-body ctx/cap-result-body)
 (def namespaces-block ctx-namespaces/namespaces-block)
@@ -266,19 +265,16 @@
    [:seon.ns/name   :seon.ns/name]
    [:seon.ns/source :seon.ns/source]])
 
-;; :seon.agent — the agent's OWN entity-kind. The `:seon.render/html`
-;; property makes `seon.render.default/view` the default surface renderer via
-;; the same kind-lookup every other kind uses; an agent OVERRIDES by
-;; transacting `:seon.render/html '<its-own-fn-sym>` onto its own entity
-;; (per-entity override wins in `seon.render/entity-html-sym`). No
+;; :seon.agent — the agent's OWN entity shape. Its page/canvas operation
+;; selects the surface renderer after acquiring one immutable agent value;
+;; the schema does not install a second host-side default reader. No
 ;; `:seon.render/ai` property in the props — the agent entity must NOT enter
 ;; the chronological ai window. The ONLY required attr is `id` (the one thing
 ;; `create!` always writes); state is DERIVED (no stored enum), and every
 ;; other attr arrives lazily. `sections` keeps its own register! (still
 ;; transactable/queryable) but stays out of the record shape's required set.
 (schema/register! :seon.agent
-  [:map {:seon.db/entity   true
-         :seon.render/html 'seon.render.default/view}
+  [:map {:seon.db/entity true}
    [:seon.agent/id      :seon.agent/id]
    [:seon.agent/purpose            {:optional true} :seon.agent/purpose]
    [:seon.agent/parent             {:optional true} :seon.agent/parent]

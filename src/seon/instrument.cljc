@@ -95,39 +95,81 @@
 
 #?(:cljs
    (def injectables
-     "The injectable REGISTRY — `injectable-key → (fn [eval-ctx] value)`.
+     "The injectable registry for one eval operation.
 
       The ONE extension surface for explicit dependency injection at the eval
       boundary (`docs/seon/architecture/context.md` §\"Explicit dependencies\").
       A map-in fn declares an injectable as an `{:optional true}` request key;
       [[injecting-fschema]]'s wrapper fills every DECLARED-BUT-ABSENT key from
-      the current eval context — explicit caller args always win. Adding a
-      dependency is ONE entry here + fns declaring the key.
+      the current eval context. Each entry owns its resolver and whether an
+      agent may provide a different value. Adding a dependency is ONE entry
+      here + fns declaring the key.
 
-      The agent id comes from the child fiber's ALS scope. Database values and
-      time coordinates are deliberately not injectable: the authority owner
-      acquires ordinary data at an explicit coordinate and passes it in."
-     {:seon.agent/id (fn [_] (db/current-agent-id))}))
+      The agent id and operation configuration come from the child fiber's
+      existing transaction context. Database values and time coordinates are
+      deliberately not injectable: the authority owner acquires ordinary data
+      at an explicit coordinate and passes it in."
+     {:seon.agent/id
+      {::resolver (fn [_] (db/current-agent-id))
+       ::caller-policy ::caller-provided}
+      :seon.config/configuration
+      {::resolver (fn [_]
+                    (:seon.config/configuration (db/current-tx-context)))
+       ::caller-policy ::context-only}}))
 
 #?(:cljs
-   (defn- inject-into
-     "Fill each DECLARED injectable `k` ABSENT from request map `m` with its
-      [[injectables]] value from the eval context. Explicit keys WIN (a
-      present key is untouched); a provider yielding nil leaves the key
-      absent. `inj-keys` is the pre-computed declared∩registry set."
-     [m inj-keys]
-     (reduce (fn [acc k]
-               (if (contains? acc k)
-                 acc
-                 (let [v ((injectables k) nil)]
-                   (if (some? v) (assoc acc k v) acc))))
-             m inj-keys)))
+   (defn inject-request
+     "Fill one request's declared dependencies from the eval operation.
+
+      Caller-provided dependencies retain their explicit value. A context-only
+      dependency may be prefilled by trusted core code, but an agent cannot
+      substitute a different value for the operation's immutable value. A
+      missing context-only value is a core operation error, never a default."
+     {:malli/schema [:=> [:cat :map [:set :keyword]] :map]}
+     [request injectable-keys]
+     (reduce
+       (fn [resolved k]
+         (let [{::keys [resolver caller-policy]} (get injectables k)
+               operation-value (resolver nil)
+               provided? (contains? resolved k)
+               provided-value (get resolved k)
+               agent-call? (some? (db/current-agent-id))]
+           (cond
+             (and provided?
+                  (= ::context-only caller-policy)
+                  agent-call?
+                  (not= provided-value operation-value))
+             (throw
+               (ex-info
+                 (str (pr-str k) " is supplied by the current operation and "
+                      "cannot be overridden by an agent.")
+                 {::injectable-key k
+                  :seon.error/kind :agent}))
+
+             provided?
+             resolved
+
+             (some? operation-value)
+             (assoc resolved k operation-value)
+
+             (= ::context-only caller-policy)
+             (throw
+               (ex-info
+                 (str "The current operation did not supply " (pr-str k) ".")
+                 {::injectable-key k
+                  :seon.error/kind :core-bug}))
+
+             :else
+             resolved)))
+       request injectable-keys)))
 
 #?(:cljs
    (defn declared-injectables
      "The set of injectable request-keys a fn's `:=>` `schema-obj` DECLARES on
       its FIRST (map) argument — the intersection of that arg map's keys with
-      the [[injectables]] registry. Computed ONCE per fn at register time
+      the [[injectables]] registry. Only optional request entries are
+      injectable; required configuration arguments remain ordinary explicit
+      function arguments. Computed ONCE per fn at register time
       (rides on [[injecting-fschema]]'s closure), never per call.
 
       Reads the arg schema via `m/-function-info` → first `:input` child →
@@ -143,7 +185,14 @@
              arg0 (first (m/children (:input info)))
              d    (when arg0 (m/deref arg0))]
          (if (and d (= :map (m/type d)))
-           (into #{} (comp (map first) (filter injectables)) (m/entries d))
+           (into #{}
+                 (keep (fn [entry]
+                         (let [k (key entry)]
+                           (when (and (contains? injectables k)
+                                      (true? (:optional
+                                               (m/properties (val entry)))))
+                             k))))
+                 (m/entries d))
            #{}))
        (catch :default _ #{}))))
 
@@ -219,10 +268,10 @@
       schema EXCEPT `-instrument-f`, which it overrides to
       INJECT-then-validate:
 
-        - INJECT: every DECLARED-BUT-ABSENT injectable key ([[injectables]],
-          pre-computed via [[declared-injectables]]) is filled into the first
-          (map) arg from the eval context BEFORE input validation, so the
-          filled map satisfies the `:map` and explicit caller args win;
+        - INJECT: every declared injectable key ([[injectables]], pre-computed
+          via [[declared-injectables]]) is resolved against the first map arg
+          BEFORE input validation, so caller-provided dependencies remain
+          explicit while context-only dependencies cannot be substituted;
         - input + arity validated synchronously (throws via `report`);
         - the call's return, if a Promise, gets a `.then` validating the
           RESOLVED value against the output schema; a non-thenable return
@@ -285,10 +334,10 @@
                                         {:schema s}))]
              (fn [& args]
                (let [args (vec args)
-                     ;; INJECT declared-absent deps into the request map before
-                     ;; validation; explicit args win, nil providers no-op.
+                     ;; INJECT declared dependencies into the request map before
+                     ;; validation; the registry enforces caller policy once.
                      args (if (and (seq inj-keys) (map? (first args)))
-                            (assoc args 0 (inject-into (first args) inj-keys))
+                            (assoc args 0 (inject-request (first args) inj-keys))
                             args)
                      n    (count args)]
                  (when wrap-in

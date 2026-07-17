@@ -3,11 +3,10 @@
    prompt text) and `:seon.render/html` (a surface) — selected by key
    presence, never a stored discriminator.
 
-   Each slot is a fully-qualified symbol (or a literal: a verbatim
-   string for ai, a hiccup vector for html). `*-render` resolves the
-   symbol via `seon.eval/lookup-value` and calls it; a nil, unqualified,
-   or unresolvable symbol falls through to `seon.render.default/pretty-*`
-   so a render never crashes.
+   Each render attribute is a fully-qualified symbol or a literal value.
+   [[render]] resolves symbols through `seon.eval/lookup-value`, selects the
+   registered shape renderer when no explicit value exists, and otherwise
+   uses its universal data renderer.
 
    ## The engine
 
@@ -15,9 +14,8 @@
    node's children in two views (`:seon.render/ai` → String,
    `:seon.render/html` → hiccup). It injects a view-bound recursion
    handle (`:seon.render/render`) so a parent renders its children
-   through the same dispatch, and a `:seon.render/slot` handle so a
-   layout places a named block's html into a slot ([[slot]]). A throwing
-   or missing render degrades to a legible value, never a crash.
+   through the same dispatch. A throwing or missing render degrades
+   to a legible value, never a crash.
 
    ## Late-bound symbol lookup
 
@@ -33,8 +31,6 @@
     [seon.error :as err]
     [seon.error.instrument :as einstrument]
     [seon.eval :as eval]
-    [seon.agent.ctx.render-fns :as render-fns]
-    [seon.render.default :as default]
     [seon.render.canvas :as canvas]
     [seon.render.schema]
     [seon.render.sci :as render-sci]
@@ -44,8 +40,7 @@
     [seon.schema :as schema]
     [seon.ui.clojure :as cljhl]
     [seon.ui.html :as html]
-    [seon.ui.markdown :as md]
-    [seon.web.reactive.transform :as transform]))
+    [seon.ui.markdown :as md]))
 
 ;; ============================================================
 ;; Schemas — every shape this surface reads or writes (spec-05 §15.1).
@@ -143,9 +138,8 @@
 (schema/register! :seon.render/children
   [:vector {:seon.db/component true} :seon.db/ref])      ;; OPTIONAL authored nesting; derived sections query instead
 
-;; The `:seon.render/ai-response` envelope — the canvas / default
-;; slot-primitive return shape (`ai-render` → `seon.render.default/pretty-ai`
-;; and `seon.render.chat`). The old `:seon.render/text` second arm was
+;; The `:seon.render/ai-response` envelope returned by AI-side renderers.
+;; The old `:seon.render/text` second arm was
 ;; DELETED with the V4 composer rewrite (context-render keystone): the ONE
 ;; producer of it (`seon.agent.ctx/assemble-context`) is gone, and the keystone's
 ;; CONVERTERS return BARE Strings (not this envelope). One key, one meaning.
@@ -185,49 +179,13 @@
    [:seon.render.canvas/wired {:optional true}
     :seon.render.canvas/wired-response]])
 
-;; System renderer input — for `seon.render.default/*` and other
-;; non-agent-namespaced fns. Doesn't know which agent ahead of time;
-;; carries `:seon.agent/id` and pulls the entity itself.
+;; A renderer receives ordinary discovery data. Database acquisition remains
+;; with the operation that invokes it; the renderer is a pure projection of
+;; the immutable values that operation selected.
 (schema/register! :seon.render/system-input
   [:map
-   [:seon.db/db    :seon.db/db]
-   [:seon.agent/id :string]])
-
-;; ============================================================
-;; Renderers — one per surface. Both fall through to pretty-print
-;; on miss; html-render additionally accepts literal hiccup.
-;; ============================================================
-
-(defn ai-render
-  "Materialize an `:seon.render/ai` slot to agent-facing text.
-
-   Slot is a qualified symbol; if it doesn't resolve (or is nil /
-   unqualified), fall through to
-   seon.render.default/pretty-ai so the agent always gets some ctx."
-  {:malli/schema [:=> [:cat :any :map] :seon.render/ai-response]}
-  [sym input-map]
-  (let [f (or (eval/lookup-value sym) default/pretty-ai)]
-    (f input-map)))
-
-(defn html-render
-  "Materialize an `:seon.render/html` slot to hiccup.
-
-   Slot is either a symbol (resolved + called), a literal hiccup vector
-   (used as-is), or
-   anything else (pretty-printed)."
-  {:malli/schema [:=> [:cat :any :map] :seon.render/html-response]}
-  [slot input-map]
-  (cond
-    (qualified-symbol? slot)
-    (if-let [f (eval/lookup-value slot)]
-      (f input-map)
-      (default/pending-html slot))
-
-    (vector? slot)
-    {:seon.render/hiccup slot}
-
-    :else
-    (default/pretty-html input-map)))
+   [:seon.agent/id :string]
+   [:seon.agent/entity :map]])
 
 ;; ============================================================
 ;; Entity-shape resolution from the active schema projection.
@@ -292,8 +250,8 @@
 ;; may return BARE content — hiccup for the html view, a String for the
 ;; ai view — OR the established `:seon.render/html-response` MAP envelope
 ;; `{:seon.render/hiccup <h> :seon.render/ai <s> …}`. This is the ONLY
-;; place the envelope is unwrapped, so entity surfaces and context-block slots
-;; AND recursive sections never leak a raw map into hiccup (the
+;; place the envelope is unwrapped, so entity surfaces, context blocks,
+;; and recursive sections never leak a raw map into hiccup (the
 ;; map-renders-empty bug). No second extraction site, no second contract.
 ;; ============================================================
 
@@ -306,12 +264,15 @@
     :seon.render/html :seon.render/hiccup
     :seon.render/ai   :seon.render/ai))
 
-(defn- unwrap-response
-  "Extract `view`'s value from a render result `r`. When `r` is the
+(defn unwrap-response
+  "Extract `view`'s value from a render result `r`.
+
+   When `r` is the
    `:seon.render/html-response` MAP envelope carrying `view`'s key, return
    that value (the hiccup or the ai String); otherwise pass the bare value
    through unchanged. A non-envelope map (one lacking the key) passes
    through too — only the established contract is unwrapped."
+  {:malli/schema [:=> [:cat :keyword :any] :any]}
   [view r]
   (let [k (view->response-key view)]
     (if (and (map? r) (contains? r k))
@@ -645,207 +606,6 @@
           :html (canvas/error-card {:seon.error/message msg :seon.error/where :block})
           :ai   msg)))))
 
-;; ============================================================
-;; Agent canvas (canvas U1) — the agent's one always-visible HTML
-;; surface. Resolution (seon.render.canvas/wired-content):
-;; explicit entity pin → configured canvas-block default → derived
-;; last-updated surface → core welcome. The exact `::canvas/wired`
-;; result rides the response so every consumer explains the same render.
-;; ============================================================
-
-(schema/register! :seon.render/canvas-request
-  [:map
-   [:seon.agent/id :string]
-   [:seon.config/configuration :seon.config/singleton]
-   [:seon.db/db    {:optional true} :seon.db/db]])
-
-(defn render-agent-canvas
-  "Render the agent's canvas — the one surface it rewrites.
-
-   Dynamically rewritten by transacting a qualified fn symbol or
-   literal hiccup onto `:seon.render.canvas/content` on its own
-   agent entity; see seon.render.canvas's ns docstring for the
-   full contract).
-
-   Returns `:seon.render/html-response`. A renderer that THROWS does
-   NOT vanish: the response is `seon.render.canvas/error-response`
-   — fallback card for the human, `:seon.render/error` envelope +
-   `:seon.render/ai` render for the agent. nil hiccup only when the
-   agent entity doesn't exist (the canvas never crashes its caller)."
-  {:malli/schema [:=> [:cat :seon.render/canvas-request] :seon.render/html-response]}
-  [{:seon.agent/keys [id] :seon.db/keys [db] :as input}]
-  (let [db  (or db @db/*conn*)
-        {ent :seon.render/entity
-         configured :seon.render.canvas/configured}
-        (canvas/canvas-state {:seon.db/db db :seon.agent/id id})]
-    (if (nil? (:seon.agent/id ent))
-      {:seon.render/hiccup nil}
-      (let [base-wired
-            (canvas/wired-content
-              (cond-> {:seon.render/entity ent}
-                (some? configured)
-                (assoc :seon.render.canvas/configured configured)))
-            ;; Only an agent with neither an explicit pin nor a configured
-            ;; canvas-block default consults the derived last-updated surface.
-            ;; A derivation failure means no candidate and falls to welcome.
-            derived
-            (when (= :seon.render.canvas/welcome
-                     (:seon.render.canvas/source base-wired))
-              (try (:seon.agent.ctx.render-fns/surface-sym
-                     (render-fns/last-updated-surface
-                       {:seon.db/db db :seon.agent/id id}))
-                   ;; core derivation (last-updated-surface) throwing is a defect
-                   ;; (:core) — a genuine "no candidate" RETURNS nil, it does
-                   ;; not throw; the canvas still degrades to the welcome.
-                   (catch :default e
-                     (when-not (err/recorded? e)
-                       (err/record! {:seon.error/raw e :seon.error/fault :core}))
-                     nil)))
-            wired (if (some? derived)
-                    (canvas/wired-content
-                      (cond-> {:seon.render/entity ent
-                               :seon.render.canvas/derived derived}
-                        (some? configured)
-                        (assoc :seon.render.canvas/configured configured)))
-                    base-wired)
-            value (:seon.render.canvas/value wired)
-            input {:seon.db/db         db
-                   :seon.agent/id      id
-                   :seon.render/entity ent}]
-        (assoc
-          (try
-          (let [;; Agent-authored canvas fns run under an SCI wall-clock
-                ;; interrupt so a non-terminating canvas (a sync loop/recur)
-                ;; aborts in-process instead of freezing the single pod thread
-                ;; (canvas isolation PRD Layer 1). The core `welcome`, core
-                ;; section fns, and literal hiccup stay on the fast compiled
-                ;; `html-render` path untouched.
-                resp   (if (and (render-sci/bounding-enabled?)
-                                (err/agent-authored-sym? value))
-                         (let [r (render-sci/invoke-bounded value input)]
-                           (cond
-                             ;; deadline tripped — reset the canvas to welcome +
-                             ;; warn the agent (async, deduped), and render the
-                             ;; known-good welcome for the human this turn.
-                             (:seon.render.sci/interrupt r)
-                             (do (render-sci/recover-hung-canvas!
-                                   id value render-sci/default-budget-ms)
-                                 (html-render canvas/welcome-sym input))
-                             ;; SCI could not run the fn — FAIL-LOUD: throw
-                             ;; into the guard below (strict dial → loud;
-                             ;; prod → the calm error-response + the derived
-                             ;; agent-facing truth). NEVER the unbounded
-                             ;; compiled path: a hang there would wedge the
-                             ;; single-threaded pod.
-                             (:seon.render.sci/error r)
-                             (throw (ex-info
-                                      (str "canvas fn " value " could not run "
-                                           "under SCI bounding — "
-                                           (get-in r [:seon.render.sci/error
-                                                      :seon.error/message]))
-                                      {:seon/error (:seon.render.sci/error r)}))
-                             ;; the canvas contract is the html-response map
-                             ;; envelope (nil tolerated — renders nothing);
-                             ;; a bare value is a broken canvas fn → the same
-                             ;; guard below (legible error-response), never
-                             ;; an unbounded compiled re-run.
-                             (or (nil? r) (map? r)) r
-                             :else
-                             (throw (ex-info
-                                      (str "canvas fn " value " returned a bare "
-                                           "value — a canvas fn must return the "
-                                           "{:seon.render/hiccup … "
-                                           ":seon.render/ai …} map envelope")
-                                      {:seon.render.canvas/content value}))))
-                         (html-render value input))
-                ;; INTERACTIVITY: rewrite agent fn-call / fn-ref handler slots
-                ;; in AGENT-authored hiccup into standard Datastar
-                ;; `@post('/call?…')` (seon.web.reactive.transform). Bare
-                ;; handler symbols qualify to the authoring namespace; /call
-                ;; routes by that namespace into the owning agent's sandbox.
-                ;;
-                ;; The authoring ns is the canvas fn's ns when an agent wired a
-                ;; symbol, but a literal-hiccup canvas (the easiest path the
-                ;; canvas guidance pushes) has no symbol — it is still
-                ;; agent-authored, so we qualify its bare handlers to the
-                ;; agent's OWN home ns `my.agent.<id>` (the same id /call
-                ;; routes by). Without this, a literal `[:button {:on-click …}]`
-                ;; emitted no @post → a dead button.
-                ;;
-                ;; No-op on core hiccup (welcome/section symbols → not
-                ;; agent-authored) and on hiccup with no interactive handlers.
-                resp   (let [ns-sym (cond
-                                      (err/agent-authored-sym? value)
-                                      (symbol (namespace value))
-                                      (vector? value)        ; literal hiccup
-                                      (symbol (str "my.agent." id)))]
-                         (if ns-sym
-                           (update resp :seon.render/hiccup
-                                   (fn [h]
-                                     (if h
-                                       (transform/transform-hiccup ns-sym h)
-                                       h)))
-                           resp))
-                hiccup (:seon.render/hiccup resp)]
-            ;; SERIALIZATION joins the same guarded path as invocation
-            ;; (serialization-boundary hardening): a structurally-broken hiccup (e.g. a
-            ;; vector-of-vectors child) doesn't throw at html-render —
-            ;; it used to escape here and detonate LATER at page
-            ;; serialization, 500ing /agent/<id>, the grid, and
-            ;; mid-boot-replay renders. Two layers, one catch:
-            (when (some? hiccup)
-              ;; (a) serializer-faithful structural walk — a legible
-              ;;     message locating the defect (path included);
-              (when-some [{:seon.render.canvas/keys
-                           [structure-path structure-message]}
-                          (canvas/hiccup-structure-error hiccup)]
-                (throw (ex-info (str "invalid canvas hiccup — "
-                                     structure-message
-                                     " (at path " (pr-str structure-path)
-                                     ")")
-                                {:seon.render.canvas/structure-path
-                                 structure-path})))
-              ;; (b) backstop: PROVE the hiccup serializes. ->string is
-              ;;     pure + deterministic, so success here guarantees
-              ;;     the page render embedding this hiccup cannot throw
-              ;;     on this canvas.
-              (html/->string hiccup))
-            resp)
-          (catch :default e
-            ;; The canvas `value` decides the population: an agent-authored
-            ;; symbol OR literal hiccup (qualified to my.agent.<id> above) is
-            ;; the agent's own canvas → :agent; a core canvas symbol → :core.
-            ;; recorded? skips the datom when the SCI bounding funnel already
-            ;; recorded an agent canvas-fn failure (re-thrown at :sci/error).
-            ;; Record BEFORE strict-fail! (re-throws in strict mode).
-            ;; SCI already recorded the underlying failure before returning its
-            ;; error envelope. The wrapper ex-info below is necessarily a new
-            ;; JS object, so `recorded?` alone cannot see through it. Treat the
-            ;; carried error value as the same occurrence; otherwise every
-            ;; derived render writes a fresh error datom, which invalidates the
-            ;; same view and forms an unbounded render→error→render loop.
-            (when-not (or (err/recorded? e)
-                          (contains? (ex-data e) :seon/error))
-              (err/record! {:seon.error/raw   e
-                            :seon.error/fault (if (or (err/agent-authored-sym? value)
-                                                      (vector? value))
-                                                :agent :core)}))
-            ;; Strict dial: dev/test/benchmark → re-throw loudly (catch a broken canvas
-            ;; the moment it renders); prod → the calm derived banner below.
-            (strict-fail! :canvas e)
-            ;; A broken canvas must never crash the render and never show the
-            ;; human a scary error: return the calm fallback placeholder
-            ;; for the human. The agent is NOT actively pushed a message (#43 /
-            ;; D2 — a forged self-message wakes + defeats the halt); breakage
-            ;; is a DERIVED surface: error-response's :seon.render/ai render
-            ;; ("YOUR CANVAS IS BROKEN …") is re-derived into the agent's
-            ;; canvas context section every turn, self-healing on the next
-            ;; clean render. No stored flag, no notification.
-            (canvas/error-response
-              {:seon.db/error                 (err/->map e)
-               :seon.render.canvas/content value})))
-          :seon.render.canvas/wired wired)))))
-
 (defn render-entity-ai
   "Render `entity` to text via its resolved `:seon.render/ai` symbol.
    Per-entity override wins; else schema property for the entity's
@@ -928,7 +688,7 @@
                                         [?e _ _ ?tx] [?tx :db/txInstant ?t]]
                        :seon.db/args [eid]}))))
 
-(declare render slot)
+(declare render)
 
 (defn- generic-default-renderer
   "The GENERIC default — renders ANY structure when there is no slot and no
@@ -1038,8 +798,7 @@
            "; (seon.agent/unprune! …) to restore)"))
     (let [f  (resolve-render view node)
           in (assoc ctx :seon.render/node   node
-                        :seon.render/render  #(render view ctx %)
-                        :seon.render/slot    #(slot ctx %))]
+                        :seon.render/render #(render view ctx %))]
       (try
         (unwrap-response view (f in))           ;; bare OR html-response envelope
         (catch :default e
@@ -1061,84 +820,3 @@
             (str ";; ⚠ [" (renderable-id node) "] render failed: " (ex-message e))
             (canvas/error-card
               {:seon.error/message (str (renderable-id node) " — " (ex-message e))})))))))
-
-;; ============================================================
-;; The `slot` primitive — place a named block's html render into a
-;; layout hole. `(slot ctx :canvas)` looks the block up by
-;; `:seon.agent.ctx/name` in the agent's OWN `:seon.agent/ctx`, renders
-;; its `:seon.render/html` through the guarded engine, and wraps it as
-;; `[:div {:id "surface-<name>" :data-slot "<name>"} <html>]` — a stable DOM
-;; id for idiomorph. GUARDED: a missing block or a throwing render
-;; becomes a `:seon/error` value rendered as an error card in the slot,
-;; so a sibling slot never crashes (never-crash-always-surface). The same
-;; handle is injected into every render ctx as `:seon.render/slot`, so a
-;; core or agent layout calls `((:seon.render/slot in) :canvas)`.
-;; ============================================================
-
-(defn- agent-ctx-block
-  "The agent's `:seon.agent/ctx` block named `block-name` (its render
-   slots EDN-decoded), or nil when the agent has no such block. Pulls the
-   block components from `db` directly — `seon.render` cannot require
-   `seon.agent.ctx` (that ns requires this one), so the lookup + decode
-   live here rather than calling `seon.agent.ctx/agent-blocks`."
-  [db agent-id block-name]
-  (when (and db agent-id block-name)
-    (let [ent (try (db/pull db '[{:seon.agent/ctx [*]}] [:seon.agent/id agent-id])
-                   ;; probe: an unresolvable lookup-ref (agent absent) → nil
-                   ;; block, the documented "no such block" path; expected
-                   ;; absence, not a defect.
-                   (catch :default _ nil))]
-      (when-let [b (->> (:seon.agent/ctx ent)
-                        (filter #(= block-name (:seon.agent.ctx/name %)))
-                        first)]
-        (cond-> b
-          (contains? b :seon.render/html)
-          (update :seon.render/html #(db/decode-edn-value :seon.render/html %))
-          (contains? b :seon.render/ai)
-          (update :seon.render/ai #(db/decode-edn-value :seon.render/ai %)))))))
-
-(schema/register! ::slot-request
-  [:map
-   [:seon.db/db    {:optional true} :seon.db/db]
-   [:seon.agent/id {:optional true} :seon.agent/id]])
-
-(defn slot
-  "Place the agent's block named `block-name` into a named surface slot.
-   Looks the block up by `:seon.agent.ctx/name` in the agent's OWN
-   `:seon.agent/ctx` (`ctx` carries `:seon.db/db` + `:seon.agent/id`),
-   renders its `:seon.render/html` through the guarded engine, and wraps
-   it as `[:div {:id \"surface-<name>\" :data-slot \"<name>\"} <html>]` — a
-   stable DOM id for idiomorph. GUARDED: a missing block or a throwing
-   render becomes a `:seon/error` value surfaced as an error card, so a
-   sibling slot never crashes (never-crash-always-surface). Injected into
-   every render ctx as `:seon.render/slot`."
-  {:malli/schema [:=> [:catn [::ctx ::slot-request] [::block-name :keyword]]
-                  :seon.render.canvas/hiccup]}
-  [ctx block-name]
-  (let [db    (or (:seon.db/db ctx) @db/*conn*)
-        id    (:seon.agent/id ctx)
-        block (agent-ctx-block db id block-name)
-        body  (if (nil? block)
-                (canvas/error-card
-                  {:seon.error/message (str "no block named " block-name " on "
-                                            (or id "this agent"))
-                   :seon.error/where   block-name
-                   :seon.error/hint    "install! it (or fix the slot name)"})
-                (try
-                  (render :seon.render/html (assoc ctx :seon.db/db db) block)
-                  (catch :default e
-                    ;; The inner `render` walker records + classifies the
-                    ;; block-render failure (recorded? then skips here); a
-                    ;; throw that reaches this slot machinery unrecorded is our
-                    ;; own (:core). Record BEFORE strict-fail! (re-throws in
-                    ;; strict mode).
-                    (when-not (err/recorded? e)
-                      (err/record! {:seon.error/raw e :seon.error/fault :core}))
-                    ;; STRICT dial: dev/test/benchmark → re-throw LOUD; prod → guard.
-                    (strict-fail! block-name e)
-                    (canvas/error-card
-                      {:seon.error/message (str block-name " render failed: "
-                                                (err/->message e))
-                       :seon.error/where   block-name}))))]
-    [:div {:id (str "surface-" (name block-name)) :data-slot (name block-name)}
-     body]))

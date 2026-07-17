@@ -1,167 +1,168 @@
 (ns seon.instrument-inject-test
-  "The explicit-dependency INJECTION contract on the one instrumentation
-   wrapper (`seon.instrument/injecting-fschema`): a map-in fn declares an
-   injectable (`:seon.db/db`, `:seon.agent/id`, `:seon.render/at`) as an
-   OPTIONAL request key,
-   and the eval boundary fills every DECLARED-BUT-ABSENT one from the eval
-   context — explicit caller args always win, a nil provider leaves the key
-   absent, a fn declaring none is untouched.
-
-   Design: `docs/prds/agent-fsm/research/explicit-deps-injection-2026-07-02.md`
-   + `docs/seon/architecture/context.md` §\"Explicit dependencies\".
-
-   The probe fns live in THIS ns; they route through the SAME
-   exact-data instrumentation path the pod boots with. Teardown
-   unstruments them so no wrapper leaks. A fresh `:memory` conn is the db the
-   `:seon.db/db` provider reads via `db/*conn*`; `db/with-agent` supplies the
-   `:seon.agent/id` provider's value."
+  "The one eval-boundary dependency-injection contract."
   (:require
-    [cljs.test :refer [deftest is async use-fixtures]]
-    [datahike.api :as d]
-    [malli.core :as m]
-    [seon.db :as db]
-    [seon.instrument :as inst]
-    [seon.render]))   ; load-order: probe schema references :seon.render/at
+   [cljs.test :refer [deftest is use-fixtures]]
+   [malli.core :as m]
+   [seon.config :as config]
+   [seon.db :as db]
+   [seon.instrument :as inst]))
 
-;; ── probe fns — one declaring both injectables, one declaring none ──────────
-;; Both are simple single-fixed-arity `:=>` map-in fns, so target preparation
-;; routes each through injecting-fschema. Their bodies REPORT what landed in
-;; the request map so a test can assert the injection outcome directly.
+(def configuration (config/resolve-config-singleton {}))
 
 (defn probe-injects
-  "Returns what the wrapper handed the body: whether db was present, the id
-   value (nil = absent), the at basis-t (nil = absent), and the passthrough
-   x. Declares db+id+at OPTIONAL."
-  {:malli/schema [:=> [:cat [:map
-                             [:seon.db/db     {:optional true} :seon.db/db]
-                             [:seon.agent/id  {:optional true} :seon.agent/id]
-                             [:seon.render/at {:optional true} :seon.render/at]
-                             [:probe/x :int]]]
-                  [:map [:got-db :boolean] [:got-id [:maybe :string]]
-                        [:got-at [:maybe :int]] [:x :int]]]}
-  [{:seon.db/keys [db] id :seon.agent/id at :seon.render/at x :probe/x}]
-  {:got-db (some? db) :got-id id :got-at at :x x})
+  "Return the optional dependencies received by the function body."
+  {:malli/schema
+   [:=>
+    [:cat
+     [:map
+      [:seon.agent/id {:optional true} :string]
+      [:seon.config/configuration
+       {:optional true}
+       :seon.config/singleton]
+      [:probe/x :int]]]
+    [:map
+     [:probe/got-id {:optional true} :string]
+     [:probe/got-configuration? :boolean]
+     [:probe/x :int]]]}
+  [{id :seon.agent/id
+    operation-configuration :seon.config/configuration
+    x :probe/x}]
+  (cond-> {:probe/got-configuration? (some? operation-configuration)
+           :probe/x x}
+    id (assoc :probe/got-id id)))
+
+(defn probe-required-configuration
+  "Return an ordinary required configuration argument unchanged."
+  {:malli/schema
+   [:=>
+    [:cat
+     [:map
+      [:seon.config/configuration :seon.config/singleton]]]
+    :seon.config/singleton]}
+  [{operation-configuration :seon.config/configuration}]
+  operation-configuration)
 
 (defn probe-no-inject
-  "A map-in fn declaring NO injectable — must be handed the request map
-   verbatim (no db/id keys added)."
-  {:malli/schema [:=> [:cat [:map [:probe/x :int]]]
-                  [:map [:key-count :int] [:x :int]]]}
-  [{x :probe/x :as req}]
-  {:key-count (count req) :x x})
+  "Return the size of a request that declares no dependency."
+  {:malli/schema [:=> [:cat [:map [:probe/x :int]]] :int]}
+  [request]
+  (count request))
 
 (def ^:private target-syms
   '#{seon.instrument-inject-test/probe-injects
+     seon.instrument-inject-test/probe-required-configuration
      seon.instrument-inject-test/probe-no-inject})
 
 (def ^:private targets
   [{::inst/sym 'seon.instrument-inject-test/probe-injects
     ::inst/schema-form (:malli/schema (meta #'probe-injects))}
+   {::inst/sym 'seon.instrument-inject-test/probe-required-configuration
+    ::inst/schema-form (:malli/schema (meta #'probe-required-configuration))}
    {::inst/sym 'seon.instrument-inject-test/probe-no-inject
     ::inst/schema-form (:malli/schema (meta #'probe-no-inject))}])
 
 (defn- instrument-probes! []
   (inst/instrument-delta!
-    {::inst/changed-syms target-syms
-     ::inst/targets targets}))
+   {::inst/changed-syms target-syms
+    ::inst/targets targets}))
 
 (defn- uninstrument-probes! []
   (inst/instrument-delta!
-    {::inst/changed-syms target-syms
-     ::inst/targets []}))
+   {::inst/changed-syms target-syms
+    ::inst/targets []}))
 
 (use-fixtures :once {:before instrument-probes! :after uninstrument-probes!})
 
-(defn ^:async ^:private fresh-conn []
-  (let [cfg {:store {:backend :memory :id (random-uuid)}
-             :schema-flexibility :write :keep-history? true}]
-    (await (d/create-database cfg))
-    (await (d/connect cfg {:sync? false}))))
+(def valid-id "INJECTtest0001")
 
-(def ^:private valid-id "INJECTtest0001") ; matches :seon.agent/id shape (14, dash-at-3? see below)
+(defn- with-operation [operation-configuration thunk]
+  (db/with-agent
+   valid-id
+   #(db/with-tx-context
+     {:seon.config/configuration operation-configuration}
+     thunk)))
 
-(deftest injects-declared-absent-deps
-  (async done
-    (let [orig db/*conn*]
-      (-> (fresh-conn)
-          (.then (fn [conn]
-                   (set! db/*conn* conn)
-                   ;; declared + absent → filled from eval-ctx
-                   (let [r (db/with-agent valid-id
-                             (fn [] (probe-injects {:probe/x 1})))]
-                     (is (true? (:got-db r)) "db injected from *conn*")
-                     (is (= valid-id (:got-id r)) "id injected from with-agent scope")
-                     (is (= (db/basis-t @conn) (:got-at r))
-                         "at injected — the current db value's basis-t")
-                     (is (= 1 (:x r)) "passthrough arg preserved"))))
-          (.catch (fn [e] (is false (str "threw: " (ex-message e)))))
-          (.finally (fn [] (set! db/*conn* orig) (done)))))))
+(deftest declared-absent-dependencies-come-from-one-operation
+  (let [result (with-operation configuration
+                 #(probe-injects {:probe/x 1}))]
+    (is (= valid-id (:probe/got-id result)))
+    (is (true? (:probe/got-configuration? result)))
+    (is (= 1 (:probe/x result)))))
 
-(deftest explicit-args-win
-  (async done
-    (let [orig db/*conn*]
-      (-> (fresh-conn)
-          (.then (fn [conn]
-                   (set! db/*conn* conn)
-                   ;; caller supplies id → the scope's id must NOT overwrite it
-                   (let [r (db/with-agent valid-id
-                             (fn [] (probe-injects {:probe/x 2
-                                                    :seon.agent/id "OTHERagent0002"
-                                                    :seon.render/at 12345})))]
-                     (is (= "OTHERagent0002" (:got-id r))
-                         "explicit id kept, not overwritten by the scope id")
-                     (is (= 12345 (:got-at r))
-                         "explicit at kept — a forensic replay can pin a past t")
-                     (is (true? (:got-db r)) "db still injected (absent)"))))
-          (.catch (fn [e] (is false (str "threw: " (ex-message e)))))
-          (.finally (fn [] (set! db/*conn* orig) (done)))))))
+(deftest caller-provided-agent-id-remains-inspectable
+  (let [result (with-operation
+                 configuration
+                 #(probe-injects {:probe/x 2
+                                  :seon.agent/id "OTHERagent0002"}))]
+    (is (= "OTHERagent0002" (:probe/got-id result)))
+    (is (true? (:probe/got-configuration? result)))))
 
-(deftest nil-provider-leaves-key-absent
-  (async done
-    (let [orig db/*conn*]
-      (-> (fresh-conn)
-          (.then (fn [conn]
-                   (set! db/*conn* conn)
-                   ;; OUTSIDE with-agent → current-agent-id nil → id key absent
-                   ;; (optional, so input still validates; never store nil)
-                   (let [r (probe-injects {:probe/x 3})]
-                     (is (nil? (:got-id r)) "nil id provider leaves the key absent")
-                     (is (true? (:got-db r)) "db provider non-nil → injected")
-                     ;; NO conn → the at provider yields nil → key absent
-                     (set! db/*conn* nil)
-                     (let [r2 (probe-injects {:probe/x 4})]
-                       (is (nil? (:got-at r2)) "nil at provider leaves the key absent")
-                       (is (false? (:got-db r2)) "nil db provider leaves the key absent")))))
-          (.catch (fn [e] (is false (str "threw: " (ex-message e)))))
-          (.finally (fn [] (set! db/*conn* orig) (done)))))))
+(deftest context-only-configuration-cannot-be-substituted
+  (let [error
+        (try
+          (with-operation
+            configuration
+            #(probe-injects
+              {:probe/x 3
+               :seon.config/configuration
+               (assoc configuration :seon.agent.web/policy :open)}))
+          nil
+          (catch :default exception exception))]
+    (is (= :seon.config/configuration
+           (::inst/injectable-key (ex-data error))))
+    (is (= :agent (:seon.error/kind (ex-data error))))))
 
-(deftest no-injectable-fn-untouched
-  (async done
-    (let [orig db/*conn*]
-      (-> (fresh-conn)
-          (.then (fn [conn]
-                   (set! db/*conn* conn)
-                   ;; declares no injectable → request map handed through verbatim
-                   (let [r (db/with-agent valid-id
-                             (fn [] (probe-no-inject {:probe/x 9})))]
-                     (is (= 1 (:key-count r)) "no db/id keys added to the request")
-                     (is (= 9 (:x r))))))
-          (.catch (fn [e] (is false (str "threw: " (ex-message e)))))
-          (.finally (fn [] (set! db/*conn* orig) (done)))))))
+(deftest operation-prefilled-configuration-is-idempotent
+  (let [result
+        (with-operation
+          configuration
+          #(probe-injects {:probe/x 4
+                           :seon.config/configuration configuration}))]
+    (is (true? (:probe/got-configuration? result)))
+    (is (= 4 (:probe/x result)))))
 
-(deftest declared-injectables-reads-keys
-  ;; The static side: declared∩registry from a fn's :=> schema — inline maps,
-  ;; registered refs, non-map args, and no-injectable maps.
-  (is (= #{:seon.db/db :seon.agent/id :seon.render/at}
+(deftest missing-context-only-configuration-is-a-core-error
+  (let [error
+        (try
+          (db/with-agent valid-id #(probe-injects {:probe/x 5}))
+          nil
+          (catch :default exception exception))]
+    (is (= :seon.config/configuration
+           (::inst/injectable-key (ex-data error))))
+    (is (= :core-bug (:seon.error/kind (ex-data error))))))
+
+(deftest required-configuration-remains-an-ordinary-argument
+  (is (= configuration
+         (probe-required-configuration
+          {:seon.config/configuration configuration}))))
+
+(deftest function-without-dependencies-is-untouched
+  (is (= 1 (with-operation configuration #(probe-no-inject {:probe/x 9})))))
+
+(deftest declared-injectables-select-only-optional-registry-keys
+  (is (= #{:seon.agent/id :seon.config/configuration}
          (inst/declared-injectables
-           (m/schema [:=> [:cat [:map
-                                 [:seon.db/db {:optional true} :seon.db/db]
-                                 [:seon.agent/id {:optional true} :seon.agent/id]
-                                 [:seon.render/at {:optional true} :seon.render/at]
-                                 [:probe/x :int]]] :string]))))
-  (is (= #{} (inst/declared-injectables
-               (m/schema [:=> [:cat [:map [:probe/x :int]]] :string])))
-      "a map with no injectable key declares none")
-  (is (= #{} (inst/declared-injectables
-               (m/schema [:=> [:cat :int] :string])))
-      "a non-map first arg declares none"))
+          (m/schema
+           [:=>
+            [:cat
+             [:map
+              [:seon.agent/id {:optional true} :string]
+              [:seon.config/configuration
+               {:optional true}
+               :seon.config/singleton]]]
+            :string]))))
+  (is (= #{}
+         (inst/declared-injectables
+          (m/schema
+           [:=>
+            [:cat
+             [:map
+              [:seon.config/configuration :seon.config/singleton]]]
+            :string])))
+      "a required argument is explicit, not injectable")
+  (is (= #{}
+         (inst/declared-injectables
+          (m/schema [:=> [:cat [:map [:probe/x :int]]] :string]))))
+  (is (= #{}
+         (inst/declared-injectables
+          (m/schema [:=> [:cat :int] :string])))))

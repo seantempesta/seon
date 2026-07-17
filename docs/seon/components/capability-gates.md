@@ -56,7 +56,7 @@ domain allowlist) into one `:seon.agent.web/policy` mode:
 - **The shipped clusters:** `config/system.edn` and `config/acme.edn` both set
   `:seon.agent.web/policy :open` — zero friction, and the web_fetch bench's
   loopback fixtures work with no special grant.
-- **Host-owned:** the agent READS its policy via `(seon.agent.web/grants)` but
+- **Host-owned:** the agent READS its policy via `(seon.agent.web/grants {})` but
   nothing in the pod can widen it (there is no runtime `configure!`).
 - The retired `SEON_WEB_ALLOW_PRIVATE` / `SEON_WEB_DOMAINS` / `SEON_WEB_LOCK`
   env vars are GONE — config over env, env never shadows config.
@@ -111,7 +111,7 @@ are re-read live per call, but the pod inherits its env at spawn — so editing
 ```clojure
 ;; via the pod REPL / an agent eval — both must show granted:
 (seon.agent.shell/grants)  ;; => {... :seon.agent.shell/granted? true ...}
-(seon.agent.web/grants)    ;; => {... :seon.agent.web/enabled? true
+(seon.agent.web/grants {}) ;; => {... :seon.agent.web/enabled? true
                            ;;      :seon.agent.web/policy :open ...}
 ```
 

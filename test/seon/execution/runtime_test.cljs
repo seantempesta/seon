@@ -3,13 +3,15 @@
    [cljs.test :refer [async deftest is testing]]
    [clojure.string :as str]
    [seon.agent.ctx :as ctx]
+   [seon.agent.message :as message]
    [seon.config :as config]
    [seon.db :as db]
    [seon.db.coordinate :as coordinate]
    [seon.db.protocol :as protocol]
    [seon.eval :as eval]
    [seon.execution :as execution]
-   [seon.execution.runtime :as runtime]))
+   [seon.execution.runtime :as runtime]
+   [seon.render.canvas :as canvas]))
 
 (def point
   {::coordinate/database-id #uuid "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
@@ -346,8 +348,7 @@
       (set! db/execute-many
             (fn [_]
               (js/Promise.resolve
-               {::db/coordinate point
-                ::db/results
+               {::db/results
                 [{::protocol/success? true
                   ::protocol/result {:seon.agent/id "agent-1"}}
                  {::protocol/success? true ::protocol/result nil}
@@ -375,8 +376,7 @@
       (set! db/execute-many
             (fn [_]
               (js/Promise.resolve
-               {::db/coordinate point
-                ::db/results
+               {::db/results
                 [{::protocol/success? false
                   ::protocol/error {:seon.error/message "authority failed"}}
                  {::protocol/success? true
@@ -457,6 +457,10 @@
                   (::db/db
                    (:seon.execution.runtime-test/context @observed)))
                  "agent database calls advance from the session cache instead of an invocation pin")
+             (is (= configuration
+                    (:seon.config/configuration
+                     (:seon.execution.runtime-test/context @observed)))
+                 "the eval operation exposes its one decoded configuration to injection")
              (done)))
           (.catch
            (fn [error]
@@ -476,8 +480,7 @@
             (fn [request]
               (reset! acquisition request)
               (js/Promise.resolve
-               {::db/coordinate point
-                ::db/results
+               {::db/results
                 [{::protocol/success? true
                   ::protocol/result
                   {:seon.agent/id "agent-1"
@@ -488,13 +491,17 @@
                     {:seon.agent.ctx/name :authored
                      :seon.agent.ctx/priority 2
                      :seon.render/html (pr-str 'my.agent.agent-1/view)
-                     :seon.fn/read-attrs [:my.example/value]}]}}
+                     :seon.fn/read-attrs [:my.example/value]}
+                    {:seon.agent.ctx/name :canvas
+                     :seon.agent.ctx/priority 3
+                     :seon.render.canvas/content
+                     (pr-str [:div "configured canvas"])}]}}
                  {::protocol/success? true
                   :datahike.query/result 3}
                  {::protocol/success? true
                   ::protocol/result configuration}]})))
       (-> (db/with-tx-context
-           {::db/coordinate point}
+           {::db/db database}
            #(runtime/render-agent-view!
              {:seon.agent/id "agent-1"}
              (fn [selected]
@@ -511,12 +518,131 @@
                     (into #{}
                           (map :seon.render.surface/label)
                           (:seon.render.surface/surfaces projection))))
+             (is (= [:div "configured canvas"]
+                    (->> (:seon.render.surface/surfaces projection)
+                         (some #(when (= "canvas"
+                                         (:seon.render.surface/label %))
+                                  (:seon.render.surface/expanded %)))))
+                 "the page uses the configured canvas block before derivation")
              (is (= 3 (count (::db/members @acquisition)))
                  "the page acquires the agent, count, and configuration")
+             (is (identical? database (::db/db @acquisition))
+                 "the configured canvas shares the page's one database value")
              (is (contains? (:seon.web.datastar/dependencies projection)
                             :my.example/value))
              (is (contains? (:seon.web.datastar/dependencies projection)
                             :seon.agent/id))
+             (done)))
+          (.catch (fn [error] (is false (str error)) (done)))
+          (.finally (fn [] (set! db/execute-many original)))))))
+
+(deftest agent-view-unwired-canvas-resolves-to-welcome
+  (async done
+    (let [original db/execute-many
+          original-recent message/recent
+          acquisitions (atom 0)
+          requests (atom [])
+          recent-request (atom nil)
+          calls (atom nil)]
+      (set! db/execute-many
+            (fn [request]
+              (swap! requests conj request)
+              (let [n (swap! acquisitions inc)]
+                (js/Promise.resolve
+                 (case n
+                   1 {::db/results
+                      [{::protocol/success? true
+                        ::protocol/result {:seon.agent/id "agent-1"}}
+                       {::protocol/success? true
+                        :datahike.query/result 1}
+                       {::protocol/success? true
+                        ::protocol/result configuration}]}
+                   2 {::db/results
+                      [{::protocol/success? true
+                        :datahike.query/result []}]}
+                   {:seon.error/message "unexpected acquisition"})))))
+      (set! message/recent
+            (fn [request]
+              (reset! recent-request request)
+              (js/Promise.resolve
+               [{:seon.agent.message/from {:seon.agent/id "agent-1"}
+                 :seon.agent.message/to [{:seon.user/id "user"}]
+                 :seon.agent.message/content "older reply"
+                 :seon.agent.message/at (js/Date. 1)}
+                {:seon.agent.message/from {:seon.agent/id "agent-1"}
+                 :seon.agent.message/to [{:seon.user/id "user"}]
+                 :seon.agent.message/content "latest reply"
+                 :seon.agent.message/at (js/Date. 2)}
+                {:seon.agent.message/from {:seon.agent/id "agent-1"}
+                 :seon.agent.message/to [{:seon.agent/id "agent-2"}]
+                 :seon.agent.message/content "newer peer message"
+                 :seon.agent.message/at (js/Date. 3)}
+                {:seon.agent.message/from {:seon.agent/id "agent-1"}
+                 :seon.agent.message/to [{:seon.agent/id "agent-1"}]
+                 :seon.agent.message/content "newest self narration"
+                 :seon.agent.message/at (js/Date. 4)}])))
+      (-> (db/with-tx-context
+           {::db/db database}
+           #(runtime/render-agent-view!
+             {:seon.agent/id "agent-1"}
+             (fn [selected]
+               (reset! calls selected)
+               (js/Promise.resolve
+                [{::execution/ok? true
+                  ::execution/value
+                  {:seon.render/hiccup [:div "welcome"]}}]))))
+          (.then
+           (fn [projection]
+             (is (= [canvas/welcome-sym]
+                    (mapv ::execution/function-symbol @calls))
+                 "absence follows the shared canvas resolution to welcome")
+             (is (= 2 @acquisitions)
+                 "page acquisition and one bounded derived-candidate read")
+             (is (every? #(identical? database (::db/db %)) @requests)
+                 "page and canvas acquisition use the identical database value")
+             (is (identical? database (::db/db @recent-request))
+                 "recent messages use that same database value")
+             (is (= "latest reply"
+                    (get-in (first @calls)
+                            [::execution/arguments 0
+                             :seon.render.chat/last-reply]))
+                 "welcome receives the newest agent-to-user reply as ordinary data")
+             (is (= [:div "welcome"]
+                    (->> (:seon.render.surface/surfaces projection)
+                         (some #(when (= "canvas"
+                                         (:seon.render.surface/label %))
+                                  (:seon.render.surface/expanded %))))))
+             (done)))
+          (.catch (fn [error] (is false (str error)) (done)))
+          (.finally (fn []
+                      (set! db/execute-many original)
+                      (set! message/recent original-recent)))))))
+
+(deftest agent-view-direct-acquisition-error-short-circuits
+  (async done
+    (let [original db/execute-many
+          requests (atom 0)
+          selected (atom 0)
+          failure {:seon.error/message "page acquisition failed"
+                   :seon.error/data {:stage :page}}]
+      (set! db/execute-many
+            (fn [_request]
+              (swap! requests inc)
+              (js/Promise.resolve failure)))
+      (-> (db/with-tx-context
+           {::db/db database}
+           #(runtime/render-agent-view!
+             {:seon.agent/id "agent-1"}
+             (fn [_calls]
+               (swap! selected inc)
+               (js/Promise.resolve []))))
+          (.then
+           (fn [result]
+             (is (= failure result))
+             (is (= 1 @requests)
+                 "the malformed page result never starts canvas acquisition")
+             (is (zero? @selected)
+                 "no selected renderer runs after page acquisition failure")
              (done)))
           (.catch (fn [error] (is false (str error)) (done)))
           (.finally (fn [] (set! db/execute-many original)))))))

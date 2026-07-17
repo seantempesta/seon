@@ -91,21 +91,15 @@
    of a computed value goes stale and dies with the session. This is
    the reactive-context principle applied to the human surface.
 
-   ## Who calls what
+   ## Resolution
 
-   `seon.render/render-agent-canvas` is the one entry point: it calls
-   [[wired-content]] to resolve WHICH value is wired
-   (`::content` pin → configured canvas-block default → the caller-derived
-   last-updated surface → [[welcome]]),
-   invokes it
-   through `seon.render/html-render` (the ONE value-or-fn dispatch),
-   and on a throw builds the legible [[error-response]] — a broken
-   canvas must never silently vanish (vanish = indistinguishable from
-   unwired; banned)."
+   The prompt and web operations acquire the agent and context facts they
+   need, call [[wired-content]] over those ordinary values, and invoke the
+   selected renderer in the execution child. This namespace owns only the
+   pure selection, validation, welcome formatting, and error shapes."
   (:require
     [seon.ai.tokens :as tokens]
     [seon.db :as db]
-    [seon.render.chat :as chat]
     [seon.render.schema]
     [seon.schema :as schema]
     [seon.ui.html :as html]
@@ -320,7 +314,7 @@
    [:seon.render/entity :map]
    ;; A database-configured default on the agent's :canvas context block.
    ;; The explicit agent-entity pin above wins; `:none` is omitted by
-   ;; [[canvas-state]].
+   ;; the caller that acquired the context block.
    [::configured {:optional true} ::configured]
    ;; The DERIVED canvas default — the agent's last-updated surface fn
    ;; (seon.agent.ctx.render-fns/last-updated-surface), computed by the
@@ -333,34 +327,10 @@
    [::source ::source]
    [::value  ::content]])
 
-(schema/register! ::state-request
-  [:map
-   [:seon.db/db :seon.db/db]
-   [:seon.agent/id :string]])
-
-(schema/register! ::state-response
-  [:map
-   [:seon.render/entity :map]
-   [::configured {:optional true} ::configured]])
-
 (schema/register! ::error-request
-  [:merge :seon.db/error
-   [:map [::content {:optional true} ::content]]])
+  [:map [::content {:optional true} ::content]])
 
 (schema/register! ::hour [:int {:min 0 :max 23}])
-
-(schema/register! ::user-name :string)
-
-;; `:seon.db/db` (the datahike db snapshot — a runtime handle,
-;; registered `:any` in seon.render today; reported drift — wants to
-;; live in seon.db) loads AFTER this ns, so the request shape specs
-;; the handle inline as `:any` (the sanctioned third-party-boundary
-;; exception).
-(schema/register! ::user-name-request
-  [:map [:seon.db/db {:optional true} :any]])
-
-(schema/register! ::user-name-response
-  [:map [::user-name {:optional true} ::user-name]])
 
 ;; ============================================================
 ;; Resolution — which value is wired.
@@ -371,41 +341,10 @@
    other wired symbol (the default eats the same dogfood)."
   'seon.render.canvas/welcome)
 
-(def ^:private canvas-entity-pattern
-  "The exact agent and configured-canvas facts needed for resolution."
-  [:db/id
-   :seon.agent/id
-   :seon.agent/run
-   :seon.agent/purpose
-   :seon.render.canvas/content
-   {:seon.agent/ctx
-    [:seon.agent.ctx/name :seon.render.canvas/content]}])
-
-(defn canvas-state
-  "Read the facts that resolve one agent's canvas.
-
-   Returns the bounded agent entity plus an optional configured default from
-   its `:canvas` context block. The context component is consumed here and is
-   not exposed to renderer input. Missing agents return an empty entity. A
-   block value of `:none` means no configured default and is omitted."
-  {:malli/schema [:=> [:cat ::state-request] ::state-response]}
-  [{:seon.db/keys [db] :seon.agent/keys [id]}]
-  (let [raw (or (db/pull db canvas-entity-pattern [:seon.agent/id id]) {})
-        configured (some (fn [block]
-                           (when (= :canvas (:seon.agent.ctx/name block))
-                             (let [value (some->>
-                                           (:seon.render.canvas/content block)
-                                           (db/decode-edn-value ::content))]
-                               (when (and (some? value) (not= :none value))
-                                 value))))
-                         (:seon.agent/ctx raw))]
-    (cond-> {:seon.render/entity (dissoc raw :seon.agent/ctx)}
-      (some? configured) (assoc ::configured configured))))
-
 (defn wired-content
   "Resolve WHICH value is the agent's canvas, with provenance.
 
-   Resolution over [[canvas-state]] plus the caller's derivation:
+   Resolution over the caller's already-acquired agent and context data:
    `:seon.render.canvas/content` (the explicit canvas pin) when present;
    else `::configured` from the agent's canvas context block; else the
    caller-supplied `::derived` symbol (the agent's last-updated surface, see
@@ -479,26 +418,6 @@
     (<= 17 hour 21) "Good evening"
     :else           "Good night"))
 
-(defn user-name
-  "The human's name, when the db carries one.
-
-   From `:seon.user/name` on
-   the user entity. Returns `{::user-name \"Sean\"}` or `{}` —
-   gracefully generic when the attr was never installed (querying an
-   attr datahike has never seen THROWS, so the `seon.db/installed-schema`
-   gate is load-bearing, not defensive fluff)."
-  {:malli/schema [:=> [:cat ::user-name-request] ::user-name-response]}
-  [{:seon.db/keys [db]}]
-  (let [db (or db (some-> db/*conn* deref))]
-    (if (and db (contains? (db/installed-schema db) :seon.user/name))
-      (if-some [n (ffirst (db/query
-                            {:seon.db/db    db
-                             :seon.db/query '[:find ?n
-                                              :where [_ :seon.user/name ?n]]}))]
-        {::user-name n}
-        {})
-      {})))
-
 (def welcome-line
   "The double-duty line: tells the human what the canvas is, and —
    because the agent reads this fn's render and source every turn —
@@ -510,28 +429,29 @@
   "The core default canvas — elegant, simple, time-aware.
 
    COMPACT (the root grid): purpose headline + agent id + the agent's
-   last reply as readable text (`seon.render.chat/last-reply` — the
-   conversation query, not raw message data), so an uncustomized
+   caller-acquired last reply as readable text, so an uncustomized
    agent's grid card is worth glancing at. Expanded (the canvas): when
    the agent has a reply, LEAD with that reply as a real markdown card
    (`seon.ui.markdown/md->hiccup`) with the greeting/date demoted to a
    thin subhead — so a plain chat answer renders richly on the canvas;
    when there's no reply yet, a greeting empty-state (by name when the
-   store knows one), today's date and time, the purpose line, and
+   caller acquired one), today's date and time, the purpose line, and
    [[welcome-line]].
 
    This fn is itself the worked example of the canvas contract: one
    render emitting tagged compact + expanded blocks, plus the
    `:seon.render/ai` render saying what the human sees. Note it
-   DERIVES everything from the db value and the wall clock at render
-   time — nothing stored, nothing stale (write your canvas fns the
-   same way: rendered database queries, not hiccup snapshots)."
+   derives its display from ordinary caller-acquired fields and the wall clock.
+   The operation that acquired the agent may also supply `:seon.user/name`
+   and `:seon.render.chat/last-reply`; this formatter performs no database
+   acquisition of its own."
   {:malli/schema [:=> [:cat :seon.render/system-input] :seon.render/html-response]}
-  [{:seon.db/keys [db] :seon.render/keys [entity] :seon.agent/keys [id]}]
+  [{entity :seon.agent/entity
+    id :seon.agent/id
+    uname :seon.user/name
+    reply :seon.render.chat/last-reply}]
   (let [now        (js/Date.)
         greet      (greeting (.getHours now))
-        ;; Optional = absent, never nil-valued (house rule).
-        uname      (::user-name (user-name (if db {:seon.db/db db} {})))
         greet-line (if uname
                      (str greet ", " uname ".")
                      (str greet "."))
@@ -545,16 +465,7 @@
         purpose    (:seon.agent/purpose entity)
         purpose-line (or purpose
                          "I'm still finding my purpose — tell me what you need.")
-        agent-id   (or id (:seon.agent/id entity))
-        ;; Last reply — derived from the message log, schema-gated
-        ;; like [[user-name]] (querying a never-installed attr THROWS
-        ;; on datahike-cljs).
-        reply      (when (and db agent-id
-                              (contains? (db/installed-schema db)
-                                         :seon.agent.message/content))
-                     (:seon.render.chat/last-reply
-                       (chat/last-reply {:seon.agent/id agent-id
-                                         :seon.db/db    db})))]
+        agent-id   (or id (:seon.agent/id entity))]
     {:seon.render/hiccup
      [:div {:class "seon-card"}
       [:div {:class "seon-card-compact flex flex-col gap-1 p-3"}
@@ -633,7 +544,7 @@
 ;; Errors are legible — a broken canvas never silently vanishes.
 ;;
 ;; ONE overridable seam ([[error-card]]) renders error surfaces
-;; (entity render, agent-view slot, a render failure); a consumer `set!`s it to
+;; (entity and surface render failures); a consumer `set!`s it to
 ;; a branded card (acme does) and the override carries across them all.
 ;; The canvas HERO ([[error-response]]) is the deliberate EXCEPTION: it
 ;; stays CALM — the human never sees the failure there (it rides the agent
@@ -644,7 +555,7 @@
   "The core default html render of a `:seon/error` value.
 
    The ONE error
-   card shared by the error surfaces (entity render, slot, a render
+   card shared by the error surfaces (entity render and a render
    failure). Reads only the shared error core (message + optional
    where/symbol/hint), so it renders ANY error. Override the whole look by
    `set!`-ing [[error-card]]."
@@ -660,7 +571,7 @@
 
 (def error-card
   "THE one overridable error-card seam — a fn `(fn [:seon/error] → hiccup)`
-   the error surfaces call (entity render, slot, a render failure) —
+   the error surfaces call (entity and surface render failures) —
    NOT the calm canvas hero ([[error-response]]). A consumer `set!`s
    this var to a branded card and the override carries across those
    surfaces (the late-binding `set!` pattern acme already uses). Defaults

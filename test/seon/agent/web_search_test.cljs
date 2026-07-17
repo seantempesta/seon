@@ -14,18 +14,18 @@
       path assembled through the int/!gemini-impl test seam.
 
    The gemini transport is FAKED via int/!gemini-impl; SEON_WEB /
-   GEMINI_API_KEY are set per test and restored; the backend is pinned via
-   int/!search-config-override. A fresh :memory conn is root-set! as
-   db/*conn* so the best-effort projection tx has somewhere to land."
+   GEMINI_API_KEY are set per test and restored; backend configuration is
+   ordinary immutable operation data. Database projections are stubbed at the
+   async authority boundary."
   (:require
     [cljs.test :refer [deftest is testing async use-fixtures]]
     [clojure.string :as str]
-    [datahike.api :as d]
     [seon.agent.web :as web]
     [seon.agent.web.internal :as int]
     [seon.ai.tokens :as tokens]
-    [seon.client :as client]
-    [seon.db :as db]))
+    [seon.config :as config]
+    [seon.db :as db]
+    [seon.instrument :as instrument]))
 
 ;; ---------------------------------------------------------------------------
 ;; Fixture — the REAL grounding shape (captured from a live gemini-3.1-flash-lite
@@ -67,59 +67,78 @@
 (defonce ^:private !saved-web (atom nil))
 (defonce ^:private !saved-key (atom nil))
 (defonce ^:private !saved-serper (atom nil))
+(defonce ^:private !saved-transact (atom nil))
+
+(defn- fake-transact!
+  [& call-args]
+  (case (count call-args)
+    1 (js/Promise.resolve {:seon.db/ok? true})
+    2 (js/Promise.resolve {:seon.db/ok? true})
+    (throw (ex-info "unexpected transact! arity"
+                    {:seon.test/argument-count (count call-args)}))))
 
 (defn- set-env! [k v]
   (if (some? v) (aset (.-env js/process) k v) (js-delete (.-env js/process) k)))
 
+(def ^:private gemini-configuration
+  (assoc (config/resolve-config-singleton {})
+         :seon.agent.web/search-backend :gemini-grounding
+         :seon.agent.web/search-model "gemini-3.1-flash-lite"))
+
+(def ^:private serper-configuration
+  (assoc gemini-configuration
+         :seon.agent.web/search-backend :serper
+         :seon.agent.web/search-model "n/a"))
+
+(def ^:private instrumented-web-targets
+  [{::instrument/sym 'seon.agent.web/search
+    ::instrument/schema-form (:malli/schema (meta #'web/search))}
+   {::instrument/sym 'seon.agent.web/grants
+    ::instrument/schema-form (:malli/schema (meta #'web/grants))}])
+
+(defn- with-web-configuration [configuration thunk]
+  (db/with-agent
+   "WEBsearchagent1"
+   (fn []
+     (db/with-tx-context
+      {:seon.config/configuration configuration}
+      thunk))))
+
 (use-fixtures :once
   {:before (fn []
+             (instrument/instrument-delta!
+              {::instrument/changed-syms
+               '#{seon.agent.web/search seon.agent.web/grants}
+               ::instrument/targets instrumented-web-targets})
+             (reset! !saved-transact db/transact!)
+             (set! db/transact! fake-transact!)
              (reset! !saved-web (aget (.-env js/process) "SEON_WEB"))
              (reset! !saved-key (aget (.-env js/process) "GEMINI_API_KEY"))
              (reset! !saved-serper (aget (.-env js/process) "SERPER_API_KEY"))
              (set-env! "SEON_WEB" "1")
-             (set-env! "GEMINI_API_KEY" "test-key-not-real")
-             (reset! int/!search-config-override
-                     {:seon.agent.web/search-backend :gemini-grounding
-                      :seon.agent.web/search-model   "gemini-3.1-flash-lite"}))
+             (set-env! "GEMINI_API_KEY" "test-key-not-real"))
    :after  (fn []
+             (instrument/instrument-delta!
+              {::instrument/changed-syms
+               '#{seon.agent.web/search seon.agent.web/grants}
+               ::instrument/targets []})
+             (set! db/transact! @!saved-transact)
              (set-env! "SEON_WEB" @!saved-web)
              (set-env! "GEMINI_API_KEY" @!saved-key)
-             (set-env! "SERPER_API_KEY" @!saved-serper)
-             (reset! int/!search-config-override nil))})
+             (set-env! "SERPER_API_KEY" @!saved-serper))})
 
 (use-fixtures :each
   {:before (fn []
              ;; each test starts from the granted/keyed/gemini baseline
              (set-env! "SEON_WEB" "1")
-             (set-env! "GEMINI_API_KEY" "test-key-not-real")
-             (reset! int/!search-config-override
-                     {:seon.agent.web/search-backend :gemini-grounding
-                      :seon.agent.web/search-model   "gemini-3.1-flash-lite"}))
+             (set-env! "GEMINI_API_KEY" "test-key-not-real"))
    :after  (fn [] (reset! int/!gemini-impl nil) (reset! int/!serper-impl nil))})
 
-(defn- fresh-conn []
-  (let [cfg {:store              {:backend :memory :id (random-uuid)}
-             :schema-flexibility :write
-             :keep-history?      true}]
-    (-> (d/create-database cfg)
-        (.then (fn [_] (d/connect cfg {:sync? false})))
-        (.then (fn [conn]
-                 (-> (db/ensure-provenance! {:seon.db/conn conn})
-                     (.then (fn [_]
-                              (d/transact!
-                                conn
-                                {:tx-data (into (db/malli->datahike-schema
-                                                  client/agent-bootstrap-attrs)
-                                                (db/tx-meta-datahike-schema))})))
-                     (.then (fn [_] conn))))))))
-
 (defn- run-test [chain done]
-  (-> (fresh-conn)
-      (.then (fn [conn]
-               (let [orig db/*conn*]
-                 (set! db/*conn* conn)
-                 (-> (js/Promise.resolve (chain conn))
-                     (.finally (fn [] (set! db/*conn* orig)))))))
+  (-> (js/Promise.resolve
+       (with-web-configuration
+        gemini-configuration
+        (fn [] (chain nil))))
       (.then (fn [_] (done)))
       (.catch (fn [e] (is false (str "threw — " e)) (done)))))
 
@@ -314,17 +333,19 @@
 (deftest search-unwired-backend-refuses-legibly
   (async done
     ;; A backend keyword outside the wired case arms falls through to the
-    ;; legible refusal (config override bypasses the enum, so :bing is legal here).
-    (reset! int/!search-config-override
-            {:seon.agent.web/search-backend :bing
-             :seon.agent.web/search-model   "n/a"})
+    ;; legible refusal.
     (run-test
       (fn [_]
-        (-> (web/search {:seon.agent.web/query "anything"})
-            (.then (fn [{ok? :seon.agent.web/ok?
-                         msg :seon.error/message}]
-                     (is (false? ok?))
-                     (is (re-find #"(?i)bing|not wired" msg) "names the unwired backend")))))
+        (with-web-configuration
+          (assoc gemini-configuration
+                 :seon.agent.web/search-backend :bing
+                 :seon.agent.web/search-model "n/a")
+          #(-> (web/search {:seon.agent.web/query "anything"})
+               (.then (fn [{ok? :seon.agent.web/ok?
+                            msg :seon.error/message}]
+                        (is (false? ok?))
+                        (is (re-find #"(?i)bing|not wired" msg)
+                            "names the unwired backend"))))))
       done)))
 
 ;; ===========================================================================
@@ -369,13 +390,12 @@
 (deftest search-serper-branch-assembles-response
   (async done
     (set-env! "SERPER_API_KEY" "test-serper-key")
-    (reset! int/!search-config-override
-            {:seon.agent.web/search-backend :serper
-             :seon.agent.web/search-model   "n/a"})
     (reset! int/!serper-impl (fake-serper serper-body))
     (run-test
       (fn [_]
-        (-> (web/search {:seon.agent.web/query "current stable Clojure version"})
+        (with-web-configuration
+          serper-configuration
+          #(-> (web/search {:seon.agent.web/query "current stable Clojure version"})
             (.then (fn [{ok?   :seon.agent.web/ok?
                          q     :seon.agent.web/query
                          be    :seon.agent.web/backend
@@ -394,24 +414,23 @@
                      (is (nil? qs) "serper carries no ::queries arm")
                      (is (string? hint))
                      (is (not (re-find #"(?i)redirect" hint))
-                         "serper urls are real pages, not redirect URIs")))))
+                         "serper urls are real pages, not redirect URIs"))))))
       done)))
 
 (deftest search-serper-no-key-is-an-error-value
   (async done
     (set-env! "SERPER_API_KEY" nil)
-    (reset! int/!search-config-override
-            {:seon.agent.web/search-backend :serper
-             :seon.agent.web/search-model   "n/a"})
     (reset! int/!serper-impl (fn [& _] (throw (js/Error. "serper must not run with no key"))))
     (run-test
       (fn [_]
-        (-> (web/search {:seon.agent.web/query "anything"})
+        (with-web-configuration
+          serper-configuration
+          #(-> (web/search {:seon.agent.web/query "anything"})
             (.then (fn [{ok? :seon.agent.web/ok?
                          msg :seon.error/message}]
                      (is (false? ok?))
                      (is (re-find #"(?i)SERPER_API_KEY|no search backend key" msg)
-                         "names the missing key")))))
+                         "names the missing key"))))))
       done)))
 
 (deftest search-backend-transport-error-passes-through
@@ -434,17 +453,22 @@
 (deftest grants-surfaces-search-backend
   (testing "keyed + configured ⇒ the backend"
     (set-env! "GEMINI_API_KEY" "test-key-not-real")
-    (is (= :gemini-grounding (:seon.agent.web/search-backend (web/grants)))))
+    (is (= :gemini-grounding
+           (:seon.agent.web/search-backend
+            (with-web-configuration gemini-configuration #(web/grants {}))))))
   (testing "no key ⇒ :none (no search can run)"
     (set-env! "GEMINI_API_KEY" nil)
-    (is (= :none (:seon.agent.web/search-backend (web/grants))))
+    (is (= :none
+           (:seon.agent.web/search-backend
+            (with-web-configuration gemini-configuration #(web/grants {})))))
     (set-env! "GEMINI_API_KEY" "test-key-not-real"))
   (testing "serper configured + keyed ⇒ :serper"
-    (reset! int/!search-config-override
-            {:seon.agent.web/search-backend :serper
-             :seon.agent.web/search-model   "n/a"})
     (set-env! "SERPER_API_KEY" "test-serper-key")
-    (is (= :serper (:seon.agent.web/search-backend (web/grants))))
+    (is (= :serper
+           (:seon.agent.web/search-backend
+            (with-web-configuration serper-configuration #(web/grants {})))))
     (testing "serper configured, NO key ⇒ :none"
       (set-env! "SERPER_API_KEY" nil)
-      (is (= :none (:seon.agent.web/search-backend (web/grants)))))))
+      (is (= :none
+             (:seon.agent.web/search-backend
+              (with-web-configuration serper-configuration #(web/grants {}))))))))

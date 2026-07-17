@@ -1198,8 +1198,8 @@
    (`bin/test-cljs` exports it; a benchmark driver may set it per run) so a
    silent render failure SCREAMS the moment it happens instead of hiding in a
    one-line `⚠ … render failed` guard. This is the config seam the
-   `seon.render` guards + the transcript converter route their swallow through
-   ([[seon.render/render]] / [[seon.render/slot]] / [[seon.render/render-value]]).
+   `seon.render` guards + the transcript converter route through the one
+   [[seon.render/render]] owner.
 
    An explicit env dial (not a build `goog.DEBUG` guess) BECAUSE the live
    `:client` pod is itself a `:devtools`-enabled dev build — build flags cannot

@@ -17,11 +17,11 @@
    5. The private transport ceiling bounds streamed body reads and marks the
       result truncated; it is not a caller-controlled public request dial.
 
-   Hermetic: the transport (int/!fetch-impl), DNS resolver
-   (int/!lookup-impl), and web-access POLICY (int/!policy-override) are
-   FAKED — no network, no config file staged. Blobs go to a pid-scoped
-   tmp dir; each test runs against a fresh :memory conn root-set! as
-   db/*conn* (the my.blob-test pattern). SEON_WEB is granted for the run
+   Hermetic: the transport (int/!fetch-impl) and DNS resolver
+   (int/!lookup-impl) are FAKED, while policy is ordinary operation data — no
+   network or config file is used. Blobs go to a pid-scoped
+   tmp dir; database projections are stubbed at the async authority boundary.
+   SEON_WEB is granted for the run
    and restored after; the policy baseline is :public-only (each :after
    restores it), individual tests override to :open / :allowlist to prove
    those modes."
@@ -30,13 +30,13 @@
     ["node:path" :as npath]
     [cljs.test :refer [deftest is async use-fixtures]]
     [clojure.string :as str]
-    [datahike.api :as d]
     [my.blob :as blob]
     [seon.agent.web :as web]
     [seon.agent.web.internal :as int]
     [seon.ai.tokens :as tokens]
-    [seon.client :as client]
+    [seon.config :as config]
     [seon.db :as db]
+    [seon.instrument :as instrument]
     [seon.schema :as schema]))
 
 ;; ---------------------------------------------------------------------------
@@ -52,22 +52,55 @@
 
 (defonce ^:private !saved-storage-view (atom nil))
 (defonce ^:private !saved-env (atom nil))
+(defonce ^:private !saved-transact (atom nil))
 
-;; The :public-only baseline every test starts from — the SSRF-safe policy.
-(def ^:private public-only {:seon.agent.web/policy :public-only})
+(defn- fake-transact!
+  [& call-args]
+  (case (count call-args)
+    1 (js/Promise.resolve {:seon.db/ok? true})
+    2 (js/Promise.resolve {:seon.db/ok? true})
+    (throw (ex-info "unexpected transact! arity"
+                    {:seon.test/argument-count (count call-args)}))))
+
+(def ^:private public-only-configuration
+  (assoc (config/resolve-config-singleton {})
+         :seon.agent.web/policy :public-only))
+
+(def ^:private open-configuration
+  (assoc public-only-configuration :seon.agent.web/policy :open))
+
+(def ^:private allowlist-configuration
+  (assoc public-only-configuration
+         :seon.agent.web/policy :allowlist
+         :seon.agent.web/allowed-domains ["example.com"]))
+
+(def ^:private instrumented-web-targets
+  [{::instrument/sym 'seon.agent.web/fetch
+    ::instrument/schema-form (:malli/schema (meta #'web/fetch))}
+   {::instrument/sym 'seon.agent.web/grants
+    ::instrument/schema-form (:malli/schema (meta #'web/grants))}])
 
 (use-fixtures :once
   {:before (fn []
+             (instrument/instrument-delta!
+              {::instrument/changed-syms
+               '#{seon.agent.web/fetch seon.agent.web/grants}
+               ::instrument/targets instrumented-web-targets})
+             (reset! !saved-transact db/transact!)
+             (set! db/transact! fake-transact!)
              (reset! !saved-storage-view @blob/!storage-view)
              (reset! blob/!storage-view (storage-view fixture-dir))
              (.rmSync nfs fixture-dir #js {:recursive true :force true})
              (reset! !saved-env (aget (.-env js/process) "SEON_WEB"))
-             (aset (.-env js/process) "SEON_WEB" "1")
-             (reset! int/!policy-override public-only))
+             (aset (.-env js/process) "SEON_WEB" "1"))
    :after  (fn []
+             (instrument/instrument-delta!
+              {::instrument/changed-syms
+               '#{seon.agent.web/fetch seon.agent.web/grants}
+               ::instrument/targets []})
+             (set! db/transact! @!saved-transact)
              (reset! blob/!storage-view @!saved-storage-view)
              (.rmSync nfs fixture-dir #js {:recursive true :force true})
-             (reset! int/!policy-override nil)
              (if-some [v @!saved-env]
                (aset (.-env js/process) "SEON_WEB" v)
                (js-delete (.-env js/process) "SEON_WEB")))})
@@ -75,35 +108,19 @@
 (use-fixtures :each
   {:after (fn []
             (reset! int/!fetch-impl nil)
-            (reset! int/!lookup-impl nil)
-            (reset! int/!policy-override public-only))})
+            (reset! int/!lookup-impl nil))})
 
-(defn- fresh-conn []
-  (let [cfg {:store              {:backend :memory :id (random-uuid)}
-             :schema-flexibility :write
-             :keep-history?      true}]
-    (-> (d/create-database cfg)
-        (.then (fn [_] (d/connect cfg {:sync? false})))
-        (.then (fn [conn]
-                 (-> (db/ensure-provenance! {:seon.db/conn conn})
-                     (.then (fn [_]
-                              (d/transact!
-                                conn
-                                {:tx-data (into (db/malli->datahike-schema
-                                                  client/agent-bootstrap-attrs)
-                                                (db/tx-meta-datahike-schema))})))
-                     (.then (fn [_] conn))))))))
-
-(defn- with-conn [body]
-  (-> (fresh-conn)
-      (.then (fn [conn]
-               (let [orig db/*conn*]
-                 (set! db/*conn* conn)
-                 (-> (js/Promise.resolve (body conn))
-                     (.finally (fn [] (set! db/*conn* orig)))))))))
+(defn- with-web-configuration [configuration thunk]
+  (db/with-agent
+   "WEBtestagent1"
+   (fn []
+     (db/with-tx-context
+      {:seon.config/configuration configuration}
+      thunk))))
 
 (defn- run-test [chain done]
-  (-> (with-conn (fn [conn] (chain conn)))
+  (-> (js/Promise.resolve
+       (with-web-configuration public-only-configuration #(chain nil)))
       (.then (fn [_] (done)))
       (.catch (fn [e] (is false (str "threw — " e)) (done)))))
 
@@ -133,7 +150,7 @@
     (reset! int/!lookup-impl (public-dns))
     (reset! int/!fetch-impl (fake-fetch (fn [_] (html-response sample-html))))
     (run-test
-      (fn [conn]
+      (fn [_]
         (-> (web/fetch {:seon.agent.web/url                "https://example.com/page"
                         :seon.agent.web/max-preview-tokens 5})
             (.then (fn [{ok?     :seon.agent.web/ok?
@@ -146,7 +163,6 @@
                          hash    :seon.agent.web/blob-hash
                          links   :seon.agent.web/links
                          trunc?  :seon.agent.web/truncated?}]
-                     (set! db/*conn* conn)
                      (is (true? ok?))
                      (is (= 200 status))
                      (is (= "Hello Title" title) "the <title> rode through extraction")
@@ -197,16 +213,17 @@
   (async done
     (reset! int/!fetch-impl
             (fake-fetch (fn [_] (html-response "<html><body><p>Established in 1920.</p></body></html>"))))
-    (reset! int/!policy-override {:seon.agent.web/policy :open})
     (run-test
       (fn [_]
-        (-> (web/fetch {:seon.agent.web/url "http://127.0.0.1:64999/history.html"})
-            (.then (fn [{ok?     :seon.agent.web/ok?
-                         preview :seon.agent.web/preview}]
-                     (is (true? ok?) "loopback fetch RUNS under the :open policy")
-                     (is (str/includes? (str preview) "1920") "the fixture body came through")
-                     (is (= :open (:seon.agent.web/policy (web/grants)))
-                         "grants surfaces the resolved policy")))))
+        (with-web-configuration
+          open-configuration
+          #(-> (web/fetch {:seon.agent.web/url "http://127.0.0.1:64999/history.html"})
+               (.then (fn [{ok?     :seon.agent.web/ok?
+                            preview :seon.agent.web/preview}]
+                        (is (true? ok?) "loopback fetch RUNS under the :open policy")
+                        (is (str/includes? (str preview) "1920") "the fixture body came through")
+                        (is (= :open (:seon.agent.web/policy (web/grants {})))
+                            "grants surfaces the resolved policy"))))))
       done)))
 
 ;; ---------------------------------------------------------------------------
@@ -218,22 +235,23 @@
   (async done
     (reset! int/!lookup-impl (public-dns))
     (reset! int/!fetch-impl (fake-fetch (fn [_] (html-response "<html><body><p>allowed body</p></body></html>"))))
-    (reset! int/!policy-override
-            {:seon.agent.web/policy :allowlist
-             :seon.agent.web/allowed-domains ["example.com"]})
     (run-test
       (fn [_]
-        (-> (web/fetch {:seon.agent.web/url "https://docs.example.com/page"})
-            (.then (fn [{ok? :seon.agent.web/ok?}]
-                     (is (true? ok?) "a subdomain of a listed domain is reachable")
-                     (is (= ["example.com"] (:seon.agent.web/allowed-domains (web/grants)))
-                         "grants surfaces the allowlist")))
-            (.then (fn [_]
-                     (web/fetch {:seon.agent.web/url "https://evil.org/page"})))
-            (.then (fn [{ok? :seon.agent.web/ok?
-                         msg :seon.error/message}]
-                     (is (false? ok?) "an out-of-list host is refused")
-                     (is (re-find #"(?i)allowlist" msg) "the refusal names the allowlist")))))
+        (with-web-configuration
+          allowlist-configuration
+          #(-> (web/fetch {:seon.agent.web/url "https://docs.example.com/page"})
+               (.then (fn [{ok? :seon.agent.web/ok?}]
+                        (is (true? ok?) "a subdomain of a listed domain is reachable")
+                        (is (= ["example.com"]
+                               (:seon.agent.web/allowed-domains (web/grants {})))
+                            "grants surfaces the allowlist")))
+               (.then (fn [_]
+                        (web/fetch {:seon.agent.web/url "https://evil.org/page"})))
+               (.then (fn [{ok? :seon.agent.web/ok?
+                            msg :seon.error/message}]
+                        (is (false? ok?) "an out-of-list host is refused")
+                        (is (re-find #"(?i)allowlist" msg)
+                            "the refusal names the allowlist"))))))
       done)))
 
 ;; ---------------------------------------------------------------------------
@@ -332,11 +350,12 @@
                           (keep #(when (vector? %) (first %)))
                           set)]
     (is (= #{:seon.agent.web/url
+             :seon.config/configuration
              :seon.agent.web/timeout-ms
              :seon.agent.web/max-preview-tokens
              :seon.agent.web/max-age-ms}
            request-keys)
-        "the fetch request has one public content-size dial, denominated in tokens")))
+        "the request names its injected configuration and token size dial")))
 
 (deftest private-body-reader-enforces-its-transport-ceiling
   (async done
