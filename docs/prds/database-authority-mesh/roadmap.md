@@ -282,6 +282,19 @@ current `transact!` Malli contract and added the missing `current-agent-id`
 contract. The remaining config arity warnings are the finite downstream-owner
 ledger; the stale instrumentation fixture is recorded at
 `tmp/test-cljs-20260717-032612-47853.log` rather than restoring an ambient read.
+Commit `ed4cae81` removes the last ambient skills-corpus config read. Startup
+already selects the corpus directory once, so `my.skills/seed-skills-tx-data`
+now has one explicit-directory signature and no fallback arity. Focused proof
+passes 9 skills tests/31 assertions.
+Commit `77789812` settles membership on the same database-value owner. One
+resumable-agent query definition drives both the explicit projection facade
+and selective listener interest; the copied attribute patterns and second
+advertisement database cache are deleted. A completed projection is accepted
+only when its input equals the session's cached latest immutable database
+value, including when an unrelated transaction advances that value without
+triggering membership interest. Focused proof passes 4 multiagent tests/25
+assertions, 5 advertisement tests/23 assertions, and 7 client-initialization
+tests/20 assertions.
 `3ebfcaf5` leaves one current artifact manifest/application digest and removes
 the four historical readers; `9a66bb78` leaves one generated-identity
 allocator; and `c453a5bd` makes that allocator consume the same native
@@ -318,27 +331,29 @@ modest-hardware density checkpoint.
 
 ### Current implementation checkpoint
 
-- **Earliest unsettled contract:** migrate membership and then quiescence
-  through the one settled client session,
+- **Earliest unsettled contract:** migrate quiescence through the one settled
+  client session,
   publication, advertisement, recovery, and state-reconciliation owners.
 - **Integrated proof that closes it:** eval, autocomplete, namespace context,
   startup, converged reload, advertisement, runtime hosting, and declarative
-  state reconciliation reuse ordinary database values and native transaction
-  reports; fresh and warm startup both execute the one ordered sequence.
-- **Dependency-ready parallel portfolio:** membership implementation is active
-  and quiescence is grounded at
-  [[research/membership-quiescence-single-owner-audit-2026-07-17]] against that
-  boundary, including the stale-result defect tracked at
-  [[../../seon/issues/runtime-membership-can-accept-stale-database-value]];
-  the shared-instructions async database defect is an independent existing
-  owner; the web/render single-owner audit is durable at
+  state reconciliation and runtime membership reuse ordinary database values
+  and native transaction reports; fresh and warm startup both execute the one
+  ordered sequence, and membership rejects completion behind any newer cached
+  session value.
+- **Dependency-ready parallel portfolio:** quiescence is grounded at
+  [[research/membership-quiescence-single-owner-audit-2026-07-17]] against the
+  settled membership boundary. Operation-owned config propagation is grounded
+  at [[research/eval-render-config-single-owner-audit-2026-07-17]], including
+  the existing error-scope seam and the complete deletion set for load-time
+  config values. The web/render single-owner audit is durable at
   [[research/web-render-single-owner-audit-2026-07-17]]; the plan consumer cut
   is grounded at [[research/plan-single-owner-audit-2026-07-17]] and explicitly
   rejects the current dirty coordinate/oversized-row prototype. The complete
   parallel-system inventory is durable at
   [[research/parallel-behavior-unification-audit-2026-07-17]].
-- **Next refills:** finish membership, then migrate quiescence in one complete
-  cut; close the web/feed database-value and
+- **Next refills:** migrate quiescence in one complete cut while the independent
+  operation-owned config seam advances without touching client lifecycle;
+  close the web/feed database-value and
   rendered-transaction owner next, followed by the exact-database blob
   operator seam and the operation-specific plan consumers.
   The final graduation gate remains the full frozen-source correctness, live
