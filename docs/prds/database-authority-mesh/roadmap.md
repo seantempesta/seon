@@ -154,6 +154,19 @@ result cut rather than accepting an adapter. Final graduation remains one
 frozen-source full test, live browser/agent, crash/restart, packaging, and
 modest-hardware density checkpoint.
 
+Message retry semantics are settled at
+[[research/message-idempotent-delivery-seam-2026-07-16]]. The public
+`message!` request and exact message-id-plus-hops result stay unchanged.
+Completion becomes one expected-database, run-CAS transaction containing the
+result, optional message, close, and pointer retraction. Delegation becomes one
+generated-identity transaction containing child birth plus its initial task,
+then hosts the child from committed facts. The existing exact database request
+receipt resolves ambiguous delivery only while the transport retains the same
+request id and frozen bytes; no caller message id, content dedupe, queue,
+outbox, sent flag, or second receipt registry is added. These two atomic domain
+transactions delete the current partial-success workflows instead of retrying
+around them.
+
 ## Settled laws
 
 - Datahike cache identity is `[connection-id generation commit-id]`.
