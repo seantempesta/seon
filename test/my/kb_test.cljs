@@ -470,8 +470,8 @@
                     [102 :my.kb.source/title
                      "LISP 1.5 Programmer's Manual"]]))
                ::pull-many-fn
-               (fn [{:seon.db/keys [eids]}]
-                 (js/Promise.resolve (mapv pulled-by-eid eids)))
+               (fn [{:seon.db/keys [refs]}]
+                 (js/Promise.resolve (mapv pulled-by-eid refs)))
                ::embedding-enabled-fn (constantly false)
                ::search-pull-fn
                (fn [_] (js/Promise.resolve {:seon.embed/hits []}))}
