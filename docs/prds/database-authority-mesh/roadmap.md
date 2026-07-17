@@ -93,10 +93,19 @@ construction, and the embedded-Datahike run test system are deleted. Focused
 proof passes 8 tests/33 assertions. The deletion intentionally exposes the
 remaining synchronous consumers rather than preserving compatibility helpers.
 
-Earliest unsettled contract: `seon.derive` and `seon.agent.schedule` still call
-the deleted duplicate run readers and retain ambient-connection and removed
-envelope assumptions. They must become one async database-value cut before
-lifecycle, loop, and web consumers can follow. `seon.web.serve` also still
+The derive/schedule cut is settled at `d2386e23`. Database-backed derived
+projections are async over explicit immutable database values; scheduling
+captures one value and performs one grouped acquisition for schedule rows,
+crash evidence, and prior schedule starts, then applies the one pure state
+rule. Ambient connections, removed envelopes, and deleted duplicate run
+readers are gone. Focused proof passes 3 derive tests/12 assertions and 5
+schedule tests/28 assertions with no warning in either owner.
+
+Earliest unsettled contract: lifecycle must consume the settled run, message,
+and database-value owners without partial-success transactions. Completion
+must commit its result, optional message, run close, and pointer retraction in
+one expected-database CAS transaction; wait, pause, resume, and terminate must
+use the same native result convention. `seon.web.serve` also still
 references deleted turn, attempt, and eval-operation coordinate fields and must
 derive historical model evidence from the parent turn's `rendered-tx` without
 compatibility projections. Autocomplete/export is settled at `8c2bfbe7`: one captured current
@@ -174,13 +183,12 @@ modest-hardware density checkpoint.
 
 ### Current implementation checkpoint
 
-- **Earliest unsettled contract:** `seon.derive` and
-  `seon.agent.schedule` must consume the one async run/database-value owner;
-  their deleted-reader and ambient-connection failures are explicit and no
-  compatibility helper will be restored.
-- **Integrated proof that closes it:** focused derive and schedule behavior
-  over one captured database value, native reports/direct errors, and a client
-  compile with no warning in those two owners.
+- **Earliest unsettled contract:** lifecycle atomic completion and native
+  wait/pause/resume/terminate behavior over the settled run, message, and
+  database-value owners.
+- **Integrated proof that closes it:** focused lifecycle, message composition,
+  and run database-value tests proving one completion transaction and no
+  removed envelope or partial-success branch.
 - **Dependency-ready parallel portfolio:** lifecycle is factoring the one
   existing message transaction composer so completion can commit result,
   optional message, close, and pointer retraction atomically; listener
