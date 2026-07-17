@@ -339,6 +339,16 @@
                (not= render-id (::render-id promoted)))
       (start-render! subscription-key subscription-id))))
 
+(defn- finish-render-result!
+  "Settle every asynchronous render layer before it reaches feed state."
+  [subscription-key subscription-id render-id rendered]
+  (if (promise-like? rendered)
+    (.then rendered
+           #(finish-render-result! subscription-key subscription-id render-id %)
+           #(finish-render! subscription-key subscription-id render-id
+                            (render-error-patch %)))
+    (finish-render! subscription-key subscription-id render-id rendered)))
+
 (defn- start-render! [subscription-key subscription-id]
   (let [subscription (get-in @!feeds [::subscriptions subscription-key])
         request (some-> (::active-render subscription)
@@ -353,16 +363,9 @@
                            [::subscriptions subscription-key ::active-render]
                            request)
                  registry)))
-      (let [rendered (render-request-result subscription request)]
-        (if (promise-like? rendered)
-          (.then rendered
-                 #(finish-render! subscription-key subscription-id
-                                  (::render-id request) %)
-                 #(finish-render! subscription-key subscription-id
-                                  (::render-id request)
-                                  (render-error-patch %)))
-          (finish-render! subscription-key subscription-id
-                          (::render-id request) rendered))))))
+      (finish-render-result! subscription-key subscription-id
+                             (::render-id request)
+                             (render-request-result subscription request)))))
 
 (defn- enqueue-render! [subscription-key request]
   (let [subscription (get-in @!feeds [::subscriptions subscription-key])
