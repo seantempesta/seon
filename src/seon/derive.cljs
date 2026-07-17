@@ -1,8 +1,7 @@
 (ns seon.derive
-  "The ONE leaf of DB-derived projections — every pure read that turns a db
-   value + an agent/run id into derived state lives HERE, exactly once.
+  "Pure transformations and the remaining database-derived projections.
 
-   Why a leaf: the agent's derived state, turn counts, current-run, and the
+   The agent's derived state, turn counts, current-run, and the
    armable-agent ID query were each re-implemented 5+ times across `seon.agent`,
    `seon.agent.ctx`, `seon.render.default`, `seon.agent.run`, and
    `seon.agent.schedule`, every copy justified by dodging the
@@ -15,10 +14,6 @@
    :paused → :running); [[derive-state]] reads the primitives off a db and
    applies it; [[armable-agent-ids]] / [[agent-idle?]] are FILTERS over it,
    never re-encodings — so the rule cannot drift.
-
-   Every fn takes an EXPLICIT db value (the basis-t the caller is reading
-   against). A caller that holds no db threads `@seon.db/*conn*` at the call
-   site (the wrappers in `seon.agent`/`seon.agent.run` do exactly that).
 
    Dependency direction (acyclic): requires ONLY `seon.db` + `seon.schema`.
    It MUST NOT require `seon.agent`, `seon.agent.ctx`, `seon.render.*`, or
@@ -81,31 +76,14 @@
     :else         :running))
 
 ;; ============================================================
-;; Reads — each takes an EXPLICIT db value + an id, sync over that value.
+;; Legacy derived readers below are migrated by their owning consumer cuts.
 ;; ============================================================
-
-(defn current-run
-  "The agent's CURRENT open run as a plain touched map, or nil.
-
-   The `:seon.agent/run`
-   pointer, resolved to its run entity, returned only when that run is
-   `:open`. Drill its refs via follow-up reads."
-  {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db]
-                             [:seon.agent/id :seon.agent/id]]
-                  [:maybe :map]]}
-  [db agent-id]
-  (let [a       (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id agent-id]})
-        run-eid (:db/id (:seon.agent/run a))]
-    (when run-eid
-      (let [r (db/entity {:seon.db/db db :seon.db/ref run-eid})]
-        (when (= :open (:seon.agent.run/status r)) r)))))
 
 (defn derive-state
   "The agent's DERIVED FSM state over the db value `db`.
 
    One of :idle/:running/:paused/:terminated. Reads `terminated-at`,
-   whether it has an OPEN run
-   ([[current-run]]), and that run's `paused-at`, then applies
+   whether it has an OPEN run, and that run's `paused-at`, then applies
    [[state-from-primitives]]. The ONE reader the readline / web UI / loop /
    wake gate share."
   {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db]
@@ -121,30 +99,6 @@
         (:seon.agent.run/paused-at run) (assoc :seon.agent.run/paused-at
                                                (:seon.agent.run/paused-at run))))))
 
-(defn run-turn-count
-  "How many WORK turns are stamped with run `run-id`.
-
-   The run's derived current-turn — the WORK budget the loop checks against
-   turn-limit). Counts `:seon.agent.turn/run` datoms over the explicit db value
-   but EXCLUDES schedule-fire turns (`:seon.agent.turn/scheduled? true`): a cron
-   fire opens a turn so its eval RENDERS in the transcript, yet it is not an LLM
-   drive and must never burn a turn from the work budget. No installed-schema
-   gate (the loop is the active model; `:seon.agent.turn/run` is always
-   registered by boot)."
-  {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db]
-                             [:seon.agent.run/id :seon.agent.run/id]]
-                  :int]}
-  [db run-id]
-  (or (db/query {:seon.db/db db
-                 :seon.db/query
-                 '[:find (count ?t) . :in $ ?rid
-                   :where
-                   [?r :seon.agent.run/id ?rid]
-                   [?t :seon.agent.turn/run ?r]
-                   (not [?t :seon.agent.turn/scheduled? true])]
-                 :seon.db/args [run-id]})
-      0))
-
 (defn run-form-count
   "How many FORMS (persisted evals) ran under run `run-id`.
 
@@ -153,7 +107,7 @@
    orientation turns burn for nothing (repl-milestone rung-0 verdict, 2026-07-10) —
    under `:stream` the loop bounds work by THIS count instead. Joins
    `:seon.agent.turn/run` → `:seon.agent.turn/evals` over the explicit
-   db value; excludes schedule-fire turns like [[run-turn-count]]."
+   db value; excludes schedule-fire turns."
   {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db]
                              [:seon.agent.run/id :seon.agent.run/id]]
                   :int]}

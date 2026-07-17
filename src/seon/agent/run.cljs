@@ -16,7 +16,7 @@
 
    This namespace OWNS the `:seon.agent.run/*` schemas and the lifecycle:
    `open-run!` / `close-run!` / `renew!` / `beat!` / `current-run` /
-   `snapshot` / `turn-limit-reached?` / `deadline-passed?` /
+   `turn-limit-reached?` / `deadline-passed?` /
    `close-overdue-runs!` — the deadline WATCHDOG — and `close-stale-runs!` —
    the HEARTBEAT watchdog (both scans run each pass of the one ticker,
    [[seon.agent.loop/run-tick!]]; the schedule half is
@@ -26,12 +26,10 @@
    Dependency direction (acyclic): it transacts via `seon.db` directly and
    references `:seon.agent/*` keywords from the global registry (request agent
    ids use `:string`, so this ns has NO load-time dependency on seon.agent). It
-   requires the [[seon.derive]] leaf so
-   `current-run` is a thin `*conn*` adapter over the one derivation, plus
-   [[seon.agent.message]] (to send outcome notices — that ns never requires run
+   requires [[seon.agent.message]] (to send outcome notices — that ns never requires run
    back, so acyclic) and the [[seon.error]] leaf (to record a wedge as a
    `:core` fault). seon.agent requires THIS ns, so the edge runs
-   agent → run → {derive, message, error}, never the reverse."
+   agent → run → {message, error}, never the reverse."
   (:require
     [seon.agent.ctx :as ctx]
     [seon.agent.message :as msg]
@@ -40,7 +38,6 @@
     [seon.db :as db]
     [seon.db.id :as db.id]
     [seon.db.protocol :as db.protocol]
-    [seon.derive :as derive]
     [seon.error :as error]
     [seon.schema :as schema]))
 
@@ -172,18 +169,78 @@
       (:seon.agent/default-deadline-ms agent)
       (:seon.config.run/deadline-ms policy)))
 
-(defn effective-deadline-ms
+(defn- error-value? [value]
+  (and (map? value) (string? (:seon.error/message value))))
+
+(defn- direct-error [message]
+  {:seon.error/message message})
+
+(schema/register! ::direct-error
+  [:map [:seon.error/message :string]])
+(schema/register! ::transact-result
+  [:or :seon.db/transact-response ::direct-error])
+
+(defn- pull-member [database selector ref]
+  {::db.protocol/operation db.protocol/pull-operation
+   ::db/db database
+   ::db.protocol/selector selector
+   ::db.protocol/entity-id ref})
+
+(defn- query-member [database query arguments]
+  {::db.protocol/operation db.protocol/query-operation
+   ::db/db database
+   ::db.protocol/query-form query
+   ::db.protocol/arguments arguments})
+
+(defn- successful-member? [member]
+  (true? (::db.protocol/success? member)))
+
+(defn- member-result [member]
+  (or (::db.protocol/result member)
+      (:datahike.query/result member)))
+
+(defn- failed-member [label member]
+  {:seon.error/message (str label " failed: "
+                            (or (::db.protocol/error member)
+                                "the database returned no error message."))
+   :seon.error/kind (or (:seon.error/kind member) :core-bug)
+   :seon.error/data member})
+
+(def ^:private config-selector
+  [:seon.config/repl-mode
+   :seon.config.run/batch-turn-limit
+   :seon.config.run/stream-form-limit
+   :seon.config.run/deadline-ms])
+
+(defn- policy-from [stored]
+  (merge (config/default-run-policy) stored))
+
+(defn ^:async effective-deadline-ms
   "Effective run deadline duration for an agent and database value."
   {:malli/schema [:=> [:cat ::effective-deadline-request]
-                  ::default-deadline-ms]}
+                  [:or ::default-deadline-ms ::direct-error]]}
   [{:seon.db/keys [db] id :seon.agent/id}]
-  (deadline-ms-from
-    (when id
-      (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id id]}))
-    (ctx/run-policy db)))
+  (let [members (cond-> [(pull-member db config-selector
+                                      [:seon.config/id config/cluster-config-id])]
+                  id (conj (pull-member db
+                                        [::default-deadline-ms
+                                         :seon.agent/default-deadline-ms]
+                                        [:seon.agent/id id])))
+        acquired (await (db/execute-many {::db/db db ::db/members members}))
+        results (::db/results acquired)]
+    (cond
+      (error-value? acquired) acquired
+      (not= (count members) (count results))
+      (direct-error "Effective deadline acquisition returned the wrong member count.")
+      (not (every? successful-member? results))
+      (failed-member "effective deadline acquisition"
+                     (first (remove successful-member? results)))
+      :else
+      (let [[stored agent] (map member-result results)]
+        (deadline-ms-from agent (policy-from stored))))))
 
 ;; ============================================================
-;; Reads — sync over the local db value.
+;; Reads — async over one explicit immutable database value.
 ;; ============================================================
 
 (schema/register! :seon.agent.run/snapshot
@@ -200,39 +257,54 @@
    [:seon.agent.run/paused-at     {:optional true} :seon.agent.run/paused-at]
    [:seon.agent.run/closed-reason {:optional true} :seon.agent.run/closed-reason]])
 
-(schema/register! ::snapshot-request [:map [:seon.agent.run/id :seon.agent.run/id]])
-
-(defn snapshot
-  "The run's fingerprint as a plain map, or nil if unresolved.
-
-   Ref pointers (agent/cause) are dropped — they're internal."
-  {:malli/schema [:=> [:cat ::snapshot-request] [:maybe :seon.agent.run/snapshot]]}
-  [{run-id :seon.agent.run/id}]
-  (when-let [r (db/entity {:seon.db/ref [:seon.agent.run/id run-id]})]
-    (select-keys r [:seon.agent.run/id :seon.agent.run/status :seon.agent.run/trigger
-                    :seon.agent.run/started-at :seon.agent.run/turn-limit
-                    :seon.agent.run/deadline :seon.agent.run/last-beat-at
-                    :seon.agent.run/paused-at :seon.agent.run/closed-reason])))
+(defn- run-projection [run]
+  (select-keys run [:seon.agent.run/id :seon.agent.run/status
+                    :seon.agent.run/trigger :seon.agent.run/started-at
+                    :seon.agent.run/turn-limit :seon.agent.run/deadline
+                    :seon.agent.run/last-beat-at :seon.agent.run/paused-at
+                    :seon.agent.run/closed-reason]))
 
 ;; The agent-id VALUE schema in these request maps is base `:string`, NOT
 ;; `:seon.agent/id`: every register! here is LOAD-TIME, and seon.agent.run is a
-;; LEAF (requires only db/derive/schema) that loads BEFORE seon.agent registers
+;; LEAF (requires no seon.agent namespace) that loads BEFORE seon.agent registers
 ;; `:seon.agent/id` — referencing it at cold boot throws. `:string` also admits
 ;; the literal "root" orchestrator-root id (the generated shape is enforced
 ;; at CREATE, via `:seon.agent/id` itself); these are run OPS over an existing id.
-(schema/register! ::current-run-request [:map [:seon.agent/id :string]])
+(schema/register! ::current-run-request
+  [:map
+   [:seon.agent/id :string]
+   [:seon.db/db {:optional true} :seon.db/db]])
 
-(defn current-run
+(defn ^:async current-run
   "The agent's CURRENT open run entity, or nil.
 
    The `:seon.agent/run` pointer, if it
    resolves to an `:open` run. A plain touched map; drill its refs
-   via follow-up reads. A `*conn*`-reading map-in convenience over the one
-   derivation leaf [[seon.derive/current-run]] — callers that already hold a
-   db value call `seon.derive/current-run` directly with it."
-  {:malli/schema [:=> [:cat ::current-run-request] [:maybe :map]]}
-  [{id :seon.agent/id}]
-  (derive/current-run @db/*conn* id))
+   via follow-up reads. Omission of `:seon.db/db` acquires the current cached
+   database value once."
+  {:malli/schema [:=> [:cat ::current-run-request]
+                  [:or [:maybe :map] ::direct-error]]}
+  [{database :seon.db/db id :seon.agent/id}]
+  (let [database (or database (await (db/db)))]
+    (if (error-value? database)
+      database
+      (let [agent (await
+                   (db/pull
+                    {::db/db database
+                     ::db/selector
+                     [{:seon.agent/run
+                       [:seon.agent.run/id :seon.agent.run/status
+                        :seon.agent.run/trigger :seon.agent.run/started-at
+                        :seon.agent.run/turn-limit :seon.agent.run/deadline
+                        :seon.agent.run/last-beat-at
+                        :seon.agent.run/paused-at
+                        :seon.agent.run/closed-reason]}]
+                     ::db/eid [:seon.agent/id id]}))
+            run (:seon.agent/run agent)]
+        (cond
+          (error-value? agent) agent
+          (= :open (:seon.agent.run/status run)) run
+          :else nil)))))
 
 (schema/register! ::current-runs
   [:vector
@@ -246,7 +318,7 @@
     [:seon.agent.turn/id :string]]])
 (schema/register! ::quiescence-work
   [:map
-   [:seon.db/coordinate :seon.db.coordinate/coordinate]
+   [:seon.db/db :seon.db/db]
    [::current-runs ::current-runs]
    [::running-turns ::running-turns]])
 
@@ -266,56 +338,51 @@
     [?turn :seon.agent.turn/id ?turn-id]
     [?turn :seon.agent.turn/status :running]])
 
-(defn- query-member
-  [query]
-  {::db.protocol/operation db.protocol/query-operation
-   ::db.protocol/query-form query
-   ::db.protocol/arguments []})
-
-(defn- member-value!
-  [label member]
-  (if (true? (::db.protocol/success? member))
-    (:datahike.query/result member)
-    (throw (ex-info (str "Quiescence " label " failed.")
-                    {:seon.db/error member
-                     :seon.error/kind :core-bug}))))
-
 (defn ^:async quiescence-work!
-  "Read current run ownership and running turn brackets at one coordinate.
+  "Read current run ownership and running turn brackets at one database value.
 
    The current-run projection includes only open runs still pointed to by an
    agent. The running-turn projection deliberately includes every running
    turn, even when a concurrent lifecycle close has already removed its run
    pointer. Planned drain callers close pointer-owned runs without a running
    turn, then re-read this projection until both vectors are empty."
-  {:malli/schema [:=> [:cat] ::quiescence-work]}
+  {:malli/schema [:=> [:cat] [:or ::quiescence-work ::direct-error]]}
   []
-  (let [acquired
+  (let [database (await (db/db))]
+    (if (error-value? database)
+      database
+      (let [acquired
         (await
          (db/execute-many
-          {::db/members
-           [(query-member current-runs-query)
-            (query-member running-turns-query)]}))]
-    (when (schema/valid-candidate-value? :seon.db/error acquired)
-      (throw (ex-info "Quiescence database acquisition failed."
-                      {:seon.db/error acquired
-                       :seon.error/kind :core-bug})))
-    (let [[current-runs running-turns] (::db/results acquired)]
-      {::db/coordinate (::db/coordinate acquired)
+          {::db/db database
+           ::db/members
+           [(query-member database current-runs-query [])
+            (query-member database running-turns-query [])]}))
+            members (::db/results acquired)]
+        (cond
+          (error-value? acquired) acquired
+          (not= 2 (count members))
+          (direct-error "Quiescence acquisition returned the wrong member count.")
+          (not (every? successful-member? members))
+          (failed-member "Quiescence acquisition"
+                         (first (remove successful-member? members)))
+          :else
+          (let [[current-runs running-turns] (map member-result members)]
+            {::db/db database
        ::current-runs
-       (->> (member-value! "current-run acquisition" current-runs)
+       (->> current-runs
             (map (fn [[agent-id run-id]]
                    {:seon.agent/id agent-id
                     :seon.agent.run/id run-id}))
             (sort-by (juxt :seon.agent/id :seon.agent.run/id))
             vec)
        ::running-turns
-       (->> (member-value! "running-turn acquisition" running-turns)
+       (->> running-turns
             (map (fn [[run-id turn-id]]
                    {:seon.agent.run/id run-id
                     :seon.agent.turn/id turn-id}))
             (sort-by (juxt :seon.agent.run/id :seon.agent.turn/id))
-            vec)})))
+            vec)}))))))
 
 (defn turn-limit-reached?
   "Work bound: has `turn-count` reached `turn-limit`?
@@ -343,15 +410,15 @@
 ;; Writes — fencing-guarded lifecycle. Each WORK tx LEADS with an in-tx CAS
 ;; ([[seon.db/cas-assert]]) asserting the agent's `:seon.agent/run` STILL names
 ;; this run-id; if it moved (superseded) or was retracted (watchdog-closed /
-;; timed-out) the whole tx aborts at the writer — the CAS-fail envelope IS the
-;; fencing error (no pre-read predicate). Errors are VALUES, never throws.
+;; timed-out) the whole tx aborts at the writer. The writer returns that CAS
+;; failure directly as data; errors are values and never throw.
 ;; ============================================================
 
 (defn- run-fence
   "The leading work-fence CAS op (DATA): assert the agent `id`'s
    `:seon.agent/run` pointer STILL names `run-id`. Lead a work-tx with this and
    the tx commits iff the pointer is unchanged; a moved/retracted pointer aborts
-   the WHOLE tx (`:transact/cas`) → the `{:seon.db/ok? false}` envelope."
+   the WHOLE tx and returns a direct :transact/cas error value."
   [id run-id]
   (db/cas-assert [:seon.agent/id id] :seon.agent/run [:seon.agent.run/id run-id]))
 
@@ -363,6 +430,19 @@
    [:seon.agent.run/turn-limit  {:optional true} :seon.agent.run/turn-limit]
    [:seon.agent.run/deadline    {:optional true} :seon.agent.run/deadline]])
 
+(defn- new-run-row
+  [run-id id trigger cause now turn-limit deadline]
+  (cond->
+   {:db/id                     "run"
+    :seon.agent.run/id         run-id
+    :seon.agent.run/agent      [:seon.agent/id id]
+    :seon.agent.run/started-at now
+    :seon.agent.run/trigger    trigger
+    :seon.agent.run/status     :open
+    :seon.agent.run/turn-limit turn-limit
+    :seon.agent.run/deadline   deadline}
+    cause (assoc :seon.agent.run/cause cause)))
+
 (defn ^:async open-run!
   "Open a run for an EXISTING agent and point `:seon.agent/run` at it.
 
@@ -372,25 +452,48 @@
    serialized step: when two wakes (a message + a schedule fire, or two
    messages) race, the database writer serializes the transactions and the second CAS sees
    the first's pointer, so its WHOLE tx fails — no duplicate `:open` run is
-   ever committed (the loser gets the db error envelope; the wake handler
+   ever committed (the loser gets the direct CAS error; the wake handler
    renews instead). Seeds `turn-limit` from `:seon.agent/default-turn-limit`
    (else [[default-turn-limit]]) and `deadline` from now +
    `:seon.agent/default-deadline-ms` (else [[default-deadline-ms]]); explicit
    seeds in the request win. Does NOT flip any stored state — state is
-   derived. Returns the run's [[snapshot]] on success, or the db error
-   envelope — a CAS-loss included (errors are values). `^:async`."
+   derived. Returns the run's plain projection on success, or a direct error
+   value — a CAS loss included. `^:async`."
   {:malli/schema [:=> [:cat ::open-run-request]
-                  [:or :seon.agent.run/snapshot :seon.db/transact-response]]}
+                  [:or :seon.agent.run/snapshot ::direct-error]]}
   [{id :seon.agent/id trigger :seon.agent.run/trigger cause :seon.agent.run/cause
     tl :seon.agent.run/turn-limit dl :seon.agent.run/deadline}]
-  (let [a (db/entity {:seon.db/ref [:seon.agent/id id]})]
-    (if (nil? a)
-      {:seon.db/ok? false
-       :seon.db/error {:seon.error/message
-                       (str "open-run!: no agent " (pr-str id)
-                            " — create the agent first.")}}
-      (let [now        (js/Date.)
-            policy     (ctx/run-policy @db/*conn*)
+  (let [database (await (db/db))]
+    (if (error-value? database)
+      database
+      (let [acquired
+            (await
+             (db/execute-many
+              {::db/db database
+               ::db/members
+               [(pull-member database
+                             [::default-turn-limit ::default-deadline-ms
+                              :seon.agent/default-turn-limit
+                              :seon.agent/default-deadline-ms]
+                             [:seon.agent/id id])
+                (pull-member database config-selector
+                             [:seon.config/id config/cluster-config-id])]}))
+            members (::db/results acquired)]
+        (cond
+          (error-value? acquired) acquired
+          (not= 2 (count members))
+          (direct-error "open-run!: database acquisition returned the wrong member count.")
+          (not (every? successful-member? members))
+          (failed-member "open-run! acquisition"
+                         (first (remove successful-member? members)))
+          :else
+          (let [[a stored-policy] (map member-result members)]
+            (if (nil? a)
+              (direct-error
+               (str "open-run!: no agent " (pr-str id)
+                    " — create the agent first."))
+              (let [now        (js/Date.)
+            policy     (policy-from stored-policy)
             ;; Run-bound SEED (config-driven agent-init, move 9): the new
             ;; Agent-level datoms are explicit overrides. Cluster defaults are
             ;; the frozen config singleton policy above.
@@ -399,7 +502,7 @@
                            (:seon.agent/default-turn-limit a)
                            ;; mode-denominated const fallback: forms under
                            ;; :stream, turns under :batch (repl-milestone rung-0 verdict).
-                           (if (= :stream (ctx/repl-mode @db/*conn*))
+                           (if (= :stream (:seon.config/repl-mode stored-policy))
                              (:seon.config.run/stream-form-limit policy)
                              (:seon.config.run/batch-turn-limit policy)))
             deadline   (or dl (js/Date. (+ (.getTime now)
@@ -407,23 +510,15 @@
             res
             (await
               (db.id/allocate!
-                {::db.id/allocations
+                {::db/db database
+                 ::db.id/allocations
                  [{::db.id/key :seon.agent.run/id
                    ::db.id/identity-attr :seon.agent.run/id}]
                  ::db.id/transaction-builder
                  (fn [ids]
                    (let [run-id  (get ids :seon.agent.run/id)
-                         run-row
-                         (cond->
-                           {:db/id                     "run"
-                            :seon.agent.run/id         run-id
-                            :seon.agent.run/agent      [:seon.agent/id id]
-                            :seon.agent.run/started-at now
-                            :seon.agent.run/trigger    trigger
-                            :seon.agent.run/status     :open
-                            :seon.agent.run/turn-limit turn-limit
-                            :seon.agent.run/deadline   deadline}
-                           cause (assoc :seon.agent.run/cause cause))]
+                         run-row (new-run-row run-id id trigger cause now
+                                              turn-limit deadline)]
                      {:seon.db/tx-data
                       [run-row
                        ;; ATOMIC WAKE GUARD: point the agent at the
@@ -432,12 +527,12 @@
                        ;; this same allocation-aware transaction.
                        [:db.fn/cas [:seon.agent/id id]
                         :seon.agent/run nil
-                        [:seon.agent.run/id run-id]]]}))
-                 :seon.db/conn db/*conn*}))
-            run-id (get-in res [::db.id/ids :seon.agent.run/id])]
-        (if (false? (:seon.db/ok? res))
+                        [:seon.agent.run/id run-id]]]}))}))]
+        (if (error-value? res)
           res
-          (snapshot {:seon.agent.run/id run-id}))))))
+          (run-projection
+           (new-run-row (get-in res [::db.id/ids :seon.agent.run/id])
+                        id trigger cause now turn-limit deadline)))))))))))
 
 (schema/register! ::close-run-request
   [:map
@@ -504,6 +599,27 @@
          (str " · budget exhausted, not death: message me again to open a "
               "fresh run (my context + plan persist)."))))
 
+(def ^:private close-selector
+  [:seon.agent.run/id :seon.agent.run/status
+   {:seon.agent.run/agent
+    [:seon.agent/id :seon.agent/purpose
+     {:seon.agent/parent [:seon.agent/id]}
+     {:seon.agent/run [:seon.agent.run/id]}]}
+   {:seon.agent.turn/_run
+    [:seon.agent.turn/id :seon.agent.turn/scheduled?]}])
+
+(defn- work-turn-count [run]
+  (->> (:seon.agent.turn/_run run)
+       (remove :seon.agent.turn/scheduled?)
+       count))
+
+(defn- log-notice-error! [child-id recipient result]
+  (when (error-value? result)
+    (js/console.error
+     (str "seon.agent.run/notify-outcome!: " recipient
+          " notice FAILED for " child-id ": "
+          (:seon.error/message result)))))
+
 (defn ^:async ^:private notify-outcome!
   "Message the parent (or the user) that the run closed with `reason`.
 
@@ -511,12 +627,34 @@
    it WAKES the parent through the normal inbound gate. A no-op for
    non-outcome reasons. Errors are values — a failed notice is logged, never
    re-thrown into the close."
-  [db child-id reason run-id]
+  [database reason run-id]
   (when (contains? outcome-reasons reason)
-    (let [child     (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id child-id]})
+    (let [acquired
+          (await
+           (db/execute-many
+            {::db/db database
+             ::db/members
+             [(pull-member database close-selector
+                           [:seon.agent.run/id run-id])
+              (pull-member database [:seon.agent/id]
+                           [:seon.agent/id root-id])]}))
+          members (::db/results acquired)]
+      (if (or (error-value? acquired)
+              (not= 2 (count members))
+              (not (every? successful-member? members)))
+        (js/console.error
+         (str "seon.agent.run/notify-outcome!: outcome acquisition FAILED for "
+              run-id ": "
+              (or (:seon.error/message acquired)
+                  (::db.protocol/error
+                   (first (remove successful-member? members)))
+                  "invalid result")))
+        (let [[run root] (map member-result members)
+          child     (:seon.agent.run/agent run)
+          child-id  (:seon.agent/id child)
           parent-id (:seon.agent/id (:seon.agent/parent child))
           purpose   (:seon.agent/purpose child)
-          turns     (derive/run-turn-count db run-id)
+          turns     (work-turn-count run)
           content   (outcome-notice-content child-id reason turns purpose)
           parent-to (if parent-id [:seon.agent/id parent-id] msg/user-ref)
           ;; Sent IN THE CHILD'S SCOPE: the notice goes out on the child's
@@ -531,24 +669,16 @@
                             (msg/message! {:seon.agent.message/content content
                                            :seon.agent.message/from    [:seon.agent/id child-id]
                                            :seon.agent.message/to       [to]
-                                           :seon.agent.message/origin  :agent})))))]
-      (let [env (await (send! parent-to))]
-        (when (false? (:seon.db/ok? env))
-          (js/console.error
-            (str "seon.agent.run/notify-outcome!: parent notice FAILED for "
-                 child-id " (" (name reason) "): "
-                 (:seon.error/message (:seon.db/error env))))))
+                                           :seon.db/db database})))))]
+      (log-notice-error! child-id "parent" (await (send! parent-to)))
       ;; Wedge escalation: a :crashed run additionally tells root — but never
       ;; a self-message (child IS root) and never a duplicate (parent IS root).
       (when (and (= reason :crashed)
                  (not= child-id root-id)
                  (not= parent-id root-id)
-                 (some? (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id root-id]})))
-        (let [env (await (send! [:seon.agent/id root-id]))]
-          (when (false? (:seon.db/ok? env))
-            (js/console.error
-              (str "seon.agent.run/notify-outcome!: root escalation FAILED for "
-                   child-id ": " (:seon.error/message (:seon.db/error env))))))))))
+                 (some? root))
+        (log-notice-error! child-id "root escalation"
+                           (await (send! [:seon.agent/id root-id])))))))))
 
 (defn ^:async close-run!
   "Close a run — `:status :closed` + `closed-reason`.
@@ -569,31 +699,39 @@
    no-op (this run is already closed; the new owner is left intact). Close +
    retract stay in ONE tx — never a `:closed` run with a live pointer, which
    would deadlock `open-run!`'s absent-pointer CAS. `^:async`."
-  {:malli/schema [:=> [:cat ::close-run-request] :seon.db/transact-response]}
+  {:malli/schema [:=> [:cat ::close-run-request] ::transact-result]}
   [{run-id :seon.agent.run/id reason :seon.agent.run/closed-reason}]
-  (let [r (db/entity {:seon.db/ref [:seon.agent.run/id run-id]})]
-    (if (nil? r)
-      {:seon.db/ok? false
-       :seon.db/error {:seon.error/message (str "close-run!: no run " (pr-str run-id) ".")}}
-      (let [agent-eid (:db/id (:seon.agent.run/agent r))
-            agent-id  (:seon.agent/id (db/entity agent-eid))
-            ;; OWNS? = the agent's current open run IS this run (read over the
-            ;; live db value via the derive leaf). When owned, retract the
+  (let [database (await (db/db))]
+    (if (error-value? database)
+      database
+      (let [r (await
+               (db/pull {::db/db database
+                         ::db/selector close-selector
+                         ::db/eid [:seon.agent.run/id run-id]}))]
+        (cond
+          (error-value? r) r
+          (nil? r) (direct-error (str "close-run!: no run " (pr-str run-id) "."))
+          :else
+          (let [agent     (:seon.agent.run/agent r)
+            agent-id  (:seon.agent/id agent)
+            ;; OWNS? = the agent's current open run IS this run in the acquired
+            ;; ordinary projection. When owned, retract the
             ;; pointer in the SAME tx so derived state falls to :idle; when a
             ;; DIFFERENT run owns the agent (a superseded run being cleaned up),
             ;; mark this run closed but leave the live pointer untouched.
-            owns?     (and agent-id
-                           (= run-id (:seon.agent.run/id
-                                       (derive/current-run @db/*conn* agent-id))))
-            env       (await (db/transact!
-                               {:seon.db/tx-data
-                                (close-tx-data owns? agent-id run-id reason (js/Date.))}))]
+            owns?     (= run-id
+                         (:seon.agent.run/id (:seon.agent/run agent)))
+            report    (await (db/transact!
+                              {::db/db database
+                               ::db/tx-data
+                               (close-tx-data owns? agent-id run-id reason
+                                              (js/Date.))}))]
         ;; Piece 2b — route the parent/root OUTCOME notice through this one
         ;; choke point (only after the close committed; only for an outcome
         ;; reason; never for :completed, which `complete` messages itself).
-        (when (and (:seon.db/ok? env) agent-id)
-          (await (notify-outcome! @db/*conn* agent-id reason run-id)))
-        env))))
+        (when-not (error-value? report)
+          (await (notify-outcome! (:db-after report) reason run-id)))
+        report))))))
 
 (schema/register! ::renew-request
   [:map
@@ -609,25 +747,50 @@
    Bump `turn-limit` by +1 and push
    `deadline` out to now + extension. The tx LEADS with the [[run-fence]] CAS —
    a write from a superseded/timed-out run aborts at the writer and returns the
-   CAS-fail envelope (no pre-read predicate). `^:async`."
-  {:malli/schema [:=> [:cat ::renew-request] :seon.db/transact-response]}
+   direct CAS error (no pre-read predicate). `^:async`."
+  {:malli/schema [:=> [:cat ::renew-request] ::transact-result]}
   [{id :seon.agent/id run-id :seon.agent.run/id
     ext :seon.agent.run/deadline-extension-ms}]
-  (let [dbv    @db/*conn*
-        policy (ctx/run-policy dbv)
-        r      (db/entity {:seon.db/db dbv :seon.db/ref [:seon.agent.run/id run-id]})
-        a      (db/entity {:seon.db/ref [:seon.agent/id id]})
-        now    (js/Date.)
-        ext    (or ext (:seon.agent/default-deadline-ms a)
-                   (:seon.config.run/deadline-ms policy))
-        new-tl (inc (:seon.agent.run/turn-limit r))
-        new-dl (js/Date. (+ (.getTime now) ext))]
-    (await (db/transact!
-             {:seon.db/tx-data
-              [(run-fence id run-id)
-               {:seon.agent.run/id         run-id
-                :seon.agent.run/turn-limit new-tl
-                :seon.agent.run/deadline   new-dl}]}))))
+  (let [database (await (db/db))]
+    (if (error-value? database)
+      database
+      (let [acquired
+            (await
+             (db/execute-many
+              {::db/db database
+               ::db/members
+               [(pull-member database [:seon.agent.run/turn-limit]
+                             [:seon.agent.run/id run-id])
+                (pull-member database [:seon.agent/default-deadline-ms]
+                             [:seon.agent/id id])
+                (pull-member database config-selector
+                             [:seon.config/id config/cluster-config-id])]}))
+            members (::db/results acquired)]
+        (cond
+          (error-value? acquired) acquired
+          (not= 3 (count members))
+          (direct-error "renew!: database acquisition returned the wrong member count.")
+          (not (every? successful-member? members))
+          (failed-member "renew! acquisition"
+                         (first (remove successful-member? members)))
+          :else
+          (let [[run agent stored-policy] (map member-result members)
+                old-turn-limit (:seon.agent.run/turn-limit run)
+                extension (or ext (:seon.agent/default-deadline-ms agent)
+                              (:seon.config.run/deadline-ms
+                               (policy-from stored-policy)))
+                new-deadline (js/Date. (+ (.getTime (js/Date.)) extension))]
+            (if-not (int? old-turn-limit)
+              (direct-error (str "renew!: no run " (pr-str run-id) "."))
+              (await
+               (db/transact!
+                {::db/db database
+                 ::db/tx-data
+                 [(run-fence id run-id)
+                  [:db.fn/cas [:seon.agent.run/id run-id]
+                   :seon.agent.run/turn-limit old-turn-limit (inc old-turn-limit)]
+                  [:db/add [:seon.agent.run/id run-id]
+                   :seon.agent.run/deadline new-deadline]]})))))))))
 
 (schema/register! ::beat-request
   [:map
@@ -639,9 +802,9 @@
 
    The tx LEADS with the [[run-fence]]
    CAS, so a beat from a superseded/closed run aborts and returns the CAS-fail
-   envelope — the loop reads `ok? false` as 'lost authority' and stops.
+   direct error — the loop reads that as lost authority and stops.
    `^:async`."
-  {:malli/schema [:=> [:cat ::beat-request] :seon.db/transact-response]}
+  {:malli/schema [:=> [:cat ::beat-request] ::transact-result]}
   [{id :seon.agent/id run-id :seon.agent.run/id}]
   (await (db/transact!
            {:seon.db/tx-data
@@ -660,18 +823,33 @@
    floored at 0). [[resume!]] re-extends `deadline` by it, so a long pause
    never instantly blows the clock bound. The tx LEADS with the [[run-fence]]
    CAS. `^:async`."
-  {:malli/schema [:=> [:cat ::pause-request] :seon.db/transact-response]}
+  {:malli/schema [:=> [:cat ::pause-request] ::transact-result]}
   [{id :seon.agent/id run-id :seon.agent.run/id}]
-  (let [r        (db/entity {:seon.db/ref [:seon.agent.run/id run-id]})
-        now      (js/Date.)
-        deadline (:seon.agent.run/deadline r)
-        remain   (max 0 (- (.getTime deadline) (.getTime now)))]
-    (await (db/transact!
-             {:seon.db/tx-data
-              [(run-fence id run-id)
-               {:seon.agent.run/id           run-id
-                :seon.agent.run/paused-at    now
-                :seon.agent.run/remaining-ms remain}]}))))
+  (let [database (await (db/db))]
+    (if (error-value? database)
+      database
+      (let [run (await
+                 (db/pull {::db/db database
+                           ::db/selector [:seon.agent.run/deadline]
+                           ::db/eid [:seon.agent.run/id run-id]}))
+            deadline (:seon.agent.run/deadline run)]
+        (cond
+          (error-value? run) run
+          (nil? deadline) (direct-error (str "pause!: no run " (pr-str run-id) "."))
+          :else
+          (let [now (js/Date.)
+                remaining-ms (max 0 (- (.getTime deadline) (.getTime now)))]
+            (await
+             (db/transact!
+              {::db/db database
+               ::db/tx-data
+               [(run-fence id run-id)
+                (db/cas-assert [:seon.agent.run/id run-id]
+                               :seon.agent.run/deadline deadline)
+                [:db.fn/cas [:seon.agent.run/id run-id]
+                 :seon.agent.run/paused-at nil now]
+                [:db/add [:seon.agent.run/id run-id]
+                 :seon.agent.run/remaining-ms remaining-ms]]}))))))))
 
 (schema/register! ::resume-request
   [:map
@@ -684,29 +862,44 @@
    Re-extend `deadline` to now + the banked `remaining-ms`
    (a long pause never instantly blows the clock bound). GUARDED on
    `paused-at`: a run that is NOT paused has no banked budget, so resume! is
-   a loud no-op (the error envelope) rather than an accidental deadline
+   a loud direct error rather than an accidental deadline
    overwrite with the default window. The tx LEADS with the [[run-fence]] CAS
    too. `^:async`."
-  {:malli/schema [:=> [:cat ::resume-request] :seon.db/transact-response]}
+  {:malli/schema [:=> [:cat ::resume-request] ::transact-result]}
   [{id :seon.agent/id run-id :seon.agent.run/id}]
-  (let [r (db/entity {:seon.db/ref [:seon.agent.run/id run-id]})]
-    (if-not (:seon.agent.run/paused-at r)
-      {:seon.db/ok? false
-       :seon.db/error
-       {:seon.error/message
-        (str "resume!: run " (pr-str run-id) " is not paused "
-             "(no :seon.agent.run/paused-at) — nothing to resume.")}}
-      (let [remain (or (:seon.agent.run/remaining-ms r)
-                       (:seon.config.run/deadline-ms
-                         (ctx/run-policy @db/*conn*)))
-            new-dl (js/Date. (+ (.getTime (js/Date.)) remain))]
-        (await (db/transact!
-                 {:seon.db/tx-data
-                  [(run-fence id run-id)
-                   {:seon.agent.run/id       run-id
-                    :seon.agent.run/deadline new-dl}
-                   [:db/retract [:seon.agent.run/id run-id]
-                    :seon.agent.run/paused-at]]}))))))
+  (let [database (await (db/db))]
+    (if (error-value? database)
+      database
+      (let [run (await
+                 (db/pull {::db/db database
+                           ::db/selector [:seon.agent.run/paused-at
+                                          :seon.agent.run/remaining-ms]
+                           ::db/eid [:seon.agent.run/id run-id]}))
+            paused-at (:seon.agent.run/paused-at run)
+            remaining-ms (:seon.agent.run/remaining-ms run)]
+        (cond
+          (error-value? run) run
+          (or (nil? paused-at) (nil? remaining-ms))
+          (direct-error
+           (str "resume!: run " (pr-str run-id)
+                " is not paused with a banked :seon.agent.run/remaining-ms."))
+          :else
+          (let [new-deadline (js/Date. (+ (.getTime (js/Date.)) remaining-ms))]
+            (await
+             (db/transact!
+              {::db/db database
+               ::db/tx-data
+               [(run-fence id run-id)
+                (db/cas-assert [:seon.agent.run/id run-id]
+                               :seon.agent.run/paused-at paused-at)
+                (db/cas-assert [:seon.agent.run/id run-id]
+                               :seon.agent.run/remaining-ms remaining-ms)
+                [:db/add [:seon.agent.run/id run-id]
+                 :seon.agent.run/deadline new-deadline]
+                [:db/retract [:seon.agent.run/id run-id]
+                 :seon.agent.run/paused-at]
+                [:db/retract [:seon.agent.run/id run-id]
+                 :seon.agent.run/remaining-ms]]}))))))))
 
 ;; ============================================================
 ;; The deadline WATCHDOG — the wall-clock half of the one ticker
@@ -734,25 +927,41 @@
    is SKIPPED — `paused-at` froze the clock and its absolute `deadline` is
    stale until [[resume!]] re-extends it, so it must never be deadline-killed.
    Fencing is automatic (each close goes through [[close-run!]]). `^:async`."
-  {:malli/schema [:=> [:cat ::close-overdue-request] ::close-overdue-response]}
+  {:malli/schema [:=> [:cat ::close-overdue-request]
+                  [:or ::close-overdue-response ::direct-error]]}
   [{now :seon.agent/now}]
-  (let [overdue (->> (db/query
-                       {:seon.db/query
+  (let [database (await (db/db))]
+    (if (error-value? database)
+      database
+      (let [rows (await
+                  (db/query
+                   {::db/db database
+                    ::db/query
                         '[:find ?rid ?deadline
                           :where
                           [?r :seon.agent.run/status :open]
                           [?r :seon.agent.run/id ?rid]
                           [?r :seon.agent.run/deadline ?deadline]
-                          (not [?r :seon.agent.run/paused-at _])]})
-                     (filter (fn [[_ deadline]]
-                               (> (.getTime now) (.getTime deadline))))
-                     (mapv first))]
-    (loop [[rid & more] overdue]
-      (when rid
-        (await (close-run! {:seon.agent.run/id            rid
-                            :seon.agent.run/closed-reason :deadline-exceeded}))
-        (recur more)))
-    {:seon.agent.run/closed overdue}))
+                          (not [?r :seon.agent.run/paused-at _])]}))]
+        (if (error-value? rows)
+          rows
+          (let [overdue (->> rows
+                             (filter (fn [[_ deadline]]
+                                       (> (.getTime now) (.getTime deadline))))
+                             (map first)
+                             sort
+                             vec)]
+            (loop [[rid & more] overdue]
+              (if-not rid
+                {:seon.agent.run/closed overdue}
+                (let [result
+                      (await
+                       (close-run! {:seon.agent.run/id rid
+                                    :seon.agent.run/closed-reason
+                                    :deadline-exceeded}))]
+                  (if (error-value? result)
+                    result
+                    (recur more)))))))))))
 
 ;; ============================================================
 ;; The HEARTBEAT WATCHDOG (multi-agent-context Piece 2c) — a WEDGED agent
@@ -775,7 +984,21 @@
 ;; SKIPPED (a paused agent legitimately does not beat).
 ;; ============================================================
 
-(defn stale-run-ids
+(def ^:private stale-runs-query
+  '[:find ?rid ?agent-id ?started ?anchor
+    :where
+    [?r :seon.agent.run/status :open]
+    [?r :seon.agent.run/id ?rid]
+    [?r :seon.agent.run/agent ?agent]
+    [?agent :seon.agent/id ?agent-id]
+    [?r :seon.agent.run/started-at ?started]
+    (not [?r :seon.agent.run/paused-at _])
+    (or-join [?r ?anchor]
+             [?r :seon.agent.run/last-beat-at ?anchor]
+             (and [?r :seon.agent.run/started-at ?anchor]
+                  (not [?r :seon.agent.run/last-beat-at _])))])
+
+(defn ^:async stale-run-ids
   "Open, non-paused run-ids whose heartbeat is stale at `now`.
 
    A PURE fn of (db, now, stale-ms) — `now` is an argument, never an inline
@@ -786,24 +1009,25 @@
   {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db]
                              [:seon.agent/now :inst]
                              [:seon.agent.run/stale-ms :seon.agent.run/stale-ms]]
-                  [:vector :seon.agent.run/id]]}
+                  [:or [:vector :seon.agent.run/id] ::direct-error]]}
   [db now stale-ms]
+  (let [rows (await (db/query {::db/db db ::db/query stale-runs-query}))]
+    (if (error-value? rows)
+      rows
+      (let [cutoff (- (.getTime ^js now) stale-ms)]
+        (->> rows
+             (keep (fn [[rid _agent-id _started anchor]]
+                     (when (< (.getTime ^js anchor) cutoff) rid)))
+             sort
+             vec)))))
+
+(defn- stale-candidates [rows now stale-ms]
   (let [cutoff (- (.getTime ^js now) stale-ms)]
-    (->> (db/query
-           {:seon.db/db db
-            :seon.db/query
-            '[:find ?rid ?started
-              :where
-              [?r :seon.agent.run/status :open]
-              [?r :seon.agent.run/id ?rid]
-              [?r :seon.agent.run/started-at ?started]
-              (not [?r :seon.agent.run/paused-at _])]})
-         (keep (fn [[rid started]]
-                 (let [beat   (:seon.agent.run/last-beat-at
-                                (db/entity {:seon.db/db db
-                                            :seon.db/ref [:seon.agent.run/id rid]}))
-                       anchor (or beat started)]
-                   (when (< (.getTime ^js anchor) cutoff) rid))))
+    (->> rows
+         (keep (fn [[rid agent-id _started anchor]]
+                 (when (< (.getTime ^js anchor) cutoff)
+                   {:seon.agent.run/id rid :seon.agent/id agent-id})))
+         (sort-by :seon.agent.run/id)
          vec)))
 
 (schema/register! ::close-stale-request
@@ -823,20 +1047,34 @@
    dev `:crash` dial the loud exit happens AFTER the agent is unstuck. Returns
    the run-ids it closed (map-out). IDEMPOTENT — a re-scan finds the
    now-`:closed` runs gone. `^:async`."
-  {:malli/schema [:=> [:cat ::close-stale-request] ::close-overdue-response]}
+  {:malli/schema [:=> [:cat ::close-stale-request]
+                  [:or ::close-overdue-response ::direct-error]]}
   [{now :seon.agent/now stale-ms :seon.agent.run/stale-ms}]
-  (let [stale (stale-run-ids @db/*conn* now stale-ms)]
-    (loop [[rid & more] stale]
-      (when rid
-        (let [r    (db/entity {:seon.db/ref [:seon.agent.run/id rid]})
-              a-id (:seon.agent/id (db/entity (:db/id (:seon.agent.run/agent r))))]
-          (await (close-run! {:seon.agent.run/id            rid
-                              :seon.agent.run/closed-reason :crashed}))
-          (error/record!
-            {:seon.error/raw
-             (js/Error. (str "heartbeat watchdog: run " rid
-                             " (agent " a-id ") wedged — no heartbeat progress "
-                             "for ≥" stale-ms "ms; closed :crashed"))
-             :seon.error/fault :core}))
-        (recur more)))
-    {:seon.agent.run/closed stale}))
+  (let [database (await (db/db))]
+    (if (error-value? database)
+      database
+      (let [rows (await (db/query {::db/db database ::db/query stale-runs-query}))]
+        (if (error-value? rows)
+          rows
+          (let [candidates (stale-candidates rows now stale-ms)
+                ids (mapv :seon.agent.run/id candidates)]
+            (loop [[candidate & more] candidates]
+              (if-not candidate
+                {:seon.agent.run/closed ids}
+                (let [rid (:seon.agent.run/id candidate)
+                      agent-id (:seon.agent/id candidate)
+                      result
+                      (await
+                       (close-run! {:seon.agent.run/id rid
+                                    :seon.agent.run/closed-reason :crashed}))]
+                  (if (error-value? result)
+                    result
+                    (do
+                      (error/record!
+                       {:seon.error/raw
+                        (js/Error.
+                         (str "heartbeat watchdog: run " rid
+                              " (agent " agent-id ") wedged — no heartbeat progress "
+                              "for ≥" stale-ms "ms; closed :crashed"))
+                        :seon.error/fault :core})
+                      (recur more))))))))))))

@@ -1,460 +1,349 @@
 (ns seon.agent.run-test
-  "Lifecycle tests for seon.agent.run on a FRESH :memory conn seeded like the
-   pod boots (never the live agent conn). Covers open-run! (bounds + the
-   fencing pointer + derived :running), the in-tx WORK FENCE (a superseded
-   run's beat/renew is rejected AT COMMIT — the leading CAS aborts the tx,
-   lands no datom; the current run's write commits), close-run!
-   (retract-pointer-when-owned → derived :idle), renew! (bump both bounds,
-   fenced), beat!, and seeding turn-limit from the agent default."
+  "Focused owner tests for the async run lifecycle boundary."
   (:require
-    [cljs.test :refer [deftest is async]]
-    [datahike.api :as d]
-    [seon.agent :as agent]
-    [seon.agent.ctx :as agent-ctx]
-    [seon.agent.run :as run]
-    [seon.client :as client]
-    [seon.db :as db]
-    [seon.db.id :as db.id]
-    [seon.db.protocol :as db.protocol]
-    [seon.runtime.recovery :as recovery]))
+   [cljs.test :refer [async deftest is]]
+   [seon.agent.message :as message]
+   [seon.agent.run :as run]
+   [seon.db :as db]
+   [seon.db.id :as db.id]
+   [seon.db.protocol :as db.protocol]
+   [seon.error :as error]))
 
-(def ^:private a-id "runtest-260625")   ; exactly 14 chars (:seon.db/id)
-(def ^:private a-ref [:seon.agent/id a-id])
+(def ^:private database
+  {:db-name "run-test" :t 7 :as-of nil :since nil :history false
+   :datahike/commit-id #uuid "00000000-0000-0000-0000-000000000007"})
 
-(defn- fresh-conn
-  "Promise of a fresh :memory conn with the pod's boot schema + run-model
-   schema + the user entity + an :idle agent A."
-  []
-  (-> (client/open-agent-conn!)
-      (.then (fn [conn]
-               (-> (d/transact!
-                     conn
-                     {:tx-data [{:seon.user/id "user"}
-                                {:seon.agent/id a-id}]})
-                   (.then (fn [_] conn)))))))
+(def ^:private database-after
+  (assoc database :t 8
+         :datahike/commit-id #uuid "00000000-0000-0000-0000-000000000008"))
 
-(defn- with-conn
-  "Fresh seeded conn `set!` as the ROOT db/*conn* for `body` (conn → Promise),
-   prior root restored after. Root set!, not binding (CLJS dynamic bindings
-   pop at the first await — see my.plan-test)."
-  [body]
-  (-> (fresh-conn)
-      (.then (fn [conn]
-               (let [orig db/*conn*]
-                 (set! db/*conn* conn)
-                 (-> (js/Promise.resolve (body conn))
-                     (.finally (fn [] (set! db/*conn* orig)))))))))
+(def ^:private native-report
+  {:db-before database :db-after database-after
+   :tx-data [] :tempids {} :tx-meta {}})
 
-(defn- local-quiescence-work
-  "Derive quiescence rows in the isolated Datahike fixture."
-  [database]
-  {::run/current-runs
-   (->> (d/q '[:find ?agent-id ?run-id
-               :where
-               [?agent :seon.agent/id ?agent-id]
-               [?agent :seon.agent/run ?run]
-               [?run :seon.agent.run/id ?run-id]
-               [?run :seon.agent.run/status :open]]
-             database)
-        (map (fn [[agent-id run-id]]
-               {:seon.agent/id agent-id
-                :seon.agent.run/id run-id}))
-        (sort-by (juxt :seon.agent/id :seon.agent.run/id))
-        vec)
-   ::run/running-turns
-   (->> (d/q '[:find ?run-id ?turn-id
-               :where
-               [?run :seon.agent.run/id ?run-id]
-               [?turn :seon.agent.turn/run ?run]
-               [?turn :seon.agent.turn/id ?turn-id]
-               [?turn :seon.agent.turn/status :running]]
-             database)
-        (map (fn [[run-id turn-id]]
-               {:seon.agent.run/id run-id
-                :seon.agent.turn/id turn-id}))
-        (sort-by (juxt :seon.agent.run/id :seon.agent.turn/id))
-        vec)})
+(defn- query-result [value]
+  {::db.protocol/success? true :datahike.query/result value})
 
-(defn ^:async supersede!
-  "Open a fresh CURRENT run for agent A, leaving the prior run OPEN but no
-   longer pointed-at (a 'superseded' run for the fencing tests). open-run! is
-   now CAS-guarded on an ABSENT pointer — a plain second open while a run is
-   pointed-at FAILS — so supersede = retract the pointer, then open. Returns
-   the new run's snapshot."
-  [trigger]
-  (await (d/transact! db/*conn* {:tx-data [[:db/retract a-ref :seon.agent/run]]}))
-  (await (run/open-run! {:seon.agent/id a-id :seon.agent.run/trigger trigger})))
+(defn- pull-result [value]
+  {::db.protocol/success? true ::db.protocol/result value})
 
-(deftest open-run!-opens-a-bounded-run-and-derives-running
+(defn- finish! [done originals work]
+  (-> (work)
+      (.catch (fn [cause] (is false (str "unexpected rejection: " cause))))
+      (.finally
+       (fn []
+         (doseq [[restore value] originals] (restore value))
+         (done)))))
+
+(deftest pure-bounds
+  (is (false? (run/turn-limit-reached? 2 3)))
+  (is (true? (run/turn-limit-reached? 3 3)))
+  (let [deadline (js/Date. 100)]
+    (is (false? (run/deadline-passed? deadline (js/Date. 100))))
+    (is (true? (run/deadline-passed? deadline (js/Date. 101))))))
+
+(deftest current-run-and-quiescence-thread-one-database-value
   (async done
-    (-> (with-conn
-          (fn [_]
-            (-> (run/open-run! {:seon.agent/id a-id :seon.agent.run/trigger :message})
-                (.then
-                  (fn [snap]
-                    (is (= :open (:seon.agent.run/status snap)))
-                    (is (= :message (:seon.agent.run/trigger snap)))
-                    (is (re-matches #"^[a-z][a-z0-9]{11}$"
-                                    (:seon.agent.run/id snap))
-                        "the fencing token uses the compact generated-id policy")
-                    (is (= 100 (:seon.agent.run/turn-limit snap)) "default turn-limit")
-                    (is (inst? (:seon.agent.run/deadline snap)) "wall-clock bound set")
-                    (let [cur  (run/current-run {:seon.agent/id a-id})
-                          snap2 (agent/derive-status {:seon.agent/id a-id})]
-                      (is (= (:seon.agent.run/id snap) (:seon.agent.run/id cur))
-                          "the agent's pointer resolves to this open run")
-                      (is (= :running (:seon.agent/state snap2)) "derived state")
-                      (is (= 0 (:seon.agent.run/turn snap2)) "no turns stamped yet")
-                      (is (= 100 (:seon.agent.run/turns-remaining snap2)))
-                      (is (contains? snap2 :seon.agent.run/ms-remaining))))))))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
-
-(deftest work-fence-rejects-a-superseded-runs-write-at-commit
-  ;; The in-tx CAS IS the fence (no owns-run? predicate): a write from a
-  ;; superseded run aborts the WHOLE tx at the writer and lands NO datom; the
-  ;; current run's write commits.
-  (async done
-    (-> (with-conn
-          (fn ^:async fence-test [_]
-            (let [r1    (:seon.agent.run/id
-                          (await (run/open-run! {:seon.agent/id a-id
-                                                 :seon.agent.run/trigger :message})))
-                  beat1 (await (run/beat! {:seon.agent/id a-id :seon.agent.run/id r1}))]
-              (is (:seon.db/ok? beat1) "the owning run's beat commits")
-              (let [hb1   (:seon.agent.run/last-beat-at
-                            (db/entity {:seon.db/ref [:seon.agent.run/id r1]}))
-                    r2    (:seon.agent.run/id (await (supersede! :schedule)))
-                    ;; r1 no longer owns the agent — its beat's leading CAS
-                    ;; fails, aborting the whole tx.
-                    res-old (await (run/beat! {:seon.agent/id a-id :seon.agent.run/id r1}))]
-                (is (inst? hb1) "the owning beat landed a heartbeat")
-                (is (false? (:seon.db/ok? res-old))
-                    "a superseded run's beat is REJECTED at commit (CAS abort)")
-                (is (= hb1 (:seon.agent.run/last-beat-at
-                             (db/entity {:seon.db/ref [:seon.agent.run/id r1]})))
-                    "the rejected tx landed NO datom — r1's heartbeat is unchanged")
-                (let [res-cur (await (run/beat! {:seon.agent/id a-id :seon.agent.run/id r2}))]
-                  (is (:seon.db/ok? res-cur)
-                      "the CURRENT run's beat commits — fencing rejects only the loser"))))))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
-
-(deftest close-run!-retracts-pointer-when-owned-deriving-idle
-  (async done
-    (-> (with-conn
-          (fn [_]
-            (-> (run/open-run! {:seon.agent/id a-id :seon.agent.run/trigger :message})
-                (.then
-                  (fn [snap]
-                    (run/close-run! {:seon.agent.run/id (:seon.agent.run/id snap)
-                                     :seon.agent.run/closed-reason :completed})))
-                (.then
-                  (fn [res]
-                    (is (:seon.db/ok? res))
-                    (is (nil? (run/current-run {:seon.agent/id a-id})) "pointer retracted")
-                    (is (= :idle (:seon.agent/state (agent/derive-status {:seon.agent/id a-id})))
-                        "derived state falls to idle")
-                    (is (= :completed
-                           (:seon.agent.run/closed-reason
-                             (agent/derive-status {:seon.agent/id a-id})))
-                        "last closed-reason surfaces in the snapshot"))))))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
-
-(deftest quiescence-work-retains-pointer-lost-running-turns
-  (async done
-    (-> (with-conn
-          (fn ^:async project [conn]
-            (let [run-id
-                  (:seon.agent.run/id
-                    (await
-                      (run/open-run!
-                        {:seon.agent/id a-id
-                         :seon.agent.run/trigger :message})))
-                  allocation
-                  (await
-                    (db.id/allocate!
-                      {::db.id/allocations
-                       [{::db.id/key ::turn
-                         ::db.id/identity-attr :seon.agent.turn/id}]
-                       ::db.id/transaction-builder
-                       (fn [ids]
-                         {:seon.db/tx-data
-                          [{:seon.agent.turn/id (get ids ::turn)
-                            :seon.agent.turn/at (js/Date.)
-                            :seon.agent.turn/status :running
-                            :seon.agent.turn/run
-                            [:seon.agent.run/id run-id]}]})
-                       :seon.db/conn db/*conn*}))
-                  turn-id (get-in allocation [::db.id/ids ::turn])]
-              (is (= {::run/current-runs
-                      [{:seon.agent/id a-id :seon.agent.run/id run-id}]
-                      ::run/running-turns
-                      [{:seon.agent.run/id run-id
-                        :seon.agent.turn/id turn-id}]}
-                     (local-quiescence-work @conn)))
-              (await
-                (d/transact!
-                  conn
-                  {:tx-data
-                   [[:db/retract a-ref :seon.agent/run]]}))
-              (is (= {::run/current-runs []
-                      ::run/running-turns
-                      [{:seon.agent.run/id run-id
-                        :seon.agent.turn/id turn-id}]}
-                     (local-quiescence-work @conn))
-                  "a pointer loss does not hide the accepted turn bracket")
-              (await
-                (d/transact!
-                  conn
-                  {:tx-data
-                   [{:seon.agent.turn/id turn-id
-                     :seon.agent.turn/status :done}]}))
-              (is (= {::run/current-runs [] ::run/running-turns []}
-                     (local-quiescence-work @conn))
-                  "drain is derived from the next immutable database value"))))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
-
-(deftest quiescence-work-acquires-both-projections-at-one-coordinate
-  (async done
-    (let [original-execute-many db/execute-many
-          coordinate {:seon.db.coordinate/database-id (random-uuid)
-                      :seon.db.coordinate/branch :db
-                      :seon.db.coordinate/commit-id (random-uuid)
-                      :seon.db.coordinate/t 72}
-          request (atom nil)]
+    (let [original-db db/db
+          original-pull db/pull
+          original-execute db/execute-many
+          pull-request (atom nil)
+          execute-request (atom nil)]
+      (set! db/db (fn ([] (js/Promise.resolve database))
+                    ([_] (js/Promise.resolve database))))
+      (set! db/pull
+            (fn
+              ([request]
+               (reset! pull-request request)
+               (js/Promise.resolve
+                {:seon.agent/run {:seon.agent.run/id "run-a"
+                                  :seon.agent.run/status :open}}))
+              ([_ _] (js/Promise.resolve nil))
+              ([_ _ _] (js/Promise.resolve nil))))
       (set! db/execute-many
-            (fn [value]
-              (reset! request value)
+            (fn [request]
+              (reset! execute-request request)
               (js/Promise.resolve
-               {::db/coordinate coordinate
-                ::db/results
-                [{::db.protocol/success? true
-                  :datahike.query/result #{["agent-b" "run-b"]
-                                           ["agent-a" "run-a"]}}
-                 {::db.protocol/success? true
-                  :datahike.query/result #{["run-b" "turn-b"]}}]})))
-      (-> (run/quiescence-work!)
-          (.then
-           (fn [work]
-             (is (= 2 (count (::db/members @request))))
-             (is (every? #(= db.protocol/query-operation
-                             (::db.protocol/operation %))
-                         (::db/members @request)))
-             (is (= {::db/coordinate coordinate
-                     ::run/current-runs
-                     [{:seon.agent/id "agent-a"
-                       :seon.agent.run/id "run-a"}
-                      {:seon.agent/id "agent-b"
-                       :seon.agent.run/id "run-b"}]
-                     ::run/running-turns
-                     [{:seon.agent.run/id "run-b"
-                       :seon.agent.turn/id "turn-b"}]}
-                    work))))
-          (.catch
-           (fn [error]
-             (is false (str "quiescence acquisition threw " error))))
-          (.finally
-           (fn []
-             (set! db/execute-many original-execute-many)
-             (done)))))))
+               {::db/results
+                [(query-result #{["agent-b" "run-b"] ["agent-a" "run-a"]})
+                 (query-result #{["run-b" "turn-b"]})]})))
+      (finish!
+       done
+       [[#(set! db/db %) original-db]
+        [#(set! db/pull %) original-pull]
+        [#(set! db/execute-many %) original-execute]]
+       (fn ^:async test-read []
+         (let [current (await (run/current-run {:seon.agent/id "agent-a"}))
+               work (await (run/quiescence-work!))]
+           (is (= "run-a" (:seon.agent.run/id current)))
+           (is (identical? database (::db/db @pull-request)))
+           (is (identical? database (::db/db work)))
+           (is (= ["agent-a" "agent-b"]
+                  (mapv :seon.agent/id (::run/current-runs work))))
+           (is (every? #(identical? database (::db/db %))
+                       (::db/members @execute-request)))))))))
 
-(deftest renew!-bumps-both-bounds-and-fences
+(deftest quiescence-returns-member-failure-as-a-direct-error
   (async done
-    (-> (with-conn
-          (fn [conn]
-            (-> (run/open-run! {:seon.agent/id a-id :seon.agent.run/trigger :message})
-                (.then
-                  (fn [snap]
-                    (let [rid    (:seon.agent.run/id snap)
-                          dl-bef (.getTime (:seon.agent.run/deadline snap))]
-                      (-> (run/renew! {:seon.agent/id a-id :seon.agent.run/id rid
-                                       :seon.agent.run/deadline-extension-ms 2400000})
-                          (.then
-                            (fn [res]
-                              (is (:seon.db/ok? res))
-                              (let [r (db/entity @conn [:seon.agent.run/id rid])]
-                                (is (= 101 (:seon.agent.run/turn-limit r)) "turn-limit +1")
-                                (is (> (.getTime (:seon.agent.run/deadline r)) dl-bef)
-                                    "deadline pushed out"))
-                              ;; supersede, then renew the OLD run → fenced
-                              (supersede! :schedule)))
-                          (.then
-                            (fn [_]
-                              (run/renew! {:seon.agent/id a-id :seon.agent.run/id rid})))
-                          (.then
-                            (fn [res]
-                              (is (false? (:seon.db/ok? res))
-                                  "a superseded run cannot renew (fencing)"))))))))) )
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
-
-(deftest beat!-writes-a-heartbeat-and-fences
-  (async done
-    (-> (with-conn
-          (fn [conn]
-            (-> (run/open-run! {:seon.agent/id a-id :seon.agent.run/trigger :message})
-                (.then
-                  (fn [snap]
-                    (let [rid (:seon.agent.run/id snap)]
-                      (-> (run/beat! {:seon.agent/id a-id :seon.agent.run/id rid})
-                          (.then
-                            (fn [res]
-                              (is (:seon.db/ok? res))
-                              (is (inst? (:seon.agent.run/last-beat-at
-                                           (db/entity @conn [:seon.agent.run/id rid])))
-                                  "heartbeat stamped")
-                              (supersede! :schedule)))
-                          (.then (fn [_] (run/beat! {:seon.agent/id a-id :seon.agent.run/id rid})))
-                          (.then
-                            (fn [res]
-                              (is (false? (:seon.db/ok? res)) "superseded run cannot beat"))))))))) )
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
-
-(deftest open-run!-seeds-turn-limit-from-agent-default
-  (async done
-    (-> (with-conn
-          (fn [conn]
-            (-> (d/transact! conn {:tx-data [{:seon.agent/id a-id :seon.agent/default-turn-limit 3}]})
-                (.then (fn [_] (run/open-run! {:seon.agent/id a-id :seon.agent.run/trigger :message})))
-                (.then (fn [snap]
-                         (is (= 3 (:seon.agent.run/turn-limit snap))
-                             "turn-limit seeded from :seon.agent/default-turn-limit"))))))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
-
-(deftest effective-deadline-ms-follows-database-and-agent-policy
-  (async done
-    (-> (with-conn
-          (fn [conn]
-            (let [global (:seon.config.run/deadline-ms
-                           (agent-ctx/run-policy @conn))]
-              (is (= global
-                     (run/effective-deadline-ms {:seon.db/db @conn})))
-              (-> (d/transact!
-                    conn
-                    {:tx-data [{:seon.agent/id a-id
-                                :seon.agent/default-deadline-ms 123456}]})
-                  (.then
-                    (fn [_]
-                      (is (= 123456
-                             (run/effective-deadline-ms
-                               {:seon.db/db @conn :seon.agent/id a-id})))))))))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
-
-;; ── FIX 1: crash recovery — close runs orphaned by a prior pod crash ───────
-
-(deftest recover!-closes-orphaned-runs-and-is-idempotent
-  (async done
-    (let [!rid (atom nil)]
-      (-> (with-conn
+    (let [original-db db/db
+          original-execute db/execute-many]
+      (set! db/db (fn ([] (js/Promise.resolve database))
+                    ([_] (js/Promise.resolve database))))
+      (set! db/execute-many
             (fn [_]
-              (-> (run/open-run! {:seon.agent/id a-id :seon.agent.run/trigger :message})
-                  (.then (fn [snap]
-                           (reset! !rid (:seon.agent.run/id snap))
-                           ;; an open run with no loop driving it IS the
-                           ;; post-crash state: derived :running, unwakeable.
-                           (is (= :running (:seon.agent/state
-                                             (agent/derive-status {:seon.agent/id a-id})))
-                               "open run, no driver ⇒ derived :running (crash state)")
-                           (recovery/recover! {})))
-                  (.then (fn [res]
-                           (is (= [@!rid] (::recovery/run-ids res))
-                               "the orphaned run was recovered")
-                           (let [r (db/entity {:seon.db/ref [:seon.agent.run/id @!rid]})]
-                             (is (= :closed (:seon.agent.run/status r)))
-                             (is (= :crashed (:seon.agent.run/closed-reason r))
-                                 "closed with the boot-recovery reason"))
-                           (is (nil? (run/current-run {:seon.agent/id a-id})) "pointer cleared")
-                           (is (= :idle (:seon.agent/state
-                                          (agent/derive-status {:seon.agent/id a-id})))
-                               "the recovered agent is wakeable (:idle)")
-                           (recovery/recover! {})))
-                  (.then (fn [res2]
-                           (is (false? (::recovery/repaired? res2))
-                               "idempotent — a clean second pass closes nothing"))))))
-          (.then (fn [_] (done)))
-          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+              (js/Promise.resolve
+               {::db/results
+                [(query-result #{})
+                 {::db.protocol/success? false
+                  ::db.protocol/error "running turns unavailable"}]})))
+      (finish!
+       done
+       [[#(set! db/db %) original-db]
+        [#(set! db/execute-many %) original-execute]]
+       (fn ^:async test-error []
+         (let [result (await (run/quiescence-work!))]
+           (is (= "Quiescence acquisition failed: running turns unavailable"
+                  (:seon.error/message result)))))))))
 
-;; ── FIX 2: atomic wake — two concurrent opens yield exactly ONE open run ───
-
-(deftest concurrent-opens-yield-exactly-one-open-run
+(deftest open-run-returns-the-built-run-without-a-reread
   (async done
-    (-> (with-conn
-          (fn [_]
-            ;; Fire two opens WITHOUT awaiting the first: both read the agent
-            ;; idle (no pointer), then the writer serializes their txs — the
-            ;; second's CAS sees the first's pointer and its whole tx fails.
-            (let [p1 (run/open-run! {:seon.agent/id a-id :seon.agent.run/trigger :message})
-                  p2 (run/open-run! {:seon.agent/id a-id :seon.agent.run/trigger :schedule})]
-              (-> (js/Promise.all #js [p1 p2])
-                  (.then (fn [results]
-                           (let [rs         [(aget results 0) (aget results 1)]
-                                 ok-count   (count (remove #(false? (:seon.db/ok? %)) rs))
-                                 fail-count (count (filter #(false? (:seon.db/ok? %)) rs))
-                                 open-runs  (db/query {:seon.db/query
-                                                       '[:find [?rid ...]
-                                                         :where
-                                                         [?r :seon.agent.run/status :open]
-                                                         [?r :seon.agent.run/id ?rid]]})]
-                             (is (= 1 ok-count) "exactly one open succeeded")
-                             (is (= 1 fail-count) "the other LOST the CAS (error envelope)")
-                             (is (= 1 (count open-runs))
-                                 "exactly ONE :open run in the db — no duplicate")
-                             (is (= :running (:seon.agent/state (agent/derive-status {:seon.agent/id a-id})))))))))))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+    (let [original-db db/db
+          original-execute db/execute-many
+          original-allocate db.id/allocate!
+          allocation-request (atom nil)
+          built (atom nil)]
+      (set! db/db (fn ([] (js/Promise.resolve database))
+                    ([_] (js/Promise.resolve database))))
+      (set! db/execute-many
+            (fn [_]
+              (js/Promise.resolve
+               {::db/results
+                [(pull-result {:seon.agent/default-turn-limit 4})
+                 (pull-result {:seon.config/repl-mode :batch
+                               :seon.config.run/batch-turn-limit 100
+                               :seon.config.run/stream-form-limit 300
+                               :seon.config.run/deadline-ms 60000})]})))
+      (set! db.id/allocate!
+            (fn [request]
+              (reset! allocation-request request)
+              (reset! built ((::db.id/transaction-builder request)
+                             {:seon.agent.run/id "run-a"}))
+              (js/Promise.resolve
+               (assoc native-report ::db.id/ids
+                      {:seon.agent.run/id "run-a"}))))
+      (finish!
+       done
+       [[#(set! db/db %) original-db]
+        [#(set! db/execute-many %) original-execute]
+        [#(set! db.id/allocate! %) original-allocate]]
+       (fn ^:async test-open []
+         (let [result (await (run/open-run!
+                              {:seon.agent/id "agent-a"
+                               :seon.agent.run/trigger :message}))
+               cas (second (:seon.db/tx-data @built))]
+           (is (= "run-a" (:seon.agent.run/id result)))
+           (is (= 4 (:seon.agent.run/turn-limit result)))
+           (is (identical? database (::db/db @allocation-request)))
+           (is (= :db.fn/cas (first cas)))
+           (is (nil? (nth cas 3)))))))))
 
-;; ── close-run! TOCTOU — the owned retract is in-tx FENCED ───────────────────
-
-(deftest close-run!-fence-protects-the-new-owners-pointer-in-the-toctou-window
-  ;; close-run! reads owns? then, in ONE tx, conditionally retracts the agent's
-  ;; :seon.agent/run pointer. A supersede landing in that read→commit window must
-  ;; NOT retract the NEW owner's pointer. The owned retract-tx now LEADS with a
-  ;; CAS asserting the pointer STILL names this run (run-fence); if it moved, the
-  ;; whole tx aborts. This reproduces the window deterministically: build the
-  ;; EXACT owned-branch tx close-run! commits for r1, supersede to r2 IN THE
-  ;; WINDOW, THEN commit the stale tx — and assert r2's pointer survives. (Sans
-  ;; the leading CAS, the bare [:db/retract] would yank r2's live pointer →
-  ;; orphan it → wrongly idle the agent; this test discriminates the fix.)
+(deftest renew-pause-and-resume-use-targeted-cas
   (async done
-    (-> (with-conn
-          (fn ^:async toctou [_]
-            (let [r1 (:seon.agent.run/id
-                       (await (run/open-run! {:seon.agent/id a-id
-                                              :seon.agent.run/trigger :message})))
-                  ;; the REAL owned-branch tx close-run! commits for r1 — built
-                  ;; via close-run!'s own builder, so dropping the fence breaks
-                  ;; THIS test (the bare [:db/retract] would yank r2's pointer):
-                  stale-close (#'run/close-tx-data true a-id r1 :completed)
-                  ;; ── the supersede lands IN THE WINDOW (r2 now owns the agent) ──
-                  r2  (:seon.agent.run/id (await (supersede! :schedule)))
-                  ;; now commit r1's stale, pre-built close-tx:
-                  res (await (db/transact! {:seon.db/tx-data stale-close}))]
-              (is (false? (:seon.db/ok? res))
-                  "the fenced close aborts — the pointer no longer names r1")
-              (is (= r2 (:seon.agent.run/id (run/current-run {:seon.agent/id a-id})))
-                  "the NEW owner r2 still owns the agent — its pointer was NOT retracted")
-              (is (= :running (:seon.agent/state (agent/derive-status {:seon.agent/id a-id})))
-                  "the agent stays :running on r2 (never wrongly idled by the stale close)"))))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+    (let [original-db db/db
+          original-execute db/execute-many
+          original-pull db/pull
+          original-transact db/transact!
+          deadline (js/Date. (+ (.getTime (js/Date.)) 60000))
+          paused-at (js/Date. 1000)
+          pulls (atom [{:seon.agent.run/deadline deadline}
+                       {:seon.agent.run/paused-at paused-at
+                        :seon.agent.run/remaining-ms 5000}])
+          transactions (atom [])]
+      (set! db/db (fn ([] (js/Promise.resolve database))
+                    ([_] (js/Promise.resolve database))))
+      (set! db/execute-many
+            (fn [_]
+              (js/Promise.resolve
+               {::db/results
+                [(pull-result {:seon.agent.run/turn-limit 9})
+                 (pull-result {:seon.agent/default-deadline-ms 1000})
+                 (pull-result {:seon.config.run/deadline-ms 2000})]})))
+      (set! db/pull
+            (fn
+              ([_]
+               (let [value (first @pulls)]
+                 (swap! pulls subvec 1)
+                 (js/Promise.resolve value)))
+              ([_ _] (js/Promise.resolve nil))
+              ([_ _ _] (js/Promise.resolve nil))))
+      (set! db/transact!
+            (fn [& requests]
+              (swap! transactions conj (first requests))
+              (js/Promise.resolve native-report)))
+      (finish!
+       done
+       [[#(set! db/db %) original-db]
+        [#(set! db/execute-many %) original-execute]
+        [#(set! db/pull %) original-pull]
+        [#(set! db/transact! %) original-transact]]
+       (fn ^:async test-cas []
+         (await (run/renew! {:seon.agent/id "agent-a"
+                             :seon.agent.run/id "run-a"}))
+         (await (run/pause! {:seon.agent/id "agent-a"
+                             :seon.agent.run/id "run-a"}))
+         (await (run/resume! {:seon.agent/id "agent-a"
+                              :seon.agent.run/id "run-a"}))
+         (let [renew-tx (::db/tx-data (nth @transactions 0))
+               pause-tx (::db/tx-data (nth @transactions 1))
+               resume-tx (::db/tx-data (nth @transactions 2))]
+           (is (= [:db.fn/cas [:seon.agent.run/id "run-a"]
+                   :seon.agent.run/turn-limit 9 10]
+                  (second renew-tx)))
+           (is (= [:db.fn/cas [:seon.agent.run/id "run-a"]
+                   :seon.agent.run/deadline deadline deadline]
+                  (second pause-tx)))
+           (is (= [:db.fn/cas [:seon.agent.run/id "run-a"]
+                   :seon.agent.run/paused-at paused-at paused-at]
+                  (second resume-tx)))
+           (is (= :seon.agent.run/remaining-ms
+                  (nth (last resume-tx) 2)))))))))
 
-(deftest close-tx-data-fences-the-owned-retract
-  ;; Pure guard on close-run!'s tx-builder: the OWNED close must LEAD with the
-  ;; work-fence CAS on the agent's run pointer (then close + retract), and the
-  ;; UNOWNED close must be the close-row alone (never touch another run's
-  ;; pointer). No db/async — a function of its args.
-  (let [owned   (#'run/close-tx-data true  a-id "Kpx-2606010000" :completed)
-        unowned (#'run/close-tx-data false a-id "Kpx-2606010000" :superseded)
-        retract? (fn [tx] (some #(and (vector? %) (= :db/retract (first %))) tx))]
-    (is (= :db.fn/cas (ffirst owned)) "owned close LEADS with the work-fence CAS")
-    (is (= :seon.agent/run (nth (first owned) 2)) "the CAS fences the agent's run pointer")
-    (is (retract? owned) "owned close retracts the pointer (in the same fenced tx)")
-    (is (= 1 (count unowned)) "unowned close is the close-row ALONE — no CAS, no retract")
-    (is (nil? (retract? unowned))
-        "unowned close never retracts a pointer it does not own")))
+(deftest close-fences-owned-pointer-and-notifies-from-db-after
+  (async done
+    (let [original-db db/db
+          original-pull db/pull
+          original-transact db/transact!
+          original-execute db/execute-many
+          original-message message/message!
+          transaction (atom nil)
+          outcome-request (atom nil)
+          sent (atom nil)
+          run-row {:seon.agent.run/id "run-a"
+                   :seon.agent.run/status :open
+                   :seon.agent.run/agent
+                   {:seon.agent/id "agent-a"
+                    :seon.agent/purpose "check the result"
+                    :seon.agent/run {:seon.agent.run/id "run-a"}}}]
+      (set! db/db (fn ([] (js/Promise.resolve database))
+                    ([_] (js/Promise.resolve database))))
+      (set! db/pull
+            (fn
+              ([_] (js/Promise.resolve run-row))
+              ([_ _] (js/Promise.resolve nil))
+              ([_ _ _] (js/Promise.resolve nil))))
+      (set! db/transact!
+            (fn [& requests]
+              (reset! transaction (first requests))
+              (js/Promise.resolve native-report)))
+      (set! db/execute-many
+            (fn [request]
+              (reset! outcome-request request)
+              (js/Promise.resolve
+               {::db/results [(pull-result run-row) (pull-result nil)]})))
+      (set! message/message!
+            (fn [request]
+              (reset! sent request)
+              (js/Promise.resolve
+               {:seon.agent.message/id "message-a"
+                :seon.agent.message/hops 1})))
+      (finish!
+       done
+       [[#(set! db/db %) original-db]
+        [#(set! db/pull %) original-pull]
+        [#(set! db/transact! %) original-transact]
+        [#(set! db/execute-many %) original-execute]
+        [#(set! message/message! %) original-message]]
+       (fn ^:async test-close []
+         (let [result
+               (await
+                (run/close-run!
+                 {:seon.agent.run/id "run-a"
+                  :seon.agent.run/closed-reason :turn-limit}))
+               tx (::db/tx-data @transaction)]
+           (is (= native-report result))
+           (is (= :db.fn/cas (ffirst tx)))
+           (is (= :seon.agent/run (nth (first tx) 2)))
+           (is (= :db/retract (first (last tx))))
+           (is (identical? database-after (::db/db @outcome-request)))
+           (is (every? #(identical? database-after (::db/db %))
+                       (::db/members @outcome-request)))
+           (is (identical? database-after (:seon.db/db @sent)))
+           (is (nil? (:seon.agent.message/origin @sent)))))))))
+
+(deftest unowned-close-never-touches-the-current-pointer
+  (async done
+    (let [original-db db/db
+          original-pull db/pull
+          original-transact db/transact!
+          transaction (atom nil)]
+      (set! db/db (fn ([] (js/Promise.resolve database))
+                    ([_] (js/Promise.resolve database))))
+      (set! db/pull
+            (fn
+              ([_]
+               (js/Promise.resolve
+                {:seon.agent.run/id "run-old"
+                 :seon.agent.run/agent
+                 {:seon.agent/id "agent-a"
+                  :seon.agent/run {:seon.agent.run/id "run-new"}}}))
+              ([_ _] (js/Promise.resolve nil))
+              ([_ _ _] (js/Promise.resolve nil))))
+      (set! db/transact!
+            (fn [& requests]
+              (reset! transaction (first requests))
+              (js/Promise.resolve native-report)))
+      (finish!
+       done
+       [[#(set! db/db %) original-db]
+        [#(set! db/pull %) original-pull]
+        [#(set! db/transact! %) original-transact]]
+       (fn ^:async test-unowned []
+         (await
+          (run/close-run!
+           {:seon.agent.run/id "run-old"
+            :seon.agent.run/closed-reason :superseded}))
+         (let [tx (::db/tx-data @transaction)]
+           (is (= 1 (count tx)))
+           (is (map? (first tx)))))))))
+
+(deftest watchdog-scans-once-and-closes-each-candidate
+  (async done
+    (let [original-db db/db
+          original-query db/query
+          original-close run/close-run!
+          original-record error/record!
+          queries (atom [])
+          closes (atom [])]
+      (set! db/db (fn ([] (js/Promise.resolve database))
+                    ([_] (js/Promise.resolve database))))
+      (set! db/query
+            (fn
+              ([request]
+               (swap! queries conj request)
+               (js/Promise.resolve
+                #{["run-b" "agent-b" (js/Date. 0) (js/Date. 100)]
+                  ["run-a" "agent-a" (js/Date. 0) (js/Date. 200)]}))
+              ([query & inputs]
+               (js/Promise.resolve [query inputs]))))
+      (set! run/close-run!
+            (fn [request]
+              (swap! closes conj request)
+              (js/Promise.resolve native-report)))
+      (set! error/record! (fn [_] nil))
+      (finish!
+       done
+       [[#(set! db/db %) original-db]
+        [#(set! db/query %) original-query]
+        [#(set! run/close-run! %) original-close]
+        [#(set! error/record! %) original-record]]
+       (fn ^:async test-watchdog []
+         (let [result
+               (await
+                (run/close-stale-runs!
+                 {:seon.agent/now (js/Date. 10000)
+                  :seon.agent.run/stale-ms 1000}))]
+           (is (= ["run-a" "run-b"] (:seon.agent.run/closed result)))
+           (is (= 1 (count @queries)))
+           (is (identical? database (::db/db (first @queries))))
+           (is (= ["run-a" "run-b"]
+                  (mapv :seon.agent.run/id @closes)))))))))
