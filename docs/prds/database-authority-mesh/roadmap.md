@@ -257,6 +257,16 @@ The one retained containment drain protocol is unchanged; legacy group-signal,
 stop-result, reason, status, and schema branches plus their tests are deleted.
 Focused operator proof passes 55 tests/269 assertions without running a
 lifecycle command or sending a signal.
+Commit `289de934` moves the one declarative-state reconciler onto ordinary
+immutable database values and native transaction results. Omitted database
+input acquires the current value once; grouped reads and the expected-database
+write fence reuse it, while a stale fence reacquires and recompiles for a
+bounded number of attempts. The embedded-Datahike connection fixture and old
+coordinate/envelope assertions are deleted rather than adapted. Focused proof
+passes 13 state tests/45 assertions with zero warnings and 5 client
+initialization tests/16 assertions; first-use schema publication, convergence
+without a write, unmanaged collision, component cascade, and direct database
+errors remain covered.
 `3ebfcaf5` leaves one current artifact manifest/application digest and removes
 the four historical readers; `9a66bb78` leaves one generated-identity
 allocator; and `c453a5bd` makes that allocator consume the same native
@@ -295,24 +305,24 @@ modest-hardware density checkpoint.
 
 - **Earliest unsettled contract:** remove the phantom config reader, then
   migrate membership and quiescence through the one settled client session,
-  publication, advertisement, and recovery owner.
+  publication, advertisement, recovery, and state-reconciliation owners.
 - **Integrated proof that closes it:** eval, autocomplete, namespace context,
-  startup, converged reload, advertisement, and runtime hosting reuse ordinary
-  database values and native transaction reports; fresh and warm startup both
-  execute the one ordered sequence.
-- **Dependency-ready parallel portfolio:** config acquisition and state
-  reconciliation are active; the finite no-containment process-record
-  falsifier is independent; the web/render single-owner audit is durable at
+  startup, converged reload, advertisement, runtime hosting, and declarative
+  state reconciliation reuse ordinary database values and native transaction
+  reports; fresh and warm startup both execute the one ordered sequence.
+- **Dependency-ready parallel portfolio:** phantom-config deletion is active;
+  membership/quiescence is being grounded read-only against that boundary;
+  the shared-instructions async database defect is an independent existing
+  owner; the web/render single-owner audit is durable at
   [[research/web-render-single-owner-audit-2026-07-17]]; the plan consumer cut
   is grounded at [[research/plan-single-owner-audit-2026-07-17]] and explicitly
   rejects the current dirty coordinate/oversized-row prototype. The complete
   parallel-system inventory is durable at
   [[research/parallel-behavior-unification-audit-2026-07-17]].
-- **Next refills:** finish config and state reconciliation, then migrate
-  membership and quiescence in ordered complete cuts; delete the obsolete
-  process-record branch only if its local evidence falsifier is clean; close the web/feed
-  database-value and rendered-transaction owner next, followed by the
-  operation-specific plan consumers and atomic eval publication.
+- **Next refills:** finish phantom-config deletion, then migrate membership and
+  quiescence in ordered complete cuts; close the web/feed database-value and
+  rendered-transaction owner next, followed by the exact-database blob
+  operator seam and the operation-specific plan consumers.
   The final graduation gate remains the full frozen-source correctness, live
   Bun/JVM, multi-agent, child-crash, multi-database, and measured resource
   matrix.
