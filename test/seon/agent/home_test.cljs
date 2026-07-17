@@ -74,16 +74,15 @@
         (set! config/resolve-agent-context
               (fn [_id _override]
                 {:seon.eval/home-requires '[[seon.db :as config-db]]}))
-        (-> (home/home-requires-for "probe")
+        (-> (home/home-requires-for database "probe")
             (.then
              (fn [requires]
                (is (= '[[seon.db :as persisted-db]] requires)
                    "persisted data retains precedence over configuration")
-               (is (= [[:db]
-                       [:installed-schema database]
+               (is (= [[:installed-schema database]
                        [:entity database [:seon.agent/id "probe"]]]
                       @calls)
-                   "one database value is reused for every related read")))
+                   "the supplied database value is reused without reacquiring head")))
             (.catch (fn [error]
                       (is false (str "home require acquisition rejected: " error))))
             (.finally (fn [] (restore-home-functions! originals)))

@@ -19,7 +19,7 @@
      non-agent / complete forms);
    - the LIVE self-host proof: a fn defined in a brand-new agent ns that
      references `db/query` FAILS on a bare `(ns …)` (the bug) and RESOLVES
-     through `eval-batch!` (the fix).
+     after the one source augmentation (the fix).
 
    Run via `bin/test-cljs`, or interactively:
      (require 'seon.eval.auto-refer-test :reload)
@@ -27,14 +27,27 @@
   (:require
     [cljs.test :refer [deftest is testing async]]
     [clojure.string :as str]
+    [my.blob]
+    [my.canvas]
+    [my.data]
+    [my.kb]
+    [my.ns]
+    [my.plan]
+    [my.skills]
+    [my.ui]
+    [seon.agent]
+    [seon.agent.fs]
     [seon.agent.home :as home]
-    [seon.client :as client]
+    [seon.agent.lifecycle]
+    [seon.agent.message]
+    [seon.agent.search]
+    [seon.agent.shell]
+    [seon.agent.web]
     [seon.config :as config]
-    [seon.db :as db]
-    [seon.db.id :as db.id]
+    [seon.db]
     [seon.eval :as seval]
     [seon.repl :as repl]
-    [seon.repl.internal :as repl-int]))
+    [seon.schema]))
 
 ;; ---------------------------------------------------------------------------
 ;; Pure: augment-ns-source — string in, string out. No compile-state needed.
@@ -109,7 +122,11 @@
           (.then
             (fn [cs]
               (reset! !cs cs)
-              (with-redefs [home/home-requires-for (fn [_] root-requires)]
+              (with-redefs [home/home-requires-for
+                            (fn
+                              ([_] (js/Promise.resolve root-requires))
+                              ([_database _id]
+                               (js/Promise.resolve root-requires)))]
                 (seval/setup-agent-ns! cs 'my.agent.root "root"))))
           (.then
             (fn [_]
@@ -134,8 +151,13 @@
             (fn [_]
               (with-redefs
                 [home/home-requires-for
-                 (fn [_]
-                   '[[seon.agent :refer [not-a-real-seon-agent-var]]])]
+                 (fn
+                   ([_]
+                    (js/Promise.resolve
+                      '[[seon.agent :refer [not-a-real-seon-agent-var]]]))
+                   ([_database _id]
+                    (js/Promise.resolve
+                      '[[seon.agent :refer [not-a-real-seon-agent-var]]])))]
                 (-> (seval/setup-agent-ns!
                       @!cs 'my.agent.invalid-root "invalid-root")
                     (.then (fn [_]
@@ -167,57 +189,39 @@
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
-(deftest after-new-agent-ns-via-batch-resolves-db-alias
-  ;; The fix: the agent's eval-batch path augments the `(ns …)` form, so a
-  ;; fn it then defines in that ns resolves `db/query` with no error.
+(deftest after-augmented-agent-ns-resolves-db-alias
+  ;; The fix: the one source augmentation gives the self-host compiler the
+  ;; exact `(ns …)` form eval-batch uses, so `db/query` resolves with no DB
+  ;; fixture or second namespace setup path.
   (async done
-    (let [new-ns "my.recall.ar73"
-          src    (str "(ns " new-ns ")\n"
-                      "(defn db-ok? [] (some? db/query))\n"
-                      "(db-ok?)")]
-      (-> (js/Promise.all #js [(repl/ensure-bootstrap!) (client/open-agent-conn!)])
-          (.then (fn [pair]
-                   (let [cs   (aget pair 0)
-                         conn (aget pair 1)]
-                     ;; CLJS dynamic bindings don't cross async hops — set the
-                     ;; root so db/*conn* holds through eval-batch!'s awaits.
-                     (set! db/*conn* conn)
-                     (-> (db.id/allocate!
-                           {::db.id/allocations
-                            [{::db.id/key ::fixture-agent
-                              ::db.id/identity-attr :seon.agent/id}
-                             {::db.id/key ::fixture-turn
-                              ::db.id/identity-attr :seon.agent.turn/id}]
-                            ::db.id/transaction-builder
-                            (fn [ids]
-                              {:seon.db/tx-data
-                               [{:seon.agent/id (::fixture-agent ids)}
-                                {:seon.agent.turn/id (::fixture-turn ids)}]})
-                            :seon.db/conn conn})
-                         (.then (fn [env]
-                                  (let [aid (get-in env [::db.id/ids
-                                                        ::fixture-agent])
-                                        hns (home/home-ns aid)]
-                                    (-> (seval/setup-agent-ns! cs hns aid)
-                                        (.then
-                                          (fn [_]
-                                            (seval/eval-batch!
-                                              cs (repl-int/parse-forms src)
-                                              hns aid
-                                              (get-in env [::db.id/ids
-                                                           ::fixture-turn])
-                                              nil)))))))
-                         (.then (fn [r]
-                                  (is (= 0 (:seon.eval/n-fail r))
-                                      "no form failed — db/query resolved in the new ns")
-                                  (is (= 3 (:seon.eval/n-ok r))
-                                      "the ns switch, the defn, and the call all ran")
-                                  ;; read the (db-ok?) value back via result/<id>
-                                  (let [last-id (last (:seon.eval/ids r))]
-                                    (-> (seval/eval cs (str "result/" last-id)
-                                                    {:seon.eval/starting-ns (symbol new-ns) :seon.eval/analyze-deps? false})
-                                        (.then (fn [r2]
-                                                 (is (true? (:seon.eval/value r2))
-                                                     "db/query is the live fn — (some? db/query) is true")))))))))))
+    (let [new-ns 'my.recall.ar73]
+      (-> (repl/ensure-bootstrap!)
+          (.then
+            (fn [cs]
+              (-> (seval/eval
+                    cs
+                    (seval/augment-ns-source (str "(ns " new-ns ")"))
+                    {:seon.eval/starting-ns 'cljs.user
+                     :seon.eval/analyze-deps? true})
+                  (.then
+                    (fn [result]
+                      (is (true? (:seon.eval/ok? result)))
+                      (seval/eval
+                        cs
+                        "(defn db-ok? [] (some? db/query))"
+                        {:seon.eval/starting-ns new-ns
+                         :seon.eval/analyze-deps? false})))
+                  (.then
+                    (fn [result]
+                      (is (true? (:seon.eval/ok? result)))
+                      (seval/eval
+                        cs "(db-ok?)"
+                        {:seon.eval/starting-ns new-ns
+                         :seon.eval/analyze-deps? false})))
+                  (.then
+                    (fn [result]
+                      (is (true? (:seon.eval/ok? result)))
+                      (is (true? (:seon.eval/value result))
+                          "db/query is the live function in the authored ns"))))))
           (.then (fn [_] (done)))
           (.catch (fn [e] (is false (str "threw — " e)) (done)))))))

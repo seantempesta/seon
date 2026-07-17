@@ -1378,9 +1378,14 @@
                 child      (or (some-> definition ::schema-form schema-form-refs) #{})
                 out'       (if (or (contains? own-keys k) (nil? definition))
                              out
-                             (conj out k))]
-            (recur (into queue (remove seen) (sort child))
-                   (conj seen k)
+                             (conj out k))
+                seen'      (conj seen k)]
+            (recur (->> (concat queue child)
+                        (remove seen')
+                        distinct
+                        sort
+                        vec)
+                   seen'
                    out'
                    definitions')))))))
 

@@ -73,6 +73,7 @@
 (schema/register! ::with-tests    [:vector {:default []} :seon.ns/name]) ; ns present → also show its tests
 (schema/register! ::current-full?  [:boolean {:default true}])           ; the agent's current ns renders full
 (schema/register! ::current-tests? [:boolean {:default true}])           ; …and its current ns shows its tests
+(schema/register! ::home-requires :seon.agent.home/require-specs)
 
 ;; ============================================================
 ;; The namespace-display rules. Two SEPARATE concerns, both pure
@@ -597,10 +598,10 @@
    row the caller already matched (an included, current-ns row). `id` is the
    agent id, threaded so the stub prose shows THIS agent's actual configured
    requires ([[seon.agent.home/home-requires-for]]) — not the const default."
-  [nm id]
+  [nm require-specs]
   (ctx/ns-demarc
     nm
-    (str (home/home-ns-form nm (home/home-requires-for id)) "\n"
+    (str (home/home-ns-form nm require-specs) "\n"
          "; (your workspace — nothing defined here yet; define schemas + fns and they appear here.\n"
          ";  a defn whose :malli/schema output declares :seon.render/ai (and/or :seon.render/hiccup)\n"
          ";  auto-runs every turn: its output becomes a live section of your context + a surface on your page)")))
@@ -620,11 +621,11 @@
    real to show is
    omitted (nil). `id` threads through to the workspace stub so its prose
    reflects THIS agent's configured requires."
-  [nm row schema-rows cur-ns id]
+  [nm row schema-rows cur-ns require-specs]
   (if-not row
     ;; No `:seon.ns/name` entity — the current ns still keeps its promise via
     ;; the workspace stub; any other row with no entity is omitted.
-    (when (= nm cur-ns) (cur-ns-workspace-stub nm id))
+    (when (= nm cur-ns) (cur-ns-workspace-stub nm require-specs))
     (let [txt    (-> (ctx/render-namespace-ai
                        {:seon.ns/name nm
                         :seon.agent.ctx/namespace-rows [row]
@@ -639,7 +640,9 @@
                      (str/includes? txt "(no recorded source/fns/schemas)")
                      (str/includes? txt "(not in db)"))]
       (cond
-        (= nm cur-ns) (if empty? (cur-ns-workspace-stub nm id) txt)
+        (= nm cur-ns) (if empty?
+                        (cur-ns-workspace-stub nm require-specs)
+                        txt)
         empty?        nil
         :else         txt))))
 
@@ -660,8 +663,20 @@
   "Acquire and render namespaces at the active database value."
   {:malli/schema [:=> [:cat :seon.render/section-request :any] :map]}
   [input _invoke-selected!]
-  (let [acquired
+  (let [database-acquired
         (await (acquire-schema-rows! (await (acquire-namespace-rows! input))))
+        home-requires
+        (when-not (database-error database-acquired)
+          (await (home/home-requires-for
+                   (::db/db database-acquired)
+                   (:seon.agent/id database-acquired))))
+        acquired
+        (cond
+          (database-error database-acquired) database-acquired
+          (database-error home-requires)
+          (assoc database-acquired ::error
+                 (acquisition-error "home require acquisition" home-requires))
+          :else (assoc database-acquired ::home-requires home-requires))
         current-ns (:seon.agent.ctx.render-fns/current-ns acquired)
         current-row (some #(when (= current-ns (:seon.ns/name %)) %)
                           (::namespace-rows acquired))]
@@ -710,8 +725,7 @@
    NEVER a render-time file read — the boot indexer is the one reader; both the
    full renderer and the compact card read only indexed rows."
   [input]
-  (let [{id :seon.agent/id} input]
-    (if-let [error (or (::error input) (database-error input))]
+  (if-let [error (or (::error input) (database-error input))]
       (str "[namespaces] render failed: " (pr-str error))
       (let [policy {:seon.config/current-ns (:seon.config/current-ns input)}
         cur-ns (:seon.agent.ctx.render-fns/current-ns input)
@@ -723,6 +737,7 @@
                          (::current-tests? input) true)
         namespace-rows (::namespace-rows input)
         schema-rows (:seon.agent.ctx/schema-rows input)
+        home-requires (::home-requires input)
         row-by-name (into {} (map (juxt :seon.ns/name identity)) namespace-rows)
         current-row (get row-by-name cur-ns)
         required (required-ns-selections
@@ -761,7 +776,8 @@
         ;; indexed. Append the ns's indexed test source when it is in tests-set.
         render-row (fn [[nm row full? _phase selection]]
                      (when-let [block-txt (if full?
-                                            (render-one nm row schema-rows cur-ns id)
+                                            (render-one nm row schema-rows cur-ns
+                                                        home-requires)
                                             (compact-block nm row schema-rows selection))]
                        (str block-txt
                             (when (contains? tests-set nm)
@@ -775,7 +791,7 @@
         blocks        (concat prefix-blocks body-blocks)]
     (if (seq blocks)
       (str namespaces-header "\n\n" (str/join "\n\n" blocks))
-      "")))))
+      ""))))
 
 ;; ============================================================
 ;; The COMPACT card renderer — a SIBLING detail-level to

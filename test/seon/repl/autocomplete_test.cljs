@@ -5,6 +5,7 @@
     ["node:path" :as npath]
     [cljs.test :refer [async deftest is use-fixtures]]
     [clojure.string :as str]
+    [seon.agent.home :as home]
     [seon.agent.turn :as turn]
     [seon.ai.tokens :as tokens]
     [seon.db :as db]
@@ -34,6 +35,7 @@
   (set! db/pull-many (:pull-many saved))
   (set! db/entity (:entity saved))
   (set! db/transact! (:transact saved))
+  (set! home/home-requires-for (:home-requires-for saved))
   (set! turn/render-prompt (:render-prompt saved)))
 
 (defn- saved-functions []
@@ -43,6 +45,7 @@
    :pull-many db/pull-many
    :entity db/entity
    :transact db/transact!
+   :home-requires-for home/home-requires-for
    :render-prompt turn/render-prompt})
 
 (deftest context-uses-the-supplied-database-value
@@ -120,6 +123,12 @@
               ([_database eid]
                (js/Promise.resolve
                  (when (= 501 eid) {:db/id 501 :seon.config/id :cluster})))))
+      (set! home/home-requires-for
+            (fn
+              ([_agent-id]
+               (js/Promise.resolve home/home-ns-require-specs))
+              ([_database _agent-id]
+               (js/Promise.resolve home/home-ns-require-specs))))
       (set! turn/render-prompt
             (fn
               ([_agent-id supplied-db]

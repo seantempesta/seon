@@ -19,6 +19,7 @@
     [cljs.test :refer [deftest is testing async]]
     [seon.agent.ctx :as ctx]
     [seon.agent.ctx.namespaces :as nss]
+    [seon.agent.home :as home]
     [seon.config :as config]
     [seon.db :as db]
     [seon.db.protocol :as protocol]))
@@ -78,6 +79,7 @@
    :seon.agent.ctx.namespaces/with-tests #{}
    :seon.agent.ctx.namespaces/current-full? true
    :seon.agent.ctx.namespaces/current-tests? true
+   :seon.agent.ctx.namespaces/home-requires home/home-ns-require-specs
    :seon.agent.ctx.namespaces/namespace-rows
    [eager-current-row eager-helper-row]
    :seon.agent.ctx/schema-rows []})
@@ -96,14 +98,12 @@
   (let [original-execute-many db/execute-many
         original-query db/query
         original-pull db/pull
-        original-entity db/entity
-        original-entity-lazy db/entity-lazy]
+        original-entity db/entity]
     (try
       (set! db/execute-many fail-on-db-io)
       (set! db/query fail-on-db-io)
       (set! db/pull fail-on-db-io)
       (set! db/entity fail-on-db-io)
-      (set! db/entity-lazy fail-on-db-io)
       (let [out (@#'nss/format-namespaces-block (eager-input))]
         (is (str/includes? out "CUR-BODY"))
         (is (str/includes? out "my.helper/assist"))
@@ -112,8 +112,7 @@
         (set! db/execute-many original-execute-many)
         (set! db/query original-query)
         (set! db/pull original-pull)
-        (set! db/entity original-entity)
-        (set! db/entity-lazy original-entity-lazy)))))
+        (set! db/entity original-entity)))))
 
 (deftest remote-acquisition-is-bounded-and-selection-scoped
   (let [initial (@#'nss/initial-acquisition-members agent-id)
@@ -192,20 +191,23 @@
           requests (atom [])
           original-query db/query]
       (set! db/query
-            (fn [request]
-              (swap! requests conj request)
-              (js/Promise.resolve
-                (mapv (fn [k] [k ":string"])
-                      (first (::db/args request))))))
-      (-> ((deref #'nss/acquire-schema-rows!)
-           {::db/db database
-            :seon.agent.ctx.namespaces/namespace-rows
-            [{:seon.ns/name :grown.left
-              :seon.fn/_ns [{:seon.fn/sym "grown.left/run"
-                             :seon.fn/spec (spec left-keys)}]}
-             {:seon.ns/name :grown.right
-              :seon.fn/_ns [{:seon.fn/sym "grown.right/run"
-                             :seon.fn/spec (spec right-keys)}]}]})
+            (fn
+              ([request]
+               (swap! requests conj request)
+               (js/Promise.resolve
+                 (mapv (fn [k] [k ":string"])
+                       (first (::db/args request)))))
+              ([_query & _inputs] (js/Promise.resolve []))))
+      (-> (js/Promise.resolve
+            ((deref #'nss/acquire-schema-rows!)
+             {::db/db database
+              :seon.agent.ctx.namespaces/namespace-rows
+              [{:seon.ns/name :grown.left
+                :seon.fn/_ns [{:seon.fn/sym "grown.left/run"
+                               :seon.fn/spec (spec left-keys)}]}
+               {:seon.ns/name :grown.right
+                :seon.fn/_ns [{:seon.fn/sym "grown.right/run"
+                               :seon.fn/spec (spec right-keys)}]}]}))
           (.then
             (fn [acquired]
               (is (= (* 2 ctx/referenced-schema-cap)
@@ -241,13 +243,16 @@
             (range namespace-count))
           original-query db/query]
       (set! db/query
-            (fn [request]
-              (js/Promise.resolve
-                (mapv (fn [k] [k ":string"])
-                      (first (::db/args request))))))
-      (-> ((deref #'nss/acquire-schema-rows!)
-           {::db/db database
-            :seon.agent.ctx.namespaces/namespace-rows rows})
+            (fn
+              ([request]
+               (js/Promise.resolve
+                 (mapv (fn [k] [k ":string"])
+                       (first (::db/args request)))))
+              ([_query & _inputs] (js/Promise.resolve []))))
+      (-> (js/Promise.resolve
+            ((deref #'nss/acquire-schema-rows!)
+             {::db/db database
+              :seon.agent.ctx.namespaces/namespace-rows rows}))
           (.then
             (fn [acquired]
               (let [error (:seon.agent.ctx.namespaces/error acquired)
@@ -274,16 +279,19 @@
                       "] :string]")}]}
           original-query db/query]
       (set! db/query
-            (fn [request]
-              (js/Promise.resolve
-                (mapv (fn [k]
-                        [k (if (= k (first initial-keys))
-                             (pr-str [:tuple earlier-child])
-                             ":string")])
-                      (first (::db/args request))))))
-      (-> ((deref #'nss/acquire-schema-rows!)
-           {::db/db database
-            :seon.agent.ctx.namespaces/namespace-rows [row]})
+            (fn
+              ([request]
+               (js/Promise.resolve
+                 (mapv (fn [k]
+                         [k (if (= k (first initial-keys))
+                              (pr-str [:tuple earlier-child])
+                              ":string")])
+                       (first (::db/args request)))))
+              ([_query & _inputs] (js/Promise.resolve []))))
+      (-> (js/Promise.resolve
+            ((deref #'nss/acquire-schema-rows!)
+             {::db/db database
+              :seon.agent.ctx.namespaces/namespace-rows [row]}))
           (.then
             (fn [acquired]
               (let [schema-rows (:seon.agent.ctx/schema-rows acquired)
@@ -296,7 +304,7 @@
                 (is (str/includes? rendered
                                    "(register! :a.branch/child"))
                 (is (not (str/includes? rendered
-                                        "(register! :z.branch/k39"))
+                                        "(register! :z.branch/k9"))
                     "ctx alone selects its lexically re-sorted first forty")
                 (is (str/includes? rendered
                                    "40+ referenced schemas — capped")))))

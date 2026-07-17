@@ -1860,7 +1860,11 @@
   {:malli/schema
    [:=> [:catn [::compile-state :any] [::agent-ns-sym :any] [::agent-id :any]] :any]}
   [compile-state agent-ns-sym agent-id]
-  (let [require-specs (home/home-requires-for agent-id)
+  (let [require-specs (await (home/home-requires-for agent-id))
+        _             (when (:seon.error/message require-specs)
+                        (throw
+                         (ex-info (:seon.error/message require-specs)
+                                  require-specs)))
         _             (seed-toolkit-refers! compile-state require-specs)
         setup-src     (home/home-ns-form agent-ns-sym require-specs)
         r (await (eval compile-state setup-src

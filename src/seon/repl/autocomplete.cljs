@@ -220,13 +220,13 @@
   #"(?<![:A-Za-z0-9*+!?<>=._'-])[A-Za-z][A-Za-z0-9*+!?<>=._'-]*/[A-Za-z*+!?<>=_-][A-Za-z0-9*+!?<>=._'-]*")
 
 (defn- home-alias-maps
-  "[aliases refers] for `agent-id`'s home requires.
+  "[aliases refers] for one resolved home require vector.
 
    `aliases` maps alias-string → ns-string (`\"db\"` → `\"seon.db\"`);
    `refers` maps bare-name → full-sym (`\"complete\"` →
    `\"seon.agent.lifecycle/complete\"`). Derived from
    `seon.agent.home/home-requires-for` — the SAME list that wires the agent's ns."
-  [agent-id]
+  [require-specs]
   (reduce (fn [[aliases refers] spec]
             (let [ns-sym (first spec)]
               (case (second spec)
@@ -237,7 +237,7 @@
                                 refers (nth spec 2))]
                 [aliases refers])))
           [{} {}]
-          (home/home-requires-for agent-id)))
+          require-specs))
 
 (defn- ^:async indexed-fn-syms
   "The set of every `:seon.fn/sym` string in db value `db`."
@@ -558,9 +558,20 @@
                    [:seon.eval/at :seon.eval/ok? :seon.eval/source]}]
                 turn-eids)))
           turns-by-eid (zipmap turn-eids turn-rows)
+          home-require-values
+          (await
+            (js/Promise.all
+              (into-array
+                (map #(home/home-requires-for database-value %)
+                     agent-ids))))
+          home-requires-by-agent
+          (zipmap agent-ids
+                  (mapv result! (js->clj home-require-values)))
           candidates
           (mapv (fn [[agent-id turn-eid]]
-                  (let [[aliases refers] (home-alias-maps agent-id)]
+                  (let [[aliases refers]
+                        (home-alias-maps
+                          (get home-requires-by-agent agent-id))]
                     {::agent-id agent-id
                      ::aliases aliases
                      ::refers refers
