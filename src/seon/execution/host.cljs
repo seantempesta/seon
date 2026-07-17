@@ -48,14 +48,14 @@
             ::execution/error {:seon.error/message message
                                :seon.error/kind :core-bug
                                :seon.error/data data}}
-     (::execution/coordinate invocation)
-     (assoc ::execution/coordinate (::execution/coordinate invocation)))))
+     (:seon.db/db invocation)
+     (assoc :seon.db/db (:seon.db/db invocation)))))
 
 (defn- canceled-error [invocation]
   {::execution/message execution/error-message
    ::execution/protocol-version execution/protocol-version
    ::execution/invocation-id (::execution/invocation-id invocation)
-   ::execution/coordinate (::execution/coordinate invocation)
+   :seon.db/db (:seon.db/db invocation)
    ::execution/error {:seon.error/message "The invocation was canceled."
                       :seon.error/kind :agent}})
 
@@ -145,8 +145,8 @@
            ::exit-code exit-code
            ::stderr-tail (::stderr-tail current)
            ::artifact-digest (::artifact-digest current)
-           ::execution/coordinate
-           (get-in active [::invocation ::execution/coordinate])})))
+           :seon.db/db
+           (get-in active [::invocation :seon.db/db])})))
       (remove-child! agent-id generation process))))
 
 (defn- schedule-idle-stop!
@@ -196,9 +196,8 @@
             (::execution/shadow-build-id message))
          (= (::launch/execution-digest runtime)
             (::execution/artifact-digest message))
-         (or (nil? (::coordinate/attachment database))
-             (= (::coordinate/attachment database)
-                (::execution/database-attachment message))))))
+         (= (::db.protocol/database-name database)
+            (:db-name (:seon.db/db message))))))
 
 (defn- result-current?
   [config active message]
@@ -206,8 +205,8 @@
         runtime (get-in config [::launch-descriptor ::launch/runtime])
         current-run-fence? (::run-fence-current? config)]
     (and (= (::artifact-digest active) (::launch/execution-digest runtime))
-         (= (::execution/coordinate invocation)
-            (::execution/coordinate message))
+         (= (:seon.db/db invocation)
+            (:seon.db/db message))
          (or (nil? (::execution/run-fence invocation))
              (current-run-fence? (::execution/run-fence invocation))))))
 
@@ -483,15 +482,15 @@
     (::promise completion)))
 
 (defn ^:async invoke-plans!
-  "Prepare and execute ordinary authored calls at one database coordinate."
-  {:malli/schema [:=> [:cat :seon.db.coordinate/coordinate
+  "Prepare and execute ordinary authored calls at one database value."
+  {:malli/schema [:=> [:cat :seon.db/db
                        :seon.execution/invocation-plans]
                   [:vector :map]]}
-  [coordinate plans]
+  [database plans]
   (let [invocations
         (await
          (execution/prepare-invocations!
-          {::execution/coordinate coordinate
+          {:seon.db/db database
            ::execution/invocation-plans plans}))]
     (let [groups (vals (group-by (comp ::execution/agent-id second)
                                  (map-indexed vector invocations)))
@@ -514,17 +513,17 @@
 
 (defn ^:async invoke-compiled!
   "Invoke one trusted function from the digest-verified execution artifact."
-  {:malli/schema [:=> [:cat :seon.db.coordinate/coordinate
+  {:malli/schema [:=> [:cat :seon.db/db
                        :seon.execution/agent-id
                        :seon.execution/function-symbol
                        :seon.execution/arguments]
                   :map]}
-  [coordinate agent-id function-symbol arguments]
+  [database agent-id function-symbol arguments]
   (let [runtime (get-in (host-configuration)
                         [::launch-descriptor ::launch/runtime])
         invocation
         (execution/compiled-invocation
-         agent-id function-symbol arguments coordinate
+         agent-id function-symbol arguments database
          (::launch/execution-digest runtime))]
     (await (invoke! invocation))))
 

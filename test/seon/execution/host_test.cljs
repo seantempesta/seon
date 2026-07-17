@@ -1,18 +1,18 @@
 (ns seon.execution.host-test
   (:require
    [cljs.test :refer [async deftest is testing]]
-   [seon.db.coordinate :as coordinate]
    [seon.execution :as execution]
    [seon.execution.host :as host]
    [seon.launch :as launch]))
 
 (def digest (apply str (repeat 64 "e")))
-(def point
-  {::coordinate/database-id #uuid "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
-   ::coordinate/branch :db
-   ::coordinate/commit-id #uuid "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
-   ::coordinate/t 42})
-(def attachment (coordinate/attachment point))
+(def database
+  {:db-name "test-cluster"
+   :t 42
+   :as-of nil
+   :since nil
+   :history false
+   :datahike/commit-id #uuid "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"})
 
 (defn descriptor []
   (launch/with-execution-artifact
@@ -40,7 +40,7 @@
     ::execution/protocol-version execution/protocol-version
     ::execution/agent-id agent-id
     ::execution/invocation-id invocation-id
-    ::execution/coordinate point
+    :seon.db/db database
     ::execution/function-identity
     {::execution/function-symbol 'my.render/view
      ::execution/source-digest digest}
@@ -55,14 +55,13 @@
    ::execution/bun-version "1.2.0"
    ::execution/shadow-build-id "execution"
    ::execution/artifact-digest digest
-   ::execution/database-attachment attachment
-   ::execution/coordinate point})
+   :seon.db/db database})
 
 (defn result-message [invocation-id value]
   {::execution/message execution/result-message
    ::execution/protocol-version execution/protocol-version
    ::execution/invocation-id invocation-id
-   ::execution/coordinate point
+   :seon.db/db database
    ::execution/result value
    ::execution/result-bytes 32})
 
@@ -167,6 +166,67 @@
            (fn [error]
              (is false (str "unexpected host failure: " error))
              (done)))))))
+
+(deftest changed-program-replaces-one-child-and-retries-once
+  (async done
+    (let [options (atom [])
+          first-child (fake-process 111)
+          second-child (fake-process 112)
+          remaining (atom [first-child second-child])
+          _ (configure
+             (fn [value]
+               (swap! options conj value)
+               (let [[before after] (swap-vals! remaining subvec 1)]
+                 (:process (first before)))))
+          request (invocation "program-change")
+          completion (host/invoke! request)]
+      (feed! (first @options) (:process first-child) (ready-message))
+      (-> (js/Promise.resolve nil)
+          (.then
+           (fn [_]
+             (is (= [execution/invoke-message]
+                    (mapv ::execution/message @(:sent first-child))))
+             (feed!
+              (first @options) (:process first-child)
+              {::execution/message execution/error-message
+               ::execution/protocol-version execution/protocol-version
+               ::execution/invocation-id "program-change"
+               :seon.db/db database
+               ::execution/error
+               {:seon.error/message "The authored program changed."
+                :seon.error/kind :core-bug
+                :seon.error/data {::execution/reload-required? true}}})
+             (js/Promise.
+              (fn [resolve-promise _]
+                (js/setTimeout resolve-promise 0)))))
+          (.then
+           (fn [_]
+             (is (= 2 (count @options))
+                 "the retry spawns exactly one fresh child")
+             (is (= ["SIGKILL"] @(:kills first-child)))
+             (feed! (second @options) (:process second-child)
+                    (ready-message))))
+          (.then
+           (fn [_]
+             (feed! (second @options) (:process second-child)
+                    (result-message "program-change"
+                                    {:my.render/value :current}))
+             completion))
+          (.then
+           (fn [result]
+             (is (= {:my.render/value :current}
+                    (::execution/result result)))
+             (is (= [execution/invoke-message]
+                    (mapv ::execution/message @(:sent second-child)))
+                 "the original invocation is sent once to the replacement")
+             (is (empty? @remaining)
+                 "a reload response cannot create a third attempt")
+             ((:resolve-exit! first-child) 1)
+             ((:resolve-exit! second-child) 0)))
+          (.catch
+           (fn [error]
+             (is false (str "program replacement rejected: " error))))
+          (.finally (fn [] (done)))))))
 
 (deftest pre-ready-exit-settles-the-waiting-invocation
   (async done
@@ -455,7 +515,7 @@
       (set! execution/prepare-invocations!
             (fn [_] (js/Promise.resolve invocations)))
       (set! host/invoke! invoke-stub)
-      (let [completion (host/invoke-plans! point plans)]
+      (let [completion (host/invoke-plans! database plans)]
         (-> first-wave-started
             (.then
              (fn [_]
@@ -496,11 +556,11 @@
               (js/Promise.resolve
                (result-message (::execution/invocation-id request) :ok))))
       (-> (host/invoke-compiled!
-           point "agent-1" 'seon.execution.runtime/render-prompt! [:input])
+           database "agent-1" 'seon.execution.runtime/render-prompt! [:input])
           (.then
            (fn [result]
              (is (= :ok (::execution/result result)))
-             (is (= point (::execution/coordinate @captured)))
+             (is (= database (:seon.db/db @captured)))
              (is (= digest
                     (get-in @captured
                             [::execution/function-identity

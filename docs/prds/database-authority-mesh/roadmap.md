@@ -69,12 +69,14 @@ The current ordered spine is:
    system; and
 6. measure the final architecture, then optimize only the retained bottlenecks.
 
-Earliest unsettled contract: prove that the existing Bun execution child is
-replaced exactly once when its accepted program changes, then executes the same
-invocation against the new immutable database value with removed definitions
-absent. The integrated proof starts from the now-settled fresh/full,
-partial/delta, and converged/no-write initialization boundary and exercises two
-independent children over complete namespace source sections.
+Earliest unsettled contract: exercise two real Bun execution children over
+complete namespace source sections, accept one database-wide program change,
+then prove both children reconstruct from the new immutable database value and
+that removed definitions are absent. The host-level replacement contract is
+settled: one stale child is killed, exactly one replacement is spawned, and the
+same invocation is retried once without permitting a third attempt. The
+integrated proof starts from the now-settled fresh/full, partial/delta, and
+converged/no-write initialization boundary.
 
 The JVM half of that contract is implemented. One unversioned
 `seon.db.program/compile-tx-data` owner reads one immutable Datahike value and
@@ -98,16 +100,15 @@ wire forwarding, plus 24 writer tests/117 assertions for authority admission.
 
 Current parallel portfolio:
 
-- top level adds the missing child digest-change replacement regression and the
-  two-child whole-namespace publication proof before deleting residual replay
-  helpers;
-- the duplication audit orders later ambient-database, renderer, eval, test,
-  artifact, and process deletions by dependency and impact;
-- the Datahike transaction probe proves why provenance genesis and the
-  boot-attributed program transaction are exactly two fresh commits; and
-- historical turn evidence remains one native
-  `:seon.agent.turn/rendered-tx` ref. Request-scoped `:seon.db/db` maps are not
-  persisted as domain state.
+- top level implements the real two-child whole-namespace publication proof
+  before deleting residual replay helpers;
+- one audit orders the remaining ambient-database consumers into complete
+  behavior migrations against the canonical asynchronous `seon.db` API;
+- one proof-design audit grounds the smallest real two-child fixture in the
+  existing operator and execution owners; and
+- one artifact audit plans deletion of old manifest readers and duplicated
+  identity construction without confusing a necessary current format
+  discriminator with parallel function implementations.
 
 Next refills are complete consumer cohorts after the child contract settles and
 test-gate conversion
@@ -1468,7 +1469,7 @@ receives that identical value as its parsed database source; `execute-many`
 returns results only and no longer pretends to echo request identity. Pinned
 compiled reads inherit the value through the child transaction context, while
 write fencing remains explicit on the individual transaction or targeted run
-CAS. Focused execution and host proof passes 8 tests/47 assertions.
+CAS.
 
 Source audit also found that program publication was already one accepted eval
 transaction. The visibility defect was seven execution queries treating
@@ -1483,8 +1484,12 @@ complete schema projection, concatenates one current section per runtime
 namespace, and lets `cljs.js` own dependency order, cycles, and load-once. A
 changed digest takes the existing fresh-child and one-retry path on the next
 invocation. There is no form replay, program broadcast, per-agent transaction,
-or eager idle-child wake. Focused shared-program proof passes 3 tests/22
-assertions. Exact source and decisions are in
+or eager idle-child wake. The host regression proves the stale child receives
+the invocation once, is killed, exactly one fresh child receives the same
+invocation once, and no third attempt is possible. The complete execution and
+host gate passes 30 tests/129 assertions; the remaining integration proof uses
+two real Bun children and an accepted database program change. Exact source and
+decisions are in
 [[research/universal-current-program-publication-audit-2026-07-16]].
 
 The cold schema audit corrects one temporary workaround rather than preserving

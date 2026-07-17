@@ -4,9 +4,7 @@
    [cognitect.transit :as transit]
    [clojure.walk :as walk]
    [shadow.cljs.devtools.client.env :as shadow-env]
-   [seon.agent.home :as home]
    [seon.db :as db]
-   [seon.db.coordinate]
    [seon.db.protocol :as db.protocol]
    [seon.error :as error]
    [seon.eval :as eval]
@@ -14,7 +12,7 @@
 
 ;;; Data contract
 
-(def protocol-version 2)
+(def protocol-version 3)
 (def maximum-invocation-ms (* 10 60 1000))
 (def maximum-result-bytes
   ;; Reserve room for the terminal envelope inside the database protocol's
@@ -49,8 +47,6 @@
 (schema/register! ::result-limit-bytes
                   [:int {:min 1 :max maximum-result-bytes}])
 (schema/register! ::run-fence [:map-of :qualified-keyword :any])
-(schema/register! ::coordinate :seon.db.coordinate/coordinate)
-(schema/register! ::database-attachment :seon.db.coordinate/attachment)
 (schema/register! ::shadow-build-id [:string {:min 1}])
 (schema/register! ::bun-version [:string {:min 1}])
 (schema/register! ::database-selection :seon.db/open-session-request)
@@ -69,7 +65,7 @@
   [::protocol-version ::protocol-version]
   [::agent-id ::agent-id]
   [::invocation-id ::invocation-id]
-  [::coordinate ::coordinate]
+  [:seon.db/db :seon.db/db]
   [::function-identity ::function-identity]
   [::arguments ::arguments]
   [::deadline-ms ::deadline-ms]
@@ -103,15 +99,14 @@
   [::bun-version ::bun-version]
   [::shadow-build-id ::shadow-build-id]
   [::artifact-digest ::artifact-digest]
-  [::database-attachment ::database-attachment]
-  [::coordinate ::coordinate]])
+  [:seon.db/db :seon.db/db]])
 (schema/register!
  ::result-message
  [:map {:closed true}
   [::message [:= result-message]]
   [::protocol-version ::protocol-version]
   [::invocation-id ::invocation-id]
-  [::coordinate ::coordinate]
+  [:seon.db/db :seon.db/db]
   [::result ::result]
   [::result-bytes ::result-bytes]])
 (schema/register!
@@ -120,7 +115,7 @@
   [::message [:= error-message]]
   [::protocol-version ::protocol-version]
   [::invocation-id ::invocation-id]
-  [::coordinate {:optional true} ::coordinate]
+  [:seon.db/db {:optional true} :seon.db/db]
   [::error ::error]])
 (schema/register!
  ::stopped
@@ -144,7 +139,7 @@
 (schema/register!
  ::prepare-request
  [:map {:closed true}
-  [::coordinate ::coordinate]
+  [:seon.db/db :seon.db/db]
   [::invocation-plans ::invocation-plans]])
 
 (defonce ^:private transit-writer (transit/writer :json))
@@ -216,125 +211,68 @@
 (def ^:private maximum-program-rows 2048)
 (def ^:private maximum-program-bytes (* 3 1024 1024))
 
-(def ^:private authored-namespace-query
+(def ^:private runtime-namespace-query
   '[:find ?name ?source
-    :in $ ?agent-id
     :where
     [?namespace :seon.ns/name ?name]
     [?namespace :seon.ns/source ?source ?tx]
-    [?tx :seon.db/user ?author]
-    [?author :seon.agent/id ?agent-id]
     [?tx :seon.db/process ?process]
     [?process :seon.db.process/id :seon.db.process/repl]])
 
-(def ^:private authored-require-edge-query
+(def ^:private runtime-require-edge-query
   '[:find ?name (pull ?edge [*])
-    :in $ ?agent-id
     :where
     [?namespace :seon.ns/name ?name]
     [?namespace :seon.ns/require-edges ?edge ?tx]
-    [?tx :seon.db/user ?author]
-    [?author :seon.agent/id ?agent-id]
     [?tx :seon.db/process ?process]
     [?process :seon.db.process/id :seon.db.process/repl]])
 
-(def ^:private home-namespace-query
-  '[:find ?home-name ?source
-           (pull ?namespace [{:seon.ns/require-edges [*]}])
-    :in $ ?home-name
-    :where
-    [?namespace :seon.ns/name ?home-name]
-    [?namespace :seon.ns/source ?source]])
-
-(def ^:private authored-function-query
+(def ^:private runtime-function-query
   '[:find ?sym ?source ?ns-name
-    :in $ ?agent-id
     :where
     [?function :seon.fn/sym ?sym]
     [?function :seon.fn/source ?source ?tx]
-    [?tx :seon.db/user ?author]
-    [?author :seon.agent/id ?agent-id]
     [?tx :seon.db/process ?process]
     [?process :seon.db.process/id :seon.db.process/repl]
-    [?function :seon.fn/ns ?namespace ?ns-tx]
-    [?ns-tx :seon.db/user ?ns-author]
-    [?ns-author :seon.agent/id ?agent-id]
-    [?ns-tx :seon.db/process ?ns-process]
-    [?ns-process :seon.db.process/id :seon.db.process/repl]
+    [?function :seon.fn/ns ?namespace]
     [?namespace :seon.ns/name ?ns-name]])
 
-(def ^:private authored-test-query
+(def ^:private runtime-test-query
   '[:find ?sym ?source ?ns-name
-    :in $ ?agent-id
     :where
     [?test :seon.test/sym ?sym]
     [?test :seon.test/source ?source ?tx]
-    [?tx :seon.db/user ?author]
-    [?author :seon.agent/id ?agent-id]
     [?tx :seon.db/process ?process]
     [?process :seon.db.process/id :seon.db.process/repl]
-    [?test :seon.test/ns ?namespace ?ns-tx]
-    [?ns-tx :seon.db/user ?ns-author]
-    [?ns-author :seon.agent/id ?agent-id]
-    [?ns-tx :seon.db/process ?ns-process]
-    [?ns-process :seon.db.process/id :seon.db.process/repl]
+    [?test :seon.test/ns ?namespace]
     [?namespace :seon.ns/name ?ns-name]])
 
 (def ^:private schema-query
   '[:find ?key ?form
-    :in $ ?agent-id
     :where
     [?schema :seon.schema/key ?key]
-    [?schema :seon.schema/form ?form ?tx]
-    (or-join [[?tx ?agent-id]]
-      (and
-        [?tx :seon.db/process ?boot-process]
-        [?boot-process :seon.db.process/id :seon.db.process/boot])
-      (and
-        [?tx :seon.db/user ?author]
-        [?author :seon.agent/id ?agent-id]
-        [?tx :seon.db/process ?repl-process]
-        [?repl-process :seon.db.process/id :seon.db.process/repl]))])
+    [?schema :seon.schema/form ?form]])
 
 (def ^:private function-contract-query
   '[:find ?sym ?form
-    :in $ ?agent-id
     :where
     [?function :seon.fn/sym ?sym]
-    [?function :seon.fn/spec ?form ?spec-tx]
-    [?function :seon.fn/source _ ?source-tx]
-    (or-join [[?source-tx ?spec-tx ?agent-id]]
-      (and
-        [?source-tx :seon.db/process ?source-boot-process]
-        [?source-boot-process :seon.db.process/id :seon.db.process/boot]
-        [?spec-tx :seon.db/process ?spec-boot-process]
-        [?spec-boot-process :seon.db.process/id :seon.db.process/boot])
-      (and
-        [?source-tx :seon.db/user ?source-author]
-        [?source-author :seon.agent/id ?agent-id]
-        [?source-tx :seon.db/process ?source-repl-process]
-        [?source-repl-process :seon.db.process/id :seon.db.process/repl]
-        [?spec-tx :seon.db/user ?spec-author]
-        [?spec-author :seon.agent/id ?agent-id]
-        [?spec-tx :seon.db/process ?spec-repl-process]
-        [?spec-repl-process :seon.db.process/id :seon.db.process/repl]))])
+    [?function :seon.fn/spec ?form]])
 
 (def ^:private invocation-source-query
   '[:find ?sym ?source
-    :in $ ?agent-id [?requested ...]
+    :in $ [?requested ...]
     :where
     [?function :seon.fn/sym ?sym]
     [(= ?sym ?requested)]
     [?function :seon.fn/source ?source ?tx]
-    [?tx :seon.db/user ?author]
-    [?author :seon.agent/id ?agent-id]
     [?tx :seon.db/process ?process]
     [?process :seon.db.process/id :seon.db.process/repl]])
 
-(defn- query-member [query arguments]
+(defn- query-member [database query arguments]
   {::db.protocol/operation db.protocol/query-operation
    ::db.protocol/query-form query
-   ::db.protocol/arguments arguments
+   ::db.protocol/arguments (into [database] arguments)
    :datahike.resource/max-results maximum-program-rows
    :datahike.resource/max-result-weight maximum-program-bytes})
 
@@ -448,7 +386,7 @@
         (.digest "hex"))))
 
 (defn invocation-plan
-  "Build one ordinary authored call plan for a captured render coordinate."
+  "Build one ordinary authored call plan."
   {:malli/schema [:=> [:cat ::agent-id ::function-symbol ::arguments]
                   ::invocation-plan]}
   [agent-id function-symbol arguments]
@@ -461,16 +399,16 @@
 
 (defn compiled-invocation
   "Pin one parent-selected core call to the verified execution artifact."
-  {:malli/schema [:=> [:cat ::agent-id ::function-symbol ::arguments ::coordinate
+  {:malli/schema [:=> [:cat ::agent-id ::function-symbol ::arguments :seon.db/db
                        ::artifact-digest]
                   ::invoke]}
-  [agent-id function-symbol arguments coordinate artifact-digest]
+  [agent-id function-symbol arguments database artifact-digest]
   (let [plan (invocation-plan agent-id function-symbol arguments)]
     (-> plan
         (dissoc ::function-symbol)
         (assoc ::message invoke-message
                ::protocol-version protocol-version
-               ::coordinate coordinate
+               :seon.db/db database
                ::function-identity
                {::function-symbol function-symbol
                 ::artifact-digest artifact-digest}))))
@@ -478,41 +416,27 @@
 (defn ^:async prepare-invocations!
   "Pin ordinary invocation plans to their authored source identities."
   {:malli/schema [:=> [:cat ::prepare-request] :any]}
-  [{::keys [coordinate invocation-plans]}]
-  (let [by-agent (->> invocation-plans
-                      (group-by ::agent-id)
-                      (sort-by key)
-                      vec)
+  [{database :seon.db/db ::keys [invocation-plans]}]
+  (let [requested (->> invocation-plans
+                       (map (comp str ::function-symbol))
+                       distinct
+                       vec)
         acquisition
         (await
          (db/execute-many
-          {::db/coordinate coordinate
-           ::db/max-result-weight (* 1024 1024)
+          {::db/max-result-weight (* 1024 1024)
            ::db/members
-           (mapv (fn [[agent-id plans]]
-                   (query-member invocation-source-query
-                                 [agent-id
-                                  (mapv (comp str ::function-symbol) plans)]))
-                 by-agent)}))
-        _ (when-not (= coordinate (::db/coordinate acquisition))
-            (throw
-             (ex-info "Invocation source acquisition moved coordinates."
-                      {:seon.error/kind :core-bug})))
+           [(query-member database invocation-source-query [requested])]}))
         identities
-        (reduce
-         (fn [known [[agent-id _] member]]
-           (into known
-                 (map (fn [[sym source]]
-                        [[agent-id (symbol sym)]
-                         {::function-symbol (symbol sym)
-                          ::source-digest (source-digest source)}]))
-                 (query-result member)))
-         {}
-         (map vector by-agent (::db/results acquisition)))]
+        (into {}
+              (map (fn [[sym source]]
+                     [(symbol sym)
+                      {::function-symbol (symbol sym)
+                       ::source-digest (source-digest source)}]))
+              (query-result (first (::db/results acquisition))))]
     (mapv
      (fn [plan]
-       (let [identity (get identities [(::agent-id plan)
-                                       (::function-symbol plan)])]
+       (let [identity (get identities (::function-symbol plan))]
          (when-not identity
            (throw (ex-info "No current authored source matches the invocation."
                            {::agent-id (::agent-id plan)
@@ -522,36 +446,30 @@
              (dissoc ::function-symbol)
              (assoc ::message invoke-message
                     ::protocol-version protocol-version
-                    ::coordinate coordinate
+                    :seon.db/db database
                     ::function-identity identity))))
      invocation-plans)))
 
 (defn- ^:async acquire-program!
-  [coordinate agent-id]
+  [database]
   (let [result (await
                 (db/execute-many
-                 {::db/coordinate coordinate
-                  ::db/max-result-weight maximum-program-bytes
-                  ::db/members
-                  [(query-member authored-namespace-query [agent-id])
-                   (query-member authored-require-edge-query [agent-id])
-                   (query-member home-namespace-query
-                                 [(keyword (str (home/home-ns agent-id)))])
-                   (query-member authored-function-query [agent-id])
-                   (query-member authored-test-query [agent-id])
-                   (query-member schema-query [agent-id])
-                   (query-member function-contract-query [agent-id])]}))
-        [namespaces edges homes functions tests schemas contracts]
+                  {::db/max-result-weight maximum-program-bytes
+                   ::db/members
+                  [(query-member database runtime-namespace-query [])
+                   (query-member database runtime-require-edge-query [])
+                   (query-member database runtime-function-query [])
+                   (query-member database runtime-test-query [])
+                   (query-member database schema-query [])
+                   (query-member database function-contract-query [])]}))
+        [namespaces edges functions tests schemas contracts]
         (mapv query-result (::db/results result))
-        program (canonical-program namespaces edges homes functions tests
+        program (canonical-program namespaces edges [] functions tests
                                    schemas contracts)
         source-by-symbol
         (into {}
               (map (fn [[sym source & _]] [(symbol sym) source]))
               (concat functions tests))]
-    (when-not (= coordinate (::db/coordinate result))
-      (throw (ex-info "Authored program acquisition moved coordinates."
-                      {:seon.error/kind :core-bug})))
     (assoc program
            ::digest (source-digest program)
            ::source-by-symbol source-by-symbol)))
@@ -621,16 +539,14 @@
 
 (defn- ^:async ensure-program!
   [state invocation function-symbols verify-identity?]
-  (let [program (await (acquire-program! (::coordinate invocation)
-                                         (::agent-id invocation)))]
+  (let [program (await (acquire-program! (:seon.db/db invocation)))]
     (await (install-program! state invocation program function-symbols
                              verify-identity?))))
 
 (defn- ^:async prepare-eval-program!
-  "Prepare the invocation-coordinate program and the child's compiler."
+  "Prepare the invocation database value's program and the child's compiler."
   [state invocation]
-  (let [program (await (acquire-program! (::coordinate invocation)
-                                         (::agent-id invocation)))
+  (let [program (await (acquire-program! (:seon.db/db invocation)))
         symbols (vec (keys (::source-by-symbol program)))
         _ (await (install-program! state invocation program symbols false))]
     {::compile-state (::compile-state @state)
@@ -705,18 +621,18 @@
       (and (map? data) (db.protocol/ordinary-wire-value? data))
       (assoc :seon.error/data data))))
 
-(defn- terminal-message [invocation coordinate bounded]
+(defn- terminal-message [invocation bounded]
   (if (::ok? bounded)
     {::message result-message
      ::protocol-version protocol-version
      ::invocation-id (::invocation-id invocation)
-     ::coordinate coordinate
+     :seon.db/db (:seon.db/db invocation)
      ::result (::value bounded)
      ::result-bytes (::result-bytes bounded)}
     {::message error-message
      ::protocol-version protocol-version
      ::invocation-id (::invocation-id invocation)
-     ::coordinate coordinate
+     :seon.db/db (:seon.db/db invocation)
      ::error (::error bounded)}))
 
 (defn- send! [send-message! message]
@@ -747,7 +663,7 @@
          {::message error-message
           ::protocol-version protocol-version
           ::invocation-id (::invocation-id invocation)
-          ::coordinate (::coordinate invocation)
+          :seon.db/db (:seon.db/db invocation)
           ::error {:seon.error/message message
                    :seon.error/kind kind}})
   state)
@@ -764,7 +680,7 @@
    {::message error-message
     ::protocol-version protocol-version
     ::invocation-id (::invocation-id invocation)
-    ::coordinate (::coordinate invocation)
+    :seon.db/db (:seon.db/db invocation)
     ::error {:seon.error/message "The invocation timed out."
              :seon.error/kind :agent}})
   (exit! 1))
@@ -779,7 +695,7 @@
                               (get (::compiled-functions current)
                                    function-symbol))
         compiled-function (::compiled-function compiled-descriptor)
-        pin-coordinate? (true? (::pin-coordinate? compiled-descriptor))
+        pin-database? (true? (::pin-database? compiled-descriptor))
         remaining (- (::deadline-ms invocation) now-ms)]
     (cond
       (::shutting-down? current)
@@ -840,8 +756,8 @@
                      (fn []
                        (db/with-tx-context
                         (cond-> (or (::run-fence invocation) {})
-                          pin-coordinate?
-                          (assoc ::db/coordinate (::coordinate invocation)))
+                          pin-database?
+                          (assoc :seon.db/db (:seon.db/db invocation)))
                         (fn []
                           (if compiled?
                             (function-value
@@ -863,14 +779,13 @@
                                              (::result-limit-bytes invocation))]
                  (settle-active!
                   state token send-message!
-                  (terminal-message invocation (::coordinate invocation)
-                                    bounded)))))
+                  (terminal-message invocation bounded)))))
             (.catch
              (fn [exception]
                (settle-active!
                 state token send-message!
                 (terminal-message
-                 invocation (::coordinate invocation)
+                 invocation
                  {::ok? false ::error (exception-value exception)})))))
         state))))
 
@@ -883,7 +798,7 @@
        {::message error-message
         ::protocol-version protocol-version
         ::invocation-id invocation-id
-        ::coordinate (get-in active [::invocation ::coordinate])
+        :seon.db/db (get-in active [::invocation :seon.db/db])
         ::error {:seon.error/message "The invocation was canceled."
                  :seon.error/kind :agent}}))))
 
@@ -937,7 +852,7 @@
                      ::compiled-functions compiled-functions})]
     (-> (db/open-session! (::database-selection startup))
         (.then
-         (fn [{::db/keys [attachment coordinate]}]
+         (fn [{database :seon.db/db}]
            (send! send-message!
                   {::message ready-message
                    ::protocol-version protocol-version
@@ -945,8 +860,7 @@
                    ::bun-version (or (.-version js/Bun) "unknown")
                    ::shadow-build-id (::shadow-build-id startup)
                    ::artifact-digest (::artifact-digest startup)
-                   ::database-attachment attachment
-                   ::coordinate coordinate})
+                   :seon.db/db database})
            (on-message!
             (fn [encoded]
               (receive! state encoded send-message! exit! (.now js/Date))))

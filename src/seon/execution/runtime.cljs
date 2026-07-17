@@ -183,7 +183,7 @@
       (assoc :seon.error/kind :core-bug))))
 
 (defn ^:async render-prompt!
-  "Acquire and invoke selected prompt blocks at the active coordinate."
+  "Acquire and invoke selected prompt blocks at the active database value."
   {:malli/schema [:=> [:cat ::render-prompt-request :any]
                   [:or :seon.agent.ctx/rendered-context ::prompt-error]]}
   [{:seon.agent/keys [id] profile :seon.agent.ctx/profile} invoke-selected!]
@@ -391,19 +391,19 @@
    {::execution/compiled-function
     (fn [arguments invoke-selected! _compile-state! _prepare-program!]
       (apply render-prompt! (conj arguments invoke-selected!)))
-    ::execution/pin-coordinate? true}
+    ::execution/pin-database? true}
 
    'seon.execution.runtime/eval-batch!
    {::execution/compiled-function
     (fn [arguments _invoke-selected! _compile-state! prepare-program!]
       (apply eval-batch! (conj arguments prepare-program!)))
-    ::execution/pin-coordinate? false}
+    ::execution/pin-database? false}
 
    'seon.execution.runtime/render-agent-view!
    {::execution/compiled-function
     (fn [arguments invoke-selected! _compile-state! _prepare-program!]
       (apply render-agent-view! (conj arguments invoke-selected!)))
-    ::execution/pin-coordinate? true}})
+    ::execution/pin-database? true}})
 
 (defn -main
   "Start the execution child from the complete runtime composition root."

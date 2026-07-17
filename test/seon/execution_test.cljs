@@ -4,21 +4,24 @@
    [seon.db :as db]
    [seon.db.protocol :as protocol]
    [seon.eval :as seval]
-   [seon.execution :as execution]))
+   [seon.execution :as execution]
+   [seon.schema :as schema]))
 
 (def digest (apply str (repeat 64 "a")))
-(def coordinate
-  {:seon.db.coordinate/database-id #uuid "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
-   :seon.db.coordinate/branch :db
-   :seon.db.coordinate/commit-id #uuid "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
-   :seon.db.coordinate/t 42})
+(def database
+  {:db-name "test"
+   :t 42
+   :as-of nil
+   :since nil
+   :history false
+   :datahike/commit-id #uuid "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"})
 
 (def invocation
   {::execution/message execution/invoke-message
    ::execution/protocol-version execution/protocol-version
    ::execution/agent-id "agent-1"
    ::execution/invocation-id "invoke-1"
-   ::execution/coordinate coordinate
+   :seon.db/db database
    ::execution/function-identity
    {::execution/function-symbol 'my.render/view
     ::execution/source-digest digest}
@@ -58,9 +61,9 @@
                      ::execution/compiled-functions
                      {prompt-function
                       {::execution/compiled-function (fn [_ _ _ _] nil)
-                       ::execution/pin-coordinate? true}}})
+                       ::execution/pin-database? true}}})
         request (execution/compiled-invocation
-                 "agent-1" 'my.render/view [] coordinate digest)]
+                 "agent-1" 'my.render/view [] database digest)]
     (@#'execution/receive! state (execution/encode-message request)
      (decoded-sender messages) (fn [_]) 0)
     (is (= execution/error-message
@@ -76,10 +79,10 @@
                      ::execution/compiled-functions
                      {prompt-function
                       {::execution/compiled-function (fn [_ _ _ _] nil)
-                       ::execution/pin-coordinate? true}}})
+                       ::execution/pin-database? true}}})
         wrong-digest (apply str (repeat 64 "b"))
         request (execution/compiled-invocation
-                 "agent-1" prompt-function [1] coordinate wrong-digest)]
+                 "agent-1" prompt-function [1] database wrong-digest)]
     (with-redefs [db/open-session!
                   (fn [_]
                     (swap! opens inc)
@@ -106,13 +109,12 @@
                            (is (fn? invoke-selected!))
                            (is (fn? compile-state!))
                            (is (fn? prepare-program!))
-                           (is (= coordinate
-                                  (::db/coordinate
-                                   (db/current-tx-context))))
+                           (is (= database
+                                  (:seon.db/db (db/current-tx-context))))
                            {:seon.execution-test/value (first arguments)})
-                         ::execution/pin-coordinate? true}}})
+                         ::execution/pin-database? true}}})
           request (execution/compiled-invocation
-                   "agent-1" prompt-function [7] coordinate digest)]
+                   "agent-1" prompt-function [7] database digest)]
       (with-redefs [db/open-session! (fn [_] (js/Promise.resolve nil))
                     db/execute-many
                     (fn [_]
@@ -149,18 +151,18 @@
                   {prompt-function
                    {::execution/compiled-function
                     (fn [_ _ _ _]
-                      {:seon.execution-test/pinned-coordinate
-                       (::db/coordinate (db/current-tx-context))})
-                    ::execution/pin-coordinate? false}}})
+                      {:seon.execution-test/pinned-database
+                       (:seon.db/db (db/current-tx-context))})
+                    ::execution/pin-database? false}}})
           request (execution/compiled-invocation
-                   "agent-1" prompt-function [] coordinate digest)]
+                   "agent-1" prompt-function [] database digest)]
       (with-redefs [db/open-session! (fn [_] (js/Promise.resolve nil))]
         (@#'execution/receive! state (execution/encode-message request)
          (decoded-sender messages) (fn [_]) 0)
         (-> (js/Promise. (fn [resolve _] (js/setTimeout resolve 0)))
             (.then
              (fn [_]
-               (is (= {:seon.execution-test/pinned-coordinate nil}
+               (is (= {:seon.execution-test/pinned-database nil}
                       (::execution/result (first @messages))))
                (done)))
             (.catch
@@ -241,14 +243,12 @@
                      (.digest "hex"))]
     (is (= expected (execution/source-digest source)))))
 
-(deftest authored-program-acquisition-is-one-agent-owned-snapshot
+(deftest runtime-program-acquisition-is-one-shared-database-value
   (async done
     (let [request (atom nil)
           results
           [#{[:my.agent.agent-1 "(ns my.agent.agent-1)"]}
            #{}
-           #{[:my.agent.agent-1 "(ns my.agent.agent-1)"
-              {:seon.ns/require-edges []}]}
            #{["my.agent.agent-1/run" "(defn run [] :ok)"
               :my.agent.agent-1]}
            #{["my.agent.agent-1/check" "(deftest check (is true))"
@@ -256,8 +256,7 @@
            #{}
            #{}]
           response
-          {::db/coordinate coordinate
-           ::db/results
+          {::db/results
            (mapv (fn [result]
                    {::protocol/success? true
                     :datahike.query/result result})
@@ -267,11 +266,13 @@
                       (reset! request value)
                       (js/Promise.resolve response))]
         (-> (js/Promise.resolve
-             (@#'execution/acquire-program! coordinate "agent-1"))
+             (@#'execution/acquire-program! database))
             (.then
              (fn [program]
-               (is (= 7 (count (::db/members @request))))
-               (is (= coordinate (::db/coordinate @request)))
+               (is (= 6 (count (::db/members @request))))
+               (is (every? #(= database
+                                (first (::protocol/arguments %)))
+                           (::db/members @request)))
                (let [row (first (::execution/namespace-rows program))]
                  (is (= :my.agent.agent-1 (:seon.ns/name row)))
                  (is (= ['my.agent.agent-1/run]
@@ -289,7 +290,8 @@
 
 (deftest authored-loader-loads-each-selected-namespace-once
   (async done
-    (-> (seval/load-authored-program!
+    (let [schema-state (schema/snapshot-state)]
+      (-> (seval/load-authored-program!
          {:seon.execution/schema-forms []
           :seon.execution/function-contracts []
           :seon.execution/namespace-rows
@@ -321,7 +323,10 @@
         (.catch
          (fn [error]
            (is false (str "multi-target load rejected: " error))))
-        (.finally done))))
+          (.finally
+           (fn []
+             (schema/restore-state! schema-state)
+             (done)))))))
 
 (deftest selected-compiled-functions-skip-authored-acquisition
   (async done
@@ -338,11 +343,12 @@
                         (fn [value invoke-selected!]
                           (is (fn? invoke-selected!))
                           (inc value))))]
-        (-> (@#'execution/invoke-selected!
+        (-> (js/Promise.resolve
+             (@#'execution/invoke-selected!
               state invocation
               [{::execution/function-symbol 'seon.test/compiled
                 ::execution/invoke-selected? true
-                ::execution/arguments [41]}])
+                ::execution/arguments [41]}]))
             (.then
               (fn [results]
                 (is (zero? @reads))
@@ -361,10 +367,11 @@
                     (fn [sym]
                       (when (= 'seon.test/renderer sym)
                         (fn [value] (inc value))))]
-        (-> (@#'execution/invoke-selected!
+        (-> (js/Promise.resolve
+             (@#'execution/invoke-selected!
               state invocation
               [{::execution/function-symbol 'seon.test/renderer
-                ::execution/arguments [41]}])
+                ::execution/arguments [41]}]))
             (.then
               (fn [results]
                 (is (= [{::execution/ok? true ::execution/value 42}]
@@ -407,24 +414,28 @@
          (fn [request]
            (swap! requests conj request)
            (js/Promise.resolve
-            {::db/coordinate coordinate
-             ::db/results
+            {::db/results
              [{::protocol/success? true
                :datahike.query/result
                [["my.one/first" (get source-by-symbol "my.one/first")]
-                ["my.one/second" (get source-by-symbol "my.one/second")]]}
-              {::protocol/success? true
-               :datahike.query/result
-               [["my.two/run" (get source-by-symbol "my.two/run")]]}]}))]
+                ["my.one/second" (get source-by-symbol "my.one/second")]
+                ["my.two/run" (get source-by-symbol "my.two/run")]]}]}))]
         (-> (execution/prepare-invocations!
-             {::execution/coordinate coordinate
+             {:seon.db/db database
               ::execution/invocation-plans plans})
             (.then
              (fn [prepared]
                (is (= 1 (count @requests)))
-               (is (= coordinate (::db/coordinate (first @requests))))
-               (is (= 2 (count (::db/members (first @requests))))
-                   "one execute-many member is issued per agent")
+               (is (every? #(= database
+                                (first (::protocol/arguments %)))
+                           (::db/members (first @requests))))
+               (is (= 1 (count (::db/members (first @requests))))
+                   "one source query covers every agent plan")
+               (let [member (first (::db/members (first @requests)))
+                     [_ requested] (::protocol/arguments member)]
+                 (is (= #{"my.one/first" "my.one/second" "my.two/run"}
+                        (set requested))
+                     "source identity is database-wide rather than per-agent"))
                (is (= (mapv ::execution/invocation-id plans)
                       (mapv ::execution/invocation-id prepared))
                    "prepared invocations retain caller position")
@@ -455,7 +466,7 @@
        {::execution/message execution/result-message
         ::execution/protocol-version execution/protocol-version
         ::execution/invocation-id "invoke-1"
-        ::execution/coordinate coordinate
+        :seon.db/db database
         ::execution/result {:my.render/value 1}
         ::execution/result-bytes 32})))
 
