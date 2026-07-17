@@ -598,7 +598,7 @@
 
 ;;; Transaction reports
 
-(declare database-value)
+(declare database-value recovered-temporary-ids)
 
 (defn- transaction-report-data
   [database-name db-before-descriptor report request-id]
@@ -610,12 +610,14 @@
      :db-after (database-value database-name db-after)
      :tx-data (transaction-data->protocol transaction-data)
      :tempids
-     (into {}
-           (remove
-            (fn [[tempid _entity]]
-              (or (= :db/current-tx tempid)
-                  (internal-tempid? tempid))))
-           (:tempids report))
+     (merge
+      (into {}
+            (remove
+             (fn [[tempid _entity]]
+               (or (= :db/current-tx tempid)
+                   (internal-tempid? tempid))))
+            (:tempids report))
+      (recovered-temporary-ids db-after (basis-t-of db-after)))
      :tx-meta (public-transaction-meta (:tx-meta report))
      ::protocol/request-id request-id}))
 

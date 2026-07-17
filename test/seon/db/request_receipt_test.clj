@@ -178,8 +178,8 @@
       (is (true? (::protocol/recovered? recovered-response)))
       (is (= (::protocol/coordinate first-response)
              (::protocol/coordinate recovered-response)))
-      (is (= (::protocol/temporary-ids first-response)
-             (::protocol/temporary-ids recovered-response)))
+      (is (= (:tempids first-response)
+             (:tempids recovered-response)))
       (is (empty?
            (filter protocol/reserved-attributes
                    (map second (::protocol/transaction-data first-response))))

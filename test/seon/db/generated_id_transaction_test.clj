@@ -148,7 +148,7 @@
     (is (not= thing-id other-id))
     (is (= other-id (get-in stored [:generated.thing/other :db/id])))
     (is (= {"thing-temp" thing-id "other-temp" other-id}
-           (select-keys (::protocol/temporary-ids response)
+           (select-keys (:tempids response)
                         ["thing-temp" "other-temp"])))))
 
 (deftest nested-component-can-own-a-generated-identity
