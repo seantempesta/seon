@@ -6,14 +6,14 @@
    the next REPL forms. This ns owns the seon side of that contract:
 
      - [[context]] — the encoder input. NOT a new renderer: the compiled
-       prompt child invoked at a complete coordinate with the `:autocomplete`
+       prompt child invoked at one immutable database value with the `:autocomplete`
        render PROFILE (db-stored `:seon.config/context-profiles`, code
        default [[context-blocks]]) — the existing :plan / :transcript
        functions under tight per-block token caps.
      - [[rate!]] + the `::rating`/`::tag` curation attrs — mark turns
        gold/good/excluded for the training corpus.
-     - [[export!]] — walk every agent's turns (`seon.agent.ctx/agent-turns`),
-       render [[context]] at each turn's complete rendered coordinate, pair it
+     - [[export!]] — query every agent's turns in one captured database value,
+       render [[context]] as of each turn's rendered transaction, pair it
        with the turn's ok `:seon.eval/source` forms, and write one canonical,
        content-addressed manifest under `data/tune/`.
 
@@ -39,7 +39,6 @@
     [seon.ai.tokens :as tokens]
     [seon.config :as config]
     [seon.db :as db]
-    [seon.db.coordinate :as coordinate]
     [seon.schema :as schema]))
 
 ;; ============================================================
@@ -67,6 +66,13 @@
    [:seon.agent.turn/id {:optional true} :seon.agent.turn/id]
    [::error {:optional true} ::error]])
 
+(defn- result!
+  "Return an ordinary database result or throw for the outer value boundary."
+  [value]
+  (if (:seon.error/message value)
+    (throw (ex-info (:seon.error/message value) value))
+    value))
+
 (defn ^:async rate!
   "Rate a turn for the autocomplete corpus (:gold | :good | :excluded).
 
@@ -75,18 +81,28 @@
    upsert minting a hollow turn). → `{::ok? true …}` or a fail envelope."
   {:malli/schema [:=> [:cat ::rate-request] ::rate-response]}
   [{turn-id :seon.agent.turn/id rating ::rating tags ::tag}]
-  (let [turn (db/entity-lazy {:seon.db/ref [:seon.agent.turn/id turn-id]})]
-    (if (nil? (:seon.agent.turn/id turn))
-      {::ok? false ::error (str "rate!: no turn " (pr-str turn-id)
-                                " — pass a real :seon.agent.turn/id")}
-      (let [res (await (db/transact!
-                         {:seon.db/tx-data
-                          [(cond-> {:seon.agent.turn/id turn-id
-                                    ::rating            rating}
-                             (seq tags) (assoc ::tag (vec tags)))]}))]
-        (if (:seon.db/ok? res)
-          {::ok? true :seon.agent.turn/id turn-id}
-          {::ok? false ::error (str (:seon.db/error res))})))))
+  (let [database (await (db/db))]
+    (if (:seon.error/message database)
+      {::ok? false ::error (:seon.error/message database)}
+      (let [turn (await (db/entity database [:seon.agent.turn/id turn-id]))]
+        (cond
+          (:seon.error/message turn)
+          {::ok? false ::error (:seon.error/message turn)}
+
+          (nil? (:seon.agent.turn/id turn))
+          {::ok? false ::error (str "rate!: no turn " (pr-str turn-id)
+                                    " — pass a real :seon.agent.turn/id")}
+
+          :else
+          (let [res (await (db/transact!
+                             {:seon.db/db database
+                              :seon.db/tx-data
+                              [(cond-> {:seon.agent.turn/id turn-id
+                                        ::rating            rating}
+                                 (seq tags) (assoc ::tag (vec tags)))]}))]
+            (if (:seon.error/message res)
+              {::ok? false ::error (:seon.error/message res)}
+              {::ok? true :seon.agent.turn/id turn-id})))))))
 
 ;; ============================================================
 ;; The projection PROFILE — a block list in the exact `:seon.agent/ctx`
@@ -138,29 +154,30 @@
     ;; render stays a pure fn of the db value.
     :seon.agent.ctx/escape-clipping? true}])
 
-(defn- profile-from-db
+(defn- ^:async profile-from-db
   "The `:autocomplete` entry of the db-stored context profiles, or nil.
 
    Reads `:seon.config/context-profiles` off the `:seon.config` singleton
    IN the passed db VALUE (never the live conn / config-view) — an as-of
    render regenerates under the profile in force at that t. nil when the
    store predates the attr or carries no `:autocomplete` profile."
-  [db]
-  (when (and db (contains? (db/installed-schema db)
-                           :seon.config/context-profiles))
-    (some->> (:seon.config/context-profiles
-               (db/entity {:seon.db/db db
-                           :seon.db/ref [:seon.config/id
-                                         config/cluster-config-id]}))
-             (db/decode-edn-value :seon.config/context-profiles)
-             :autocomplete
-             seq
-             vec)))
+  [database]
+  (let [row (await
+              (db/pull database
+                       [:seon.config/context-profiles]
+                       [:seon.config/id config/cluster-config-id]))]
+    (if (:seon.error/message row)
+      row
+      (some->> (:seon.config/context-profiles row)
+               (db/decode-edn-value :seon.config/context-profiles)
+               :autocomplete
+               seq
+               vec))))
 
 (schema/register! ::context-request
   [:map
    [:seon.agent/id :string]
-   [:seon.db.coordinate/coordinate :seon.db.coordinate/coordinate]
+   [:seon.db/db :seon.db/db]
    [:seon.agent.ctx/profile {:optional true} :seon.agent.ctx/profile]])
 
 (schema/register! ::context-result
@@ -171,42 +188,23 @@
     [:seon.error/kind :keyword]
     [:seon.error/data {:optional true} :map]]])
 
-(defn ^:async ^:private profile-at-coordinate
-  [point]
-  (let [config-row
-        (await
-          (db/pull
-            {::db/coordinate point
-             ::db/pull-pattern [:seon.config/context-profiles]
-             ::db/ref [:seon.config/id config/cluster-config-id]
-             ::db/max-work 100000
-             ::db/max-results 1
-             ::db/max-result-weight 65536}))]
-    (if (:seon.error/message config-row)
-      config-row
-      (or (some->> (:seon.config/context-profiles config-row)
-                   (db/decode-edn-value :seon.config/context-profiles)
-                   :autocomplete
-                   seq
-                   vec)
-          context-blocks))))
-
 (defn ^:async context
   "The autocomplete situation projection for one agent, as a bare String.
 
    The encoder input (byte-exact contract): the same compiled owner as the
    real prompt, invoked with the database-owned `:autocomplete` profile at the
-   supplied complete coordinate. The default [[context-blocks]] applies when
-   that coordinate has no stored profile. Errors remain values."
+   supplied immutable database value. The default [[context-blocks]] applies
+   when that value has no stored profile. Errors remain values."
   {:malli/schema [:=> [:cat ::context-request] ::context-result]}
   [{id :seon.agent/id
-    point :seon.db.coordinate/coordinate
+    database :seon.db/db
     supplied-profile :seon.agent.ctx/profile}]
-  (let [profile (or supplied-profile
-                    (await (profile-at-coordinate point)))]
+  (let [stored-profile (when-not supplied-profile
+                         (await (profile-from-db database)))
+        profile (or supplied-profile stored-profile context-blocks)]
     (if (:seon.error/message profile)
       profile
-      (let [rendered (await (turn/render-prompt id point profile))]
+      (let [rendered (await (turn/render-prompt id database profile))]
         (if (:seon.error/message rendered)
           rendered
           (:seon.render/text rendered))))))
@@ -241,12 +239,14 @@
           [{} {}]
           (home/home-requires-for agent-id)))
 
-(defn- indexed-fn-syms
+(defn- ^:async indexed-fn-syms
   "The set of every `:seon.fn/sym` string in db value `db`."
-  [db]
+  [database]
   (into #{} (map first)
-        (db/query {:seon.db/db db
-                   :seon.db/query '[:find ?s :where [_ :seon.fn/sym ?s]]})))
+        (result!
+          (await
+            (db/query {:seon.db/db database
+                       :seon.db/query '[:find ?s :where [_ :seon.fn/sym ?s]]})))))
 
 (defn- called-syms
   "Full `:seon.fn/sym` strings referenced by `target` source text.
@@ -274,18 +274,20 @@
                         refers)]
     (->> (concat qualified referred) distinct sort vec)))
 
-(defn- fn-record
+(defn- ^:async fn-record
   "The indexed row and compact card for fn `sym-str`, or nil.
 
    ONE mechanism with the `:namespaces` compact cards —
    `seon.agent.ctx.namespaces/compact-fn-head` over the indexed
    `:seon.fn` row."
-  [db sym-str]
-  (when (db/entity-lazy {:seon.db/db db :seon.db/ref [:seon.fn/sym sym-str]})
-    (let [row (db/pull {:seon.db/db db
-                        :seon.db/ref [:seon.fn/sym sym-str]
-                        :seon.db/pull-pattern '[:seon.fn/sym :seon.fn/arglists
-                                                :seon.fn/doc :seon.fn/spec]})]
+  [database sym-str]
+  (let [row (result!
+              (await
+                (db/pull database
+                         '[:seon.fn/sym :seon.fn/arglists
+                           :seon.fn/doc :seon.fn/spec]
+                         [:seon.fn/sym sym-str])))]
+    (when (:seon.fn/sym row)
       {::fn-row row ::card (ns-cards/compact-fn-head row)})))
 
 (def ^:private keyword-token-re
@@ -383,12 +385,6 @@
 (defn- sha256 [s]
   (-> (.createHash node-crypto "sha256") (.update s "utf8") (.digest "hex")))
 
-(defn- coordinate-data [point]
-  {"database_id" (str (::coordinate/database-id point))
-   "branch" (name (::coordinate/branch point))
-   "commit_id" (str (::coordinate/commit-id point))
-   "t" (::coordinate/t point)})
-
 (defn- split-for [row-id]
   (let [bucket (mod (js/parseInt (subs row-id 0 8) 16) 100)]
     (cond (< bucket 80) "development"
@@ -425,42 +421,41 @@
       (throw (ex-info "autocomplete export requires the canonical runtime artifact manifest"
                       {:path path})))
     (let [manifest (reader/read-string (.readFileSync nfs path "utf8"))
-          identity (select-keys manifest
-                     [:seon.dev.artifact/version :seon.dev.artifact/flavor
-                      :seon.dev.artifact/client-build-id
-                      :seon.dev.artifact/writer-digest
-                      :seon.dev.artifact/client-digest
-                      :seon.dev.artifact/bootstrap-digest
-                      :seon.dev.artifact/css-digest
-                      :seon.dev.artifact/application-digest])]
-      {"identity_sha256" (sha256 (canonical-json identity))
-       "manifest" identity})))
+          digest (:seon.dev.artifact/application-digest manifest)]
+      (when-not (and (string? digest) (re-matches #"[0-9a-f]{64}" digest))
+        (throw (ex-info "runtime artifact manifest has no valid application digest"
+                        {:path path})))
+      {"application_digest" digest})))
 
-(defn- config-identity [db]
+(defn- ^:async config-identity [database]
   ;; Query attr presence rather than using a lookup ref: historical/test
   ;; databases can carry the singleton before `:seon.config/id` was unique.
-  (let [eid (ffirst (db/query
-                      {:seon.db/db db
-                       :seon.db/query
-                       '[:find ?e :in $ ?id :where [?e :seon.config/id ?id]]
-                       :seon.db/args [config/cluster-config-id]}))
-        row (some-> (when eid
-                      (db/entity-lazy {:seon.db/db db :seon.db/ref eid}))
+  (let [eid (ffirst
+              (result!
+                (await
+                (db/query
+                  {:seon.db/db database
+                   :seon.db/query
+                   '[:find ?e :in $ ?id :where [?e :seon.config/id ?id]]
+                   :seon.db/args [config/cluster-config-id]}))))
+        row (some-> (when eid (result! (await (db/entity database eid))))
                     (dissoc :db/id))]
     (sha256 (canonical-json (or row {})))))
 
-(defn- profile-identity [db]
-  (sha256 (canonical-json (or (profile-from-db db) context-blocks))))
+(defn- ^:async profile-identity [database]
+  (let [profile (await (profile-from-db database))]
+    (if (:seon.error/message profile)
+      profile
+      (sha256 (canonical-json (or profile context-blocks))))))
 
 (defn- rejection-record
-  [{::keys [agent-id turn point reason target]}]
+  [{::keys [agent-id turn database reason target]}]
   (let [base (cond-> {"agent" agent-id
                       "turn_id" (:seon.agent.turn/id turn)
                       "projection_mode" "observed"
                       "attempted_target" (or target "")
                       "reason" reason}
-               (and point (not (:seon.error/message point)))
-               (assoc "coordinate" (coordinate-data point)))
+               database (assoc "db" database))
         id (sha256 (canonical-json base))]
     (assoc base "rejection_id" id)))
 
@@ -495,12 +490,12 @@
    [::turns-walked     {:optional true} ::count]
    [::rows             {:optional true} ::count]
    [::skipped-no-evals {:optional true} ::count]
-   [::skipped-no-coordinate {:optional true} ::count]
+   [::skipped-no-db {:optional true} ::count]
    [::skipped-excluded {:optional true} ::count]
    [::skipped-context  {:optional true} ::count]
    [::cards-missed     {:optional true} ::count]
-   ;; Byte-exactness self-check: every row's context is rendered TWICE
-   ;; at the same complete coordinate; a mismatch is a determinism bug.
+   ;; Byte-exactness self-check: every row's context is rendered twice
+   ;; at the same immutable database value; a mismatch is a determinism bug.
    [::determinism-mismatches {:optional true} ::count]
    [::context-tokens   {:optional true} ::token-summary]
    [::target-tokens    {:optional true} ::token-summary]
@@ -509,18 +504,18 @@
 (defn ^:async export!
   "Export every agent's turns as one content-addressed autocomplete manifest.
 
-   Walks agent → runs → turns (`seon.agent.ctx/agent-turns`) over db value
-   `:seon.db/db` (default: the live db). A turn contributes one row when it
-   has ok `:seon.eval/source` forms AND a complete rendered database
-   coordinate; turns rated `:excluded` are dropped. Per row:
+   Walks agent → runs → turns over one captured `:seon.db/db` value (default:
+   the current value). A turn contributes one row when it has ok
+   `:seon.eval/source` forms and a `:seon.agent.turn/rendered-tx` ref; turns
+   rated `:excluded` are dropped. Per row:
 
-     context — [[context]] rendered against the exact retained coordinate
+     context — [[context]] rendered as of the retained transaction
                (the pre-turn database snapshot the model actually saw)
      target  — the turn's ok eval sources, in order, newline-joined
      cards   — compact fn cards for the fns the target CALLS (direct +
                home-alias + refer resolution) plus `::distractors`
                (default 3) deterministic distractor cards
-     meta    — turn-id, agent, complete coordinate, database, projection-sha
+     meta    — turn-id, agent, database value, projection-sha
                (git HEAD unless passed), and rating when present
 
    Rows, referenced-schema closures, configurations, profiles, deterministic
@@ -533,31 +528,44 @@
   {:malli/schema [:=> [:cat ::export-request] ::export-response]}
   [{db :seon.db/db ::keys [out-path projection-sha distractors]}]
   (try
-    (let [db    (or db @db/*conn*)
+    (let [database-value (result! (or db (await (db/db))))
           sha   (or projection-sha (git-head-sha))
           k     (or distractors 3)
           database (database-name)
           runtime-artifact (runtime-artifact-identity)
           source (source-identity sha)
-          agent-ids (->> (db/query {:seon.db/db db
-                                    :seon.db/query
-                                    '[:find ?id :where [_ :seon.agent/id ?id]]})
-                         (map first)
-                         sort)
-          ;; Attr-presence guard: an old database may predate rating. Complete
-          ;; turn-coordinate absence is handled by `turn/rendered-coordinate`.
-          installed  (db/installed-schema db)
-          rating-ok? (contains? installed ::rating)
+          turn-pairs
+          (result!
+            (await
+              (db/query
+                {:seon.db/db database-value
+                 :seon.db/query
+                 '[:find ?agent-id ?turn
+                   :where
+                   [?agent :seon.agent/id ?agent-id]
+                   [?run :seon.agent.run/agent ?agent]
+                   [?turn :seon.agent.turn/run ?run]]})))
+          agent-ids (->> turn-pairs (map first) distinct sort vec)
+          turn-eids (mapv second turn-pairs)
+          turn-rows
+          (result!
+            (await
+              (db/pull-many
+                database-value
+                '[:seon.agent.turn/id :seon.agent.turn/rendered-tx
+                  :seon.repl.autocomplete/rating
+                  {:seon.agent.turn/evals
+                   [:seon.eval/at :seon.eval/ok? :seon.eval/source]}]
+                turn-eids)))
+          turns-by-eid (zipmap turn-eids turn-rows)
           candidates
-          (mapcat (fn [agent-id]
-                    (let [[aliases refers] (home-alias-maps agent-id)]
-                      (map (fn [turn]
-                             {::agent-id agent-id
-                              ::aliases aliases
-                              ::refers refers
-                              ::turn turn})
-                           (ctx/agent-turns agent-id db))))
-                  agent-ids)
+          (mapv (fn [[agent-id turn-eid]]
+                  (let [[aliases refers] (home-alias-maps agent-id)]
+                    {::agent-id agent-id
+                     ::aliases aliases
+                     ::refers refers
+                     ::turn (get turns-by-eid turn-eid)}))
+                turn-pairs)
           contributions
           (await
             (js/Promise.all
@@ -571,14 +579,17 @@
                                        (map :seon.eval/source)
                                        (remove str/blank?)
                                        vec)
-                          point   (turn/rendered-coordinate turn)
-                          rating  (when rating-ok? (::rating turn))]
+                          rendered-tx (let [value (:seon.agent.turn/rendered-tx turn)]
+                                        (if (map? value) (:db/id value) value))
+                          historical-db (when (int? rendered-tx)
+                                          (db/as-of database-value rendered-tx))
+                          rating  (::rating turn)]
                       (cond
                         (= :excluded rating)
                         {::turns-walked 1 ::skipped-excluded 1
                          ::rejections
                          [(rejection-record
-                            {::agent-id agent-id ::turn turn ::point point
+                            {::agent-id agent-id ::turn turn ::database historical-db
                              ::target (str/join "\n" sources)
                              ::reason "excluded-rating"})]}
 
@@ -586,49 +597,44 @@
                         {::turns-walked 1 ::skipped-no-evals 1
                          ::rejections
                          [(rejection-record
-                            {::agent-id agent-id ::turn turn ::point point
+                            {::agent-id agent-id ::turn turn ::database historical-db
                              ::target "" ::reason "no-successful-evals"})]}
 
-                        (:seon.error/message point)
-                        {::turns-walked 1 ::skipped-no-coordinate 1
+                        (nil? historical-db)
+                        {::turns-walked 1 ::skipped-no-db 1
                          ::rejections
                          [(rejection-record
                             {::agent-id agent-id ::turn turn
                              ::target (str/join "\n" sources)
-                             ::reason "incomplete-rendered-coordinate"})]}
+                             ::reason "missing-rendered-transaction"})]}
 
                         :else
-                        (let [aodb (await (db/at-coordinate db/*conn* point))]
-                          (if (:seon.error/message aodb)
-                            {::turns-walked 1 ::skipped-no-coordinate 1
-                             ::rejections
-                             [(rejection-record
-                                {::agent-id agent-id ::turn turn ::point point
-                                 ::target (str/join "\n" sources)
-                                 ::reason "unresolvable-rendered-coordinate"})]}
-                            (let [profile (or (profile-from-db aodb)
-                                              context-blocks)
-                                  ctext (await
-                                          (context
-                                            {:seon.agent/id agent-id
-                                             :seon.db.coordinate/coordinate point
-                                             :seon.agent.ctx/profile profile}))
-                                  ;; The second child call proves byte stability.
-                                  ;; A first-call error stops immediately.
-                                  ctext2 (when-not (:seon.error/message ctext)
-                                           (await
-                                             (context
-                                               {:seon.agent/id agent-id
-                                                :seon.db.coordinate/coordinate point
-                                                :seon.agent.ctx/profile profile})))
-                                  target (str/join "\n" sources)]
-                              (cond
+                        (let [aodb historical-db
+                              stored-profile (await (profile-from-db aodb))
+                              profile (or stored-profile context-blocks)
+                              ctext (await
+                                      (if (:seon.error/message profile)
+                                        profile
+                                        (context
+                                          {:seon.agent/id agent-id
+                                           :seon.db/db aodb
+                                           :seon.agent.ctx/profile profile})))
+                              ;; The second child call proves byte stability.
+                              ;; A first-call error stops immediately.
+                              ctext2 (when-not (:seon.error/message ctext)
+                                       (await
+                                         (context
+                                           {:seon.agent/id agent-id
+                                            :seon.db/db aodb
+                                            :seon.agent.ctx/profile profile})))
+                              target (str/join "\n" sources)]
+                          (cond
                                 (:seon.error/message ctext)
                                 {::turns-walked 1
                                  ::skipped-context 1
                                  ::rejections
                                  [(rejection-record
-                                    {::agent-id agent-id ::turn turn ::point point
+                                    {::agent-id agent-id ::turn turn ::database aodb
                                      ::target target
                                      ::reason "context-render-failed"})]}
 
@@ -637,7 +643,7 @@
                                  ::skipped-context 1
                                  ::rejections
                                  [(rejection-record
-                                    {::agent-id agent-id ::turn turn ::point point
+                                    {::agent-id agent-id ::turn turn ::database aodb
                                      ::target target
                                      ::reason "context-rerender-failed"})]}
 
@@ -646,30 +652,45 @@
                                  ::determinism-mismatches 1
                                  ::rejections
                                  [(rejection-record
-                                    {::agent-id agent-id ::turn turn ::point point
+                                    {::agent-id agent-id ::turn turn ::database aodb
                                      ::target target
                                      ::reason "context-determinism-mismatch"})]}
                                 :else
-                                (let [fn-syms (indexed-fn-syms aodb)
+                                (let [fn-syms (await (indexed-fn-syms aodb))
                                       called (called-syms target fn-syms
                                                           aliases refers)
                                       turn-id (:seon.agent.turn/id turn)
                                       syms (into called
                                                  (distractor-syms fn-syms called
                                                                   turn-id k))
-                                      records (vec (keep #(fn-record aodb %) syms))
+                                      record-values
+                                      (await
+                                        (js/Promise.all
+                                          (into-array
+                                            (map #(fn-record aodb %) syms))))
+                                      records (vec (remove nil? (js->clj record-values)))
                                       cards (mapv ::card records)
                                       specs (vec (keep (comp :seon.fn/spec ::fn-row)
                                                        records))
-                                      schema-text
-                                      (or (ctx/referenced-schema-block
+                                      schema-rows
+                                      (result!
+                                        (await
+                                          (db/query
                                             {:seon.db/db aodb
-                                             :seon.agent.ctx/seed-specs specs
-                                             :seon.agent.ctx/own-keys #{}})
+                                             :seon.db/query
+                                             '[:find [(pull ?schema
+                                                           [:seon.schema/key
+                                                            :seon.schema/form]) ...]
+                                               :where [?schema :seon.schema/key]]})))
+                                      schema-text
+                                      (or (ctx/referenced-schema-rows-block
+                                            {:seon.agent.ctx/seed-specs specs
+                                             :seon.agent.ctx/own-keys #{}
+                                             :seon.agent.ctx/schema-rows schema-rows})
                                           "")
                                       schema-id (sha256 schema-text)
-                                      config-id (config-identity aodb)
-                                      profile-id (profile-identity aodb)
+                                      config-id (await (config-identity aodb))
+                                      profile-id (result! (await (profile-identity aodb)))
                                       missed (- (count syms) (count cards))
                                       coverage
                                       (ingredients-coverage
@@ -680,7 +701,7 @@
                                         {"agent" agent-id
                                          "turn_id" turn-id
                                          "projection_mode" "observed"
-                                         "coordinate" (coordinate-data point)
+                                         "db" aodb
                                          "context" ctext
                                          "cards" cards
                                          "target" target
@@ -706,7 +727,7 @@
                                    ::schema-data [{"id" schema-id
                                                    "definitions" schema-text}]
                                    ::config-data [{"id" config-id}]
-                                   ::profile-data [{"id" profile-id}]}))))))))
+                                   ::profile-data [{"id" profile-id}]}))))))
                   candidates))))
           acc (reduce
                 (fn [acc contribution]
@@ -718,7 +739,7 @@
                     acc
                     contribution))
                 {::turns-walked 0 ::rows 0 ::skipped-no-evals 0
-                 ::skipped-no-coordinate 0 ::skipped-excluded 0
+                 ::skipped-no-db 0 ::skipped-excluded 0
                  ::skipped-context 0
                  ::cards-missed 0 ::determinism-mismatches 0
                  ::ctx-tokens [] ::target-tokens [] ::row-data []
@@ -764,7 +785,7 @@
        ::turns-walked     (::turns-walked acc)
        ::rows             (::rows acc)
        ::skipped-no-evals (::skipped-no-evals acc)
-       ::skipped-no-coordinate (::skipped-no-coordinate acc)
+       ::skipped-no-db (::skipped-no-db acc)
        ::skipped-excluded (::skipped-excluded acc)
        ::skipped-context (::skipped-context acc)
        ::cards-missed     (::cards-missed acc)

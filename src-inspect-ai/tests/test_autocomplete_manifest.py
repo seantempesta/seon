@@ -18,15 +18,16 @@ def _digest(value):
 
 
 def _manifest():
-    coordinate = {
-        "database_id": "db-1", "branch": "db", "commit_id": "commit-1", "t": 7}
+    database = {
+        "db-name": "default", "t": 10, "as-of": 7, "since": None,
+        "history": False, "datahike/commit-id": "commit-1"}
     closure = {"definitions": "(register! :x/id :string)"}
     closure["id"] = hashlib.sha256(closure["definitions"].encode()).hexdigest()
     config = {"id": "c" * 64}
     profile = {"id": "b" * 64}
     row = {
         "agent": "root", "turn_id": "turn-1", "projection_mode": "observed",
-        "coordinate": coordinate, "context": "ctx", "cards": ["fn x/y"],
+        "db": database, "context": "ctx", "cards": ["fn x/y"],
         "target": "(x/y)", "coverage": 1,
         "schema_closure_id": closure["id"], "config_id": config["id"],
         "profile_id": profile["id"],
@@ -39,18 +40,11 @@ def _manifest():
         "attempted_target": "", "reason": "no-successful-evals",
     }
     rejection["rejection_id"] = _digest(rejection)
-    artifact_manifest = {
-        "seon.dev.artifact/version": 3,
-        "seon.dev.artifact/application-digest": "a" * 64,
-    }
     content = {
         "format": am.FORMAT, "database": "default",
         "source": {"revision": "deadbeef", "projection_sha": "deadbeef",
                    "runtime_root_diff_sha256": "e" * 64},
-        "runtime_artifact": {
-            "identity_sha256": _digest(artifact_manifest),
-            "manifest": artifact_manifest,
-        },
+        "runtime_artifact": {"application_digest": "a" * 64},
         "renderer": {"symbol": "seon.repl.autocomplete/context",
                      "profile": "autocomplete"},
         "split_policy": {

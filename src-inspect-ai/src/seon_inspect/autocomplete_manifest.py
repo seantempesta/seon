@@ -38,18 +38,25 @@ def _require_sha(value: Any, where: str) -> str:
     return value
 
 
-def _require_coordinate(value: Any, where: str) -> None:
+def _require_db(value: Any, where: str) -> None:
     if not isinstance(value, dict):
-        raise AutocompleteManifestError(f"{where} is not a coordinate map")
-    required = {"database_id", "branch", "commit_id", "t"}
+        raise AutocompleteManifestError(f"{where} is not a database value")
+    required = {"db-name", "t", "as-of", "since", "history",
+                "datahike/commit-id"}
     if set(value) != required:
         raise AutocompleteManifestError(
             f"{where} must contain exactly {sorted(required)}")
-    if not all(isinstance(value[key], str)
-               for key in ("database_id", "branch", "commit_id")):
-        raise AutocompleteManifestError(f"{where} string identities are invalid")
-    if not isinstance(value["t"], int):
-        raise AutocompleteManifestError(f"{where}.t is not an integer")
+    if not isinstance(value["db-name"], str) or not value["db-name"]:
+        raise AutocompleteManifestError(f"{where}.db-name is invalid")
+    if not isinstance(value["datahike/commit-id"], str):
+        raise AutocompleteManifestError(f"{where} commit identity is invalid")
+    if not isinstance(value["t"], int) or not isinstance(value["history"], bool):
+        raise AutocompleteManifestError(f"{where} basis/history is invalid")
+    temporal = [value["as-of"], value["since"]]
+    if any(point is not None and not isinstance(point, int) for point in temporal):
+        raise AutocompleteManifestError(f"{where} temporal selection is invalid")
+    if all(point is not None for point in temporal):
+        raise AutocompleteManifestError(f"{where} has two temporal selections")
 
 
 def _split_for(row_id: str) -> str:
@@ -128,7 +135,7 @@ def verify_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
         if row.get("projection_mode") != "observed":
             raise AutocompleteManifestError(
                 f"row {row_id} has unsupported projection semantics")
-        _require_coordinate(row.get("coordinate"), f"row {row_id}.coordinate")
+        _require_db(row.get("db"), f"row {row_id}.db")
         if row.get("schema_closure_id") not in closure_ids:
             raise AutocompleteManifestError(f"row {row_id} schema closure is absent")
         if row.get("config_id") not in config_ids:
@@ -144,19 +151,19 @@ def verify_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
         if _digest(base) != rejection_id:
             raise AutocompleteManifestError(
                 f"rejection {rejection_id} identity does not verify")
-        if "coordinate" in rejection:
-            _require_coordinate(
-                rejection["coordinate"], f"rejection {rejection_id}.coordinate")
+        if "db" in rejection:
+            _require_db(rejection["db"], f"rejection {rejection_id}.db")
         if not isinstance(rejection.get("reason"), str):
             raise AutocompleteManifestError(
                 f"rejection {rejection_id} reason is absent")
 
     artifact = content.get("runtime_artifact")
-    if not isinstance(artifact, dict) or not isinstance(artifact.get("manifest"), dict):
-        raise AutocompleteManifestError("runtime artifact identity is absent")
-    if _digest(artifact["manifest"]) != _require_sha(
-            artifact.get("identity_sha256"), "runtime_artifact.identity_sha256"):
-        raise AutocompleteManifestError("runtime artifact identity does not verify")
+    if not isinstance(artifact, dict) or set(artifact) != {"application_digest"}:
+        raise AutocompleteManifestError("runtime artifact application digest is absent")
+    _require_sha(
+        artifact.get("application_digest"),
+        "runtime_artifact.application_digest",
+    )
     source = content.get("source")
     if not isinstance(source, dict):
         raise AutocompleteManifestError("source identity is absent")
