@@ -469,6 +469,116 @@ After that dependency gate:
    transport cut after semantic parity. Routing, render derivation, feed
    sharing, and database contracts stay unchanged.
 
+### Finish-line execution plan
+
+The remaining program is one replacement, not a sequence of compatibility
+systems. Each stage leaves fewer owners, dependencies, concepts, and mutable
+states than it found. A stage graduates only through its public behavior and a
+live system observation; passing isolated tests while the application cannot
+run is not progress.
+
+#### 1. Close the authority surface
+
+- Finish blob retention, public blob calls, and operation-specific plan reads
+  over one captured immutable database value.
+- Migrate every remaining maintained caller to the existing asynchronous
+  `seon.db` functions while preserving the useful Datahike-shaped signatures
+  and ordinary namespaced return data.
+- Delete ambient connections, copied database coordinates, local Datahike
+  construction, replica/replay assumptions, generic oversized acquisitions,
+  and obsolete tests in the same cuts.
+
+Exit: the client compiles without removed-database warnings; focused blob,
+plan, web, runtime, and database tests pass; active source contains one public
+database API and no alternate authority.
+
+#### 2. Make initialization and recovery exact
+
+- Treat compiled package contents as the initial program and admit only the
+  exact schema/function/test delta required by the selected database.
+- Prove empty database seeding, converged no-op startup, newer-program update,
+  restart during each publication boundary, writer restart, pod restart, and
+  child restart without duplicate effects or partially visible program state.
+- Keep one JVM process capable of serving several database identities. Preserve
+  one ordered Datahike writer per database while immutable reads and unrelated
+  databases execute in parallel.
+
+Exit: repeated fresh/converged/crash runs produce the same database facts and
+process graph; converged startup performs no program transaction; failures are
+ordinary data and no child death takes down its supervisor or sibling cluster.
+
+#### 3. Restore the complete product path
+
+- Bring agent birth, resume, eval, turns, messages, plans, tests, authored
+  functions, rendering, Datastar updates, canvas interaction, debugging, and
+  database browsing through the settled authority and supervised-child seams.
+- Unify duplicate rendering, retry, lifecycle, configuration, and test paths
+  encountered along the way. Do not preserve an obsolete path merely to keep an
+  intermediate build green.
+- Verify default first, then simultaneous databases and downstream ACME through
+  the same operator and artifact contracts.
+
+Exit: maintained CLJS, writer, operator, and offline Inspect gates pass; the
+real browser proves root, agent, canvas, debug, data, reconnect, restart, and
+two independent sessions; child crash and multi-cluster journeys recover.
+
+#### 4. Measure the completed architecture
+
+- Add bounded phase evidence rather than another telemetry system: startup
+  construction/encoding/transfer/diff/transaction, child bootstrap, database
+  request/cache work, render/serialize/compress/socket/browser work, rerender
+  counts, CPU, event-loop delay, heap, RSS, and disk.
+- Measure cold, warm, fresh, converged, grown-database, one-cluster, and
+  simultaneous-cluster cases from exact artifacts.
+- Investigate latency spikes as ownership or unbounded-work defects before
+  considering micro-optimization.
+
+Exit: reproducible evidence identifies the dominant costs and establishes
+explicit latency, throughput, memory, and idle-resource budgets.
+
+#### 5. Simplify measured bottlenecks
+
+- If complete rendering is materially expensive, independently demand closed
+  transcript, debug, and plan bodies inside the same renderer and Datastar
+  feed.
+- If converged program admission is materially expensive, replace repeated
+  build/encode/transfer/scan work with the smallest exact content/digest or
+  delta contract that preserves atomic publication and source identity.
+- Use the JVM query cache and Datahike indexes as the shared computation owner;
+  do not add a client cache or copied database. Tune concurrency and batching
+  only where measurements show queueing or repeated work.
+
+Exit: every optimization removes work or code, retains the complete correctness
+matrix, and improves a recorded budget. Speculative complexity is rejected.
+
+#### 6. Finish the Bun and packaging cut
+
+- Replace Node-shaped process, Unix-socket, and HTTP/SSE host mechanics in place
+  with the proven Bun-native interfaces. `Bun.serve` remains an outer transport
+  change; application routing and the single feed do not fork.
+- Remove Node compatibility dependencies, unused adapters, dead runtime paths,
+  stale tests, and historical instructions from active source after exact
+  artifact parity.
+- Prove no-source downstream packaging, modest-hardware cluster density,
+  bounded shutdown, crash containment, and the complete destructive acceptance
+  matrix.
+
+Exit: `bin/seon up` starts the one documented system; all maintained tests and
+browser journeys pass; performance budgets are green; active searches,
+classpath inspection, and process inspection find no superseded mechanism.
+
+### Finish-line laws
+
+- Correct and observable before fast; measure the completed dependency graph.
+- One public owner per behavior; Git, not compatibility code, preserves history.
+- One database authority, one renderer, one Datastar feed, one operator, and one
+  compiled program identity.
+- Preserve Datahike/Datomic vocabulary and ordinary immutable data. Introduce a
+  new term only when the implementation has a genuinely new durable concept.
+- Prefer a deletion or a direct library seam over a wrapper. Performance work
+  must reduce repeated computation, serialization, process cost, or retained
+  memory—not merely shuffle it between owners.
+
 The one message writer is settled at `7f732e2e`. `message!` captures one
 database value, derives sender/origin and hop data there, validates normalized
 recipients, allocates natively, and returns exactly message id plus hops or a

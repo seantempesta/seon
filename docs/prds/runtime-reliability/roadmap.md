@@ -62,6 +62,16 @@ tests still name removed local APIs. Those warnings are a dependency inventory,
 not compatibility work and not permission to create versioned replacement
 functions. Detailed order and evidence are in
 [[../database-authority-mesh/research/system-recovery-graduation-plan-2026-07-16]].
+
+The current finish-line order is the six-stage
+[[../database-authority-mesh/roadmap#finish-line-execution-plan]]. It supersedes
+the older unit-by-unit scheduling prose below wherever that prose conflicts:
+close the authority surface; prove exact initialization and recovery; restore
+the complete product path; measure the completed architecture; simplify only
+measured bottlenecks; then finish the Bun-native and downstream packaging cut.
+The older unit table remains a coverage ledger, not six independent runtime
+tracks and not a requirement to preserve obsolete intermediate mechanisms.
+
 The existing remote query surface now exposes its protocol-native historical
 view, closing the only facade gap needed by coordinate-pinned startup birth.
 LLM configuration and brand startup sync also use bounded coordinate-fenced
