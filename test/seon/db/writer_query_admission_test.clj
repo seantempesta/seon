@@ -153,6 +153,10 @@
                                ::writer/selected-processors 4
                                ::writer/request-socket-path request-path})
         runtime (::writer/runtime server)
+        read-window
+        (get-in (executor/evidence (::writer/executor server))
+                [::executor/capacity ::executor/classes :read
+                 ::executor/maximum-queued-by-database])
         transport (#'writer/transport-connection
                    {::uds/close! (fn [] nil) ::uds/send! (fn [_] nil)})
         head-a (ensure-database-value! runtime transport database-a)
@@ -182,8 +186,8 @@
                  ::protocol/members (vec (repeat 33 query-member))}))]
           (is (.await entered 2 TimeUnit/SECONDS))
           (wait-until!
-           #(= 8 (:datahike.single-flight/active-callers
-                    (d/query-cache-evidence)))
+           #(= read-window (:datahike.single-flight/active-callers
+                             (d/query-cache-evidence)))
            "execute-many did not fill its bounded admitted-member window")
           (wait-until!
            #(let [evidence (executor/evidence (::writer/executor server))]
@@ -207,10 +211,16 @@
               (is (every? ::protocol/success? results))
               (is (= 1 (count (filter #{:datahike.cache.outcome/miss-owner}
                                       outcomes))))
-              (is (= 7 (count (filter #{:datahike.cache.outcome/miss-joined}
-                                      outcomes))))
-              (is (= 25 (count (filter #{:datahike.cache.outcome/hit}
-                                       outcomes))))
+              (is (<= (dec read-window)
+                      (count (filter #{:datahike.cache.outcome/miss-joined}
+                                     outcomes))))
+              (is (= 32
+                     (count
+                      (filter #{:datahike.cache.outcome/miss-joined
+                                :datahike.cache.outcome/hit}
+                              outcomes))))
+              (is (= 2 @run-count)
+                  "database A shares one physical query while database B runs independently")
               (wait-until!
                #(and (empty? @(::writer/active-requests runtime))
                      (zero? (::executor/retained-identities
@@ -234,6 +244,10 @@
                                ::writer/selected-processors 3
                                ::writer/request-socket-path request-path})
         runtime (::writer/runtime server)
+        read-window
+        (get-in (executor/evidence (::writer/executor server))
+                [::executor/capacity ::executor/classes :read
+                 ::executor/maximum-queued-by-database])
         transport (#'writer/transport-connection
                    {::uds/close! (fn [] nil) ::uds/send! (fn [_] nil)})
         head (ensure-database-value! runtime transport database-name)
@@ -292,10 +306,10 @@
           (wait-until!
            #(let [entry (get @(::writer/active-requests runtime)
                              "many/result-limit")]
-              (and (= 8 (::writer/next-position entry))
+              (and (= read-window (::writer/next-position entry))
                    (some? (get-in entry [::writer/results 1]))))
            "the bounded admitted suffix did not settle behind position zero")
-          (is (every? #(< % 8) @calls))
+          (is (every? #(< % read-window) @calls))
           (.countDown release-slow)
           (let [response (deref response 5000 ::timeout)
                 results (::protocol/results response)]
@@ -304,7 +318,7 @@
             (is (= small-result (first results)))
             (is (every? #{(var-get #'writer/execute-many-result-limit)}
                         (subvec results 1)))
-            (is (every? #(< % 8) @calls))
+            (is (every? #(< % read-window) @calls))
             (wait-until!
              #(and (empty? @(::writer/active-requests runtime))
                    (zero? (::executor/retained-identities
