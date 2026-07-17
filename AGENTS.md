@@ -302,6 +302,34 @@ Use discoverable code names, not umbrella nouns or synonyms:
 | cluster | environment | one database, pod, root, and task agents |
 | attributes + connections | entity kind/type | the Datahike model |
 
+Database vocabulary is the dependency's vocabulary, never a Seon wrapper noun:
+
+- **database value** — the immutable ordinary value sent across the protocol;
+  it carries `:db-name`, basis transaction `:t`, `:as-of`, `:since`,
+  `:history`, and `:datahike/commit-id`;
+- **basis transaction** — the database value's `:t`;
+- **commit ID** — Datahike/Proximum's `:datahike/commit-id`;
+- **connection ID** — Datahike's process-local connection identity, whose
+  self-writer form is `[store-id branch]` and whose remote form also includes
+  the writer backend;
+- **store ID**, **branch**, and **branch head** — the individual Datahike and
+  Proximum facts used by branch management; and
+- **transaction report**, **db-before**, and **db-after** — the committed-change
+  vocabulary.
+
+Do not introduce or preserve generic database “coordinate”, “point”, or
+“attachment” maps. `seon.db` clients exchange database values. Internal code
+that must call Datahike or Proximum passes the required store ID, branch, basis
+transaction, or commit ID by those names. A UI screen location or ordinary
+English coordination is unrelated and is not covered by this database rule.
+
+Name every interface only after reading the maintained sources on both sides
+of that interface. Reuse the producer's concrete output terms and the
+consumer's concrete input terms; when they differ, translate fields directly
+at the boundary. Never invent a third umbrella noun merely to make the two
+sides sound uniform. Record the source files and selected dependency revisions
+that establish those names in the owning PRD's dependency ledger.
+
 Current route truth is database data in `src/seon/route.cljs`: `/` is root's
 system view, `POST /agents` creates an agent, and `/agent/{id}` is its page.
 
@@ -443,7 +471,7 @@ For each Clojure change:
    pod behavior and the selected cluster's `eval_clj` for writer behavior.
 2. Reproduce the failure with one small form. Inspect the complete returned
    envelope, live database facts, installed schema, and immutable database
-   coordinate before inferring a cause.
+   value before inferring a cause.
 3. Call the existing pure transformation or owning function directly with
    representative data. Probe dependency behavior from `reference-code/` at
    this boundary instead of rebuilding its semantics from memory.
