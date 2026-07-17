@@ -145,15 +145,27 @@ configured home package rather than restoring the deleted local-database
 fixture. Focused proof passes 22 tests/91 assertions across home, namespace
 context, eval auto-refer, and autocomplete.
 
-Earliest unsettled contract: the central cold-start/reload owner must consume
-the settled asynchronous database-value API. `seon.client` still names removed
-coordinate/envelope and resumable-query behavior; it must retain one
-initialization, publication, recovery, advertisement, and runtime-host sequence
-without replaying forms or adding a second startup path. The settled source
-cut is grounded at [[research/client-single-lifecycle-audit-2026-07-17]]:
-session identity is stable connection/database selection, while every cold or
-reload publication presents the current initialization through the same
-serialized ensure-and-acquire operation before admission and rehosting.
+Commit `cf9bb491` settles the central cold-start/reload package owner. Session
+identity is stable connection/database selection rather than initialization
+bytes. The existing in-flight session owner is installed before cold connect
+or active ensure work begins, identical initialization coalesces, and changed
+initialization serializes complete ensure-then-acquire units. A failed active
+ensure preserves the accepted database and listener owner. Shadow completion
+uses that same open operation before admission and awaits exactly one rehost
+before the ticker; failure leaves admission unavailable. Focused proof passes
+5 session tests/20 assertions and 4 initialization tests/14 assertions. The
+obsolete coordinate/provenance/precondition session tests were deleted rather
+than making the current facade satisfy removed APIs.
+
+Earliest unsettled contract: the remaining client lifecycle consumers must
+consume this owner and ordinary database values. Runtime advertisement still
+maintains desired, accepted, and cached coordinate state around a listener
+that now returns one scalar key and native transaction reports. Recovery,
+config, membership, and quiescence still branch on removed envelopes. They
+must be migrated in ordered complete cuts while retaining one initialization,
+publication, recovery, advertisement, and runtime-host sequence without form
+replay or a second startup path. The source contract is grounded at
+[[research/client-single-lifecycle-audit-2026-07-17]].
 `seon.web.serve` also still
 references deleted turn, attempt, and eval-operation coordinate fields and must
 derive historical model evidence from the parent turn's `rendered-tx` without
@@ -236,21 +248,25 @@ modest-hardware density checkpoint.
 
 ### Current implementation checkpoint
 
-- **Earliest unsettled contract:** migrate the one cold-start/reload owner
-  without adding wrappers or a second initialization/publication path.
+- **Earliest unsettled contract:** migrate runtime advertisement, then the
+  remaining recovery/config/membership/quiescence consumers through the one
+  settled client session and publication owner.
 - **Integrated proof that closes it:** eval, autocomplete, namespace context,
   startup, converged reload, advertisement, and runtime hosting reuse ordinary
   database values and native transaction reports; fresh and warm startup both
   execute the one ordered sequence.
-- **Dependency-ready parallel portfolio:** the client session/publication cut
-  is active; the web/render single-owner audit is durable at
+- **Dependency-ready parallel portfolio:** the client advertisement cut is
+  active; the flat action-door deletion and small toolkit database-value cut
+  are independent consumers; the web/render single-owner audit is durable at
   [[research/web-render-single-owner-audit-2026-07-17]]; the plan consumer cut
   is grounded at [[research/plan-single-owner-audit-2026-07-17]] and explicitly
-  rejects the current dirty coordinate/oversized-row prototype.
-- **Next refills:** finish the one client session/package publication owner,
-  then migrate its advertisement/recovery/config/startup consumers in ordered
-  complete cuts; close the web/feed database-value and rendered-transaction
-  owner next, followed by the operation-specific plan/toolkit consumers.
+  rejects the current dirty coordinate/oversized-row prototype. The complete
+  parallel-system inventory is durable at
+  [[research/parallel-behavior-unification-audit-2026-07-17]].
+- **Next refills:** finish advertisement, then migrate recovery, config,
+  membership, and quiescence in ordered complete cuts; close the web/feed
+  database-value and rendered-transaction owner next, followed by the
+  operation-specific plan consumers and atomic eval publication.
   The final graduation gate remains the full frozen-source correctness, live
   Bun/JVM, multi-agent, child-crash, multi-database, and measured resource
   matrix.
