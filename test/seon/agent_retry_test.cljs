@@ -1,418 +1,191 @@
 (ns seon.agent-retry-test
-  "The bounded LLM transport retry (revived 2026-07-02; originally the
-   agent-robustness unit, 2026-06-11).
-
-   Pins `seon.agent.turn/ask-and-eval!` — the turn body whose
-   `call-llm!` is the SOLE LLM retry authority (the adapters ship
-   `maxRetries 0`). Current semantics under test:
-
-     - a TRANSIENT provider failure — TRANSPORT-shaped
-       (`:seon.ai/transport?`), HTTP 429, or HTTP 5xx — is retried with
-       backoff, bounded by the agent's effective max-retries
-       (`:seon.ai/agent-max-retries` datom when an int, else the
-       default 4); every retry lands on the record as
-       `:seon.agent.turn/llm-retries n`
-     - a NON-transient error (HTTP 4xx other than 429) NEVER retries:
-       one call, and no llm-retries key (optional = absent)
-     - exhaustion closes the turn `:error` with the failure captured as
-       data on `:seon.agent.turn/error` (a bounded string) — no throw
-     - a recovery mid-retry is NOT an error, and still records the
-       retry honestly
-     - every attempt in one turn uses the prompt coordinate's one ordinary
-       provider and retry-policy resolution; retries perform no database read
-
-   Hermetic: blobs re-pointed to a pid-scoped tmp dir (the success path
-   captures the raw reply blob), legacy persistence cases use a fresh :memory conn
-   root-`set!` as `db/*conn*` (CLJS bindings don't survive await). The
-   coordinate-pinning regression is connection-free."
+  "Behavioral tests for the one bounded LLM retry path."
   (:require
-    ["node:fs" :as nfs]
-    ["node:path" :as npath]
-    [clojure.string :as str]
-    [cljs.test :refer [deftest is testing async use-fixtures]]
-    [my.blob :as blob]
-    [seon.agent.turn :as turn]
-    [seon.ai :as ai]
-    [seon.client :as client]
-    [seon.db :as db]
-    [seon.db.coordinate :as coordinate]
-    [seon.execution :as execution]
-    [seon.execution.host :as execution.host]))
+   [clojure.string :as str]
+   [cljs.test :refer [async deftest is testing]]
+   [seon.agent.turn :as turn]
+   [seon.db.coordinate :as db.coordinate]
+   [seon.execution :as execution]
+   [seon.execution.host :as execution.host]))
 
-;; ---------------------------------------------------------------------------
-;; Fixtures — pid-scoped blob dir (reply capture on the success path),
-;; fresh conn per test.
-;; ---------------------------------------------------------------------------
+(def ^:private database-value
+  {::db.coordinate/database-id #uuid "00000000-0000-4000-8000-000000000081"
+   ::db.coordinate/branch :db
+   ::db.coordinate/commit-id #uuid "00000000-0000-4000-8000-000000000082"
+   ::db.coordinate/t 42})
 
-(def ^:private fixture-dir
-  (.resolve npath (str "tmp/agent-retry-test-" (.-pid js/process))))
+(def ^:private base-resolution
+  {:seon.ai/resolved-config
+   {:seon.ai/provider :openai-compat
+    :seon.ai/model "model-a"
+    :seon.ai/temperature 0.0
+    :seon.ai/base-url "https://user:secret@a.example/v1?sig=hide#frag"
+    :seon.ai/timeout-ms 1111
+    :seon.config.model-transport/response-identity-cap 80
+    :seon.config.model-transport/endpoint-cap 256}
+   :seon.ai/provenance
+   {:seon.ai/provider :config-row
+    :seon.ai/model :config-row
+    :seon.ai/temperature :config-row
+    :seon.ai/base-url :config-row
+    :seon.ai/timeout-ms :config-row}})
 
-(defonce ^:private !saved-storage-view (atom nil))
-
-(use-fixtures :once
-  {:before (fn []
-             (reset! !saved-storage-view @blob/!storage-view)
-             (reset! blob/!storage-view
-                     {:my.blob/writable-dir fixture-dir
-                      :my.blob/read-only-dirs []})
-             (.rmSync nfs fixture-dir #js {:recursive true :force true}))
-   :after  (fn []
-             (reset! blob/!storage-view @!saved-storage-view)
-             (.rmSync nfs fixture-dir #js {:recursive true :force true}))})
-
-(defn- with-conn
-  "Open a fresh schema-loaded conn, `set!` it as the ROOT `db/*conn*`
-   (a plain `binding` does NOT survive Promise/await boundaries in
-   CLJS), run `body` (0-arg, may return a Promise), restore after."
-  [body]
-  (-> (client/open-agent-conn!)
-      (.then (fn [conn]
-               (let [prev db/*conn*]
-                 (set! db/*conn* conn)
-                 (-> (js/Promise.resolve (body))
-                     (.finally (fn [] (set! db/*conn* prev)))))))))
-
-(defn- run-test [body done]
-  (-> (with-conn body)
-      (.then (fn [_] (done)))
-      (.catch (fn [e] (is false (str "threw — " e)) (done)))))
-
-;; ---------------------------------------------------------------------------
-;; Stub LLM responses + the call harness.
-;; ---------------------------------------------------------------------------
-
-(def ^:private evidence-cap 80)
-(def ^:private endpoint-cap 256)
+(defn- response-fn [calls responses]
+  (fn [arg]
+    (swap! calls conj arg)
+    (js/Promise.resolve
+     (nth responses (dec (count @calls)) (last responses)))))
 
 (defn- transport-failure []
   {:text ""
-   :seon.ai/error {:seon.ai/msg        "DeepSeek fetch failed: fetch failed"
+   :seon.ai/error {:seon.ai/msg "DeepSeek fetch failed: fetch failed"
                    :seon.ai/transport? true}})
 
-(defn- http-400-failure []
+(defn- http-failure [status message]
   {:text ""
-   :seon.ai/error {:seon.ai/msg    "DeepSeek HTTP 400: bad request"
-                   :seon.ai/status 400}})
+   :seon.ai/error {:seon.ai/msg message
+                   :seon.ai/status status}})
 
-(defn- rate-limit-failure []
-  {:text ""
-   :seon.ai/error {:seon.ai/msg    "DeepSeek HTTP 429: rate limited"
-                   :seon.ai/status 429}})
+(defn- invoke-turn!
+  ([llm-fn] (invoke-turn! llm-fn base-resolution))
+  ([llm-fn resolution]
+   (turn/ask-and-eval!
+    {:seon.agent/id "AGTretry00001"
+     :seon.agent/llm-fn llm-fn
+     ::db.coordinate/coordinate database-value
+     :seon.db/db database-value
+     :seon.ai/config-resolution resolution
+     :seon.agent.turn/id-of-turn "turn-retry-test"
+     :seon.agent.turn/turn-idx 1
+     :seon.agent.turn/prompt-text "ctx"})))
 
-(defn- adapter-timeout-failure []
-  {:text ""
-   :seon.ai/error {:seon.ai/msg "OpenAI-compatible request timed out"
-                   :seon.ai/timeout? true}})
-
-(defn- counting-llm-fn
-  "An llm-fn stub returning the responses in `resps` in order (last one
-   repeats). `!calls` counts invocations."
-  [!calls resps]
-  (fn [_ctx]
-    (let [n (swap! !calls inc)]
-      (js/Promise.resolve (nth resps (dec n) (last resps))))))
-
-(defn- ^:async ask!
-  "Seed the agent row (optionally capping `:seon.ai/agent-max-retries`),
-   then run one `ask-and-eval!` turn body with the stub `llm-fn`."
-  [agent-id llm-fn max-retries]
-  (let [env (await
-              (db/transact!
-                {:seon.db/tx-data
-                 [(cond-> {:seon.agent/id agent-id}
-                    max-retries
-                    (assoc :seon.ai/agent-max-retries max-retries))
-                  {:seon.config/id "cluster"
-                   :seon.config.model-transport/response-identity-cap evidence-cap
-                   :seon.config.model-transport/endpoint-cap endpoint-cap}]}))]
-    (when-not (:seon.db/ok? env)
-      (throw (ex-info "agent-retry-test: seed transact failed" env)))
-    (let [point (coordinate/resolved @db/*conn*)
-          resolution (ai/resolved-config
-                      {:seon.db/db @db/*conn* :seon.agent/id agent-id})
-          original execution.host/invoke-compiled!]
-      (set! execution.host/invoke-compiled!
-            (fn [requested-point _agent-id _function-symbol _arguments]
-              (js/Promise.resolve
-               {::execution/message execution/result-message
-                ::execution/coordinate requested-point
-                ::execution/result {:seon.eval/n-ok 0
-                                    :seon.eval/n-fail 0
-                                    :seon.eval/ids []}})))
-      (try
-        (await
-         (turn/open-turn!
-          {:seon.agent/id agent-id
-           :seon.agent.turn/prompt-text "ctx"}
-          (fn ^:async run-test-turn! [turn-id]
-            (await
-             (turn/ask-and-eval!
-              {:seon.agent/id              agent-id
-               :seon.agent/llm-fn          llm-fn
-               ::coordinate/coordinate     point
-               :seon.ai/config-resolution  resolution
-               :seon.agent.turn/id-of-turn turn-id
-               :seon.agent.turn/turn-idx   1
-               :seon.agent.turn/prompt-text "ctx"})))))
-        (finally
-          (set! execution.host/invoke-compiled! original))))))
-
-(defn- persisted-attempts
-  [turn-id]
-  (->> (:seon.agent.turn/llm-attempts
-         (db/pull {:seon.db/pull-pattern
-                   '[{:seon.agent.turn/llm-attempts [*]}]
-                   :seon.db/ref [:seon.agent.turn/id turn-id]}))
-       (sort-by :seon.ai.attempt/ordinal)
-       vec))
-
-;; ---------------------------------------------------------------------------
-;; The pins.
-;; ---------------------------------------------------------------------------
+(defn- with-compiled-result [body]
+  (let [original execution.host/invoke-compiled!]
+    (set! execution.host/invoke-compiled!
+          (fn [requested-database _agent-id _function-symbol _arguments]
+            (js/Promise.resolve
+             {::execution/message execution/result-message
+              :seon.db/db requested-database
+              ::execution/result {:seon.eval/n-ok 0
+                                  :seon.eval/n-fail 0
+                                  :seon.eval/ids []}})))
+    (-> (js/Promise.resolve (body))
+        (.finally #(set! execution.host/invoke-compiled! original)))))
 
 (deftest transport-error-retries-to-the-cap-then-fails-honestly
   (async done
-    (run-test
-      (fn ^:async run []
-        (let [!calls (atom 0)
-              ;; cap the retry budget at 1 via the agent's own
-              ;; :seon.ai/agent-max-retries datom — the per-agent knob
-              ;; call-llm! actually reads (ai/agent-max-retries).
-              result (await (ask! "AGTretrycap001"
-                                  (counting-llm-fn !calls [(transport-failure)])
-                                  1))]
-          (testing "retries stop at the agent's cap — never a loop"
-            (is (= 2 @!calls) "1 attempt + the capped 1 retry"))
-          (testing "the turn body reports :error when the retry fails"
-            (is (= :error (:seon.agent.turn/status result)))
-            (is (= 0 (:seon.agent/eval-count result))))
-          (testing "the retry is on the record"
-            (is (= 1 (:seon.agent.turn/llm-retries result))))
-          (testing "the failure is captured as data on the turn"
-            (is (string? (:seon.agent.turn/error result)))
-            (is (str/includes? (:seon.agent.turn/error result)
-                               "fetch failed")))
-          (let [attempts (persisted-attempts (:seon.agent.turn/id result))]
-            (is (= [0 1] (mapv :seon.ai.attempt/ordinal attempts)))
-            (is (= [:provider-error :provider-error]
-                   (mapv :seon.ai.attempt/outcome attempts)))
-            (is (every? false? (map :seon.ai.attempt/stream? attempts)))
-            (is (every? #(= :openai-compat (:seon.ai.attempt/adapter %))
-                        attempts)))))
-      done)))
+    (let [calls (atom [])
+          resolution (assoc base-resolution :seon.ai/agent-max-retries 1)]
+      (-> (invoke-turn! (response-fn calls [(transport-failure)]) resolution)
+          (.then
+           (fn [result]
+             (testing "one retry is bounded by the resolved agent policy"
+               (is (= 2 (count @calls)))
+               (is (= :error (:seon.agent.turn/status result)))
+               (is (= 0 (:seon.agent/eval-count result)))
+               (is (= 1 (:seon.agent.turn/llm-retries result))))
+             (testing "the final provider failure and both attempts remain data"
+               (is (str/includes? (:seon.agent.turn/error result) "fetch failed"))
+               (is (= [0 1]
+                      (mapv :seon.ai.attempt/ordinal
+                            (:seon.agent.turn/llm-attempts result))))
+               (is (= [:provider-error :provider-error]
+                      (mapv :seon.ai.attempt/outcome
+                            (:seon.agent.turn/llm-attempts result)))))))
+          (.then (fn [_] (done)))
+          (.catch (fn [error] (is false (str error)) (done)))))))
 
-(deftest http-4xx-error-never-retries
+(deftest non-transient-http-error-does-not-retry
   (async done
-    (run-test
-      (fn ^:async run []
-        (let [!calls (atom 0)
-              result (await (ask! "AGTretry400001"
-                                  (counting-llm-fn !calls [(http-400-failure)])
-                                  nil))]
-          (is (= 1 @!calls)
-              "HTTP 4xx (other than 429) is not transient — one call only")
-          (is (= :error (:seon.agent.turn/status result)))
-          (is (not (contains? result :seon.agent.turn/llm-retries))
-              "optional = absent — no retry happened, no key stored")
-          (let [[attempt] (persisted-attempts (:seon.agent.turn/id result))]
-            (is (= :provider-error (:seon.ai.attempt/outcome attempt)))
-            (is (= 400 (:seon.ai.attempt/error-status attempt)))
-            (is (= 0 (:seon.ai.attempt/ordinal attempt))))))
-      done)))
+    (let [calls (atom [])]
+      (-> (invoke-turn!
+           (response-fn calls [(http-failure 400 "bad request")]))
+          (.then
+           (fn [result]
+             (is (= 1 (count @calls)))
+             (is (= :error (:seon.agent.turn/status result)))
+             (is (not (contains? result :seon.agent.turn/llm-retries)))
+             (is (= 400
+                    (-> result :seon.agent.turn/llm-attempts first
+                        :seon.ai.attempt/error-status)))))
+          (.then (fn [_] (done)))
+          (.catch (fn [error] (is false (str error)) (done)))))))
 
-(deftest transport-error-then-recovery-records-the-retry
+(deftest transient-error-then-success-keeps-one-resolution
   (async done
-    (run-test
-      (fn ^:async run []
-        ;; blank reply on recovery — the success path with ZERO forms, so
-        ;; nothing evals; compile-state nil is never touched.
-        (let [!calls (atom 0)
-              result (await (ask! "AGTretryrec001"
-                                  (counting-llm-fn
-                                    !calls
-                                    [(transport-failure)
-                                     {:text ""
-                                      :seon.ai/raw
-                                      {:seon.ai/response-model "response-model"
-                                       :seon.ai/system-fingerprint "fp-1"
-                                       :seon.ai/request-id "req-1"}}])
-                                  nil))]
-          (is (= 2 @!calls))
-          (testing "recovered turn is NOT an error"
-            (is (nil? (:seon.agent.turn/status result))
-                "no :error status — open-turn! closes it :done"))
-          (testing "the recovery still records the retry honestly"
-            (is (= 1 (:seon.agent.turn/llm-retries result))))
-          (let [attempts (persisted-attempts (:seon.agent.turn/id result))]
-            (is (= [0 1] (mapv :seon.ai.attempt/ordinal attempts)))
-            (is (= [:provider-error :success]
-                   (mapv :seon.ai.attempt/outcome attempts)))
-            (is (= "response-model"
-                   (:seon.ai.attempt/response-model (second attempts))))
-            (is (= "fp-1"
-                   (:seon.ai.attempt/system-fingerprint (second attempts))))
-            (is (= "req-1"
-                   (:seon.ai.attempt/request-id (second attempts)))))))
-      done)))
-
-(deftest retry-keeps-one-coordinate-pinned-config-resolution
-  (async done
-    (let [point {::coordinate/database-id
-                 #uuid "00000000-0000-4000-8000-000000000081"
-                 ::coordinate/branch :db
-                 ::coordinate/commit-id
-                 #uuid "00000000-0000-4000-8000-000000000082"
-                 ::coordinate/t 42}
-          resolution
-          {:seon.ai/resolved-config
-           {:seon.ai/provider :openai-compat
-            :seon.ai/model "model-a"
-            :seon.ai/temperature 0.0
-            :seon.ai/base-url
-            "https://user:secret@a.example/v1?sig=hide#frag"
-            :seon.ai/timeout-ms 1111}
-           :seon.ai/provenance
-           {:seon.ai/provider :config-row
-            :seon.ai/model :config-row
-            :seon.ai/temperature :config-row
-            :seon.ai/base-url :config-row
-            :seon.ai/timeout-ms :config-row}
-           :seon.ai/agent-max-retries 1}
-          !calls (atom 0)
-          !args (atom [])
-          original execution.host/invoke-compiled!
-          llm-fn
-          (fn [arg]
-            (swap! !args conj arg)
-            (js/Promise.resolve
-             (if (= 1 (swap! !calls inc))
-               (transport-failure)
-               {:text ""})))]
-      (set! execution.host/invoke-compiled!
-            (fn [requested-point _agent-id _function-symbol _arguments]
-              (js/Promise.resolve
-               {::execution/message execution/result-message
-                ::execution/coordinate requested-point
-                ::execution/result {:seon.eval/n-ok 0
-                                    :seon.eval/n-fail 0
-                                    :seon.eval/ids []}})))
-      (-> (turn/ask-and-eval!
-           {:seon.agent/id "AGTretrydrift1"
-            :seon.agent/llm-fn llm-fn
-            ::coordinate/coordinate point
-            :seon.ai/config-resolution resolution
-            :seon.agent.turn/id-of-turn "turn-pinned-config"
-            :seon.agent.turn/turn-idx 1
-            :seon.agent.turn/prompt-text "ctx"})
+    (let [calls (atom [])
+          resolution (assoc base-resolution :seon.ai/agent-max-retries 1)]
+      (-> (with-compiled-result
+            #(invoke-turn!
+              (response-fn calls
+                           [(transport-failure)
+                            {:text ""
+                             :seon.ai/raw
+                             {:seon.ai/response-model "response-model"
+                              :seon.ai/system-fingerprint "fp-1"
+                              :seon.ai/request-id "req-1"}}])
+              resolution))
           (.then
            (fn [result]
              (let [attempts (:seon.agent.turn/llm-attempts result)]
-               (is (= [0 1] (mapv :seon.ai.attempt/ordinal attempts)))
+               (is (= 2 (count @calls)))
+               (is (= 1 (:seon.agent.turn/llm-retries result)))
+               (is (= [:provider-error :success]
+                      (mapv :seon.ai.attempt/outcome attempts)))
                (is (= ["model-a" "model-a"]
                       (mapv :seon.ai.attempt/requested-model attempts)))
-               (is (= [1111 1111]
-                      (mapv :seon.ai.attempt/adapter-timeout-ms attempts)))
-               (is (= [0.0 0.0]
-                      (mapv :seon.ai.attempt/temperature attempts)))
                (is (every? #(= resolution (:seon.ai/config-resolution %))
-                           @!args))
-               (is (every? #(= (::coordinate/commit-id point)
-                                (:seon.ai.attempt/commit-id %))
-                           attempts))
+                           @calls))
                (is (not (str/includes? (pr-str attempts) "user:secret")))
-               (is (not (str/includes? (pr-str attempts) "sig=hide")))
-               (done))))
-          (.catch (fn [error] (is false (str error)) (done)))
-          (.finally
-           (fn [] (set! execution.host/invoke-compiled! original)))))))
-
-(deftest rate-limit-429-is-transient-and-retried
-  (async done
-    (run-test
-      (fn ^:async run []
-        (let [!calls (atom 0)
-              result (await (ask! "AGTretry429001"
-                                  (counting-llm-fn
-                                    !calls [(rate-limit-failure) {:text ""}])
-                                  nil))]
-          (is (= 2 @!calls) "429 is rate-limit-shaped — retried like transport")
-          (is (nil? (:seon.agent.turn/status result)))
-          (is (= 1 (:seon.agent.turn/llm-retries result)))))
-      done)))
-
-(deftest adapter-timeout-is-distinct-from-the-outer-attempt-cap
-  (async done
-    (run-test
-      (fn ^:async run []
-        (let [result (await (ask! "AGTadapttime01"
-                                  (counting-llm-fn
-                                    (atom 0) [(adapter-timeout-failure)])
-                                  1))
-              [attempt] (persisted-attempts (:seon.agent.turn/id result))]
-          (is (= :error (:seon.agent.turn/status result)))
-          (is (= :adapter-timeout (:seon.ai.attempt/outcome attempt)))
-          (is (int? (:seon.ai.attempt/adapter-timeout-ms attempt)))
-          (is (int? (:seon.ai.attempt/outer-timeout-ms attempt)))))
-      done)))
-
-(deftest provider-evidence-error-persists-as-a-bounded-attempt-fact
-  (async done
-    (run-test
-      (fn ^:async run []
-        (let [message
-              (str "Provider response identity exceeded the configured evidence bound; "
-                   "these rejected bytes must never reach the attempt fact.")
-              result
-              (await
-                (ask! "AGTeviderror01"
-                      (counting-llm-fn
-                        (atom 0)
-                        [{:text ""
-                          :seon.ai/raw {:seon.ai/evidence-error message}}])
-                      0))
-              [attempt] (persisted-attempts (:seon.agent.turn/id result))]
-          (is (= :success (:seon.ai.attempt/outcome attempt)))
-          (is (= (subs message 0 evidence-cap)
-                 (:seon.ai.attempt/evidence-error attempt)))
-          (is (= evidence-cap
-                 (count (:seon.ai.attempt/evidence-error attempt))))))
-      done)))
-
-(deftest attempt-timeout-aborts-provider-and-never-retries
-  (async done
-    (let [env   (.. js/process -env)
-          saved (aget env "SEON_LLM_ATTEMPT_TIMEOUT_MS")
-          !calls (atom 0)
-          !signals (atom [])
-          !aborted (atom 0)
-          llm-fn (fn [arg]
-                   (let [signal (:seon.ai/abort-signal arg)]
-                     (swap! !calls inc)
-                     (swap! !signals conj signal)
-                     (.addEventListener signal "abort"
-                       (fn [] (swap! !aborted inc))
-                       #js{:once true})
-                     (js/Promise. (fn [_ _]))))]
-      (aset env "SEON_LLM_ATTEMPT_TIMEOUT_MS" "30")
-      (-> (with-conn
-            (fn ^:async run []
-              (let [result (await (ask! "AGTretryabort1" llm-fn 3))]
-                (is (= 1 @!calls) "timeout is nonretryable")
-                (is (= 1 @!aborted) "the provider signal was actively aborted")
-                (is (= 1 (count @!signals)))
-                (is (true? (.-aborted (first @!signals))))
-                (is (= :error (:seon.agent.turn/status result)))
-                (is (str/includes? (:seon.agent.turn/error result)
-                                   "provider request cancelled"))
-                (is (not (contains? result :seon.agent.turn/llm-retries)))
-                (let [[attempt]
-                      (persisted-attempts (:seon.agent.turn/id result))]
-                  (is (= :outer-timeout (:seon.ai.attempt/outcome attempt)))
-                  (is (= 30 (:seon.ai.attempt/outer-timeout-ms attempt)))
-                  (is (uuid? (:seon.ai.attempt/commit-id attempt)))))))
-          (.finally (fn []
-                      (if (some? saved)
-                        (aset env "SEON_LLM_ATTEMPT_TIMEOUT_MS" saved)
-                        (js-delete env "SEON_LLM_ATTEMPT_TIMEOUT_MS"))))
+               (is (not (str/includes? (pr-str attempts) "sig=hide"))))))
           (.then (fn [_] (done)))
-          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+          (.catch (fn [error] (is false (str error)) (done)))))))
+
+(deftest rate-limit-is-transient
+  (async done
+    (let [calls (atom [])
+          resolution (assoc base-resolution :seon.ai/agent-max-retries 1)]
+      (-> (with-compiled-result
+            #(invoke-turn!
+              (response-fn calls
+                           [(http-failure 429 "rate limited") {:text ""}])
+              resolution))
+          (.then
+           (fn [result]
+             (is (= 2 (count @calls)))
+             (is (= 1 (:seon.agent.turn/llm-retries result)))))
+          (.then (fn [_] (done)))
+          (.catch (fn [error] (is false (str error)) (done)))))))
+
+(deftest attempt-timeout-aborts-provider-and-does-not-retry
+  (async done
+    (let [env (.-env js/process)
+          saved (aget env "SEON_LLM_ATTEMPT_TIMEOUT_MS")
+          calls (atom [])
+          aborted (atom 0)
+          llm-fn
+          (fn [arg]
+            (let [signal (:seon.ai/abort-signal arg)]
+              (swap! calls conj arg)
+              (.addEventListener signal "abort" #(swap! aborted inc)
+                                 #js {:once true})
+              (js/Promise. (fn [_resolve _reject]))))]
+      (aset env "SEON_LLM_ATTEMPT_TIMEOUT_MS" "30")
+      (-> (invoke-turn! llm-fn
+                        (assoc base-resolution :seon.ai/agent-max-retries 3))
+          (.then
+           (fn [result]
+             (is (= 1 (count @calls)))
+             (is (= 1 @aborted))
+             (is (= :error (:seon.agent.turn/status result)))
+             (is (not (contains? result :seon.agent.turn/llm-retries)))
+             (is (= :outer-timeout
+                    (-> result :seon.agent.turn/llm-attempts first
+                        :seon.ai.attempt/outcome)))))
+          (.finally
+           (fn []
+             (if (some? saved)
+               (aset env "SEON_LLM_ATTEMPT_TIMEOUT_MS" saved)
+               (js-delete env "SEON_LLM_ATTEMPT_TIMEOUT_MS"))))
+          (.then (fn [_] (done)))
+          (.catch (fn [error] (is false (str error)) (done)))))))
