@@ -2791,3 +2791,29 @@ database, and returned the Bun pod to readiness with explicit clean generations
 for watcher, writer, and pod. Crash/recovery remains to prove after the obsolete
 local-connection test fixtures are replaced; those fixtures currently obscure
 the maintained complete correctness gate but are not a runtime fallback.
+
+### 2026-07-17 maintained-test cleanup checkpoint
+
+The first complete CLJS attempt reached the active runtime and stopped on two
+obsolete fixtures rather than a production authority failure. Commits
+`cff7ad82`, `cdea8285`, `0a91d0a4`, `eaa642bb`, and `481da284` remove 1,640 net
+lines while retaining behavior at its current owner:
+
+- the internal-namespace tests prove the actual context boundary without
+  pinning a deleted private `transact!*` implementation detail;
+- `my.kb` uses the public `pull-many` `:seon.db/refs` signature;
+- retry proof calls the one `seon.agent.turn` LLM retry owner without an
+  embedded database;
+- writer integration retains current authority behavior while protocol,
+  registry, transport, program, and initialization tests own their respective
+  contracts; and
+- configuration reconciliation and startup admission remain covered by the
+  current state, config, and client-initialization tests rather than the
+  deleted local boot database.
+
+Focused proof totals 78 tests and 378 assertions with no failures or errors.
+The remaining embedded-connection fixtures are being classified in the same
+way. After those consumers are gone, the next frozen-source checkpoint is the
+complete CLJS and writer gates, followed immediately by supervised child-crash
+and reconstruction proof. No compatibility connection or local Datahike test
+authority is being restored.
