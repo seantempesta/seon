@@ -8,8 +8,8 @@
    `/agent/{id}`, `/agent/{id}/feed`, `/agent/{id}/call`), and the static
    supplement carries
    the routes NOT yet seeded as datoms (static assets, the secondary POST
-   doors, the loopback operator config door, and the flat `/call`). The
-   compiled router is a discardable
+   doors, and the loopback operator config door). The compiled router is a
+   discardable
    cache keyed by the exact route projection plus the static supplement
    config. [[attach!]] installs one query-derived authority interest and reads
    the initial projection at its acknowledgement coordinate. Later matching
@@ -36,7 +36,7 @@
    node `req`/`res` under `:seon.http/node-req` / `:seon.http/node-res` so the
    streaming + static handlers can reach the socket. A handler that takes over
    the socket itself (the SSE open, a static file pipe, the gzip /agent-view feed,
-   a /call JSON write) returns the **hijack sentinel** `{:seon.http/hijacked
+   an agent-action JSON write) returns the **hijack sentinel** `{:seon.http/hijacked
    true}`; [[handle-request]] sees it and writes NOTHING (the handler already
    owns the stream). A handler that returns a plain Ring response map is
    written to the node res by [[write-ring-response!]] — so a future pure-Ring
@@ -64,7 +64,9 @@
     ;; its sole requirer.
     [seon.web.datastar]
     [seon.web.debug :as debug]
-    [seon.web.reactive.call :as call]
+    ;; Build-inclusion only: the database-seeded `/agent/{id}/call` route
+    ;; resolves this handler symbol late through seon.eval/lookup-value.
+    [seon.web.reactive.call]
     [reitit.ring :as rr]))
 
 ;; ============================================================
@@ -127,7 +129,7 @@
 
 (defn- node->ring
   "Build a Ring request map from a node IncomingMessage, injecting the raw
-   node `req`/`res` so socket-owning handlers (SSE, static, /call) can reach
+   node `req`/`res` so socket-owning handlers (SSE, static, agent action) can reach
    them. `:uri` is the path with the query stripped (reitit matches on it);
    `:query-string` is the raw query; `:request-method` is a lower-cased
    keyword. Headers ride as a plain map for completeness — routing + the
@@ -264,8 +266,8 @@
 ;; ============================================================
 ;; The static supplement — the routes NOT (yet) seeded as `:seon.route/*`
 ;; datoms, so nothing 404s: static assets, the secondary state-changing POST
-;; doors (each `:seon.route/same-origin`-gated), the back-compat
-;; flat `/call`, and the operator dev tools (`/data` + `/agent/{id}/debug`,
+;; doors (each `:seon.route/same-origin`-gated), and the operator dev tools
+;; (`/data` + `/agent/{id}/debug`,
 ;; `seon.web.debug`). db->routes supplies the core routes; this supplies
 ;; the rest. FLAG (coordination → Core): the secondary POST doors below should
 ;; be seeded as `:seon.route/*` datoms for fully data-driven routing — until
@@ -290,8 +292,7 @@
     hijacked))
 
 (defn- static-supplement
-  "The non-core reitit routes, built from the injected handler set `h`
-   (serve's handlers) + the directly-required `call` leaf handler."
+  "The non-core reitit routes built from serve's injected handlers."
   [h]
   (let [{::keys [static readiness chat stop resume clear log
                  complete agent-run config-apply operator-quiesce
@@ -321,11 +322,6 @@
      ["/agents/run"  {:post {:middleware [:seon.route/same-origin] :handler (admitted-post-handler agent-run)}}]
      ["/_seon/operator/config" {:post {:middleware [:seon.route/same-origin]
                                         :handler (admitted-post-handler config-apply)}}]
-     ;; The flat `/call` (back-compat this unit) hands the raw (req,res) to the
-     ;; unchanged capability gate; the per-agent `/agent/{id}/call` is the
-     ;; SEEDED core door (db->routes) → the same gate.
-     ["/call"                {:post {:middleware [:seon.route/same-origin]
-                                     :handler (fn [r] (call/handle! (node-req r) (node-res r)) hijacked)}}]
      ["/agent/{id}/complete" {:post {:middleware [:seon.route/same-origin]
                                      :handler (fn [r] (complete (node-req r) (node-res r)
                                                                 (get-in r [:path-params :id]))

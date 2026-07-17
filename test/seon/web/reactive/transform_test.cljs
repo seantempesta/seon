@@ -1,6 +1,6 @@
 (ns seon.web.reactive.transform-test
   "Render-time rewrite — agent fn-call / fn-ref handler slots → standard
-   Datastar `@post('/call?…')`. Behavioral assertions on the rewritten
+   Datastar `@post('/agent/<id>/call?…')`. Behavioral assertions on the rewritten
    structure + the call descriptor that decodes back out of the URL — NOT
    brittle full-string matches on the emitted Datastar expression."
   (:require
@@ -11,12 +11,16 @@
 (def ^:private on-click (keyword "data-on:click"))
 (def ^:private on-submit (keyword "data-on:submit"))
 
-(defn- action->params
-  "Pull the URLSearchParams out of a rewritten `@post('/call?…')` action
-   string (the URL is the bit inside the single quotes)."
+(defn- action->url
+  "The URL inside a rewritten `@post('<url>')` action string."
   [action]
-  (let [url (second (re-find #"@post\('([^']*)'\)" action))]
-    (.-searchParams (js/URL. (str "http://x" url)))))
+  (js/URL. (str "http://x"
+                (second (re-find #"@post\('([^']*)'\)" action)))))
+
+(defn- action->params
+  "The URLSearchParams inside a rewritten Datastar action."
+  [action]
+  (.-searchParams (action->url action)))
 
 ;; ---------------------------------------------------------------------------
 ;; fn-CALL — a seq with a symbol head; args bound at render time.
@@ -31,13 +35,10 @@
     (testing "the on-click key becomes a standard data-on:click (old key gone)"
       (is (contains? attrs on-click))
       (is (not (contains? attrs :on-click))))
-    (testing "the value is a standard Datastar @post(…) to the call door — no bespoke macro"
+    (testing "the value is a standard Datastar @post(…) to the one action door"
       (is (string? action))
-      ;; behavior, not the exact route: it's a datastar @post to a /call door
-      ;; (flat or hierarchical both route to the gate); namespace-as-route is
-      ;; verified by the fn param below, so don't pin the path structure.
       (is (str/starts-with? action "@post('"))
-      (is (str/includes? action "/call?")))
+      (is (= "/agent/tst/call" (.-pathname (action->url action)))))
     (let [sp (action->params action)]
       (testing "namespace is the route — the bare handler qualified to the authoring ns"
         (is (= "my.agent.tst/cancel-order!" (.get sp "fn"))))
@@ -48,11 +49,27 @@
   (let [out   (transform/transform-hiccup
                 'my.agent.tst
                 [:button {:on-click (list 'my.agent.other/do-it 1 2)}])
-        sp    (action->params (get (second out) on-click))]
+        action (get (second out) on-click)
+        sp    (action->params action)]
     (testing "an explicitly-qualified handler symbol is NOT re-qualified"
       (is (= "my.agent.other/do-it" (.get sp "fn"))))
+    (testing "the qualified function's agent owns the action route"
+      (is (= "/agent/other/call" (.-pathname (action->url action)))))
     (testing "all render-time args survive the round trip in order"
       (is (= [1 2] (transform/decode-args (.get sp "args")))))))
+
+(deftest non-agent-handler-is-omitted
+  (doseq [[authoring-ns handler]
+          [['my.agent.tst 'seon.system/stop!]
+           ['my.system 'stop!]]]
+    (let [out (transform/transform-hiccup
+                authoring-ns
+                [:button {:class "keep" :on-click handler} "Stop"])
+          attrs (second out)]
+      (is (= "keep" (:class attrs)))
+      (is (not (contains? attrs :on-click)))
+      (is (not (contains? attrs on-click)))
+      (is (not (str/includes? (pr-str out) "/call"))))))
 
 (deftest fn-call-args-with-apostrophe-stay-quote-safe
   ;; A string arg containing an apostrophe must not break the single-quoted
@@ -115,7 +132,7 @@
     (is (= args (transform/decode-args (transform/encode-args args))))))
 
 ;; ---------------------------------------------------------------------------
-;; Security — decode-args is DATA-ONLY (the /call RCE regression).
+;; Security — decode-args is DATA-ONLY (the action-call RCE regression).
 ;; Transit-JSON decodes ["~#list",[…]] into a real seq and "~$sym" into a real
 ;; symbol. In the old synthesize-a-form-and-eval path a list arg pr-str'd as
 ;; EVALUABLE code, so a crafted ?args= broke out of the capability gate and ran

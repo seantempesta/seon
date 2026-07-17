@@ -17,7 +17,7 @@
    - fn-REF — a bare (or qualified) symbol, args from CLICK-time signals:
        [:button {:on-click 'submit-order!} \"Submit\"]
      No render-time args; Datastar sends the current signals as the POST
-     body, and `/call` passes them to the fn as a single map argument.
+     body, and the agent action door passes them to the fn as one map argument.
 
    ## The rewrite (both shapes → one standard Datastar attribute)
 
@@ -52,14 +52,14 @@
 ;; ============================================================
 ;; Args codec — transit-JSON, byte-compatible with the wire codec.
 ;; The rewrite WRITES (render-time arg values → query string); the
-;; /call route READS (query string → arg values). One place owns the
+;; agent action route READS (query string → arg values). One place owns the
 ;; shape so the two sides can never drift.
 ;; ============================================================
 
 (defn encode-args
   "Transit-JSON encode the render-time `args` to a URL string.
 
-   The `args` sequence encodes for the `/call` URL. The caller URL-encodes
+   The `args` sequence encodes for the agent action URL. The caller URL-encodes
    the result."
   {:malli/schema [:=> [:catn [::args [:sequential :any]]] :string]}
   [args]
@@ -70,8 +70,8 @@
    keyword / inst / uuid) or a vector/set/map recursively of pure data. A
    SYMBOL, a LIST/SEQ (non-vector), or a transit TaggedValue is NOT pure data.
    This is the whitelist [[decode-args]] enforces: the render-time args of a
-   `/call` are VALUES, never code. Transit-JSON decodes `[\"~#list\",[…]]` into
-   a real seq and `\"~$sym\"` into a real symbol — both are refused here so a
+   an action call are VALUES, never code. Transit-JSON decodes
+   `[\"~#list\",[…]]` into a real seq and `\"~$sym\"` into a real symbol — both are refused here so a
    code-shaped arg can never enter the invoke path (belt-and-suspenders behind
    the resolve-and-apply gate in `seon.web.reactive.call`)."
   [v]
@@ -133,18 +133,18 @@
    resolved fn symbol + optional render-time args. `<id>` is the owning
    agent (the fn's namespace minus `my.agent.`) — the hierarchical action
    door; the fn's own namespace still authorizes (the `{id}` segment is the
-   routing level, not an auth input). A non-agent namespace (no id) falls back
-   to the flat `/call` door, which the capability gate refuses. fn-CALL passes
-   `args` (transit in the query); fn-REF passes none (the body's signals
-   become the fn's arg)."
+   routing level, not an auth input). A non-agent namespace has no action
+   door, so this returns nil and the caller omits that handler. fn-CALL passes
+   `args` (transit in the query); fn-REF passes none (the body's signals become
+   the fn's arg)."
   [fn-sym args]
-  (let [id   (agent-id-of fn-sym)
-        door (if id (str "/agent/" (url-enc id) "/call") "/call")
-        base (str "@post('" door "?fn=" (url-enc (str fn-sym)))]
-    (str (if (seq args)
-           (str base "&args=" (url-enc (encode-args args)))
-           base)
-         "')")))
+  (when-let [id (agent-id-of fn-sym)]
+    (let [base (str "@post('/agent/" (url-enc id) "/call?fn="
+                    (url-enc (str fn-sym)))]
+      (str (if (seq args)
+             (str base "&args=" (url-enc (encode-args args)))
+             base)
+           "')"))))
 
 ;; ============================================================
 ;; Handler-slot detection + rewrite.
@@ -186,16 +186,18 @@
 
 (defn- rewrite-attr
   "Rewrite one [k v] pair. An event-handler key whose value is a fn-call /
-   fn-ref becomes `[:data-on:<event> \"@post('/call?…')\"]`; everything else
-   passes through unchanged."
+   fn-ref becomes `[:data-on:<event> \"@post('/agent/<id>/call?…')\"]` when
+   its qualified function namespace owns an agent. An unsupported non-agent
+   handler is omitted. Everything else passes through unchanged."
   [ns-sym k v]
   (if-let [[fn-sym args] (and (event-attr? k) (call-or-ref ns-sym v))]
-    [(keyword (str "data-on:" (event-name k))) (call-action fn-sym args)]
+    (when-let [action (call-action fn-sym args)]
+      [(keyword (str "data-on:" (event-name k))) action])
     [k v]))
 
 (defn- rewrite-attrs [ns-sym attrs]
   (if (map? attrs)
-    (into {} (map (fn [[k v]] (rewrite-attr ns-sym k v))) attrs)
+    (into {} (keep (fn [[k v]] (rewrite-attr ns-sym k v))) attrs)
     attrs))
 
 (defn- hiccup-element? [form]
@@ -208,10 +210,11 @@
   "Rewrite agent handler slots in `hiccup` into Datastar attrs.
 
    Postwalks `hiccup`, rewriting agent fn-call / fn-ref handler slots into
-   standard Datastar `@post('/call?…')` attributes. Bare handler symbols are
-   qualified to `ns-sym` (the authoring namespace). Elements without an attr
-   map, and attrs that aren't fn-call/fn-ref handler slots, are untouched —
-   so it is a no-op on hiccup that uses no interactive handlers."
+   standard Datastar `@post('/agent/<id>/call?…')` attributes. Bare handler
+   symbols are qualified to `ns-sym` (the authoring namespace). A qualified
+   function outside `my.agent.*` has no action door, so its handler is omitted.
+   Elements without an attr map and attrs that aren't fn-call/fn-ref handler
+   slots are untouched, so this is a no-op on non-interactive hiccup."
   {:malli/schema [:=> [:catn [::ns-sym :symbol] [::hiccup :any]] :any]}
   [ns-sym hiccup]
   (walk/postwalk

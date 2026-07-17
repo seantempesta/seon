@@ -70,8 +70,16 @@
           (fn
             ([request] (query request))
             ([query-form & inputs] (apply query query-form inputs))))
-    (set! db/listen! listen)
-    (set! db/unlisten! unlisten)
+    (set! db/listen!
+          (fn
+            ([request] (listen request))
+            ([key handler] (listen {:seon.db/key key
+                                    :seon.db/handler handler}))
+            ([database key handler]
+             (listen {:seon.db/db database
+                      :seon.db/key key
+                      :seon.db/handler handler}))))
+    (set! db/unlisten! (fn [request] (unlisten request)))
     (reset! state-atom {})
     (-> (js/Promise.resolve nil)
         (.then (fn [] (body)))
@@ -116,6 +124,18 @@
   (let [response (request! "POST" "/_seon/operator/config")]
     (is (= 200 (::response-status response)))
     (is (= "{:seon.state/ok? true}" (::response-body response)))))
+
+(deftest action-door-is-only-database-projected
+  (let [projection [{:seon.route/pattern "/agent/{id}/call"
+                     :seon.route/method :post
+                     :seon.route/handler
+                     'seon.web.router-test/temporary-handler!
+                     :seon.route/middleware :seon.route/same-origin}]
+        projected (router/db->routes projection)
+        supplement (#'router/static-supplement {})]
+    (is (= ["/agent/{id}/call"] (mapv first projected)))
+    (is (not (contains? (set (map first supplement)) "/call"))
+        "the static compatibility address is absent")))
 
 (deftest operator-quiesce-route-is-unadmitted-and-loopback-only
   (let [!invocations (atom 0)
