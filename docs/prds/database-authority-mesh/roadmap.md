@@ -295,6 +295,50 @@ value, including when an unrelated transaction advances that value without
 triggering membership interest. Focused proof passes 4 multiagent tests/25
 assertions, 5 advertisement tests/23 assertions, and 7 client-initialization
 tests/20 assertions.
+Commit `70fd2fca` settles quiescence on ordinary database values. The final
+empty-work snapshot is reused for one bounded `pull-many`; coordinate capture,
+accumulation, and result envelopes are deleted. Native close reports and direct
+errors are the only lifecycle result. Focused proof passes 5 client-quiescence
+tests/12 assertions, the lifecycle gate in CLJS and CLJ at 1 test/6 assertions
+each, and 55 operator process tests/269 assertions. Commits `c71e2864` and
+`2d10e86a` leave one flat database-value decoder shared by client startup,
+execution, and agent creation; client initialization remains green at 7 tests/
+20 assertions.
+Commit `88680450` makes agent creation, initial-agent reconciliation, minting,
+start, and delegation reuse one decoded config singleton from their existing
+grouped acquisition. Home requirements are creation-time database facts with
+one canonical-data fallback, not a config read during namespace setup. Focused
+proof passes 5 multiagent tests/36 assertions and 6 home tests/11 assertions.
+Commit `7c1ba42a` removes the AI prompt config fallback and the embedded AI test
+database: compiled prompt acquisition owns cluster prompt resolution, direct
+adapter calls use the shipped default, and AI seed sync fences its one native
+transaction with the immutable database value returned by its one acquisition.
+Focused proof passes 10 tests/36 assertions. Commits `8b4cb98c` and `da1ea921`
+join schedule-breaker and stale-watchdog config to each operation's existing
+immutable database acquisition rather than a tick-wide cache. Focused proof
+passes 5 schedule tests/31 assertions and 9 run tests/46 assertions. Commit
+`00244fdc` derives warning exclusions from exact already-acquired boot-attribute
+provenance; the deleted namespace helper, registry mutation, and two embedded
+warning databases are gone. Focused proof passes 8 pure warning tests/41
+assertions and 1 acquisition test/10 assertions.
+Commit `97654066` settles operation-owned configuration across prompt/context
+rendering, eval dispatch, execution, handlers, and error escalation. One grouped
+operation acquisition decodes one config singleton and threads the identical
+ordinary value through child calls; AsyncLocalStorage is retained only for
+cross-fiber error escalation. Load-time config reads, removed render-function
+invalidation, two embedded error/render databases, and 2,293 lines of embedded
+eval-database fixtures are deleted. Focused proof passes 129 tests/509
+assertions across execution, errors, rendering, instrumentation, self-host eval,
+Promise/print behavior, receipts, requires, and result retention. Both execution
+artifacts compile; their remaining warnings name the next explicit consumer
+cuts rather than compatibility fallbacks.
+Commit `3cb9f019` settles the remaining client startup contradictions. One
+`SEON_EXTRA_SRC` source map is read once by `index-core!` and reused for
+downstream function and namespace rows; the dead namespace inventory, repeated
+source scans, client-side precondition/coordinate assertion, and false
+boot-time provider classification are deleted. Focused proof passes 28 tests/
+158 assertions. The default execution artifact compiles 283 files and the ACME
+artifact compiles 386 files with downstream source present.
 `3ebfcaf5` leaves one current artifact manifest/application digest and removes
 the four historical readers; `9a66bb78` leaves one generated-identity
 allocator; and `c453a5bd` makes that allocator consume the same native
@@ -331,31 +375,31 @@ modest-hardware density checkpoint.
 
 ### Current implementation checkpoint
 
-- **Earliest unsettled contract:** migrate quiescence through the one settled
-  client session,
-  publication, advertisement, recovery, and state-reconciliation owners.
+- **Earliest unsettled contract:** finish operation-owned configuration and
+  ordinary-database-value propagation through eval/render execution and its
+  remaining direct consumers; delete every embedded CLJS database test that
+  only exercised the removed runtime.
 - **Integrated proof that closes it:** eval, autocomplete, namespace context,
   startup, converged reload, advertisement, runtime hosting, and declarative
   state reconciliation and runtime membership reuse ordinary database values
-  and native transaction reports; fresh and warm startup both execute the one
-  ordered sequence, and membership rejects completion behind any newer cached
-  session value.
-- **Dependency-ready parallel portfolio:** quiescence is grounded at
-  [[research/membership-quiescence-single-owner-audit-2026-07-17]] against the
-  settled membership boundary. Operation-owned config propagation is grounded
-  at [[research/eval-render-config-single-owner-audit-2026-07-17]], including
-  the existing error-scope seam and the complete deletion set for load-time
-  config values. The web/render single-owner audit is durable at
+  and native transaction reports; quiescence, agent creation, AI seeding,
+  scheduling, the watchdog, and warning acquisition now reuse the same rule.
+  The current frozen proof must close eval/render configuration and leave no
+  retained test dependent on a local Datahike connection.
+- **Dependency-ready parallel portfolio:** operation-owned config propagation
+  is grounded at [[research/eval-render-config-single-owner-audit-2026-07-17]],
+  including the existing error-scope seam and the complete deletion set for
+  load-time config values. The web/render single-owner audit is durable at
   [[research/web-render-single-owner-audit-2026-07-17]]; the plan consumer cut
   is grounded at [[research/plan-single-owner-audit-2026-07-17]] and explicitly
   rejects the current dirty coordinate/oversized-row prototype. The complete
   parallel-system inventory is durable at
   [[research/parallel-behavior-unification-audit-2026-07-17]].
-- **Next refills:** migrate quiescence in one complete cut while the independent
-  operation-owned config seam advances without touching client lifecycle;
-  close the web/feed database-value and
-  rendered-transaction owner next, followed by the exact-database blob
-  operator seam and the operation-specific plan consumers.
+- **Next refills:** finish and commit the frozen eval/render config cut; remove
+  the obsolete host renderer/canvas/slot graph exposed by that deletion; close
+  the web/feed database-value and rendered-transaction owner next, followed by
+  the exact-database blob operator seam and the operation-specific plan
+  consumers.
   The final graduation gate remains the full frozen-source correctness, live
   Bun/JVM, multi-agent, child-crash, multi-database, and measured resource
   matrix.
