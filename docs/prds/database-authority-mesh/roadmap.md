@@ -405,6 +405,27 @@ in the changed listener, router, Datastar, debug, or route owners.
 
 ### Current implementation checkpoint
 
+The live execution boundary is now closed through the real system. Commits
+`99afc40f` and `4f3db199` make the manifest's execution identity the raw bytes
+verified by Bun and publish the complete Shadow execution closure beside the
+bootstrap in one immutable runtime root. The mutable watcher output is only a
+build input; admitted children launch the manifest path. Focused artifact and
+process proof passes 75 tests/357 assertions. Three clean supervised restarts
+proved watcher, writer, and pod readiness while progressively falsifying the
+old path digest, incomplete `main.js` snapshot, and missing imported-runtime
+assumptions.
+
+Commits `8e46789d`, `92e96990`, and `3f2e7ffb` then close the first complete live
+root render. Datahike resource evidence showed the scalar count retains four
+nodes, so its result bound is 16; the full configuration pull has an explicit
+4,096-node bound; database errors bypass the ordinary page formatter; and the
+system renderer emits each mapped card/status as a hiccup child rather than a
+nested tag vector. Focused execution, Datastar, and system-render proof passes
+24 tests/95 assertions. The live gzip feed returns one valid complete
+`#app-view` with the system header, two-agent grid, canvas, plan, and transcript,
+with no child identity, import, query-budget, render, or core-fault entry in the
+fresh pod log.
+
 - **Earliest unsettled contract:** finish real-authority proof of the public
   operation-specific plan consumer, then prove exact initialization and
   recovery. Web serving and

@@ -54,21 +54,24 @@ source is `shadow.cljs.devtools.api/compile*`,
 
 ## Bounded implementation
 
-Artifact manifest version 3 now records a content-addressed runtime root. A
-source build copies the completed bootstrap into
-`tmp/seon-runtime-artifacts/<bootstrap-digest>/out/bootstrap`, verifies the
-copy against the digest before atomic publication, and refuses an existing
-content address whose bytes do not verify. Development-only links retain the
-current source and asset behavior without copying that mutable corpus into this
-bootstrap-focused slice.
+Artifact manifest version 6 records a content-addressed runtime root. A source
+build copies the completed bootstrap, execution entry file, and all JavaScript
+modules imported by that entry file into one checkout-layout-preserving
+directory. The root identity includes the bootstrap digest, raw execution-entry
+digest, and complete imported-runtime digest. Publication verifies all three
+before its atomic move and refuses an existing content address whose bytes do
+not verify. Development-only links retain the current source and asset behavior
+without copying that mutable corpus into this runtime-focused slice.
 
 `seon.dev.process/specs` injects the manifest's runtime root only into the pod
 environment. The runtime's existing `SEON_RUNTIME_ROOT` path mechanism
 therefore resolves the immutable bootstrap without a second loader or eval
-path. The bootstrap digest is also part of the pod spec, so readiness hashes
-the exact published directory and fails when its bytes differ. Version 1/2
-manifests remain readable for already-running targets; the next source build
-publishes version 3.
+path. The bootstrap and execution-entry digests are also part of the pod spec,
+so readiness hashes the exact published members and fails when their bytes
+differ. The launch descriptor replaces the watcher's mutable execution path
+with the manifest's immutable path only after proving that the source descriptor
+selected the configured flavor and build. Only the current manifest format is
+readable.
 
 The client now has one output owner as well. A source artifact build prepares
 the writer, bootstrap, and CSS, then starts the managed Shadow watcher while
@@ -97,14 +100,14 @@ PRD owning the immutable package form.
   mutates another target's admitted path.
 - The pod's process identity changes when its bootstrap identity changes.
 - Deterministic tests publish two flavor manifests and prove that the first
-  target's bootstrap bytes and resolution remain unchanged after the second
+  target's bootstrap and execution bytes remain unchanged after the second
   build.
 - Simultaneous default and ACME proof reports the on-disk bootstrap digest each
   pod actually resolves and matches it to that pod's manifest.
 
 ## Verification
 
-- Focused operator tests pass 25 tests and 95 assertions.
+- Focused artifact/process tests pass 75 tests and 357 assertions.
 - A deterministic sequential-flavor test publishes default bytes, changes the
   mutable build output, publishes ACME bytes, and proves both content-addressed
   roots retain their own digest and content.
@@ -120,5 +123,13 @@ PRD owning the immutable package form.
   source build without that watcher owner; admits the watcher only when its
   current bytes equal the published digest; rejects drift between flush and
   admission; and reverses a newly acquired watcher if publication fails.
-- No pod was restarted or reset in this bounded unit. The final simultaneous
-  default/ACME rebuild and resolved-path evidence remain open acceptance work.
+- The final simultaneous default/ACME rebuild and resolved-path evidence remain
+  open acceptance work; no ACME process was disturbed by the default proof.
+- Live default proof at `99afc40f` and `4f3db199` found and corrected two
+  distinct identity defects: the old operator digest included a path while the
+  Bun child hashed raw bytes, and Shadow's development entry imports a separate
+  841-module runtime rather than being self-contained. A clean supervised
+  restart now launches from the immutable complete closure. The manifest's raw
+  execution digest matches `shasum -a 256` of its exact entry file, and a real
+  root render completes without an identity rejection, missing import, or
+  pre-ready child exit.
