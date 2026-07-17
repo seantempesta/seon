@@ -323,7 +323,7 @@
              :seon.render/html-response
              :seon.render/ai-response
              :seon.agent.ctx/render-namespace-response
-             :seon.db/db-val
+             :seon.db/db
              :seon.db/listen-request]]
     (testing (str k)
       (let [form (schema/schema-definition k)

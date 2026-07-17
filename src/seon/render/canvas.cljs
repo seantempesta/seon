@@ -106,6 +106,7 @@
     [seon.ai.tokens :as tokens]
     [seon.db :as db]
     [seon.render.chat :as chat]
+    [seon.render.schema]
     [seon.schema :as schema]
     [seon.ui.html :as html]
     [seon.ui.markdown :as md]))
@@ -300,26 +301,9 @@
   [x]
   (structure-error-at x []))
 
-;; The PURE-DATA hiccup bound: a vector with a keyword head. Shallow
-;; on purpose — children are `:any` (sanctioned: arbitrary hiccup
-;; trees; the deep walk happens at the render boundary via
-;; [[valid-hiccup?]] and html->string). Verified against the bridge:
-;; `:cat`/`:and` are unmappable datahike types, so any `:or` carrying
-;; this arm stays a MIXED-:or (pr-str'd EDN string storage) exactly
-;; as the `[:fn]` arm did.
-(schema/register! ::hiccup [:and [:vector :any] [:cat :keyword [:* :any]]])
-
-;; THE canvas key — qualified fn symbol OR literal hiccup, stored
-;; as a pr-str'd EDN string by the mixed-:or bridge, decoded on read
-;; via `seon.db/decode-edn-value`. `:seon.render/html` references
-;; this shape (deliberate uniformity — agents already know that
-;; vocabulary).
-;; Widened (config-driven agent-init CP-1): add `:none` (no canvas) + a
-;; `:default :none` so an unconfigured block carries no surface. The existing
-;; qualified-fn-`:symbol` and literal-`::hiccup` arms are PRESERVED. This
-;; REPLACES the hardcoded root branch (client.cljs) — root's block carries
-;; `::content 'seon.render.system/system-view` via root-context.
-(schema/register! ::content [:or {:default :none} [:enum :none] :symbol ::hiccup])
+;; The shared `::hiccup` and `::content` data forms are registered by
+;; `seon.render.schema`, a dependency-free leaf used by both context blocks and
+;; this renderer. Deep validation remains here at the actual render boundary.
 
 ;; Where the wired value came from — the canvas's provenance. Rendered
 ;; into the agent's awareness section header so the agent always sees

@@ -90,7 +90,7 @@
    The `:seon.agent/run`
    pointer, resolved to its run entity, returned only when that run is
    `:open`. Drill its refs via follow-up reads."
-  {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db-val]
+  {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db]
                              [:seon.agent/id :seon.agent/id]]
                   [:maybe :map]]}
   [db agent-id]
@@ -108,7 +108,7 @@
    ([[current-run]]), and that run's `paused-at`, then applies
    [[state-from-primitives]]. The ONE reader the readline / web UI / loop /
    wake gate share."
-  {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db-val]
+  {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db]
                              [:seon.agent/id :seon.agent/id]]
                   :seon.derive/state]}
   [db agent-id]
@@ -131,7 +131,7 @@
    drive and must never burn a turn from the work budget. No installed-schema
    gate (the loop is the active model; `:seon.agent.turn/run` is always
    registered by boot)."
-  {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db-val]
+  {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db]
                              [:seon.agent.run/id :seon.agent.run/id]]
                   :int]}
   [db run-id]
@@ -154,7 +154,7 @@
    under `:stream` the loop bounds work by THIS count instead. Joins
    `:seon.agent.turn/run` → `:seon.agent.turn/evals` over the explicit
    db value; excludes schedule-fire turns like [[run-turn-count]]."
-  {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db-val]
+  {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db]
                              [:seon.agent.run/id :seon.agent.run/id]]
                   :int]}
   [db run-id]
@@ -176,7 +176,7 @@
    (`:seon.agent.run/agent`) ← turn (`:seon.agent.turn/run`), counted over the
    explicit db value. Query-based (not reverse-ref nav) so it works on a plain
    pulled/touched agent map and on a FilteredDB."
-  {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db-val]
+  {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db]
                              [:seon.agent/id :seon.agent/id]]
                   :int]}
   [db agent-id]
@@ -194,7 +194,7 @@
   "The run's heartbeat instant over `db`, or nil.
 
    `:seon.agent.run/last-beat-at`; nil when the run never beat / doesn't resolve."
-  {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db-val]
+  {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db]
                              [:seon.agent.run/id :seon.agent.run/id]]
                   [:maybe :inst]]}
   [db run-id]
@@ -206,7 +206,7 @@
 
    Not terminated, no open run. A
    FILTER over [[derive-state]], never a re-encoding of the rule."
-  {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db-val]
+  {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db]
                              [:seon.agent/id :seon.agent/id]]
                   :boolean]}
   [db agent-id]
@@ -218,7 +218,7 @@
    an identity-only lookup target such as provenance genesis's reserved root
    stub is not yet a runnable agent. A FILTER over [[derive-state]] (one rule,
    never a re-encoded idle query), sorted asc for deterministic boot logs."
-  {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db-val]] [:vector :seon.agent/id]]}
+  {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db]] [:vector :seon.agent/id]]}
   [db]
   (->> (db/query {:seon.db/db db
                   :seon.db/query '[:find [?id ...]
@@ -238,7 +238,7 @@
    lookup targets are not hosts; birth requires `:seon.eval/home-requires`.
    Among born agents the only exclusion is the durable termination fact."
   {:malli/schema
-   [:=> [:catn [:seon.db/db :seon.db/db-val]] [:vector :seon.agent/id]]}
+   [:=> [:catn [:seon.db/db :seon.db/db]] [:vector :seon.agent/id]]}
   [db]
   (->> (db/query {:seon.db/db db
                   :seon.db/query
@@ -267,7 +267,7 @@
    Windows over the stored `:seon.agent.run/closed-at` instant (`:db/txInstant`
    can't be backdated, so a stored close instant is what a test windows over).
    A pure count — the breaker's state IS the run log, nothing stored."
-  {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db-val]
+  {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db]
                              [:seon.agent/id :seon.agent/id]
                              [:since :inst]]
                   :int]}
@@ -292,7 +292,7 @@
    supplies the config-dialed N + window; nothing stored. Human/agent MESSAGES
    still wake a tripped agent — only SCHEDULE wakes are refused (the caller
    gates on this)."
-  {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db-val]
+  {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db]
                              [:seon.agent/id :seon.agent/id]
                              [:seon.agent/now :inst]
                              [:seon.config.breaker/crash-count :int]
@@ -370,7 +370,7 @@
    This is the one immutable run-outcome projection used by status, child
    context, and root's fleet view. It is gated on the run schema being
    installed so old/unseeded database values omit the fact cleanly."
-  {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db-val]
+  {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db]
                              [:seon.agent/id :string]]
                   [:or :nil :seon.derive/closed-run]]}
   [db id]
@@ -401,7 +401,7 @@
 
 (defn last-closed-reason
   "The `closed-reason` of the agent's latest closed run, or nil."
-  {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db-val]
+  {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db]
                              [:seon.agent/id :seon.agent/id]]
                   [:maybe :seon.agent.run/closed-reason]]}
   [db id]
@@ -409,7 +409,7 @@
 
 (schema/register! :seon.derive/status-request
   [:map
-   [:seon.db/db {:optional true} :seon.db/db-val]
+   [:seon.db/db {:optional true} :seon.db/db]
    ;; Leaf-purity (see note below): this is a LOAD-TIME register! in a leaf ns
    ;; — seon.agent requires THIS, so `:seon.agent/id` is NOT registered yet at
    ;; cold boot and can't be referenced here. The base type `:string` still

@@ -16,8 +16,7 @@
    :datahike.query/result result})
 
 (defn- loop-read [run current-run-id mode turn-count form-count]
-  {::db/coordinate {:test/database-value true}
-   ::db/results [(member run)
+  {::db/results [(member run)
                  (query-member current-run-id)
                  (query-member mode)
                  (query-member turn-count)
@@ -68,27 +67,95 @@
 
 (deftest run-loop-acquires-one-batched-database-value
   (async done
-    (let [!requests (atom [])
+    (let [admission-state admission/state
+          db-fn db/db
+          execute-many db/execute-many
+          !requests (atom [])
+          database {:db-name "default" :t 1 :as-of nil :since nil
+                    :history false
+                    :datahike/commit-id
+                    #uuid "10000000-0000-0000-0000-000000000001"}
           run {:seon.agent.run/id "run-a"
                :seon.agent.run/status :closed
                :seon.agent.run/closed-reason :completed}
-          result
-          (with-redefs
-            [admission/state (fn [] {::admission/status :available})
-             db/execute-many
-             (fn [request]
-               (swap! !requests conj request)
-               (js/Promise.resolve (loop-read run nil :batch 0 0)))]
-            (loop/run-loop! {:seon.agent/id "agent-a"} "run-a"))]
+          _ (set! admission/state
+                  (fn [] {::admission/status :available}))
+          _ (set! db/db
+                  (fn
+                    ([] (js/Promise.resolve database))
+                    ([_request] (js/Promise.resolve database))))
+          _ (set! db/execute-many
+                  (fn [request]
+                    (swap! !requests conj request)
+                    (js/Promise.resolve (loop-read run nil :batch 0 0))))
+          result (loop/run-loop! {:seon.agent/id "agent-a"} "run-a")]
       (-> result
           (.then
             (fn [result]
               (is (= :idle result))
               (is (= 1 (count @!requests)))
-              (is (= 5 (count (::db/members (first @!requests)))))))
+              (let [members (::db/members (first @!requests))]
+                (is (= 5 (count members)))
+                (is (= database (::db/db (first members))))
+                (is (every? #(= database
+                                (first (::db.protocol/arguments %)))
+                            (rest members))))))
           (.catch (fn [error]
                     (is false (str "run-loop! rejected: " error))))
-          (.finally done)))))
+          (.finally
+           (fn []
+             (set! db/db db-fn)
+             (set! db/execute-many execute-many)
+             (set! admission/state admission-state)
+             (done)))))))
+
+(deftest wake-handler-reads-one-committed-database-value-once
+  (async done
+    (let [available? admission/available?
+          pull-many db/pull-many
+          database {:db-name "default" :t 2 :as-of nil :since nil
+                    :history false
+                    :datahike/commit-id
+                    #uuid "10000000-0000-0000-0000-000000000002"}
+          !requests (atom [])
+          handler (loop/wake-handler {:seon.agent/id "agent-a"})
+          _ (set! admission/available? (constantly true))
+          _ (set! db/pull-many
+                  (fn
+                    ([_request]
+                     (js/Promise.reject (js/Error. "unexpected map pull")))
+                    ([db-value selector refs]
+                     (swap! !requests conj [db-value selector refs])
+                     (js/Promise.resolve
+                      [{:db/id 7 :seon.agent/terminated-at (js/Date.)}
+                       {:db/id 11
+                        :seon.agent.message/id "message-a"
+                        :seon.agent.message/hops 0
+                        :seon.agent.message/origin :human
+                        :seon.agent.message/from {:db/id 9}}]))))
+          result
+          (handler
+           {:db-after database
+            :tx-data [[11 :seon.agent.message/to 7 536870914 true]
+                      [11 :seon.agent.message/content "hello"
+                       536870914 true]]})]
+      (-> result
+          (.then
+           (fn [_]
+             (is (= 1 (count @!requests)))
+             (let [[db-value selector refs] (first @!requests)]
+               (is (= database db-value))
+               (is (= [[:seon.agent/id "agent-a"] 11] refs))
+               (is (some #(and (map? %)
+                               (contains? % :seon.agent.message/from))
+                         selector)))))
+          (.catch (fn [error]
+                    (is false (str "wake handler rejected: " error))))
+          (.finally
+           (fn []
+             (set! db/pull-many pull-many)
+             (set! admission/available? available?)
+             (done)))))))
 
 (deftest activity-log-is-one-authority-query
   (async done

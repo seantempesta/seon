@@ -36,6 +36,7 @@
     [seon.agent.ctx.render-fns :as render-fns]
     [seon.render.default :as default]
     [seon.render.canvas :as canvas]
+    [seon.render.schema]
     [seon.render.sci :as render-sci]
     [seon.render.value :as value]
     [seon.code :as code]
@@ -80,14 +81,8 @@
 ;; the seon.db bridge stores these as pr-str'd EDN strings
 ;; (`:db.type/string`); `seon.db/decode-edn-value` is the read-side
 ;; inverse used by every consumer here.
-(schema/register! :seon.render/ai   [:or :string :symbol])
-
-;; `:seon.render/html` REFERENCES the canonical value-or-fn shape
-;; `:seon.render.canvas/content` (canvas U1) — same shape,
-;; registered once. The definition lives in seon.render.canvas
-;; because that ns loads first (this ns requires it) and register!'s
-;; compilability guard rejects forward references.
-(schema/register! :seon.render/html :seon.render.canvas/content)
+;; `:seon.render/ai` and `:seon.render/html` are registered once in the
+;; dependency-free `seon.render.schema` leaf shared with context compilation.
 
 ;; ── render-CONTROL attrs (context-render keystone) — all OPTIONAL; ANY
 ;; entity (a domain row OR a section) may carry them. A renderable is a

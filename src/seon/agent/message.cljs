@@ -15,8 +15,7 @@
                    error, no row). No self→self messaging, ever.
 
    The wake trigger itself lives in [[seon.agent.loop]], while this
-   message-data namespace owns [[inbound-msg-datom?]]: the one adapter from a
-   transaction datom to the shared waking-inbound rule. `seon.agent`
+   message-data namespace owns the pure waking-inbound rule. `seon.agent`
    re-exports `message!`/`user-ref` on the face."
   (:require
     [clojure.string :as str]
@@ -84,54 +83,40 @@
   [:map {:closed true}
    [:seon.agent/id :string]
    [::recent-limit ::recent-limit]
-   [::db/coordinate {:optional true} ::db/coordinate]])
+   [::db/db {:optional true} :seon.db/db]])
 (schema/register! ::read-failure
   [:map {:closed true}
-   [:seon.db/ok? [:= false]]
-   [:seon.db/error :seon.db/error]])
+   [:seon.error/message :string]
+   [:seon.error/data :map]])
 (schema/register! ::recent-response [:or [:vector :map] ::read-failure])
 (schema/register! ::recent-all-request
   [:map {:closed true}
    [::recent-limit ::recent-limit]
-   [::db/coordinate {:optional true} ::db/coordinate]])
+   [::db/db {:optional true} :seon.db/db]])
 
 (def ^:private recent-pull-pattern
   '[* {:seon.agent.message/from [:db/id :seon.user/id :seon.agent/id]
        :seon.agent.message/to   [:db/id :seon.user/id :seon.agent/id]}])
 
-(defn- query-member
-  [query arguments]
-  {::protocol/operation protocol/query-operation
-   ::protocol/query-form query
-   ::protocol/arguments arguments
-   :datahike.resource/max-results 1
-   :datahike.resource/max-result-weight 65536})
-
 (defn- index-member
-  [attribute value limit]
+  [database attribute value limit]
   {::protocol/operation protocol/index-page-operation
+   ::db/db database
    ::protocol/index :avet
    ::protocol/prefix [attribute value]
    ::protocol/direction :reverse
    ::protocol/limit limit
    :datahike.resource/max-result-weight 131072})
 
-(defn- member-result
-  [member]
-  (or (::protocol/result member)
-      (:datahike.query/result member)))
-
 (defn- read-failure
   [message data]
-  {:seon.db/ok? false
-   :seon.db/error {:seon.error/message message
-                   :seon.error/data data}})
+  {:seon.error/message message
+   :seon.error/data data})
 
 (defn- failed-read?
   [value]
   (and (map? value)
-       (or (false? (:seon.db/ok? value))
-           (:seon.error/message value))))
+       (string? (:seon.error/message value))))
 
 (defn- ordered-messages
   [messages]
@@ -150,91 +135,77 @@
    are append-only, so descending entity ids are their creation order."
   {:malli/schema [:=> [:cat ::recent-request] ::recent-response]}
   [{agent-id :seon.agent/id limit ::recent-limit :as request}]
-  (let [initial
-        (await
-         (db/execute-many
-          (cond->
-           {::db/members
-            [(query-member
-              '[:find ?entity .
-                :in $ ?agent-id
-                :where [?entity :seon.agent/id ?agent-id]]
-              [agent-id])]
-            ::db/max-result-weight 65536}
-            (::db/coordinate request)
-            (assoc ::db/coordinate (::db/coordinate request)))))]
-    (if-not (and (::db/coordinate initial)
-                 (= 1 (count (::db/results initial)))
-                 (true? (::protocol/success? (first (::db/results initial)))))
-      (read-failure "Recent-message agent lookup failed." initial)
-      (if-some [agent-eid (member-result (first (::db/results initial)))]
-        (let [indexed
-              (await
-               (db/execute-many
-                {::db/coordinate (::db/coordinate initial)
-                 ::db/members
-                 [(index-member :seon.agent.message/from agent-eid limit)
-                  (index-member :seon.agent.message/to agent-eid limit)]
-                 ::db/max-result-weight 262144}))]
-          (if-not (and (= (::db/coordinate initial) (::db/coordinate indexed))
-                       (= 2 (count (::db/results indexed)))
-                       (every? #(true? (::protocol/success? %))
-                               (::db/results indexed)))
-            (read-failure "Recent-message index read failed." indexed)
-            (let [entity-ids
-                  (->> (::db/results indexed)
-                       (mapcat ::protocol/datoms)
-                       (map :seon.db/e)
-                       distinct
-                       (sort >)
-                       (take limit)
-                       vec)
-                  messages
-                  (if (seq entity-ids)
-                    (await
-                     (db/pull-many
-                      {::db/coordinate (::db/coordinate initial)
-                       ::db/pull-pattern recent-pull-pattern
-                       ::db/refs entity-ids
-                       ::db/max-results limit
-                       ::db/max-result-weight 524288}))
-                    [])]
-              (if (failed-read? messages)
-                (read-failure "Recent-message pull failed." messages)
-                (ordered-messages messages)))))
-        []))))
+  (let [database (or (::db/db request) (await (db/db)))]
+    (if (failed-read? database)
+      (read-failure "Recent-message database acquisition failed." database)
+      (let [indexed
+            (await
+             (db/execute-many
+              {::db/members
+               [(index-member database :seon.agent.message/from
+                              [:seon.agent/id agent-id] limit)
+                (index-member database :seon.agent.message/to
+                              [:seon.agent/id agent-id] limit)]
+               ::db/max-result-weight 262144}))]
+        (if-not (and (= 2 (count (::db/results indexed)))
+                     (every? #(true? (::protocol/success? %))
+                             (::db/results indexed)))
+          (read-failure "Recent-message index read failed." indexed)
+          (let [entity-ids
+                (->> (::db/results indexed)
+                     (mapcat :datahike.index-page/datoms)
+                     (map first)
+                     distinct
+                     (sort >)
+                     (take limit)
+                     vec)
+                messages
+                (if (seq entity-ids)
+                  (await
+                   (db/pull-many
+                    {::db/db database
+                     ::db/selector recent-pull-pattern
+                     ::db/eids entity-ids
+                     ::db/max-results limit
+                     ::db/max-result-weight 524288}))
+                  [])]
+            (if (failed-read? messages)
+              (read-failure "Recent-message pull failed." messages)
+              (ordered-messages messages))))))))
 
 (defn ^:async recent-all
   "Return newest messages across the database, bounded and oldest first."
   {:malli/schema [:=> [:cat ::recent-all-request] ::recent-response]}
   [{limit ::recent-limit :as request}]
-  (let [indexed
-        (await
-         (db/index-page
-          (cond->
-           {::db/index :aevt
-            ::db/components [:seon.agent.message/at]
-            ::db/direction :reverse
-            ::db/index-limit limit
-            ::db/max-result-weight 131072}
-            (::db/coordinate request)
-            (assoc ::db/coordinate (::db/coordinate request)))))]
-    (if (failed-read? indexed)
-      (read-failure "Recent-message index read failed." indexed)
-      (let [entity-ids (mapv :seon.db/e (::db/datoms indexed))
-            messages
-            (if (seq entity-ids)
-              (await
-               (db/pull-many
-                {::db/coordinate (::db/coordinate indexed)
-                 ::db/pull-pattern recent-pull-pattern
-                 ::db/refs entity-ids
-                 ::db/max-results limit
-                 ::db/max-result-weight 524288}))
-              [])]
-        (if (failed-read? messages)
-          (read-failure "Recent-message pull failed." messages)
-          (ordered-messages messages))))))
+  (let [database (or (::db/db request) (await (db/db)))]
+    (if (failed-read? database)
+      (read-failure "Recent-message database acquisition failed." database)
+      (let [indexed
+            (await
+             (db/index-page
+              database
+              {::db/index :aevt
+               ::db/components [:seon.agent.message/at]
+               ::db/direction :reverse
+               ::db/limit limit
+               ::db/max-result-weight 131072}))]
+        (if (failed-read? indexed)
+          (read-failure "Recent-message index read failed." indexed)
+          (let [entity-ids
+                (mapv first (:datahike.index-page/datoms indexed))
+                messages
+                (if (seq entity-ids)
+                  (await
+                   (db/pull-many
+                    {::db/db database
+                     ::db/selector recent-pull-pattern
+                     ::db/eids entity-ids
+                     ::db/max-results limit
+                     ::db/max-result-weight 524288}))
+                  [])]
+            (if (failed-read? messages)
+              (read-failure "Recent-message pull failed." messages)
+              (ordered-messages messages))))))))
 
 ;; ============================================================
 ;; message! — the SINGLE write entry point for messages (the functions
@@ -273,14 +244,12 @@
     [:seon.agent.message/ok?  [:= true]]
     [:seon.agent.message/id   :seon.agent.message/id]
     [:seon.agent.message/hops :seon.agent.message/hops]]
-   [:map
-    [:seon.db/ok?   [:= false]]
-    [:seon.db/error :seon.db/error]]])
+   [:map [:seon.error/message :string]]])
 
 ;; The waking-inbound RULE — ONE source of truth for "this message wakes
 ;; (and renders as an inbound) for the agent whose eid is `my-eid`". Both
-;; the wake gate ([[inbound-msg-datom?]]) and the transcript
-;; head-render ([[seon.agent.ctx.transcript]]) call these so a message wakes
+;; the wake gate and the transcript head-render
+;; ([[seon.agent.ctx.transcript]]) call these so a message wakes
 ;; under exactly the rule it renders under — no drift. PUBLIC (cross-ns
 ;; callers): lives here, the message-data owner, not in `.internal`.
 
@@ -300,41 +269,6 @@
   (and (not= my-eid (:db/id (:seon.agent.message/from m)))
        (not= :core (:seon.agent.message/origin m))))
 
-(schema/register!
- ::inbound-datom-request
- [:map {:closed true}
-  [::db/coordinate ::db/coordinate]
-  [:seon.db/datom ::protocol/datom]
-  [:seon.agent/eid :int]])
-(schema/register! ::inbound-datom-response [:or :boolean ::read-failure])
-
-(defn ^:async inbound-msg-datom?
-  "True iff `datom` adds a waking inbound message target for `my-eid`.
-
-   The target check belongs in this adapter because every agent receives the
-   same transaction report. It then pulls the message entity and delegates to
-   [[waking-inbound?]], so loop wakeups and transcript classification share one
-   rule. Hop exhaustion deliberately remains outside this predicate: the loop
-   must receive exhausted messages in order to refuse them loudly."
-  {:malli/schema [:=> [:cat ::inbound-datom-request]
-                  ::inbound-datom-response]}
-  [{point ::db/coordinate
-    {eid :seon.db/e target :seon.db/v} :seon.db/datom
-    my-eid :seon.agent/eid}]
-  (if-not (= target my-eid)
-    false
-    (let [message
-          (await
-           (db/pull
-            {::db/coordinate point
-             ::db/pull-pattern recent-pull-pattern
-             ::db/ref eid
-             ::db/max-results 1
-             ::db/max-result-weight 65536}))]
-      (if (failed-read? message)
-        (read-failure "Inbound-message pull failed." message)
-        (waking-inbound? message my-eid)))))
-
 (defn hop-live?
   "True iff message `m`'s hop count is under `seon.warn/hop-cap`.
 
@@ -352,7 +286,7 @@
    Map-in / map-out; returns a CONCISE envelope, never the raw
    tx-report:
      {:seon.agent.message/ok? true :seon.agent.message/id _ :seon.agent.message/hops _}
-     {:seon.db/ok? false :seon.db/error …}   ; failure (errors are values)
+     {:seon.error/message _}   ; failure (errors are values)
 
    Defaulting (boundary liberties — the STORED row is always full):
      :seon.agent.message/from — defaults to [:seon.agent/id (current-agent-id)]
@@ -379,8 +313,7 @@
   {:malli/schema [:=> [:cat ::message-request] ::message-response]}
   [{:seon.agent.message/keys [content from to origin]}]
   (if-not (admission/available?)
-    {:seon.db/ok? false
-     :seon.db/error (:seon/error (admission/unavailable))}
+    (:seon/error (admission/unavailable))
     (let [agent-id (db/current-agent-id)
           from     (or from (when agent-id [:seon.agent/id agent-id]))
           to       (cond
@@ -393,24 +326,20 @@
                    :else                 [to])]         ; single eid
     (cond
       (or (nil? content) (str/blank? content))
-      {:seon.db/ok? false
-       :seon.db/error
-       {:seon.error/message
-        (str "message!: blank :seon.agent.message/content refused — a message "
-             "with nothing to say must not be stored. Compose the text "
-             "first, then send.")}}
+      {:seon.error/message
+       (str "message!: blank :seon.agent.message/content refused — a message "
+            "with nothing to say must not be stored. Compose the text "
+            "first, then send.")}
 
       (nil? from)
-      {:seon.db/ok? false
-       :seon.db/error
-       {:seon.error/message
-        (str "message!: no :seon.agent.message/from and no agent-id in scope — "
-             "pass from explicitly or call inside (seon.db/with-agent …).")}}
+      {:seon.error/message
+       (str "message!: no :seon.agent.message/from and no agent-id in scope — "
+            "pass from explicitly or call inside (seon.db/with-agent …).")}
 
       :else
       (let [send-data (await (internal/acquire-send-data from to))]
         (if-not (:seon.db/ok? send-data)
-          send-data
+          (:seon.db/error send-data)
           (let [from-user? (:seon.agent.message/from-user? send-data)
                 hops (if from-user?
                        0
@@ -487,7 +416,7 @@
               {:seon.agent.message/ok? true
                :seon.agent.message/id msg-id
                :seon.agent.message/hops hops}
-              env))))))))
+              (:seon.db/error env)))))))))
 
 ;; ============================================================
 ;; The two agent-facing functions. Thin wrappers over `message!` — `from`
@@ -496,8 +425,8 @@
 ;; `(message/user "…")` / `(message/agent id "…")`. No self→self
 ;; messaging, ever: `agent` refuses `to = me` (the wake gate already
 ;; ignores `from = me`; this makes it a hard prohibition at the function).
-;; Both ride the one injecting wrapper: SEMANTIC failures stay `ok? false`
-;; envelopes; only a shape-invalid call trips the validator, surfaced by
+;; Both ride the one injecting wrapper: semantic failures stay ordinary
+;; error values; only a shape-invalid call trips the validator, surfaced by
 ;; the eval boundary as a structured `:seon/error` value — data, never a
 ;; crash. Both reuse `::message-response`.
 ;; ============================================================
@@ -528,19 +457,17 @@
    REFUSES sending to YOURSELF (the ALS agent in scope): a self-message
    returns a loud error envelope and transacts NO row — an agent's
    notes-to-itself are `;;` comments in its turn, never a stored
-   self→self message. Errors are values — branch on `:seon.db/ok?`."
+   self→self message. Errors are values — branch on `:seon.error/message`."
   {:malli/schema [:=> [:catn [::to-id :string] [::content :string]]
                   ::message-response]}
   [to-id content]
   (let [me (db/current-agent-id)]
     (if (and me (= to-id me))
-      {:seon.db/ok? false
-       :seon.db/error
-       {:seon.error/message
-        (str "message/agent: refused — you cannot message YOURSELF ("
-             (pr-str to-id) "). No self→self messages exist anywhere; a "
-             "note to yourself is a ;; comment in your turn. To message a "
-             "PEER, pass that agent's id; to say something to your human, "
-             "use (message/user \"…\").")}}
+      {:seon.error/message
+       (str "message/agent: refused — you cannot message YOURSELF ("
+            (pr-str to-id) "). No self→self messages exist anywhere; a "
+            "note to yourself is a ;; comment in your turn. To message a "
+            "PEER, pass that agent's id; to say something to your human, "
+            "use (message/user \"…\").")}
       (await (message! {:seon.agent.message/content content
                         :seon.agent.message/to      [[:seon.agent/id to-id]]})))))

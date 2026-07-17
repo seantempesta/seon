@@ -48,7 +48,7 @@
 (schema/register! :seon.agent.debug/request
   [:map
    [:seon.agent/id {:optional true} :seon.agent/id]
-   [:seon.db/db {:optional true} :seon.db/db-val]
+   [:seon.db/db {:optional true} :seon.db/db]
    [:seon.db.coordinate/coordinate
     {:optional true}
     :seon.db.coordinate/coordinate]

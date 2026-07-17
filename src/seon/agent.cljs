@@ -313,7 +313,7 @@
 ;; hold.
 ;; ============================================================
 
-(schema/register! ::armable-agent-ids-request [:map [:seon.db/db {:optional true} :seon.db/db-val]])
+(schema/register! ::armable-agent-ids-request [:map [:seon.db/db {:optional true} :seon.db/db]])
 (schema/register! ::armable-agent-ids-response [:vector :seon.agent/id])
 (schema/register! ::resumable-agent-ids-response [:vector :seon.agent/id])
 (schema/register!
@@ -676,7 +676,7 @@
    cycle guard: a cycle is a `:core`-fault-worthy invariant break (recorded via
    `seon.error/record!`, never thrown — the fn returns the depth walked so
    far). Pure read over the passed db value."
-  {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db-val]
+  {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db]
                              [:seon.agent/id :seon.agent/id]]
                   :int]}
   [db agent-id]

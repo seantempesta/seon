@@ -54,6 +54,7 @@
     [seon.error.instrument :as einstrument]
     [seon.eval :as seval]
     [seon.handlers.test :as h-test]
+    [seon.render.schema]
     [seon.schema :as schema]
     [seon.ui.markdown :as md]))
 

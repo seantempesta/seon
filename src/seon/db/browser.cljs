@@ -124,7 +124,7 @@
 (schema/register!
   ::page-request
   [:map {:closed true}
-   [:seon.db/db :seon.db/db-val]
+   [:seon.db/db :seon.db/db]
    [::database-coordinate :seon.db.coordinate/coordinate]
    [::projection ::projection]
    [::index :seon.db/index]
@@ -135,7 +135,7 @@
 (schema/register!
   ::attribute-page-request
   [:map
-   [:seon.db/db :seon.db/db-val]
+   [:seon.db/db :seon.db/db]
    [::database-coordinate :seon.db.coordinate/coordinate]
    [::attribute ::attribute]
    [::limit ::limit]
@@ -143,7 +143,7 @@
 (schema/register!
   ::entity-page-request
   [:map {:closed true}
-   [:seon.db/db :seon.db/db-val]
+   [:seon.db/db :seon.db/db]
    [::database-coordinate :seon.db.coordinate/coordinate]
    [::entity ::entity]
    [::limit ::limit]
@@ -151,7 +151,7 @@
 (schema/register!
   ::reverse-reference-page-request
   [:map {:closed true}
-   [:seon.db/db :seon.db/db-val]
+   [:seon.db/db :seon.db/db]
    [::database-coordinate :seon.db.coordinate/coordinate]
    [::attribute ::attribute]
    [::target-entity ::target-entity]
@@ -180,7 +180,7 @@
 
    With `system?` false, framework attributes are omitted; the database read
    is proportional to installed schema, not accumulated entities or history."
-  {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db-val]
+  {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db]
                              [::system? ::system?]]
                   ::attribute-groups]}
   [dbv system?]
@@ -194,7 +194,7 @@
 
 (defn attribute-schema
   "The installed Datahike schema facts for one attribute, or nil."
-  {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db-val]
+  {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db]
                              [::attribute ::attribute]]
                   [:maybe :map]]}
   [dbv attribute]

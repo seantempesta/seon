@@ -19,6 +19,15 @@
    #uuid "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
    :seon.db.coordinate/t 42})
 
+(def database
+  {:db-name "default"
+   :t 42
+   :as-of nil
+   :since nil
+   :history false
+   :datahike/commit-id
+   #uuid "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"})
+
 (defn- finish!
   [promise done]
   (-> promise
@@ -116,43 +125,48 @@
             (fn [request]
               (swap! requests conj request)
               (js/Promise.resolve
-               (if (= 1 (count (::db/members request)))
-                 {::db/coordinate point
-                  ::db/results
-                  [(protocol/success {:datahike.query/result 10})]}
-                 {::db/coordinate point
-                  ::db/results
-                  [(protocol/success
-                    {::protocol/datoms
-                     [{:seon.db/e 22} {:seon.db/e 20}]})
-                   (protocol/success
-                    {::protocol/datoms
-                     [{:seon.db/e 21} {:seon.db/e 22}]})]}))))
+               {::db/results
+                [(protocol/success
+                  {:datahike.index-page/datoms
+                   [[22 :seon.agent.message/from 10 42 true]
+                    [20 :seon.agent.message/from 10 40 true]]})
+                 (protocol/success
+                  {:datahike.index-page/datoms
+                   [[21 :seon.agent.message/to 10 41 true]
+                    [22 :seon.agent.message/to 10 42 true]]})]})))
       (set! db/pull-many
-            (fn [request]
-              (swap! requests conj request)
-              (js/Promise.resolve
-               [{:seon.agent.message/id "later"
-                 :seon.agent.message/at later}
-                {:seon.agent.message/id "earlier"
-                 :seon.agent.message/at earlier}])))
+            (fn
+              ([request]
+               (swap! requests conj request)
+               (js/Promise.resolve
+                [{:seon.agent.message/id "later"
+                  :seon.agent.message/at later}
+                 {:seon.agent.message/id "earlier"
+                  :seon.agent.message/at earlier}]))
+              ([_database _selector _refs]
+               (js/Promise.reject (js/Error. "unexpected positional pull")))))
       (finish!
        (-> (message/recent
             {:seon.agent/id "sender"
+             ::db/db database
              :seon.agent.message/recent-limit 2})
            (.then
             (fn [messages]
               (is (= ["earlier" "later"]
                      (mapv :seon.agent.message/id messages)))
-              (is (= 3 (count @requests)))
-              (let [index-request (second @requests)
-                    pull-request (nth @requests 2)]
-                (is (= point (::db/coordinate index-request)))
+              (is (= 2 (count @requests)))
+              (let [index-request (first @requests)
+                    pull-request (second @requests)]
                 (is (= 2 (count (::db/members index-request))))
                 (is (every? #(= :reverse (::protocol/direction %))
                             (::db/members index-request)))
-                (is (= [22 21] (::db/refs pull-request)))
-                (is (= point (::db/coordinate pull-request))))))
+                (is (every? #(= database (::db/db %))
+                            (::db/members index-request)))
+                (is (every? #(= [:seon.agent/id "sender"]
+                                (second (::protocol/prefix %)))
+                            (::db/members index-request)))
+                (is (= [22 21] (::db/eids pull-request)))
+                (is (= database (::db/db pull-request))))))
            (.finally
             (fn []
               (set! db/execute-many execute-many)
@@ -165,58 +179,42 @@
           pull-many db/pull-many
           requests (atom [])]
       (set! db/index-page
-            (fn [request]
-              (swap! requests conj request)
-              (js/Promise.resolve
-               {::db/coordinate point
-                ::db/datoms [{:seon.db/e 4} {:seon.db/e 3}]})))
+            (fn
+              ([_request]
+               (js/Promise.reject (js/Error. "unexpected ambient index read")))
+              ([db-value options]
+               (swap! requests conj [db-value options])
+               (js/Promise.resolve
+                {:datahike.index-page/datoms
+                 [[4 :seon.agent.message/at (js/Date. 2000) 42 true]
+                  [3 :seon.agent.message/at (js/Date. 1000) 41 true]]}))))
       (set! db/pull-many
-            (fn [request]
-              (swap! requests conj request)
-              (js/Promise.resolve
-               [{:seon.agent.message/id "new"
-                 :seon.agent.message/at (js/Date. 2000)}
-                {:seon.agent.message/id "old"
-                 :seon.agent.message/at (js/Date. 1000)}])))
+            (fn
+              ([request]
+               (swap! requests conj request)
+               (js/Promise.resolve
+                [{:seon.agent.message/id "new"
+                  :seon.agent.message/at (js/Date. 2000)}
+                 {:seon.agent.message/id "old"
+                  :seon.agent.message/at (js/Date. 1000)}]))
+              ([_database _selector _refs]
+               (js/Promise.reject (js/Error. "unexpected positional pull")))))
       (finish!
        (-> (message/recent-all
             {:seon.agent.message/recent-limit 2
-             ::db/coordinate point})
+             ::db/db database})
            (.then
             (fn [messages]
               (is (= ["old" "new"]
                      (mapv :seon.agent.message/id messages)))
-              (is (= :reverse (::db/direction (first @requests))))
-              (is (= [4 3] (::db/refs (second @requests))))))
+              (let [[db-value options] (first @requests)]
+                (is (= database db-value))
+                (is (= :reverse (::db/direction options))))
+              (is (= [4 3] (::db/eids (second @requests))))))
            (.finally
             (fn []
               (set! db/index-page index-page)
               (set! db/pull-many pull-many))))
-       done))))
-
-(deftest inbound-target-check-precedes-one-pinned-pull
-  (async done
-    (let [pull db/pull
-          requests (atom [])]
-      (set! db/pull
-            (fn [request]
-              (swap! requests conj request)
-              (js/Promise.resolve
-               {:seon.agent.message/from {:db/id 11}
-                :seon.agent.message/origin :human})))
-      (finish!
-       (-> (message/inbound-msg-datom?
-            {::db/coordinate point
-             :seon.db/datom
-             {:seon.db/e 20 :seon.db/a :seon.agent.message/to
-              :seon.db/v 10 :seon.db/tx 42 :seon.db/added? true}
-             :seon.agent/eid 10})
-           (.then
-            (fn [inbound?]
-              (is (true? inbound?))
-              (is (= point (::db/coordinate (first @requests))))
-              (is (= 20 (::db/ref (first @requests))))))
-           (.finally (fn [] (set! db/pull pull))))
        done))))
 
 (deftest message-write-uses-acquired-data-and-no-local-connection
@@ -274,14 +272,11 @@
              :seon.agent.message/content "   "})
            (.then
             (fn [blank]
-              (is (false? (:seon.db/ok? blank)))
+              (is (string? (:seon.error/message blank)))
               (message/agent "self" "hello")))
            (.then
             (fn [self]
-              (is (false? (:seon.db/ok? self)))
-              (is (re-find #"YOURSELF"
-                           (get-in self [:seon.db/error
-                                         :seon.error/message])))))
+              (is (re-find #"YOURSELF" (:seon.error/message self)))))
            (.finally
             (fn []
               (set! admission/available? available?)

@@ -990,7 +990,7 @@
   {:malli/schema
    [:function
     [:=> [:cat] :int]
-    [:=> [:cat :seon.db/db-val] :int]]}
+    [:=> [:cat :seon.db/db] :int]]}
   ([]
    (get (render-config) :seon.config.render/database-edn-cap 16384))
   ([database]
@@ -1363,7 +1363,7 @@
   {:malli/schema
    [:function
     [:=> [:cat] :int]
-    [:=> [:cat :seon.db/db-val] :int]]}
+    [:=> [:cat :seon.db/db] :int]]}
   ([] (get (config-view) :seon.config.root/recent-limit 12))
   ([database]
    (get (config-view database) :seon.config.root/recent-limit 12)))

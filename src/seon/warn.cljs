@@ -620,7 +620,7 @@
    \"since the latest user message\" cutoff every runtime check (and the
    root-agent-view core-faults section) shares — public so section fns
    outside this registry reuse it instead of forking the query."
-  {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db-val]] [:maybe :inst]]}
+  {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db]] [:maybe :inst]]}
   [db]
   (ffirst (db/query
             {:seon.db/db db

@@ -16,7 +16,8 @@ Skills: `ui-canvas` (the agent-facing canvas how-to), `datastar-web-ui`.
   says must key on basis-t — and probably don't need (measure first).
 - **A render fn must never crash the walk** — guard it; a throwing render
   becomes a `:seon/error` surfaced in place.
-- **`canvas.cljs` owns the low-level canvas render contract**: agents set their focal view by
+- **`canvas.cljs` owns the low-level canvas render behavior** and
+  `schema.cljs` owns its dependency-free shared data forms: agents set their focal view by
   transacting hiccup OR a qualified fn symbol onto
   `:seon.render.canvas/content`. Its docstring and the CSS safelist must
   stay in sync — agents guess from the docstring.

@@ -1361,11 +1361,35 @@ recurrence and supplies that identical descriptor to every `execute-many`
 member. Message wake no longer performs a state read plus one request per
 candidate datom: the exact transaction `:db-after` and native transaction
 datoms select candidates, then one ordered `pull-many` acquires the agent and
-all candidate messages. The cold exact-var test remains behind the known
-atomic consumer cut because loading `seon.eval` still reaches its obsolete
-`:seon.db/db-val` schema; the canonical client compiles and that load failure
-now identifies the next dependency-ready consumer rather than motivating a
-compatibility schema.
+all candidate messages. Recent-message acquisition similarly replaces two
+coordinate-shaped index responses plus per-message reads with two bounded
+native index members and one input-aligned `pull-many` over the same immutable
+database value. Read failures are ordinary `:seon.error/message` values rather
+than a second compact database envelope. The dead `seon.eval` recent/error-
+storm surface and its local-Datahike test are deleted because no production
+caller remained.
+
+Cold loading no longer depends on whichever runtime happened to register the
+render slot schemas first. `seon.render.schema` is one dependency-free owner of
+the shared `:seon.render/ai`, `:seon.render/html`,
+`:seon.render.canvas/hiccup`, and `:seon.render.canvas/content` data forms;
+context compilation and the renderer depend on that leaf without loading each
+other. The removed in-process `:seon.db/db-val` schema name has zero remaining
+source or test references. Declarations now name the one ordinary
+`:seon.db/db` value, deliberately exposing synchronous local-Datahike bodies as
+compile warnings until their owning consumer cut deletes or migrates them.
+Focused loop/message proof starts both cold namespaces and passes 5 tests/23
+assertions with zero failures or errors.
+
+The next ordered contract is the execution transaction context and namespace
+acquisition: replace its request-level coordinate with the captured ordinary
+database value, place that same value on every grouped member, and keep the
+dependent schema frontier on it. Source audit found that the core context
+formatter is already pure and its block acquisition already remote; most old
+`seon.eval` local namespace helpers have no callers and should be deleted.
+The remaining live `seon.agent.ctx.namespaces` path and `my.ns/functions` need
+one async database-value-pinned acquisition, while the obsolete SCI namespace
+reader leaves with SCI rather than earning a new adapter.
 
 The stopped plan-consumer draft remains an explicit uncommitted handoff because
 its pure row transformations are reusable but its coordinate and

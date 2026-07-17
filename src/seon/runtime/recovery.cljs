@@ -290,7 +290,7 @@
    [::runs ::runs]
    [::turns ::turns]])
 (schema/register! ::pending-notices-request
-  [:map [:seon.db/db :seon.db/db-val]])
+  [:map [:seon.db/db :seon.db/db]])
 (schema/register! ::pending-notices-response [:vector ::notice])
 
 (defn- anchor-rows

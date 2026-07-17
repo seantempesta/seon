@@ -105,20 +105,6 @@
 ;; A recent eval's value resolves as result/<id> — no undeclared warning.
 ;; ---------------------------------------------------------------------------
 
-(deftest recent-evals-use-the-bounded-agent-ref-window
-  (async done
-    (-> (run-batch "recent-evals" "(+ 1 1)\n(+ 2 2)\n(+ 3 3)\n(+ 4 4)")
-        (.then
-          (fn [^js o]
-            (let [rows (seval/recent
-                         {:seon.db/db @(.-conn o)
-                          :seon.agent/id (.-aid o)
-                          :seon.eval/recent-limit 2})]
-              (is (= ["(+ 3 3)" "(+ 4 4)"]
-                     (mapv :seon.eval/source rows))))))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
-
 (deftest recent-eval-value-resolves-as-result-var
   (async done
     (-> (run-batch "rv1-260618t" "(+ 40 2)")

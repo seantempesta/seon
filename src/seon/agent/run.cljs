@@ -783,7 +783,7 @@
    chosen `now`; zero timers). The freshness anchor is `:last-beat-at`, or
    `:started-at` for a run that NEVER beat (a wedge before the first beat must
    not be invisible). PAUSED runs are excluded (they legitimately don't beat)."
-  {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db-val]
+  {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db]
                              [:seon.agent/now :inst]
                              [:seon.agent.run/stale-ms :seon.agent.run/stale-ms]]
                   [:vector :seon.agent.run/id]]}
