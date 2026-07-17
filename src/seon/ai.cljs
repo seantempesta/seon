@@ -427,6 +427,10 @@
   [::provider ::model ::temperature ::max-tokens ::thinking ::timeout-ms
    ::base-url ::api-key-env ::dg-backend ::extra-body-edn])
 
+(def ^:private config-pull-max-work 100000)
+(def ^:private config-pull-max-results 256)
+(def ^:private config-pull-max-result-weight (* 1024 1024))
+
 ;; ============================================================
 ;; Env reads — SEON_AI_*, parsed to the attr's concrete type.
 ;; ============================================================
@@ -842,9 +846,10 @@
                [{::protocol/operation protocol/pull-operation
                  ::protocol/selector (into [::id] config-attrs)
                  ::protocol/entity-id [::id "config"]
-                 :datahike.resource/max-work 10000
-                 :datahike.resource/max-results 1
-                 :datahike.resource/max-result-weight 65536}]}))
+                 :datahike.resource/max-work config-pull-max-work
+                 :datahike.resource/max-results config-pull-max-results
+                 :datahike.resource/max-result-weight
+                 config-pull-max-result-weight}]}))
           member (first (::db/results acquired))
           _ (when (:seon.error/message acquired)
               (throw (ex-info "LLM config acquisition failed."

@@ -51,6 +51,9 @@
                  (::datastar/event result)))
     (is (not (re-find #"Promise" (::datastar/event result))))))
 
+(deftest native-javascript-promises-are-recognized
+  (is (@#'datastar/promise-like? (js/Promise.resolve :ready))))
+
 (deftest subscriptions-render-only-for-declared-changed-attributes
   (let [affected? @#'datastar/subscription-affected?]
     (is (affected? {::datastar/dependencies #{:seon.agent/id}}

@@ -134,17 +134,17 @@
 
 (defn- promise-like? [value]
   (and (some? value)
-       (or (object? value) (fn? value))
-       (fn? (.-then value))))
+       (= "function" (goog/typeOf (.-then value)))))
 
 (defn- rendered-html-patch [rendered observed? html]
   (if (promise-like? html)
     (.then html
            #(rendered-html-patch rendered observed? %)
            render-error-patch)
-    (cond-> {::event (patch-elements* html)}
-      (and observed? (contains? rendered ::dependencies))
-      (assoc ::dependencies (::dependencies rendered)))))
+    (let [event (patch-elements* html)]
+      (cond-> {::event event}
+        (and observed? (contains? rendered ::dependencies))
+        (assoc ::dependencies (::dependencies rendered))))))
 
 (defn- rendered-view-patch [rendered]
   (if (promise-like? rendered)

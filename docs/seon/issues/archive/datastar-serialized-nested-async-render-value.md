@@ -11,15 +11,16 @@ tags:
 
 ## Failure
 
-The shared Datastar feed recognized the first asynchronous return from its
-render function, but the instrumented ClojureScript child boundary could
-settle that value to another Promise. The serializer received the nested
-Promise and emitted `elements [object Promise]` instead of HTML.
+The shared Datastar feed tested native JavaScript `.then` with ClojureScript's
+`fn?`. Native Bun functions do not implement ClojureScript `IFn`, so genuine
+Promises were not recognized and the serializer emitted
+`elements [object Promise]` instead of HTML.
 
 ## Resolution
 
-The one feed renderer now settles Promise-like values recursively at the
-serialization boundary. Plain hiccup and the existing observed render map keep
+The one feed renderer now recognizes native `.then` functions with JavaScript
+type semantics and settles every asynchronous render layer before retaining or
+serializing an event. Plain hiccup and the existing observed render map keep
 the same path; no second renderer or feed was added.
 
 ## Acceptance

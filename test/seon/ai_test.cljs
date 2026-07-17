@@ -78,6 +78,11 @@
                        (::protocol/operation member)))
                 (is (= [::ai/id "config"]
                        (::protocol/entity-id member)))
+                (is (= 100000 (:datahike.resource/max-work member)))
+                (is (= 256 (:datahike.resource/max-results member))
+                    "pull result budgets count retained nodes, not entities")
+                (is (= (* 1024 1024)
+                       (:datahike.resource/max-result-weight member)))
                 (is (identical? database (::db/expected-db transact))
                     "the immutable database value fences the seed")
                 (is (= [{::ai/id "config" ::ai/thinking "true"}]
