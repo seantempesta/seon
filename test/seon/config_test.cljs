@@ -11,11 +11,9 @@
      (require 'seon.config-test :reload)
      (cljs.test/run-tests 'seon.config-test)"
   (:require
-    [cljs.test :refer [deftest is testing async]]
-    [datahike.api :as d]
+    [cljs.test :refer [deftest is testing]]
     [malli.core :as m]
     [seon.agent]
-    [seon.agent.ctx :as agent-ctx]
     [seon.agent.message]
     [seon.agent.web]
     [seon.config :as config]
@@ -89,16 +87,13 @@
                       :seon.config.render/content-layout :single-line
                       :seon.config.render/line-numbers   true}})))
   (testing "an absent section defaults to today's byte-identical render"
-    ;; `*conn*` nil ⇒ the db-view seam returns nil ⇒ the accessors take the
-    ;; PRE-conn manifest-resolve path (`resolve-config-singleton`), so the
-    ;; redefed `{}` manifest drives the defaults (config-db-migration).
+    ;; The redefed empty manifest drives the pre-attach defaults.
     (with-redefs [config/load-manifest (fn [] {})]
-      (binding [db/*conn* nil]
-        (is (= :raw        (config/render-whitespace)))
-        (is (= :literal    (config/render-tabs)))
-        (is (= :off        (config/render-trailing-ws)))
-        (is (= :structured (config/render-content-layout)))
-        (is (false?        (config/render-line-numbers?)))))))
+      (is (= :raw        (config/render-whitespace)))
+      (is (= :literal    (config/render-tabs)))
+      (is (= :off        (config/render-trailing-ws)))
+      (is (= :structured (config/render-content-layout)))
+      (is (false?        (config/render-line-numbers?))))))
 
 (defn- ctx-block-names [id override]
   (into #{} (map :seon.agent.ctx/name)
@@ -294,8 +289,7 @@
   (with-env
     "SEON_CONFIG" "config/system.edn"
     (fn []
-      (binding [db/*conn* nil]
-        (let [ordinary (config/resolve-agent-context "worker-x" nil)
+      (let [ordinary (config/resolve-agent-context "worker-x" nil)
               root (config/resolve-agent-context "root" nil)
               order (fn [context]
                       (->> (:seon.agent/ctx context)
@@ -318,14 +312,13 @@
                   [:canvas 90]
                   [:transcript 100]]
                  (order root))
-              "root is one additive tree with its dynamic fleet canvas near the tail"))))))
+              "root is one additive tree with its dynamic fleet canvas near the tail")))))
 
 (deftest acme-manifest-inherits-context-and-adds-only-product-tools
   (with-env
     "SEON_CONFIG" "config/acme.edn"
     (fn []
-      (binding [db/*conn* nil]
-        (let [ordinary (config/resolve-agent-context "acme-worker" nil)
+      (let [ordinary (config/resolve-agent-context "acme-worker" nil)
               root     (config/resolve-agent-context "root" nil)
               targets  (fn [context]
                          (into #{} (map first)
@@ -339,7 +332,7 @@
           (is (every? (targets root)
                       '[acme.brand acme.widget my.ns my.skills
                         seon.agent seon.agent.shell seon.agent.web])
-              "root inherits the complete ordinary/downstream capability set"))))))
+              "root inherits the complete ordinary/downstream capability set")))))
 
 (deftest route-removes
   (testing "a route spec drops the named seeded routes"
@@ -353,24 +346,21 @@
 ;;; byte-identical to the shipped value.
 
 (deftest render-caps-read-the-manifest
-  ;; `*conn*` nil ⇒ the db-view seam returns nil ⇒ the accessors resolve from
-  ;; the redefed manifest (the pre-conn sliver path); post-conn they read the
-  ;; seeded singleton datom (proven live, not here — this is the pure resolver).
+  ;; These are pure pre-attach manifest resolver tests. Authority-backed
+  ;; config reads belong to the database facade contract, not a local conn.
   (testing "an absent :seon.config/render section → the accessor's literal fallback"
     (with-redefs [config/load-manifest (fn [] {})]
-      (binding [db/*conn* nil]
-        (is (= 72 (config/value-width)))
-        (is (= 16384 (config/database-edn-cap)))
-        (is (= 3 (config/value-max-depth))))))
+      (is (= 72 (config/value-width)))
+      (is (= 16384 (config/database-edn-cap)))
+      (is (= 3 (config/value-max-depth)))))
   (testing "a manifest value overrides the fallback"
     (with-redefs [config/load-manifest
                   (fn [] {:seon.config/render {:seon.config.render/value-width 40
                                                :seon.config.render/database-edn-cap 999}})]
-      (binding [db/*conn* nil]
-        (is (= 40 (config/value-width)))
-        (is (= 999 (config/database-edn-cap)))
-        ;; an unset key in a present section still falls back to the literal
-        (is (= 3 (config/value-max-depth)))))))
+      (is (= 40 (config/value-width)))
+      (is (= 999 (config/database-edn-cap)))
+      ;; an unset key in a present section still falls back to the literal
+      (is (= 3 (config/value-max-depth))))))
 
 ;;; ENV KNOBS — the few knobs that stay env-only (launch/process). These tests
 ;;; pin the COERCION + the :seon.config/dirs precedence, not live env values.
@@ -516,137 +506,3 @@
         (if (some? saved-m)
           (set! (.-SEON_AI_MODEL env) saved-m)
           (js-delete env "SEON_AI_MODEL"))))))
-
-(defn- config-scratch-conn
-  "Promise of a fresh :memory conn with tx-meta + the `:seon.config` singleton
-   attrs installed — for the db-backed accessor reads."
-  []
-  (let [attrs [:seon.config/id :seon.config/repl-mode :seon.config/current-ns
-               :seon.config/on-core-error :seon.config/spawn-depth-cap
-               :seon.config/always :seon.config/system-text
-               :seon.config.render/eval-cap :seon.config.render/database-edn-cap
-               :seon.config.model-transport/response-identity-cap
-               :seon.config.model-transport/endpoint-cap
-               :seon.config.render/value-width :seon.config.render/line-numbers
-               :seon.config.repair/level :seon.config.repair/classes
-               :seon.agent.web/policy :seon.agent.web/allowed-domains
-               :seon.agent.web/search-backend :seon.agent.web/search-model
-               :seon.config.watchdog/stale-ms :seon.config.breaker/crash-count]
-        cfg {:store {:backend :memory :id (random-uuid)}
-             :schema-flexibility :write :keep-history? true}]
-    (-> (d/create-database cfg)
-        (.then (fn [_] (d/connect cfg {:sync? false})))
-        (.then
-          (fn ^:async install [conn]
-            (await (db/ensure-provenance! {:seon.db/conn conn}))
-            (await
-              (db/with-tx-context
-                {:seon.db/user [:seon.agent/id "root"]
-                 :seon.db/process
-                 [:seon.db.process/id :seon.db.process/boot]}
-                (fn []
-                  (db/transact!
-                    {:seon.db/conn conn
-                     :seon.db/tx-data (db/malli->datahike-schema attrs)}))))
-            conn)))))
-
-(deftest accessors-read-the-seeded-singleton-datom
-  ;; Seed the singleton into a scratch conn (the boot path), pin `*conn*`, and
-  ;; prove the accessors read the DATOM — config-through-DB. The three collection
-  ;; knobs round-trip through the EDN-slot bridge (set / map / vector).
-  (async done
-    (-> (config-scratch-conn)
-        (.then
-          (fn [conn]
-            (let [manifest {:seon.config/render {:seon.config.render/eval-cap 4321}
-                            :seon.config/run {:seon.config.run/batch-turn-limit 17
-                                              :seon.config.run/stream-form-limit 51
-                                              :seon.config.run/deadline-ms 654321}
-                            :seon.config/root {:seon.config.root/recent-limit 7}
-                            :seon.config/model-transport
-                            {:seon.config.model-transport/response-identity-cap 23
-                             :seon.config.model-transport/endpoint-cap 47}
-                            :seon.config/on-core-error :log
-                            :seon.config/repair {:seon.config.repair/classes {:foo false}}
-                            :seon.config/web {:seon.agent.web/policy :allowlist
-                                              :seon.agent.web/allowed-domains ["a.example.com"]}
-                            :seon.config/namespaces {:seon.config/always '[my.kb my.plan]}
-                            :seon.config/system-text "SYS"}
-                  singleton (config/resolve-config-singleton manifest)
-                  prev db/*conn*]
-              (-> (db/with-tx-context
-                    {:seon.db/user [:seon.agent/id "root"]
-                     :seon.db/process
-                     [:seon.db.process/id :seon.db.process/config]}
-                    (fn [] (db/transact! {:seon.db/conn conn :seon.db/tx-data [singleton]})))
-                  (.then
-                    (fn [_]
-                      (set! db/*conn* conn)
-                      (try
-                        ;; scalar caps + dials read from the datom
-                        (is (= 4321 (config/eval-render-cap)))
-                        (is (= 23
-                               (:seon.config.model-transport/response-identity-cap
-                                 (config/config-view))))
-                        (is (= 47
-                               (:seon.config.model-transport/endpoint-cap
-                                 (config/config-view))))
-                        (is (= {:seon.config.run/batch-turn-limit 17
-                                :seon.config.run/stream-form-limit 51
-                                :seon.config.run/deadline-ms 654321}
-                               (agent-ctx/run-policy @conn))
-                            "the frozen db value owns the effective run policy")
-                        (is (= :log (config/on-core-error)))
-                        (is (= 1 (config/spawn-depth-cap)))      ; default, seeded
-                        (is (= 7 (config/root-recent-limit @conn))
-                            "root's bounded evidence lookback is database data")
-                        ;; collection knobs decoded off the EDN slot
-                        (is (= #{:my.kb :my.plan} (:seon.config/always (config/namespaces-policy))))
-                        (is (= :allowlist (:seon.agent.web/policy (config/web-policy))))
-                        (is (= ["a.example.com"] (:seon.agent.web/allowed-domains (config/web-policy))))
-                        (let [cache @@#'db/!config-view-cache]
-                          (is (= (db/head-coordinate @conn)
-                                 (:seon.db/cached-config-coordinate cache)))
-                          (is (= #{:seon.db/cached-config-coordinate
-                                   :seon.db/cached-config-view}
-                                 (set (keys cache)))
-                              "the hot config cache retains no database value"))
-                        (finally (set! db/*conn* prev) (done)))))
-                  (.catch (fn [e] (set! db/*conn* prev) (is false (str e)) (done)))))))
-        (.catch (fn [e] (is false (str e)) (done))))))
-
-(deftest explicit-database-config-view-does-not-reread-the-ambient-head
-  (async done
-    (-> (config-scratch-conn)
-        (.then
-          (fn [conn]
-            (let [prev db/*conn*
-                  transact-cap!
-                  (fn [cap]
-                    (db/with-tx-context
-                      {:seon.db/user [:seon.agent/id "root"]
-                       :seon.db/process
-                       [:seon.db.process/id :seon.db.process/config]}
-                      (fn []
-                        (db/transact!
-                          {:seon.db/conn conn
-                           :seon.db/tx-data
-                           [{:seon.config/id config/cluster-config-id
-                             :seon.config.render/database-edn-cap cap}]}))))]
-              (-> (transact-cap! 111)
-                  (.then
-                    (fn [{ok? :seon.db/ok?}]
-                      (is (true? ok?))
-                      (let [frozen @conn]
-                        (-> (transact-cap! 222)
-                            (.then
-                              (fn [{ok? :seon.db/ok?}]
-                                (is (true? ok?))
-                                (set! db/*conn* conn)
-                                (is (= 111 (config/database-edn-cap frozen))
-                                    "the frozen database retains cap A")
-                                (is (= 222 (config/database-edn-cap))
-                                    "the ambient head advances to cap B")))))))
-                  (.finally (fn [] (set! db/*conn* prev)))))))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str e)) (done))))))
