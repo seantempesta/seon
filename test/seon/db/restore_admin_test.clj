@@ -82,11 +82,7 @@
       #{:db :restore.test/selected undo-branch prepared-branch}
       ::restore/protocol-version protocol/current-version
       ::restore/artifact-identity
-      {:seon.dev.artifact/application-digest digest
-       :seon.dev.artifact/client-digest digest
-       :seon.dev.artifact/bootstrap-digest digest
-       :seon.dev.artifact/css-digest digest
-       :seon.dev.artifact/writer-digest digest}
+      {:seon.dev.artifact/application-digest digest}
       ::restore/consumer-generations
       {:seon.dev.process/pod (random-uuid)}
       ::restore/core-overlay-selection :seon.dev.restore.overlay/preserve
