@@ -93,11 +93,21 @@ creating another path:
 - Schema registration now collects declarations without resolving forward refs
   against partial namespace load order. Complete projection validation remains
   the admission gate; the focused gate passes 4 tests and 17 assertions.
-- The complete CLJS application is intentionally not green. The latest selected
-  state test compiled 514 files with 111 migration warnings but never ran
-  because its namespace still loads obsolete local-connection fixtures. This
-  is consumer/test migration evidence, not an initialization or Datahike query
-  failure.
+- The complete CLJS application is intentionally not green. The obsolete
+  config-test cache, ambient connection, and second local Datahike fixture are
+  deleted. The focused config artifact now compiles 307 files with 34 migration
+  warnings and passes 22 tests/94 assertions. Those warnings identify the
+  remaining derive, schedule, agent, render, plan, typeahead, home, and warning
+  consumers; they are not permission to restore local connections.
+- Run lifecycle reads and writes now use one ordinary database value, targeted
+  CAS, native reports, and direct errors. The public snapshot helper, duplicate
+  derive run readers, mutable construction, and embedded local-Datahike run
+  test path are deleted; focused proof passes 8 tests/33 assertions.
+- Ambiguous transaction delivery now retains and redelivers one exact request
+  through the existing UDS pending owner and durable writer receipt. Explicit
+  owner close stops recovery; focused UDS, facade, and writer proof passes 32
+  tests/156 assertions. Listener-interest restoration remains a distinct
+  unsettled owner.
 - No current live-cluster proof supports a claim that the refactor is complete.
 
 ## Ordered implementation plan
