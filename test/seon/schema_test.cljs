@@ -111,6 +111,29 @@
                      [:seon.schema.projection/function-dependencies
                       function-sym]))))))
 
+(deftest projection-validation-is-independent-of-declaration-order
+  (let [before (schema/snapshot-state)
+        parent :schematest.forward/parent
+        child :schematest.forward/child]
+    (try
+      (testing "a declaration may reference a schema loaded by a later namespace"
+        (is (= parent (schema/register! parent [:vector child])))
+        (is (= child (schema/register! child :string)))
+        (let [projection (schema/build-projection (schema/snapshot))]
+          (is (= #{child}
+                 (get-in projection
+                         [:seon.schema.projection/schema-dependencies
+                          parent])))))
+      (testing "the complete projection still rejects a genuinely absent ref"
+        (let [error (try
+                      (schema/build-projection {parent [:vector child]})
+                      nil
+                      (catch :default error error))]
+          (is (= :seon.schema/invalid-schema
+                 (:seon.schema/error (ex-data error))))))
+      (finally
+        (schema/restore-state! before)))))
+
 (deftest single-segment-keyword-namespace-is-refused-with-guidance
   (testing "the S-21 defect shape — :workout/date"
     (let [e (try (schema/register! :workout/date :string)
@@ -132,23 +155,26 @@
   ;; Live-drive finding 2026-07-13: a Muse agent ran
   ;; (register! :my.reading/rating [:maybe :int]) and it returned ok — a
   ;; "false ok". seon bans nilable value schemas (a stored value is never
-  ;; nil; absent = the key is simply omitted). register! now refuses a
-  ;; top-level [:maybe <builtin>] with a guiding :user-input ex-info.
+  ;; nil; absent = the key is simply omitted). Complete projection admission
+  ;; refuses a top-level [:maybe <builtin>] with a guiding :user-input ex-info.
   (testing "the smell shape — [:maybe :int]"
-    (let [e (try (schema/register! :my.reading/rating [:maybe :int])
-                 nil
-                 (catch :default e e))]
-      (is (some? e) "register! must throw, not register")
-      (is (not (schema/registered? :my.reading/rating))
-          "nothing landed in the registry (throw precedes the swap!)")
-      (is (= :seon.schema/nilable-value-schema
-             (:seon.schema/error (ex-data e))))
-      (is (= :user-input (:seon.error/kind (ex-data e)))
-          "agent-input error kind — surfaced to agents as an error envelope")
-      (is (str/includes? (ex-message e) "(schema/register! :my.reading/rating :int)")
-          "the error GUIDES: names the copy-pasteable base-type registration")
-      (is (str/includes? (ex-message e) "{:optional true}")
-          "the error teaches the fix: mark the FIELD optional, don't store nil")))
+    (let [before (schema/snapshot-state)]
+      (try
+        (schema/register! :my.reading/rating [:maybe :int])
+        (let [e (try (schema/build-projection (schema/snapshot))
+                     nil
+                     (catch :default e e))]
+          (is (some? e) "the complete candidate must be rejected")
+          (is (= :seon.schema/nilable-value-schema
+                 (:seon.schema/error (ex-data e))))
+          (is (= :user-input (:seon.error/kind (ex-data e)))
+              "agent-input error kind — surfaced to agents as an error envelope")
+          (is (str/includes? (ex-message e) "(schema/register! :my.reading/rating :int)")
+              "the error GUIDES: names the copy-pasteable base-type registration")
+          (is (str/includes? (ex-message e) "{:optional true}")
+              "the error teaches the fix: mark the FIELD optional, don't store nil"))
+        (finally
+          (schema/restore-state! before)))))
   (testing "a :maybe around a REGISTERED domain type is a nullable fn-slot — allowed"
     ;; [:maybe ::registered] and [:maybe [:or …]] are deliberate nullable
     ;; return/arg schemas (e.g. :my.plan/tree-response); only a :maybe around

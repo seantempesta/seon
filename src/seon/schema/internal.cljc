@@ -116,13 +116,13 @@
     v))
 
 (defn assert-compilable-schema!
-  "register!-time gate: reject invalid Malli forms so an agent never
-   'successfully' registers something the system can't use. Compiles `k`
-   against a complete candidate containing `schemas` plus `[k v]`; failure
+  "Projection-build gate: reject invalid Malli forms before a candidate
+   population can be admitted. Compiles `k` against the complete `schemas`
+   population plus `[k v]`; failure
    throws a legible `:user-input`
    ex-info naming the key, the bad form, and common storable types.
-   Requires any referenced schema to exist in that candidate (the load-order
-   convention), without depending on Malli's process-global default."
+   Requires every referenced schema to exist in the complete population,
+   without depending on declaration order or Malli's process-global default."
   [schemas k v]
   (try
     (let [registry (mr/composite-registry
@@ -140,7 +140,7 @@
                     "[:vector <type>] / [:set <type>]. (:number is NOT "
                     "a type — use :int or :double.) If the form "
                     "references another schema keyword, register that "
-                    "keyword first.")
+                    "keyword in the same admitted schema population.")
                {:seon.schema/error :seon.schema/invalid-schema
                 :seon.schema/key   k
                 :seon.schema/definition v
@@ -160,7 +160,7 @@
       (first body))))
 
 (defn assert-non-nilable-value-schema!
-  "register!-time gate: reject a top-level nilable value schema whose inner
+  "Projection-build gate: reject a top-level nilable value schema whose inner
    is a raw Malli built-in type — e.g. `[:maybe :int]`. In seon a stored
    value is NEVER nil (absent = the key is simply omitted, never stored as
    nil), so a NAMED value schema must not be nilable. Throws a guiding

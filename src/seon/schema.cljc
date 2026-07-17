@@ -222,7 +222,10 @@
 (defn ^:seon.fn/agent-facing? register!
   "Define a new attribute so facts using it can be saved and queried.
 
-   Adds one canonical declaration to the current candidate collector.
+   Adds one canonical declaration to the current candidate collector. Schema
+   references are resolved only when [[build-projection]] validates the
+   complete population, so namespace load order cannot change whether a
+   declaration is accepted.
 
    Arguments:
      k - Schema keyword (use `::name` for auto-namespacing)
@@ -272,8 +275,6 @@
            :seon.schema/key k
            :seon.schema/definition v
            :seon.error/kind :user-input}))))
-  (internal/assert-compilable-schema! (candidate-forms) k v)
-  (internal/assert-non-nilable-value-schema! (candidate-forms) k v)
   (update-candidate-forms! assoc k v)
   k)
 
@@ -303,7 +304,10 @@
     [:=> [:catn [::forms :map] [::function-contracts :map]] :map]]}
   ([forms] (build-projection forms {}))
   ([forms function-contracts]
-   (let [registry (mr/composite-registry
+   (let [_        (doseq [[k form] (sort-by key forms)]
+                    (internal/assert-compilable-schema! forms k form)
+                    (internal/assert-non-nilable-value-schema! forms k form))
+        registry (mr/composite-registry
                    (m/default-schemas)
                    (mr/fast-registry forms))
         options  {:registry registry}
