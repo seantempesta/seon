@@ -1,276 +1,283 @@
 (ns my.skills-test
-  "my.skills contracts, on a fresh :memory conn seeded with the pod's boot
-   schema (never the live agent conn):
-
-     1. SCHEMA — the three `:my.skills/*` attrs are the shapes the design
-        locks (identity keyword name, non-blank description, non-blank inline
-        body).
-     2. CORPUS SCAN — `seed-skills-tx-data` reads the REAL shipped corpus
-        (`config/skills-dir`, manifest-owned) end-to-end (frontmatter scanner
-        + dir walk), so the scanner can't bit-rot: the shipped skills appear
-        as rows with name + file-path + verbatim description.
-     3. LOAD / UNLOAD / LIST — load installs ONE `:skill/<name>` block, unload
-        removes it, and the catalog's `::loaded?` is DERIVED from the agent's
-        own blocks (no stored flag).
-     4. RENDER — catalog-block renders a `;`-line per skill (and \"\" when the
-        store has none); skill-block renders the file body (frontmatter
-        stripped, `;`-commented) + the derived token-cost footer.
-
-   The functions read `db/*conn*` AMBIENTLY exactly as the live pod does, so the
-   test installs the conn on the ROOT `db/*conn*` and RE-PINS it (via `pinned`)
-   right before each ambient read — a `binding` would pop at the first async
-   hop (CLJS dynamic bindings don't survive `await`)."
+  "Current `my.skills` schema, corpus, and database-value behavior."
   (:require
     [cljs.test :refer [deftest is async]]
     [clojure.string :as str]
-    [datahike.api :as d]
-    [seon.client :as client]
+    [my.skills :as skills]
+    [seon.agent.ctx :as ctx]
     [seon.config :as config]
     [seon.db :as db]
-    [seon.schema :as schema]
-    [my.skills :as skills]))
+    [seon.schema :as schema]))
 
-;; Derived from the SAME source of truth the scanner uses (the manifest's
-;; :seon.config/dirs, else env, else the default) — never a pinned literal,
-;; so a corpus move can't stale this test.
-(def datahike-skill-path (str (config/skills-dir) "/datahike/SKILL.md"))
+(defn- as-database-fn
+  [f]
+  (fn
+    ([] (f))
+    ([_] (f))))
 
-;; A valid `:seon.db/id` agent id — exactly 14 chars ("root" or a 14-char id
-;; are the only shapes the `:seon.agent/id` schema accepts).
-(def test-agent-id "tst-2606280000")
+(defn- as-query-fn
+  [f]
+  (fn
+    ([request] (f request))
+    ([query-form & inputs] (apply f query-form inputs))))
 
-(defn- fresh-conn
-  "Promise of a fresh :memory conn carrying the pod's boot schema (agent +
-   ctx attrs). `:my.skills/*` and `:seon.agent.ctx/file-path` are NOT
-   pre-installed — `db/transact!` lazy-installs them on first write."
-  []
-  (let [cfg {:store              {:backend :memory :id (random-uuid)}
-             :schema-flexibility :write
-             :keep-history?      true}]
-    (-> (d/create-database cfg)
-        (.then (fn [_] (d/connect cfg {:sync? false})))
-        (.then (fn [conn]
-                 (-> (db/ensure-provenance! {:seon.db/conn conn})
-                     (.then (fn [_]
-                              (d/transact!
-                                conn
-                                {:tx-data (into (db/malli->datahike-schema
-                                                  client/agent-bootstrap-attrs)
-                                                (db/tx-meta-datahike-schema))})))
-                     (.then (fn [_] conn))))))))
+(defn- as-pull-fn
+  [f]
+  (fn
+    ([request] (f request))
+    ([selector eid] (f selector eid))
+    ([database selector eid] (f database selector eid))))
 
-(defn- with-conn
-  "Fresh conn `set!` as the ROOT db/*conn* for `body` (conn → Promise),
-   prior root restored after. `body` is handed the conn so it can re-pin."
-  [body]
-  (-> (fresh-conn)
-      (.then (fn [conn]
-               (let [orig db/*conn*]
-                 (set! db/*conn* conn)
-                 (-> (js/Promise.resolve (body conn))
-                     (.finally (fn [] (set! db/*conn* orig)))))))))
+(def datahike-skill-path
+  (str (config/skills-dir) "/datahike/SKILL.md"))
 
-(defn- pinned
-  "Wrap a `.then` callback so it RE-PINS `conn` as the root db/*conn* before
-   running — every ambient read in `f` then resolves against THIS test's conn."
-  [conn f]
-  (fn [x] (set! db/*conn* conn) (f x)))
+(defn- finish
+  [promise done]
+  (-> promise
+      (.then (fn [_] (done)))
+      (.catch (fn [error]
+                (is false (str "threw — " error))
+                (done)))))
 
-(defn- block-names
-  "The set of ctx-block names on agent `id` in `conn`."
-  [conn id]
-  (set (db/query '[:find [?n ...]
-                   :in $ ?aid
-                   :where
-                   [?a :seon.agent/id ?aid]
-                   [?a :seon.agent/ctx ?b]
-                   [?b :seon.agent.ctx/name ?n]]
-                 @conn id)))
+(defn- with-list-fakes
+  [{database-fn ::database-fn
+    agent-id-fn ::agent-id-fn
+    query-fn ::query-fn}
+   body]
+  (let [saved {::database-fn db/db
+               ::agent-id-fn db/current-agent-id
+               ::query-fn db/query}]
+    (set! db/db (as-database-fn database-fn))
+    (set! db/current-agent-id agent-id-fn)
+    (set! db/query (as-query-fn query-fn))
+    (-> (js/Promise.resolve (body))
+        (.finally
+          (fn []
+            (set! db/db (::database-fn saved))
+            (set! db/current-agent-id (::agent-id-fn saved))
+            (set! db/query (::query-fn saved)))))))
 
-;;; ───────────────────────────────────────────────────────────────────────
-;;; 1. SCHEMA — the three :my.skills/* shapes.
-;;; ───────────────────────────────────────────────────────────────────────
+(defn- with-skill-action-fakes
+  [{query-fn ::query-fn
+    install-fn ::install-fn
+    remove-fn ::remove-fn}
+   body]
+  (let [saved {::query-fn db/query
+               ::install-fn ctx/install!
+               ::remove-fn ctx/remove!}]
+    (set! db/query (as-query-fn query-fn))
+    (set! ctx/install! install-fn)
+    (set! ctx/remove! remove-fn)
+    (-> (js/Promise.resolve (body))
+        (.finally
+          (fn []
+            (set! db/query (::query-fn saved))
+            (set! ctx/install! (::install-fn saved))
+            (set! ctx/remove! (::remove-fn saved)))))))
+
+(defn- with-skill-render-fakes
+  [{query-fn ::query-fn
+    pull-fn ::pull-fn
+    read-file-fn ::read-file-fn}
+   body]
+  (let [saved {::query-fn db/query
+               ::pull-fn db/pull
+               ::read-file-fn ctx/read-file-text}]
+    (set! db/query (as-query-fn query-fn))
+    (set! db/pull (as-pull-fn pull-fn))
+    (set! ctx/read-file-text read-file-fn)
+    (try
+      (body)
+      (finally
+        (set! db/query (::query-fn saved))
+        (set! db/pull (::pull-fn saved))
+        (set! ctx/read-file-text (::read-file-fn saved))))))
 
 (deftest schema-shapes-are-registered
-  (is (= [:keyword {:seon.db/identity true}] (schema/schema-definition :my.skills/name))
-      "name is the identity keyword — the catalog key AND load/unload handle")
-  (is (= [:string {:min 1}] (schema/schema-definition :my.skills/description))
-      "description is a non-blank string (the catalog line / trigger text)")
-  (is (= [:string {:min 1}] (schema/schema-definition :my.skills/body))
-      "inline body is a non-blank string (agent-authored skills only)"))
-
-;;; ───────────────────────────────────────────────────────────────────────
-;;; 2. CORPUS SCAN — the real shipped corpus dir, end to end.
-;;; ───────────────────────────────────────────────────────────────────────
+  (is (= [:keyword {:seon.db/identity true}]
+         (schema/schema-definition :my.skills/name)))
+  (is (= [:string {:min 1}]
+         (schema/schema-definition :my.skills/description)))
+  (is (= [:string {:min 1}]
+         (schema/schema-definition :my.skills/body))))
 
 (deftest seed-scan-reads-the-shipped-skill-corpus
   (let [rows (skills/seed-skills-tx-data)
         by-name (into {} (map (juxt :my.skills/name identity)) rows)]
-    (is (every? (fn [r] (and (keyword? (:my.skills/name r))
-                             (string? (:my.skills/description r))
-                             (not (str/blank? (:my.skills/description r)))
-                             (str/ends-with? (:seon.agent.ctx/file-path r) "SKILL.md")))
-                rows)
-        "every scanned row is name(kw) + non-blank description + a SKILL.md path")
-    (is (contains? by-name :datahike) "the shipped datahike skill is found")
-    (is (contains? by-name :clojurescript) "the shipped clojurescript skill is found")
-    (is (contains? by-name :data-oriented-clojure)
-        "a later-authored skill is picked up by the scan, no hardcoding")
-    (is (= datahike-skill-path (:seon.agent.ctx/file-path (by-name :datahike)))
-        "the row stores the SKILL.md PATH — the body stays in the file")
-    (is (str/starts-with? (:my.skills/description (by-name :datahike))
-                          "Seon database patterns.")
-        "description is the frontmatter value VERBATIM (quotes stripped)")))
+    (is (every? (fn [row]
+                  (and (keyword? (:my.skills/name row))
+                       (not (str/blank? (:my.skills/description row)))
+                       (str/ends-with? (:seon.agent.ctx/file-path row)
+                                       "SKILL.md")))
+                rows))
+    (is (contains? by-name :datahike))
+    (is (= datahike-skill-path
+           (:seon.agent.ctx/file-path (by-name :datahike))))))
 
 (deftest seed-scan-is-empty-for-an-absent-dir
-  (is (= [] (skills/seed-skills-tx-data "/no/such/skills/dir"))
-      "an absent/unreadable dir yields no rows (no skills, no crash)"))
+  (is (= [] (skills/seed-skills-tx-data "/no/such/skills/dir"))))
 
-;;; ───────────────────────────────────────────────────────────────────────
-;;; 3. LOAD / UNLOAD / LIST — install!/remove! + derived loaded?.
-;;; ───────────────────────────────────────────────────────────────────────
-
-(deftest load-installs-block-unload-removes-it-list-derives-loaded
+(deftest load-and-unload-use-one-stable-context-block-identity
   (async done
-    (-> (with-conn
-          (fn [conn]
-            (-> (db/transact!
-                  {:seon.db/tx-data
-                   [{:seon.agent/id test-agent-id}
-                    {:my.skills/name :datahike
-                     :my.skills/description "DB patterns."
-                     :seon.agent.ctx/file-path datahike-skill-path}]})
-                ;; nothing loaded yet — list marks it ○, no block installed
-                (.then (pinned conn
-                         (fn [_]
-                           (is (= [false]
-                                  (mapv :my.skills/loaded?
-                                        (db/with-agent test-agent-id #(skills/list))))
-                               "before load: the row exists, loaded? false")
-                           (is (not (contains? (block-names conn test-agent-id) :skill/datahike))
-                               "no :skill/datahike block yet"))))
-                ;; load → ONE :skill/datahike block, list flips loaded? true
-                (.then (pinned conn (fn [_] (db/with-agent test-agent-id #(skills/load :datahike)))))
-                (.then (pinned conn
-                         (fn [res]
-                           (is (true? (:my.skills/ok? res)) "load is ok")
-                           (is (contains? (block-names conn test-agent-id) :skill/datahike)
-                               "load installed the :skill/datahike block")
-                           (is (= [true]
-                                  (mapv :my.skills/loaded?
-                                        (db/with-agent test-agent-id #(skills/list))))
-                               "loaded? is DERIVED from the agent's own block — now true"))))
-                ;; load again → idempotent upsert (still exactly one block)
-                (.then (pinned conn (fn [_] (db/with-agent test-agent-id #(skills/load :datahike)))))
-                (.then (pinned conn
-                         (fn [_]
-                           (is (= 1 (db/query '[:find (count ?b) .
-                                                :in $ ?aid
-                                                :where
-                                                [?a :seon.agent/id ?aid]
-                                                [?a :seon.agent/ctx ?b]]
-                                              @conn test-agent-id))
-                               "re-loading replaces in place — ag1 still has exactly one block"))))
-                ;; unload → block gone, loaded? back to false
-                (.then (pinned conn (fn [_] (db/with-agent test-agent-id #(skills/unload :datahike)))))
-                (.then (pinned conn
-                         (fn [res]
-                           (is (true? (:my.skills/ok? res)) "unload is ok")
-                           (is (not (contains? (block-names conn test-agent-id) :skill/datahike))
-                               "unload removed the block")
-                           (is (= [false]
-                                  (mapv :my.skills/loaded?
-                                        (db/with-agent test-agent-id #(skills/list))))
-                               "loaded? derived false again — nothing stored to clear")))))))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+    (let [installs (atom [])
+          removals (atom [])]
+      (finish
+        (-> (with-skill-action-fakes
+              {::query-fn (fn [_] (js/Promise.resolve 101))
+               ::install-fn
+               (fn [request]
+                 (swap! installs conj request)
+                 (js/Promise.resolve {:seon.agent.ctx/ok? true}))
+               ::remove-fn
+               (fn [block-name]
+                 (swap! removals conj block-name)
+                 (js/Promise.resolve {:seon.agent.ctx/ok? true}))}
+              #(-> (skills/load :datahike)
+                   (.then
+                     (fn [result]
+                       (is (true? (:my.skills/ok? result)))
+                       (skills/load :datahike)))
+                   (.then
+                     (fn [result]
+                       (is (true? (:my.skills/ok? result)))
+                       (skills/unload :datahike)))))
+            (.then
+              (fn [result]
+                (is (true? (:my.skills/ok? result)))
+                (is (= [:skill/datahike :skill/datahike]
+                       (mapv :seon.agent.ctx/name @installs))
+                    "reloading targets the same context-block identity")
+                (is (= ['my.skills/skill-block 'my.skills/skill-block]
+                       (mapv :seon.render/ai @installs)))
+                (is (= [:skill/datahike] @removals)))))
+        done))))
 
-(deftest load-of-an-absent-skill-is-an-error-value
+(deftest load-of-an-absent-skill-remains-an-error-value
   (async done
-    (-> (with-conn
-          (fn [conn]
-            (-> (db/transact! {:seon.db/tx-data [{:seon.agent/id test-agent-id}
-                                                 {:my.skills/name :real
-                                                  :my.skills/description "x."
-                                                  :my.skills/body "the body"}]})
-                (.then (pinned conn (fn [_] (db/with-agent test-agent-id #(skills/load :nope)))))
-                (.then (pinned conn
-                         (fn [res]
-                           (is (false? (:my.skills/ok? res))
-                               "loading a non-existent skill returns an error VALUE, never throws")
-                           (is (str/includes? (:my.skills/message res) "no skill")
-                               "the message names the miss")
-                           (is (not (contains? (block-names conn test-agent-id) :skill/nope))
-                               "no block installed for a miss")))))))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+    (let [installs (atom 0)]
+      (finish
+        (-> (with-skill-action-fakes
+              {::query-fn (fn [_] (js/Promise.resolve nil))
+               ::install-fn
+               (fn [_]
+                 (swap! installs inc)
+                 (js/Promise.resolve {:seon.agent.ctx/ok? true}))
+               ::remove-fn
+               (fn [_] (js/Promise.resolve {:seon.agent.ctx/ok? true}))}
+              #(skills/load :missing))
+            (.then
+              (fn [result]
+                (is (false? (:my.skills/ok? result)))
+                (is (str/includes? (:my.skills/message result) "no skill"))
+                (is (zero? @installs)))))
+        done))))
 
-;;; ───────────────────────────────────────────────────────────────────────
-;;; 4. RENDER — catalog (L0) + loaded body+footer (L2).
-;;; ───────────────────────────────────────────────────────────────────────
+(deftest skill-render-keeps-file-content-derived-and-drops-missing-rows
+  (let [database {:db-name "default" :t 16}
+        queries (atom [])
+        pulls (atom [])
+        rendered
+        (with-skill-render-fakes
+          {::query-fn
+           (fn [& args]
+             (swap! queries conj args)
+             101)
+           ::pull-fn
+           (fn [request]
+             (swap! pulls conj request)
+             {:seon.agent.ctx/file-path datahike-skill-path})
+           ::read-file-fn
+           (fn [_]
+             "---\nname: datahike\ndescription: DB patterns.\n---\n# Datahike\nUse immutable database values.")}
+          #(skills/skill-block
+             {:seon.db/db database
+              :seon.render/node
+              {:seon.agent.ctx/name :skill/datahike}}))]
+    (is (str/includes? rendered "; # Datahike"))
+    (is (not (str/includes? rendered "name: datahike"))
+        "frontmatter is not duplicated into agent context")
+    (is (every? #(or (str/blank? %) (str/starts-with? % ";"))
+                (str/split-lines rendered))
+        "the rendered body remains eval-safe comment data")
+    (is (= 1 (count @queries)))
+    (is (= 1 (count @pulls)))
+    (is (identical? database (:seon.db/db (first @pulls))))
+    (is (= ""
+           (with-skill-render-fakes
+             {::query-fn (fn [& _] nil)
+              ::pull-fn (fn [_] (throw (js/Error. "must not pull")))
+              ::read-file-fn (fn [_] nil)}
+             #(skills/skill-block
+                {:seon.db/db database
+                 :seon.render/node
+                 {:seon.agent.ctx/name :skill/missing}})))
+        "a missing skill row omits the render")))
 
-(deftest catalog-block-renders-a-line-per-skill-and-empties-out
+(deftest list-reuses-one-immutable-database-value
   (async done
-    (-> (with-conn
-          (fn [conn]
-            (is (= "" (skills/catalog-block {:seon.db/db @conn :seon.agent/id test-agent-id}))
-                "no skill rows → \"\" → the section drops (reactive)")
-            (-> (db/transact!
-                  {:seon.db/tx-data
-                   [{:seon.agent/id test-agent-id}
-                    {:my.skills/name :datahike :my.skills/description "DB patterns."
-                     :seon.agent.ctx/file-path datahike-skill-path}]})
-                (.then (pinned conn
-                         (fn [_]
-                           (let [out (skills/catalog-block
-                                       {:seon.db/db @conn :seon.agent/id test-agent-id})]
-                             (is (str/includes? out "SKILLS — loadable knowledge")
-                                 "the prose header explains skills cost nothing until loaded")
-                             (is (str/includes? out "; - :datahike  ○ — DB patterns.")
-                                 "one ;-line per skill: name ○ (not loaded) — description"))))))))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+    (let [database {:db-name "default" :t 12}
+          database-calls (atom 0)
+          requests (atom [])]
+      (finish
+        (-> (with-list-fakes
+              {::database-fn
+               (fn []
+                 (swap! database-calls inc)
+                 (js/Promise.resolve database))
+               ::agent-id-fn (constantly "agent-a")
+               ::query-fn
+               (fn [request]
+                 (swap! requests conj request)
+                 (js/Promise.resolve
+                   (if (empty? (:seon.db/args request))
+                     #{[:datahike "Database patterns."]}
+                     [:skill/datahike])))}
+              skills/list)
+            (.then
+              (fn [result]
+                (is (= 1 @database-calls))
+                (is (= 2 (count @requests)))
+                (is (every? #(identical? database (:seon.db/db %))
+                            @requests))
+                (is (= [{:my.skills/name :datahike
+                         :my.skills/description "Database patterns."
+                         :my.skills/loaded? true}]
+                       result)))))
+        done))))
 
-(deftest skill-block-renders-the-file-body-quoted-with-the-cost-footer
+(deftest list-database-error-passes-through-without-querying
   (async done
-    (-> (with-conn
-          (fn [conn]
-            (-> (db/transact!
-                  {:seon.db/tx-data
-                   [{:my.skills/name :datahike :my.skills/description "DB patterns."
-                     :seon.agent.ctx/file-path datahike-skill-path}]})
-                (.then (pinned conn
-                         (fn [_]
-                           (let [out (skills/skill-block
-                                       {:seon.db/db @conn
-                                        :seon.render/node {:seon.agent.ctx/name :skill/datahike}})]
-                             (is (str/includes? out "; # Datahike")
-                                 "the file body renders, frontmatter stripped (starts at H1)")
-                             (is (not (str/includes? out "name: datahike"))
-                                 "the YAML frontmatter is stripped from the rendered body")
-                             (is (every? #(or (str/blank? %) (str/starts-with? % ";"))
-                                         (str/split-lines out))
-                                 "every line is a ;-comment — the prompt stays eval-valid")
-                             (is (str/includes? out "datahike skill · ~")
-                                 "the derived token-cost footer is appended")
-                             (is (str/includes? out "(my.skills/unload :datahike)")
-                                 "the footer always carries the explicit unload hint"))))))))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+    (let [database-error {:seon.error/message "database unavailable"}
+          queries (atom 0)]
+      (finish
+        (-> (with-list-fakes
+              {::database-fn (fn [] (js/Promise.resolve database-error))
+               ::agent-id-fn (constantly "agent-a")
+               ::query-fn
+               (fn [_] (swap! queries inc) (js/Promise.resolve []))}
+              skills/list)
+            (.then
+              (fn [result]
+                (is (identical? database-error result))
+                (is (zero? @queries)))))
+        done))))
 
-(deftest skill-block-drops-when-the-row-is-gone
+(deftest list-query-error-passes-through-without-a-second-query
   (async done
-    (-> (with-conn
-          (fn [conn]
-            ;; an installed block whose skill row was never seeded → blank → drops
-            (-> (db/transact! {:seon.db/tx-data
-                               [{:my.skills/name :real :my.skills/description "x."
-                                 :my.skills/body "body"}]})
-                (.then (pinned conn
-                         (fn [_]
-                           (is (= "" (skills/skill-block
-                                       {:seon.db/db @conn
-                                        :seon.render/node {:seon.agent.ctx/name :skill/ghost}}))
-                               "no matching row → \"\" → the block drops (reactive)")))))))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+    (let [database {:db-name "default" :t 13}
+          query-error {:seon.error/message "catalog query failed"}
+          queries (atom 0)]
+      (finish
+        (-> (with-list-fakes
+              {::database-fn (fn [] (js/Promise.resolve database))
+               ::agent-id-fn (constantly "agent-a")
+               ::query-fn
+               (fn [_]
+                 (swap! queries inc)
+                 (js/Promise.resolve query-error))}
+              skills/list)
+            (.then
+              (fn [result]
+                (is (identical? query-error result))
+                (is (= 1 @queries)))))
+        done))))

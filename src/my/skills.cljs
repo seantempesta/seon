@@ -35,8 +35,8 @@
 
    Async: `load`/`unload` AWAIT the underlying `install!`/`remove!` transact
    (they are `^:async`); the eval path auto-awaits, so an agent calling
-   `(my.skills/load :datahike)` gets the result MAP, not a Promise. `list` is
-   a synchronous derived query."
+   `(my.skills/load :datahike)` gets the result MAP, not a Promise. `list`
+   acquires one immutable database value for its derived queries."
   (:refer-clojure :exclude [load list])
   (:require
     [clojure.string :as str]
@@ -77,6 +77,10 @@
    [:my.skills/name        :my.skills/name]
    [:my.skills/description  :my.skills/description]
    [::loaded?              ::loaded?]])
+
+(schema/register! ::list-response
+  [:or [:vector ::catalog-entry]
+   [:map [:seon.error/message :string]]])
 
 (schema/register! ::result
   [:map
@@ -263,28 +267,36 @@
 
      (my.skills/list)
      ; returns «vector: [{:my.skills/name :datahike, :my.skills/description \"…\", :my.skills/loaded? false} …]»"
-  {:malli/schema [:=> [:cat] [:vector ::catalog-entry]]}
+  {:malli/schema [:=> [:cat] ::list-response]}
   []
-  (let [coordinate (await (db/head-coordinate))
-        agent-id (db/current-agent-id)
-        catalog (await (db/query
-                        {:seon.db/query '[:find ?n ?d
-                                          :where
-                                          [?e :my.skills/name ?n]
-                                          [?e :my.skills/description ?d]]
-                         :seon.db/coordinate coordinate}))
-        loaded (if agent-id
-                 (await (db/query
-                         {:seon.db/query '[:find [?n ...]
-                                           :in $ ?aid
-                                           :where
-                                           [?a :seon.agent/id ?aid]
-                                           [?a :seon.agent/ctx ?b]
-                                           [?b :seon.agent.ctx/name ?n]]
-                          :seon.db/args [agent-id]
-                          :seon.db/coordinate coordinate}))
-                 [])]
-    (catalog-entries catalog loaded)))
+  (let [database (await (db/db))]
+    (if (:seon.error/message database)
+      database
+      (let [agent-id (db/current-agent-id)
+            catalog (await
+                     (db/query
+                      {:seon.db/db database
+                       :seon.db/query '[:find ?n ?d
+                                        :where
+                                        [?e :my.skills/name ?n]
+                                        [?e :my.skills/description ?d]]}))]
+        (if (:seon.error/message catalog)
+          catalog
+          (let [loaded (if agent-id
+                         (await
+                          (db/query
+                           {:seon.db/db database
+                            :seon.db/query '[:find [?n ...]
+                                             :in $ ?aid
+                                             :where
+                                             [?a :seon.agent/id ?aid]
+                                             [?a :seon.agent/ctx ?b]
+                                             [?b :seon.agent.ctx/name ?n]]
+                            :seon.db/args [agent-id]}))
+                         [])]
+            (if (:seon.error/message loaded)
+              loaded
+              (catalog-entries catalog loaded))))))))
 
 ;;; RENDER FNS — the always-on catalog (L0) and the loaded body+footer (L2).
 ;;; Both `;`-comment their text so the whole prompt stays eval-valid Clojure.

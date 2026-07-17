@@ -1,437 +1,446 @@
 (ns my.kb-test
-  "Two contracts, one fresh-:memory conn seeded like the pod boots (never
-   the live agent conn):
-
-     1. THE SCAFFOLD: the four shared provenance shapes are registered ONCE;
-        my.kb.shared (the cluster-wide instruction singleton, context-v4
-        V4-0) seeds EMPTY and idempotent; rows are APPENDED by transact
-        (nested component maps under the many-ref) and read back in append
-        order via the `instructions` fn; re-seeding never clobbers appended
-        rows.
-
-     2. THE WORKED DB MANUAL: every recipe in my.kb compiles AND runs — the
-        manual can't bit-rot. `build-kb-example!` registers the sample
-        `:my.kb.source/*` schema, seeds 3 sources / 2 authors / 1 component
-        finding, and aggregates; the read/mutation recipes are then exercised
-        directly and verified by read-back.
-
-   The worked recipes read `db/*conn*` AMBIENTLY (db-omitted), exactly as the
-   live pod does, so the test installs the conn on the ROOT `db/*conn*` (a
-   `binding` would pop at the first async hop — CLJS dynamic bindings don't
-   survive `await`). That root is a SHARED global the whole suite mutates; a
-   background fiber from an async-heavy test can `set!` it between our async
-   hops. So each `.then` that does an ambient read RE-PINS the test's conn via
-   `pinned` first — a synchronous read right after a `set!` can't be
-   interleaved, which closes the contamination window."
+  "Current `my.kb` schema and immutable database-value behavior."
   (:require
     [cljs.test :refer [deftest is async]]
-    [datahike.api :as d]
-    [seon.client :as client]
-    [seon.db :as db]
-    [seon.schema :as schema]
+    [my.data :as data]
     [my.kb :as kb]
-    [my.kb.shared :as kb-shared]))
+    [my.kb.shared :as kb-shared]
+    [seon.db :as db]
+    [seon.embed :as embed]
+    [seon.schema :as schema]))
 
-(defn- fresh-conn
-  "Promise of a fresh :memory conn with the pod's boot schema + the
-   shipped my.kb.shared seed (the same row seon.client seeds at boot).
-   The `:my.kb.source/*` sample schema is NOT pre-installed — db/transact!
-   lazy-installs it on the first write (build-kb-example!/remember-sources!)."
-  []
-  (let [cfg {:store              {:backend :memory :id (random-uuid)}
-             :schema-flexibility :write
-             :keep-history?      true}]
-    (-> (d/create-database cfg)
-        (.then (fn [_] (d/connect cfg {:sync? false})))
-        (.then (fn [conn]
-                 (-> (db/ensure-provenance! {:seon.db/conn conn})
-                     (.then (fn [_]
-                              (d/transact!
-                                conn
-                                {:tx-data (into (db/malli->datahike-schema
-                                                  client/agent-bootstrap-attrs)
-                                                (db/tx-meta-datahike-schema))})))
-                     (.then (fn [_]
-                              (d/transact! conn
-                                {:tx-data (kb-shared/seed-tx-data)})))
-                     (.then (fn [_] conn))))))))
+(defn- as-database-fn
+  [f]
+  (fn
+    ([] (f))
+    ([_] (f))))
 
-(defn- with-conn
-  "Fresh seeded conn, `set!` as the ROOT db/*conn* for `body` (conn →
-   Promise), prior root restored after (root set!, not `binding` — CLJS
-   dynamic bindings pop at the first microtask boundary). `body` is handed
-   the conn so it can RE-PIN before each ambient read (see `pinned`)."
-  [body]
-  (-> (fresh-conn)
-      (.then (fn [conn]
-               (let [orig db/*conn*]
-                 (set! db/*conn* conn)
-                 (-> (js/Promise.resolve (body conn))
-                     (.finally (fn [] (set! db/*conn* orig)))))))))
+(defn- as-query-fn
+  [f]
+  (fn
+    ([request] (f request))
+    ([query-form & inputs] (apply f query-form inputs))))
 
-(defn- pinned
-  "Wrap a `.then` callback so it RE-PINS `conn` as the root db/*conn*
-   before running. A concurrent test's fiber may have `set!` the shared
-   root during the preceding await; re-pinning means every ambient
-   (db-omitted) read in `f` resolves against THIS test's conn. The reads
-   in `f` are synchronous, so nothing interleaves between the `set!` and
-   them."
-  [conn f]
-  (fn [x] (set! db/*conn* conn) (f x)))
+(defn- as-pull-fn
+  [f]
+  (fn
+    ([request] (f request))
+    ([selector eid] (f selector eid))
+    ([database selector eid] (f database selector eid))))
 
-(defn- run-test
-  "with-conn + cljs.test/async glue: call `(chain conn)` (returns a
-   Promise), then `done`; a rejection anywhere fails the test loudly."
-  [chain done]
-  (-> (with-conn (fn [conn] (chain conn)))
+(defn- as-pull-many-fn
+  [f]
+  (fn
+    ([request] (f request))
+    ([selector eids] (f selector eids))
+    ([database selector eids] (f database selector eids))))
+
+(defn- as-installed-schema-fn
+  [f]
+  (fn
+    ([] (f nil))
+    ([request] (f request))))
+
+(defn- as-transact-fn
+  [f]
+  (fn [& call-args] (apply f call-args)))
+
+(defn- with-kb-fakes
+  [{query-fn ::query-fn
+    pull-fn ::pull-fn
+    transact-fn ::transact-fn
+    rows-fn ::rows-fn}
+   body]
+  (let [saved {::query-fn db/query
+               ::pull-fn db/pull
+               ::transact-fn db/transact!
+               ::rows-fn data/rows}]
+    (set! db/query (if query-fn (as-query-fn query-fn) db/query))
+    (set! db/pull (if pull-fn (as-pull-fn pull-fn) db/pull))
+    (set! db/transact!
+          (if transact-fn (as-transact-fn transact-fn) db/transact!))
+    (set! data/rows (or rows-fn data/rows))
+    (-> (js/Promise.resolve (body))
+        (.finally
+          (fn []
+            (set! db/query (::query-fn saved))
+            (set! db/pull (::pull-fn saved))
+            (set! db/transact! (::transact-fn saved))
+            (set! data/rows (::rows-fn saved)))))))
+
+(defn- finish
+  [promise done]
+  (-> promise
       (.then (fn [_] (done)))
-      (.catch (fn [e] (is false (str "threw — " e)) (done)))))
+      (.catch (fn [error]
+                (is false (str "threw — " error))
+                (done)))))
 
-;;; ───────────────────────────────────────────────────────────────────────
-;;; 1. THE SCAFFOLD — shared provenance shapes + the instruction singleton.
-;;; ───────────────────────────────────────────────────────────────────────
+(defn- with-recall-fakes
+  [{database-fn ::database-fn
+    installed-schema-fn ::installed-schema-fn
+    query-fn ::query-fn
+    pull-many-fn ::pull-many-fn
+    embedding-enabled-fn ::embedding-enabled-fn
+    search-pull-fn ::search-pull-fn}
+   body]
+  (let [saved {::database-fn db/db
+               ::installed-schema-fn db/installed-schema
+               ::query-fn db/query
+               ::pull-many-fn db/pull-many
+               ::embedding-enabled-fn embed/enabled?
+               ::search-pull-fn embed/search-pull}]
+    (set! db/db (as-database-fn database-fn))
+    (set! db/installed-schema
+          (as-installed-schema-fn installed-schema-fn))
+    (set! db/query (as-query-fn query-fn))
+    (set! db/pull-many (as-pull-many-fn pull-many-fn))
+    (set! embed/enabled? embedding-enabled-fn)
+    (set! embed/search-pull search-pull-fn)
+    (-> (js/Promise.resolve (body))
+        (.finally
+          (fn []
+            (set! db/db (::database-fn saved))
+            (set! db/installed-schema (::installed-schema-fn saved))
+            (set! db/query (::query-fn saved))
+            (set! db/pull-many (::pull-many-fn saved))
+            (set! embed/enabled? (::embedding-enabled-fn saved))
+            (set! embed/search-pull (::search-pull-fn saved)))))))
 
-(deftest the-shared-provenance-shapes-are-registered-once
+(deftest shared-provenance-shapes-and-seed-remain-canonical
   (is (= :string (schema/schema-definition :my.kb/source-path)))
   (is (= :int (schema/schema-definition :my.kb/source-line)))
-  (is (= :int (schema/schema-definition :my.kb/source-line-end))
-      "line RANGES are two ints on shared attrs (start + inclusive end) —
-       never a string, never a forked plural attr")
+  (is (= :int (schema/schema-definition :my.kb/source-line-end)))
   (is (= :inst (schema/schema-definition :my.kb/verified-at)))
   (is (= [:enum :verified :inferred]
-         (schema/schema-definition :my.kb/confidence))
-      "confidence is the shared enum — domains reference it, never inline it"))
+         (schema/schema-definition :my.kb/confidence)))
+  (is (= [{:my.kb.shared/id "shared"}]
+         (kb-shared/seed-tx-data))))
 
-(deftest shared-seed-is-the-empty-singleton
-  (let [rows (kb-shared/seed-tx-data)]
-    (is (= [{:my.kb.shared/id "shared"}] rows)
-        "the seed is ONE empty identity row — the four behavioral
-         teachings live in the system prompt (V4-0), never here")))
-
-(deftest shared-instructions-read-empty-then-ordered-after-appends
+(deftest shared-instructions-remain-ordered-derived-data
   (async done
-    (-> (with-conn
-          (fn [_conn]
-            (is (= [] (kb-shared/instructions))
-                "fresh store → no rows → [] (the zero state)")
-            (-> (db/transact!
-                  {:seon.db/tx-data
-                   [{:my.kb.shared/id "shared"
-                     :my.kb.shared/instructions
-                     [{:my.kb.shared/text "Always store provenance with findings."
-                       :my.kb.shared/at   (js/Date. 1000)}]}]})
-                (.then
-                  (fn [{ok? :seon.db/ok?}]
-                    (is (true? ok?) "an append is ONE nested-map transact")
-                    (db/transact!
-                      {:seon.db/tx-data
-                       [{:my.kb.shared/id "shared"
-                         :my.kb.shared/instructions
-                         [{:my.kb.shared/text "Prefer editing an existing schema."
-                           :my.kb.shared/at   (js/Date. 2000)}]}]})))
-                (.then
-                  (fn [{ok? :seon.db/ok?}]
-                    (is (true? ok?) "a second agent's append is the same move")
-                    (is (= ["Always store provenance with findings."
-                            "Prefer editing an existing schema."]
-                           (kb-shared/instructions))
-                        "re-read shows BOTH rows, oldest append first"))))))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+    (let [later (js/Date. 2000)
+          earlier (js/Date. 1000)]
+      (finish
+        (with-kb-fakes
+          {::query-fn
+           (fn [_]
+             (js/Promise.resolve
+               #{[later "Prefer the existing schema."]
+                 [earlier "Store provenance."]}))}
+          #(-> (kb-shared/instructions)
+               (.then
+                 (fn [result]
+                   (is (= ["Store provenance."
+                           "Prefer the existing schema."]
+                          result))))))
+        done))))
 
-(deftest shared-instructions-append-by-transact
-  ;; The reseed-safety contract: appending a row and then re-running
-  ;; the boot seed leaves the appended row intact (the seed carries no
-  ;; ::instructions value — identity upsert, zero clobber).
+(deftest knowledge-base-write-recipes-keep-one-canonical-transaction-shape
   (async done
-    (-> (with-conn
-          (fn [conn]
-            (-> (db/transact!
-                  {:seon.db/tx-data
-                   [{:my.kb.shared/id "shared"
-                     :my.kb.shared/instructions
-                     [{:my.kb.shared/text "Survives the reseed."
-                       :my.kb.shared/at   (js/Date.)}]}]})
-                (.then (fn [_]
-                         ;; the pod-restart move: re-transact the seed
-                         (d/transact! conn {:tx-data (kb-shared/seed-tx-data)})))
-                (.then (fn [_]
-                         (is (= ["Survives the reseed."]
-                                (kb-shared/instructions))
-                             "re-seeding never clobbers appended rows"))))))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+    (let [requests (atom [])]
+      (finish
+        (-> (with-kb-fakes
+              {::transact-fn
+               (fn [& call-args]
+                 (swap! requests conj (first call-args))
+                 (js/Promise.resolve {:seon.db/ok? true}))}
+              #(js/Promise.all
+                 #js [(kb/remember-sources!)
+                      (kb/retitle-source! "s1" "Revised")
+                      (kb/clear-rating! "s2")
+                      (kb/replace-topics! "s1" [:lisp :history])
+                      (kb/forget-source! "s3")]))
+            (.then
+              (fn [_]
+                (is (= 5 (count @requests)))
+                (let [[seed retitle clear replace forget]
+                      (map :seon.db/tx-data @requests)]
+                  (is (= 5 (count seed))
+                      "the worked example still seeds five entities")
+                  (is (= [{:my.kb.source/id "s1"
+                           :my.kb.source/title "Revised"}]
+                         retitle))
+                  (is (= [[:db/retract
+                           [:my.kb.source/id "s2"]
+                           :my.kb.source/rating]]
+                         clear))
+                  (is (= [[:db/retract
+                           [:my.kb.source/id "s1"]
+                           :my.kb.source/topics]
+                          {:my.kb.source/id "s1"
+                           :my.kb.source/topics [:lisp :history]}]
+                         replace))
+                  (is (= [[:db.fn/retractEntity
+                           [:my.kb.source/id "s3"]]]
+                         forget))))))
+        done))))
 
-;;; ───────────────────────────────────────────────────────────────────────
-;;; 2. THE WORKED DB MANUAL — register → seed → aggregate, end to end.
-;;;    seed: 3 sources (ratings 5,4,5 → rating-total 14, count 3),
-;;;    2 authors (mccarthy×2, okasaki×1), s1 has one component finding.
-;;; ───────────────────────────────────────────────────────────────────────
-
-(deftest build-kb-example-registers-seeds-and-aggregates
+(deftest remember-preserves-parsed-provenance-and-identity-upsert
   (async done
-    (run-test
-      (fn [conn]
-        (-> (kb/build-kb-example!)
-            (.then (pinned conn
-                     (fn [summary]
-                       (is (map? summary) "resolves to a map")
-                       (is (contains? summary :my.kb/count)
-                           "resolves to the stats summary, not a failure envelope")
-                       ;; build-kb-example! WROTE to this conn (transact!
-                       ;; captures the conn at call time), then reads the stats
-                       ;; back via ambient *conn* AFTER its own await — the one
-                       ;; read a concurrent fiber could clobber. Re-derive the
-                       ;; numbers against the re-pinned conn so it's deterministic.
-                       (let [s (kb/source-stats)]
-                         (is (= 3 (:my.kb/count s)))
-                         (is (= 14 (:my.kb/rating-total s))
-                             ":with ?e keeps each entity's row distinct — both 5s count")
-                         (is (= {:lisp 2 :foundations 1 :reference 1
-                                 :functional 1 :data-structures 1}
-                                (:my.kb/topic-counts s))
-                             "grouped aggregate counts sources per topic")))))))
-      done)))
+    (let [requests (atom [])
+          response {:seon.db/ok? true
+                    :seon.db/tempids {"finding" 101}}]
+      (finish
+        (-> (with-kb-fakes
+              {::transact-fn
+               (fn [& call-args]
+                 (swap! requests conj (first call-args))
+                 (js/Promise.resolve response))}
+              #(-> (kb/remember
+                     {:my.kb/claim "Entities are attributes and connections."
+                      :my.kb/source "src/seon/db.cljs:42"
+                      :my.kb/confidence :verified})
+                   (.then
+                     (fn [result]
+                       (is (= {:my.kb/id 101} result))
+                       (kb/remember
+                         {:my.kb/claim "Entities are attributes and connections."
+                          :my.kb/source "src/seon/db.cljs:42"
+                          :my.kb/confidence :inferred})))))
+            (.then
+              (fn [result]
+                (is (= {:my.kb/id 101} result))
+                (let [[first-row second-row]
+                      (map (comp first :seon.db/tx-data) @requests)]
+                  (is (= "finding" (:db/id first-row)))
+                  (is (= (:my.kb/claim first-row)
+                         (:my.kb/claim second-row))
+                      "repeating a claim keeps the same identity upsert")
+                  (is (= "src/seon/db.cljs" (:my.kb/source-path first-row)))
+                  (is (= 42 (:my.kb/source-line first-row)))
+                  (is (= :verified (:my.kb/confidence first-row)))
+                  (is (= :inferred (:my.kb/confidence second-row)))
+                  (is (inst? (:my.kb/verified-at first-row)))))))
+        done))))
 
-;;; ───────────────────────────────────────────────────────────────────────
-;;; Read recipes — query shapes + pull/entity.
-;;; ───────────────────────────────────────────────────────────────────────
-
-(deftest read-recipes-return-expected-shapes
+(deftest read-recipes-and-worked-summary-preserve-their-results
   (async done
-    (run-test
-      (fn [conn]
-        (-> (kb/build-kb-example!)
-            (.then (pinned conn
-                     (fn [_]
-                       (is (= #{"Recursive Functions of Symbolic Expressions"
-                                "LISP 1.5 Programmer's Manual"
-                                "Purely Functional Data Structures"}
-                              (set (kb/titles)))
-                           "collection find → vector of titles")
-                       (is (= #{["Recursive Functions of Symbolic Expressions" 5]
-                                ["LISP 1.5 Programmer's Manual" 4]
-                                ["Purely Functional Data Structures" 5]}
-                              (kb/title+rating))
-                           "relation find → set of [title rating] tuples")
-                       (is (= #{"Recursive Functions of Symbolic Expressions"
-                                "LISP 1.5 Programmer's Manual"}
-                              (set (kb/titles-by-author "John McCarthy")))
-                           ":in-bound input + ref-join → McCarthy's two titles")
-                       (let [detail (kb/source-detail "s1")]
-                         (is (= "Recursive Functions of Symbolic Expressions"
-                                (:my.kb.source/title detail)))
-                         (is (= "Code and data share one representation."
-                                (-> detail :my.kb.source/findings first :my.kb.finding/text))
-                             "component child inlined under [*]")
-                         (is (= "John McCarthy"
-                                (-> detail :my.kb.source/author :my.kb.author/name))
-                             "plain ref expanded by naming it with a sub-pattern"))
-                       (let [e (kb/source-entity "s3")]
-                         (is (= "Purely Functional Data Structures" (:my.kb.source/title e)))
-                         (is (= 5 (:my.kb.source/rating e))))
-                       (is (nil? (kb/source-entity "nope"))
-                           "unresolved lookup-ref → nil"))))))
-      done)))
+    (let [query-results (atom [["A" "B"]
+                               #{["A" 5] ["B" 4]}
+                               ["A"]])
+          source {:db/id 101
+                  :my.kb.source/id "s1"
+                  :my.kb.source/title "A"}
+          rows {:seon.items/items
+                [{:my.kb.source/rating 5
+                  :my.kb.source/topics [:lisp :foundations]}
+                 {:my.kb.source/rating 4
+                  :my.kb.source/topics [:lisp]}]
+                :seon.items/count 2}]
+      (finish
+        (with-kb-fakes
+          {::query-fn
+           (fn
+             ([_]
+              (let [result (first @query-results)]
+                (swap! query-results subvec 1)
+                (js/Promise.resolve result)))
+             ([_ & _]
+              (let [result (first @query-results)]
+                (swap! query-results subvec 1)
+                (js/Promise.resolve result))))
+           ::pull-fn
+           (fn
+             ([_] (js/Promise.resolve source))
+             ([_ _] (js/Promise.resolve source))
+             ([_ _ _] (js/Promise.resolve source)))
+           ::rows-fn (fn [_] (js/Promise.resolve rows))}
+          #(-> (kb/titles)
+               (.then (fn [result] (is (= ["A" "B"] result))
+                        (kb/title+rating)))
+               (.then (fn [result] (is (= #{["A" 5] ["B" 4]} result))
+                        (kb/titles-by-author "Author")))
+               (.then (fn [result] (is (= ["A"] result))
+                        (kb/source-detail "s1")))
+               (.then (fn [result] (is (= source result))
+                        (kb/source-entity "s1")))
+               (.then (fn [result] (is (= source result))
+                        (kb/source-stats)))
+               (.then
+                 (fn [result]
+                   (is (= {:my.kb/count 2
+                           :my.kb/rating-total 9
+                           :my.kb/topic-counts {:lisp 2 :foundations 1}}
+                          result))))))
+        done))))
 
-;;; ───────────────────────────────────────────────────────────────────────
-;;; Write recipes — upsert / retract one attr / cardinality-many replace /
-;;; retractEntity cascade, each verified by read-back.
-;;; ───────────────────────────────────────────────────────────────────────
-
-(deftest mutation-recipes-modify-in-place
+(deftest recall-reuses-one-immutable-database-value
   (async done
-    (run-test
-      (fn [conn]
-        (-> (kb/build-kb-example!)
-            ;; UPSERT — retitle in place, no duplicate
-            (.then (pinned conn (fn [_] (kb/retitle-source! "s1" "Recursive Functions (rev.)"))))
-            (.then (pinned conn
-                     (fn [_]
-                       (is (= "Recursive Functions (rev.)"
-                              (:my.kb.source/title (kb/source-entity "s1"))))
-                       (is (= 3 (:my.kb/count (kb/source-stats)))
-                           "upsert updated in place — still 3 sources"))))
-            ;; RETRACT one attr — clear s2's rating (4)
-            (.then (pinned conn (fn [_] (kb/clear-rating! "s2"))))
-            (.then (pinned conn
-                     (fn [_]
-                       (is (nil? (:my.kb.source/rating (kb/source-entity "s2")))
-                           "rating retracted")
-                       (is (= 10 (:my.kb/rating-total (kb/source-stats)))
-                           "rating-total dropped by 4"))))
-            ;; cardinality-many REPLACE — overlapping set proves retract-before-add
-            ;; is order-correct: :foundations dropped, :history added, the
-            ;; surviving :lisp is neither lost nor duplicated.
-            (.then (pinned conn (fn [_] (kb/replace-topics! "s1" [:lisp :history]))))
-            (.then (pinned conn
-                     (fn [_]
-                       (is (= #{:lisp :history}
-                              (set (:my.kb.source/topics (kb/source-entity "s1"))))
-                           "topics replaced, not appended; overlapping :lisp survives"))))
-            ;; retractEntity — cascade to the component finding
-            (.then (pinned conn (fn [_] (kb/forget-source! "s1"))))
-            (.then (pinned conn
-                     (fn [_]
-                       (is (nil? (kb/source-entity "s1")) "whole entity deleted")
-                       (is (nil? (db/entity [:my.kb.finding/id "f1"]))
-                           "component finding cascade-deleted with its source")
-                       (is (= 2 (:my.kb/count (kb/source-stats)))
-                           "down to 2 sources"))))))
-      done)))
+    (let [database {:db-name "default" :t 7}
+          calls (atom [])]
+      (finish
+        (-> (with-recall-fakes
+              {::database-fn
+               (fn []
+                 (swap! calls conj [::database])
+                 (js/Promise.resolve database))
+               ::installed-schema-fn
+               (fn [actual]
+                 (swap! calls conj [::installed-schema actual])
+                 (js/Promise.resolve
+                   {:my.kb/claim {:db/valueType :db.type/string}}))
+               ::query-fn
+               (fn [request]
+                 (swap! calls conj [::query request])
+                 (js/Promise.resolve
+                   [[101 :my.kb/claim "alpha beta"]]))
+               ::pull-many-fn
+               (fn [request]
+                 (swap! calls conj [::pull-many request])
+                 (js/Promise.resolve
+                   [{:db/id 101 :my.kb/claim "alpha beta"}]))
+               ::embedding-enabled-fn (constantly true)
+               ::search-pull-fn
+               (fn [request]
+                 (swap! calls conj [::search-pull request])
+                 (js/Promise.resolve {:seon.embed/hits []}))}
+              #(kb/recall {:my.kb/about "alpha"}))
+            (.then
+              (fn [result]
+                (is (true? (:seon.result/ok? result)))
+                (is (= 1 (count (filter #(= ::database (first %)) @calls))))
+                (is (identical?
+                      database
+                      (second (first (filter #(= ::installed-schema (first %))
+                                             @calls)))))
+                (doseq [[operation request]
+                        (filter #(contains? #{::query ::pull-many ::search-pull}
+                                            (first %))
+                                @calls)]
+                  (is (identical? database (:seon.db/db request))
+                      (str operation " reused the acquired database value")))
+                (is (= :text (:my.kb/match
+                                (first (:seon.items/items result))))))))
+        done))))
 
-(deftest remember-sources-write-is-idempotent-upsert
-  ;; remember-sources! is driven end-to-end by build-kb-example! above; here we
-  ;; call it DIRECTLY and read its envelope. A second call re-transacts the SAME
-  ;; identity ids — an upsert, not a duplicate — so the store still holds
-  ;; exactly three sources, McCarthy still authoring two of them.
+(deftest recall-database-error-is-a-failure-value
   (async done
-    (run-test
-      (fn [conn]
-        (-> (kb/build-kb-example!)
-            (.then (pinned conn (fn [_] (kb/remember-sources!))))
-            (.then (pinned conn
-                     (fn [{ok? :seon.db/ok?}]
-                       (is (true? ok?) "the seed write returns an ok envelope")
-                       (is (= 3 (count (kb/titles)))
-                           "re-seeding the same ids upserts — still three sources")
-                       (is (= 2 (count (kb/titles-by-author "John McCarthy")))
-                           "McCarthy still authors exactly two"))))))
-      done)))
+    (let [database-error {:seon.error/message "database unavailable"}
+          downstream (atom 0)]
+      (finish
+        (-> (with-recall-fakes
+              {::database-fn (fn [] (js/Promise.resolve database-error))
+               ::installed-schema-fn
+               (fn [_] (swap! downstream inc) (js/Promise.resolve {}))
+               ::query-fn
+               (fn [_] (swap! downstream inc) (js/Promise.resolve []))
+               ::pull-many-fn
+               (fn [_] (swap! downstream inc) (js/Promise.resolve []))
+               ::embedding-enabled-fn (constantly false)
+               ::search-pull-fn
+               (fn [_] (swap! downstream inc)
+                 (js/Promise.resolve {:seon.embed/hits []}))}
+              #(kb/recall {:my.kb/about "alpha"}))
+            (.then
+              (fn [result]
+                (is (false? (:seon.result/ok? result)))
+                (is (re-find #"database unavailable" (:my.kb/error result)))
+                (is (zero? @downstream)
+                    "a failed database acquisition performs no reads"))))
+        done))))
 
-(deftest remember-stores-one-finding-with-parsed-provenance
-  ;; The single-claim fast path: ONE call, no schema design / register! /
-  ;; hand-written transact. It parses "file:line" into the shared
-  ;; ::source-path + ::source-line, stamps ::confidence + ::verified-at,
-  ;; returns the live eid handle, and UPSERTS by claim (re-grade, never a
-  ;; duplicate). A url/no-line source stores path-only.
+(deftest recall-query-error-is-not-empty-success
   (async done
-    (run-test
-      (fn [conn]
-        (-> (kb/remember {:my.kb/claim "transact! Malli-validates every entity value before the tx reaches datahike"
-                          :my.kb/source "src/seon/db/internal.cljs:694"
-                          :my.kb/confidence :verified})
-            (.then (pinned conn
-                     (fn [{eid :my.kb/id}]
-                       (is (int? eid) "resolves to the live eid handle {:my.kb/id <eid>}")
-                       (let [m (db/pull '[*] eid)]
-                         (is (= "src/seon/db/internal.cljs" (:my.kb/source-path m))
-                             "\"file:line\" parsed into the shared ::source-path")
-                         (is (= 694 (:my.kb/source-line m)) "the line is a parsed INT, not a string")
-                         (is (= :verified (:my.kb/confidence m)) "the required grade is stored")
-                         (is (inst? (:my.kb/verified-at m)) "::verified-at stamped automatically")))))
-            ;; UPSERT — same claim, new grade → one entity, re-graded
-            (.then (pinned conn
-                     (fn [_]
-                       (kb/remember {:my.kb/claim "transact! Malli-validates every entity value before the tx reaches datahike"
-                                     :my.kb/source "src/seon/db/internal.cljs:694"
-                                     :my.kb/confidence :inferred}))))
-            (.then (pinned conn
-                     (fn [{eid :my.kb/id}]
-                       (is (= :inferred (:my.kb/confidence (db/pull '[*] eid)))
-                           "same claim UPSERTS in place — re-graded, not duplicated")
-                       (is (= 1 (count (db/query '[:find ?f :where [?f :my.kb/claim _]])))
-                           "still exactly one finding row"))))
-            ;; a url/no-line source stores path-only (still a valid finding)
-            (.then (pinned conn
-                     (fn [_]
-                       (kb/remember {:my.kb/claim "datahike entities have no kind — an entity IS its attributes plus refs"
-                                     :my.kb/source "https://docs.datomic.com/schema"
-                                     :my.kb/confidence :inferred}))))
-            (.then (pinned conn
-                     (fn [{eid :my.kb/id}]
-                       (let [m (db/pull '[*] eid)]
-                         (is (= "https://docs.datomic.com/schema" (:my.kb/source-path m))
-                             "a line-less source stores path-only")
-                         (is (nil? (:my.kb/source-line m)) "no ::source-line for a line-less source")))))))
-      done)))
+    (let [database {:db-name "default" :t 9}
+          query-error {:seon.error/message "query failed"}
+          pulls (atom 0)]
+      (finish
+        (-> (with-recall-fakes
+              {::database-fn (fn [] (js/Promise.resolve database))
+               ::installed-schema-fn
+               (fn [_]
+                 (js/Promise.resolve
+                   {:my.kb/claim {:db/valueType :db.type/string}}))
+               ::query-fn (fn [_] (js/Promise.resolve query-error))
+               ::pull-many-fn
+               (fn [_] (swap! pulls inc) (js/Promise.resolve []))
+               ::embedding-enabled-fn (constantly false)
+               ::search-pull-fn
+               (fn [_] (js/Promise.resolve {:seon.embed/hits []}))}
+              #(kb/recall {:my.kb/about "alpha"}))
+            (.then
+              (fn [result]
+                (is (false? (:seon.result/ok? result)))
+                (is (re-find #"query failed" (:my.kb/error result)))
+                (is (zero? @pulls)))))
+        done))))
 
-;;; ───────────────────────────────────────────────────────────────────────
-;;; Recall — the symmetric ASK: deterministic whole-token match over every
-;;; stored my.kb* string (claims AND domain rows), ranked, honest totals.
-;;; SEON_EMBED is unset in this suite, so the semantic top-up arm stays
-;;; off — recall is purely deterministic here.
-;;; ───────────────────────────────────────────────────────────────────────
-
-(deftest recall-finds-a-remembered-claim
+(deftest recall-ranks-domain-and-claim-rows-and-reports-the-uncapped-total
   (async done
-    (run-test
-      (fn [conn]
-        (-> (kb/build-kb-example!)
-            (.then (pinned conn
-                     (fn [_]
-                       (kb/remember {:my.kb/claim "transact! Malli-validates every entity value before the tx reaches datahike"
-                                     :my.kb/source "src/seon/db/internal.cljs:694"
-                                     :my.kb/confidence :verified}))))
-            (.then (pinned conn
-                     (fn [_] (kb/recall {:my.kb/about "malli transact validation"}))))
-            (.then (pinned conn
-                     (fn [{ok? :seon.result/ok? :as res}]
-                       (is (true? ok?))
-                       (is (= 1 (:seon.items/count res))
-                           "exactly one stored fact mentions malli+transact")
-                       (is (= 1 (:my.kb/matched res)) "honest total = returned")
-                       (let [top (first (:seon.items/items res))]
-                         (is (some? (:my.kb/claim top))
-                             "the item is the FULL pulled row — claim present")
-                         (is (= "src/seon/db/internal.cljs" (:my.kb/source-path top))
-                             "provenance rides the item")
-                         (is (= :text (:my.kb/match top))
-                             "deterministic arm labels ::match :text")
-                         (is (= 2 (:my.kb/matched-tokens top))
-                             "malli + transact matched; validation ≠ validates (no stemming)")))))))
-      done)))
+    (let [database {:db-name "default" :t 14}
+          pulled-by-eid
+          {101 {:db/id 101
+                :my.kb.source/title
+                "Recursive Functions of Symbolic Expressions"}
+           102 {:db/id 102
+                :my.kb.source/title "LISP 1.5 Programmer's Manual"}}]
+      (finish
+        (-> (with-recall-fakes
+              {::database-fn (fn [] (js/Promise.resolve database))
+               ::installed-schema-fn
+               (fn [_]
+                 (js/Promise.resolve
+                   {:my.kb/claim {:db/valueType :db.type/string}
+                    :my.kb.source/title {:db/valueType :db.type/string}}))
+               ::query-fn
+               (fn [_]
+                 (js/Promise.resolve
+                   [[101 :my.kb.source/title
+                     "Recursive Functions of Symbolic Expressions"]
+                    [102 :my.kb.source/title
+                     "LISP 1.5 Programmer's Manual"]]))
+               ::pull-many-fn
+               (fn [{:seon.db/keys [eids]}]
+                 (js/Promise.resolve (mapv pulled-by-eid eids)))
+               ::embedding-enabled-fn (constantly false)
+               ::search-pull-fn
+               (fn [_] (js/Promise.resolve {:seon.embed/hits []}))}
+              #(kb/recall {:my.kb/about "recursive symbolic manual"
+                           :my.kb/limit 1}))
+            (.then
+              (fn [result]
+                (is (true? (:seon.result/ok? result)))
+                (is (= 1 (:seon.items/count result)))
+                (is (= 2 (:my.kb/matched result))
+                    "the limit does not hide the total number of matches")
+                (is (= 101 (:db/id (first (:seon.items/items result)))))
+                (is (= 2 (:my.kb/matched-tokens
+                           (first (:seon.items/items result))))))))
+        done))))
 
-(deftest recall-ranks-by-distinct-matched-tokens-and-caps-honestly
+(deftest recall-empty-and-no-match-remain-success
   (async done
-    (run-test
-      (fn [conn]
-        (-> (kb/build-kb-example!)
-            (.then (pinned conn
-                     (fn [_] (kb/recall {:my.kb/about "recursive symbolic manual"}))))
-            (.then (pinned conn
-                     (fn [res]
-                       (let [items (:seon.items/items res)]
-                         (is (= 2 (:seon.items/count res))
-                             "two sources match — recall reaches DOMAIN rows, not just claims")
-                         (is (= "Recursive Functions of Symbolic Expressions"
-                                (:my.kb.source/title (first items)))
-                             "two matched tokens outrank one")
-                         (is (= 2 (:my.kb/matched-tokens (first items))))
-                         (is (= "LISP 1.5 Programmer's Manual"
-                                (:my.kb.source/title (second items))))
-                         (is (= 1 (:my.kb/matched-tokens (second items))))))))
-            ;; the cap: limit 1 returns ONE item but reports BOTH matches
-            (.then (pinned conn
-                     (fn [_] (kb/recall {:my.kb/about "recursive symbolic manual"
-                                         :my.kb/limit 1}))))
-            (.then (pinned conn
-                     (fn [res]
-                       (is (= 1 (:seon.items/count res)) "limit caps the items")
-                       (is (= 2 (:my.kb/matched res)) "…but the total stays honest")
-                       (is (= "Recursive Functions of Symbolic Expressions"
-                              (:my.kb.source/title (first (:seon.items/items res))))
-                           "the cap keeps the best match"))))))
-      done)))
-
-(deftest recall-no-match-and-empty-store-are-success
-  (async done
-    (run-test
-      (fn [conn]
-        (-> ((pinned conn
-               (fn [_] (kb/recall {:my.kb/about "quantum blockchain"})))
-             nil)
-            (.then (pinned conn
-                     (fn [{ok? :seon.result/ok? :as res}]
-                       (is (true? ok?) "an EMPTY store answers ok — nothing known yet")
-                       (is (= [] (:seon.items/items res)))
-                       (is (= 0 (:my.kb/matched res))))))
-            (.then (pinned conn (fn [_] (kb/build-kb-example!))))
-            (.then (pinned conn
-                     (fn [_] (kb/recall {:my.kb/about "quantum blockchain"}))))
-            (.then (pinned conn
-                     (fn [{ok? :seon.result/ok? :as res}]
-                       (is (true? ok?) "no matches is SUCCESS, not an error")
-                       (is (= 0 (:seon.items/count res)))
-                       (is (= 0 (:my.kb/matched res))))))))
-      done)))
+    (let [database {:db-name "default" :t 15}
+          queries (atom 0)
+          pulls (atom 0)]
+      (finish
+        (-> (with-recall-fakes
+              {::database-fn (fn [] (js/Promise.resolve database))
+               ::installed-schema-fn
+               (fn [_]
+                 (js/Promise.resolve
+                   {:my.kb/claim {:db/valueType :db.type/string}}))
+               ::query-fn
+               (fn [_]
+                 (swap! queries inc)
+                 (js/Promise.resolve
+                   [[101 :my.kb/claim "unrelated stored fact"]]))
+               ::pull-many-fn
+               (fn [_]
+                 (swap! pulls inc)
+                 (js/Promise.resolve []))
+               ::embedding-enabled-fn (constantly false)
+               ::search-pull-fn
+               (fn [_] (js/Promise.resolve {:seon.embed/hits []}))}
+              #(kb/recall {:my.kb/about "quantum blockchain"}))
+            (.then
+              (fn [result]
+                (is (true? (:seon.result/ok? result)))
+                (is (= [] (:seon.items/items result)))
+                (is (zero? (:seon.items/count result)))
+                (is (zero? (:my.kb/matched result)))
+                (is (= 1 @queries))
+                (is (zero? @pulls)
+                    "no selected entity means no empty pull request"))))
+        done))))

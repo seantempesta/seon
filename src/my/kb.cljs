@@ -25,7 +25,7 @@
    its own throwaway db), so never report them as real data.
 
    Database reads and writes are asynchronous authority operations. Compose
-   related reads at one explicit coordinate inside an `^:async` function."
+   related reads at one immutable database value inside an `^:async` function."
   (:require
     [clojure.string :as str]
     [my.data :as data]
@@ -315,14 +315,14 @@
   (into #{} (filter #(>= (count %) 2)) (re-seq #"[a-z0-9]+" (str/lower-case s))))
 
 (defn ^:async ^:private kb-text-rows
-  "Every `[eid attr text]` of a `my.kb`-family STRING attr at one coordinate — the
+  "Every `[eid attr text]` of a `my.kb`-family STRING attr at one database value — the
    deterministic recall corpus: [[remember]] claims AND your own
    `my.kb.<domain>` rows alike. Attrs come from the db's installed schema
    (an attr installs at its first write); sorted for determinism."
-  [coordinate]
+  [database]
   (let [family? (fn [a] (when-let [ns (and (keyword? a) (namespace a))]
                           (or (= ns "my.kb") (str/starts-with? ns "my.kb."))))
-        installed (await (db/installed-schema {:seon.db/coordinate coordinate}))]
+        installed (await (db/installed-schema database))]
     (if (:seon.error/message installed)
       installed
       (let [attrs (->> installed
@@ -339,7 +339,13 @@
                               :in $ [?a ...]
                               :where [?e ?a ?v]]
              :seon.db/args [attrs]
-             :seon.db/coordinate coordinate})))))))
+             :seon.db/db database})))))))
+
+(defn- recall-error
+  [stage error]
+  {:seon.result/ok? false
+   ::error (str "recall failed during " stage ": "
+                (or (:seon.error/message error) (pr-str error)))})
 
 (defn- text-matches
   "Rank `[eid attr text]` rows against a question-token set: an entity's
@@ -382,52 +388,60 @@
    direct database queries or `/data` before concluding nothing is known."
   {:malli/schema [:=> [:cat ::recall-request] ::recall-response]}
   [{::keys [about limit]}]
-  (try
-    (let [limit (or limit 10)
-          coordinate (await (db/head-coordinate))
-          _ (when (:seon.error/message coordinate)
-              (throw (ex-info "knowledge-base coordinate acquisition failed"
-                              coordinate)))
-          rows  (await (kb-text-rows coordinate))
-          _ (when (:seon.error/message rows)
-              (throw (ex-info "knowledge-base text acquisition failed" rows)))
-          hits  (text-matches (tokens about) rows)
-          selected (vec (take limit hits))
-          pulled (await (db/pull-many
-                         {:seon.db/pull-pattern '[*]
-                          :seon.db/refs (mapv first selected)
-                          :seon.db/coordinate coordinate}))
-          _ (when (:seon.error/message pulled)
-              (throw (ex-info "knowledge-base pull failed" pulled)))
-          items (mapv (fn [[_e score] entity]
-                        (assoc entity ::match :text ::matched-tokens score))
-                      selected pulled)
-          want  (- limit (count items))
-          seen  (into #{} (map :db/id) items)
-          scope (into #{} (map first) rows)
-          sem   (when (and (embed/enabled?) (pos? want) (seq scope))
-                  (await (embed/search-pull {:seon.embed/query about
-                                             :seon.embed/k     limit
-                                             :seon.embed/eids  scope
-                                             :seon.embed/coordinate coordinate})))
-          items (into items
-                      (->> (:seon.embed/hits sem)
-                           (remove #(seen (:seon.embed/eid %)))
-                           (take want)
-                           (mapv (fn [{:seon.embed/keys [entity eid distance]}]
-                                   (assoc (or entity {:db/id eid})
-                                          ::match :semantic
-                                          :seon.embed/distance distance)))))]
-      (cond-> {:seon.result/ok?  true
-               :seon.items/items items
-               :seon.items/count (count items)
-               ::matched         (count hits)}
-        (:seon/error sem)
-        (assoc ::hint (str "semantic top-up failed — "
-                           (get-in sem [:seon/error :seon.error/message])))))
-    (catch :default e
-      {:seon.result/ok? false
-       ::error (str "recall failed: " (or (some-> e .-message) (str e)))})))
+  (let [limit (or limit 10)
+        database (await (db/db))]
+    (if (:seon.error/message database)
+      (recall-error "database acquisition" database)
+      (let [rows (await (kb-text-rows database))]
+        (if (:seon.error/message rows)
+          (recall-error "text acquisition" rows)
+          (let [hits (text-matches (tokens about) rows)
+                selected (vec (take limit hits))
+                pulled (if (seq selected)
+                         (await
+                          (db/pull-many
+                           {:seon.db/db database
+                            :seon.db/selector '[*]
+                            :seon.db/eids (mapv first selected)}))
+                         [])]
+            (if (:seon.error/message pulled)
+              (recall-error "entity acquisition" pulled)
+              (let [items (mapv (fn [[_e score] entity]
+                                  (assoc entity
+                                         ::match :text
+                                         ::matched-tokens score))
+                                selected pulled)
+                    want (- limit (count items))
+                    seen (into #{} (map :db/id) items)
+                    scope (into #{} (map first) rows)
+                    sem (when (and (embed/enabled?) (pos? want) (seq scope))
+                          (await
+                           (embed/search-pull
+                            {:seon.db/db database
+                             :seon.embed/query about
+                             :seon.embed/k limit
+                             :seon.embed/eids scope})))
+                    items (into items
+                                (->> (:seon.embed/hits sem)
+                                     (remove #(seen (:seon.embed/eid %)))
+                                     (take want)
+                                     (mapv
+                                      (fn [{:seon.embed/keys
+                                            [entity eid distance]}]
+                                        (assoc (or entity {:db/id eid})
+                                               ::match :semantic
+                                               :seon.embed/distance
+                                               distance)))))]
+                (cond-> {:seon.result/ok? true
+                         :seon.items/items items
+                         :seon.items/count (count items)
+                         ::matched (count hits)}
+                  (:seon/error sem)
+                  (assoc ::hint
+                         (str "semantic top-up failed — "
+                              (get-in sem
+                                      [:seon/error
+                                       :seon.error/message]))))))))))))
 
 ;;; PULL / ENTITY — read one entity by lookup-ref `[identity-attr value]`,
 ;;; which IS the "by name" addressing.
