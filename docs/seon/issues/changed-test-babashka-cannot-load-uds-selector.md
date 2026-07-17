@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, database, flow]
 ---
@@ -39,3 +39,17 @@ loadable by the Babashka operator; it must not create another transport.
 - `bin/seon test changed --path src/seon/db/writer.clj` reaches the existing
   changed-test selection and runner.
 - Focused JVM transport and writer contracts remain green.
+
+## Resolution
+
+Resolved on 2026-07-16 by keeping the one UDS transport namespace loadable in
+both runtimes. Selector operation bits remain their public Java values; the JVM
+server obtains its selector from the already-open server channel; and the
+selector command queue plus atomic flags use Babashka-visible JDK concurrency
+classes with the same queue/CAS behavior. `bin/seon status` now loads the
+operator through this namespace and reaches launch validation, while
+`bin/seon test changed --path src/seon/db/writer.clj` reaches the retained test
+runner. The two affected selector handoff/forced-close concurrency regressions
+pass. The containing UDS suite still has stale protocol-version/coordinate
+fixtures owned by the authority consumer conversion; they are not transport
+load failures.

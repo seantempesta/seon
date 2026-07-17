@@ -10,8 +10,8 @@
            [java.nio ByteBuffer]
            [java.nio.channels Channels SocketChannel]
            [java.util ArrayDeque Date UUID]
-           [java.util.concurrent CountDownLatch TimeUnit]
-           [java.util.concurrent.atomic AtomicBoolean]))
+           [java.util.concurrent CountDownLatch LinkedBlockingQueue TimeUnit]
+           [java.util.concurrent.atomic AtomicReference]))
 
 (defn- socket-path
   [label]
@@ -749,7 +749,7 @@
             (.await release-poll)
             (proxy-super pollFirst)))
         send-lock (Object.)
-        encoding-active? (AtomicBoolean. true)
+        encoding-active? (AtomicReference. true)
         session {::uds/send-lock send-lock
                  ::uds/pending-encodes queue
                  ::uds/encoding-active? encoding-active?}
@@ -1280,8 +1280,7 @@
               (is (zero? @(::uds/authority-response-slot-count server)))
               (is (zero? @(::uds/authority-output-bytes server)))
               (is (empty? @(::uds/connections server)))
-              (is (.isEmpty ^java.util.concurrent.ConcurrentLinkedQueue
-                            (::uds/commands server)))))))
+              (is (.isEmpty ^LinkedBlockingQueue (::uds/commands server)))))))
       (finally
         (reset! release-encode true)
         (.close channel)
