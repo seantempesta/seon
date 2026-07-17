@@ -2,7 +2,10 @@
   "Focused contracts for the authority-backed agent loop."
   (:require
     [cljs.test :refer [async deftest is testing]]
+    [my.plan.internal :as plan-internal]
     [seon.agent.loop :as loop]
+    [seon.agent.run :as run]
+    [seon.agent.turn :as turn]
     [seon.db :as db]
     [seon.db.protocol :as db.protocol]
     [seon.runtime.admission :as admission]))
@@ -96,16 +99,137 @@
               (is (= 1 (count @!requests)))
               (let [members (::db/members (first @!requests))]
                 (is (= 5 (count members)))
-                (is (= database (::db/db (first members))))
-                (is (every? #(= database
-                                (first (::db.protocol/arguments %)))
-                            (rest members))))))
+                (is (every? #(= database (::db/db %)) members))
+                (is (= ["agent-a"]
+                       (::db.protocol/arguments (second members))))
+                (is (= ["run-a"]
+                       (::db.protocol/arguments (nth members 3)))))))
           (.catch (fn [error]
                     (is false (str "run-loop! rejected: " error))))
           (.finally
            (fn []
              (set! db/db db-fn)
              (set! db/execute-many execute-many)
+             (set! admission/state admission-state)
+             (done)))))))
+
+(deftest run-loop-passes-its-database-value-into-the-turn
+  (async done
+    (let [admission-state admission/state
+          db-fn db/db
+          execute-many db/execute-many
+          beat run/beat!
+          run-turn turn/run-turn!
+          consult plan-internal/maybe-consult!
+          database {:db-name "default" :t 7 :as-of nil :since nil
+                    :history false
+                    :datahike/commit-id
+                    #uuid "10000000-0000-0000-0000-000000000007"}
+          open-run {:seon.agent.run/id "run-a"
+                    :seon.agent.run/status :open
+                    :seon.agent.run/turn-limit 4
+                    :seon.agent.run/deadline
+                    (js/Date. (+ (.now js/Date) 60000))}
+          closed-run {:seon.agent.run/id "run-a"
+                      :seon.agent.run/status :closed
+                      :seon.agent.run/closed-reason :completed}
+          !reads (atom 0)
+          !beat-database (atom nil)
+          !turn-input (atom nil)
+          _ (set! admission/state
+                  (fn [] {::admission/status :available}))
+          _ (set! db/db
+                  (fn
+                    ([] (js/Promise.resolve database))
+                    ([_request] (js/Promise.resolve database))))
+          _ (set! db/execute-many
+                  (fn [_request]
+                    (let [n (swap! !reads inc)]
+                      (js/Promise.resolve
+                       (if (= 1 n)
+                         (loop-read open-run "run-a" :batch 0 0)
+                         (loop-read closed-run nil :batch 1 1))))))
+          _ (set! run/beat!
+                  (fn [_request]
+                    (reset! !beat-database
+                            (:seon.db/db (db/current-tx-context)))
+                    (js/Promise.resolve
+                     {:db-before database :db-after database
+                      :tx-data [] :tempids {} :tx-meta {}})))
+          _ (set! turn/run-turn!
+                  (fn [input]
+                    (reset! !turn-input input)
+                    (js/Promise.resolve
+                     {:seon.agent.turn/id "turn-a"
+                      :seon.agent/eval-count 1})))
+          _ (set! plan-internal/maybe-consult!
+                  (fn [_request] (js/Promise.resolve nil)))]
+      (-> (loop/run-loop! {:seon.agent/id "agent-a"} "run-a")
+          (.then
+           (fn [result]
+             (is (= :idle result))
+             (is (= database @!beat-database))
+             (is (= database (:seon.db/db @!turn-input)))
+             (is (= "run-a" (:seon.agent.run/id @!turn-input)))
+             (is (= 2 @!reads))))
+          (.catch (fn [error]
+                    (is false (str "run-loop! rejected: " error))))
+          (.finally
+           (fn []
+             (set! db/db db-fn)
+             (set! db/execute-many execute-many)
+             (set! run/beat! beat)
+             (set! turn/run-turn! run-turn)
+             (set! plan-internal/maybe-consult! consult)
+             (set! admission/state admission-state)
+             (done)))))))
+
+(deftest run-loop-closes-a-bound-from-the-deciding-database-value
+  (async done
+    (let [admission-state admission/state
+          db-fn db/db
+          execute-many db/execute-many
+          close-run run/close-run!
+          database {:db-name "default" :t 8 :as-of nil :since nil
+                    :history false
+                    :datahike/commit-id
+                    #uuid "10000000-0000-0000-0000-000000000008"}
+          bounded-run {:seon.agent.run/id "run-a"
+                       :seon.agent.run/status :open
+                       :seon.agent.run/turn-limit 4
+                       :seon.agent.run/deadline
+                       (js/Date. (+ (.now js/Date) 60000))}
+          !close-request (atom nil)
+          _ (set! admission/state
+                  (fn [] {::admission/status :available}))
+          _ (set! db/db
+                  (fn
+                    ([] (js/Promise.resolve database))
+                    ([_request] (js/Promise.resolve database))))
+          _ (set! db/execute-many
+                  (fn [_request]
+                    (js/Promise.resolve
+                     (loop-read bounded-run "run-a" :batch 4 0))))
+          _ (set! run/close-run!
+                  (fn [request]
+                    (reset! !close-request request)
+                    (js/Promise.resolve
+                     {:db-before database :db-after database
+                      :tx-data [] :tempids {} :tx-meta {}})))]
+      (-> (loop/run-loop! {:seon.agent/id "agent-a"} "run-a")
+          (.then
+           (fn [result]
+             (is (= :idle result))
+             (is (= database (:seon.db/db @!close-request)))
+             (is (= :turn-limit
+                    (:seon.agent.run/closed-reason @!close-request)))))
+          (.catch (fn [error]
+                    (is false (str "run-loop! rejected: " error))))
+          (.finally
+           (fn []
+             (set! db/db db-fn)
+             (set! db/execute-many execute-many)
+             (set! run/close-run! close-run)
              (set! admission/state admission-state)
              (done)))))))
 
@@ -159,20 +283,23 @@
 
 (deftest activity-log-is-one-authority-query
   (async done
-    (let [!requests (atom [])
+    (let [query db/query
+          !requests (atom [])
           started (js/Date. 1000)
-          result
-          (with-redefs
-            [db/query
-             (fn [request]
-               (swap! !requests conj request)
-               (js/Promise.resolve
-                 [[{:seon.agent.run/status :closed
-                    :seon.agent.run/closed-reason :completed
-                    :seon.agent.run/cause
-                    {:seon.agent.message/content "done"}}
-                   started]]))]
-            (loop/activity-log {:seon.agent/id "agent-a"}))]
+          _ (set! db/query
+                  (fn
+                    ([request]
+                     (swap! !requests conj request)
+                     (js/Promise.resolve
+                      [[{:seon.agent.run/status :closed
+                         :seon.agent.run/closed-reason :completed
+                         :seon.agent.run/cause
+                         {:seon.agent.message/content "done"}}
+                        started]]))
+                    ([_query & _inputs]
+                     (js/Promise.reject
+                      (js/Error. "unexpected positional query")))))
+          result (loop/activity-log {:seon.agent/id "agent-a"})]
       (-> result
           (.then
             (fn [result]
@@ -184,4 +311,7 @@
                      (:seon.agent.loop/entries result)))))
           (.catch (fn [error]
                     (is false (str "activity-log rejected: " error))))
-          (.finally done)))))
+          (.finally
+           (fn []
+             (set! db/query query)
+             (done)))))))
