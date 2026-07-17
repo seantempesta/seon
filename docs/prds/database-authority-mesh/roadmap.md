@@ -84,11 +84,19 @@ embedded-Datahike observability test systems are deleted. Focused proof passes
 runtime tests/44 assertions; the maintained client compiles with no warning in
 the changed turn/debug/runtime owners.
 
-Earliest unsettled contract: the retained `seon.agent.run` owner still reads an
-ambient local connection, duplicates current-run reads in `seon.derive`, and
-interprets removed database envelopes. It must move atomically to asynchronous
-ordinary database values, native reports, and targeted Datahike CAS before
-lifecycle and schedule consumers can follow. `seon.web.serve` also still
+The retained `seon.agent.run` owner is settled at `9636fd0e`: its one public
+`current-run` acquires an ordinary database value asynchronously, read-derived
+writes reuse one immutable value, targeted Datahike CAS owns run and pointer
+transitions, and writes return native transaction reports or direct errors.
+The public snapshot helper, duplicate `seon.derive` run readers, mutable row
+construction, and the embedded-Datahike run test system are deleted. Focused
+proof passes 8 tests/33 assertions. The deletion intentionally exposes the
+remaining synchronous consumers rather than preserving compatibility helpers.
+
+Earliest unsettled contract: `seon.derive` and `seon.agent.schedule` still call
+the deleted duplicate run readers and retain ambient-connection and removed
+envelope assumptions. They must become one async database-value cut before
+lifecycle, loop, and web consumers can follow. `seon.web.serve` also still
 references deleted turn, attempt, and eval-operation coordinate fields and must
 derive historical model evidence from the parent turn's `rendered-tx` without
 compatibility projections. Autocomplete/export is settled at `8c2bfbe7`: one captured current
@@ -155,10 +163,12 @@ rather than replaced. The downstream web cut is grounded at
 `seon.agent.debug/turn` reconstruction owner feeds the composition boundary,
 attempts inherit their parent turn's `as-of` value, and eval-operation replay
 is deleted while restore/feed selector identity remains intact. Run lifecycle
-is grounded at [[research/run-native-result-database-value-cut-2026-07-16]];
-its retained owner uses targeted Datahike CAS and one database value per
-read-derived write, deletes duplicate run readers, and waits on the message
-result cut rather than accepting an adapter. Final graduation remains one
+is grounded at [[research/run-native-result-database-value-cut-2026-07-16]] and
+implemented at `9636fd0e`; downstream derive/schedule migration is the active
+cut. The obsolete config test's private cache, ambient connection, and second
+local Datahike database were deleted at `8a24839b`, unblocking the canonical
+CLJS artifact; focused config proof passes 22 tests/94 assertions. Final
+graduation remains one
 frozen-source full test, live browser/agent, crash/restart, packaging, and
 modest-hardware density checkpoint.
 
@@ -191,6 +201,15 @@ receipt remains the sole durable result owner. The cut reuses existing
 callbacks until physical completion, and never asks `db.id` to regenerate a
 candidate after transport ambiguity. No queue, second receipt, public request
 id, retained duplicate byte buffer, or versioned transaction API is added.
+It is implemented at `016ceb36`: accepted-frame close, repeated failed reopen,
+and redelivery reuse the exact request and durable writer receipt; explicit
+owner close terminates recovery; active running requests are distinguished
+from durable receipt conflicts; and a canceled running mutation consults its
+receipt before reporting cancellation. Focused proof passes 16 UDS tests/61
+assertions, 11 facade tests/65 assertions, and 5 writer tests/30 assertions.
+The ordinary path adds no hop or copied frame. Physical database-listen
+interest restoration after reconnect remains a separate unsettled owner and
+is not hidden inside transaction recovery.
 
 ## Settled laws
 
