@@ -414,34 +414,23 @@ There is no web-host Datahike replica or global transaction broadcast. The agent
 only transacts datoms; it never opens or writes a stream. The Bun web host
 implements the `view = f(db)` model through `seon.web.datastar`.
 
-- **view = f(db), compiled into stable units.** Reitit route
-  match + normalized path/query/complete database value define one view key. Database route,
-  context, and program facts compile to one plan containing a shell, shared
-  header, fleet cards, surfaces, focus controller, debug panes, or data result
-  as stable ID-addressed units. Initial paint derives the whole
-  `[:main#app-view …]`; later updates render only dirty units and emit their
-  complete elements in one `datastar-patch-elements` event (default `outer`). A
-  plan/membership change falls back to a whole `#app-view` morph so conditional
-  elements disappear honestly. One subscription owns the plan/cache for all
-  equivalent tabs. Subscriptions reference an ephemeral normalized-unit registry
-  (unit id + params + complete database value), so truly shared units such as the header own
-  one read/output cache across different page keys and render once. Frozen as-of
-  subscriptions do no current work.
+- **view = f(db), one complete morph.** Reitit route match plus normalized
+  path/query defines one semantic subscription key. Initial paint and each
+  relevant later database value derive the complete `[:main#app-view …]` and
+  emit one `datastar-patch-elements` event (default `outer`). Conditional
+  elements therefore disappear honestly without a second patch or renderer.
+  Equivalent tabs share one render and the same serialized bytes; their view
+  IDs own only socket replacement. Frozen as-of subscriptions do no current
+  work.
 - **Async work is bounded by the normalized subscription.** One subscription
   runs at most one database-value-pinned async render and retains at most the newest
   coherent pending database change. A completion publishes only while the same
   subscription still owns the latest request; a transaction racing the initial
   paint requires a new complete `#app-view`. Equivalent sockets share the one
   invocation and its serialized bytes. Closing the final consumer releases the
-  active/pending ownership, and any later Promise completion is inert.
-  Catalog changes are result data and become live only at that same acceptance
-  fence; a stale async render cannot mutate a view catalog or unit ownership.
-- **Lazy activation uses the same protocol.** A collapsed debug or database
-  unit is only a stable stub. Its Datastar fetch action calls `/view/unit`,
-  which returns one `text/event-stream` response containing a
-  `datastar-patch-elements` event for the complete active unit. Bare HTML is
-  not a Datastar action response and is never a second update path. Closing the
-  unit restores its stub and releases its observed reads from the view plan.
+  active/pending ownership, and any later Promise completion is inert. There is
+  no catalog, active-token registry, per-unit fetch route, or partial-render
+  acceptance path.
 - **native stream + configurable compression.** `Bun.serve` returns one direct
   `ReadableStream` response whose controller owns browser backpressure and
   disconnect. Loopback development uses identity encoding for observability and
@@ -452,45 +441,35 @@ implements the `view = f(db)` model through `seon.web.datastar`.
   views open without one timer per socket. A
   backpressured connection retains only its newest derived event and resumes on
   `drain`; stale UI states never form an unbounded write queue.
-- **Observed reads + exact result change.** Each unit renders under a
-  runtime-only observer at the `seon.db` boundary. Actual remote
-  query/pull/entity requests compile into one runtime dependency descriptor:
-  concrete attributes,
-  entity refs, index prefixes/windows, and a broad flag for anything that cannot
-  be narrowed safely. One in-memory reverse index maps those descriptors to
-  active normalized render units; no dependency datoms are stored. A coalesced
-  authority wakeup retains the latest complete database value and conservative
-  changed attributes. Attribute/entity/index intersections select candidate
-  units; broad units remain candidates for every transaction. Each unique
-  normalized read is replayed once on the new immutable value and compared with
-  its captured result. Only an unequal result invokes its unit renderer.
-  Identical serialized output is suppressed. Coalescing has a bounded maximum
-  wait, so continuous structural writes cannot starve a view.
+- **Selective interest, complete rendering.** Each renderer declares the
+  attributes that can affect its complete projection. The one database interest
+  is the union across live subscriptions; native transaction `:tx-data`
+  supplies conservative changed-attribute evidence and `:db-after` supplies the
+  exact immutable value to render. Intersecting attributes enqueue the semantic
+  subscription once, while unrelated commits merely advance its accepted
+  database value. Missing evidence fails open. Identical serialized output is
+  suppressed. Coalescing has a bounded maximum wait, so continuous structural
+  writes cannot starve a view.
 - **Declared renderer reads are database facts.** The analyzer tee persists
   qualified keyword reads as `:seon.fn/read-attrs`; focus/recency and an optional
   cold-start hint consume those facts. They never regex-scan function source as
   a compatibility path. The declared set is non-transitive through helper
   calls, so it can never exclude a runtime-observed dependency or veto exact
-  replay. Runtime observations are the sole live-correctness authority.
-- **Caching is automatic at the unit boundary.** Core and agent-authored
-  renderers do not call `memoize`. Every active unit automatically retains its
-  stable non-database inputs, renderer/source digest, normalized read
-  requests/results, and last serialized element. Equal read results reuse that
-  element without invoking the renderer; equal serialized output emits no
-  patch. Equivalent open views share this authority through their normalized
-  subscription. A bounded LRU may retain recently reusable unit outputs across
-  subscriptions, keyed only by complete database value + renderer digest + small plain
-  input/read-result data and bounded by entry count plus estimated output
-  tokens. It never keys by or retains a Datahike database/entity value. A source
-  change changes the renderer digest; an activation change changes the unit
-  plan; eviction affects performance only.
+  replay. The declared set narrows wakeups but never changes result semantics.
+- **Caching is automatic at the subscription boundary.** Core and agent-authored
+  renderers do not call `memoize`. One semantic subscription retains the
+  database value that proved its last complete serialized event and shares that
+  event across equivalent sockets and reconnects. Unaffected commits advance
+  the proof value without recomputation; affected commits replace the complete
+  event only after the latest render finishes. A source or projection-input
+  change selects a different semantic subscription. Eviction affects
+  performance only.
 - **One generic transition engine.** Root, ordinary-agent, canvas, context,
-  debug, and `/data` layouts compile to the same unit descriptors and call the
-  same observe/candidate/replay/render/serialize transition. Page namespaces
-  define unit composition and presentation, not custom invalidation algorithms.
-  Closed lazy details have no active descriptor, observations, or cache entry.
-  Agent-authored surfaces inherit the complete mechanism merely by rendering
-  through their ordinary surface unit; no special API or caching instruction is
+  debug, and `/data` layouts use the same
+  acquire/select/enqueue/render/serialize transition. Page namespaces define
+  complete projection and presentation, not custom invalidation algorithms.
+  Agent-authored surfaces inherit the mechanism by participating in their
+  ordinary complete page render; no special API or caching instruction is
   exposed to the agent.
 - **Separate GET feed path.** The shim page (`/view`, `/agent/{id}`) and its live
   stream (`/view/feed`, `/agent/{id}/feed`) are two GET URLs; the shim's

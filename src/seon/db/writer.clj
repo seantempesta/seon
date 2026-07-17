@@ -2166,7 +2166,7 @@
                        (assoc-in [::by-source source] scope))]
     (swap! (::interests transport-connection) assoc request-id interest)
     (reset! state-atom next-state)
-    (coordinate/resolved (d/db connection))))
+    (database-value database-name db-value)))
 
 (defn- handle-listen!
   [runtime transport-connection request]
@@ -2183,13 +2183,14 @@
       (let [{::keys [connection database-name]
              attachment ::coordinate/attachment}
             (connection-for-request transport-connection request)
-            _
+            database
             (locking (::interest-lock runtime)
               (remove-interest-locked! runtime transport-connection request-id)
               (install-interest-locked! runtime transport-connection request
                                         connection database-name attachment))]
         (protocol/success
          {::protocol/request-id request-id
+          :db-after database
           ::protocol/listening? true})))))
 
 (defn- handle-unlisten!

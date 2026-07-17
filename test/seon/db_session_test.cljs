@@ -72,7 +72,8 @@
               ::protocol/acquired? true})
 
     :seon.db.protocol.operation/listen
-    (success request {::protocol/listening? true})
+    (success request {:db-after (::db/db request)
+                      ::protocol/listening? true})
 
     :seon.db.protocol.operation/unlisten
     (success request

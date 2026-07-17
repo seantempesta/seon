@@ -86,7 +86,7 @@
                 :tx-meta {:seon.db/user [:seon.agent/id "root"]}})
 
       :seon.db.protocol.operation/listen
-      (success request {::protocol/listening? true})
+      (success request {:db-after current ::protocol/listening? true})
 
       :seon.db.protocol.operation/unlisten
       (success request {::protocol/target-request-id
@@ -644,6 +644,9 @@
                                         ::db/handler
                                         #(swap! first-events conj %)})))
                   (.then (fn [key] (is (= :updates key))
+                           (is (= database
+                                  (get-in @@#'db/!session
+                                          [::db/databases database-name])))
                            (db/listen! :updates
                                        #(swap! replacement-events conj %))))
                   (.then

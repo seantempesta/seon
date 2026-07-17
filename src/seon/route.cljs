@@ -100,11 +100,6 @@
    {::pattern "/agents"          ::method :post ::name ::agents-create
     ::handler 'seon.web.serve/create-agent!
     ::middleware ::same-origin}
-   ;; Generic one-shot Datastar HTML door. The client sends only an opaque
-   ;; catalog token; the handler resolves it through the open server view and
-   ;; never decodes client input into a renderer symbol.
-   {::pattern "/view/unit"       ::method :get  ::name ::view-unit
-    ::handler 'seon.web.datastar/handle-view-unit!}
    {::pattern "/agent/{id}"      ::method :get  ::name ::agent
     ::handler 'seon.web.datastar/serve-agent-page!}
    {::pattern "/agent/{id}/feed" ::method :get  ::name ::agent-feed

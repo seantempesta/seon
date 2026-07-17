@@ -4,7 +4,6 @@
     [cljs.test :refer [async deftest is testing]]
     [seon.agent.message]
     [seon.db :as db]
-    [seon.db.coordinate :as coordinate]
     [seon.route]
     [seon.runtime.admission :as admission]
     [seon.test.async :refer [settle!]]
@@ -25,13 +24,15 @@
                          :seon.route/middleware]) ...]
     :where [?route :seon.route/pattern]])
 
-(defn- database-coordinate
-  "One complete immutable database coordinate for route tests."
+(defn- database-value
+  "One complete immutable database value for route tests."
   [transaction]
-  {::coordinate/database-id (random-uuid)
-   ::coordinate/branch :db
-   ::coordinate/commit-id (random-uuid)
-   ::coordinate/t transaction})
+  {:db-name "default"
+   :t transaction
+   :as-of nil
+   :since nil
+   :history false
+   :datahike/commit-id (random-uuid)})
 
 (defn- route-row
   "One ordinary database route projection row."
@@ -57,8 +58,9 @@
 
 (defn- with-route-db-fakes
   "Run one Promise body with direct database functions replaced and restored."
-  [{::keys [query listen unlisten]} body]
+  [{::keys [query listen unlisten current-db]} body]
   (let [original-query db/query
+        original-db db/db
         original-listen db/listen!
         original-unlisten db/unlisten!
         state-atom @#'router/!router-state
@@ -70,6 +72,10 @@
           (fn
             ([request] (query request))
             ([query-form & inputs] (apply query query-form inputs))))
+    (set! db/db
+          (fn
+            ([] (current-db))
+            ([_request] (current-db))))
     (set! db/listen!
           (fn
             ([request] (listen request))
@@ -86,6 +92,7 @@
         (.finally
           (fn []
             (set! db/query original-query)
+            (set! db/db original-db)
             (set! db/listen! original-listen)
             (set! db/unlisten! original-unlisten)
             (reset! state-atom prior-state))))))
@@ -213,123 +220,135 @@
       (finally
         (reset! @#'admission/!state prior)))))
 
-(deftest route-interest-queries-the-acknowledged-and-later-coordinates
+(deftest route-interest-queries-the-acknowledged-and-later-database-values
   (async done
-    (let [ack-coordinate (database-coordinate 10)
-          event-coordinate (assoc ack-coordinate
-                                  ::coordinate/commit-id (random-uuid)
-                                  ::coordinate/t 11)
-          interest-key "database-interest/routes-17"
+    (let [ack-db (database-value 10)
+          event-db (database-value 11)
+          interest-key ::routes
+          !current-db (atom ack-db)
           !queries (atom [])
           !listen-request (atom nil)
           !unlisten-request (atom nil)
           !handler (atom nil)]
       (->
-        (with-route-db-fakes
-          {::query
-           (fn [request]
-             (swap! !queries conj request)
-             (js/Promise.resolve
-               (if (= event-coordinate (:seon.db/coordinate request))
-                 [(route-row "/temporary-route")]
-                 [])))
-           ::listen
-           (fn [request]
-             (reset! !listen-request request)
-             (reset! !handler (:seon.db/handler request))
-             (js/Promise.resolve {:seon.db/key interest-key
-                                  :seon.db/coordinate ack-coordinate}))
-           ::unlisten
-           (fn [request]
-             (reset! !unlisten-request request)
-             (js/Promise.resolve {:seon.db/ok? true}))}
-          (fn []
-            (router/install! {})
-            (-> (router/attach!)
-                (.then
-                  (fn [_]
-                    (testing "the exact route query defines the interest"
-                      (is (= route-query
-                             (:seon.db/query @!listen-request))))
-                    (testing "initial projection is read at the ack coordinate"
-                      (is (= [{:seon.db/query route-query
-                               :seon.db/coordinate ack-coordinate}]
-                             @!queries)))
-                    (@!handler
-                      {:seon.db.protocol/coordinate event-coordinate})
-                    (next-turn)))
-                (.then
-                  (fn [_]
-                    (testing "a later event reads and publishes its exact point"
-                      (is (= event-coordinate
-                             (:seon.db/coordinate (peek @!queries))))
-                      (is (= 200
-                             (::response-status
-                               (request! "/temporary-route")))))
-                    (router/detach!)))
-                (.then
-                  (fn [_]
-                    (testing "detach uses the authority-returned interest key"
-                      (is (= {:seon.db/key interest-key}
-                             @!unlisten-request))))))))
-        (settle! done)))))
+       (with-route-db-fakes
+        {::query
+         (fn [request]
+           (swap! !queries conj request)
+           (js/Promise.resolve
+            (if (= event-db (::db/db request))
+              [(route-row "/temporary-route")]
+              [])))
+         ::current-db #(js/Promise.resolve @!current-db)
+         ::listen
+         (fn [request]
+           (reset! !listen-request request)
+           (reset! !handler (:seon.db/handler request))
+           (js/Promise.resolve interest-key))
+         ::unlisten
+         (fn [key]
+           (reset! !unlisten-request key)
+           (js/Promise.resolve {:seon.db/ok? true}))}
+        (fn []
+          (router/install! {})
+          (-> (router/attach!)
+              (.then
+               (fn [key]
+                 (is (= interest-key key))
+                 (is (= route-query (:seon.db/query @!listen-request)))
+                 (is (= [{:seon.db/query route-query ::db/db ack-db}]
+                        @!queries))
+                 (reset! !current-db event-db)
+                 (@!handler {:db-after event-db :tx-data []})
+                 (next-turn)))
+              (.then
+               (fn [_]
+                 (is (= event-db (::db/db (peek @!queries))))
+                 (is (= 200 (::response-status
+                             (request! "/temporary-route"))))
+                 (router/detach!)))
+              (.then
+               (fn [_]
+                 (is (= interest-key @!unlisten-request)))))))
+       (settle! done)))))
 
 (deftest stale-route-query-completion-cannot-replace-a-newer-projection
   (async done
-    (let [ack-coordinate (database-coordinate 20)
-          stale-coordinate (assoc ack-coordinate
-                                  ::coordinate/commit-id (random-uuid)
-                                  ::coordinate/t 21)
-          current-coordinate (assoc ack-coordinate
-                                    ::coordinate/commit-id (random-uuid)
-                                    ::coordinate/t 22)
+    (let [ack-db (database-value 20)
+          stale-db (database-value 21)
+          current-db (database-value 22)
           stale-query (deferred)
           current-query (deferred)
           !handler (atom nil)]
       (->
-        (with-route-db-fakes
-          {::query
-           (fn [{actual-coordinate :seon.db/coordinate}]
-             (cond
-               (= stale-coordinate actual-coordinate) (::promise stale-query)
-               (= current-coordinate actual-coordinate) (::promise current-query)
-               :else (js/Promise.resolve [])))
-           ::listen
-           (fn [request]
-             (reset! !handler (:seon.db/handler request))
-             (js/Promise.resolve {:seon.db/key "database-interest/routes-18"
-                                  :seon.db/coordinate ack-coordinate}))
-           ::unlisten
-           (fn [_request]
-             (js/Promise.resolve {:seon.db/ok? true}))}
-          (fn []
-            (router/install! {})
-            (-> (router/attach!)
-                (.then
-                  (fn [_]
-                    (@!handler
-                      {:seon.db.protocol/coordinate stale-coordinate})
-                    (@!handler
-                      {:seon.db.protocol/coordinate current-coordinate})
-                    ((::resolve! current-query)
-                     [(route-row "/current-route")])
-                    (next-turn)))
-                (.then
-                  (fn [_]
-                    (testing "the newer completed projection is active"
-                      (is (= 200
-                             (::response-status
-                               (request! "/current-route")))))
-                    ((::resolve! stale-query)
-                     [(route-row "/stale-route")])
-                    (next-turn)))
-                (.then
-                  (fn [_]
-                    (testing "late older work cannot regress the route cache"
-                      (is (= 200
-                             (::response-status
-                               (request! "/current-route"))))
-                      (is (= 302
-                             (::response-status
-                               (request! "/stale-route"))))))))))
-        (settle! done)))))
+       (with-route-db-fakes
+        {::query
+         (fn [{database ::db/db}]
+           (cond
+             (= stale-db database) (::promise stale-query)
+             (= current-db database) (::promise current-query)
+             :else (js/Promise.resolve [])))
+         ::current-db #(js/Promise.resolve ack-db)
+         ::listen
+         (fn [request]
+           (reset! !handler (:seon.db/handler request))
+           (js/Promise.resolve ::routes))
+         ::unlisten
+         (fn [_key] (js/Promise.resolve {:seon.db/ok? true}))}
+        (fn []
+          (router/install! {})
+          (-> (router/attach!)
+              (.then
+               (fn [_]
+                 (@!handler {:db-after stale-db :tx-data []})
+                 (@!handler {:db-after current-db :tx-data []})
+                 ((::resolve! current-query) [(route-row "/current-route")])
+                 (next-turn)))
+              (.then
+               (fn [_]
+                 (is (= 200 (::response-status
+                             (request! "/current-route"))))
+                 ((::resolve! stale-query) [(route-row "/stale-route")])
+                 (next-turn)))
+              (.then
+               (fn [_]
+                 (is (= 200 (::response-status
+                             (request! "/current-route"))))
+                 (is (= 302 (::response-status
+                             (request! "/stale-route")))))))))
+       (settle! done)))))
+
+(deftest detached-route-query-completion-cannot-publish
+  (async done
+    (let [ack-db (database-value 30)
+          later-db (database-value 31)
+          later-query (deferred)
+          !handler (atom nil)]
+      (->
+       (with-route-db-fakes
+        {::query (fn [{database ::db/db}]
+                   (if (= later-db database)
+                     (::promise later-query)
+                     (js/Promise.resolve [])))
+         ::current-db #(js/Promise.resolve ack-db)
+         ::listen (fn [request]
+                    (reset! !handler (:seon.db/handler request))
+                    (js/Promise.resolve ::routes))
+         ::unlisten (fn [_key]
+                      (js/Promise.resolve {:seon.db/ok? true}))}
+        (fn []
+          (router/install! {})
+          (-> (router/attach!)
+              (.then
+               (fn [_]
+                 (@!handler {:db-after later-db :tx-data []})
+                 (router/detach!)))
+              (.then
+               (fn [_]
+                 ((::resolve! later-query) [(route-row "/detached-route")])
+                 (next-turn)))
+              (.then
+               (fn [_]
+                 (is (= 302 (::response-status
+                             (request! "/detached-route")))))))))
+       (settle! done)))))

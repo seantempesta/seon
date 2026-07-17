@@ -1087,7 +1087,9 @@
           (let [response (await (request-on-session! session request 15000))]
             (if (and (not (error-value? response))
                      (::protocol/success? response))
-              public-key
+              (do
+                (swap! !session cache-database (:db-after response))
+                public-key)
               (do
                 (swap! !session
                        (fn [current]

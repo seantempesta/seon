@@ -4,7 +4,7 @@
 
    The route vector is `(into (db->routes rows) (static-supplement h))`:
    [[db->routes]] is a PURE projection of the seeded `:seon.route/*` datoms
-   (the core routes — `/`, `/view/unit`,
+   (the core routes — `/`,
    `/agent/{id}`, `/agent/{id}/feed`, `/agent/{id}/call`), and the static
    supplement carries
    the routes NOT yet seeded as datoms (static assets, the secondary POST
@@ -12,8 +12,8 @@
    discardable
    cache keyed by the exact route projection plus the static supplement
    config. [[attach!]] installs one query-derived authority interest and reads
-   the initial projection at its acknowledgement coordinate. Later matching
-   commits reconcile that exact coordinate, while unrelated transactions do no
+   the initial projection at its acknowledged database value. Later matching
+   commits reconcile that exact value, while unrelated transactions do no
    routing work. Build-time path/name conflict detection
    catches overlaps the old `cond` silently shadowed.
 
@@ -59,7 +59,7 @@
     [seon.runtime.admission :as admission]
     ;; Build-inclusion only (no alias): db->routes resolves datastar's core
     ;; handler symbols (`serve-root!`,
-    ;; `handle-view-unit!`, `serve-agent-page!`, `open-agent-feed!`) at request time via
+    ;; `serve-agent-page!`, `open-agent-feed!`) at request time via
     ;; eval/lookup-value, so the ns must be compiled into the build. router is
     ;; its sole requirer.
     [seon.web.datastar]
@@ -369,31 +369,31 @@
 
 (defn ^:async ^:private reconcile-cache!
   "Acquire and accept one exact route projection when it is still current."
-  [owner coordinate]
+  [owner database]
   (let [rows (await (db/query {:seon.db/query route-query
-                               :seon.db/coordinate coordinate}))]
+                               ::db/db database}))]
     (when (:seon.error/message rows)
       (throw (ex-info "Route projection failed." rows)))
     (let [projection (route-projection rows)
           config (::config @!router-state)
           next-key (cache-key projection config)]
       (when (and (identical? owner (::interest-owner @!router-state))
-                 (= coordinate (::desired-coordinate @!router-state)))
+                 (= database (::desired-db @!router-state)))
         (when-not (= next-key (::cache-key @!router-state))
           (swap! !router-state assoc
                  ::cache-key next-key
                  ::ring-handler (build-ring-handler projection config)))
-        (swap! !router-state assoc ::accepted-coordinate coordinate)
+        (swap! !router-state assoc ::accepted-db database)
         true))))
 
 (defn- refresh-routes!
-  [owner coordinate]
+  [owner database]
   (swap! !router-state
          (fn [state]
            (if (identical? owner (::interest-owner state))
-             (assoc state ::desired-coordinate coordinate)
+             (assoc state ::desired-db database)
              state)))
-  (-> (reconcile-cache! owner coordinate)
+  (-> (reconcile-cache! owner database)
       (.catch
        (fn [error]
          (log/error-console! "seon.web.router"
@@ -403,14 +403,14 @@
   [owner]
   (await
    (loop []
-     (let [{::keys [interest-owner desired-coordinate accepted-coordinate]}
+     (let [{::keys [interest-owner desired-db accepted-db]}
            @!router-state]
        (cond
          (not (identical? owner interest-owner)) false
-         (= desired-coordinate accepted-coordinate) true
+         (= desired-db accepted-db) true
          :else
          (do
-           (await (reconcile-cache! owner desired-coordinate))
+           (await (reconcile-cache! owner desired-db))
            (recur)))))))
 
 (defn ^:async attach!
@@ -422,13 +422,12 @@
   {:malli/schema [:=> [:cat] :any]}
   []
   (if-let [interest-key (::interest-key @!router-state)]
-    {::db/key interest-key
-     ::db/coordinate (::accepted-coordinate @!router-state)}
+    interest-key
     (let [owner (js-obj)]
       (swap! !router-state assoc
              ::interest-owner owner
-             ::desired-coordinate nil
-             ::accepted-coordinate nil)
+             ::desired-db nil
+             ::accepted-db nil)
       (let [listening
             (await
              (db/listen!
@@ -436,23 +435,24 @@
                :seon.db/query route-query
                :seon.db/handler
                (fn [event]
-                 (refresh-routes! owner
-                                  (:seon.db.protocol/coordinate event)))}))]
+                 (refresh-routes! owner (:db-after event)))}))]
         (when (:seon.error/message listening)
           (swap! !router-state
                  (fn [state]
                    (if (identical? owner (::interest-owner state))
-                     (dissoc state ::interest-owner ::desired-coordinate
-                             ::accepted-coordinate)
+                     (dissoc state ::interest-owner ::desired-db ::accepted-db)
                      state)))
           (throw (ex-info "Route interest failed." listening)))
-        (swap! !router-state
-               (fn [state]
-                 (if (identical? owner (::interest-owner state))
-                   (cond-> (assoc state ::interest-key (::db/key listening))
-                     (nil? (::desired-coordinate state))
-                     (assoc ::desired-coordinate (::db/coordinate listening)))
-                   state)))
+        (let [database (await (db/db))]
+          (when (:seon.error/message database)
+            (throw (ex-info "Route database acquisition failed." database)))
+          (swap! !router-state
+                 (fn [state]
+                   (if (identical? owner (::interest-owner state))
+                     (assoc state
+                            ::interest-key listening
+                            ::desired-db database)
+                     state))))
         (await (settle-routes! owner))
         listening))))
 
@@ -462,10 +462,9 @@
   []
   (let [interest-key (::interest-key @!router-state)]
     (swap! !router-state dissoc
-           ::interest-owner ::interest-key ::desired-coordinate
-           ::accepted-coordinate)
+           ::interest-owner ::interest-key ::desired-db ::accepted-db)
     (if interest-key
-      (await (db/unlisten! {:seon.db/key interest-key}))
+      (await (db/unlisten! interest-key))
       {:seon.db/ok? true})))
 
 (defn install!

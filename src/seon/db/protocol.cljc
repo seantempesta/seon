@@ -761,6 +761,7 @@
  [:map {:closed true}
   [::success? [:= true]]
   [::request-id ::request-id]
+  [:db-after :db-after]
   [::listening? [:= true]]])
 (schema/register!
  ::unlisten-response

@@ -3,27 +3,22 @@
    core route set. These guard the CROSS-LANE interface the UI lane's
    `db->routes` (in `seon.web.router`) consumes: change a pattern/method/name
    here and the projection into reitit changes, so the set is pinned on
-   purpose. Three layers: (1) the seed-set contract (names → pattern/method),
-   (2) the malli→datahike bridge facets per attr, (3) a fresh :memory conn
-   round-trip proving the rows transact, read back with a NATIVE symbol
-   handler, and upsert idempotently on `:seon.route/name`."
+   purpose. Two layers remain here: (1) the seed-set contract
+   (names → pattern/method), and (2) the Malli→Datahike bridge facets per
+   attribute. Authority admission tests own real Datahike publication."
   (:require
-    [cljs.test :refer [deftest is async testing]]
-    [datahike.api :as d]
+    [cljs.test :refer [deftest is testing]]
     [seon.agent]
     [seon.agent.message]
     [seon.db :as db]
-    [seon.route :as route]
-    [seon.test.async :refer [settle!]]))
+    [seon.route :as route]))
 
 (def ^:private expected
   "name → [pattern method] — the authoritative seeded core route set. `/`
-   is the root agent and fleet view. The seed is `/` +
-   the generic unit door + the per-agent page + its separate `…/feed` SSE
-   stream + the two POST action doors."
+   is the root agent and fleet view. The seed is `/` + the per-agent page +
+   its separate `…/feed` SSE stream + the two POST action doors."
   {:seon.route/root        ["/" :get]
    :seon.route/agents-create ["/agents" :post]
-   :seon.route/view-unit   ["/view/unit" :get]
    :seon.route/agent       ["/agent/{id}" :get]
    :seon.route/agent-feed  ["/agent/{id}/feed" :get]
    :seon.route/agent-debug ["/agent/{id}/debug" :get]
@@ -70,46 +65,3 @@
     (let [mw (facet :seon.route/middleware)]
       (is (= :db.type/keyword (:db/valueType mw)))
       (is (= :db.cardinality/one (:db/cardinality mw))))))
-
-(defn- fresh-conn
-  "Promise of a fresh :memory conn. `d/create-database`/`d/connect` is the
-   scratch-store creation (no seon.db equivalent — same idiom as state_test);
-   all data ops route through `seon.db`. No manual schema install needed:
-   `db/transact!` auto-bridges + installs the route attrs (registered in
-   `seon.route`) at first transact."
-  []
-  (let [cfg {:store              {:backend :memory :id (random-uuid)}
-             :schema-flexibility :write
-             :keep-history?      true}]
-    (-> (d/create-database cfg)
-        (.then (fn [_] (d/connect cfg {:sync? false})))
-        (.then (fn [conn]
-                 (-> (db/ensure-provenance! {:seon.db/conn conn})
-                     (.then (fn [_] conn))))))))
-
-(deftest rows-round-trip-and-upsert-idempotently
-  (async done
-    (-> (fresh-conn)
-        (.then (fn [conn]
-                 (-> (db/transact! {:seon.db/tx-data (route/core-routes-tx)
-                                    :seon.db/conn    conn})
-                     ;; seed a SECOND time — identity upsert on :seon.route/name
-                     ;; must merge, never duplicate.
-                     (.then (fn [_] (db/transact! {:seon.db/tx-data (route/core-routes-tx)
-                                                   :seon.db/conn    conn})))
-                     (.then
-                       (fn [_]
-                         (let [names (db/query {:seon.db/query '[:find [?n ...]
-                                                                 :where [?e :seon.route/name ?n]]
-                                                :seon.db/conn  conn})
-                               h     (ffirst (db/query {:seon.db/query
-                                                        '[:find ?h :where
-                                                          [?e :seon.route/name :seon.route/agent]
-                                                          [?e :seon.route/handler ?h]]
-                                                        :seon.db/conn conn}))]
-                           (is (= (count expected) (count names))
-                               "double seed creates no duplicate route entities")
-                           (is (= (set (keys expected)) (set names)))
-                           (is (symbol? h) "handler reads back as a native symbol")
-                           (is (= 'seon.web.datastar/serve-agent-page! h))))))))
-        (settle! done))))

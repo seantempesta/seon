@@ -388,21 +388,38 @@ of the next web/feed and plan consumers of removed ambient database functions,
 not compatibility work. The cut removes 2,121 lines while retaining the one
 public `seon.render/render` and `seon.db` surfaces.
 
+The database-interest and Datastar feed base now use one ordinary database
+value contract. A listener acknowledgement includes the authority's exact
+`:db-after`; `seon.db/listen!` caches it before returning the unchanged scalar
+listener key. The router and feed consume native `:db-after`/`:tx-data`, fence
+late work by immutable database equality, and render one complete view function
+per semantic subscription. Equivalent sockets share one render and serialized
+event while their view IDs own only connection replacement. The producer
+catalog, active-token state, partial renderer, `/view/unit` handler and seeded
+route, coordinate envelopes, and the route test's embedded Datahike system are
+deleted. Database failures return 503 instead of being mistaken for nonempty
+query results. Focused proof passes 21 writer tests/156 assertions, 19 database
+facade tests/96 assertions, 7 Datastar tests/22 assertions, 8 router tests/26
+assertions, and 3 route tests/42 assertions. The client compiles with no warning
+in the changed listener, router, Datastar, debug, or route owners.
+
 ### Current implementation checkpoint
 
-- **Earliest unsettled contract:** close the web/feed database-value and
-  rendered-transaction owner. Its full render, debug, task-run, and projection
-  cache paths still name removed ambient database functions; they must acquire
-  or inherit one ordinary immutable value through the existing asynchronous
-  `seon.db` surface and delete the obsolete synchronous branches.
+- **Earliest unsettled contract:** close `seon.web.serve` on the parent turn's
+  native `:seon.agent.turn/rendered-tx` ref and ordinary database values. Its
+  model/eval observability and task-run paths still name removed turn/attempt
+  coordinates, ambient connections, copied eval-operation evidence, and
+  synchronous config/run readers. They must derive history through `db/as-of`
+  and the existing asynchronous owners, then delete those projections.
 - **Integrated proof that closes it:** eval, autocomplete, namespace context,
   startup, converged reload, advertisement, runtime hosting, and declarative
-  state reconciliation and runtime membership reuse ordinary database values
-  and native transaction reports; quiescence, agent creation, AI seeding,
+  state reconciliation, runtime membership, selective interests, routing, and
+  complete Datastar rendering reuse ordinary database values and native
+  transaction reports; quiescence, agent creation, AI seeding,
   scheduling, the watchdog, warning acquisition, operation configuration, and
   render execution now reuse the same rule. The next frozen proof must remove
   every web/feed warning, retain native transaction-report observability, pass
-  the focused Datastar/debug/serve gates, and compile all four artifacts without
+  the focused serve/reactive-call gates, and compile all four artifacts without
   warnings in the changed owners.
 - **Dependency-ready parallel portfolio:** the web/render single-owner audit is
   durable at [[research/web-render-single-owner-audit-2026-07-17]] and the
@@ -412,9 +429,9 @@ public `seon.render/render` and `seon.db` surfaces.
   and explicitly rejects the current dirty coordinate/oversized-row prototype.
   The complete parallel-system inventory is durable at
   [[research/parallel-behavior-unification-audit-2026-07-17]].
-- **Next refills:** close the web/feed database-value and
-  rendered-transaction owner, followed by the exact-database blob operator seam
-  and the operation-specific plan consumers. Each cut strengthens the existing
+- **Next refills:** close the remaining serve/rendered-transaction and reactive
+  call consumers, followed by the exact-database blob operator seam and the
+  operation-specific plan consumers. Each cut strengthens the existing
   public owner and deletes removed-function callers; none adds aliases,
   versioned function names, local-database fallbacks, or a second renderer.
   The final graduation gate remains the full frozen-source correctness, live
