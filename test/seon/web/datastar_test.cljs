@@ -35,8 +35,11 @@
                       (fn [resolve _reject]
                         (resolve [:main {:id "app-view"} "ready"])))
         outer (js-obj "then" (fn [resolve _reject] (resolve inner)))
-        result (@#'datastar/rendered-view-patch outer)]
+        result (@#'datastar/rendered-view-patch
+                {::datastar/element outer
+                 ::datastar/dependencies #{:seon.agent/id}})]
     (is (string? (::datastar/event result)))
+    (is (= #{:seon.agent/id} (::datastar/dependencies result)))
     (is (re-find #"<main id=\"app-view\">ready</main>"
                  (::datastar/event result)))
     (is (not (re-find #"Promise" (::datastar/event result))))))

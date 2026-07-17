@@ -139,9 +139,14 @@
     (.then rendered rendered-view-patch render-error-patch)
     (let [observed? (and (map? rendered) (contains? rendered ::element))
           element (if observed? (::element rendered) rendered)]
-      (cond-> {::event (-> element html/->string patch-elements)}
-        (and observed? (contains? rendered ::dependencies))
-        (assoc ::dependencies (::dependencies rendered))))))
+      (if (promise-like? element)
+        (.then element
+               #(rendered-view-patch
+                 (if observed? (assoc rendered ::element %) %))
+               render-error-patch)
+        (cond-> {::event (-> element html/->string patch-elements)}
+          (and observed? (contains? rendered ::dependencies))
+          (assoc ::dependencies (::dependencies rendered)))))))
 
 (defn- view-fn-patch
   "Render a bound full-view fn into one event plus learned dependencies.
