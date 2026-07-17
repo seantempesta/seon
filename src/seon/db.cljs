@@ -296,10 +296,121 @@
    ::db (get-in state [::databases (::database-name state)])
    ::capabilities (::capabilities state)})
 
-(defn- ^:async connect-selection! [selection owner]
-  (let [{::keys [socket-path database-name backend database-path attachment
-                 initialization]}
-        selection
+(defn- stable-session-selection [selection]
+  (dissoc selection ::initialization))
+
+(defn- ^:async ensure-and-acquire!
+  [session selection initialization]
+  (let [{::keys [database-name backend database-path attachment]} selection
+        ensure-response
+        (await
+         (request-on-session!
+          session
+          (protocol/ensure-database-request
+           (cond-> {::protocol/request-id (str (random-uuid))
+                    ::protocol/database-name database-name
+                    ::protocol/backend backend}
+             database-path (assoc ::protocol/database-path database-path)
+             attachment (assoc ::db.coordinate/attachment attachment)
+             initialization (assoc ::initialization initialization)))
+          15000))
+        _ (when-not (::protocol/success? ensure-response)
+            (throw (ex-info "Opening the database failed." ensure-response)))
+        acquire-response
+        (await
+         (request-on-session!
+          session
+          (protocol/acquire-database-request
+           {::protocol/request-id (str (random-uuid))
+            ::protocol/database-name database-name})
+          15000))]
+    (when-not (::protocol/success? acquire-response)
+      (throw (ex-info "Acquiring the database failed." acquire-response)))
+    acquire-response))
+
+(defn- ^:async refresh-selection! [state initialization]
+  (let [{::keys [owner session selection]} state]
+    (try
+      (let [acquired (await (ensure-and-acquire! session selection initialization))
+            accepted (atom nil)]
+        (swap! !session
+               (fn [current]
+                 (if (and (identical? owner (::owner current))
+                          (identical? session (::session current)))
+                   (let [next (-> current
+                                  (dissoc ::opening ::opening-initialization)
+                                  (cache-database (::db acquired)))]
+                     (reset! accepted next)
+                     next)
+                   current)))
+        (if-let [current @accepted]
+          (session-result current)
+          (throw
+           (ex-info "Database session closed while refreshing."
+                    {::selection selection :seon.error/kind :core-bug}))))
+      (catch :default exception
+        (swap! !session
+               (fn [current]
+                 (if (and (identical? owner (::owner current))
+                          (identical? session (::session current)))
+                   (dissoc current ::opening ::opening-initialization)
+                   current)))
+        (throw exception)))))
+
+(defn- claim-opening! [initialization claim-state start!]
+  (let [claimed? (atom false)
+        resolve-opening (atom nil)
+        reject-opening (atom nil)
+        opening
+        (js/Promise.
+         (fn [resolve reject]
+           (reset! resolve-opening resolve)
+           (reset! reject-opening reject)))]
+    (swap! !session
+           (fn [current]
+             (if-let [claimed-state (claim-state current)]
+               (do
+                 (reset! claimed? true)
+                 (assoc claimed-state
+                        ::opening opening
+                        ::opening-initialization initialization))
+               current)))
+    (when @claimed?
+      (-> (start!)
+          (.then (fn [result] (@resolve-opening result)))
+          (.catch (fn [exception] (@reject-opening exception))))
+      opening)))
+
+(defn- claim-refresh! [state initialization]
+  (let [{::keys [owner session]} state]
+    (claim-opening!
+     initialization
+     (fn [current]
+       (when (and (identical? owner (::owner current))
+                  (identical? session (::session current))
+                  (nil? (::opening current)))
+         current))
+     #(refresh-selection! state initialization))))
+
+(declare connect-selection!)
+
+(defn- claim-connect! [current selection initialization]
+  (let [owner (or (::owner current) (js-obj))]
+    (claim-opening!
+     initialization
+     (fn [latest]
+       (when (and (or (nil? latest)
+                      (identical? owner (::owner latest)))
+                  (nil? (::opening latest)))
+         (assoc (or latest {})
+                ::owner owner
+                ::selection selection
+                ::interest-handlers
+                (or (::interest-handlers latest) {}))))
+     #(connect-selection! selection initialization owner))))
+
+(defn- ^:async connect-selection! [selection initialization owner]
+  (let [{::keys [socket-path database-name]} selection
         opened (atom nil)]
     (try
       (let [session
@@ -314,7 +425,8 @@
                           (if (and (identical? owner (::owner current))
                                    (identical? @opened (::session current)))
                             (dissoc current
-                                    ::session ::opening ::database-name
+                                    ::session ::opening ::opening-initialization
+                                    ::database-name
                                     ::capabilities ::databases)
                             current))))}))
             _ (reset! opened session)
@@ -333,30 +445,8 @@
             _ (when-not (::protocol/success? capabilities-response)
                 (throw (ex-info "Database capability negotiation failed."
                                 capabilities-response)))
-            ensure-response
-            (await
-             (request-on-session!
-              session
-              (protocol/ensure-database-request
-               (cond-> {::protocol/request-id (str (random-uuid))
-                        ::protocol/database-name database-name
-                        ::protocol/backend backend}
-                 database-path (assoc ::protocol/database-path database-path)
-                 attachment (assoc ::db.coordinate/attachment attachment)
-                 initialization (assoc ::initialization initialization)))
-              15000))
-            _ (when-not (::protocol/success? ensure-response)
-                (throw (ex-info "Opening the database failed." ensure-response)))
             acquire-response
-            (await
-             (request-on-session!
-              session
-              (protocol/acquire-database-request
-               {::protocol/request-id (str (random-uuid))
-                ::protocol/database-name database-name})
-              15000))
-            _ (when-not (::protocol/success? acquire-response)
-                (throw (ex-info "Acquiring the database failed." acquire-response)))
+            (await (ensure-and-acquire! session selection initialization))
             _ (doseq [[request-id entry] (::interest-handlers @!session)]
                 (when (and (identical? owner (::owner @!session))
                            (identical?
@@ -396,7 +486,7 @@
                              ::database-name database-name
                              ::capabilities
                              (::protocol/capabilities capabilities-response))
-                      (dissoc ::opening)
+                      (dissoc ::opening ::opening-initialization)
                       (cache-database (::db acquire-response)))]
         (swap! !session
                (fn [current]
@@ -421,34 +511,33 @@
 (defn ^:async open-session!
   "Open and acquire this process's one multiplexed database session."
   {:malli/schema [:=> [:cat ::open-session-request] ::open-session-response]}
-  [selection]
-  (let [current @!session]
+  [request]
+  (let [selection (stable-session-selection request)
+        initialization (::initialization request)
+        current @!session]
     (cond
-      (and (= selection (::selection current)) (active-session))
-      (session-result current)
-
-      (and (= selection (::selection current)) (::opening current))
-      (await (::opening current))
-
       (and current (not= selection (::selection current)))
       (throw (ex-info "Another database session owns this process."
                       {::selection selection :seon.error/kind :core-bug}))
 
+      (::opening current)
+      (if (= initialization (::opening-initialization current))
+        (await (::opening current))
+        (do
+          (await (::opening current))
+          (await (open-session! request))))
+
+      (active-session)
+      (if initialization
+        (if-let [opening (claim-refresh! current initialization)]
+          (await opening)
+          (await (open-session! request)))
+        (session-result current))
+
       :else
-      (let [owner (or (::owner current) (js-obj))
-            opening (connect-selection! selection owner)]
-        (swap! !session
-               (fn [latest]
-                 (if (or (nil? latest)
-                         (identical? owner (::owner latest)))
-                   (assoc (or latest {})
-                          ::owner owner
-                          ::selection selection
-                          ::opening opening
-                          ::interest-handlers
-                          (or (::interest-handlers latest) {}))
-                   latest)))
-        (await opening)))))
+      (if-let [opening (claim-connect! current selection initialization)]
+        (await opening)
+        (await (open-session! request))))))
 
 (defn close-session!
   "Close this process's database session."

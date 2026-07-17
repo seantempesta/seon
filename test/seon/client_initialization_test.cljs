@@ -1,9 +1,12 @@
 (ns seon.client-initialization-test
   (:require
    [cljs.test :refer [async deftest is testing]]
+   [seon.agent :as agent]
+   [seon.agent.loop :as agent-loop]
    [seon.client :as client]
    [seon.db :as db]
-   [seon.launch :as launch]))
+   [seon.launch :as launch]
+   [seon.runtime.admission :as admission]))
 
 (def ^:private digest
   "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
@@ -103,4 +106,173 @@
              (set! client/index-core! original-core)
              (set! client/index-schemas original-schemas)
              (set! db/open-session! original-open)
+             (done)))))))
+
+(defn- shadow-ready-state
+  []
+  (let [owner (js-obj)]
+    (assoc @client/!state
+           ::client/launch-capability {::client/autonomous? true}
+           ::client/advertisement-owner owner
+           ::client/advertisement-interest-key :runtime-advertisement
+           ::client/resumable-agent-ids ["root"])))
+
+(deftest completed-reload-ensures-before-publication-and-rehosting
+  (async done
+    (let [original-state @client/!state
+          original-attached? db/attached?
+          original-open client/open-database-session!
+          original-begin admission/begin-publication!
+          original-publish admission/publish-committed!
+          original-unavailable admission/mark-unavailable!
+          original-resume agent/resume!
+          original-install agent-loop/install-ticker!
+          original-heartbeat client/start-heartbeat!
+          effects (atom [])
+          finish-resume (atom nil)
+          rehost-started-resolve (atom nil)
+          rehost-started
+          (js/Promise.
+           (fn [resolve _] (reset! rehost-started-resolve resolve)))
+          finish (atom nil)
+          finished (js/Promise. (fn [resolve _] (reset! finish resolve)))]
+      (reset! client/!state (shadow-ready-state))
+      (set! db/attached? (constantly true))
+      (set! admission/begin-publication!
+            (fn [] (swap! effects conj :close) true))
+      (set! client/open-database-session!
+            (fn [request]
+              (swap! effects conj [::ensure-acquire request])
+              (js/Promise.resolve {::db/db {:db-name "default"}})))
+      (set! admission/publish-committed!
+            (fn []
+              (swap! effects conj :publish)
+              (js/Promise.resolve
+               {::admission/published? true
+                ::admission/instrumentation {}})))
+      (set! admission/mark-unavailable!
+            (fn [_] (swap! effects conj :unavailable) true))
+      (set! agent/resume!
+            (fn [request]
+              (swap! effects conj [::resume request])
+              (@rehost-started-resolve true)
+              (js/Promise.
+               (fn [resolve _]
+                 (reset! finish-resume resolve)))))
+      (set! agent-loop/install-ticker!
+            (fn [] (swap! effects conj :ticker)))
+      (set! client/start-heartbeat!
+            (fn []
+              (swap! effects conj :heartbeat)
+              (@finish true)))
+      (is (true? (client/shadow-build-notify! {:type :build-start})))
+      (is (true? (client/shadow-build-notify! {:type :build-complete})))
+      (-> rehost-started
+          (.then
+           (fn [_]
+             (is (= [:close
+                     [::ensure-acquire {::client/initialize? true}]
+                     :publish
+                     [::resume {:seon.agent/id "root"}]]
+                    @effects)
+                 "ticker waits for the one rehost Promise")
+             (@finish-resume
+              {:seon.agent.runtime/resumed? true
+               :seon.agent/id "root"})
+             finished))
+          (.then
+           (fn [_]
+             (is (= [:close
+                     [::ensure-acquire {::client/initialize? true}]
+                     :publish
+                     [::resume {:seon.agent/id "root"}]
+                     :ticker
+                     :heartbeat]
+                    @effects)
+                 "reload has one ensure/acquire, publication, and rehost order")))
+          (.catch
+           (fn [error]
+             (is false (str "completed reload rejected: " error
+                            "\n" (.-stack error)))))
+          (.finally
+           (fn []
+             (reset! client/!state original-state)
+             (set! db/attached? original-attached?)
+             (set! client/open-database-session! original-open)
+             (set! admission/begin-publication! original-begin)
+             (set! admission/publish-committed! original-publish)
+             (set! admission/mark-unavailable! original-unavailable)
+             (set! agent/resume! original-resume)
+             (set! agent-loop/install-ticker! original-install)
+             (set! client/start-heartbeat! original-heartbeat)
+             (done)))))))
+
+(deftest failed-reload-ensure-keeps-admission-closed-and-skips-rehost
+  (async done
+    (let [original-state @client/!state
+          original-attached? db/attached?
+          original-open client/open-database-session!
+          original-begin admission/begin-publication!
+          original-publish admission/publish-committed!
+          original-unavailable admission/mark-unavailable!
+          original-resume agent/resume!
+          original-install agent-loop/install-ticker!
+          original-heartbeat client/start-heartbeat!
+          effects (atom [])
+          admission-open? (atom true)
+          finish (atom nil)
+          finished (js/Promise. (fn [resolve _] (reset! finish resolve)))]
+      (reset! client/!state (shadow-ready-state))
+      (set! db/attached? (constantly true))
+      (set! admission/begin-publication!
+            (fn []
+              (reset! admission-open? false)
+              (swap! effects conj :close)
+              true))
+      (set! client/open-database-session!
+            (fn [_]
+              (swap! effects conj :ensure-acquire)
+              (js/Promise.reject (js/Error. "ensure failed"))))
+      (set! admission/publish-committed!
+            (fn []
+              (reset! admission-open? true)
+              (swap! effects conj :publish)
+              (js/Promise.resolve {::admission/published? true})))
+      (set! admission/mark-unavailable!
+            (fn [_]
+              (reset! admission-open? false)
+              (swap! effects conj :unavailable)
+              (@finish true)
+              true))
+      (set! agent/resume!
+            (fn [_]
+              (swap! effects conj :rehost)
+              (js/Promise.resolve {:seon.agent.runtime/resumed? true})))
+      (set! agent-loop/install-ticker!
+            (fn [] (swap! effects conj :ticker)))
+      (set! client/start-heartbeat!
+            (fn [] (swap! effects conj :heartbeat)))
+      (is (true? (client/shadow-build-notify! {:type :build-start})))
+      (is (true? (client/shadow-build-notify! {:type :build-complete})))
+      (-> finished
+          (.then
+           (fn [_]
+             (is (false? @admission-open?))
+             (is (= [:close :ensure-acquire :unavailable] @effects)
+                 "failed ensure cannot publish, rehost, tick, or heartbeat")))
+          (.catch
+           (fn [error]
+             (is false (str "failed ensure proof rejected: " error
+                            "\n" (.-stack error)))))
+          (.finally
+           (fn []
+             (reset! client/!state original-state)
+             (set! db/attached? original-attached?)
+             (set! client/open-database-session! original-open)
+             (set! admission/begin-publication! original-begin)
+             (set! admission/publish-committed! original-publish)
+             (set! admission/mark-unavailable! original-unavailable)
+             (set! agent/resume! original-resume)
+             (set! agent-loop/install-ticker! original-install)
+             (set! client/start-heartbeat! original-heartbeat)
              (done)))))))

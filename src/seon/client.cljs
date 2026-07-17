@@ -484,7 +484,7 @@
   (log/info-console! "seon.client" "reloading…")
   (stop-heartbeat!))
 
-(declare rehost-agent-runtimes!)
+(declare open-database-session! rehost-agent-runtimes!)
 
 (defn- instrumentation-summary
   "Drop per-function inventories from instrumentation status logs."
@@ -543,9 +543,12 @@
          ::admission/reason "Shadow build failed"})
 
       :build-complete
-      (-> (admission/publish-committed!)
+      (-> (open-database-session! {::initialize? true})
           (.then
-           (fn [publication]
+           (fn [_]
+             (admission/publish-committed!)))
+          (.then
+           (fn ^:async publish! [publication]
              (log/info-console!
               "seon.client"
               (str "reload: committed publication "
@@ -557,7 +560,7 @@
                ;; one verified generation. Web feeds re-arm lazily.
                (if (autonomous-runtime?)
                  (do
-                   (rehost-agent-runtimes!)
+                   (await (rehost-agent-runtimes!))
                    (agent-loop/install-ticker!))
                  (do
                    (agent-loop/uninstall-ticker!)
@@ -567,7 +570,8 @@
            (fn [error]
              (admission/mark-unavailable!
               {:seon.error/raw error
-               ::admission/reason "Committed reload publication failed"}))))
+               ::admission/reason
+               "Committed reload initialization or publication failed"}))))
 
       nil))
   true)
