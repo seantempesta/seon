@@ -97,7 +97,13 @@ database acquisition for each form transaction, and no operation capture,
 ambient connection, coordinate wrapper, or second result envelope. Focused
 proof passes 9 receipt tests/36 assertions, the runtime handoff test/3
 assertions, and the retained Promise primitive test/4 assertions; the client
-compiles.
+compiles. Commit `fae81117` settles the shared read-composition seam:
+`seon.db/execute-many` resolves one explicit, inherited, or current database
+value exactly once, attaches it to every member, rejects mixed values before
+transport, and retains only `::db/results` as its application result. Focused
+proof passes 1 test/11 assertions with no owned warnings. The context families
+now consume that one value directly instead of reconstructing a removed
+coordinate response.
 
 The JVM half of that contract is implemented. One unversioned
 `seon.db.program/compile-tx-data` owner reads one immutable Datahike value and
