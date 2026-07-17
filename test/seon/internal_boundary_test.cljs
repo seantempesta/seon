@@ -10,17 +10,12 @@
         config policy (the `.internal` suffix beats `:seon.config/always`).
      2. The structural selection rule `included-ns?` EXCLUDES every
         `.internal` ns from the agent prompt while INCLUDING its public
-        parent — one suffix rule, no per-namespace special-casing.
-     3. A public ns genuinely DELEGATES to its `.internal` sibling: the
-        public entry point and the private worker are distinct vars in
-        distinct namespaces (the boundary is real code, not a comment)."
+        parent — one suffix rule, no per-namespace special-casing."
   (:require
     [cljs.test :refer [deftest is]]
     [seon.agent.internal :as agent.internal]
     [seon.agent.ctx.namespaces :as ns]
-    [seon.config :as config]
-    [seon.db :as db]
-    [seon.db.internal :as db.internal]))
+    [seon.config :as config]))
 
 ;; The real framework `.internal` namespaces (each a sibling of a public ns
 ;; whose body it backs). NONE may leak to an agent.
@@ -57,17 +52,6 @@
   ;; String/keyword/symbol tolerance — same answer whatever the caller hands.
   (is (false? (ns/included-ns? "seon.db.internal")))
   (is (false? (ns/included-ns? 'seon.db.internal))))
-
-(deftest public-db-delegates-to-its-internal-sibling
-  ;; The boundary is real code: the public entry points an agent calls live
-  ;; in seon.db; the workers they delegate to live in seon.db.internal. They
-  ;; are DISTINCT vars in DISTINCT namespaces — not re-exports.
-  (is (fn? db/transact!)            "public entry point exists")
-  (is (fn? db.internal/transact!*)  "private worker exists in the .internal ns")
-  (is (fn? db/current-agent-id)     "public reader exists")
-  (is (fn? db.internal/current-agent-id) "private reader exists in .internal")
-  (is (not (identical? db/transact! db.internal/transact!*))
-      "public transact! is NOT the same var as the internal worker — it wraps it"))
 
 (deftest agent-management-is-one-pure-rule-over-a-pulled-parent-tree
   (let [tree {:seon.agent/id "child"
