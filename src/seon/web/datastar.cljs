@@ -138,9 +138,13 @@
        (fn? (.-then value))))
 
 (defn- rendered-html-patch [rendered observed? html]
-  (cond-> {::event (patch-elements* html)}
-    (and observed? (contains? rendered ::dependencies))
-    (assoc ::dependencies (::dependencies rendered))))
+  (if (promise-like? html)
+    (.then html
+           #(rendered-html-patch rendered observed? %)
+           render-error-patch)
+    (cond-> {::event (patch-elements* html)}
+      (and observed? (contains? rendered ::dependencies))
+      (assoc ::dependencies (::dependencies rendered)))))
 
 (defn- rendered-view-patch [rendered]
   (if (promise-like? rendered)
