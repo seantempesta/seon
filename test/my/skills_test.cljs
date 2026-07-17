@@ -28,8 +28,15 @@
     ([selector eid] (f selector eid))
     ([database selector eid] (f database selector eid))))
 
+(def ^:private configuration
+  (config/resolve-config-singleton
+   {:seon.config/skills {:seon.config/dirs ["seon-skills"]}}))
+
+(def ^:private skills-dir
+  (config/skills-dir configuration))
+
 (def datahike-skill-path
-  (str (config/skills-dir) "/datahike/SKILL.md"))
+  (str skills-dir "/datahike/SKILL.md"))
 
 (defn- finish
   [promise done]
@@ -102,7 +109,7 @@
          (schema/schema-definition :my.skills/body))))
 
 (deftest seed-scan-reads-the-shipped-skill-corpus
-  (let [rows (skills/seed-skills-tx-data)
+  (let [rows (skills/seed-skills-tx-data skills-dir)
         by-name (into {} (map (juxt :my.skills/name identity)) rows)]
     (is (every? (fn [row]
                   (and (keyword? (:my.skills/name row))

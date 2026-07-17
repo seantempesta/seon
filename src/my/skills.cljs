@@ -23,15 +23,13 @@
        unload hint so the trade stays visible. `(unload :name)` drops it.
 
    THE CORPUS — `(load :name)` resolves a `:my.skills/*` row seeded at boot by
-   scanning [[seon.config/skills-dir]] (manifest `:seon.config/dirs` first, else
-   env `SEON_SKILLS_DIR`, else the `.claude/skills` fallback). The shipped
+   scanning the explicit corpus directory selected during startup. The shipped
    config pins `seon-skills/` (`config/system.edn` `:seon.config/dirs`), so THAT
-   is the rendered agent corpus — the SAME directory humans edit. (`.claude/skills`
-   is the Claude-Code-dev tree of REAL dirs, used only as the unconfigured
-   fallback default, NOT the agent corpus.) Drop a standard `<name>/SKILL.md` in
-   the corpus dir and it appears; edit a skill file and the agent gets the edit.
-   The pod stores only the path + the frontmatter `name`/`description` — no YAML
-   or markdown parser, the body is the file.
+   is the rendered agent corpus — the SAME directory humans edit. Drop a
+   standard `<name>/SKILL.md` in the corpus dir and it appears; edit a skill
+   file and the agent gets the edit. The pod stores only the path + the
+   frontmatter `name`/`description` — no YAML or markdown parser, the body is
+   the file.
 
    Async: `load`/`unload` AWAIT the underlying `install!`/`remove!` transact
    (they are `^:async`); the eval path auto-awaits, so an agent calling
@@ -42,7 +40,6 @@
     [clojure.string :as str]
     [seon.agent.ctx :as ctx]
     [seon.ai.tokens :as tokens]
-    [seon.config :as config]
     [seon.db :as db]
     [seon.schema :as schema]))
 
@@ -159,22 +156,20 @@
 (defn seed-skills-tx-data
   "Tx-data seeding one `:my.skills` row per `SKILL.md` found.
 
-   Scans [[seon.config/skills-dir]] (default arg) — each row carries `:my.skills/name` (the
-   frontmatter name as a keyword), `:my.skills/description` (verbatim), and
-   `:seon.agent.ctx/file-path` (the body stays in the file, read fresh at
-   render). Identity-upsert on `:my.skills/name`, so a re-scan at every boot
-   is idempotent. [] when the dir is absent or holds no readable SKILL.md.
-   Pure (file reads only); the boot path transacts it as root/boot."
-  {:malli/schema [:function
-                  [:=> [:cat] [:vector ::skill-row]]
-                  [:=> [:catn [::dir :string]] [:vector ::skill-row]]]}
-  ([] (seed-skills-tx-data (config/skills-dir)))
-  ([dir]
-   (->> (list-skill-files dir)
-        (keep (fn [path]
-                (when-let [fm (parse-frontmatter (ctx/read-file-text path))]
-                  (assoc fm :seon.agent.ctx/file-path path))))
-        vec)))
+   Scans explicit corpus directory `dir`. Each row carries `:my.skills/name`
+   (the frontmatter name as a keyword), `:my.skills/description` (verbatim),
+   and `:seon.agent.ctx/file-path` (the body stays in the file, read fresh at
+   render). Identity-upsert on `:my.skills/name`, so a re-scan at every boot is
+   idempotent. [] when the dir is absent or holds no readable SKILL.md. Pure
+   (file reads only); the boot path selects the directory before attachment
+   and transacts the resulting ordinary data as root/boot."
+  {:malli/schema [:=> [:catn [::dir :string]] [:vector ::skill-row]]}
+  [dir]
+  (->> (list-skill-files dir)
+       (keep (fn [path]
+               (when-let [fm (parse-frontmatter (ctx/read-file-text path))]
+                 (assoc fm :seon.agent.ctx/file-path path))))
+       vec))
 
 ;;; DERIVATION — loaded? is a pure projection of the agent's OWN ctx blocks
 ;;; (the `:skill/<name>` ones), never a stored flag.
