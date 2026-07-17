@@ -101,11 +101,23 @@ rule. Ambient connections, removed envelopes, and deleted duplicate run
 readers are gone. Focused proof passes 3 derive tests/12 assertions and 5
 schedule tests/28 assertions with no warning in either owner.
 
-Earliest unsettled contract: lifecycle must consume the settled run, message,
-and database-value owners without partial-success transactions. Completion
-must commit its result, optional message, run close, and pointer retraction in
-one expected-database CAS transaction; wait, pause, resume, and terminate must
-use the same native result convention. `seon.web.serve` also still
+Lifecycle is settled at `ce00686b`. The one message owner now exposes its
+transaction composition seam; ordinary `message!` and lifecycle completion
+therefore share message and plan datom construction. Completion commits result,
+optional message rows, run close CAS, and pointer retraction in one
+expected-database transaction. Termination closes its observed run in the same
+transaction; wait, pause, and resume reuse one immutable value and return
+domain states or direct errors. The partial spawn/message-like workflow,
+ambient connection, removed database envelopes, and embedded lifecycle test
+system are deleted. Focused proof passes 6 lifecycle tests/36 assertions, 12
+message tests/57 assertions, and 9 run tests/39 assertions.
+
+Earliest unsettled contract: the central `seon.agent` owner must consume the
+settled derive/message/lifecycle seams, remove stale context aliases and
+coordinate/envelope/ambient-connection behavior, and make child birth plus its
+initial task one atomic generated-identity transaction before hosting the child.
+The loop must consume native reports/direct errors without copied run readers.
+`seon.web.serve` also still
 references deleted turn, attempt, and eval-operation coordinate fields and must
 derive historical model evidence from the parent turn's `rendered-tx` without
 compatibility projections. Autocomplete/export is settled at `8c2bfbe7`: one captured current
@@ -183,12 +195,12 @@ modest-hardware density checkpoint.
 
 ### Current implementation checkpoint
 
-- **Earliest unsettled contract:** lifecycle atomic completion and native
-  wait/pause/resume/terminate behavior over the settled run, message, and
-  database-value owners.
-- **Integrated proof that closes it:** focused lifecycle, message composition,
-  and run database-value tests proving one completion transaction and no
-  removed envelope or partial-success branch.
+- **Earliest unsettled contract:** the central agent owner and loop must use
+  the settled async database-value and native-result seams; delegation must
+  atomically commit child birth plus its initial task before process hosting.
+- **Integrated proof that closes it:** focused agent/delegation and loop tests
+  proving one allocation transaction, direct errors, no stale aliases or
+  ambient connection, and no removed result envelope.
 - **Dependency-ready parallel portfolio:** lifecycle is factoring the one
   existing message transaction composer so completion can commit result,
   optional message, close, and pointer retraction atomically; listener
