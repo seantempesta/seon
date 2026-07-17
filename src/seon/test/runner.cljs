@@ -86,8 +86,7 @@
    ::selector
    [:map
     [::record? {:optional true} ::record?]
-    [::trigger {:optional true} ::trigger]
-    [::db/conn {:optional true} ::db/conn]]])
+    [::trigger {:optional true} ::trigger]]])
 
 (schema/register! ::run-result
   [:map
@@ -106,28 +105,17 @@
      [:seon.error/kind    :seon.error/kind]
      [:seon.error/message :seon.error/message]]]])
 
-;; record-run! takes a run result. Conn is optional — falls back on db's
-;; dynamic *conn*.
 (schema/register! ::record-request
-  [:map
-   [::run-result ::run-result]
-   [::db/conn    {:optional true} ::db/conn]])
+  [:map [::run-result ::run-result]])
 
 (schema/register! ::record-tx-response
-  [:or
-   ::db/transact-response
-   [:map
-    [::db/ok?        [:= true]]
-    [::db/tempids    [:map-of :any :int]]
-    [::db/tx-count   [:= 0]]
-    [::db/added      [:= 0]]
-    [::db/retracted  [:= 0]]]])
+                  [:or ::db/transact-response ::db/error])
 
 (schema/register! ::tx-report ::record-tx-response)
 (schema/register! ::record-response
   [:map
    [::run-result ::run-result]
-   [::tx-report  ::tx-report]])
+   [::tx-report  {:optional true} ::tx-report]])
 
 ;; The persisted test entity's schema. Datahike valueTypes live in
 ;; seon.client/agent-bootstrap-schema; the Malli shapes here let
@@ -647,7 +635,7 @@
    Returns the full result with structural recording fields plus the compact
    database transaction envelope."
   {:malli/schema [:=> [:cat ::record-request] ::record-response]}
-  [{::keys [run-result conn]}]
+  [{::keys [run-result]}]
   (let [now     (js/Date.)
         events  (::events run-result)
         per-var (group-by :var (filter #(some? (:var %)) events))
@@ -661,23 +649,17 @@
               failed?       (assoc :seon.test/last-failed-at        now
                                    :seon.test/last-failure-summary  (failure-summary outcome))
               (not failed?) (assoc :seon.test/last-passed-at now))))
-        tx-report (if (seq tx-data)
-                    (await (db/transact!
-                             (cond-> {:seon.db/tx-data tx-data}
-                               conn (assoc :seon.db/conn conn))))
-                    ;; No test outcomes to record — return a no-op compact
-                    ;; envelope without inventing a transaction.
-                    {:seon.db/ok? true :seon.db/tempids {}
-                     :seon.db/tx-count 0 :seon.db/added 0
-                     :seon.db/retracted 0})
-        ok?       (true? (::db/ok? tx-report))
+        tx-report (when (seq tx-data)
+                    (await (db/transact! {:seon.db/tx-data tx-data})))
+        ok?       (or (nil? tx-report)
+                      (nil? (:seon.error/message tx-report)))
         result'   (assoc run-result
                          ::recorded? ok?
                          ::recorded-syms (if ok?
                                            (recorded-syms run-result)
                                            []))]
-    {::run-result result'
-     ::tx-report  tx-report}))
+    (cond-> {::run-result result'}
+      tx-report (assoc ::tx-report tx-report))))
 
 (defn ^:async run-and-record!
   "Run vars and record summary facts.
@@ -799,10 +781,7 @@
           base     (cond-> (assoc result ::selected-vars selected)
                      trigger (assoc ::trigger trigger))]
       (if record?
-        (::run-result
-          (await (record-run! (cond-> {::run-result base}
-                                (::db/conn req)
-                                (assoc ::db/conn (::db/conn req))))))
+        (::run-result (await (record-run! {::run-result base})))
         base))))
 
 (defn ^:async run-ns!
@@ -812,10 +791,8 @@
    projection recorded by default."
   {:malli/schema [:=> [:cat [:map [::ns ::ns]
                                   [::record? {:optional true} ::record?]
-                                  [::trigger {:optional true} ::trigger]
-                                  [::db/conn {:optional true} ::db/conn]]]
+                                  [::trigger {:optional true} ::trigger]]]
                   ::run-result]}
   [{::keys [ns record? trigger] :or {record? true} :as request}]
   (await (run! (cond-> {::ns ns ::record? record?}
-                 trigger (assoc ::trigger trigger)
-                 (::db/conn request) (assoc ::db/conn (::db/conn request))))))
+                 trigger (assoc ::trigger trigger)))))

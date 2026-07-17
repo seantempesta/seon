@@ -23,7 +23,6 @@
   (:require
     [cljs.test :as t :refer [deftest is async]]
     [clojure.string :as str]
-    [datahike.api :as d]
     [malli.core :as m]
     [seon.agent]
     [seon.agent.message]
@@ -34,29 +33,18 @@
 
 (def ^:private probes-ns 'seon.test.runner-probes)
 
-(defn- ensure-conn!
-  "The runner's record path (`run-ns!` with `::record? true`) writes through
-   the ambient `db/*conn*`. The pod binds that at boot; the node-test runner
-   has no boot, so
-   without this the record tests throw `*conn* is unbound` — an
-   UNHANDLED rejection that kills the whole Node process (observed
-   2026-06-09). Opens one fresh :memory conn for this suite and
-   root-`set!`s `db/*conn*` (a `binding` would not survive the
-   Promise boundaries). Returns a Promise of the conn."
-  []
-  (if db/*conn*
-    (js/Promise.resolve db/*conn*)
-    (let [cfg {:store              {:backend :memory :id (random-uuid)}
-               :schema-flexibility :write
-               :keep-history?      true}]
-      (-> (d/create-database cfg)
-          (.then (fn [_] (d/connect cfg {:sync? false})))
-          (.then (fn [conn]
-                   (-> (db/ensure-provenance! {:seon.db/conn conn})
-                       (.then
-                         (fn [_]
-                           (set! db/*conn* conn)
-                           conn)))))))))
+(defn- transaction-report []
+  (let [database {:db-name "runner-test"
+                  :t 1
+                  :as-of nil
+                  :since nil
+                  :history false
+                  :datahike/commit-id (random-uuid)}]
+    {:db-before database
+     :db-after database
+     :tx-data []
+     :tempids {}
+     :tx-meta {}}))
 
 ;; ============================================================
 ;; vars-in-ns
@@ -235,11 +223,14 @@
 
 (deftest run-ns!-records-durable-summaries-without-a-session-id
   (async done
-    (-> (ensure-conn!)
-        (.then (fn [_]
-                 (r/run-ns! {:seon.test.runner/ns probes-ns
-                             :seon.test.runner/record? true
-                             :seon.db/conn db/*conn*})))
+    (let [original-transact db/transact!
+          !request (atom nil)]
+      (set! db/transact!
+            (fn [& [request]]
+              (reset! !request request)
+              (js/Promise.resolve (transaction-report))))
+      (-> (r/run-ns! {:seon.test.runner/ns probes-ns
+                      :seon.test.runner/record? true})
         (.then
           (fn [result]
             (is (true? (:seon.test.runner/recorded? result))
@@ -248,17 +239,19 @@
                 "::recorded-syms should be a vector")
             (is (pos? (count (:seon.test.runner/recorded-syms result)))
                 "::recorded-syms should be non-empty after recording")
-            (let [test-sym (first (:seon.test.runner/recorded-syms result))
-                  row      (db/pull '[*] [:seon.test/sym test-sym])]
-              (is (= test-sym (:seon.test/sym row))
-                  "the database retains one durable row per recorded test")
-              (is (or (inst? (:seon.test/last-passed-at row))
-                      (inst? (:seon.test/last-failed-at row)))
-                  "the durable row carries the latest outcome timestamp"))
-            (done)))
+            (let [rows (:seon.db/tx-data @!request)]
+              (is (= (set (:seon.test.runner/recorded-syms result))
+                     (into #{} (map :seon.test/sym) rows))
+                  "one transaction carries every surfaced per-test row")
+              (is (every? #(or (inst? (:seon.test/last-passed-at %))
+                               (inst? (:seon.test/last-failed-at %)))
+                          rows)
+                  "each durable row carries its latest outcome timestamp"))))
+        (.finally (fn [] (set! db/transact! original-transact)))
+        (.then (fn [_] (done)))
         (.catch (fn [e]
                   (is false (str "threw — " e))
-                  (done))))))
+                  (done)))))))
 
 (deftest no-outcome-recording-is-a-structural-no-op
   (async done
@@ -276,10 +269,8 @@
                     "a completed empty selection is still a recorded run")
                 (is (= [] (:seon.test.runner/recorded-syms result))
                     "an empty selection records no per-test symbols")
-                (is (true? (:seon.db/ok? tx-result))
-                    "the no-op recording resolves through the success channel")
-                (is (zero? (:seon.db/tx-count tx-result))
-                    "no outcomes produce no durable transaction datoms"))))
+                (is (nil? tx-result)
+                    "no outcomes create no transaction report"))))
           (.then (fn [_] (done)))
           (.catch (fn [e]
                     (is false (str "threw — " e))
@@ -287,7 +278,7 @@
 
 (deftest failed-db-recording-reports-no-recorded-symbols
   (async done
-    (let [prior-conn db/*conn*
+    (let [original-transact db/transact!
           run-result {:seon.test.runner/events
                       [{:type :pass
                         :var 'seon.test.runner-probes/probe-passing-test
@@ -295,9 +286,11 @@
                         :actual "truthy"}]
                       :seon.test.runner/summary
                       {:test 1 :pass 1 :fail 0 :error 0}}]
-      ;; No connection forces the ordinary db error envelope without changing
-      ;; the valid test-result data that reaches the recording boundary.
-      (set! db/*conn* nil)
+      (set! db/transact!
+            (fn [& _call-args]
+              (js/Promise.resolve
+               {:seon.error/message "injected writer refusal"
+                :seon.error/kind :core-bug})))
       (-> (r/record-run! {:seon.test.runner/run-result run-result})
           (.then
             (fn [recorded]
@@ -305,14 +298,14 @@
                     tx-result (:seon.test.runner/tx-report recorded)]
                 (is (m/validate :seon.test.runner/record-response recorded)
                     "the failed-write response satisfies the public schema")
-                (is (false? (:seon.db/ok? tx-result))
+                (is (= "injected writer refusal"
+                       (:seon.error/message tx-result))
                     "a rejected durable write remains an error value")
                 (is (false? (:seon.test.runner/recorded? result))
                     "the result reports that durable recording failed")
                 (is (= [] (:seon.test.runner/recorded-syms result))
                     "no symbols claim to be recorded after a rejected write"))))
-          (.finally (fn []
-                      (set! db/*conn* prior-conn)))
+          (.finally (fn [] (set! db/transact! original-transact)))
           (.then (fn [_] (done)))
           (.catch (fn [e]
                     (is false (str "threw — " e))
