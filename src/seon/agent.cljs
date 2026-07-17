@@ -18,7 +18,6 @@
      - `armable-agent-ids` — the wakeable agent ids (a `:seon.db/db` map-in
        adapter over the one [[seon.derive]] leaf); state is a projection of the
        run/terminated-at primitives, never stored
-     - `derive-status` — the agent fingerprint, re-exported from [[seon.derive]]
      - `create!` / `mint!` — reconcile or allocate the complete initial
        durable agent fact set
      - `message!` / `user-ref` — re-exported from [[seon.agent.message]]
@@ -70,7 +69,6 @@
     [seon.config :as config]
     [seon.db :as db]
     [seon.db.id :as db.id]
-    [seon.db.protocol :as db.protocol]
     [seon.derive :as derive]
     [seon.error :as error]
     [seon.runtime.admission :as admission]
@@ -117,11 +115,6 @@
 ;; want the validated entry point.
 ;; ============================================================
 
-(def messages ctx/messages)
-(def current-turn ctx/current-turn)
-(def evals ctx/evals)
-(def current-ns ctx/current-ns)
-(def ctx-entities ctx/ctx-entities)
 (def host-timezone ctx/host-timezone)
 (def truncate-edn ctx/truncate-edn)
 (def message-label ctx/message-label)
@@ -129,10 +122,8 @@
 (def cap-result ctx/cap-result)
 (def cap-result-body ctx/cap-result-body)
 (def namespaces-block ctx-namespaces/namespaces-block)
-(def render-namespace ctx/render-namespace)
 (def warnings-block ctx-warnings/warnings-block)
 (def transcript-block ctx-transcript/transcript-block)
-(def context-root ctx/context-root)
 
 ;; The agent's COMPLETE context block set — a component vector of
 ;; :seon.agent.ctx/block maps (see seon.agent.ctx). SEED-COPIED from the
@@ -306,21 +297,15 @@
 ;; ============================================================
 ;; DERIVED state — there is no stored `:seon.agent/state`. The FSM state is a
 ;; projection of the agent's primitives (terminated-at / open run / paused-at)
-;; via [[seon.derive/derive-state]] — the ONE derivation leaf. `armable-agent-ids`
-;; (below) returns the wakeable agent ids, a FILTER over that one rule;
-;; `derive-status` (re-exported below) is the full fingerprint. The loop + wake
-;; gate now call [[seon.derive/derive-state]] directly with the db value they
-;; hold.
+;; via [[seon.derive/derive-state]] — the ONE derivation leaf. The functions
+;; below acquire an ordinary database value and call the owning async readers.
 ;; ============================================================
 
 (schema/register! ::armable-agent-ids-request [:map [:seon.db/db {:optional true} :seon.db/db]])
-(schema/register! ::armable-agent-ids-response [:vector :seon.agent/id])
+(schema/register! ::agent-ids-response [:vector :seon.agent/id])
+(schema/register! ::direct-error [:map [:seon.error/message :string]])
+(schema/register! ::agent-ids-result [:or ::agent-ids-response ::direct-error])
 (schema/register! ::resumable-agent-ids-response [:vector :seon.agent/id])
-(schema/register!
- ::resumable-agent-ids-result
- [:map
-  [:seon.db/coordinate :seon.db.coordinate/coordinate]
-  [::resumable-agent-ids ::resumable-agent-ids-response]])
 (schema/register! ::initial-created? :boolean)
 (schema/register! ::root-created? :boolean)
 (schema/register! ::ensure-initial-agent-request [:map])
@@ -331,9 +316,9 @@
     [::root-created? ::root-created?]
     [::initial-created? ::initial-created?]
     [:seon.agent/id {:optional true} :seon.agent/id]]
-   :seon.db/transact-response])
+   ::direct-error])
 
-(defn armable-agent-ids
+(defn ^:async armable-agent-ids
   "Born agent ids whose DERIVED state is `:idle` — the ones a trigger can WAKE.
 
    `:idle` = not `:terminated` AND with no OPEN run. Open a fresh run for one;
@@ -341,49 +326,26 @@
    a running/paused agent is mid-run, a terminated agent is dead. The boot
    resume pass + the wake re-arm both read this. Map-in `:seon.db/db` adapter
    over [[seon.derive/armable-agent-ids]] (the one filter-over-derive-state
-   rule); `:seon.db/db` optional (defaults to `*conn*`'s db)."
-  {:malli/schema [:=> [:cat ::armable-agent-ids-request] ::armable-agent-ids-response]}
+   rule); `:seon.db/db` optional (defaults to the session's latest value)."
+  {:malli/schema [:=> [:cat ::armable-agent-ids-request] ::agent-ids-result]}
   [{:seon.db/keys [db]}]
-  (derive/armable-agent-ids (or db @db/*conn*)))
-
-(def resumable-agent-ids-query
-  "Born, nonterminated process hosts used by cold resume and runtime discovery."
-  '[:find [?id ...]
-    :where
-    [?agent :seon.agent/id ?id]
-    [?agent :seon.eval/home-requires _]
-    (not [?agent :seon.agent/terminated-at _])])
+  (let [database (or db (await (db/db)))]
+    (if (:seon.error/message database)
+      database
+      (await (derive/armable-agent-ids database)))))
 
 (defn ^:async resumable-agent-ids!
-  "Read born, nonterminated process hosts at one database coordinate.
+  "Read born, nonterminated process hosts at one database value.
 
    Running and paused agents are included because they still need fresh
    process handles after a cold start or reload. Identity-only provenance
-   targets are not born and are omitted. The returned coordinate makes the
-   immutable basis explicit to callers that combine this result with other
-   startup decisions."
-  {:malli/schema [:=> [:cat] ::resumable-agent-ids-result]}
+   targets are not born and are omitted."
+  {:malli/schema [:=> [:cat] ::agent-ids-result]}
   []
-  (let [result
-        (await
-         (db/execute-many
-          {::db/members
-           [{::db.protocol/operation db.protocol/query-operation
-             ::db.protocol/query-form
-             resumable-agent-ids-query
-             ::db.protocol/arguments []}]}))
-        member (first (::db/results result))]
-    (when (and (map? result) (:seon.error/message result))
-      (throw (ex-info "Resumable agent ID acquisition failed."
-                      {:seon.db/error result
-                       :seon.error/kind :core-bug})))
-    (when-not (true? (::db.protocol/success? member))
-      (throw (ex-info "Resumable agent ID query failed."
-                      {:seon.db/error member
-                       :seon.error/kind :core-bug})))
-    {::db/coordinate (::db/coordinate result)
-     ::resumable-agent-ids
-     (->> (:datahike.query/result member) sort vec)}))
+  (let [database (await (db/db))]
+    (if (:seon.error/message database)
+      database
+      (await (derive/resumable-agent-ids database)))))
 
 (def ^:private ordinary-agent-ever-born-query
   '[:find ?agent .
@@ -393,58 +355,35 @@
     [(not= ?id "root")]])
 
 ;; ============================================================
-;; Derived status — the agent FINGERPRINT. The whole derived state in one map.
-;; It is a pure DERIVED READ owned by [[seon.derive/derive-status]] (the one
-;; derivation leaf); re-exported here so `seon.agent/derive-status` keeps
-;; resolving for the agent-facing surface + the run/lifecycle tests. State is
-;; DERIVED via [[seon.derive/derive-state]] over the primitives — there is NO
-;; stored state.
-;; ============================================================
-
-(def derive-status derive/derive-status)
-
-;; ============================================================
 ;; Agent creation. Reconcile known ids; allocate genuinely new ids atomically.
 ;; ============================================================
 
 (schema/register! ::create-request
   [:map
    [:seon.agent/id                  :seon.agent/id]
-   [:seon.agent/purpose             {:optional true} :any]
-   [:seon.agent/default-turn-limit  {:optional true} :any]])
+   [:seon.agent/purpose             {:optional true} :seon.agent/purpose]
+   [:seon.agent/default-turn-limit  {:optional true}
+    :seon.agent/default-turn-limit]])
 
-;; Success = `{:seon.agent/id id}`; a FAILED transact returns the db error
-;; envelope as-is (errors are values).
+;; Success = `{:seon.agent/id id}`; a failed database operation returns its
+;; direct `:seon.error/message` value unchanged.
 (schema/register! ::create-response
   [:or
    [:map [:seon.agent/id :seon.agent/id]]
-   :seon.db/transact-response])
+   ::direct-error])
 
-(defn- unavailable-db-response
+(defn- error-value?
+  [value]
+  (and (map? value) (string? (:seon.error/message value))))
+
+(defn- unavailable-response
   []
-  {:seon.db/ok? false
-   :seon.db/error (:seon/error (admission/unavailable))})
+  (:seon/error (admission/unavailable)))
 
 (defn- acquisition-failure
   [message data]
-  {:seon.db/ok? false
-   :seon.db/error
-   {:seon.error/message message
-    :seon.error/kind :core-bug
-    :seon.error/data data}})
-
-(defn- successful-member?
-  [member]
-  (true? (::db.protocol/success? member)))
-
-(defn- pull-many-member
-  [entity-ids]
-  {::db.protocol/operation db.protocol/pull-many-operation
-   ::db.protocol/selector '[*]
-   ::db.protocol/entity-ids entity-ids
-   :datahike.resource/max-work 100000
-   :datahike.resource/max-results 4096
-   :datahike.resource/max-result-weight 1048576})
+  {:seon.error/message message
+   :seon.error/data data})
 
 (defn- initial-agent-tx
   "Complete creation facts for one new agent and its home namespace.
@@ -493,43 +432,40 @@
    Identity, the full configured context component tree, scalar dials, purpose,
    parent, and the structural home-namespace entity commit in ONE transaction.
 
-   Returns `{:seon.agent/id id}` on success; on a FAILED transact the
-   db error envelope (`{:seon.db/ok? false :seon.db/error …}`) comes
-   back as-is — errors are values, the same contract as
-   `seon.agent.message/message!`. A failed create means NO agent
+   Returns `{:seon.agent/id id}` on success; a database error comes back as
+   an ordinary `:seon.error/message` value. A failed create means NO agent
    entity; callers must branch instead of chasing a ghost."
   {:malli/schema [:=> [:cat ::create-request] ::create-response]}
   [{:seon.agent/keys [id purpose default-turn-limit]}]
-  (let [acquired
-        (await
-         (db/execute-many
-          {::db/members
-           [(pull-many-member
-             [[:seon.agent/id id]
-              [:seon.ns/name (keyword (str (home/home-ns id)))]])]}))
-        member (first (::db/results acquired))]
-    (if-not (and (map? acquired)
-                 (not (:seon.error/message acquired))
-                 (successful-member? member))
-      (acquisition-failure "Agent creation acquisition failed." acquired)
-      (let [[entity home-entity] (::db.protocol/result member)
+  (let [database (await (db/db))]
+    (if (error-value? database)
+      database
+      (let [entities
+            (await
+             (db/pull-many
+              {::db/db database
+               ::db/selector '[*]
+               ::db/eids
+               [[:seon.agent/id id]
+                [:seon.ns/name (keyword (str (home/home-ns id)))]]
+               ::db/max-results 2
+               ::db/max-result-weight 1048576}))]
+        (if (error-value? entities)
+          (acquisition-failure "Agent creation acquisition failed." entities)
+          (let [[entity home-entity] entities
             complete? (and entity
                            (or (not= "root" id)
                                (string? (:seon.ns/source home-entity))))]
-        (if complete?
-          {:seon.agent/id id}
-          (let [res
-                (await
-                 (db/transact!
-                  {::db/tx-data
-                   (initial-agent-tx id purpose default-turn-limit nil entity)
-                   ::db/expected-coordinate (::db/coordinate acquired)}))]
-            (if (false? (:seon.db/ok? res))
-              (do (js/console.error
-                   (str "seon.agent/create! transact FAILED for " id ": "
-                        (:seon.error/message (:seon.db/error res))))
-                  res)
-              {:seon.agent/id id})))))))
+            (if complete?
+              {:seon.agent/id id}
+              (let [res
+                    (await
+                     (db/transact!
+                      {::db/db database
+                       ::db/expected-db database
+                       ::db/tx-data
+                       (initial-agent-tx id purpose default-turn-limit nil entity)}))]
+                (if (error-value? res) res {:seon.agent/id id})))))))))
 
 (schema/register!
   ::mint-request
@@ -541,23 +477,35 @@
 
 (defn- ^:async allocate-agent!
   [{:seon.agent/keys [purpose default-turn-limit parent]
-    :seon.db/keys [tx-data expected-coordinate]
+    :seon.db/keys [db tx-data expected-db]
+    initial-message-transaction ::initial-message-transaction
     ::db.id/keys [generator-policies]}]
   (await
    (db.id/allocate!
     (cond->
-     {::db.id/allocations
-      [{::db.id/key :seon.agent/id
-        ::db.id/identity-attr :seon.agent/id}]
+     {::db/db db
+      ::db.id/allocations
+      (into [{::db.id/key :seon.agent/id
+              ::db.id/identity-attr :seon.agent/id}]
+            (:seon.agent.message/allocations initial-message-transaction))
       ::db.id/transaction-builder
       (fn [ids]
-        (let [id (get ids :seon.agent/id)]
+        (let [id (get ids :seon.agent/id)
+              child-ref [:seon.agent/id id]
+              message-rows
+              (if initial-message-transaction
+                (::db/tx-data
+                 ((:seon.agent.message/transaction-builder
+                   initial-message-transaction)
+                  ids child-ref))
+                [])]
           (cond->
            {::db/tx-data
-            (into (vec tx-data)
-                  (initial-agent-tx id purpose default-turn-limit parent nil))}
-            expected-coordinate
-            (assoc ::db/expected-coordinate expected-coordinate))))}
+            (into (into (vec tx-data)
+                        (initial-agent-tx id purpose default-turn-limit parent nil))
+                  message-rows)}
+            expected-db
+            (assoc ::db/expected-db expected-db))))}
        generator-policies
        (assoc ::db.id/generator-policies generator-policies)))))
 
@@ -577,15 +525,12 @@
            :seon.agent/default-turn-limit default-turn-limit
            :seon.agent/parent parent}))
         id (get-in env [::db.id/ids :seon.agent/id])]
-    (if (false? (:seon.db/ok? env))
-      (do (js/console.error
-            (str "seon.agent/mint! transact FAILED: "
-                 (:seon.error/message (:seon.db/error env))))
-          env)
+    (if (error-value? env)
+      env
       {:seon.agent/id id})))
 
 (defn ^:async ensure-initial-agent!
-  "Ensure root and the cluster's one initial ordinary agent at one coordinate.
+  "Ensure the root and initial ordinary agent.
 
    A non-root agent's historical birth fact permanently satisfies this
    transition, even if that agent is later terminated or retracted. A fresh
@@ -597,67 +542,65 @@
    [:=> [:cat ::ensure-initial-agent-request]
     ::ensure-initial-agent-response]}
   [_]
-  (let [acquired
-        (await
-         (db/execute-many
-          {::db/members
-           [(pull-many-member
-             [[:seon.agent/id "root"]
-              [:seon.ns/name :my.agent.root]])
-            {::db.protocol/operation db.protocol/query-operation
-             ::db.protocol/query-form ordinary-agent-ever-born-query
-             ::db.protocol/arguments []
-             ::db.protocol/history? true
-             :datahike.resource/max-work 100000
-             :datahike.resource/max-results 1
-             :datahike.resource/max-result-weight 4096}
-            {::db.protocol/operation db.protocol/query-operation
-             ::db.protocol/query-form db.id/generator-policy-query
-             ::db.protocol/arguments [[:seon.agent/id]]
-             :datahike.resource/max-work 100000
-             :datahike.resource/max-results 1
-             :datahike.resource/max-result-weight 4096}]}))
-        [root-member history-member policy-member] (::db/results acquired)]
-    (if-not (and (map? acquired)
-                 (not (:seon.error/message acquired))
-                 (every? successful-member?
-                         [root-member history-member policy-member]))
-      (acquisition-failure "Initial agent acquisition failed." acquired)
-      (let [[root root-home] (::db.protocol/result root-member)
-            root-complete? (and root (string? (:seon.ns/source root-home)))
-            ordinary-born? (boolean (::db.protocol/result history-member))
-            coordinate (::db/coordinate acquired)
-            root-tx (when-not root-complete?
-                      (initial-agent-tx "root" nil nil nil root))]
+  (let [database (await (db/db))]
+    (if (error-value? database)
+      database
+      (let [root-data
+            (await
+             (db/pull-many
+              {::db/db database
+               ::db/selector '[*]
+               ::db/eids [[:seon.agent/id "root"]
+                          [:seon.ns/name :my.agent.root]]
+               ::db/max-results 2
+               ::db/max-result-weight 1048576}))
+            ordinary-born
+            (when-not (error-value? root-data)
+              (await
+               (db/query
+                {::db/db (db/history database)
+                 ::db/query ordinary-agent-ever-born-query
+                 ::db/max-results 1
+                 ::db/max-result-weight 4096})))]
         (cond
-          (and root-complete? ordinary-born?)
-          {::root-created? false ::initial-created? false}
-
-          ordinary-born?
-          (let [result
-                (await
-                 (db/transact!
-                  {::db/tx-data root-tx
-                   ::db/expected-coordinate coordinate}))]
-            (if (false? (:seon.db/ok? result))
-              result
-              {::root-created? true ::initial-created? false}))
-
+          (error-value? root-data) root-data
+          (error-value? ordinary-born) ordinary-born
           :else
-          (let [policies (into {} (::db.protocol/result policy-member))
-                result
-                (await
-                 (allocate-agent!
-                  {:seon.agent/parent [:seon.agent/id "root"]
-                   ::db/tx-data root-tx
-                   ::db/expected-coordinate coordinate
-                   ::db.id/generator-policies policies}))]
-            (if (false? (:seon.db/ok? result))
-              result
-              {::root-created? (not root-complete?)
-               ::initial-created? true
-               :seon.agent/id
-               (get-in result [::db.id/ids :seon.agent/id])})))))))
+          (let [[root root-home] root-data
+                root-complete? (and root (string? (:seon.ns/source root-home)))
+                ordinary-born? (boolean ordinary-born)
+                root-tx (if root-complete?
+                          []
+                          (initial-agent-tx "root" nil nil nil root))]
+            (cond
+              (and root-complete? ordinary-born?)
+              {::root-created? false ::initial-created? false}
+
+              ordinary-born?
+              (let [result
+                    (await
+                     (db/transact!
+                      {::db/db database
+                       ::db/expected-db database
+                       ::db/tx-data root-tx}))]
+                (if (error-value? result)
+                  result
+                  {::root-created? true ::initial-created? false}))
+
+              :else
+              (let [result
+                    (await
+                     (allocate-agent!
+                      {::db/db database
+                       ::db/expected-db database
+                       ::db/tx-data root-tx
+                       :seon.agent/parent [:seon.agent/id "root"]}))]
+                (if (error-value? result)
+                  result
+                  {::root-created? (not root-complete?)
+                   ::initial-created? true
+                   :seon.agent/id
+                   (get-in result [::db.id/ids :seon.agent/id])})))))))))
 
 ;; ============================================================
 ;; Spawn depth (multi-agent-context Piece 2) — the DEPTH-CAP backstop. The soft
@@ -669,31 +612,40 @@
 ;; No name list — a config-dialed number; raise the dial to deepen the tree.
 ;; ============================================================
 
-(defn spawn-depth
+(defn ^:async spawn-depth
   "Depth of `agent-id` in the spawn tree over `db` — root/parentless = 0.
 
    Walks `:seon.agent/parent` refs (child = parent + 1) with a visited-set
    cycle guard: a cycle is a `:core`-fault-worthy invariant break (recorded via
    `seon.error/record!`, never thrown — the fn returns the depth walked so
-   far). Pure read over the passed db value."
+   far). The parent tree is acquired once at the passed database value."
   {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db]
                              [:seon.agent/id :seon.agent/id]]
-                  :int]}
-  [db agent-id]
-  (loop [id agent-id depth 0 seen #{}]
-    (if (contains? seen id)
-      (do (error/record!
-            {:seon.error/raw
-             (js/Error. (str "spawn-depth: :seon.agent/parent cycle detected at "
-                             (pr-str id) " — the spawn tree must be acyclic"))
-             :seon.error/fault :core})
-          depth)
-      (let [parent (:seon.agent/id
-                     (:seon.agent/parent
-                       (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id id]})))]
-        (if (nil? parent)
-          depth
-          (recur parent (inc depth) (conj seen id)))))))
+                  [:or :int ::direct-error]]}
+  [database agent-id]
+  (let [agent
+        (await
+         (db/pull
+          {::db/db database
+           ::db/selector internal/managed-agent-selector
+           ::db/eid [:seon.agent/id agent-id]}))]
+    (if (error-value? agent)
+      agent
+      (loop [current agent depth 0 seen #{}]
+        (let [id (:seon.agent/id current)]
+          (cond
+            (nil? id) depth
+            (contains? seen id)
+            (do
+              (error/record!
+               {:seon.error/raw
+                (js/Error. (str "spawn-depth: :seon.agent/parent cycle detected at "
+                                (pr-str id) " — the spawn tree must be acyclic"))
+                :seon.error/fault :core})
+              depth)
+            (:seon.agent/parent current)
+            (recur (:seon.agent/parent current) (inc depth) (conj seen id))
+            :else depth))))))
 
 ;; ============================================================
 ;; start! — the spawn function. Alias of create! that ALSO writes the caller as
@@ -710,31 +662,55 @@
 ;; `create!` (which REQUIRES the id, so nothing resolves into it).
 (schema/register! ::start-request
   [:map
-   [:seon.agent/purpose             {:optional true} :any]
-   [:seon.agent/default-turn-limit  {:optional true} :any]])
+   [:seon.agent/purpose             {:optional true} :seon.agent/purpose]
+   [:seon.agent/default-turn-limit  {:optional true}
+    :seon.agent/default-turn-limit]])
 (schema/register! ::start-response
   [:or ::create-response :seon.agent.runtime/resume-response])
 
 (defn ^:async ^:private spawn-child!
-  "The atomic mint→resume sequence for [[start!]], extracted so the depth-cap
-   refusal short-circuits before any entity is minted."
-  [purpose default-turn-limit parent-id]
-  (let [res (await
-              (mint!
-                (cond-> {}
-                  (some? purpose)
-                  (assoc :seon.agent/purpose purpose)
-                  (some? default-turn-limit)
-                  (assoc :seon.agent/default-turn-limit default-turn-limit)
-                  parent-id
-                  (assoc :seon.agent/parent [:seon.agent/id parent-id]))))
-        child-id (:seon.agent/id res)]
-    (if (false? (:seon.db/ok? res))
+  "Commit one child birth, then host it from the committed facts."
+  [database purpose default-turn-limit parent-id initial-message-transaction]
+  (let [res
+        (await
+         (allocate-agent!
+          (cond->
+           {::db/db database
+            ::db/expected-db database
+            ::initial-message-transaction initial-message-transaction}
+            (some? purpose)
+            (assoc :seon.agent/purpose purpose)
+            (some? default-turn-limit)
+            (assoc :seon.agent/default-turn-limit default-turn-limit)
+            parent-id
+            (assoc :seon.agent/parent [:seon.agent/id parent-id]))))
+        child-id (get-in res [::db.id/ids :seon.agent/id])]
+    (if (error-value? res)
       res
       (let [resumed (await (runtime/resume! {:seon.agent/id child-id}))]
         (if (:seon.agent.runtime/resumed? resumed)
           {:seon.agent/id child-id}
           resumed)))))
+
+(defn- spawn-depth-error
+  [function-name parent-id depth cap]
+  {:seon.error/message
+   (str function-name ": refused — agent " (pr-str parent-id)
+        " is at spawn depth " depth " (cap " cap ").")})
+
+(defn ^:async ^:private acquire-spawn-database
+  [function-name parent-id]
+  (let [database (await (db/db))]
+    (if (error-value? database)
+      database
+      (let [depth (when parent-id (await (spawn-depth database parent-id)))
+            cap (get (config/config-view database)
+                     :seon.config/spawn-depth-cap 1)]
+        (cond
+          (error-value? depth) depth
+          (and depth (>= depth cap))
+          (spawn-depth-error function-name parent-id depth cap)
+          :else database)))))
 
 (defn ^:async start!
   "Spawn a child agent — the capability-gated spawn lifecycle function.
@@ -745,54 +721,25 @@
    `db/current-agent-id`) in the same transaction. The child is IDLE: it does
    no work until it receives a message (which opens its run #1).
 
-   The minted child's complete process runtime is resumed before this returns,
-   so a message the parent sends RIGHT AFTER spawn actually wakes the child
-   (wake observation is reactive-only: a message sent before listener install
-   never wakes it later, so resume must precede any inbound).
+   The minted child's process runtime is resumed before this returns. Use
+   `delegate!` when child birth and an initial task must be one transaction.
 
-   RESOLVES to `{:seon.agent/id child-id}` — that id is the one you message to
-   reach the child. On a failed transact the db error envelope comes back as-is
-   (errors are values). Called outside an agent scope (no caller) → the child
-   is created PARENTLESS (a host-initiated create), matching `create!`.
-
-   ASYNC — read the id back, never inline it. `start!` is `^:async`: evaled
-   ALONE its returned id is auto-awaited and you SEE the real
-   `{:seon.agent/id \"…\"}`, but `(:seon.agent/id (start! …))` IN THE SAME FORM
-   is `nil` (the Promise hasn't resolved — same re-reference rule as
-   `result/<id>`). So NEVER `(let [c (start! …)] (message/agent (:seon.agent/id c) …))`
-   — it spawns an ORPHAN and messages nil. Two safe paths:
-     1. ONE COMBINATOR (preferred): `(delegate! {:seon.agent/purpose \"…\"
-        :seon.agent.message/content \"<the task>\"})` spawns AND hands the
-        child its task in one call (awaits internally; returns the real id).
-     2. TWO FORMS: eval `(start! {…})` alone, COPY the rendered literal id,
-        then `(message/agent \"<that-id>\" \"<the task>\")` in the NEXT form.
-   Never invent/guess a child id — read it back."
+   Resolves to `{:seon.agent/id child-id}`. Called outside an agent scope, the
+   child is created parentless, matching `create!`."
   {:malli/schema [:=> [:cat ::start-request] ::start-response]}
   [{:seon.agent/keys [purpose default-turn-limit]}]
   (if-not (admission/available?)
-    (unavailable-db-response)
-    (let [parent-id    (db/current-agent-id)
-          cap          (config/spawn-depth-cap)
-          caller-depth (when parent-id (spawn-depth @db/*conn* parent-id))]
-      (if (and caller-depth (>= caller-depth cap))
-      ;; DEPTH-CAP BACKSTOP (Piece 2): the caller is already at/over the cap —
-      ;; refuse as data (never a throw), mint no child. A subagent may not spawn
-      ;; subagents; it does the work itself or reports back to its parent.
-      {:seon.db/ok? false
-       :seon.db/error
-       {:seon.error/message
-        (str "start!: refused — you (" (pr-str parent-id) ") are at spawn "
-             "depth " caller-depth " (cap " cap "); subagents may not spawn "
-             "subagents. Do the work yourself, or report back to your parent "
-             "and let it delegate.")}}
-        (spawn-child! purpose default-turn-limit parent-id)))))
+    (unavailable-response)
+    (let [parent-id (db/current-agent-id)
+          database (await (acquire-spawn-database "start!" parent-id))]
+      (if (error-value? database)
+        database
+        (await
+         (spawn-child!
+          database purpose default-turn-limit parent-id nil))))))
 
 ;; ============================================================
-;; delegate! — the one-form spawn→message combinator. `start!` is `^:async`,
-;; so the broken `(let [c (start! …)] (message/agent (:seon.agent/id c) …))`
-;; recipe reads `nil` (the Promise hasn't resolved). delegate! awaits start!
-;; INTERNALLY, so the child id is REAL, then messages the child its task —
-;; the ergonomic path agents reach for when delegating a task to a worker.
+;; delegate! — the one atomic child-birth plus initial-task transition.
 ;; ============================================================
 
 ;; NO `:seon.agent/id` slot — same reason as [[::start-request]]: the
@@ -800,20 +747,17 @@
 (schema/register! ::delegate-request
   [:map
    [:seon.agent.message/content     :string]
-   [:seon.agent/purpose             {:optional true} :any]
-   [:seon.agent/default-turn-limit  {:optional true} :any]])
+   [:seon.agent/purpose             {:optional true} :seon.agent/purpose]
+   [:seon.agent/default-turn-limit  {:optional true}
+    :seon.agent/default-turn-limit]])
 (schema/register! ::delegate-response
   [:or ::create-response :seon.agent.runtime/resume-response])
 
 (defn ^:async delegate!
   "Spawn a child AND hand it its task in ONE call.
 
-   The ergonomic spawn→message combinator. Because `start!` is `^:async`, the inline
-   `(let [c (start! …)] (message/agent (:seon.agent/id c) …))` recipe reads a
-   `nil` id (the Promise hasn't resolved) and spawns an ORPHAN. delegate!
-   awaits `start!` internally so the child id is REAL, then sends the child
-   `:seon.agent.message/content` FROM you — the child is armed before the
-   message lands, so it wakes on your task.
+   Child birth and the initial task message commit in one transaction before
+   the child process is hosted.
 
      (delegate! {:seon.agent/purpose \"research DuckDB for embedded analytics\"
                  :seon.agent.message/content
@@ -825,31 +769,29 @@
    it. The child id is always minted (spawn a chosen id via `create!`);
    `:seon.agent/default-turn-limit` (optional) seeds the child's work
    bound. RESOLVES to `{:seon.agent/id child-id}` on success — the id you
-   address for any follow-up. On a failed SPAWN the start! error envelope comes
-   back as-is; on a spawn-ok-but-message-failed the message error envelope plus
-   `:seon.agent/id child-id` (the child exists — retry the message). Errors are
-   values; branch on `:seon.db/ok?`."
+   address for any follow-up. A database failure commits neither child nor
+   task. A hosting failure returns the runtime error while the committed facts
+   remain available for runtime reconciliation."
   {:malli/schema [:=> [:cat ::delegate-request] ::delegate-response]}
   [{:seon.agent/keys [purpose default-turn-limit]
     content :seon.agent.message/content}]
   (if-not (admission/available?)
-    (unavailable-db-response)
-    (let [spawn-args (cond-> {}
-                       (some? purpose)            (assoc :seon.agent/purpose purpose)
-                       (some? default-turn-limit) (assoc :seon.agent/default-turn-limit default-turn-limit))
-          res        (await (start! spawn-args))]
-      (if (or (false? (:seon.db/ok? res))
-              (false? (:seon.agent.runtime/resumed? res)))
-        res
-        (let [child-id (:seon.agent/id res)
-              menv     (await (msg/agent child-id content))]
-          (if (false? (:seon.db/ok? menv))
-            (do (js/console.error
-                  (str "seon.agent/delegate! spawned " child-id
-                       " but the task message FAILED: "
-                       (:seon.error/message (:seon.db/error menv))))
-                (assoc menv :seon.agent/id child-id))
-            {:seon.agent/id child-id}))))))
+    (unavailable-response)
+    (if-let [parent-id (db/current-agent-id)]
+      (let [database (await (acquire-spawn-database "delegate!" parent-id))]
+        (if (error-value? database)
+          database
+          (let [message-transaction
+                (await
+                 (msg/initial-agent-transaction
+                  database [:seon.agent/id parent-id] content))]
+            (if (error-value? message-transaction)
+              message-transaction
+              (await
+               (spawn-child!
+                database purpose default-turn-limit parent-id
+                message-transaction))))))
+      (internal/no-agent-error "delegate!"))))
 
 ;; ============================================================
 ;; Process lifecycle. Durable birth is above; these delegate to the one
@@ -913,10 +855,6 @@
 ;; transacts; the function is the validated path).
 ;; ============================================================
 
-;; Shared response shapes for set-purpose! (errors are values).
-(schema/register! ::ok?   :boolean)
-(schema/register! ::error :string)
-
 (schema/register! ::purpose-request
   [:map
    [:seon.agent/purpose :seon.agent/purpose]
@@ -924,13 +862,9 @@
 (schema/register! ::purpose-response
   [:or
    [:map
-    [::ok? [:= true]]
     [:seon.agent/id :seon.agent/id]
     [:seon.agent/purpose :seon.agent/purpose]]
-   [:map
-    [::ok? [:= false]]
-    [::error ::error]]
-   :seon.db/transact-response])
+   ::direct-error])
 
 (defn ^:async set-purpose!
   "Set why an agent exists.
@@ -941,31 +875,40 @@
   {:malli/schema [:=> [:cat ::purpose-request] ::purpose-response]}
   [{purpose :seon.agent/purpose target-id :seon.agent/id}]
   (let [caller-id (db/current-agent-id)
-        id        (or target-id caller-id)
-        database  @db/*conn*]
+        id        (or target-id caller-id)]
     (cond
       (nil? id)
-      {::ok? false
-       ::error (str "set-purpose!: no agent in scope — pass "
-                    ":seon.agent/id or call inside (seon.db/with-agent id …).")}
+      {:seon.error/message
+       (str "set-purpose!: no agent in scope — pass "
+            ":seon.agent/id or call inside (seon.db/with-agent id …).")}
 
       (nil? caller-id)
-      {::ok? false
-       ::error "set-purpose!: no agent in scope."}
-
-      (not (internal/manages? database caller-id id))
-      (let [error (internal/unauthorized-target-error
-                    "set-purpose!" caller-id id)]
-        {::ok? false
-         ::error (:seon.error/message (:seon.db/error error))})
+      (internal/no-agent-error "set-purpose!")
 
       :else
-      (let [res (await (db/transact!
-                         {:seon.db/tx-data
-                          [{:seon.agent/id      id
-                            :seon.agent/purpose purpose}]}))]
-        (if (false? (:seon.db/ok? res))
-          res
-          {::ok? true
-           :seon.agent/id id
-           :seon.agent/purpose purpose})))))
+      (let [database (await (db/db))]
+        (if (error-value? database)
+          database
+          (let [target
+                (await
+                 (db/pull
+                  {::db/db database
+                   ::db/selector internal/managed-agent-selector
+                   ::db/eid [:seon.agent/id id]}))]
+            (cond
+              (error-value? target) target
+              (not (internal/manages? caller-id target))
+              (internal/unauthorized-target-error "set-purpose!" caller-id id)
+              :else
+              (let [res
+                    (await
+                     (db/transact!
+                      {::db/db database
+                       ::db/expected-db database
+                       ::db/tx-data
+                       [{:seon.agent/id id
+                         :seon.agent/purpose purpose}]}))]
+                (if (error-value? res)
+                  res
+                  {:seon.agent/id id
+                   :seon.agent/purpose purpose})))))))))

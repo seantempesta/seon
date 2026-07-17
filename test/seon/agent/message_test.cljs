@@ -80,6 +80,39 @@
     (is (= [:seon.agent.message/id "message-a"]
            (:my.plan/message plan-row)))))
 
+(deftest initial-agent-task-reuses-the-message-builder-with-first-contact-data
+  (async done
+    (let [acquire internal/acquire-send-data
+          child-ref [:seon.agent/id "child-a"]]
+      (set! internal/acquire-send-data
+            (fn [db-value from recipients]
+              (is (identical? database db-value))
+              (is (= [:seon.agent/id "parent-a"] from))
+              (is (= [] recipients)
+                  "the unborn child is not resolved before its birth transaction")
+              (js/Promise.resolve
+               {::db/db db-value
+                :seon.agent.message/from-user? false
+                :seon.agent.message/hops 99})))
+      (finish!
+       (-> (message/initial-agent-transaction
+            database [:seon.agent/id "parent-a"] "do the task")
+           (.then
+            (fn [transaction]
+              (is (= 1 (count (:seon.agent.message/allocations transaction))))
+              (let [built
+                    ((:seon.agent.message/transaction-builder transaction)
+                     {:seon.agent.message/id "message-a"}
+                     child-ref)
+                    [row] (:seon.db/tx-data built)]
+                (is (= "message-a" (:seon.agent.message/id row)))
+                (is (= [child-ref] (:seon.agent.message/to row)))
+                (is (= 1 (:seon.agent.message/hops row)))
+                (is (= :agent (:seon.agent.message/origin row))))))
+           (.finally
+            (fn [] (set! internal/acquire-send-data acquire))))
+       done))))
+
 (deftest message-request-admits-every-supported-ref-shape
   (let [request (fn [from]
                   {:seon.agent.message/from from

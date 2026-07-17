@@ -8,6 +8,7 @@
    envelope or stores a state label."
   (:require
    [clojure.string :as str]
+   [seon.agent.internal :as internal]
    [seon.agent.loop :as loop]
    [seon.agent.message :as message]
    [seon.agent.runtime :as runtime]
@@ -38,44 +39,11 @@
    {:seon.error/message message
     :seon.error/data data}))
 
-(defn- no-agent-error
-  [function-name]
-  (error-value
-   (str function-name ": no agent in scope — call inside "
-        "(seon.db/with-agent …).")))
-
 (defn- no-open-run-error
   [function-name agent-id]
   (error-value
    (str function-name ": agent " (pr-str agent-id)
         " has no open run to act on (it is not currently running).")))
-
-(defn- unauthorized-target-error
-  [function-name caller-id target-id]
-  (error-value
-   (str function-name ": agent " (pr-str caller-id) " cannot manage "
-        (pr-str target-id) "; root manages the cluster and ordinary agents "
-        "manage only themselves and their descendants.")))
-
-(def ^:private target-selector
-  '[:db/id :seon.agent/id :seon.agent/terminated-at
-    {:seon.agent/parent ...}
-    {:seon.agent/run
-     [:seon.agent.run/id :seon.agent.run/status
-      :seon.agent.run/started-at :seon.agent.run/paused-at]}])
-
-(defn- manages-target?
-  [caller-id target]
-  (and (string? caller-id)
-       (map? target)
-       (or (= "root" caller-id)
-           (loop [agent target seen #{}]
-             (let [id (:seon.agent/id agent)]
-               (cond
-                 (nil? id) false
-                 (= caller-id id) true
-                 (contains? seen id) false
-                 :else (recur (:seon.agent/parent agent) (conj seen id))))))))
 
 (defn ^:async ^:private acquire-target
   [database function-name caller-id target-id]
@@ -83,12 +51,12 @@
         (await
          (db/pull
           {::db/db database
-           ::db/selector target-selector
+           ::db/selector internal/managed-agent-selector
            ::db/eid [:seon.agent/id target-id]}))]
     (cond
       (error-value? target) target
-      (not (manages-target? caller-id target))
-      (unauthorized-target-error function-name caller-id target-id)
+      (not (internal/manages? caller-id target))
+      (internal/unauthorized-target-error function-name caller-id target-id)
       :else target)))
 
 (defn- stale-database-error?
@@ -139,7 +107,7 @@
                       agent-id (:seon.agent.run/id current) :waited
                       (js/Date.))}))]
               (if (error-value? report) report :idle))))))
-    (no-agent-error "wait")))
+    (internal/no-agent-error "wait")))
 
 (def ^:private completion-agent-selector
   '[:db/id :seon.agent/id
@@ -277,7 +245,7 @@
                           (completion-transaction-data
                            agent-id run-id result result-ref nil nil
                            (js/Date.))}))))))))))))
-    (no-agent-error "complete")))
+    (internal/no-agent-error "complete")))
 
 (defn ^{:async true :seon.fn/agent-facing? true} complete
   "Complete the current run atomically with its result and optional message."
@@ -306,7 +274,7 @@
    (let [caller-id (db/current-agent-id)
          target-id (or target-id caller-id)]
      (if-not caller-id
-       (no-agent-error "pause")
+       (internal/no-agent-error "pause")
        (let [database (await (db/db))]
          (if (error-value? database)
            database
@@ -344,7 +312,7 @@
      (let [caller-id (db/current-agent-id)
            target-id (or target-id caller-id)]
        (if-not caller-id
-         (no-agent-error "resume")
+         (internal/no-agent-error "resume")
          (let [database (await (db/db))]
            (if (error-value? database)
              database
@@ -425,4 +393,4 @@
         (when (= :terminated final-result)
           (runtime/unhost! {:seon.agent/id target-id}))
         final-result))
-    (no-agent-error "terminate")))
+    (internal/no-agent-error "terminate")))

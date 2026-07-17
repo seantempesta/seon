@@ -323,12 +323,15 @@
     {:seon.agent.message/allocations allocations
      :seon.agent.message/hops hops
      :seon.agent.message/transaction-builder
-     (fn [ids]
+     (fn build-message-transaction
+       ([ids]
+        (build-message-transaction ids to))
+       ([ids recipients]
        (let [message-id (get ids :seon.agent.message/id)
              message-row
              {:seon.agent.message/id message-id
               :seon.agent.message/from from
-              :seon.agent.message/to to
+              :seon.agent.message/to recipients
               :seon.agent.message/content content
               :seon.agent.message/at at
               :seon.agent.message/hops hops
@@ -345,7 +348,7 @@
                  :my.plan/from from
                  :my.plan/message [:seon.agent.message/id message-id]})
               step-allocations)]
-         {:seon.db/tx-data (into [message-row] plan-rows)}))}))
+         {:seon.db/tx-data (into [message-row] plan-rows)})))}))
 
 (defn ^:async ^:no-doc message-transaction-for
   "Acquire and build one message transaction at an immutable database value."
@@ -361,6 +364,37 @@
         :seon.agent.message/origin origin
         :seon.agent.message/at (js/Date.)
         :seon.agent.message/send-data send-data}))))
+
+(defn ^:async ^:no-doc initial-agent-transaction
+  "Validate an agent sender and compose its first task transaction."
+  [database from content]
+  (if (str/blank? content)
+    {:seon.error/message
+     "delegate!: blank :seon.agent.message/content refused."}
+    (let [send-data (await (internal/acquire-send-data database from []))]
+      (cond
+        (failed-read? send-data)
+        send-data
+
+        (:seon.agent.message/from-user? send-data)
+        {:seon.error/message
+         "delegate!: the initial task sender must be an agent."}
+
+        :else
+        (let [transaction
+              (message-transaction
+               {:seon.agent.message/content content
+                :seon.agent.message/from from
+                :seon.agent.message/to []
+                :seon.agent.message/origin :agent
+                :seon.agent.message/at (js/Date.)
+                :seon.agent.message/send-data
+                (assoc send-data :seon.agent.message/hops 0)})
+              build (:seon.agent.message/transaction-builder transaction)]
+          (assoc transaction
+                 :seon.agent.message/transaction-builder
+                 (fn [ids child-ref]
+                   (build ids [child-ref]))))))))
 
 (defn ^:async message!
   "Send a message; the single entry point for message writes.

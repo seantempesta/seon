@@ -16,6 +16,7 @@
         distinct namespaces (the boundary is real code, not a comment)."
   (:require
     [cljs.test :refer [deftest is]]
+    [seon.agent.internal :as agent.internal]
     [seon.agent.ctx.namespaces :as ns]
     [seon.db :as db]
     [seon.db.internal :as db.internal]))
@@ -63,3 +64,26 @@
   (is (fn? db.internal/current-agent-id) "private reader exists in .internal")
   (is (not (identical? db/transact! db.internal/transact!*))
       "public transact! is NOT the same var as the internal worker — it wraps it"))
+
+(deftest agent-management-is-one-pure-rule-over-a-pulled-parent-tree
+  (let [tree {:seon.agent/id "child"
+              :seon.agent/parent
+              {:seon.agent/id "parent"
+               :seon.agent/parent {:seon.agent/id "root"}}}]
+    (is (agent.internal/manages? "child" tree))
+    (is (agent.internal/manages? "parent" tree))
+    (is (agent.internal/manages? "root" tree))
+    (is (not (agent.internal/manages? "other" tree)))
+    (is (not (agent.internal/manages? nil tree)))
+    (is (not (agent.internal/manages? "root" nil)))
+    (is (not (agent.internal/manages?
+              "other"
+              {:seon.agent/id "cycle-a"
+               :seon.agent/parent
+               {:seon.agent/id "cycle-a"}})))
+    (is (string?
+         (:seon.error/message (agent.internal/no-agent-error "pause"))))
+    (is (string?
+         (:seon.error/message
+          (agent.internal/unauthorized-target-error
+           "pause" "child" "other"))))))
