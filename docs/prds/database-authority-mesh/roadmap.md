@@ -157,14 +157,19 @@ before the ticker; failure leaves admission unavailable. Focused proof passes
 obsolete coordinate/provenance/precondition session tests were deleted rather
 than making the current facade satisfy removed APIs.
 
-Earliest unsettled contract: the remaining client lifecycle consumers must
-consume this owner and ordinary database values. Runtime advertisement still
-maintains desired, accepted, and cached coordinate state around a listener
-that now returns one scalar key and native transaction reports. Recovery,
-config, membership, and quiescence still branch on removed envelopes. They
-must be migrated in ordered complete cuts while retaining one initialization,
-publication, recovery, advertisement, and runtime-host sequence without form
-replay or a second startup path. The source contract is grounded at
+Commit `077cdb75` settles runtime advertisement on the same client owner. One
+scalar listener key and each native `:db-after` value drive
+`seon.derive/resumable-agent-ids`; the exact latest ordinary database object
+rejects stale asynchronous completion. Desired, accepted, and cached
+coordinate state plus the settlement loop are deleted. Focused proof passes 4
+advertisement tests/21 assertions and 4 initialization tests/14 assertions.
+
+Earliest unsettled contract: crash recovery must consume this owner and one
+ordinary database value, then config, membership, and quiescence must follow.
+Those consumers still branch on removed envelopes. They must be migrated in
+ordered complete cuts while retaining one initialization, publication,
+recovery, advertisement, and runtime-host sequence without form replay or a
+second startup path. The source contract is grounded at
 [[research/client-single-lifecycle-audit-2026-07-17]].
 `seon.web.serve` also still
 references deleted turn, attempt, and eval-operation coordinate fields and must
@@ -212,6 +217,10 @@ Focused proof passes 10 CLJS tests/51 assertions for package construction and
 wire forwarding, plus 24 writer tests/117 assertions for authority admission.
 
 Current parallel portfolio is converged at the native-result checkpoint.
+Commit `60777866` also deletes the flat `/call` action door; the one retained
+database-seeded `POST /agent/{id}/call` route reaches the existing capability
+handler, with focused proof passing 7 router tests/24 assertions and 12
+transform tests/30 assertions.
 `3ebfcaf5` leaves one current artifact manifest/application digest and removes
 the four historical readers; `9a66bb78` leaves one generated-identity
 allocator; and `c453a5bd` makes that allocator consume the same native
@@ -248,23 +257,23 @@ modest-hardware density checkpoint.
 
 ### Current implementation checkpoint
 
-- **Earliest unsettled contract:** migrate runtime advertisement, then the
-  remaining recovery/config/membership/quiescence consumers through the one
-  settled client session and publication owner.
+- **Earliest unsettled contract:** migrate crash recovery, then the remaining
+  config/membership/quiescence consumers through the one settled client
+  session, publication, and advertisement owner.
 - **Integrated proof that closes it:** eval, autocomplete, namespace context,
   startup, converged reload, advertisement, and runtime hosting reuse ordinary
   database values and native transaction reports; fresh and warm startup both
   execute the one ordered sequence.
-- **Dependency-ready parallel portfolio:** the client advertisement cut is
-  active; the flat action-door deletion and small toolkit database-value cut
+- **Dependency-ready parallel portfolio:** crash recovery is active; the
+  knowledge/skills immutable-database-value cut and the one-map LLM request cut
   are independent consumers; the web/render single-owner audit is durable at
   [[research/web-render-single-owner-audit-2026-07-17]]; the plan consumer cut
   is grounded at [[research/plan-single-owner-audit-2026-07-17]] and explicitly
   rejects the current dirty coordinate/oversized-row prototype. The complete
   parallel-system inventory is durable at
   [[research/parallel-behavior-unification-audit-2026-07-17]].
-- **Next refills:** finish advertisement, then migrate recovery, config,
-  membership, and quiescence in ordered complete cuts; close the web/feed
+- **Next refills:** finish recovery, then migrate config, membership, and
+  quiescence in ordered complete cuts; close the web/feed
   database-value and rendered-transaction owner next, followed by the
   operation-specific plan consumers and atomic eval publication.
   The final graduation gate remains the full frozen-source correctness, live
