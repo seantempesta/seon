@@ -1541,8 +1541,9 @@
           ::writer/request-socket-path request-path})
         ^SocketChannel request-channel (uds/connect! request-path)]
     (try
-      (acquire! request-channel database-name "writer/session")
-      (let [ping-response
+      (let [acquired (acquire! request-channel database-name "writer/session")
+            initial-db (:seon.db/db acquired)
+            ping-response
             (call! request-channel
                    (protocol/ping-request
                     {::protocol/request-id "invalid/ping"}))
@@ -1552,7 +1553,7 @@
                     {::protocol/request-id "invalid/ensure"
                      ::protocol/database-name database-name
                      ::protocol/backend :memory}))
-            initial-coordinate (::coordinate/coordinate ensure-response)
+            ensured-db (:seon.db/db ensure-response)
             writer-connection
             (::registry/conn
              (registry/resolve-connection
@@ -1571,14 +1572,14 @@
             unknown-response
             (call! request-channel
                    (protocol/transaction-request
-                    {::protocol/database-name "not-open"
-                     ::protocol/request-id "unknown-route"
+                    {::protocol/request-id "unknown-route"
+                     :seon.db/db (assoc initial-db :db-name "not-open")
                      ::protocol/transaction-data []}))
             schema-response
             (call! request-channel
                    (protocol/transaction-request
-                    {::protocol/database-name database-name
-                     ::protocol/request-id "writer/schema"
+                    {::protocol/request-id "writer/schema"
+                     :seon.db/db ensured-db
                      ::protocol/transaction-data
                      [{:db/ident :writer.person/id
                        :db/valueType :db.type/string
@@ -1592,8 +1593,8 @@
                        :db/cardinality :db.cardinality/one}]}))
             entity-request
             (protocol/transaction-request
-             {::protocol/database-name database-name
-              ::protocol/request-id "writer/entity"
+             {::protocol/request-id "writer/entity"
+              :seon.db/db (:db-after schema-response)
               ::protocol/transaction-data
               [{:db/id "person-temp"
                 :writer.person/id "alice"
@@ -1615,10 +1616,8 @@
                     [ensure-response invalid-response ensure-after-invalid
                      unknown-response schema-response entity-response
                      recovered-response]))
-        (is (coordinate/same-attachment?
-             (coordinate/resolved (d/db connection))
-             (::coordinate/coordinate ensure-response)))
-        (is (= initial-coordinate (::coordinate/coordinate ensure-after-invalid))
+        (is (= database-name (:db-name (:seon.db/db ensure-response))))
+        (is (= ensured-db (:seon.db/db ensure-after-invalid))
             "invalid input and idempotent ensure do not advance the database")
         (is (= protocol/protocol-error
                (::protocol/error-kind invalid-response)))
@@ -1637,21 +1636,18 @@
              empty?
              (for [message [schema-response entity-response]]
                (filter protocol/reserved-attributes
-                       (map second (::protocol/transaction-data message)))))
+                       (map second (:tx-data message)))))
             "public transaction responses omit receipt implementation datoms")
         (is (every?
              empty?
              (for [message [schema-response entity-response]]
                (filter protocol/reserved-attributes
-                       (keys (or (::protocol/transaction-meta message) {})))))
+                       (keys (or (:tx-meta message) {})))))
             "public transaction responses omit receipt implementation metadata")
-        (is (= (count (::protocol/transaction-data entity-response))
-               (+ (::protocol/datoms-added entity-response)
-                  (::protocol/datoms-retracted entity-response))))
-        (is (true? (::protocol/recovered? recovered-response)))
-        (is (= (::protocol/coordinate entity-response)
-               (::protocol/coordinate recovered-response))
-            "an idempotent retry returns the exact committed coordinate")
+        (is (= (:db-after entity-response) (:db-after recovered-response))
+            "an idempotent retry returns the exact committed database value")
+        (is (= (set (:tx-data entity-response))
+               (set (:tx-data recovered-response))))
         (is (= :writer.status/ready (:writer.person/status stored)))
         (is (instance? Double (:writer.person/score stored)))
         (is (= 1.0 (:writer.person/score stored))))
@@ -1672,9 +1668,9 @@
         ^SocketChannel a (uds/connect! request-path)
         ^SocketChannel b (uds/connect! request-path)]
     (try
-      (acquire! a database-name "fence/a")
-      (acquire! b database-name "fence/b")
-      (let [opened
+      (let [acquired-a (acquire! a database-name "fence/a")
+            _acquired-b (acquire! b database-name "fence/b")
+            opened
             (call! a
                    (protocol/ensure-database-request
                     {::protocol/request-id "invalid/ensure-after"
@@ -1683,8 +1679,8 @@
             schema
             (call! a
                    (protocol/transaction-request
-                    {::protocol/database-name database-name
-                     ::protocol/request-id "fence/schema"
+                    {::protocol/request-id "fence/schema"
+                     :seon.db/db (:seon.db/db acquired-a)
                      ::protocol/transaction-data
                      [{:db/ident :writer.fence/id
                        :db/valueType :db.type/string
@@ -1693,7 +1689,7 @@
                       {:db/ident :writer.fence/value
                        :db/valueType :db.type/string
                        :db/cardinality :db.cardinality/one}]}))
-            frozen (::protocol/coordinate schema)
+            frozen (:db-after schema)
             ready (CountDownLatch. 2)
             start (CountDownLatch. 1)
             submit
@@ -1703,9 +1699,9 @@
                 (.await start)
                 (call! channel
                        (protocol/transaction-request
-                        {::protocol/database-name database-name
-                         ::protocol/request-id request-id
-                         ::protocol/expected-coordinate frozen
+                        {::protocol/request-id request-id
+                         :seon.db/db frozen
+                         :seon.db/expected-db frozen
                          ::protocol/transaction-data
                          [{:writer.fence/id entity-id
                            :writer.fence/value request-id}]}))))
@@ -1718,24 +1714,24 @@
                        (deref right 5000 ::timed-out)]
             accepted (first (filter ::protocol/success? responses))
             rejected (first (remove ::protocol/success? responses))
-            committed (::protocol/coordinate accepted)
+            committed (:db-after accepted)
             wrong-commit
             (call! a
                    (protocol/transaction-request
-                    {::protocol/database-name database-name
-                     ::protocol/request-id "fence/wrong-commit"
-                     ::protocol/expected-coordinate
-                     (assoc committed ::coordinate/commit-id (random-uuid))
+                    {::protocol/request-id "fence/wrong-commit"
+                     :seon.db/db committed
+                     :seon.db/expected-db
+                     (assoc committed :datahike/commit-id (random-uuid))
                      ::protocol/transaction-data
                      [{:writer.fence/id "one"
                        :writer.fence/value "wrong-commit-must-not-land"}]}))
             wrong-branch
             (call! a
                    (protocol/transaction-request
-                    {::protocol/database-name database-name
-                     ::protocol/request-id "fence/wrong-branch"
-                     ::protocol/expected-coordinate
-                     (assoc committed ::coordinate/branch :experiment)
+                    {::protocol/request-id "fence/wrong-database"
+                     :seon.db/db committed
+                     :seon.db/expected-db
+                     (assoc committed :db-name "not-this-database")
                      ::protocol/transaction-data
                      [{:writer.fence/id "one"
                        :writer.fence/value "wrong-branch-must-not-land"}]}))
@@ -1758,18 +1754,18 @@
         (is (true? (::protocol/success? accepted)))
         (is (= protocol/stale-coordinate-error
                (::protocol/error-kind wrong-commit)))
-        (is (= committed (::protocol/current-coordinate wrong-commit))
+        (is (= committed (:seon.db/current-db wrong-commit))
             "equal t cannot cross a different commit identity")
         (is (= protocol/stale-coordinate-error
                (::protocol/error-kind wrong-branch)))
-        (is (= committed (::protocol/current-coordinate wrong-branch))
-            "equal t and commit cannot cross a different branch attachment")
+        (is (= committed (:seon.db/current-db wrong-branch))
+            "an expected value cannot name a different database")
         (is (protocol/valid-response? rejected))
         (is (= protocol/stale-coordinate-error
                (::protocol/error-kind rejected)))
-        (is (= frozen (::protocol/expected-coordinate rejected)))
-        (is (= committed (::protocol/current-coordinate rejected)))
-        (is (= (::coordinate/t committed) (:max-tx (d/db connection)))
+        (is (= frozen (:seon.db/expected-db rejected)))
+        (is (= committed (:seon.db/current-db rejected)))
+        (is (= (:t committed) (:max-tx (d/db connection)))
             "the rejected request creates no receipt or transaction")
         (is (= 1 (count stored))
             "only the winning request's domain facts land"))
