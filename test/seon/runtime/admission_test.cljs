@@ -1,7 +1,6 @@
 (ns seon.runtime.admission-test
   (:require
     [cljs.test :refer [async deftest is use-fixtures]]
-    [datahike.api :as d]
     [seon.agent :as agent]
     [seon.agent.lifecycle :as lifecycle]
     [seon.agent.loop :as loop]
@@ -9,7 +8,6 @@
     [seon.agent.run :as run]
     [seon.agent.runtime :as runtime]
     [seon.agent.schedule :as schedule]
-    [seon.client :as client]
     [seon.db :as db]
     [seon.db.id :as db.id]
     [seon.error :as error]
@@ -78,98 +76,141 @@
   (is (false? (admission/begin-publication!))
       "publication cannot steal a quiescing runtime"))
 
-(defn- with-publication-seams [reconcile! record! body]
-  (with-redefs [db/*conn* (atom ::database)
-                admission/committed-projection
-                (fn [_database]
-                  {:seon.schema.projection/fingerprint 42
-                   :seon.schema.projection/function-contracts {}})
-                schema/current-projection (constantly nil)
-                schema/activate-projection! identity
-                instrument/reconcile-projection! reconcile!
-                error/record! record!]
-    (body)))
+(defn- acquired-program []
+  {::db/coordinate
+   {:db-name "admission-test"
+    :t 42
+    :datahike/commit-id #uuid "00000000-0000-0000-0000-000000000042"}
+   ::db/results
+   [{:seon.db.protocol/success? true
+     :datahike.query/result []}
+    {:seon.db.protocol/success? true
+     :datahike.query/result []}]})
+
+(defn- with-publication-seams
+  [{::keys [committed-projection current-projection activate-projection!
+            reconcile-projection! record!]}
+   body]
+  (let [original-execute-many db/execute-many
+        original-committed-projection admission/committed-projection
+        original-current-projection schema/current-projection
+        original-activate-projection! schema/activate-projection!
+        original-reconcile-projection! instrument/reconcile-projection!
+        original-record! error/record!]
+    (set! db/execute-many (fn [_] (js/Promise.resolve (acquired-program))))
+    (set! admission/committed-projection
+          (or committed-projection
+              (constantly
+                {:seon.schema.projection/fingerprint 42
+                 :seon.schema.projection/function-contracts {}})))
+    (set! schema/current-projection (or current-projection (constantly nil)))
+    (set! schema/activate-projection! (or activate-projection! identity))
+    (set! instrument/reconcile-projection! reconcile-projection!)
+    (set! error/record! record!)
+    (-> (js/Promise.resolve (body))
+        (.finally
+          (fn []
+            (set! db/execute-many original-execute-many)
+            (set! admission/committed-projection original-committed-projection)
+            (set! schema/current-projection original-current-projection)
+            (set! schema/activate-projection! original-activate-projection!)
+            (set! instrument/reconcile-projection!
+                  original-reconcile-projection!)
+            (set! error/record! original-record!))))))
 
 (deftest committed-publication-opens-only-after-verification
-  (let [!activated (atom nil)]
-    (with-redefs [db/*conn* (atom ::database)
-                  admission/committed-projection
-                  (fn [_database]
-                    {:seon.schema.projection/fingerprint 42
-                     :seon.schema.projection/function-contracts {}})
-                  schema/current-projection (constantly nil)
-                  schema/activate-projection! #(reset! !activated %)
-                  instrument/reconcile-projection!
-                  (constantly {::instrument/ok? true})]
-      (let [result (admission/publish-committed!)]
-        (is (true? (::admission/published? result)))
-        (is (false? (::admission/recovered? result)))
-        (is (= 42 (::admission/generation result)))
-        (is (= 42 (::admission/generation (admission/state))))
-        (is (admission/available?))
-        (is (= 42 (:seon.schema.projection/fingerprint @!activated)))))))
+  (async done
+    (let [!activated (atom nil)]
+      (-> (with-publication-seams
+            {::activate-projection! #(reset! !activated %)
+             ::reconcile-projection! (constantly {::instrument/ok? true})
+             ::record! (constantly nil)}
+            admission/publish-committed!)
+            (.then
+              (fn [result]
+                (is (true? (::admission/published? result)))
+                (is (false? (::admission/recovered? result)))
+                (is (= 42 (::admission/generation result)))
+                (is (= 42 (::admission/generation (admission/state))))
+                (is (admission/available?))
+                (is (= 42 (:seon.schema.projection/fingerprint @!activated)))
+                (done)))
+            (.catch (fn [error]
+                      (is false (str "publication threw — " error))
+                      (done)))))))
 
 (deftest prepared-publication-stays-closed-through-an-injected-completion
-  (let [!effects (atom [])]
-    (with-redefs [db/*conn* (atom ::database)
-                  admission/committed-projection
-                  (fn [_database]
-                    {:seon.schema.projection/fingerprint 42
-                     :seon.schema.projection/function-contracts {}})
-                  schema/current-projection (constantly nil)
-                  schema/activate-projection!
-                  (fn [projection]
-                    (swap! !effects conj :projection-activated)
-                    projection)
-                  instrument/reconcile-projection!
-                  (constantly {::instrument/ok? true})]
-      (let [preparation (admission/prepare-committed! {})]
-        (is (true? (::admission/prepared? preparation)))
-        (is (= :publishing (::admission/status (admission/state))))
-        (is (false? (admission/available?))
-            "verified wrappers remain hidden while completion is pending")
+  (async done
+    (let [!effects (atom [])]
+      (-> (with-publication-seams
+            {::activate-projection!
+             (fn [projection]
+               (swap! !effects conj :projection-activated)
+               projection)
+             ::reconcile-projection! (constantly {::instrument/ok? true})
+             ::record! (constantly nil)}
+            #(admission/prepare-committed! {}))
+            (.then
+              (fn [preparation]
+                (is (true? (::admission/prepared? preparation)))
+                (is (= :publishing (::admission/status (admission/state))))
+                (is (false? (admission/available?))
+                    "verified wrappers remain hidden while completion is pending")
 
-        (let [wrong-publication
-              (admission/admit-prepared!
-                (assoc preparation ::admission/generation 43))]
-          (is (false? (::admission/published? wrong-publication)))
-          (is (= :publishing (::admission/status (admission/state))))
-          (is (false? (admission/available?))
-              "a result for another generation cannot open admission"))
+                (let [wrong-publication
+                      (admission/admit-prepared!
+                        (assoc preparation ::admission/generation 43))]
+                  (is (false? (::admission/published? wrong-publication)))
+                  (is (= :publishing (::admission/status (admission/state))))
+                  (is (false? (admission/available?))
+                      "a result for another generation cannot open admission"))
 
-        (swap! !effects conj :completion-verified)
-        (let [publication (admission/admit-prepared! preparation)]
-          (is (true? (::admission/published? publication)))
-          (is (= [:projection-activated :completion-verified] @!effects))
-          (is (= 42 (::admission/generation (admission/state))))
-          (is (admission/available?)))))))
+                (swap! !effects conj :completion-verified)
+                (let [publication (admission/admit-prepared! preparation)]
+                  (is (true? (::admission/published? publication)))
+                  (is (= [:projection-activated :completion-verified] @!effects))
+                  (is (= 42 (::admission/generation (admission/state))))
+                  (is (admission/available?)))
+                (done)))
+            (.catch (fn [error]
+                      (is false (str "preparation threw — " error))
+                      (done)))))))
 
 (deftest publication-reconciles-from-the-projection-captured-before-replay
-  (let [projection-a {:seon.schema.projection/fingerprint 1
+  (async done
+    (let [projection-a {:seon.schema.projection/fingerprint 1
                       :seon.schema.projection/function-contracts {}}
         projection-b {:seon.schema.projection/fingerprint 2
                       :seon.schema.projection/function-contracts {}}
         !active (atom projection-a)
         !reconciliations (atom [])]
-    (with-redefs [db/*conn* (atom ::database-b)
-                  admission/committed-projection (constantly projection-b)
-                  schema/current-projection #(deref !active)
-                  schema/activate-projection! #(reset! !active %)
-                  instrument/reconcile-projection!
-                  (fn [request]
-                    (swap! !reconciliations conj request)
-                    {::instrument/ok? true})]
-      (is (true? (admission/begin-publication!))
-          "publication captures attachment A before replay")
-      (reset! !active projection-b)
-      (let [result (admission/publish-committed!)]
-        (is (true? (::admission/published? result)))
-        (is (= [{::instrument/old-projection projection-a
-                 ::instrument/new-projection projection-b}]
-               @!reconciliations)
-            "publication removes A wrappers after replay activates B")
-        (is (identical? projection-b @!active))
-        (is (= 2 (::admission/generation (admission/state))))))))
+      (-> (with-publication-seams
+            {::committed-projection (constantly projection-b)
+             ::current-projection #(deref !active)
+             ::activate-projection! #(reset! !active %)
+             ::reconcile-projection!
+             (fn [request]
+               (swap! !reconciliations conj request)
+               {::instrument/ok? true})
+             ::record! (constantly nil)}
+            (fn []
+              (is (true? (admission/begin-publication!))
+                  "publication captures attachment A before replay")
+              (reset! !active projection-b)
+              (admission/publish-committed!)))
+            (.then
+              (fn [result]
+                (is (true? (::admission/published? result)))
+                (is (= [{::instrument/old-projection projection-a
+                         ::instrument/new-projection projection-b}]
+                       @!reconciliations)
+                    "publication removes A wrappers after replay activates B")
+                (is (identical? projection-b @!active))
+                (is (= 2 (::admission/generation (admission/state))))
+                (done)))
+            (.catch (fn [error]
+                      (is false (str "publication threw — " error))
+                      (done)))))))
 
 (deftest detach-removes-the-active-projection-and-is-idempotent
   (let [projection-a {:seon.schema.projection/fingerprint 1
@@ -235,73 +276,100 @@
         (is (= 1 (count @!recorded))
             "one failed detach occurrence records one core fault")))))
 
-(deftest fresh-database-opens-after-detach-regressions
-  (async done
-    (-> (client/open-agent-conn!)
-        (.then (fn [conn] (d/release conn)))
-        (.then (fn [_] (is true) (done)))
-        (.catch (fn [error]
-                  (is false (str "fresh database failed after detach: " error))
-                  (done))))))
+(deftest committed-projection-consumes-ordinary-authority-rows
+  (let [projection
+        (admission/committed-projection
+          {::admission/schema-rows
+           [[:probe.entity/id ":string"]]
+           ::admission/function-contract-rows
+           [["probe.entity/find" "[:=> [:cat :string] :string]"]]})]
+    (is (= :string
+           (get-in projection
+                   [:seon.schema.projection/forms :probe.entity/id])))
+    (is (= [:=> [:cat :string] :string]
+           (get-in projection
+                   [:seon.schema.projection/function-contracts
+                    'probe.entity/find])))))
 
 (deftest failed-publication-retries-once-and-records-once
-  (let [!attempts (atom 0)
-        !recorded (atom [])]
-    (with-publication-seams
-      (fn [_]
-        (if (= 1 (swap! !attempts inc))
-          (throw (js/Error. "injected first wrapper failure"))
-          {::instrument/ok? true}))
-      #(swap! !recorded conj %)
-      (fn []
-        (let [result (admission/publish-committed!)]
-          (is (true? (::admission/published? result)))
-          (is (true? (::admission/recovered? result)))
-          (is (= 2 @!attempts))
-          (is (= 1 (count @!recorded)))
-          (is (admission/available?)))))))
+  (async done
+    (let [!attempts (atom 0)
+          !recorded (atom [])]
+      (-> (with-publication-seams
+            {::reconcile-projection!
+             (fn [_]
+               (if (= 1 (swap! !attempts inc))
+                 (throw (js/Error. "injected first wrapper failure"))
+                 {::instrument/ok? true}))
+             ::record! #(swap! !recorded conj %)}
+            admission/publish-committed!)
+          (.then
+            (fn [result]
+              (is (true? (::admission/published? result)))
+              (is (true? (::admission/recovered? result)))
+              (is (= 2 @!attempts))
+              (is (= 1 (count @!recorded)))
+              (is (admission/available?))
+              (done)))
+          (.catch (fn [error]
+                    (is false (str "publication threw — " error))
+                    (done)))))))
 
 (deftest closed-preparation-can-retry-without-recording-a-fault
-  (let [!attempts (atom 0)
-        !recorded (atom [])]
-    (with-publication-seams
-      (fn [_]
-        (swap! !attempts inc)
-        (throw (js/Error. "restore preparation failure")))
-      #(swap! !recorded conj %)
-      (fn []
-        (let [result
-              (admission/prepare-committed!
-                {::admission/record-failures? false})]
-          (is (false? (::admission/prepared? result)))
-          (is (= 2 @!attempts) "the existing repair attempt remains intact")
-          (is (empty? @!recorded)
-              "a disposable restore projection failure writes no core fact")
-          (is (= :unavailable (::admission/status (admission/state)))))))))
+  (async done
+    (let [!attempts (atom 0)
+          !recorded (atom [])]
+      (-> (with-publication-seams
+            {::reconcile-projection!
+             (fn [_]
+               (swap! !attempts inc)
+               (throw (js/Error. "restore preparation failure")))
+             ::record! #(swap! !recorded conj %)}
+            #(admission/prepare-committed!
+               {::admission/record-failures? false}))
+          (.then
+            (fn [result]
+              (is (false? (::admission/prepared? result)))
+              (is (= 2 @!attempts) "the existing repair attempt remains intact")
+              (is (empty? @!recorded)
+                  "a disposable restore projection failure writes no core fact")
+              (is (= :unavailable (::admission/status (admission/state))))
+              (done)))
+          (.catch (fn [error]
+                    (is false (str "preparation threw — " error))
+                    (done)))))))
 
 (deftest deterministic-repair-failure-stays-unavailable
-  (let [!attempts (atom 0)
-        !recorded (atom [])]
-    (with-publication-seams
-      (fn [_]
-        (swap! !attempts inc)
-        (throw (js/Error. "deterministic wrapper failure")))
-      #(swap! !recorded conj %)
-      (fn []
-        (let [result (admission/publish-committed!)]
-          (is (false? (::admission/published? result)))
-          (is (= 2 @!attempts))
-          (is (= 1 (count @!recorded)))
-          (is (= :unavailable (::admission/status (admission/state))))
-          (is (not (admission/available?)))
-          (admission/unavailable)
-          (admission/unavailable)
-          (is (= 1 (count @!recorded))
-              "boundary refusals never create an error census"))))))
+  (async done
+    (let [!attempts (atom 0)
+          !recorded (atom [])]
+      (-> (with-publication-seams
+            {::reconcile-projection!
+             (fn [_]
+               (swap! !attempts inc)
+               (throw (js/Error. "deterministic wrapper failure")))
+             ::record! #(swap! !recorded conj %)}
+            admission/publish-committed!)
+          (.then
+            (fn [result]
+              (is (false? (::admission/published? result)))
+              (is (= 2 @!attempts))
+              (is (= 1 (count @!recorded)))
+              (is (= :unavailable (::admission/status (admission/state))))
+              (is (not (admission/available?)))
+              (admission/unavailable)
+              (admission/unavailable)
+              (is (= 1 (count @!recorded))
+                  "boundary refusals never create an error census")
+              (done)))
+          (.catch (fn [error]
+                    (is false (str "publication threw — " error))
+                    (done)))))))
 
 (defn- unavailable-kind
   [result]
-  (or (get-in result [:seon/error :seon.error/kind])
+  (or (:seon.error/kind result)
+      (get-in result [:seon/error :seon.error/kind])
       (get-in result [:seon.db/error :seon.error/kind])))
 
 (deftest closed-agent-boundaries-refuse-before-owning-effects
@@ -348,8 +416,7 @@
   (async done
     (let [!effects (atom [])
           wake ((loop/wake-handler {:seon.agent/id "closed-agent"})
-                {:seon.db/db ::unused
-                 :seon.db/attr-index {}})
+                {:db-after ::unused :tx-data []})
           drive (loop/drive-run! {:seon.agent/id "closed-agent"})]
       (with-redefs [db/query
                     (fn [& _]
@@ -360,7 +427,8 @@
                       (swap! !effects conj :watchdog)
                       (js/Promise.resolve {}))]
         (-> (js/Promise.all
-              #js [(loop/run-loop!
+              #js [wake drive
+                   (loop/run-loop!
                      {:seon.agent/id "closed-agent"}
                      "closed-run")
                    (schedule/fire-due-schedules!
@@ -368,12 +436,13 @@
                    ((deref #'loop/run-tick!) (js/Date.))])
             (.then
               (fn [results]
-                (let [[loop-result schedule-result tick-result]
+                (let [[wake-result drive-result loop-result
+                       schedule-result tick-result]
                       (array-seq results)]
                   (is (= :seon.runtime/unavailable
-                         (unavailable-kind wake)))
+                         (unavailable-kind wake-result)))
                   (is (= :seon.runtime/unavailable
-                         (unavailable-kind drive)))
+                         (unavailable-kind drive-result)))
                   (is (= :seon.runtime/unavailable
                          (unavailable-kind loop-result)))
                   (is (= [] (:seon.agent.schedule/fired schedule-result)))
@@ -391,19 +460,26 @@
 (deftest drain-controls-remain-available-while-admission-is-closed
   (async done
     (let [!effects (atom [])
-          original-connection db/*conn*
-          original-entity db/entity
+          original-db db/db
+          original-pull db/pull
           original-current-run run/current-run
           original-current-agent-id db/current-agent-id
           original-transact db/transact!
           original-unhost runtime/unhost!]
-      (set! db/*conn* (atom ::database))
-      (set! db/entity
+      (set! db/db
             (fn
-              ([{:seon.db/keys [ref]}]
-               {:seon.agent/id (second ref)})
-              ([_database ref]
-               {:seon.agent/id (second ref)})))
+              ([] (js/Promise.resolve ::database))
+              ([_] (js/Promise.resolve ::database))))
+      (set! db/pull
+            (fn
+              ([{:seon.db/keys [eid]}]
+               (js/Promise.resolve
+                 {:seon.agent/id (second eid)
+                  :seon.agent/parent {:seon.agent/id "draining-agent"}}))
+              ([_selector eid]
+               (js/Promise.resolve {:seon.agent/id (second eid)}))
+              ([_database _selector eid]
+               (js/Promise.resolve {:seon.agent/id (second eid)}))))
       (set! run/current-run (constantly nil))
       (set! db/current-agent-id (constantly "draining-agent"))
       (set! db/transact!
@@ -423,11 +499,11 @@
             (fn [results]
               (let [[wait-result complete-result pause-result terminate-result]
                     (array-seq results)]
-                (is (false? (:seon.db/ok? wait-result))
+                (is (string? (:seon.error/message wait-result))
                     "wait reached its ordinary no-open-run diagnosis")
-                (is (false? (:seon.db/ok? complete-result))
+                (is (string? (:seon.error/message complete-result))
                     "complete reached its ordinary no-open-run diagnosis")
-                (is (false? (:seon.db/ok? pause-result))
+                (is (string? (:seon.error/message pause-result))
                     "pause reached its ordinary no-open-run diagnosis")
                 (is (= :terminated terminate-result))
                 (is (= [:terminate-write :unhost] @!effects)
@@ -436,8 +512,8 @@
                     (is false (str "drain control threw — " error))))
           (.finally
             (fn []
-              (set! db/*conn* original-connection)
-              (set! db/entity original-entity)
+              (set! db/db original-db)
+              (set! db/pull original-pull)
               (set! run/current-run original-current-run)
               (set! db/current-agent-id original-current-agent-id)
               (set! db/transact! original-transact)
@@ -447,12 +523,27 @@
 (deftest available-baseline-preserves-domain-validation-and-schedule-effects
   (async done
     (restore-test-admission!)
-    (let [!effects (atom [])]
-      (with-redefs [db/query
-                    (fn [& _]
-                      (swap! !effects conj :schedule-scan)
-                      [])]
-        (-> (js/Promise.all
+    (let [!effects (atom [])
+          original-db db/db
+          original-execute-many db/execute-many]
+      (set! db/db
+            (fn
+              ([] (js/Promise.resolve ::database))
+              ([_] (js/Promise.resolve ::database))))
+      (set! db/execute-many
+            (fn [_]
+              (swap! !effects conj :schedule-scan)
+              (js/Promise.resolve
+                {::db/results
+                 [{:seon.db.protocol/success? true
+                   :datahike.query/result []}
+                  {:seon.db.protocol/success? true
+                   :datahike.query/result []}
+                  {:seon.db.protocol/success? true
+                   :datahike.query/result []}
+                  {:seon.db.protocol/success? true
+                   :datahike.pull/result {}}]})))
+      (-> (js/Promise.all
               #js [(-> (message/message!
                          {:seon.agent.message/content " "
                           :seon.agent.message/from message/user-ref})
@@ -464,7 +555,7 @@
               (fn [results]
                 (let [[message-result schedule-result]
                       (array-seq results)]
-                  (is (false? (:seon.db/ok? message-result)))
+                  (is (string? (:seon.error/message message-result)))
                   (is (not= :seon.runtime/unavailable
                             (unavailable-kind message-result))
                       "available admission reaches ordinary message validation")
@@ -474,4 +565,8 @@
                   (done))))
             (.catch (fn [e]
                       (is false (str "available boundary threw — " e))
-                      (done))))))))
+                      (done)))
+            (.finally
+              (fn []
+                (set! db/db original-db)
+                (set! db/execute-many original-execute-many)))))))
