@@ -69,16 +69,10 @@
           requests (atom [])
           effects (atom [])
           originals [[#(set! admission/available? %) admission/available?]
-                     [#(set! config/schedule-breaker-crash-count %)
-                      config/schedule-breaker-crash-count]
-                     [#(set! config/schedule-breaker-window-ms %)
-                      config/schedule-breaker-window-ms]
                      [#(set! db/db %) db/db]
                      [#(set! db/execute-many %) db/execute-many]
                      [#(set! run/open-run! %) run/open-run!]]]
       (set! admission/available? (constantly true))
-      (set! config/schedule-breaker-crash-count (constantly 3))
-      (set! config/schedule-breaker-window-ms (constantly 1800000))
       (set! db/db (fn ([] (swap! effects conj :db)
                           (js/Promise.resolve database))
                     ([_] (js/Promise.resolve database))))
@@ -91,7 +85,12 @@
                   :datahike.query/result
                   [["agent-a" {} "0 9 * * *" 'my.jobs/run]]}
                  {::protocol/success? true :datahike.query/result []}
-                 {::protocol/success? true :datahike.query/result []}]})))
+                 {::protocol/success? true :datahike.query/result []}
+                 {::protocol/success? true
+                  ::protocol/result
+                  {:seon.config/id config/cluster-config-id
+                   :seon.config.breaker/crash-count 4
+                   :seon.config.breaker/window-ms 60000}}]})))
       (set! run/open-run!
             (fn [_]
               (swap! effects conj :open)
@@ -119,9 +118,18 @@
                (is (= 1 (count @requests)))
                (let [request (first @requests)]
                  (is (identical? database (::db/db request)))
-                 (is (= 3 (count (::db/members request))))
+                 (is (= 4 (count (::db/members request))))
                  (is (every? #(identical? database (::db/db %))
-                             (::db/members request))))
+                             (::db/members request)))
+                 (let [configuration-member (last (::db/members request))]
+                   (is (= protocol/pull-operation
+                          (::protocol/operation configuration-member)))
+                   (is (= [:seon.config/id
+                           :seon.config.breaker/crash-count
+                           :seon.config.breaker/window-ms]
+                          (::protocol/selector configuration-member)))
+                   (is (= [:seon.config/id config/cluster-config-id]
+                          (::protocol/entity-id configuration-member)))))
                (is (= [:db :open [:exec ['my.jobs/run]]
                        [:drive {:seon.agent/id "agent-a"}]]
                       @effects))))

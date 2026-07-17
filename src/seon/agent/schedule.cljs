@@ -306,11 +306,18 @@
    ::db.protocol/query-form query
    ::db.protocol/arguments arguments})
 
+(defn- pull-member [database selector entity-id]
+  {::db.protocol/operation db.protocol/pull-operation
+   ::db/db database
+   ::db.protocol/selector selector
+   ::db.protocol/entity-id entity-id})
+
 (defn- successful-member? [member]
   (true? (::db.protocol/success? member)))
 
 (defn- member-result [member]
-  (:datahike.query/result member))
+  (or (::db.protocol/result member)
+      (:datahike.query/result member)))
 
 (defn- failed-member [member]
   {:seon.error/message
@@ -349,6 +356,11 @@
     [?run :seon.agent.run/trigger :schedule]
     [?run :seon.agent.run/started-at ?started-at]])
 
+(def ^:private breaker-config-selector
+  [:seon.config/id
+   :seon.config.breaker/crash-count
+   :seon.config.breaker/window-ms])
+
 (defn ^:async ^:private acquire-schedule-facts [database]
   (let [acquired
         (await
@@ -357,21 +369,26 @@
            ::db/members
            [(query-member database schedule-rows-query [])
             (query-member database crashed-runs-query [])
-            (query-member database scheduled-starts-query [])]
+            (query-member database scheduled-starts-query [])
+            (pull-member database breaker-config-selector
+                         [:seon.config/id config/cluster-config-id])]
            ::db/max-result-weight 1048576}))
         members (::db/results acquired)]
     (cond
       (error-value? acquired) acquired
-      (not= 3 (count members))
+      (not= 4 (count members))
       {:seon.error/message
        "Schedule acquisition returned the wrong member count."}
       (not (every? successful-member? members))
       (failed-member (first (remove successful-member? members)))
       :else
-      (let [[schedules crashes starts] (map member-result members)]
+      (let [[schedules crashes starts stored-configuration]
+            (map member-result members)]
         {:seon.agent.schedule/schedules schedules
          :seon.agent.schedule/crashes crashes
-         :seon.agent.schedule/starts starts}))))
+         :seon.agent.schedule/starts starts
+         :seon.config/configuration
+         (db/decode-edn-values (or stored-configuration {}))}))))
 
 (defn- minute-of
   "Whole-minute bucket of a Date — its epoch-ms floored to the minute."
@@ -456,6 +473,7 @@
           (if (error-value? facts)
             facts
             (let [schedule-rows (:seon.agent.schedule/schedules facts)
+                  configuration (:seon.config/configuration facts)
                   schedules-by-id (group-by first schedule-rows)
                   crashes-by-id (->> (:seon.agent.schedule/crashes facts)
                                      (group-by first)
@@ -470,8 +488,10 @@
                                        (assoc result id (mapv second rows)))
                                      {}))
                   ids (sort (keys schedules-by-id))
-                  breaker-n (config/schedule-breaker-crash-count)
-                  breaker-w (config/schedule-breaker-window-ms)
+                  breaker-n
+                  (config/schedule-breaker-crash-count configuration)
+                  breaker-w
+                  (config/schedule-breaker-window-ms configuration)
                   crash-cutoff (- (.getTime ^js now) breaker-w)]
               (loop [[id & more] ids
                      fired []]
