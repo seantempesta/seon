@@ -528,13 +528,13 @@
    registration an id-carrying map is indistinguishable between
    unmarked-entity and legitimate envelope; once rows EXIST under the
    id-attr, an undeclared kind is a real defect. Derived at render,
-   self-heals the moment the kind is marked. Fires GLOBALLY across
-   AGENT-authored kinds (:seon.warn/ns is ignored), but EXCLUDES
-   core-provenance namespaces ([[seon.db/core-attr-namespaces]]) — agents can't and
-   shouldn't re-register the compiled core's :map schemas, so nagging
-   them about an unmarked core kind is a no-op task. (The fix for a
-   core kind is to mark its :map schema {:seon.db/entity true} at
-   source, which is a core change, not an agent one.)
+   self-heals the moment the entity map is marked. Fires GLOBALLY across
+   agent-authored identity attrs (:seon.warn/ns is ignored), but excludes
+   the exact attrs whose schema facts were authored by the boot process.
+   Agents cannot and should not re-register compiled core schemas, so nagging
+   them about an unmarked boot attr is a no-op task. The fix for a genuine
+   core entity is to mark its owning :map schema {:seon.db/entity true} at
+   source; ordinary request/config rows correctly remain unmarked.
 
    DEV-ONLY: this is the one check that is purely about the
    entity-renderer marker — a dev/web-UI display concern, not an agent
@@ -546,21 +546,20 @@
    runs globally and stays visible in the dev/web-UI surface via
    `:seon.warn/include-dev? true`."
   {:malli/schema [:=> [:cat ::check-request] ::check-response]}
-  [{:seon.db/keys [db] data ::data :as req}]
+  [{data ::data :as req}]
   (let [marked (marked-entity-id-attrs data)
-        core   (if data
-                 (into #{}
-                       (keep (fn [[attr process-id]]
-                               (when (= process-id :seon.db.process/boot)
-                                 (some-> attr namespace keyword))))
-                       (::schema-provenance data))
-                 (db/core-attr-namespaces db))]
+        boot-attrs
+        (into #{}
+              (keep (fn [[attr process-id]]
+                      (when (= process-id :seon.db.process/boot)
+                        attr)))
+              (::schema-provenance data))]
     {:seon.warn/kind :unmarked-entity-kinds
      :seon.warn/dev-only? true
      :seon.warn/affected
      (->> (identity-attrs req)
           (remove marked)
-          (remove #(contains? core (keyword (namespace %))))
+          (remove boot-attrs)
           (filter #(pos? (attr-instance-count req %)))
           (sort-by str)
           (mapv (fn [attr]
