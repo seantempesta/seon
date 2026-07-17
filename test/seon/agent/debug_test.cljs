@@ -102,7 +102,7 @@
                     (get-in @observed [0 1 :seon.db/db])))
              (is (= database
                     (get-in @observed [1 1 :seon.db/db])))
-             (is (= 101 (get-in @observed [1 1 :seon.db/eid])))))
+             (is (= 101 (get-in @observed [1 1 :seon.db/ref])))))
           (.catch (fn [error] (is false (str error))))
           (.finally
            (fn []

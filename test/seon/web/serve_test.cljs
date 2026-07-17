@@ -175,7 +175,7 @@
               ([request]
                (swap! requests conj request)
                (js/Promise.resolve
-                (if (= [:seon.config/id "cluster"] (:seon.db/eid request))
+                (if (= [:seon.config/id "cluster"] (:seon.db/ref request))
                   {:seon.config/repl-mode :batch}
                   {})))
               ([_selector _entity-id]

@@ -401,8 +401,8 @@
                          (await
                           (db/pull-many
                            {:seon.db/db database
-                            :seon.db/selector '[*]
-                            :seon.db/eids (mapv first selected)}))
+                            :seon.db/pull-pattern '[*]
+                            :seon.db/refs (mapv first selected)}))
                          [])]
             (if (:seon.error/message pulled)
               (recall-error "entity acquisition" pulled)

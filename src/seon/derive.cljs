@@ -110,11 +110,11 @@
   (let [agent (await
                (db/pull
                 {:seon.db/db database
-                 :seon.db/selector
+                 :seon.db/pull-pattern
                  [:seon.agent/terminated-at
                   {:seon.agent/run
                    [:seon.agent.run/status :seon.agent.run/paused-at]}]
-                 :seon.db/eid [:seon.agent/id agent-id]}))]
+                 :seon.db/ref [:seon.agent/id agent-id]}))]
     (if (error-value? agent)
       agent
       (state-from-primitives (primitives-from-agent agent)))))
@@ -178,8 +178,8 @@
   [database run-id]
   (let [run (await
              (db/pull {:seon.db/db database
-                       :seon.db/selector [:seon.agent.run/last-beat-at]
-                       :seon.db/eid [:seon.agent.run/id run-id]}))]
+                       :seon.db/pull-pattern [:seon.agent.run/last-beat-at]
+                       :seon.db/ref [:seon.agent.run/id run-id]}))]
     (if (error-value? run) run (:seon.agent.run/last-beat-at run))))
 
 (defn ^:async agent-idle?
@@ -405,12 +405,12 @@
             (let [run (await
                        (db/pull
                         {:seon.db/db database
-                         :seon.db/selector
+                         :seon.db/pull-pattern
                          [:seon.agent.run/id :seon.agent.run/started-at
                           :seon.agent.run/closed-reason
                           :seon.agent.run/closed-at :seon.agent.run/result
                           :seon.agent.run/result-ref]
-                         :seon.db/eid run-eid}))]
+                         :seon.db/ref run-eid}))]
               (if (error-value? run) run run))))))))
 
 (defn ^:async last-closed-reason
@@ -493,7 +493,7 @@
              (js/Promise.all
               #js [(db/pull
                     {:seon.db/db database
-                     :seon.db/selector
+                     :seon.db/pull-pattern
                      [:seon.agent/terminated-at
                       {:seon.agent/run
                        [:seon.agent.run/id :seon.agent.run/status
@@ -502,7 +502,7 @@
                         :seon.agent.run/last-beat-at
                         :seon.agent.run/paused-at
                         :seon.agent.run/remaining-ms]}]
-                     :seon.db/eid [:seon.agent/id id]})
+                     :seon.db/ref [:seon.agent/id id]})
                    (agent-turn-count database id)
                    (open-step-count database id)
                    (last-human-inbound-at database id)

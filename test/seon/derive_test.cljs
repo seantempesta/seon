@@ -39,7 +39,7 @@
              (is (= 1 (count @requests)))
              (is (identical? database (:seon.db/db (first @requests))))
              (is (= [:seon.agent/id "agent-a"]
-                    (:seon.db/eid (first @requests))))))
+                    (:seon.db/ref (first @requests))))))
           (.catch (fn [exception]
                     (is false (str "derive-state threw: " exception))))
           (.finally (fn [] (set! db/pull original-pull) (done)))))))

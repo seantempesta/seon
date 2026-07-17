@@ -161,8 +161,8 @@
              (is (= 1 @acquisitions))
              (is (identical? database (:seon.db/db @knn-request)))
              (is (identical? database (:seon.db/db @pull-request)))
-             (is (= '[*] (:seon.db/selector @pull-request)))
-             (is (= [7] (:seon.db/eids @pull-request)))
+             (is (= '[*] (:seon.db/pull-pattern @pull-request)))
+             (is (= [7] (:seon.db/refs @pull-request)))
              (is (= "demo/f"
                     (-> result :seon.embed/hits first
                         :seon.embed/entity :seon.fn/sym)))))

@@ -194,14 +194,14 @@
   (let [database (or database (await (db/db)))]
     (if-let [eid (await (turn-eid database turn-id))]
       (let [t (await (db/pull {:seon.db/db database
-                      :seon.db/selector
+                      :seon.db/pull-pattern
                       [:seon.agent.turn/id :seon.agent.turn/at
                        :seon.agent.turn/status
                        :seon.agent.turn/rendered-tx
                        :seon.agent.turn/error
                        {:seon.agent.turn/prompt-blob [:my.blob/hash]}
                        {:seon.agent.turn/reply-blob  [:my.blob/hash]}]
-                      :seon.db/eid eid}))
+                      :seon.db/ref eid}))
           p (blob-text t :seon.agent.turn/prompt-blob ::prompt ::prompt-tokens)
           r (blob-text t :seon.agent.turn/reply-blob  ::reply  ::reply-tokens)
           errs (vec (keep ::error [p r]))]
@@ -367,8 +367,8 @@
   "The persisted error entity under `eid`, or nil when it isn't one."
   [db eid]
   (let [e (await (db/pull {:seon.db/db db
-                           :seon.db/selector error-pull-pattern
-                           :seon.db/eid eid}))]
+                           :seon.db/pull-pattern error-pull-pattern
+                           :seon.db/ref eid}))]
     (when (:seon.error/fault e) e)))
 
 (defn ^:async errors

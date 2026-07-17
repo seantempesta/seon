@@ -428,18 +428,18 @@
                   (.then (fn [_] (db/pull database '[*] 1)))
                   (.then (fn [value] (is (= {:example/id 1} value))
                            (db/pull {::db/db database
-                                     :seon.db/selector '[*]
-                                     :seon.db/eid 1})))
+                                     :seon.db/pull-pattern '[*]
+                                     :seon.db/ref 1})))
                   (.then (fn [value] (is (= {:example/id 1} value))
                            (db/pull-many database '[*] [1 404])))
                   (.then (fn [value] (is (= [{:example/id 1} nil] value))
                            (db/pull-many {::db/db database
-                                          :seon.db/selector '[*]
-                                          :seon.db/eids [1 404]})))
+                                          :seon.db/pull-pattern '[*]
+                                          :seon.db/refs [1 404]})))
                   (.then (fn [value] (is (= [{:example/id 1} nil] value))
                            (db/entity database 1)))
                   (.then (fn [value] (is (= {:example/id 1} value))
-                           (db/entity {::db/db database :seon.db/eid 1})))
+                           (db/entity {::db/db database :seon.db/ref 1})))
                   (.then (fn [value] (is (= {:example/id 1} value))
                            (db/index-page
                             database

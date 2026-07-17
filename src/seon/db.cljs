@@ -24,9 +24,8 @@
 (schema/register! ::query-form [:or [:vector :any] :map :string])
 (schema/register! ::query :any)
 (schema/register! ::args [:vector :any])
-(schema/register! ::selector [:vector :any])
-(schema/register! ::eid :any)
-(schema/register! ::eids [:vector :any])
+(schema/register! ::pull-pattern [:vector :any])
+(schema/register! ::refs [:vector :any])
 (schema/register! ::max-work [:int {:min 1}])
 (schema/register! ::max-results [:int {:min 1}])
 (schema/register! ::max-result-weight [:int {:min 1}])
@@ -88,8 +87,8 @@
 (schema/register!
  ::pull-request
  [:map {:closed true}
-  [::selector ::selector]
-  [::eid ::eid]
+  [::pull-pattern ::pull-pattern]
+  [::ref :seon.db/ref]
   [::db {:optional true} :seon.db/db]
   [::max-work {:optional true} ::max-work]
   [::max-results {:optional true} ::max-results]
@@ -97,8 +96,8 @@
 (schema/register!
  ::pull-many-request
  [:map {:closed true}
-  [::selector ::selector]
-  [::eids ::eids]
+  [::pull-pattern ::pull-pattern]
+  [::refs ::refs]
   [::db {:optional true} :seon.db/db]
   [::max-work {:optional true} ::max-work]
   [::max-results {:optional true} ::max-results]
@@ -106,7 +105,7 @@
 (schema/register!
  ::entity-request
  [:map {:closed true}
-  [::eid ::eid]
+  [::ref :seon.db/ref]
   [::db {:optional true} :seon.db/db]
   [::max-work {:optional true} ::max-work]
   [::max-results {:optional true} ::max-results]
@@ -864,10 +863,10 @@
   {:malli/schema
    [:function
     [:=> [:cat ::pull-request] :any]
-    [:=> [:catn [::selector [:vector :any]] [::eid :any]] :any]
+    [:=> [:catn [::pull-pattern ::pull-pattern] [::ref :any]] :any]
     [:=> [:catn [::db :seon.db/db]
-                 [::selector [:vector :any]]
-                 [::eid :any]] :any]]}
+                 [::pull-pattern ::pull-pattern]
+                 [::ref :any]] :any]]}
   ([request]
    (let [base (await (request-db! request))]
      (if (error-value? base)
@@ -877,8 +876,8 @@
               (send-request!
                (protocol/pull-request
                 (merge base
-                       {::protocol/selector (::selector request)
-                        ::protocol/entity-id (::eid request)}
+                       {::protocol/selector (::pull-pattern request)
+                        ::protocol/entity-id (::ref request)}
                        (read-resource-options request)))
                30000))]
          (cond
@@ -886,11 +885,11 @@
            (not (::protocol/success? response)) (response-error response)
            :else (::protocol/result response))))))
   ([selector entity-id]
-   (await (pull {::selector selector ::eid entity-id})))
+   (await (pull {::pull-pattern selector ::ref entity-id})))
   ([database selector entity-id]
    (await (pull {::db database
-                 ::selector selector
-                 ::eid entity-id}))))
+                 ::pull-pattern selector
+                 ::ref entity-id}))))
 
 (defn ^{:async true :seon.fn/agent-facing? true} pull-many
   "Pull several entities as eager ordinary maps in input order."
@@ -903,8 +902,8 @@
               (send-request!
                (protocol/pull-many-request
                 (merge base
-                       {::protocol/selector (::selector request)
-                        ::protocol/entity-ids (::eids request)}
+                       {::protocol/selector (::pull-pattern request)
+                        ::protocol/entity-ids (::refs request)}
                        (read-resource-options request)))
                30000))]
          (cond
@@ -912,18 +911,18 @@
            (not (::protocol/success? response)) (response-error response)
            :else (::protocol/result response))))))
   ([selector entity-ids]
-   (await (pull-many {::selector selector ::eids (vec entity-ids)})))
+   (await (pull-many {::pull-pattern selector ::refs (vec entity-ids)})))
   ([database selector entity-ids]
    (await (pull-many {::db database
-                      ::selector selector
-                      ::eids (vec entity-ids)}))))
+                      ::pull-pattern selector
+                      ::refs (vec entity-ids)}))))
 
 (defn ^{:async true :seon.fn/agent-facing? true} entity
   "Pull every attribute of one entity as eager ordinary data."
   ([request-or-entity-id]
    (if (and (map? request-or-entity-id)
-            (contains? request-or-entity-id ::eid))
-     (await (pull (assoc request-or-entity-id ::selector '[*])))
+            (contains? request-or-entity-id ::ref))
+     (await (pull (assoc request-or-entity-id ::pull-pattern '[*])))
      (await (pull '[*] request-or-entity-id))))
   ([database entity-id]
    (await (pull database '[*] entity-id))))

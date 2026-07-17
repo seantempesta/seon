@@ -196,8 +196,8 @@
           (let [entities
                 (await
                  (db/pull-many
-                  {:seon.db/selector pattern
-                   :seon.db/eids (mapv ::eid hits)
+                  {:seon.db/pull-pattern pattern
+                   :seon.db/refs (mapv ::eid hits)
                    :seon.db/db database}))]
             (if (:seon.error/message entities)
               {::hits [] :seon/error entities}
