@@ -52,6 +52,8 @@
 (schema/register! ::databases [:map-of ::database-name :seon.db/db])
 (schema/register! ::thunk 'fn?)
 (schema/register! ::tx-context :map)
+(schema/register! ::managed-scope [:set :qualified-keyword])
+(schema/register! ::managed-identity-attrs [:set :qualified-keyword])
 
 (schema/register!
  ::transact-request
