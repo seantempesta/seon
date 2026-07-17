@@ -257,6 +257,8 @@ flowchart TB
 
   Browser["browser\nDatastar ID-aware morph"]
   Feed["one SSE feed per browser\nlatest complete pending event"]
+  Models["model providers\nstreamed inference"]
+  Embeddings["embedding workers\nasynchronous and restartable"]
 
   Supervisor -->|"supervise"| Web
   Supervisor -->|"supervise"| Root
@@ -267,6 +269,10 @@ flowchart TB
   Browser -->|"HTTP action as namespaced data"| Web
   Web -->|"demand agent-authored render"| Root
   Web -->|"demand agent-authored render"| Agent1
+
+  Root <-->|"stream model request and response"| Models
+  Agent1 <-->|"stream model request and response"| Models
+  AgentN <-->|"stream model request and response"| Models
 
   Web -->|"database name + operation + database value"| Sessions
   Root -->|"query · pull · transact"| Sessions
@@ -280,6 +286,9 @@ flowchart TB
   Sessions -->|"serialized only within database B"| DB2
   DB1 --> Reports
   DB2 --> Reports
+
+  Reports -->|"embedding-relevant committed facts"| Embeddings
+  Embeddings -->|"transact completed vectors later"| Sessions
 
   Reports -->|"changed attributes wake matching demanded views"| Web
   Web -->|"affected reads at exact db-after"| Sessions
@@ -317,6 +326,16 @@ fanout, latest-event retention, cancellation, and reconnect from current
 database truth. A disconnected authority session stops new renders; after
 reacquiring the named database and its interest, every live demand receives a
 complete current view rather than a replay of UI events.
+
+Model calls execute in the requesting agent child, so a slow provider cannot
+block another agent or the database authority. Their durable inputs, partial
+status, terminal results, and faults are ordinary database transactions.
+Embedding work is deliberately downstream of committed facts: workers claim
+eligible work, compute independently, and transact vectors when ready. A
+missing or delayed vector can reduce semantic-search recall but never delays
+the originating transaction, an indexed database read, a render, or another
+cluster. Worker death leaves database-visible work available for a replacement
+worker rather than wedging the agent or writer.
 
 The default feed sends one complete stable-ID element because Datastar's morph
 engine applies the minimal DOM change while the server retains no DOM mirror.
