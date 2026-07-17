@@ -93,7 +93,7 @@
    [:seon.dev.process/target qualified-keyword?]
    [:seon.dev.process/started-at :string]
    [:seon.dev.process/log :string]
-   [:seon.dev.process/containment {:optional true} containment-schema]])
+   [:seon.dev.process/containment containment-schema]])
 
 (defn- validate! [schema value message explanation-key]
   (when-not (m/validate schema value)
@@ -444,19 +444,6 @@
     (some? (state/process-start-instant (:seon.dev.process/pid record)))
     :seon.dev.process.status/reused
     :else :seon.dev.process.status/dead))
-
-(defn- group-command [signal pid]
-  ;; This boundary exists only to retire a live exact pre-containment record.
-  ;; Every new generation drains through its retained anchor instead.
-  (let [argv ["/bin/kill" signal "--" (str "-" pid)]
-        builder (doto (ProcessBuilder. ^java.util.List argv)
-                  (.redirectOutput java.lang.ProcessBuilder$Redirect/DISCARD)
-                  (.redirectError java.lang.ProcessBuilder$Redirect/DISCARD))
-        child (.start builder)]
-    {:exit (.waitFor child)}))
-
-(defn- group-present? [pid]
-  (zero? (:exit (group-command "-0" pid))))
 
 (defn- containment-identity [containment role]
   {:seon.dev.process/pid
@@ -1210,42 +1197,6 @@
                         :seon.dev.process/response response}))))
          (await-terminal! record operation-deadline))))))
 
-(defn- retire-live-legacy!
-  ([record] (retire-live-legacy! record nil))
-  ([record operation-deadline]
-   (let [pid (:seon.dev.process/pid record)
-         group (:seon.dev.process/process-group record)]
-    (when-not (and (= pid group)
-                   (state/process-identity-alive? record))
-      (throw
-       (ex-info "A legacy process record cannot be retired safely."
-                {:seon.dev.process/status
-                 :seon.dev.process.status/containment-uncertain
-                 :seon.dev.process/id (:seon.dev.process/id record)
-                 :seon.dev.process/pid pid
-                 :seon.dev.process/process-group group})))
-    ;; The exact live session leader pins this legacy PGID. Use one immediate
-    ;; hard inverse; a grace interval could let the leader exit and make a
-    ;; later numeric group signal ambiguous.
-    (when-not (zero? (:exit (group-command "-KILL" group)))
-      (throw
-       (ex-info "The live legacy process group rejected retirement."
-                {:seon.dev.process/status
-                 :seon.dev.process.status/containment-uncertain
-                 :seon.dev.process/id (:seon.dev.process/id record)
-                 :seon.dev.process/process-group group})))
-    (let [deadline (phase-deadline operation-deadline 5000)]
-      (loop []
-        (when (and (group-present? group) (< (monotonic-ms) deadline))
-          (Thread/sleep 10)
-          (recur))))
-    (when (group-present? group)
-      (throw
-       (ex-info "The legacy process group did not become absent after retirement."
-                {:seon.dev.process/status
-                 :seon.dev.process.status/containment-uncertain
-                 :seon.dev.process/id (:seon.dev.process/id record)}))))))
-
 (def ^:private no-process-expectation
   ::no-process-expectation)
 
@@ -1271,18 +1222,14 @@
                   :seon.dev.process.status/containment-uncertain
                   :seon.dev.process/id id})))
      (let [result
-          (when record
-            (if-let [containment (:seon.dev.process/containment record)]
-              (let [terminal (drain-containment! record operation-deadline)]
-                (merge
-                 {:seon.dev.process/id id
-                  :seon.dev.process/terminal
-                  (normalized-terminal containment terminal)}
-                 (writer-application-evidence containment terminal)))
-              (do
-                (retire-live-legacy! record operation-deadline)
+           (when record
+             (let [containment (:seon.dev.process/containment record)
+                   terminal (drain-containment! record operation-deadline)]
+               (merge
                 {:seon.dev.process/id id
-                 :seon.dev.process/legacy-retired? true})))]
+                 :seon.dev.process/terminal
+                 (normalized-terminal containment terminal)}
+                (writer-application-evidence containment terminal))))]
       (when record
         (clear-process! config id)
         (when-let [result-path
@@ -1411,7 +1358,6 @@
     application-capture-schema]
    [:seon.dev.process/application-error-message {:optional true}
     [:string {:max 4096}]]
-   [:seon.dev.process/legacy-retired? {:optional true} :boolean]
    [:seon.dev.process/reason {:optional true} :qualified-keyword]])
 
 (def clean-or-force-result-schema
@@ -1593,8 +1539,6 @@
         (not clean?)
         (assoc :seon.dev.process/reason
                (cond
-                 (:seon.dev.process/legacy-retired? result)
-                 :seon.dev.process.reason/legacy-retirement
                  (= :seon.dev.process.containment.trigger/workload-exit trigger)
                  :seon.dev.process.reason/unexpected-exit
                  (:seon.dev.process/application-error result)
@@ -2066,10 +2010,6 @@
         containment (:seon.dev.process/containment record)]
     (cond
       (nil? record) recorded
-      (nil? containment)
-      (if (= :seon.dev.process.status/alive recorded)
-        :seon.dev.process.status/legacy-live
-        :seon.dev.process.status/containment-uncertain)
       (containment-live? record) :seon.dev.process.status/alive
       (and (matching-terminal? containment (terminal-result containment))
            (not (state/process-identity-alive?

@@ -1714,83 +1714,6 @@
         (fs/delete-tree (:seon.dev.test/directory configuration)
                         {:force true})))))
 
-(deftest live-legacy-group-retires-with-its-child-before-upgrade
-  (let [configuration (test-config)
-        id :seon.dev.process/legacy
-        directory (:seon.dev.test/directory configuration)
-        child-file (str (fs/path directory "legacy-child"))
-        legacy (shell/process
-                {:out :discard :err :discard
-                 :cmd ["python3" "-c"
-                       (str "import os,subprocess,time\n"
-                            "os.setsid()\n"
-                            "c=subprocess.Popen(['sleep','300'])\n"
-                            "open(" (pr-str child-file)
-                            ",'w').write(str(c.pid))\n"
-                            "time.sleep(300)\n")]})
-        pid (.pid ^java.lang.Process (:proc legacy))
-        file (fs/path (:seon.dev.config/process-dir configuration)
-                      "processes/legacy.edn")]
-    (try
-      (loop [remaining 100]
-        (when (and (pos? remaining) (not (fs/regular-file? child-file)))
-          (Thread/sleep 10)
-          (recur (dec remaining))))
-      (let [child (parse-long (str/trim (slurp child-file)))
-            start (state/process-start-instant pid)]
-        (state/write-edn!
-         file
-         {:seon.dev.process/id id
-          :seon.dev.process/pid pid
-          :seon.dev.process/start-instant start
-          :seon.dev.process/process-group pid
-          :seon.dev.process/argv ["legacy"]
-          :seon.dev.process/environment-digest (apply str (repeat 64 "0"))
-          :seon.dev.process/artifact-digest "legacy"
-          :seon.dev.process/target :seon.dev.target/development
-          :seon.dev.process/started-at "legacy"
-          :seon.dev.process/log (str (fs/path directory "legacy.log"))})
-        (process/stop! configuration id)
-        (is (nil? (state/process-start-instant pid)))
-        (is (nil? (state/process-start-instant child)))
-        (is (nil? (process/read-process configuration id))))
-      (finally
-        (when (.isAlive ^java.lang.Process (:proc legacy))
-          (.destroyForcibly ^java.lang.Process (:proc legacy)))
-        (fs/delete-tree directory {:force true})))))
-
-(deftest reused-pid-is-never-signaled
-  (let [configuration (test-config)
-        id :seon.dev.process/stale
-        innocent (shell/process {:cmd ["sleep" "300"]})
-        pid (.pid ^java.lang.Process (:proc innocent))
-        file (fs/path (:seon.dev.config/process-dir configuration)
-                      "processes/stale.edn")]
-    (try
-      (state/write-edn!
-        file {:seon.dev.process/id id
-              :seon.dev.process/pid pid
-              :seon.dev.process/start-instant "not-the-live-start-instant"
-              :seon.dev.process/process-group pid
-              :seon.dev.process/argv ["sleep" "300"]
-              :seon.dev.process/environment-digest (apply str (repeat 64 "0"))
-              :seon.dev.process/artifact-digest "test-artifact"
-              :seon.dev.process/target :seon.dev.target/development
-              :seon.dev.process/started-at "test"
-              :seon.dev.process/log
-              (str (fs/path (:seon.dev.test/directory configuration)
-                            "stale.log"))})
-      (is (thrown-with-msg?
-           clojure.lang.ExceptionInfo
-           #"cannot be retired safely"
-           (process/stop! configuration id)))
-      (is (.isAlive ^java.lang.Process (:proc innocent)))
-      (is (some? (process/read-process configuration id))
-          "uncertain legacy evidence is retained and blocks replacement")
-      (finally
-        (.destroyForcibly ^java.lang.Process (:proc innocent))
-        (fs/delete-tree (:seon.dev.test/directory configuration))))))
-
 (deftest lifecycle-lock-serializes-and-cleans-up
   (let [configuration (test-config)
         entered (promise)
@@ -2049,21 +1972,24 @@
         spec (#'process/watcher-spec
               configuration @#'process/unpublished-client-digest nil)
         pid (.pid (java.lang.ProcessHandle/current))
-        record {:seon.dev.process/id process/watcher-id
-                :seon.dev.process/pid pid
-                :seon.dev.process/start-instant
-                (state/process-start-instant pid)
-                :seon.dev.process/process-group pid
-                :seon.dev.process/argv (:seon.dev.process/argv spec)
-                :seon.dev.process/environment-digest
-                (#'process/environment-digest
-                 (:seon.dev.process/environment spec)
-                 (:seon.dev.process/argv spec))
-                :seon.dev.process/artifact-digest
-                @#'process/unpublished-client-digest
-                :seon.dev.process/target :seon.dev.target/development
-                :seon.dev.process/started-at "test"
-                :seon.dev.process/log (str log)}]
+        record
+        (live-probe-record
+         configuration
+         {:seon.dev.process/id process/watcher-id
+          :seon.dev.process/pid pid
+          :seon.dev.process/start-instant
+          (state/process-start-instant pid)
+          :seon.dev.process/process-group pid
+          :seon.dev.process/argv (:seon.dev.process/argv spec)
+          :seon.dev.process/environment-digest
+          (#'process/environment-digest
+           (:seon.dev.process/environment spec)
+           (:seon.dev.process/argv spec))
+          :seon.dev.process/artifact-digest
+          @#'process/unpublished-client-digest
+          :seon.dev.process/target :seon.dev.target/development
+          :seon.dev.process/started-at "test"
+          :seon.dev.process/log (str log)})]
     (try
       (fs/create-dirs (fs/parent output))
       (fs/create-dirs (fs/parent runtime))
@@ -2157,17 +2083,20 @@
                             (:seon.dev.process/environment spec)
                             (:seon.dev.process/argv spec))
         log (str (fs/path directory "watcher.log"))
-        record {:seon.dev.process/id process/watcher-id
-                :seon.dev.process/pid pid
-                :seon.dev.process/start-instant start-instant
-                :seon.dev.process/process-group pid
-                :seon.dev.process/argv (:seon.dev.process/argv spec)
-                :seon.dev.process/environment-digest environment-digest
-                :seon.dev.process/artifact-digest
-                (:seon.dev.process/artifact-digest spec)
-                :seon.dev.process/target :seon.dev.target/development
-                :seon.dev.process/started-at "test"
-                :seon.dev.process/log log}]
+        record
+        (live-probe-record
+         configuration
+         {:seon.dev.process/id process/watcher-id
+          :seon.dev.process/pid pid
+          :seon.dev.process/start-instant start-instant
+          :seon.dev.process/process-group pid
+          :seon.dev.process/argv (:seon.dev.process/argv spec)
+          :seon.dev.process/environment-digest environment-digest
+          :seon.dev.process/artifact-digest
+          (:seon.dev.process/artifact-digest spec)
+          :seon.dev.process/target :seon.dev.target/development
+          :seon.dev.process/started-at "test"
+          :seon.dev.process/log log})]
     (try
       (spit log (str "[:client] Build completed.\n"
                      "[:execution] Build completed.\n"
