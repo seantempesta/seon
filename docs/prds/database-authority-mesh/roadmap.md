@@ -373,33 +373,50 @@ graduation remains one
 frozen-source full test, live browser/agent, crash/restart, packaging, and
 modest-hardware density checkpoint.
 
+Commit `26a87704` closes the operation-config and host-render deletion cut.
+One instrumentation descriptor owns optional immutable operation configuration;
+fetch reuses one resolved policy across redirects, and search resolves its
+backend once. One execution-owned canvas acquisition now selects explicit,
+configured, derived, or welcome content at one ordinary database value for both
+prompt and human views. The host canvas/default/chat database readers, duplicate
+AI/HTML render functions, slot owner, override atoms, zero-argument config
+fallbacks, and the entire `seon.render.default` namespace are deleted. ACME
+initialization awaits one database value and stops on the first native database
+error. Focused proof passes 97 tests/508 assertions. Default and ACME client and
+execution artifacts all compile; the 19 client warnings are an exact inventory
+of the next web/feed and plan consumers of removed ambient database functions,
+not compatibility work. The cut removes 2,121 lines while retaining the one
+public `seon.render/render` and `seon.db` surfaces.
+
 ### Current implementation checkpoint
 
-- **Earliest unsettled contract:** finish operation-owned configuration and
-  ordinary-database-value propagation through eval/render execution and its
-  remaining direct consumers; delete every embedded CLJS database test that
-  only exercised the removed runtime.
+- **Earliest unsettled contract:** close the web/feed database-value and
+  rendered-transaction owner. Its full render, debug, task-run, and projection
+  cache paths still name removed ambient database functions; they must acquire
+  or inherit one ordinary immutable value through the existing asynchronous
+  `seon.db` surface and delete the obsolete synchronous branches.
 - **Integrated proof that closes it:** eval, autocomplete, namespace context,
   startup, converged reload, advertisement, runtime hosting, and declarative
   state reconciliation and runtime membership reuse ordinary database values
   and native transaction reports; quiescence, agent creation, AI seeding,
-  scheduling, the watchdog, and warning acquisition now reuse the same rule.
-  The current frozen proof must close eval/render configuration and leave no
-  retained test dependent on a local Datahike connection.
-- **Dependency-ready parallel portfolio:** operation-owned config propagation
-  is grounded at [[research/eval-render-config-single-owner-audit-2026-07-17]],
-  including the existing error-scope seam and the complete deletion set for
-  load-time config values. The web/render single-owner audit is durable at
-  [[research/web-render-single-owner-audit-2026-07-17]]; the plan consumer cut
-  is grounded at [[research/plan-single-owner-audit-2026-07-17]] and explicitly
-  rejects the current dirty coordinate/oversized-row prototype. The complete
-  parallel-system inventory is durable at
+  scheduling, the watchdog, warning acquisition, operation configuration, and
+  render execution now reuse the same rule. The next frozen proof must remove
+  every web/feed warning, retain native transaction-report observability, pass
+  the focused Datastar/debug/serve gates, and compile all four artifacts without
+  warnings in the changed owners.
+- **Dependency-ready parallel portfolio:** the web/render single-owner audit is
+  durable at [[research/web-render-single-owner-audit-2026-07-17]] and the
+  rendered-transaction boundary at
+  [[research/web-rendered-tx-observability-unification-2026-07-16]]. The plan
+  consumer cut is grounded at [[research/plan-single-owner-audit-2026-07-17]]
+  and explicitly rejects the current dirty coordinate/oversized-row prototype.
+  The complete parallel-system inventory is durable at
   [[research/parallel-behavior-unification-audit-2026-07-17]].
-- **Next refills:** finish and commit the frozen eval/render config cut; remove
-  the obsolete host renderer/canvas/slot graph exposed by that deletion; close
-  the web/feed database-value and rendered-transaction owner next, followed by
-  the exact-database blob operator seam and the operation-specific plan
-  consumers.
+- **Next refills:** close the web/feed database-value and
+  rendered-transaction owner, followed by the exact-database blob operator seam
+  and the operation-specific plan consumers. Each cut strengthens the existing
+  public owner and deletes removed-function callers; none adds aliases,
+  versioned function names, local-database fallbacks, or a second renderer.
   The final graduation gate remains the full frozen-source correctness, live
   Bun/JVM, multi-agent, child-crash, multi-database, and measured resource
   matrix.
