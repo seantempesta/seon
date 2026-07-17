@@ -100,6 +100,11 @@
 ;; SSE framing — the datastar-patch-elements builder.
 ;; ============================================================
 
+(defn- patch-elements* [html-str]
+  (str "event: datastar-patch-elements\n"
+       "data: elements " (str/replace html-str "\n" "\ndata: elements ")
+       "\n\n"))
+
 (defn patch-elements
   "Build a `datastar-patch-elements` SSE event string from an HTML string.
 
@@ -109,9 +114,7 @@
    selector/mode dataline."
   {:malli/schema [:=> [:catn [::html :string]] :string]}
   [html-str]
-  (str "event: datastar-patch-elements\n"
-       "data: elements " (str/replace html-str "\n" "\ndata: elements ")
-       "\n\n"))
+  (patch-elements* html-str))
 
 ;; ============================================================
 ;; view = f(db) — the live agents view as `[:main#app-view …rows…]`.
@@ -134,6 +137,11 @@
        (or (object? value) (fn? value))
        (fn? (.-then value))))
 
+(defn- rendered-html-patch [rendered observed? html]
+  (cond-> {::event (patch-elements* html)}
+    (and observed? (contains? rendered ::dependencies))
+    (assoc ::dependencies (::dependencies rendered))))
+
 (defn- rendered-view-patch [rendered]
   (if (promise-like? rendered)
     (.then rendered rendered-view-patch render-error-patch)
@@ -144,9 +152,12 @@
                #(rendered-view-patch
                  (if observed? (assoc rendered ::element %) %))
                render-error-patch)
-        (cond-> {::event (-> element html/->string patch-elements)}
-          (and observed? (contains? rendered ::dependencies))
-          (assoc ::dependencies (::dependencies rendered)))))))
+        (let [rendered-html (html/->string element)]
+          (if (promise-like? rendered-html)
+            (.then rendered-html
+                   #(rendered-html-patch rendered observed? %)
+                   render-error-patch)
+            (rendered-html-patch rendered observed? rendered-html)))))))
 
 (defn- view-fn-patch
   "Render a bound full-view fn into one event plus learned dependencies.

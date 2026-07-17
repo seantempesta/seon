@@ -1,5 +1,6 @@
 (ns seon.web.datastar-test
   (:require [cljs.test :refer [deftest is]]
+            [seon.ui.html :as html]
             [seon.web.datastar :as datastar]))
 
 (def database
@@ -35,9 +36,15 @@
                       (fn [resolve _reject]
                         (resolve [:main {:id "app-view"} "ready"])))
         outer (js-obj "then" (fn [resolve _reject] (resolve inner)))
-        result (@#'datastar/rendered-view-patch
-                {::datastar/element outer
-                 ::datastar/dependencies #{:seon.agent/id}})]
+        result (with-redefs [html/->string
+                             (fn [_]
+                               (js-obj "then"
+                                       (fn [resolve _reject]
+                                         (resolve
+                                          "<main id=\"app-view\">ready</main>"))))]
+                 (@#'datastar/rendered-view-patch
+                  {::datastar/element outer
+                   ::datastar/dependencies #{:seon.agent/id}}))]
     (is (string? (::datastar/event result)))
     (is (= #{:seon.agent/id} (::datastar/dependencies result)))
     (is (re-find #"<main id=\"app-view\">ready</main>"
