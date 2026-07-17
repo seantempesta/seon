@@ -74,6 +74,17 @@
       :else (do (Thread/sleep 10)
                 (recur (dec remaining))))))
 
+(defn- test-transport-connection
+  []
+  ((var-get (ns-resolve 'seon.db.writer 'transport-connection)) {}))
+
+(defn- handle-connection-request
+  [runtime transport-connection request]
+  (let [response (promise)]
+    (writer/handle-request! runtime transport-connection request
+                            #(deliver response %))
+    @response))
+
 (defn- install-schema!
   [runtime database-name]
   (transact!
@@ -399,7 +410,10 @@
                    ::executor/execute
                    {:provider (partial execute embedding-runtime)}})
           embedding-runtime (assoc embedding-runtime
-                                   ::writer/executor worker)]
+                                   ::writer/executor worker)
+          request-runtime (assoc embedding-runtime
+                                 ::writer/active-requests (atom {}))
+          transport-connection (test-transport-connection)]
       (try
         (is (true?
              (::protocol/success?
@@ -407,17 +421,23 @@
                          "embedding/before-release"
                          [{:db/id "target" :receipt/value "source"}]))))
         (is (.await provider-entered 5 TimeUnit/SECONDS))
-        (let [{::registry/keys [attachment coordinate]}
+        (let [{::registry/keys [attachment]}
               (registry/resolve-connection
                {::registry/database-name (keyword database-name)})
+              acquired
+              (handle-connection-request
+               request-runtime transport-connection
+               (protocol/acquire-database-request
+                {::protocol/request-id "receipt/acquire"
+                 ::protocol/database-name database-name}))
               release-response
-              (writer/handle-request
-               embedding-runtime
+              (handle-connection-request
+               request-runtime transport-connection
                (protocol/release-database-request
                 {::protocol/request-id "receipt/release"
-                 ::protocol/target-database-name database-name
-                 ::protocol/target-attachment attachment
-                 ::protocol/expected-target-head coordinate}))]
+                 :seon.db/db (:seon.db/db acquired)}))]
+          (is (true? (::protocol/success? acquired)))
+          (is (true? (::protocol/acquired? acquired)))
           (is (true? (::protocol/success? release-response)))
           (is (true? (::protocol/released? release-response)))
           (is (= {::executor/queued 0
@@ -448,17 +468,20 @@
                  (d/q '[:find ?value .
                         :where [_ :receipt/derived ?value]] db-value))
                 "the old generation cannot commit after reopen"))
-          (let [{::registry/keys [attachment coordinate]}
-                (registry/resolve-connection
-                 {::registry/database-name (keyword database-name)})
+          (let [final-acquired
+                (handle-connection-request
+                 request-runtime transport-connection
+                 (protocol/acquire-database-request
+                  {::protocol/request-id "receipt/final-acquire"
+                   ::protocol/database-name database-name}))
                 final-release
-                (writer/handle-request
-                 embedding-runtime
+                (handle-connection-request
+                 request-runtime transport-connection
                  (protocol/release-database-request
                   {::protocol/request-id "receipt/final-release"
-                   ::protocol/target-database-name database-name
-                   ::protocol/target-attachment attachment
-                   ::protocol/expected-target-head coordinate}))]
+                   :seon.db/db (:seon.db/db final-acquired)}))]
+            (is (true? (::protocol/success? final-acquired)))
+            (is (true? (::protocol/acquired? final-acquired)))
             (is (true? (::protocol/success? final-release)))
             (is (true? (::protocol/released? final-release)))
             (is (nil?
