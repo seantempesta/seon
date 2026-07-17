@@ -10,7 +10,7 @@
    the worker (via the ONE wire path, [[seon.ai.diffusiongemma/complete]])
    with `{prompt: the rendered context, committed, draft, offers,
    policy, null_render}` — offers/policy derived from the SAME data the
-   rendered menu shows (`seon.agent.ctx.menu/function-offers` + `/policy`),
+   rendered menu shows (the one structured `seon.agent.ctx.menu` acquisition),
    so glyph N on the wire is glyph N in the prompt, and `null_render`
    ([[null-render]] — the prompt minus its transcript event log) is the
    null-intent baseline the worker calibrates glyph posteriors against
@@ -445,17 +445,16 @@
 (schema/register! ::req-schema :keyword)
 (schema/register! ::arg-key :keyword)
 (schema/register! ::prefill-fn :symbol)
+(schema/register! ::prefill-spec :string)
 (schema/register! ::affordance
   [:map
    [::head       {:optional true} ::head]
    [::req-schema ::req-schema]
    [::arg-key    ::arg-key]
-   [::prefill-fn ::prefill-fn]])
+   [::prefill-fn ::prefill-fn]
+   [::prefill-spec {:optional true} ::prefill-spec]])
 (schema/register! ::affordances [:vector ::affordance])
 (schema/register! ::doc [:or :map [:vector :map]])
-(schema/register! ::segments [:vector :seon.ai.diffusiongemma/template-segment])
-(schema/register! ::prefills-wire
-  [:map-of ::head ::segments])
 
 (defn- schema-props
   "The property map of a registered schema definition, or nil."
@@ -488,35 +487,42 @@
 (defn- affordance-head
   "The program-graph fn whose specced request IS `req-schema`
    (`[:=> [:cat <req-schema>] …]`) — its full sym string, or nil."
-  [db req-schema]
-  (when (and db
-             (contains? (db/installed-schema db) :seon.fn/sym)
-             (contains? (db/installed-schema db) :seon.fn/spec))
-    (let [needle (str req-schema)]
-      (->> (db/query {:seon.db/db db
-                      :seon.db/query '[:find ?sym ?spec
-                                       :where
-                                       [?e :seon.fn/sym ?sym]
-                                       [?e :seon.fn/spec ?spec]]})
-           (some (fn [[sym spec]]
-                   (when (str/includes? (str spec) needle)
-                     (let [form (try (reader/read-string spec)
-                                     (catch :default _ nil))]
-                       (when (and (vector? form) (= :=> (first form))
-                                  (= [:cat req-schema] (second form)))
-                         sym)))))))))
+  [rows req-schema]
+  (let [needle (str req-schema)]
+    (some (fn [[sym spec]]
+            (when (str/includes? (str spec) needle)
+              (let [form (try (reader/read-string spec)
+                              (catch :default _ nil))]
+                (when (and (vector? form) (= :=> (first form))
+                           (= [:cat req-schema] (second form)))
+                  sym))))
+          rows)))
 
-(defn prefill-affordances
-  "The live prefill affordances in db value `db` — registry entries
-   joined to their program-graph head fn (entries with no resolvable
+(defn ^:async ^:private prefill-affordances
+  "The live prefill affordances in database value `db`.
+
+   Registry entries are joined to their program-graph head fn (entries with no resolvable
    head are dropped: no head, no draft to match)."
-  {:malli/schema [:=> [:catn [::db :seon.db/db]] ::affordances]}
   [db]
-  (into []
-        (keep (fn [{::keys [req-schema] :as entry}]
-                (when-let [head (affordance-head db req-schema)]
-                  (assoc entry ::head head))))
-        (prefill-entries)))
+  (let [rows (await
+              (db/query {:seon.db/db db
+                         :seon.db/query '[:find ?sym ?spec
+                                          :where
+                                          [?e :seon.fn/sym ?sym]
+                                          [?e :seon.fn/spec ?spec]]
+                         :seon.db/max-results 16384
+                         :seon.db/max-result-weight 1048576}))]
+    (if (:seon.error/message rows)
+      rows
+      (let [specs (into {} rows)]
+        (into []
+              (keep (fn [{::keys [req-schema prefill-fn] :as entry}]
+                      (when-let [head (affordance-head rows req-schema)]
+                        (cond-> (assoc entry ::head head)
+                          (get specs (str prefill-fn))
+                          (assoc ::prefill-spec
+                                 (get specs (str prefill-fn)))))))
+              (prefill-entries))))))
 
 (defn- resolve-sym
   "The live fn for a full `ns/name` symbol via the ONE symbol→fn
@@ -536,25 +542,41 @@
       (conj (pop segs) [kind (str (second lst) s)])
       (conj segs [kind s]))))
 
-(defn- node-authors
-  "attr → authoring agent-id of the node's CURRENT datoms, from the tx
-   user ref (`:seon.db/user` → `:seon.agent/id`). {} when the node's
-   identity entry doesn't resolve."
-  [db id-entry]
-  (let [eid (when id-entry
-              (:db/id (db/entity-lazy {:seon.db/db db
-                                       :seon.db/ref (vec id-entry)})))]
-    (if eid
-      (into {}
-            (db/query {:seon.db/db db
-                       :seon.db/query '[:find ?a ?aid
-                                        :in $ ?e
-                                        :where
-                                        [?e ?a _ ?tx]
-                                        [?tx :seon.db/user ?author]
-                                        [?author :seon.agent/id ?aid]]
-                       :seon.db/args [eid]}))
-      {})))
+(defn- document-identities [doc]
+  (into []
+        (comp (filter map?)
+              (mapcat (fn [node]
+                        (keep (fn [[attr value]]
+                                (when (identity-attr? attr) [attr value]))
+                              node)))
+              distinct)
+        (tree-seq coll? seq doc)))
+
+(defn- ^:async document-authors [db documents]
+  (let [identities (into [] (comp (mapcat document-identities) distinct)
+                         documents)]
+    (if (empty? identities)
+      {}
+      (let [rows (await
+                  (db/query
+                   {:seon.db/db db
+                    :seon.db/query
+                    '[:find ?identity-attr ?identity-value ?attr ?agent-id
+                      :in $ [[?identity-attr ?identity-value]]
+                      :where
+                      [?entity ?identity-attr ?identity-value]
+                      [?entity ?attr _ ?tx]
+                      [?tx :seon.db/user ?author]
+                      [?author :seon.agent/id ?agent-id]]
+                    :seon.db/args [identities]
+                    :seon.db/max-results 65536
+                    :seon.db/max-result-weight 1048576}))]
+        (if (:seon.error/message rows)
+          rows
+          (reduce (fn [authors [identity-attr identity-value attr agent-id]]
+                    (assoc-in authors [[identity-attr identity-value] attr]
+                              agent-id))
+                  {} rows))))))
 
 (defn- render-doc-value
   "Render EDN `v` into edit-with-prefill segments (functional over
@@ -568,12 +590,12 @@
    EDN; clamped structure makes a parse-clean edit the construction,
    not a hope. Structural edits (split/drop/reorder) stay with the
    DELTA functions in the WORK loop — the design's other update shape."
-  [db agent-id v segs]
+  [authors agent-id v segs]
   (cond
     (map? v)
     (let [id-entry (some (fn [[k val]] (when (identity-attr? k) [k val])) v)
-          authors  (if id-entry (node-authors db id-entry) {})
-          own?     (fn [k] (= agent-id (get authors k)))
+          node-authors (get authors id-entry {})
+          own?     (fn [k] (= agent-id (get node-authors k)))
           coll?*   (fn [val] (and (sequential? val) (seq val) (every? map? val)))
           scalars  (->> (dissoc v (first id-entry))
                         (remove (fn [[_ val]] (coll?* val)))
@@ -600,7 +622,7 @@
                 segs scalars)
         (reduce (fn [segs [k val]]
                   (-> (reduce (fn [segs c]
-                                (-> (render-doc-value db agent-id c segs)
+                                (-> (render-doc-value authors agent-id c segs)
                                     (emit-seg "clamp" "\n")))
                               (emit-seg segs "clamp" (str (pr-str k) " ["))
                               val)
@@ -610,26 +632,13 @@
 
     (sequential? v)
     (-> (reduce (fn [segs c]
-                  (-> (render-doc-value db agent-id c segs)
+                  (-> (render-doc-value authors agent-id c segs)
                       (emit-seg "clamp" "\n")))
                 (emit-seg segs "clamp" "[")
                 v)
         (emit-seg "clamp" "]"))
 
     :else (emit-seg segs "prefill" (pr-str v))))
-
-(defn document-segments
-  "A projection document as edit-with-prefill wire segments.
-
-   Structure, key names, identity entries, and foreign-authored entries
-   CLAMP; only the caller's OWN scalar values ride as editable prefill
-   holes. Public for tests."
-  {:malli/schema [:=> [:catn [::db :seon.db/db]
-                       [:seon.agent/id :string]
-                       [::doc ::doc]]
-                  ::segments]}
-  [db agent-id doc]
-  (render-doc-value db agent-id doc []))
 
 (def ^:private plan-pass-doc-token-budget
   "Estimated-token cap on a prefilled document. The worker's code buffer
@@ -782,17 +791,8 @@
    rule `seon.instrument/injecting-fschema` applies at eval time (works
    whether or not the live var is wrapped; explicit keys win in the
    wrapper). {} when the fn's program-graph spec is unavailable."
-  [db sym]
-  (let [spec (when (contains? (db/installed-schema db) :seon.fn/spec)
-               (ffirst (db/query {:seon.db/db db
-                                  :seon.db/query
-                                  '[:find ?spec
-                                    :in $ ?sym
-                                    :where
-                                    [?e :seon.fn/sym ?sym]
-                                    [?e :seon.fn/spec ?spec]]
-                                  :seon.db/args [(str sym)]})))
-        inj  (try (some-> spec reader/read-string m/schema
+  [spec]
+  (let [inj  (try (some-> spec reader/read-string m/schema
                           instrument/declared-injectables)
                   (catch :default _ nil))]
     (reduce (fn [request k]
@@ -811,7 +811,7 @@
                                        (some identity-attr? (keys n))))
                           nodes)))))
 
-(defn- pass-entries
+(defn- ^:async pass-entries
   "head → pass entry, for every affordance whose projection fn resolves
    and returns a NON-EMPTY document. Within budget →
    `{::template … ::doc … ::arg-key … ::scoped? false}`; over budget the
@@ -820,30 +820,40 @@
    still over → `{::skip \"doc-over-budget (N tok)\"}`. {} when nothing
    qualifies."
   [db agent-id affordances]
-  (into {}
-        (keep (fn [{::keys [head arg-key prefill-fn]}]
-                (when-let [f (resolve-sym prefill-fn)]
-                  (let [doc (f (injected-request db prefill-fn))]
-                    (when (projection-doc? doc)
-                      (if (<= (tokens/estimate (pr-str doc))
-                              plan-pass-doc-token-budget)
-                        [head {::template (affordance-template
-                                            head arg-key
-                                            (document-segments db agent-id doc))
-                               ::doc      doc
-                               ::arg-key  arg-key
-                               ::scoped?  false}]
-                        (let [scoped (scoped-document doc)
-                              n      (tokens/estimate (pr-str scoped))]
-                          (if (<= n plan-pass-doc-token-budget)
-                            [head {::template (affordance-template
-                                                head arg-key
-                                                (document-segments db agent-id scoped))
-                                   ::doc      doc
-                                   ::arg-key  arg-key
-                                   ::scoped?  true}]
-                            [head {::skip (str "doc-over-budget (" n " tok)")}]))))))))
-        affordances))
+  (let [candidates
+        (loop [remaining (seq affordances) out []]
+          (if-let [{::keys [head arg-key prefill-fn prefill-spec]} (first remaining)]
+            (if-let [f (resolve-sym prefill-fn)]
+              (let [doc (await
+                         (db/with-tx-context
+                           {::db/db db}
+                           #(f (injected-request prefill-spec))))]
+                (recur (next remaining)
+                       (cond-> out
+                         (projection-doc? doc)
+                         (conj {::head head ::arg-key arg-key ::doc doc}))))
+              (recur (next remaining) out))
+            out))
+        authors (await (document-authors db (mapv ::doc candidates)))]
+    (if (:seon.error/message authors)
+      authors
+      (into {}
+            (map (fn [{::keys [head arg-key doc]}]
+                   (if (<= (tokens/estimate (pr-str doc))
+                           plan-pass-doc-token-budget)
+                     [head {::template (affordance-template
+                                         head arg-key
+                                         (render-doc-value authors agent-id doc []))
+                            ::doc doc ::arg-key arg-key ::scoped? false}]
+                     (let [scoped (scoped-document doc)
+                           n (tokens/estimate (pr-str scoped))]
+                       (if (<= n plan-pass-doc-token-budget)
+                         [head {::template (affordance-template
+                                             head arg-key
+                                             (render-doc-value authors agent-id scoped []))
+                                ::doc doc ::arg-key arg-key ::scoped? true}]
+                         [head {::skip (str "doc-over-budget (" n " tok)")}])))))
+            candidates))))
 
 (defn- entries->organic-wire
   "head → template for the ORGANIC step wire — UNSCOPED templates only
@@ -897,9 +907,9 @@
                 (assoc :seon.typeahead/agent
                        [:seon.agent/id (db/current-agent-id)]))
           res (await (db/transact! {:seon.db/tx-data [row]}))]
-      (when (false? (:seon.db/ok? res))
+      (when (:seon.error/message res)
         (js/console.warn "[seon.ai.typeahead] step projection failed:"
-                         (pr-str (:seon.db/error res))))))
+                         (pr-str res)))))
   nil)
 
 (defn- ^:async run-plan-pass!
@@ -984,26 +994,26 @@
    :seon.ai/error {:seon.ai/msg      "Typeahead provider attempt aborted"
                    :seon.ai/timeout? true}})
 
-(defn ^:async ^:private step-loop!
+(defn ^:async ^:private step-loop-at!
   "Run the mode=step FSM loop for one rendered prompt; return the
    turn-loop reply shape `{:text … :seon.ai/raw …}` (plus
    `:seon.ai/error` when a step failed)."
-  [opts arg]
+  [opts arg database menu-value affordances]
   (let [prompt     (ai/llm-arg->ctx arg)
         signal     (ai/llm-arg->abort-signal arg)
         opts       (cond-> opts signal (assoc :seon.ai/abort-signal signal))
-        db         (some-> db/*conn* deref)
         agent-id   (db/current-agent-id)
-        policy     (menu/policy db)
-        offers     (if (and db agent-id) (menu/function-offers db agent-id) [])
+        policy     (::menu/policy menu-value)
+        offers     (::menu/offers menu-value)
         ;; The draft-head prefill affordance (W2): registry+program-graph
         ;; derived, computed ONCE per call (the projection can only change
         ;; after this call's forms eval). UNSCOPED templates ride EVERY
         ;; step's wire so an ORGANIC opened head expands prefilled too;
         ;; scoped templates are pass-only (write-back merge required).
-        entries    (if (and db agent-id)
-                     (pass-entries db agent-id (prefill-affordances db))
+        entries    (if (and database agent-id (seq affordances))
+                     (await (pass-entries database agent-id affordances))
                      {})
+        entries    (if (:seon.error/message entries) {} entries)
         prefills   (entries->organic-wire entries)
         skips      (entries->skips entries)
         passable?  (boolean (some ::template (vals entries)))
@@ -1123,6 +1133,35 @@
                          (if pass' (conj steps' (::pass-proj pass')) steps')
                          failed'
                          (or passed? moment?)))))))))))
+
+(defn- provider-database-error [error]
+  {:text ""
+   :seon.ai/error
+   {:seon.ai/msg (str "Typeahead database acquisition failed: "
+                      (:seon.error/message error))}})
+
+(defn ^:async ^:private step-loop!
+  [opts arg]
+  (let [database (await (db/db))]
+    (if (:seon.error/message database)
+      (provider-database-error database)
+      (let [agent-id (db/current-agent-id)
+            menu-value (if agent-id
+                         (await
+                          (menu/acquire-function-menu
+                           {:seon.agent/id agent-id ::db/db database}))
+                         {::menu/policy menu/default-policy
+                          ::menu/offers []
+                          ::menu/text ""})]
+        (if (:seon.error/message menu-value)
+          (provider-database-error menu-value)
+          (let [affordances (if agent-id
+                              (await (prefill-affordances database))
+                              [])]
+            (if (:seon.error/message affordances)
+              (provider-database-error affordances)
+              (await (step-loop-at! opts arg database menu-value
+                                    affordances)))))))))
 
 (defn agent-adapter
   "A fn-of-ctx-string suitable for `seon.agent`'s `llm-fn`.

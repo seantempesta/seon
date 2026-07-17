@@ -369,7 +369,7 @@
                            :when (< i (count entries))]
                        (nth entries i))
                      (take toolkit-cap) vec)]
-    {::recent recent ::toolkit toolkit}))
+    {::policy effective-policy ::recent recent ::toolkit toolkit}))
 
 (defn- format-function-menu [{::keys [recent toolkit]}]
   (let [lines (fn [offset entries]
@@ -465,6 +465,8 @@
                                       (remove nil?)
                                       (member-result direct-member))}))))))))
 
+(declare acquire-function-menu)
+
 (defn ^:async function-menu-block
   "The `:function-menu` section — recent + toolkit functions, glyph-listed.
 
@@ -491,11 +493,11 @@
    re-seeds from the manifest)."
   {:malli/schema [:=> [:cat :seon.render/section-request :any] :string]}
   [input _invoke-selected!]
-  (let [acquired (await (acquire-prompt-menu input))]
-    (if (:seon.error/message acquired)
+  (let [menu (await (acquire-function-menu input))]
+    (if (:seon.error/message menu)
       (str "[function-menu] render failed: "
-           (:seon.error/message acquired))
-      (format-function-menu (acquired-functions acquired)))))
+           (:seon.error/message menu))
+      (::text menu))))
 
 ;; ============================================================
 ;; Driver offers — the SAME capped function list as the rendered menu,
@@ -518,6 +520,47 @@
    [:seon.typeahead/label    :seon.typeahead/label]
    [:seon.typeahead/template :seon.typeahead/template]])
 (schema/register! ::offers-view [:vector :seon.typeahead/offer])
+
+(schema/register! ::text :string)
+(schema/register! ::menu-value
+  [:map
+   [::policy ::policy-view]
+   [::offers ::offers-view]
+   [::text ::text]])
+(schema/register! ::direct-error
+  [:map [:seon.error/message :string]])
+
+(def ^:private offer-args-free-tokens
+  "Free tokens a function template grants for the call's arguments."
+  24)
+
+(defn- functions->offers
+  [{::keys [recent toolkit]}]
+  (vec
+    (map-indexed
+      (fn [i [sym row]]
+        {:seon.typeahead/glyph (glyphs i)
+         :seon.typeahead/label (ns-cards/compact-fn-head
+                                 (compact-row sym row))
+         :seon.typeahead/template
+         [["clamp" (str "(" sym " ")]
+          ["free" offer-args-free-tokens]
+          ["clamp" ")"]]})
+      (concat recent toolkit))))
+
+(defn ^:async ^:no-doc acquire-function-menu
+  {:malli/schema
+   [:=> [:cat :seon.render/section-request]
+    [:or ::menu-value ::direct-error]]}
+  [input]
+  (let [acquired (await (acquire-prompt-menu input))]
+    (if (:seon.error/message acquired)
+      acquired
+      (let [functions (acquired-functions acquired)
+            policy (::policy functions)]
+        {::policy policy
+         ::offers (functions->offers functions)
+         ::text (format-function-menu functions)}))))
 
 ;; (The `:plan-ledger` section that used to live here retired 2026-07-11
 ;; — see the ns docstring; `my.plan.internal/plan-block` carries the

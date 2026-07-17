@@ -88,8 +88,39 @@
                       :seon.typeahead/toolkit-cap 1})
         (.then
           (fn [out]
-            (is (not (str/includes? out "done!")) "recent cap is applied")
-            (is (str/includes? out "① fn my.plan/plan! — positional")
-                "toolkit retains the first glyph when recent is empty")
+            (is (= 1 (count (re-seq #"; ① fn" out)))
+                "the acquired caps leave one toolkit entry")
+            (is (str/includes? out "① fn my.plan/done! — positional")
+                "toolkit starts at the first glyph when recent is empty")
             (done)))
         (.catch (fn [error] (is false (str error)) (done))))))
+
+(deftest structured-acquisition-is-the-display-and-provider-value
+  (async done
+    (let [calls (atom (responses {:seon.typeahead/max-rounds 3}))
+          original-execute db/execute-many]
+      (set! db/execute-many
+            (fn [request]
+              (is (identical? database (::db/db request)))
+              (let [response (first @calls)]
+                (swap! calls subvec 1)
+                (js/Promise.resolve response))))
+      (-> (menu/acquire-function-menu
+           {:seon.agent/id agent-id ::db/db database})
+          (.then
+           (fn [value]
+             (is (= 3 (get-in value [::menu/policy
+                                     :seon.typeahead/max-rounds])))
+             (is (= ["①" "②"]
+                    (mapv :seon.typeahead/glyph (::menu/offers value))))
+             (is (str/includes? (:seon.typeahead/label
+                                 (first (::menu/offers value)))
+                                "my.plan/done!"))
+             (is (str/includes? (:seon.typeahead/label
+                                 (second (::menu/offers value)))
+                                "my.plan/plan!"))
+             (is (str/includes? (::menu/text value)
+                                "① fn my.plan/done! — positional"))))
+          (.finally (fn [] (set! db/execute-many original-execute)))
+          (.then (fn [_] (done)))
+          (.catch (fn [error] (is false (str error)) (done)))))))
