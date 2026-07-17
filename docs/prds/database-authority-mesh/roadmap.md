@@ -172,6 +172,27 @@ graduation remains one
 frozen-source full test, live browser/agent, crash/restart, packaging, and
 modest-hardware density checkpoint.
 
+### Current implementation checkpoint
+
+- **Earliest unsettled contract:** `seon.derive` and
+  `seon.agent.schedule` must consume the one async run/database-value owner;
+  their deleted-reader and ambient-connection failures are explicit and no
+  compatibility helper will be restored.
+- **Integrated proof that closes it:** focused derive and schedule behavior
+  over one captured database value, native reports/direct errors, and a client
+  compile with no warning in those two owners.
+- **Dependency-ready parallel portfolio:** lifecycle is factoring the one
+  existing message transaction composer so completion can commit result,
+  optional message, close, and pointer retraction atomically; the database
+  session owner is restoring its one physical listen interest set after
+  reconnect without a second registry.
+- **Next refills:** after derive/schedule, migrate the agent owner and atomic
+  delegation; after lifecycle, migrate loop result handling; after listen
+  recovery, close the web/feed database-value and rendered-transaction cut.
+  The final graduation gate remains the full frozen-source correctness, live
+  Bun/JVM, multi-agent, child-crash, multi-database, and measured resource
+  matrix.
+
 The one message writer is settled at `7f732e2e`. `message!` captures one
 database value, derives sender/origin and hop data there, validates normalized
 recipients, allocates natively, and returns exactly message id plus hops or a
