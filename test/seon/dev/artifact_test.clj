@@ -68,8 +68,9 @@
   (let [component (atom {:writer (apply str (repeat 64 "a"))
                          :client (apply str (repeat 64 "b"))
                          :execution (apply str (repeat 64 "c"))
-                         :bootstrap (apply str (repeat 64 "d"))
-                         :css (apply str (repeat 64 "e"))})
+                         :execution-runtime (apply str (repeat 64 "d"))
+                         :bootstrap (apply str (repeat 64 "e"))
+                         :css (apply str (repeat 64 "f"))})
         config {:seon.dev.config/root "/repo"
                 :seon.dev.config/artifact-flavor
                 :seon.dev.artifact.flavor/default
@@ -85,6 +86,8 @@
             #'artifact/current-client-digest (fn [_] (:client @component))
             #'artifact/current-execution-digest
             (fn [_] (:execution @component))
+            #'artifact/current-execution-runtime-digest
+            (fn [_] (:execution-runtime @component))
             #'artifact/maintained-dependencies (constantly [])
             #'artifact/digest-paths
             (fn [_ paths]
@@ -94,20 +97,25 @@
            (fn [] (artifact/current-output-digests config)))]
     (let [initial (observe)]
       (is (= (select-keys @component
-                          [:writer :client :execution :bootstrap :css])
+                          [:writer :client :execution :execution-runtime
+                           :bootstrap :css])
              {:writer (:seon.dev.artifact/writer-digest initial)
               :client (:seon.dev.artifact/client-digest initial)
               :execution (:seon.dev.artifact/execution-digest initial)
+              :execution-runtime
+              (:seon.dev.artifact/execution-runtime-digest initial)
               :bootstrap (:seon.dev.artifact/bootstrap-digest initial)
               :css (:seon.dev.artifact/css-digest initial)}))
       (doseq [[component-key manifest-key]
               [[:writer :seon.dev.artifact/writer-digest]
                [:client :seon.dev.artifact/client-digest]
                [:execution :seon.dev.artifact/execution-digest]
+               [:execution-runtime
+                :seon.dev.artifact/execution-runtime-digest]
                [:bootstrap :seon.dev.artifact/bootstrap-digest]
                [:css :seon.dev.artifact/css-digest]]]
         (let [original (get @component component-key)]
-          (swap! component assoc component-key (apply str (repeat 64 "f")))
+          (swap! component assoc component-key (apply str (repeat 64 "9")))
           (let [changed (observe)]
             (is (not= (get initial manifest-key) (get changed manifest-key)))
             (is (not= (:seon.dev.artifact/application-digest initial)
@@ -347,31 +355,48 @@
   (let [directory (fs/create-temp-dir {:prefix "seon-bootstrap-root-test-"})
         source (fs/path directory "out/bootstrap/example.txt")
         execution (fs/path directory "out/execution/main.js")
+        execution-runtime
+        (fs/path directory
+                 ".shadow-cljs/builds/execution/dev/out/cljs-runtime/a.js")
         config {:seon.dev.config/root (str directory)
-                :seon.dev.config/execution-output (str execution)}]
+                :seon.dev.config/execution-output (str execution)
+                :seon.dev.config/execution-build-id "execution"
+                :seon.dev.config/shadow-cache-root
+                (str (fs/path directory ".shadow-cljs"))}]
     (try
       (fs/create-dirs (fs/parent source))
       (fs/create-dirs (fs/parent execution))
+      (fs/create-dirs (fs/parent execution-runtime))
       (doseq [relative ["src" "test" "resources"]]
         (fs/create-dirs (fs/path directory relative)))
       (spit (str source) "default-bootstrap")
       (spit (str execution) "default-execution")
+      (spit (str execution-runtime) "default-runtime")
       (let [default-digest (artifact/digest-paths
                              directory ["out/bootstrap"])
             default-execution-digest
             (artifact/current-execution-digest config)
+            default-runtime-digest
+            (artifact/current-execution-runtime-digest config)
             default-root (#'artifact/publish-runtime-root!
-                           config default-digest default-execution-digest)]
+                           config default-digest default-execution-digest
+                           default-runtime-digest)]
         (is (= "default-bootstrap"
                (slurp (str (fs/path default-root
                                     "out/bootstrap/example.txt")))))
         (is (= "default-execution"
-               (slurp (str (fs/path default-root "execution/main.js")))))
+               (slurp (str (fs/path default-root
+                                    "out/execution/main.js")))))
+        (is (= "default-runtime"
+               (slurp (str (fs/path
+                            default-root
+                            ".shadow-cljs/builds/execution/dev/out/cljs-runtime/a.js")))))
 
         (spit (str source) "acme-bootstrap")
         (let [acme-digest (artifact/digest-paths directory ["out/bootstrap"])
               acme-root (#'artifact/publish-runtime-root!
-                         config acme-digest default-execution-digest)]
+                         config acme-digest default-execution-digest
+                         default-runtime-digest)]
           (is (not= default-root acme-root))
           (is (= default-digest
                  (artifact/digest-paths default-root ["out/bootstrap"])))
@@ -383,16 +408,19 @@
               "the later ACME publication cannot mutate the default root")
           (is (= acme-root
                  (#'artifact/publish-runtime-root!
-                  config acme-digest default-execution-digest))
+                  config acme-digest default-execution-digest
+                  default-runtime-digest))
               "identical runtime bytes reuse their verified content address")
           (spit (str execution) "changed-execution")
           (let [changed-execution-digest
                 (artifact/current-execution-digest config)
                 changed-root (#'artifact/publish-runtime-root!
-                              config acme-digest changed-execution-digest)]
+                              config acme-digest changed-execution-digest
+                              default-runtime-digest)]
             (is (not= acme-root changed-root))
             (is (= "default-execution"
-                   (slurp (str (fs/path acme-root "execution/main.js"))))
+                   (slurp (str (fs/path acme-root
+                                        "out/execution/main.js"))))
                 "a watcher rebuild cannot mutate an admitted child artifact"))))
       (finally (fs/delete-tree directory)))))
 
@@ -493,6 +521,9 @@
         execution (fs/path directory "out/execution/main.js")
         runtime (fs/path directory
                          ".shadow-cljs/builds/client/dev/out/cljs-runtime/a.js")
+        execution-runtime
+        (fs/path directory
+                 ".shadow-cljs/builds/execution/dev/out/cljs-runtime/a.js")
         bootstrap (fs/path directory "out/bootstrap/a.js")
         css (fs/path directory "resources/public/css/output.css")
         dependencies (atom (#'artifact/maintained-dependencies-from
@@ -511,13 +542,15 @@
       (write-test-jar! writer "writer-a")
       (doseq [[path value] [[client "client"] [execution "execution"]
                             [runtime "runtime"]
+                            [execution-runtime "execution-runtime"]
                             [bootstrap "bootstrap"] [css "css"]]]
         (fs/create-dirs (fs/parent path))
         (spit (str path) value))
       (with-redefs [artifact/maintained-dependencies (fn [_] @dependencies)
                     artifact/publish-runtime-root!
-                    (fn [_ bootstrap-digest execution-digest]
-                      (str "/runtime/" bootstrap-digest "-" execution-digest))]
+                    (fn [_ bootstrap-digest execution-digest runtime-digest]
+                      (str "/runtime/" bootstrap-digest "-" execution-digest
+                           "-" runtime-digest))]
         (let [initial (#'artifact/output-manifest config)]
           (swap! dependencies assoc-in
                  [0 :seon.dev.artifact/dependency-git-sha]
@@ -556,6 +589,7 @@
          :seon.dev.artifact/writer-digest digest
          :seon.dev.artifact/client-digest digest
          :seon.dev.artifact/execution-digest digest
+         :seon.dev.artifact/execution-runtime-digest digest
          :seon.dev.artifact/bootstrap-digest digest
          :seon.dev.artifact/css-digest digest
          :seon.dev.artifact/application-digest digest}]
