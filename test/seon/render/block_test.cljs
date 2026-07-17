@@ -9,6 +9,7 @@
   (:require
     [cljs.test :as t :refer [deftest is testing]]
     [clojure.string :as str]
+    [seon.config :as config]
     [seon.error :as error]
     [seon.render :as render]
     [seon.render.value :as rv]
@@ -17,6 +18,7 @@
     [seon.ui.markdown :as md]))
 
 (defn- s [hiccup] (html/->string hiccup))
+(def configuration (config/resolve-config-singleton {}))
 
 ;; `block-throwing-delegate-yields-error-card` asserts the graceful PROD
 ;; fallback (throw → error card, never an exception). Under the harness
@@ -76,42 +78,48 @@
 
 (deftest block-message-kind
   (testing "a :seon.render/markdown tag → md->hiccup"
-    (let [out (s (render/block :html {:seon.render/markdown "## Hi\n\n**bold**"}))]
+    (let [out (s (render/block :html configuration
+                               {:seon.render/markdown "## Hi\n\n**bold**"}))]
       (is (str/includes? out "<h2"))
       (is (str/includes? out "<strong")))))
 
 (deftest block-source-kind
   (testing "a :seon.render/source tag → clj->hiccup (highlighted)"
-    (let [out (s (render/block :html {:seon.render/source "(defn f [] :ok)"}))]
+    (let [out (s (render/block :html configuration
+                               {:seon.render/source "(defn f [] :ok)"}))]
       (is (str/includes? out "language-clojure hljs"))
       (is (str/includes? out "hljs-keyword")))))
 
 (deftest block-data-kind
   (testing "a render-html-data projection → the collapsible value panel"
-    (let [proj (rv/render-html-data "e1" {:a 1 :nested {:b [1 2 3]}})
-          out  (s (render/block :html proj))]
+    (let [proj (rv/render-html-data configuration "e1"
+                                    {:a 1 :nested {:b [1 2 3]}})
+          out  (s (render/block :html configuration proj))]
       (is (str/includes? out "<details"))
       (is (str/includes? out "value-node"))
       (is (str/includes? out ":nested")))))
 
 (deftest block-error-kind
   (testing "a :seon/error value → the error-card seam"
-    (let [out (s (render/block :html {:seon.error/message "kaboom" :seon.error/where :probe}))]
+    (let [out (s (render/block :html configuration
+                               {:seon.error/message "kaboom"
+                                :seon.error/where :probe}))]
       (is (str/includes? out "render error"))
       (is (str/includes? out "kaboom")))))
 
 (deftest block-hiccup-passthrough
   (testing "a literal hiccup vector passes through unchanged"
     (let [h [:div {:class "x"} "literal"]]
-      (is (= h (render/block :html h))))))
+      (is (= h (render/block :html configuration h))))))
 
 (deftest block-fallback-projects-anything
   (testing "an unknown raw value falls through to the data panel — never throws"
-    (let [out (s (render/block :html {:raw "value" :n 42 :list [9 8 7]}))]
+    (let [out (s (render/block :html configuration
+                               {:raw "value" :n 42 :list [9 8 7]}))]
       (is (str/includes? out "<details"))
       (is (str/includes? out ":raw")))
-    (is (string? (s (render/block :html 42))))
-    (is (string? (s (render/block :html "plain string"))))))
+    (is (string? (s (render/block :html configuration 42))))
+    (is (string? (s (render/block :html configuration "plain string"))))))
 
 ;; ============================================================
 ;; block — ai view returns prompt Strings.
@@ -119,12 +127,19 @@
 
 (deftest block-ai-view-returns-strings
   (testing "every kind renders to a String for the agent prompt"
-    (is (= "## hi" (render/block :ai {:seon.render/markdown "## hi"})))
-    (is (= "(+ 1 2)" (render/block :ai {:seon.render/source "(+ 1 2)"})))
-    (is (string? (render/block :ai (rv/render-html-data "e1" {:a (range 100)}))))
-    (is (= "broke" (render/block :ai {:seon.error/message "broke"})))
-    (is (string? (render/block :ai [:div "literal " [:b "text"]])))
-    (is (string? (render/block :ai {:k 1})))))
+    (is (= "## hi"
+           (render/block :ai configuration {:seon.render/markdown "## hi"})))
+    (is (= "(+ 1 2)"
+           (render/block :ai configuration {:seon.render/source "(+ 1 2)"})))
+    (is (string?
+          (render/block :ai configuration
+                        (rv/render-html-data configuration "e1"
+                                             {:a (range 100)}))))
+    (is (= "broke"
+           (render/block :ai configuration {:seon.error/message "broke"})))
+    (is (string? (render/block :ai configuration
+                               [:div "literal " [:b "text"]])))
+    (is (string? (render/block :ai configuration {:k 1})))))
 
 ;; ============================================================
 ;; block — the never-throw guard (generalizes render-entity-html).
@@ -141,7 +156,8 @@
       ;; The throwing delegate is a :core fault (md is seon.*); deliberate here,
       ;; so bracket it EXPECTED (render/block guards+records synchronously).
       (let [out (error/expecting-core-fault!
-                  (fn [] (s (render/block :html {:seon.render/markdown "hi"}))))]
+                  (fn [] (s (render/block :html configuration
+                                          {:seon.render/markdown "hi"}))))]
         (is (str/includes? out "render error"))
         (is (str/includes? out "block render failed"))))))
 
@@ -149,8 +165,9 @@
   (testing "every kind's html output serializes cleanly"
     (doseq [x [{:seon.render/markdown "# h"}
                {:seon.render/source "(inc 1)"}
-               (rv/render-html-data "e" {:a 1})
+               (rv/render-html-data configuration "e" {:a 1})
                {:seon.error/message "e"}
                [:div "h"]
                {:unknown true}]]
-      (is (string? (s (render/block :html x))) (str "serialized: " (pr-str x))))))
+      (is (string? (s (render/block :html configuration x)))
+          (str "serialized: " (pr-str x))))))

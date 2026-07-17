@@ -23,7 +23,11 @@
 
    (rewrite-clj.parser/parse-string-all \";; hi\\n(+ 1 2)\\n\")
 
-   (.then (seon.eval/eval @seon.repl/!compile-state \"(+ 1 2)\")
+   ; configuration is the ordinary singleton acquired by the operation
+   (.then (seon.eval/eval
+            @seon.repl/!compile-state
+            \"(+ 1 2)\"
+            {:seon.config/configuration configuration})
           js/console.log)
    ```
 

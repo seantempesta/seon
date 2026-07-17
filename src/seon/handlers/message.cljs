@@ -58,7 +58,8 @@
 
    `[<from>] <content>`  — e.g. `[user] Define a fn that adds two numbers.`"
   {:malli/schema [:=> [:cat :seon.render/section-request] [:maybe :string]]}
-  [{:seon.db/keys [db] :seon.render/keys [node entity] :seon.agent/keys [id]}]
+  [{:seon.db/keys [db] :seon.render/keys [node entity]
+    :seon.agent/keys [id]}]
   (let [entity (or node entity)
         from (resolve-ref db (:seon.agent.message/from entity))
         body (or (:seon.agent.message/content entity) "")]
@@ -80,8 +81,10 @@
      `data-markdown`/marked.js pass — the agent-view shim loads only
      datastar.js, so the markdown must be hiccup by the time it ships."
   {:malli/schema [:=> [:cat :seon.render/section-request] [:maybe :seon.render.canvas/hiccup]]}
-  [{:seon.db/keys [db] :seon.render/keys [node entity] :seon.agent/keys [id]}]
-  (let [entity (or node entity)
+  [{:seon.db/keys [db] :seon.render/keys [node entity]
+    :seon.agent/keys [id] :as input}]
+  (let [configuration (:seon.config/configuration input)
+        entity (or node entity)
         from   (resolve-ref db (:seon.agent.message/from entity))
         label  (agent/message-label from id)
         tos    (->> (:seon.agent.message/to entity)
@@ -118,4 +121,5 @@
        (when (instance? js/Date at)
          [:span {:class "text-xs text-text-500"} (hh-mm-ss at)])]
       [:div {:class "markdown mt-0.5 min-w-0"}
-       (render/block :html {:seon.render/markdown (str/trim body)})]]]))
+       (render/block :html configuration
+                     {:seon.render/markdown (str/trim body)})]]]))

@@ -324,10 +324,26 @@
   [scope-key]
   (true? (get (current-scope) scope-key)))
 
+(defn- run-with-scope-value
+  "Run `thunk` with one fiber-local scope value; nested scopes merge."
+  [scope-key scope-value thunk]
+  (.run scope-als (assoc (current-scope) scope-key scope-value) thunk))
+
 (defn- run-in-scope
   "Run `thunk` with `scope-key` true in this fiber; nested scopes merge."
   [scope-key thunk]
-  (.run scope-als (assoc (current-scope) scope-key true) thunk))
+  (run-with-scope-value scope-key true thunk))
+
+(defn with-configuration
+  "Run one operation with its already-acquired immutable config singleton.
+
+   Error instrumentation and process rejection handlers are cross-cutting and
+   cannot receive application arguments. They inherit this exact map through
+   the existing error AsyncLocalStorage scope; no database read or config cache
+   occurs here."
+  {:malli/schema [:=> [:cat :seon.config/singleton fn?] :any]}
+  [configuration thunk]
+  (run-with-scope-value :seon.error.scope/configuration configuration thunk))
 
 (defn- persist!
   "Fire-and-forget transact of error `entities`; re-buffers on failure.
@@ -488,12 +504,13 @@
    tripped, `:crash` NOT taken). Under `:crash` (and not expected) exits
    the pod AFTER the persist Promise settles (datom first, then loud exit)."
   [projection persist-promise]
-  (let [expected? (expecting-a-core-fault?)]
+  (let [expected? (expecting-a-core-fault?)
+        configuration (:seon.error.scope/configuration (current-scope))]
     (js/console.error
       (str (if expected? "SEON-EXPECTED-CORE-FAULT" "SEON-CORE-FAULT") " "
            (:seon.error/message projection)
            (when-let [t (::t projection)] (str " @t=" t))))
-    (when (and (not expected?) (= :crash (config/on-core-error)))
+    (when (and (not expected?) (= :crash (config/on-core-error configuration)))
       (let [exit! (fn [& _]
                     (js/console.error
                       "seon.error/record!: on-core-error :crash — exiting after persisting the fault datom")

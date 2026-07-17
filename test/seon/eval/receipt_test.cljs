@@ -3,12 +3,15 @@
   (:require
     [cljs.test :refer [async deftest is testing]]
     [malli.core :as m]
+    [seon.config :as config]
     [seon.db :as db]
     [seon.db.id :as db.id]
     [seon.db.protocol :as protocol]
     [seon.eval :as seval]
     [seon.eval.internal :as receipt]
     [seon.runtime.admission :as admission]))
+
+(def configuration (config/resolve-config-singleton {}))
 
 (def database
   {:db-name "default"
@@ -320,7 +323,8 @@
       (-> (seval/eval-batch!
            nil [] 'my.agent.receipt "AGTreceipt0001"
            "TRNreceipt0001" "RUNreceipt0001"
-           {::seval/authored-sources {} ::db/db database})
+           {:seon.config/configuration configuration
+            ::seval/authored-sources {} ::db/db database})
           (.then
            (fn [result]
              (is (true? (:seon.eval/fenced? result)))
@@ -354,7 +358,8 @@
              :seon.repl/narration "thinking"}]
            'my.agent.receipt "AGTreceipt0001"
            "TRNreceipt0001" "RUNreceipt0001"
-           {::seval/authored-sources {} ::db/db database})
+           {:seon.config/configuration configuration
+            ::seval/authored-sources {} ::db/db database})
           (.then
            (fn [result]
              (is (= ["EVLreceipt0001"] (:seon.eval/ids result)))

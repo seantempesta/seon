@@ -426,42 +426,6 @@
     (try (edn/read-string s)
          (catch :default _ nil))))
 
-(def eval-render-cap
-  "Char cap for the echoed SOURCE and captured STDOUT components of one
-   eval row — neither is dereferenceable via `result/<id>`, so a large one
-   is context-wasting noise. The citable RESULT BODY gets the larger
-   [[result-body-render-cap]] instead. Context-SAFETY invariant: no single
-   eval component may dominate the agent's whole context (one 9.7M-char
-   `pull` result once blew the prompt to ~9.8M chars). The knob lives in
-   `seon.config` (SEON_RENDER_EVAL_CAP)."
-  (config/eval-render-cap))
-
-(def result-body-render-cap
-  "Render cap for the CITABLE RESULT BODY — the `; ⟹ <value>` line every
-   successful eval renders (`cap-result-body`). The result body alone gets
-   this LARGER cap (vs [[eval-render-cap]] for echoed source + stdout)
-   because it is the one component that (a) carries a `result/<id>`
-   escape, so an over-cap body still points the agent at the whole live
-   value; and (b) is already row-capped at 50 elements upstream
-   (`seon.eval/render-result-edn`), so a body this size is STRUCTURED, not
-   a wall of text.
-
-   The default 16384 currently equals `database-edn-cap`, so a stored result
-   renders WHOLE — but this is a CROSS-REFERENCE, NOT an alias. The render
-   cap (an LLM-facing read-time projection) and `database-edn-cap` (the
-   write-time per-datom anti-OOM RAM ceiling) are different tiers.
-
-   This is the FALLBACK cap (the decay default-cap): the transcript's
-   `:seon.agent.ctx.transcript/result-decay` schedule caps a result body by AGE
-   (CP-3), and this const is the near-full / no-decay default level (offset 0 =
-   16384). Config a decay schedule on the transcript block to age-band it.
-
-   The VALUE has one owner — `seon.config/result-body-render-cap` (C32):
-   `seon.eval/clip-result-body` (the write-time persistence clip) reads
-   the same knob as a chars/4 TOKEN budget; this def keeps the ctx-side
-   char-denominated contract (`clip-or-full` plumbing)."
-  (config/result-body-render-cap))
-
 (defn cap-result
   "Truncate a rendered eval-result string to `eval-render-cap`.
 
@@ -471,27 +435,14 @@
    silently-clipped render. Operates on the ALREADY-stringified result
    (`:seon.eval/result-edn` is a pr-str string), so no re-quoting.
    Nil-safe."
-  {:malli/schema [:function
-                  [:=> [:catn [::s :any]] :string]
-                  [:=> [:catn [::s :any] [::limit :int]] :string]
-                  [:=> [:catn [::s :any] [::limit :int] [::full? :boolean]] :string]]}
-  ([s] (cap-result s eval-render-cap false))
-  ([s limit] (cap-result s limit false))
-  ([s limit full?]
-   (clip-or-full s limit full?
-     (fn [budget total]
-       (str " …⟨⚠ TRUNCATED at " budget " of " total " tokens — the DISPLAY is "
-            "clipped, the underlying data is complete; do not summarize "
-            "or quote beyond what is shown⟩")))))
-
-(def message-render-cap
-  "Per-message rendered-content char cap for a `;;; ◀ from X` inbound line
-   in the transcript: each inbound message must be individually bounded or
-   a single pasted blob could blow the context. 4000 (≈1k tokens) keeps
-   any realistic chat turn whole; the full content stays in the db
-   ((seon.agent/messages)). The knob lives in `seon.config`
-   (SEON_RENDER_MESSAGE_CAP)."
-  (config/message-render-cap))
+  {:malli/schema [:=> [:catn [::s :any] [::limit :int]
+                             [::full? :boolean]] :string]}
+  [s limit full?]
+  (clip-or-full s limit full?
+    (fn [budget total]
+      (str " …⟨⚠ TRUNCATED at " budget " of " total " tokens — the DISPLAY is "
+           "clipped, the underlying data is complete; do not summarize "
+           "or quote beyond what is shown⟩"))))
 
 (defn cap-result-body
   "Truncate an eval RESULT body, with a GUIDING clip message.
@@ -517,24 +468,18 @@
    one citable, row-capped, `result/<id>`-dereferenceable component, so
    it earns the larger cap (echoed source + stdout stay at the smaller
    [[eval-render-cap]])."
-  {:malli/schema [:function
-                  [:=> [:catn [::s :any]] :string]
-                  [:=> [:catn [::s :any] [::limit :int]] :string]
-                  [:=> [:catn [::s :any] [::limit :int] [::eid :any]] :string]
-                  [:=> [:catn [::s :any] [::limit :int] [::eid :any] [::full? :boolean]] :string]]}
-  ([s] (cap-result-body s result-body-render-cap nil false))
-  ([s limit] (cap-result-body s limit nil false))
-  ([s limit eid] (cap-result-body s limit eid false))
-  ([s limit eid full?]
-   (clip-or-full s limit full?
-     (fn [budget total]
-       (let [ref (if eid (str "result/" eid) "result/<id>")]
-         (str " …⟨⚠ TRUNCATED at " budget " of " total " tokens — the DISPLAY "
-              "is clipped, the live value is COMPLETE⟩"
-              "\n; bind " ref " for the full value — process it with code: "
-              "(count " ref "), subs, get-in/filter, or paged take/drop. To "
-              "get less next time: a :find aggregate, a tighter :where, or "
-              "pull fewer attrs."))))))
+  {:malli/schema [:=> [:catn [::s :any] [::limit :int] [::eid :any]
+                             [::full? :boolean]] :string]}
+  [s limit eid full?]
+  (clip-or-full s limit full?
+    (fn [budget total]
+      (let [ref (if eid (str "result/" eid) "result/<id>")]
+        (str " …⟨⚠ TRUNCATED at " budget " of " total " tokens — the DISPLAY "
+             "is clipped, the live value is COMPLETE⟩"
+             "\n; bind " ref " for the full value — process it with code: "
+             "(count " ref "), subs, get-in/filter, or paged take/drop. To "
+             "get less next time: a :find aggregate, a tighter :where, or "
+             "pull fewer attrs.")))))
 
 (def result-marker
   "The reserved RUNTIME result-OPEN glyph `⟹` — the SINGLE SOURCE OF TRUTH.
@@ -668,12 +613,9 @@
    the form. The repair `↻ auto-balanced …` breadcrumb (when a span was
    parinfer-repaired) rides in the preamble, keeping a wrong-but-valid
    repair catchable."
-  {:malli/schema [:function
-                  [:=> [:catn [::row :map]] :string]
-                  [:=> [:catn [::row :map]
-                              [::result-unavailable? :boolean]] :string]]}
-  ([row] (format-eval-row row false))
-  ([{src        :seon.eval/source
+  {:malli/schema [:=> [:catn [::row :map]
+                             [::result-unavailable? :boolean]] :string]}
+  [{src        :seon.eval/source
      ok?        :seon.eval/ok?
      res        :seon.eval/result-edn
      out        :seon.eval/output
@@ -692,9 +634,12 @@
      ;; converter computes it once off ITS render db and stamps it here, so an
      ;; as-of render never reads the live conn. ABSENT (direct callers) →
      ;; the live [[escape-clipping?]] read, byte-identical to today.
-     escape-override :seon.agent.ctx/escape-clipping?}
+     escape-override :seon.agent.ctx/escape-clipping?
+     configuration :seon.config/configuration}
     result-unavailable?]
-   (let [envelope    (read-error-envelope err-data)
+   (let [eval-render-cap (config/eval-render-cap configuration)
+         result-body-render-cap (config/result-body-render-cap configuration)
+         envelope    (read-error-envelope err-data)
          ;; `:seon.render/full?` (the no-clip opt-out, pinned on this eval
          ;; row) renders every authored component WHOLE past its cap. Absent
          ;; → false → byte-identical to today's clipped render.
@@ -828,7 +773,7 @@
              (when (and note (not (str/blank? note)))
                (quote-lines note {:seon.agent.ctx/strip-markers? true}))])
           (remove nil?)
-          (str/join "\n")))))
+          (str/join "\n"))))
 
 ;; ------------------------------------------------------------
 ;; Byte-stable system instructions. Context acquisition and child invocation
@@ -1650,6 +1595,7 @@
 (schema/register! ::initial-context-request
   [:map
    [:seon.agent/id :seon.agent/id]
+   [:seon.config/configuration :seon.config/singleton]
    [:seon.agent.ctx/override {:optional true} [:maybe :map]]])
 
 (defn initial-agent-context
@@ -1662,8 +1608,9 @@
    resume; their database facts remain authoritative."
   {:malli/schema
    [:=> [:cat ::initial-context-request] :seon.config/agent-context]}
-  [{:seon.agent/keys [id] :seon.agent.ctx/keys [override]}]
-  (config/resolve-agent-context id override))
+  [{:seon.agent/keys [id] :seon.agent.ctx/keys [override]
+    configuration :seon.config/configuration}]
+  (config/resolve-agent-context id override configuration))
 
 (defn- upsert-ctx-tx
   "Tx-data that REPLACES the scoped agent's :seon.agent/ctx with `blocks`:

@@ -76,7 +76,8 @@
 (defn- selected-call [input]
   {:seon.execution/function-symbol (::fn-sym (:seon.render/node input))
    :seon.execution/arguments
-   [(cond-> {:seon.render/entity (:seon.agent/entity input)}
+   [(cond-> {:seon.db/db (:seon.db/db input)
+             :seon.render/entity (:seon.agent/entity input)}
       (:seon.agent/id input)
       (assoc :seon.agent/id (:seon.agent/id input)))]})
 
@@ -99,7 +100,11 @@
             text (if (map? value) (:seon.render/ai value) value)]
         (cond
           (nil? text) ""
-          (string? text) (tokens/clip-str text (config/render-fn-token-cap))
+          (string? text)
+          (tokens/clip-str
+            text
+            (config/render-fn-token-cap
+              (:seon.config/configuration input)))
           :else (str ";; ⚠ " (::fn-sym (:seon.render/node input))
                      " returned a non-string :seon.render/ai"))))))
 

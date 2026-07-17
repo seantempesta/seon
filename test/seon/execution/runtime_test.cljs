@@ -3,6 +3,7 @@
    [cljs.test :refer [async deftest is testing]]
    [clojure.string :as str]
    [seon.agent.ctx :as ctx]
+   [seon.config :as config]
    [seon.db :as db]
    [seon.db.coordinate :as coordinate]
    [seon.db.protocol :as protocol]
@@ -23,6 +24,8 @@
    :since nil
    :history false
    :datahike/commit-id #uuid "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"})
+
+(def configuration (config/resolve-config-singleton {}))
 
 (defn- call-with-acquired-agent
   ([result request observed]
@@ -433,7 +436,8 @@
              (fn []
                (js/Promise.resolve
                 {::execution/compile-state compile-state
-                 ::execution/program program}))))
+                 ::execution/program program
+                 ::execution/configuration configuration}))))
           (.then
            (fn [result]
              (is (= {:seon.eval/n-ok 1
@@ -446,6 +450,7 @@
                      "agent-1" "turn-1" "run-1"
                      {::eval/authored-sources
                       {:my.agent.agent-1 "(ns my.agent.agent-1)"}
+                      :seon.config/configuration configuration
                       ::db/db database}]
                     (:seon.execution.runtime-test/arguments @observed)))
              (is (nil?
@@ -485,7 +490,9 @@
                      :seon.render/html (pr-str 'my.agent.agent-1/view)
                      :seon.fn/read-attrs [:my.example/value]}]}}
                  {::protocol/success? true
-                  :datahike.query/result 3}]})))
+                  :datahike.query/result 3}
+                 {::protocol/success? true
+                  ::protocol/result configuration}]})))
       (-> (db/with-tx-context
            {::db/coordinate point}
            #(runtime/render-agent-view!
@@ -504,8 +511,8 @@
                     (into #{}
                           (map :seon.render.surface/label)
                           (:seon.render.surface/surfaces projection))))
-             (is (= 2 (count (::db/members @acquisition)))
-                 "the page no longer queries the global datom count")
+             (is (= 3 (count (::db/members @acquisition)))
+                 "the page acquires the agent, count, and configuration")
              (is (contains? (:seon.web.datastar/dependencies projection)
                             :my.example/value))
              (is (contains? (:seon.web.datastar/dependencies projection)

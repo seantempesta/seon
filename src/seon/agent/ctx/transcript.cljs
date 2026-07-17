@@ -418,7 +418,8 @@
    UNANSWERED inbound — one that arrived after the agent's last action (a
    fresh wake or a mid-call arrival) so the agent re-orients to it."
   {:malli/schema [:=> [:cat :seon.render/section-request] :string]}
-  [{node :seon.render/node}]
+  [{node :seon.render/node
+    configuration :seon.config/configuration}]
   (let [{::keys [at from-label to-labels content id new? outbound? escape?]} node
         ;; CP-5 escape-clipping (#43, owner: "render the blocks in full"):
         ;; when the agent's `:seon.agent.ctx/escape-clipping?` is on (default
@@ -426,7 +427,7 @@
         ;; The flag rides the event (threaded off the RENDER db by
         ;; [[transcript-block]] — byte-exact); a direct call with no
         ;; threaded flag falls back to the live read.
-        body (ctx/cap-result content ctx/message-render-cap
+        body (ctx/cap-result content (config/message-render-cap configuration)
                              (if (boolean? escape?) escape? true))
         who  (if outbound?
                (str "▶ to " (str/join ", " to-labels))
@@ -896,15 +897,10 @@
         run (:seon.agent/run entity)
         run-id (:seon.agent.run/id run)
         open? (= :open (:seon.agent.run/status run))
+        configuration (:seon.config/configuration input)
         stage-one-members
         (cond->
-          [(pull-member [:seon.config/repl-mode
-                         :seon.config.run/batch-turn-limit
-                         :seon.config.run/stream-form-limit
-                         :seon.config.run/deadline-ms]
-                        [:seon.config/id config/cluster-config-id]
-                        256 32 4096)
-           ;; Datahike charges intermediate relations to max-results and their
+          [;; Datahike charges intermediate relations to max-results and their
            ;; retained structure to max-result-weight. Both remain finite;
            ;; the grown-query fixture calibrates them independently.
            (query-member turn-count-query [id] 1000000 1000000 4096)
@@ -924,9 +920,8 @@
                        (database-error stage-one)
                        (acquisition-error (::db/results stage-one)))]
       (assoc input ::error error)
-      (let [[config-member turn-count-member turns-member ns-member action-member
+      (let [[turn-count-member turns-member ns-member action-member
              run-turn-member run-form-member] (::db/results stage-one)
-            stored-config (or (::protocol/result (member-value config-member)) {})
             turn-count (or (query-result turn-count-member) 0)
             newest-rows (->> (query-result turns-member)
                              (sort-by (juxt second first))
@@ -982,8 +977,8 @@
                 current-ns (or (ffirst (query-result ns-member))
                                (home/home-ns id))
                 previous-ns (ffirst (query-result previous-ns-member))
-                mode (or (:seon.config/repl-mode stored-config) :batch)
-                policy (merge (config/default-run-policy) stored-config)
+                mode (or (:seon.config/repl-mode configuration) :batch)
+                policy (merge (config/default-run-policy) configuration)
                 state (derive/state-from-primitives
                         (cond-> {:seon.agent.run/open? open?}
                           (:seon.agent/terminated-at entity)
@@ -1059,6 +1054,7 @@
         ;; the `seon.agent/transcript-block` re-export), there
         ;; is no injected handle — fall back to a local ai render so the
         ;; same code path produces the same String.
+        configuration (:seon.config/configuration input)
         render*  (or render-fn #(render/render :seon.render/ai input %))
         events   (ordered-events input)
         ;; Flag any INBOUND newer than the last action as NEW (UNANSWERED) —
@@ -1126,14 +1122,18 @@
                                             (- max-turn (or (::turn-idx ev) max-turn)))
                                  cap    (decay-cap-for-offset
                                           (mapv #(into {} %) levels) offset
-                                          ctx/result-body-render-cap)]
+                                          (config/result-body-render-cap
+                                            configuration))]
                              (cond-> (update ev ::entity assoc
-                                             :seon.render/result-body-cap cap)
+                                             :seon.render/result-body-cap cap
+                                             :seon.config/configuration
+                                             configuration)
                                (some? esc)
                                (update ::entity assoc
                                        :seon.agent.ctx/escape-clipping? esc)
                                (not handles?) (assoc ::result-live? false)))
-                           (cond-> ev
+                           (cond-> (assoc ev :seon.config/configuration
+                                         configuration)
                              (some? esc) (assoc ::escape? esc))))
                        events*t)
         ;; Render each event directly. Handle availability is already an exact
@@ -1225,7 +1225,7 @@
 
 (defn- message-card-html
   "Render one already-acquired message row without another database read."
-  [agent-id message]
+  [configuration agent-id message]
   (let [from-label (ctx/message-label (:seon.agent.message/from message) agent-id)
         to-labels (->> (:seon.agent.message/to message)
                        (map #(ctx/message-label % agent-id))
@@ -1244,11 +1244,13 @@
          [:span {:class "text-xs font-mono text-text-500"}
           (str "→ " to-labels)])]
       [:div {:class "markdown mt-0.5 min-w-0"}
-       (render/block :html {:seon.render/markdown (str/trim body)})]]]))
+       (render/block :html configuration
+                     {:seon.render/markdown (str/trim body)})]]]))
 
 (defn- format-transcript-html
   [{:seon.agent/keys [id] turns ::turns :as input}]
-  (let [node (:seon.render/node input)
+  (let [configuration (:seon.config/configuration input)
+        node (:seon.render/node input)
         retained (or (::turns-retained node) default-turns-retained)
         turn-ats (mapv :seon.agent.turn/at turns)
         events (->> (ordered-events input)
@@ -1256,7 +1258,7 @@
                     coalesce-events)
         render-message
         (fn [event]
-          (message-card-html id (::entity event)))
+          (message-card-html configuration id (::entity event)))
         cards
         (->> events
              (keep
@@ -1265,7 +1267,8 @@
                    :coalesced (coalesced-card-html event)
                    :message (render-message event)
                    :eval (eval-handler/render-activity-html
-                           {:seon.render/node (::entity event)})
+                           {:seon.config/configuration configuration
+                            :seon.render/node (::entity event)})
                    nil)))
              vec)
         latest-reply (some->> events

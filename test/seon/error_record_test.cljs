@@ -15,14 +15,54 @@
    classification fns are pure — tested directly here."
   (:require
     [cljs.test :refer [deftest is testing async]]
-    [datahike.api :as d]
     [malli.core :as m]
     [seon.agent]
     [seon.agent.message]
-    [seon.db :as db]
+    [seon.config :as config]
     [seon.error :as error]
     [seon.error.instrument :as ei]
     [seon.instrument :as si]))
+
+(declare tick)
+
+(deftest operation-configuration-is-isolated-across-async-fibers
+  (async done
+    (let [configuration-a (assoc (config/resolve-config-singleton {})
+                                 :seon.config/on-core-error :log)
+          configuration-b (assoc (config/resolve-config-singleton {})
+                                 :seon.config/on-core-error :gate)
+          observed (atom [])
+          original-accessor config/on-core-error
+          original-console-error (.-error js/console)
+          escalate! (deref #'error/escalate!)]
+      (set! (.-error js/console) (fn [& _] nil))
+      (set! config/on-core-error
+            (fn [configuration]
+              (swap! observed conj (:seon.config/on-core-error configuration))
+              (original-accessor configuration)))
+      (-> (js/Promise.all
+              #js [(error/with-configuration
+                     configuration-a
+                     #(-> (tick 10)
+                          (.then (fn [_]
+                                   (escalate!
+                                     {:seon.error/message "fiber a"} nil)))))
+                   (error/with-configuration
+                     configuration-b
+                     #(-> (tick 0)
+                          (.then (fn [_]
+                                   (escalate!
+                                     {:seon.error/message "fiber b"} nil)))))])
+            (.then
+              (fn [_]
+                (is (= #{:log :gate} (set @observed))
+                    "each async fault reads the configuration of its operation")))
+            (.catch (fn [error] (is false (str error))))
+            (.finally
+              (fn []
+                (set! config/on-core-error original-accessor)
+                (set! (.-error js/console) original-console-error)
+                (done)))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Pure pieces — no conn needed.
@@ -198,142 +238,76 @@
               error never reaches the fn — callers some->)"
       (is (nil? (error/parse-frames "no frames here"))))))
 
-(deftest record-returns-envelope-and-never-throws
-  ;; No conn bound in this test process yet — record! must still return the
-  ;; envelope (the projection lands in the in-memory buffer, flushed by the
-  ;; next conn-backed record!).
-  (let [env (error/record! {:seon.error/raw (js/Error. "buffered one")
-                            :seon.error/fault :agent})]
-    (is (= :agent (:seon.error/fault env)))
-    (is (= "buffered one" (:seon.error/message env)))
-    (is (map? (error/record! {:seon.error/raw nil :seon.error/fault :agent}))
-        "nil raw still yields an envelope")))
-
-(deftest recorded-tag-dedup
-  (let [e (js/Error. "tag me")]
-    (is (false? (error/recorded? e)))
-    (error/record! {:seon.error/raw e :seon.error/fault :agent})
-    (is (true? (error/recorded? e))
-        "record! tags the raw error so outer funnels skip it")
-    (is (false? (error/recorded? nil)))
-    (is (false? (error/recorded? "a string reason")))))
-
-;; ---------------------------------------------------------------------------
-;; Persistence — fresh :memory conn, root set! of db/*conn* (CLJS has no
-;; binding across awaits; the persist hook closes over the var root).
-;; ---------------------------------------------------------------------------
-
-(defn- fresh-conn
-  "Fresh :memory datahike conn (history ON — as-of needs the temporal
-   index). Returns a Promise of the conn."
-  []
-  (let [cfg {:store              {:backend :memory :id (random-uuid)}
-             :schema-flexibility :write
-             :keep-history?      true}]
-    (-> (d/create-database cfg)
-        (.then (fn [_] (d/connect cfg {:sync? false})))
-        (.then (fn [conn]
-                 (-> (db/ensure-provenance! {:seon.db/conn conn})
-                     (.then (fn [_] conn))))))))
-
 (defn- tick
   "Promise resolving after `ms` — lets a fire-and-forget persist settle."
   [ms]
   (js/Promise. (fn [resolve _] (js/setTimeout resolve ms))))
 
-(defn- install-default-error-hooks!
-  "Restore the same late-bound hooks installed by `seon.db` at ns load."
-  []
-  (error/set-db-hooks!
-    {:seon.error/transact! (fn [tx-data]
-                             (when db/*conn*
-                               (db/transact! {:seon.db/tx-data tx-data})))
-     :seon.error/coordinate (fn []
-                              (when db/*conn*
-                                (db/head-coordinate @db/*conn*)))})
+(defn- clear-error-hooks! []
+  (error/set-db-hooks! {})
   nil)
 
-(defn- with-fresh-conn
-  "Run `f` (conn → Promise) with db/*conn* set! to a fresh conn; restore
-   the prior root either way, then `done`."
-  [f done]
-  (let [prior db/*conn*
-        finish (fn [] (set! db/*conn* prior) (done))]
-    (-> (fresh-conn)
-        (.then (fn [conn] (set! db/*conn* conn) (f conn)))
-        (.catch (fn [e] (is false (str "test chain threw/rejected — " e))))
-        (.then finish))))
+(defn- install-capture-hooks! [batches point]
+  (error/set-db-hooks!
+    {:seon.error/transact!
+     (fn [tx-data]
+       (swap! batches conj tx-data)
+       (js/Promise.resolve {:seon.db/ok? true}))
+     :seon.error/coordinate (constantly point)}))
 
-(defn ^:async ^:private assert-persisted-row!
-  "Assertions over the row `record-persists…` wrote — split out to keep
-   the async chain shallow."
-  [env]
-  (let [row (first (db/query {:seon.db/query
-                              '[:find ?e ?database-id ?branch ?commit-id ?t
-                                :where
-                                [?e :seon.error/message "persisted one"]
-                                [?e :seon.error/fault :agent]
-                                [?e :seon.error/database-id ?database-id]
-                                [?e :seon.error/branch ?branch]
-                                [?e :seon.error/commit-id ?commit-id]
-                                [?e :seon.error/t ?t]]}))
-        eid (first row)
-        point {:seon.db.coordinate/database-id (nth row 1)
-               :seon.db.coordinate/branch (nth row 2)
-               :seon.db.coordinate/commit-id (nth row 3)
-               :seon.db.coordinate/t (nth row 4)}]
-    (is (some? row) "the datom projection landed")
-    (is (= point (error/recorded-coordinate env)))
-    (testing "frames are reified component entities"
-      (is (pos? (count (db/query {:seon.db/query
-                                  '[:find ?f
-                                    :in $ ?e
-                                    :where [?e :seon.error/frames ?f]]
-                                  :seon.db/args [eid]})))))
-    (testing "the complete coordinate resolves the db the failing code saw"
-      (let [historical-db (await (db/at-coordinate db/*conn* point))]
-        (is (nil? (db/pull {:seon.db/db historical-db
-                          :seon.db/pull-pattern '[:seon.error/message]
-                          :seon.db/ref eid})))))
-    (testing "the earlier no-conn record! was buffered and FLUSHED here"
-      (is (some? (db/query {:seon.db/query
-                            '[:find ?e .
-                              :where [?e :seon.error/message "buffered one"]]}))))))
+(defn- captured-errors [batches message]
+  (filter #(= message (:seon.error/message %)) (mapcat identity @batches)))
 
-(deftest query-missing-attr-throw-classifies-agent
-  ;; The REAL seon.db/query typo throw (flat :user-input ex-data after
-  ;; C43) through the classifier — the concrete agent-mistake path that
-  ;; used to pre-build a nested envelope.
-  (async done
-    (with-fresh-conn
-      (fn [_conn]
-        (try
-          (db/query '[:find ?e :where [?e :no.such.attr/typo ?v]])
-          (is false "the typo guard must throw")
-          (catch :default e
-            (is (= :user-input (:seon.error/kind (ex-data e)))
-                "kind is FLAT in ex-data")
-            (is (= [:no.such.attr/typo] (:seon.db/missing-attrs (ex-data e))))
-            (is (= :agent (si/wrapper-fault e :core))
-                "a mistyped query attr is the AGENT's mistake")
-            (is (= :user-input
-                   (:seon.error/kind (error/->map e)))
-                "the envelope carries the kind at the TOP (C45 lift)")))
-        (js/Promise.resolve nil))
-      done)))
+(defn- with-captured-errors [point body done]
+  (let [batches (atom [])]
+    (install-capture-hooks! batches point)
+    (-> (body batches)
+        (.catch (fn [e] (is false (str "test chain rejected — " e))))
+        (.finally (fn [] (clear-error-hooks!) (done))))))
 
-(deftest record-persists-fault-at-frames-and-buffer-flush
-  (async done
-    (with-fresh-conn
-      (fn [_conn]
-        (let [env (error/record! {:seon.error/raw (js/Error. "persisted one")
-                                  :seon.error/fault :agent})]
-          (is (= :agent (:seon.error/fault env)))
-          (is (nil? (:seon.error/message (error/recorded-coordinate env)))
-              "a complete coordinate is stamped when a conn is live")
-          (-> (tick 100)
-              (.then (fn [] (assert-persisted-row! env))))))
-      done)))
+(deftest record-returns-envelope-and-never-throws
+  (let [batches (atom [])]
+    (try
+      (install-capture-hooks! batches nil)
+      (let [env (error/record! {:seon.error/raw (js/Error. "recorded one")
+                                :seon.error/fault :agent})]
+        (is (= :agent (:seon.error/fault env)))
+        (is (= "recorded one" (:seon.error/message env)))
+        (is (= 1 (count (captured-errors batches "recorded one"))))
+        (is (map? (error/record! {:seon.error/raw nil
+                                  :seon.error/fault :agent}))
+            "nil raw still yields an envelope"))
+      (finally (clear-error-hooks!)))))
+
+(deftest recorded-tag-dedup
+  (let [batches (atom [])
+        e (js/Error. "tag me")]
+    (try
+      (install-capture-hooks! batches nil)
+      (is (false? (error/recorded? e)))
+      (error/record! {:seon.error/raw e :seon.error/fault :agent})
+      (is (true? (error/recorded? e))
+          "record! tags the raw error so outer funnels skip it")
+      (is (false? (error/recorded? nil)))
+      (is (false? (error/recorded? "a string reason")))
+      (finally (clear-error-hooks!)))))
+
+(deftest record-persists-projection-with-complete-database-point
+  (let [batches (atom [])
+        point {:seon.db.coordinate/database-id (random-uuid)
+               :seon.db.coordinate/branch :main
+               :seon.db.coordinate/commit-id (random-uuid)
+               :seon.db.coordinate/t 42}]
+    (try
+      (install-capture-hooks! batches point)
+      (let [env (error/record! {:seon.error/raw (js/Error. "persisted one")
+                                :seon.error/fault :agent})
+            projection (first (captured-errors batches "persisted one"))]
+        (is (= point (error/recorded-coordinate env)))
+        (is (= :agent (:seon.error/fault projection)))
+        (is (seq (:seon.error/frames projection))
+            "stack frames remain ordinary component transaction data"))
+      (finally (clear-error-hooks!)))))
 
 ;; ---------------------------------------------------------------------------
 ;; The wrapper arms — async rejection + output violation become datoms.
@@ -347,8 +321,9 @@
 
 (deftest async-rejection-arm-records-and-re-rejects
   (async done
-    (with-fresh-conn
-      (fn [_conn]
+    (with-captured-errors
+      nil
+      (fn [batches]
         (let [wrapped (wrap 'my.probe/reject-fn
                             (fn [_] (js/Promise.reject (js/Error. "reject-arm"))))]
           (-> (wrapped {})
@@ -357,24 +332,17 @@
                                  "caller sees the ORIGINAL rejection unchanged")))
               (.then (fn [] (tick 100)))
               (.then (fn []
-                       (is (= #{[:agent]}
-                              (db/query {:seon.db/query
-                                         '[:find ?fault
-                                           :where
-                                           [?e :seon.error/message "reject-arm"]
-                                           [?e :seon.error/fault ?fault]]}))
-                           "ONE datom, my.* sym → :agent"))))))
+                       (is (= [:agent]
+                              (mapv :seon.error/fault
+                                    (captured-errors batches "reject-arm")))
+                           "one projection, my.* sym is agent-fault"))))))
       done)))
 
-(defn- assert-args-edn-row! []
-  (let [row (first (db/query {:seon.db/query
-                              '[:find ?args ?data
-                                :where
-                                [?e :seon.error/args-edn ?args]
-                                [?e :seon.error/data-edn ?data]
-                                [?e :seon.error/fault :agent]]}))
-        args-edn (first row)
-        data-edn (second row)]
+(defn- assert-args-edn-projection! [batches]
+  (let [{args-edn :seon.error/args-edn
+         data-edn :seon.error/data-edn}
+        (first
+          (filter :seon.error/args-edn (mapcat identity @batches)))]
     (is (= "[{:my.probe/arg 42}]" args-edn)
         "the FULL args vector persisted, read-string-able")
     (is (re-find #"malli-instrument-output" (str data-edn)))
@@ -383,21 +351,23 @@
 
 (deftest async-output-violation-records-with-full-args
   (async done
-    (with-fresh-conn
-      (fn [_conn]
+    (with-captured-errors
+      nil
+      (fn [batches]
         (let [wrapped (wrap 'my.probe/bad-output
                             (fn [_] (js/Promise.resolve :not-a-map)))]
           (-> (wrapped {:my.probe/arg 42})
               (.then (fn [_] (is false "must reject on output violation"))
                      (fn [e] (is (= ":malli.core/invalid-output" (.-message e)))))
               (.then (fn [] (tick 100)))
-              (.then (fn [] (assert-args-edn-row!))))))
+              (.then (fn [] (assert-args-edn-projection! batches))))))
       done)))
 
 (deftest propagated-rejection-is-recorded-once-with-refined-fault
   (async done
-    (with-fresh-conn
-      (fn [_conn]
+    (with-captured-errors
+      nil
+      (fn [batches]
         ;; An agent-diagnostic error rejecting through TWO nested
         ;; core-population conduits (the seon.eval shape): the dedup tag
         ;; yields ONE datom, and wrapper-fault refines :core → :agent.
@@ -412,18 +382,15 @@
                      (fn [e] (is (= "propagated diag" (.-message e)))))
               (.then (fn [] (tick 100)))
               (.then (fn []
-                       (is (= #{[:agent]}
-                              (db/query {:seon.db/query
-                                         '[:find ?fault
-                                           :where
-                                           [?e :seon.error/message "propagated diag"]
-                                           [?e :seon.error/fault ?fault]]}))
-                           "exactly ONE datom, refined to :agent"))))))
+                       (is (= [:agent]
+                              (mapv :seon.error/fault
+                                    (captured-errors batches
+                                                     "propagated diag")))
+                           "exactly one projection, refined to agent-fault"))))))
       done)))
 
 ;; ---------------------------------------------------------------------------
-;; Persistence-hook isolation — after the real buffer-flush proof above so
-;; these deliberately injected hooks cannot consume that fixture's pending row.
+;; Persistence-hook isolation.
 ;; ---------------------------------------------------------------------------
 
 (deftest partial-coordinate-hook-is-omitted-as-a-unit
@@ -441,7 +408,7 @@
                                :seon.error/commit-id :seon.error/t]))
           "a malformed hook cannot create a partial persisted identity"))
     (finally
-      (install-default-error-hooks!))))
+      (clear-error-hooks!))))
 
 (deftest persist-recursion-fence-is-local-to-the-persist-fiber
   ;; A contract failure caused by the error-persistence write itself must not
@@ -468,7 +435,7 @@
           "the nested persist-contract error is console-only, not recursive")
       (finally
         (set! (.-error js/console) console-error)
-        (install-default-error-hooks!)))))
+        (clear-error-hooks!)))))
 
 (deftest pending-persist-does-not-suppress-an-unrelated-fiber
   ;; While one error write is pending, another agent may independently hit a
@@ -499,9 +466,9 @@
       (-> (tick 0)
           (.then
             (fn []
-              (install-default-error-hooks!)
+              (clear-error-hooks!)
               (done))
             (fn [e]
-              (install-default-error-hooks!)
+              (clear-error-hooks!)
               (is false (str "persist-isolation cleanup rejected — " e))
               (done)))))))

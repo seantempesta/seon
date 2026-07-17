@@ -22,10 +22,12 @@
     [cljs.test :refer [deftest is async]]
     [clojure.string :as str]
     [my.kb]
-    [seon.db :as db]
+    [seon.config :as config]
     [seon.error]
     [seon.eval :as seval]
     [seon.repl :as repl]))
+
+(def configuration (config/resolve-config-singleton {}))
 
 (defn- err-chain
   "All `:seon.error/message` strings in a failed eval result's cause
@@ -54,7 +56,9 @@
                             (str "(ns scratch.require-b4 "
                                  "(:require [my.kb :as kb] "
                                  "[seon.error :as err]))")
-                            {:seon.eval/starting-ns 'cljs.user :seon.eval/analyze-deps? false})
+                            {:seon.config/configuration configuration
+                             :seon.eval/starting-ns 'cljs.user
+                             :seon.eval/analyze-deps? false})
                 (.then
                   (fn [r]
                     (is (:seon.eval/ok? r)
@@ -65,7 +69,8 @@
                     ;; munged globalThis path.
                     (seval/eval cs
                                 "(err/->message (js/Error. \"b4-alias\"))"
-                                {:seon.eval/starting-ns 'scratch.require-b4
+                                {:seon.config/configuration configuration
+                                 :seon.eval/starting-ns 'scratch.require-b4
                                  :seon.eval/analyze-deps? false})))
                 (.then
                   (fn [r]
@@ -82,7 +87,9 @@
         (.then
           (fn [cs]
             (-> (seval/eval cs "(require '[my.kb])"
-                            {:seon.eval/starting-ns 'cljs.user :seon.eval/analyze-deps? false})
+                            {:seon.config/configuration configuration
+                             :seon.eval/starting-ns 'cljs.user
+                             :seon.eval/analyze-deps? false})
                 (.then
                   (fn [r]
                     (is (:seon.eval/ok? r)
@@ -102,7 +109,9 @@
             (-> (seval/eval cs
                             (str "(ns scratch.require-absent "
                                  "(:require [no.such.namespace :as nope]))")
-                            {:seon.eval/starting-ns 'cljs.user :seon.eval/analyze-deps? false})
+                            {:seon.config/configuration configuration
+                             :seon.eval/starting-ns 'cljs.user
+                             :seon.eval/analyze-deps? false})
                 (.then
                   (fn [r]
                     (is (false? (:seon.eval/ok? r))
@@ -134,9 +143,7 @@
              :seon.fn/_ns
              [{:seon.fn/sym (symbol (str target "/answer"))
                :seon.fn/source "(defn answer [] (inc (dep/base)))"}]
-             :seon.test/_ns []}])
-          original-conn db/*conn*]
-      (set! db/*conn* nil)
+             :seon.test/_ns []}])]
       (-> (repl/ensure-bootstrap!)
           (.then
            (fn [compile-state]
@@ -144,14 +151,14 @@
               compile-state
               (str "(ns " caller " (:require [" target " :as target])) "
                    "(target/answer)")
-              {:seon.eval/starting-ns 'cljs.user
+              {:seon.config/configuration configuration
+               :seon.eval/starting-ns 'cljs.user
                :seon.eval/analyze-deps? true
                :seon.eval/authored-sources sources})))
           (.then
            (fn [result]
              (is (:seon.eval/ok? result) (err-chain result))
              (is (= 42 (:seon.eval/value result)))))
-          (.finally (fn [] (set! db/*conn* original-conn)))
           (.then (fn [_] (done)))
           (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
 
@@ -168,16 +175,15 @@
              (str "(ns " target " (:require [" missing " :as missing]))")
              :seon.ns/require-edges []
              :seon.fn/_ns []
-             :seon.test/_ns []}])
-          original-conn db/*conn*]
-      (set! db/*conn* nil)
+             :seon.test/_ns []}])]
       (-> (repl/ensure-bootstrap!)
           (.then
            (fn [compile-state]
              (seval/eval
               compile-state
               (str "(ns " caller " (:require [" target " :as target]))")
-              {:seon.eval/starting-ns 'cljs.user
+              {:seon.config/configuration configuration
+               :seon.eval/starting-ns 'cljs.user
                :seon.eval/analyze-deps? true
                :seon.eval/authored-sources sources})))
           (.then
@@ -185,6 +191,5 @@
              (is (false? (:seon.eval/ok? result)))
              (is (str/includes? (err-chain result) (str missing))
                  (err-chain result))))
-          (.finally (fn [] (set! db/*conn* original-conn)))
           (.then (fn [_] (done)))
           (.catch (fn [e] (is false (str "threw — " e)) (done)))))))

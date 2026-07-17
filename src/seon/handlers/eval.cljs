@@ -183,8 +183,9 @@
      backstop for actual RENDER throws and its header reads 'render error',
      which would mislabel (and alarm about) an ordinary eval error."
   {:malli/schema [:=> [:cat :seon.render/section-request] [:maybe :seon.render.canvas/hiccup]]}
-  [{:seon.render/keys [node entity]}]
-  (let [entity    (or node entity)
+  [{:seon.render/keys [node entity] :as input}]
+  (let [configuration (:seon.config/configuration input)
+        entity    (or node entity)
         eid       (:seon.eval/id entity)
         narration (:seon.eval/narration entity)
         src       (or (:seon.eval/source entity) "")
@@ -207,9 +208,11 @@
        [:div {:class "text-2xs font-mono text-text-600 mb-1"} (str "eval " eid)]
        (when (and narration (not (str/blank? narration)))
          [:div {:class "markdown mb-1 text-xs"}
-          (render/block :html {:seon.render/markdown (str/trim narration)})])
+          (render/block :html configuration
+                        {:seon.render/markdown (str/trim narration)})])
        [:div {:class "text-2xs font-mono text-text-500 mb-0.5"} "code"]
-       (render/block :html {:seon.render/source (str/trim src)})
+       (render/block :html configuration
+                     {:seon.render/source (str/trim src)})
        (cond
          ok?
          (when-let [r (short-result res-edn)]
@@ -217,7 +220,8 @@
             [:summary {:class "text-xs font-mono text-amber-300/70 cursor-pointer"}
              (str "result · " r)]
             [:div {:class "mt-1 min-w-0 overflow-hidden"}
-             (render/block :html {:seon.render/source (str res-edn)})]])
+             (render/block :html configuration
+                           {:seon.render/source (str res-edn)})]])
 
          (string? err-str)
          [:details {:class "mt-1"}

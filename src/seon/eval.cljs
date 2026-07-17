@@ -1308,7 +1308,8 @@
   {:malli/schema [:=> [:catn [::ref-sym :string]] :string]}
   [ref-sym]
   (str ref-sym " isn't live (a prior session, or pruned past the last "
-       result-vars-cap " results) — re-run its form to recompute it. "
+       result-vars-cap
+       " results) — re-run its form to recompute it. "
        "Only recent results stay referenceable as `result/<id>` vars."))
 
 ;; Defined later; declared here so `raw-eval`'s not-defined branch can append
@@ -1396,7 +1397,8 @@
                   ;; misses reach this branch.
                   (and result-ref?
                        (some (partial truly-undeclared? compile-state) @warnings))
-                  (resolve {::value (result-miss-message (str/trim (str form-str)))
+                  (resolve {::value (result-miss-message
+                                      (str/trim (str form-str)))
                             ::ending-ns ns-sym})
 
                   (some (partial truly-undeclared? compile-state) @warnings)
@@ -1451,7 +1453,8 @@
      {::ok? false :seon/error <seon.error/->map>}  on any failure
    Never throws; never rejects.
 
-   Opts (all optional):
+   Options:
+     :seon.config/configuration — required ordinary operation singleton.
      ::starting-ns    target namespace (default `cljs.user`). The
                     returned `::ending-ns` is the ENDING ns — `(ns
                     other)` forms switch it. Callers that want
@@ -1478,20 +1481,17 @@
      {::ok? false :seon/error {:seon.error/message \"eval timed out after Nms\" …}}
    The underlying form keeps running — see `race-timeout` docstring."
   {:malli/schema
-   [:function
-    [:=> [:catn [::compile-state :any] [::form-str :any]] :any]
-    [:=> [:catn [::compile-state :any] [::form-str :any]
-          [::opts [:map
-                   [::starting-ns   {:optional true} ::starting-ns]
-                   [::analyze-deps? {:optional true} ::analyze-deps?]
-                   [::timeout-ms    {:optional true} ::timeout-ms]
-                   [::authored-sources {:optional true}
-                    ::authored-sources]]]]
-     :any]]}
-  ([compile-state form-str]
-   (eval compile-state form-str {}))
-  ([compile-state form-str
-    {::keys [starting-ns analyze-deps? timeout-ms authored-sources]}]
+   [:=> [:catn [::compile-state :any] [::form-str :any]
+         [::opts [:map
+                  [:seon.config/configuration :seon.config/singleton]
+                  [::starting-ns   {:optional true} ::starting-ns]
+                  [::analyze-deps? {:optional true} ::analyze-deps?]
+                  [::timeout-ms    {:optional true} ::timeout-ms]
+                  [::authored-sources {:optional true}
+                   ::authored-sources]]]]
+    :any]}
+  [compile-state form-str
+   {::keys [starting-ns analyze-deps? timeout-ms authored-sources]}]
    (try
      (let [ns      (or starting-ns user-ns-sym)
            ms      (or timeout-ms default-timeout-ms)
@@ -1521,7 +1521,7 @@
        (when-not (error/recorded? e)
          (error/record! {:seon.error/raw   e
                          :seon.error/fault (instrument/wrapper-fault e :core)}))
-       {::ok? false :seon/error (error/->map e)}))))
+       {::ok? false :seon/error (error/->map e)})))
 
 ;; ============================================================
 ;; Per-agent namespace setup. Run once per agent at boot. Primes the
@@ -1722,7 +1722,8 @@
    values become a bounded descriptor before this function touches the live
    runtime slot. Eval recording uses the same admitted value through the
    private installer so its transcript and live handle cannot disagree."
-  {:malli/schema [:=> [:catn [::compile-state :any] [::id :string] [::value :any]]
+  {:malli/schema [:=> [:catn [::compile-state :any] [::id :string]
+                             [::value :any]]
                   :nil]}
   [compile-state id v]
   (bind-admitted-result-var! compile-state id (admit-result-value v)))
@@ -1858,8 +1859,10 @@
    and require-edge facts are part of `seon.agent`'s atomic birth transaction;
    resume never writes a second projection of analyzer state."
   {:malli/schema
-   [:=> [:catn [::compile-state :any] [::agent-ns-sym :any] [::agent-id :any]] :any]}
-  [compile-state agent-ns-sym agent-id]
+   [:=> [:catn [:seon.config/configuration :seon.config/singleton]
+                [::compile-state :any] [::agent-ns-sym :any]
+                [::agent-id :any]] :any]}
+  [configuration compile-state agent-ns-sym agent-id]
   (let [require-specs (await (home/home-requires-for agent-id))
         _             (when (:seon.error/message require-specs)
                         (throw
@@ -1868,7 +1871,9 @@
         _             (seed-toolkit-refers! compile-state require-specs)
         setup-src     (home/home-ns-form agent-ns-sym require-specs)
         r (await (eval compile-state setup-src
-                       {::starting-ns user-ns-sym ::analyze-deps? true}))]
+                       {:seon.config/configuration configuration
+                        ::starting-ns user-ns-sym
+                        ::analyze-deps? true}))]
     (when-not (::ok? r)
       (throw (ex-info
                (str "setup-agent-ns! failed — the home-ns require/refer did not "
@@ -2358,8 +2363,8 @@
    \"Unmatched delimiter: ] [at line 25, column 76]\". `source` is the
    bad span. Falls back to the raw message when no `[at line N, column C]`
    coordinate is present."
-  {:malli/schema [:=> [:cat :string :string] :string]}
-  [raw source]
+  {:malli/schema [:=> [:cat :seon.config/singleton :string :string] :string]}
+  [configuration raw source]
   (let [m (re-find #"\[at line (\d+),?\s*column (\d+)\]" (str raw))
         ;; An "Unexpected EOF" read error is the OUTPUT-CAP TRUNCATION
         ;; signature: a form (often a giant inline (str "…report…")) ran
@@ -2394,7 +2399,7 @@
             ;; constructing the guidance never duplicates the full line into
             ;; both source + caret strings. The exact coordinate remains in
             ;; the headline; raw reply bytes remain in the turn blob.
-            limit   (config/eval-render-cap)
+            limit   (config/eval-render-cap configuration)
             caret-i (when (and src-ln (pos? col-no))
                       (min (count src-ln) (dec col-no)))
             window-size (max 1 (- limit 2))
@@ -2921,42 +2926,21 @@
               true)))
         tee-entities))))
 
-(def database-edn-cap
-  "Store-time char cap for any pr-str'd string persisted as a datom
-   (`:seon.eval/result-edn`, `:seon.eval/error`). Override with
-   SEON_RENDER_DATABASE_EDN_CAP.
-
-   MEMORY-SAFETY invariant: the DB must never hold a multi-MB blob in a
-   single datom. A 9.7M-char `pull [*]` result once landed verbatim as
-   `:seon.eval/result-edn`; a later whole-DB `[?e ?a ?v]` scan
-   materialized every bloated datom at once and OOM-killed the Node pod
-   (losing the in-RAM `:memory` DB). This cap bounds each persisted
-   string so a whole-database scan stays bounded by `N * database-edn-cap`.
-
-   16k is generous headroom for direct datom inspection/debugging while
-   staying ~600x below the 9.7M blob that caused the OOM. A safely admitted
-   value remains available in-session as `result/<id>`; rejected values leave
-   a compact descriptor instead of retaining the dangerous object graph."
-  (config/database-edn-cap))
-
 (defn cap-edn
   "Truncate a pr-str'd value string to `database-edn-cap`.
 
    Appends an elision marker reporting the estimated tokens omitted.
    Nil-safe. Mirrors `seon.agent/cap-result` but applies the larger
    database-write cap at the persistence boundary."
-  {:malli/schema
-   [:function
-    [:=> [:catn [::s :any]] :string]
-    [:=> [:catn [::s :any] [::limit :int]] :string]]}
-  ([s] (cap-edn s database-edn-cap))
-  ([s limit]
-   (let [s (str s)
-         n (count s)]
-     (if (> n limit)
-       (str (subs s 0 limit) " …⟨"
-            (tokens/chars->tokens (- n limit)) " tokens elided⟩")
-       s))))
+  {:malli/schema [:=> [:catn [::s :any]
+                             [::limit :int]] :string]}
+  [s limit]
+  (let [s (str s)
+        n (count s)]
+    (if (> n limit)
+      (str (subs s 0 limit) " …⟨"
+           (tokens/chars->tokens (- n limit)) " tokens elided⟩")
+      s)))
 
 (def ^:private known-error-kinds
   "Error kinds whose `:seon.error/message` is already crystal-clear
@@ -3025,11 +3009,13 @@
    value's `result/<id>` live var. Under the cap → returned unchanged.
    Names the id so the agent knows where an admitted untruncated value lives;
    an unsafe value is already a compact rejection descriptor. Pure; nil-safe."
-  {:malli/schema [:=> [:catn [::eval-id :string] [::body :string]] :string]}
-  [eval-id body]
+  {:malli/schema [:=> [:catn [:seon.config/configuration
+                              :seon.config/singleton]
+                             [::eval-id :string] [::body :string]] :string]}
+  [configuration eval-id body]
   (tokens/clip-str
     body
-    (tokens/chars->tokens (config/result-body-render-cap))
+    (tokens/chars->tokens (config/result-body-render-cap configuration))
     (fn [budget total]
       (str "\n; … +" (- total budget) " tokens clipped (of " total "); the "
            "admitted value is the live var result/" eval-id " — drill it with "
@@ -3096,23 +3082,27 @@
    clips to a well-formed string that names `result/<id>`. Operates on the
    RAW value (pre-pr-str). Pure: stores nothing, does not touch the
    live result store. Never throws."
-  {:malli/schema [:=> [:catn [::eval-id :string] [::value :any]] :string]}
-  [eval-id value]
+  {:malli/schema [:=> [:catn [:seon.config/configuration
+                              :seon.config/singleton]
+                             [::eval-id :string] [::value :any]] :string]}
+  [configuration eval-id value]
   (clip-result-body
-    eval-id
+    configuration eval-id
     (try
       (value/format-ai
         {::value/eval-id eval-id
-         ::value/prepared (value/prepare-ai {::value/value value})})
+         ::value/prepared
+         (value/prepare-ai {:seon.config/configuration configuration
+                            ::value/value value})})
       (catch :default _
         (str "; <value could not be rendered as data; the live value is "
              "result/" eval-id ">")))))
 
 (defn- render-prepared-result-edn
   "Format one already-prepared eval value under its final candidate id."
-  [eval-id prepared]
+  [configuration eval-id prepared]
   (clip-result-body
-    eval-id
+    configuration eval-id
     (try
       (value/format-ai {::value/eval-id eval-id
                         ::value/prepared prepared})
@@ -3187,6 +3177,7 @@
    result without rerunning the form. No result handle is bound here."
   {:malli/schema [:=> [:catn [::record-request :map]] :any]}
   [{::keys [at narration source result duration-ms tee output pending? eval-id]
+    configuration :seon.config/configuration
     database ::db/db
     expected-database ::db/expected-db
     turn-id :seon.agent.turn/id-of-turn
@@ -3208,7 +3199,9 @@
           (assoc :seon.eval/agent [:seon.agent/id aid])
 
           (and (string? output) (not (str/blank? output)))
-          (assoc :seon.eval/output (cap-edn output))
+          (assoc :seon.eval/output
+                 (cap-edn output
+                          (config/database-edn-cap configuration)))
 
           (not (::ok? result))
           (assoc :seon.eval/error
@@ -3217,7 +3210,8 @@
                         (catch :default e
                           (error/record! {:seon.error/raw e
                                           :seon.error/fault :core})
-                          (str (:seon/error result))))))
+                          (str (:seon/error result))))
+                   (config/database-edn-cap configuration)))
 
           (and (not (::ok? result))
                (einstrument/instrument-error?
@@ -3227,7 +3221,8 @@
                    (-> result :seon/error :seon.error/data))))
         prepared-value
         (when (and (::ok? result) (not pending?))
-          (value/prepare-ai {::value/value (::value result)}))
+          (value/prepare-ai {:seon.config/configuration configuration
+                             ::value/value (::value result)}))
         eval-row-for
         (fn [eval-id]
           (let [stored-value (if pending?
@@ -3239,9 +3234,10 @@
               (assoc :seon.eval/result-edn
                      (cap-edn
                        (if pending?
-                         (render-result-edn eval-id stored-value)
-                         (render-prepared-result-edn eval-id
-                                                     prepared-value)))))))
+                         (render-result-edn configuration eval-id stored-value)
+                         (render-prepared-result-edn configuration eval-id
+                                                     prepared-value))
+                       (config/database-edn-cap configuration))))))
         allocate-record!
         (fn ^:async allocate-record! [accepted-tee]
           (await
@@ -3326,9 +3322,10 @@
         (js/console.error "[seon.eval/record-eval!] tx FAILED:"
                           (cap-edn
                             (:seon.error/message primary)
-                            (config/eval-render-cap))
+                            (config/eval-render-cap configuration))
                           "— source:"
-                          (cap-edn source (config/eval-render-cap)))
+                          (cap-edn source
+                                   (config/eval-render-cap configuration)))
         primary))))
 
 ;; ============================================================
@@ -3769,6 +3766,8 @@
             (cond->
               {:seon.agent.turn/id-of-turn
                (:seon.agent.turn/id-of-turn frozen)
+               :seon.config/configuration
+               (:seon.config/configuration frozen)
                ::eval-id (::eval-id frozen)
                ::at (::at frozen)
                ::duration-ms (::duration-ms frozen)
@@ -3902,9 +3901,11 @@
   "Is fix class `class` enabled under the live repair config? The
    computed rule: `seon.repair/class-enabled?` over the config level +
    per-class kill-switch map."
-  [class]
-  (repair/class-enabled? {:seon.repair/level   (config/repair-level)
-                          :seon.repair/classes (config/repair-classes)
+  [configuration class]
+  (repair/class-enabled? {:seon.repair/level
+                          (config/repair-level configuration)
+                          :seon.repair/classes
+                          (config/repair-classes configuration)
                           :seon.repair/class   class}))
 
 (defn- qualified-sym-misses
@@ -4074,11 +4075,11 @@
    over ONE form's source (see [[preflight-repair!]], which owns the
    analyzer cleanup around this). Returns nil / a fix map / a
    suggestions map — never throws to the caller (the wrapper records)."
-  [compile-state authored-sources source ns-sym]
-  (let [budget    (config/repair-budget-ms)
+  [configuration compile-state authored-sources source ns-sym]
+  (let [budget    (config/repair-budget-ms configuration)
         start     (.now js/Date)
         over?     #(> (- (.now js/Date) start) budget)
-        max-fixes (config/repair-max-fixes)]
+        max-fixes (config/repair-max-fixes configuration)]
     (loop [src source fixes [] cls nil]
       (let [{::keys [check-ok? check-error check-undeclared]}
             (await (compile-check compile-state authored-sources src ns-sym))
@@ -4101,7 +4102,8 @@
           (some? check-error)
           (let [form  (first (or (read-all-forms src) []))
                 fixed (when (and (empty? fixes)
-                                 (repair-class-on? :seon.repair/def-vs-defn)
+                                 (repair-class-on? configuration
+                                                   :seon.repair/def-vs-defn)
                                  (grammar/malformed-def? form))
                         (str/replace-first src #"\(\s*def\s+" "(defn "))]
             (when (and fixed (not= fixed src))
@@ -4112,7 +4114,8 @@
 
           ;; Undeclared var(s). Unique-winner substitution, else hint.
           :else
-          (let [class-on? (repair-class-on? :seon.repair/undeclared-var)]
+          (let [class-on? (repair-class-on?
+                            configuration :seon.repair/undeclared-var)]
             (if (or (nil? token) (not class-on?)
                     (>= (count fixes) max-fixes))
               ;; Won't fix (cap hit / no token) — still surface the
@@ -4195,9 +4198,9 @@
   "Should `source` get the pre-flight compile gate? A symbol-tier class
    must be enabled, the source must be a real form (non-blank, not a
    bare `result/<id>` read), and the head must not be a loader form."
-  [source]
-  (and (or (repair-class-on? :seon.repair/undeclared-var)
-           (repair-class-on? :seon.repair/def-vs-defn))
+  [configuration source]
+  (and (or (repair-class-on? configuration :seon.repair/undeclared-var)
+           (repair-class-on? configuration :seon.repair/def-vs-defn))
        (not (str/blank? (str source)))
        (not (result-var-ref? source))
        (let [form (first (or (read-all-forms source) []))]
@@ -4223,12 +4226,13 @@
    trial's phantoms are removed before returning — the real eval's
    `defs-before` snapshot and the detect-and-tee diff stay
    byte-identical to a run without preflight."
-  [compile-state authored-sources source ns-sym]
+  [configuration compile-state authored-sources source ns-sym]
   (await (ensure-analyzer-ns! compile-state ns-sym))
   (let [defs-before (analyzer-info/snapshot-defs compile-state)
         outcome     (try
                       (await (preflight-repair-run!
-                               compile-state authored-sources source ns-sym))
+                               configuration compile-state authored-sources
+                               source ns-sym))
                       (catch :default e
                         ;; OUR repair machinery throwing is a core defect
                         ;; (:core) — record it; the form still evals
@@ -4303,6 +4307,7 @@
      ::source          — the source string to eval (repaired or original)."
   [{::keys [compile-state authored-sources current-ns n-ok n-fail
             failed-defs outer-test-run? narration source]
+    configuration :seon.config/configuration
     database ::db/db
     turn-id :seon.agent.turn/id-of-turn}]
   (let [;; Real requires (#73/#56): if this is a NEW agent-authored `(ns …)`
@@ -4336,6 +4341,7 @@
             recorded (await
                        (record-eval!
                          {:seon.agent.turn/id-of-turn turn-id
+                          :seon.config/configuration configuration
                           ::at          at
                           ::duration-ms 0
                           ::narration   narration
@@ -4354,10 +4360,10 @@
             ;; the visible `↻ fixed:` note rides the narration. A REFUSED
             ;; fix (ambiguous / unproven) surfaces as did-you-mean on the
             ;; eval error below.
-            pre        (when (preflight-eligible? source)
+            pre        (when (preflight-eligible? configuration source)
                          (await (preflight-repair!
-                                  compile-state authored-sources source
-                                  @current-ns)))
+                                  configuration compile-state authored-sources
+                                  source @current-ns)))
             fixed?     (some? (:seon.repair/source pre))
             source     (if fixed? (:seon.repair/source pre) source)
             narration  (if fixed?
@@ -4403,7 +4409,8 @@
                 (.run print-als out-bucket
                   (fn ^:async run-with-print-capture! []
                     (let [raw (await (eval compile-state source
-                                           {::starting-ns @current-ns
+                                           {:seon.config/configuration configuration
+                                            ::starting-ns @current-ns
                                             ::authored-sources
                                             authored-sources
                                             ::analyze-deps? false}))]
@@ -4535,6 +4542,7 @@
                ::duration-ms duration-ms
                ::narration narration
                ::output output
+               :seon.config/configuration configuration
                :seon.agent.turn/id-of-turn turn-id}
               attempt
               (if-not (database-error? started)
@@ -4654,6 +4662,7 @@
    tx. Mutates the caller's fold counters like eval-form-entry!."
   [{::keys [compile-state current-ns n-ok n-fail narration source
             value error tee committed!]
+    configuration :seon.config/configuration
     database ::db/db
     expected-database ::db/expected-db
     turn-id :seon.agent.turn/id-of-turn}]
@@ -4666,6 +4675,7 @@
                    (record-eval!
                     (cond->
                       {:seon.agent.turn/id-of-turn turn-id
+                       :seon.config/configuration configuration
                        ::at          (js/Date.)
                        ::duration-ms 0
                        ::narration   narration
@@ -4688,25 +4698,21 @@
 
 (defn- ^:async retry-repl-form-record!
   "Reacquire and record a special form before applying its local effect."
-  ([request m compile-record committed!]
-   (await (retry-repl-form-record!
-           request m compile-record committed!
-           acquire-repl-form-inputs! record-form-result!)))
-  ([request m compile-record committed! acquire! record!]
-   (loop []
-     (let [acquired (await (acquire! request))
-           prepared (compile-record acquired)
-           record-request
-           (cond-> (merge m prepared)
-             (::db/db acquired)
-             (assoc ::db/db (::db/db acquired)
-                    ::db/expected-db (::db/db acquired))
-             committed!
-             (assoc ::committed! committed!))
-           recorded (await (record! record-request))]
-       (if (stale-database-failure? recorded)
-         (recur)
-         recorded)))))
+  [request m compile-record committed! acquire! record!]
+  (loop []
+    (let [acquired (await (acquire! request))
+          prepared (compile-record acquired)
+          record-request
+          (cond-> (merge m prepared)
+            (::db/db acquired)
+            (assoc ::db/db (::db/db acquired)
+                   ::db/expected-db (::db/db acquired))
+            committed!
+            (assoc ::committed! committed!))
+          recorded (await (record! record-request))]
+      (if (stale-database-failure? recorded)
+        (recur)
+        recorded))))
 
 (defn- unmap-compiled-symbol!
   "Remove one symbol from the accepted compiler projection."
@@ -4746,7 +4752,8 @@
    `form` is the [[repl-form-of]] parse of `::source`. Mutates the
    caller's fold volatiles exactly as eval-form-entry! does."
   {:malli/schema [:=> [:catn [::request :map]] :any]}
-  [{::keys [compile-state authored-sources current-ns form narration] :as m}]
+  [{::keys [compile-state authored-sources current-ns form narration] :as m
+    configuration :seon.config/configuration}]
   (case (first form)
       in-ns
       (let [target (quoted-sym (second form))]
@@ -4768,7 +4775,8 @@
           ;; the one explicit source-map load function, then move.
           (contains? authored-sources (keyword target))
           (let [r (await (eval compile-state (str "(require '" target ")")
-                               {::starting-ns @current-ns
+                               {:seon.config/configuration configuration
+                                ::starting-ns @current-ns
                                 ::authored-sources authored-sources
                                 ::analyze-deps? true}))]
             (if (::ok? r)
@@ -4856,7 +4864,9 @@
                   :else
                   {::value true ::tee (ns-unmap-tx sym-str)})))
             (fn []
-              (unmap-compiled-symbol! compile-state ns-arg sym-arg))))))
+              (unmap-compiled-symbol! compile-state ns-arg sym-arg))
+            acquire-repl-form-inputs!
+            record-form-result!))))
 
       ns-unalias
       (let [[ns-arg a] (if (>= (count form) 3)
@@ -4914,7 +4924,9 @@
                       (::source-process acquired))
                      (ns-require-edges-tx
                       (keyword (str ns-arg)) require-edges)))})
-                committed!))))))))
+                committed!
+                acquire-repl-form-inputs!
+                record-form-result!))))))))
 
 (defn- ^:async dispatch-eval-entry!
   "Dispatch ONE non-`:read` parsed entry through the per-form mechanism:
@@ -4940,6 +4952,7 @@
    a repaired form)."
   [{::keys [compile-state authored-sources current-ns n-ok n-fail
             failed-defs outer-test-run? entry narration]
+    configuration :seon.config/configuration
     turn-id :seon.agent.turn/id-of-turn}]
   ;; A `#code` heredoc form carries `:seon.repl/eval-source` — the
   ;; machine-escaped, cljs-READABLE rewrite of the byte-faithful (but not
@@ -4952,6 +4965,7 @@
       ;; transcript and is never lost. Not counted in n-ok/n-fail.
       (= :comment (:seon.repl/kind entry))
       (await (record-eval! {:seon.agent.turn/id-of-turn turn-id
+                            :seon.config/configuration configuration
                             ::at          (js/Date.)
                             ::duration-ms 0
                             ::narration   narration
@@ -4971,6 +4985,7 @@
             recorded (await
                        (record-eval!
                          {:seon.agent.turn/id-of-turn turn-id
+                          :seon.config/configuration configuration
                           ::at          (js/Date.)
                           ::duration-ms 0
                           ::narration   narration
@@ -4991,6 +5006,7 @@
       (some? (repl-form-of source))
       (await (dispatch-repl-form!
                {::compile-state   compile-state
+                :seon.config/configuration configuration
                 ::authored-sources authored-sources
                 :seon.agent.turn/id-of-turn turn-id
                 ::current-ns      current-ns
@@ -5011,6 +5027,7 @@
       (prose-paren? compile-state @current-ns source)
       (await (record-eval!
                {:seon.agent.turn/id-of-turn turn-id
+                :seon.config/configuration configuration
                 ::at          (js/Date.)
                 ::duration-ms 0
                 ::narration   (str (when (seq narration) (str narration "\n"))
@@ -5027,6 +5044,7 @@
       :else
       (await (eval-form-entry!
                {::compile-state   compile-state
+                :seon.config/configuration configuration
                 ::authored-sources authored-sources
                 :seon.agent.turn/id-of-turn turn-id
                 ::current-ns      current-ns
@@ -5106,10 +5124,8 @@
                      Mid-batch supersession is caught by the loop's next-turn
                      re-read (§8c); full per-write atomic isolation is the
                      Phase-2 worker-buffer keystone.
-     options       — the ordinary namespace source map and invocation database
-                     value acquired by the execution child. The six-argument
-                     arity acquires the current value and supplies no authored
-                     sources for existing core-only callers.
+     options       — the ordinary configuration, namespace source map, and
+                     invocation database value acquired by the execution child.
 
    Returns `{:seon.eval/ids    [<id> ...]   ; ordered, one per entry
              :seon.eval/n-ok   <int>        ; successful evals
@@ -5120,15 +5136,7 @@
    The caller reads ::n-ok for 'progress made this turn' and ::n-fail to
    surface to the agent's warnings surface."
   {:malli/schema
-   [:function
-    [:=> [:catn [::compile-state :any]
-                [::parsed :any]
-                [::agent-ns-sym :any]
-                [::agent-id :string]
-                [::turn-id :string]
-                [::run-id :any]]
-         :map]
-    [:=> [:catn [::compile-state :any]
+   [:=> [:catn [::compile-state :any]
                 [::parsed :any]
                 [::agent-ns-sym :any]
                 [::agent-id :string]
@@ -5136,16 +5144,14 @@
                 [::run-id :any]
                 [::options
                  [:map {:closed true}
+                  [:seon.config/configuration :seon.config/singleton]
                   [::authored-sources ::authored-sources]
                   [::db/db :seon.db/db]]]]
-         :map]]}
-  ([compile-state parsed agent-ns-sym agent-id turn-id run-id]
-   (await
-     (eval-batch! compile-state parsed agent-ns-sym agent-id turn-id run-id
-                  {::authored-sources {}
-                   ::db/db (await (db/db))})))
-  ([compile-state parsed agent-ns-sym agent-id turn-id run-id
-    {::keys [authored-sources] database ::db/db}]
+         :map]}
+  [compile-state parsed agent-ns-sym agent-id turn-id run-id
+   {::keys [authored-sources]
+    configuration :seon.config/configuration
+    database ::db/db}]
   (if-not (admission/available?)
     {:seon.eval/ids []
      :seon.eval/n-ok 0
@@ -5232,7 +5238,8 @@
                       ;; holding a heredoc opener (an UNTERMINATED heredoc, whose
                       ;; `:read` names the awaited sentinel) is REFUSED repair
                       ;; here, so that error surfaces intact instead.
-                      rep    (if (and (repair-class-on? :seon.repair/delimiters)
+                      rep    (if (and (repair-class-on?
+                                       configuration :seon.repair/delimiters)
                                       (not (internal/contains-heredoc-opener?
                                              (:seon.repl/source entry))))
                                (repair/repair-source
@@ -5268,6 +5275,7 @@
                                 (await
                                   (dispatch-eval-entry!
                                     {::compile-state   compile-state
+                                     :seon.config/configuration configuration
                                      ::authored-sources authored-sources
                                      :seon.agent.turn/id-of-turn turn-id
                                      ::current-ns      current-ns
@@ -5284,6 +5292,7 @@
                           (await
                             (record-eval!
                               {:seon.agent.turn/id-of-turn turn-id
+                               :seon.config/configuration configuration
                                ::at          (js/Date.)
                                ::duration-ms 0
                                ::narration   (:seon.repl/narration entry)
@@ -5295,6 +5304,7 @@
                                 {:seon.error/kind :read
                                  :seon.error/message
                                  (read-error-message
+                                   configuration
                                    (-> entry :seon/error :seon.error/message)
                                    (:seon.repl/source entry))}}}))]
                       (append-record! recorded)
@@ -5309,6 +5319,7 @@
                   (await
                     (dispatch-eval-entry!
                       {::compile-state   compile-state
+                       :seon.config/configuration configuration
                        ::authored-sources authored-sources
                        :seon.agent.turn/id-of-turn turn-id
                        ::current-ns      current-ns
@@ -5323,4 +5334,4 @@
              :seon.eval/n-fail @n-fail}
       fence-lost? (assoc :seon.eval/fenced? true)
       (not (admission/available?))
-      (assoc :seon/error (:seon/error (admission/unavailable))))))))
+      (assoc :seon/error (:seon/error (admission/unavailable)))))))

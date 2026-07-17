@@ -1,272 +1,67 @@
 (ns seon.eval.promise-ergonomics-test
-  "Promise ergonomics for agent eval (cljs-async-await design §D). A form
-   whose value is a Promise the auto-await can't deliver as data in time —
-   an auto-await TIMEOUT or an explicit `(seon.eval/defer …)` — must:
-
-   - record a clean `:seon.eval/pending` PLACEHOLDER as the form value (never
-     the raw Promise — the value renderer must not `seq` a Promise);
-   - store the live Promise HANDLE at `result/<id>` (NOT the placeholder);
-   - resolve to real DATA when `result/<id>` is re-referenced in a later eval
-     (the existing auto-await on the eval-batch path).
-
-   `defer` must NOT block — it hands the pipeline the handle synchronously.
-   The CLJS-async gotcha this guards: a Promise sitting in an `if`/`or`/`cond`
-   TEST position is AUTO-AWAITED by the compiler, which would resolve (and
-   block on) the handle. So the pending branch tests `(some? handle)` — never
-   a bare `handle` — and binds via `(if pending? handle …)`, keeping the
-   Promise in branch/arg positions only.
-
-   Run via `bin/test-cljs`, or:
-     (require 'seon.eval.promise-ergonomics-test :reload)
-     (cljs.test/run-tests 'seon.eval.promise-ergonomics-test)"
+  "Value-local defer and deadline behavior before database recording."
   (:require
-    [cljs.test :refer [deftest is async]]
-    [clojure.string :as str]
-    [seon.agent.home :as home]
-    [seon.client :as client]
-    [seon.db :as db]
-    [seon.db.id :as db.id]
-    [seon.eval :as seval]
-    [seon.repl :as repl]
-    [seon.repl.internal :as repl-int]))
+   [cljs.test :refer [async deftest is]]
+   [seon.eval :as eval]))
 
-(defn- with-conn
-  "Open a fresh :memory conn, `set!` it as the ROOT `db/*conn*` (a plain
-   `binding` does NOT survive await boundaries in CLJS), run `body` (0-arg,
-   returns a Promise), restore the prior root after."
-  [body]
-  (-> (client/open-agent-conn!)
-      (.then (fn [conn]
-               (let [prev db/*conn*]
-                 (set! db/*conn* conn)
-                 (-> (js/Promise.resolve (body))
-                     (.finally (fn [] (set! db/*conn* prev)))))))))
+(def ^:private maybe-await-value (deref #'eval/maybe-await-value))
 
-(defn- run-batch
-  "Run `source` (one form) through eval-batch! in `aid`'s home ns against the
-   current root conn. Returns a Promise of the eval-batch! result map. The
-   live-result store (`result/<id>`) is process-global, so a later run-batch
-   re-references a handle a prior one bound."
-  [_aid _turn-id source]
-  (-> (repl/ensure-bootstrap!)
-      (.then (fn [cs]
-               (-> (db.id/allocate!
-                     {::db.id/allocations
-                      [{::db.id/key ::fixture-agent
-                        ::db.id/identity-attr :seon.agent/id}
-                       {::db.id/key ::fixture-turn
-                        ::db.id/identity-attr :seon.agent.turn/id}]
-                      ::db.id/transaction-builder
-                      (fn [ids]
-                        {:seon.db/tx-data
-                         [{:seon.agent/id (::fixture-agent ids)}
-                          {:seon.agent.turn/id (::fixture-turn ids)}]})
-                      :seon.db/conn db/*conn*})
-                   (.then
-                     (fn [env]
-                       (let [aid (get-in env [::db.id/ids ::fixture-agent])
-                             hns (home/home-ns aid)]
-                         (-> (seval/setup-agent-ns! cs hns aid)
-                             (.then
-                               (fn [_]
-                                 (seval/eval-batch!
-                                   cs (repl-int/parse-forms source) hns aid
-                                   (get-in env [::db.id/ids ::fixture-turn])
-                                   nil))))))))))))
-
-(defn- row
-  "The :seon.eval entity for `id` (read against the current root conn)."
-  [id]
-  (db/entity {:seon.db/ref [:seon.eval/id id]}))
-
-;; ---------------------------------------------------------------------------
-;; defer — unit. A Promise becomes a `Deferred` handle; a non-Promise passes
-;; through untouched (nothing to defer).
-;; ---------------------------------------------------------------------------
-
-(deftest defer-wraps-promise-passes-non-promise
-  (is (instance? seval/Deferred (seval/defer (js/Promise.resolve 1)))
-      "a Promise becomes a Deferred handle")
-  (is (instance? seval/Deferred
-                 (seval/defer (seval/budget 25 (js/Promise.resolve 1))))
-      "defer still opts out when composed outside budget")
-  (is (= 42 (seval/defer 42))
-      "a non-Promise is returned unchanged — nothing to defer")
-  (is (= [:plain :data] (seval/defer [:plain :data]))))
+(deftest defer-wraps-promises-and-passes-ordinary-values
+  (is (instance? eval/Deferred (eval/defer (js/Promise.resolve 1))))
+  (is (instance? eval/Deferred
+                 (eval/defer (eval/budget 25 (js/Promise.resolve 1)))))
+  (is (= 42 (eval/defer 42)))
+  (is (= [:plain :data] (eval/defer [:plain :data]))))
 
 (deftest defer-wins-in-either-budget-composition-order
   (async done
     (let [budget-outside-p (js/Promise. (fn [_ _]))
-          defer-outside-p  (js/Promise. (fn [_ _]))
-          values           [(seval/budget 25 (seval/defer budget-outside-p))
-                            (seval/defer (seval/budget 25 defer-outside-p))]]
+          defer-outside-p (js/Promise. (fn [_ _]))
+          values [(eval/budget 25 (eval/defer budget-outside-p))
+                  (eval/defer (eval/budget 25 defer-outside-p))]]
       (-> (js/Promise.all
-            (clj->js (mapv (fn [v] (#'seval/maybe-await-value v)) values)))
+           (clj->js (mapv maybe-await-value values)))
           (.then
-            (fn [results]
-              (let [[budget-outside defer-outside] (array-seq results)]
-                (is (false? (::seval/ok? budget-outside)))
-                (is (identical? budget-outside-p
-                                (::seval/pending-promise budget-outside))
-                    "(budget ms (defer p)) preserves the exact handle")
-                (is (false? (::seval/ok? defer-outside)))
-                (is (identical? defer-outside-p
-                                (::seval/pending-promise defer-outside))
-                    "(defer (budget ms p)) preserves the exact handle"))))
-          (.then (fn [_] (done)))
-          (.catch (fn [e]
-                    (is false (str "threw — " e))
-                    (done)))))))
-
-;; ---------------------------------------------------------------------------
-;; budget ownership — the deadline travels with the returned value. Two agent
-;; fibers may return budgeted Promises before either auto-await starts; neither
-;; consumption order may steal or clear the other value's deadline.
-;; ---------------------------------------------------------------------------
+           (fn [results]
+             (let [[budget-outside defer-outside] (array-seq results)]
+               (is (false? (::eval/ok? budget-outside)))
+               (is (identical? budget-outside-p
+                               (::eval/pending-promise budget-outside)))
+               (is (false? (::eval/ok? defer-outside)))
+               (is (identical? defer-outside-p
+                               (::eval/pending-promise defer-outside))))))
+          (.catch (fn [error] (is false (str error))))
+          (.finally done)))))
 
 (defn- delayed-value [ms value]
   (js/Promise.
-    (fn [resolve _]
-      (js/setTimeout (fn [] (resolve value)) ms))))
+   (fn [resolve _]
+     (js/setTimeout (fn [] (resolve value)) ms))))
 
-(defn- interleaved-budget-results
-  "Return both auto-await envelopes after consuming the two already-created
-   budgeted values in `order`. The Promises overlap in either order."
-  [order]
-  (let [short-p  (delayed-value 80 :short-finished)
-        long-p   (delayed-value 80 :long-finished)
-        values   {::short (seval/budget 10 short-p)
-                  ::long  (seval/budget 250 long-p)}
-        promises (mapv (fn [k]
-                         (#'seval/maybe-await-value (get values k)))
-                       order)]
+(defn- interleaved-budget-results [order]
+  (let [short-p (delayed-value 80 :short-finished)
+        values {::short (eval/budget 10 short-p)
+                ::long (eval/budget 250 (delayed-value 80 :long-finished))}
+        promises (mapv #(maybe-await-value (get values %)) order)]
     (-> (js/Promise.all (clj->js promises))
         (.then (fn [results]
                  {::short-p short-p
                   ::results (zipmap order (array-seq results))})))))
 
-(deftest budget-is-value-local-under-both-consumption-orders
+(deftest deadlines-belong-to-values-not-consumption-order
   (async done
     (letfn [(assert-order! [order]
               (-> (interleaved-budget-results order)
                   (.then
-                    (fn [env]
-                      (let [results      (::results env)
-                            short-result (::short results)
-                            long-result  (::long results)]
-                        (is (false? (::seval/ok? short-result))
-                            (str order " keeps the short deadline"))
-                        (is (identical? (::short-p env)
-                                        (::seval/pending-promise short-result))
-                            (str order " returns the exact timed-out handle"))
-                        (is (= {::seval/ok? true
-                                ::seval/value :long-finished}
-                               long-result)
-                            (str order " keeps the long deadline")))))))]
+                   (fn [{::keys [short-p results]}]
+                     (is (false? (::eval/ok? (::short results))))
+                     (is (identical? short-p
+                                     (::eval/pending-promise
+                                      (::short results))))
+                     (is (= {::eval/ok? true
+                             ::eval/value :long-finished}
+                            (::long results)))))))]
       (-> (assert-order! [::short ::long])
           (.then (fn [_] (assert-order! [::long ::short])))
-          (.then (fn [_] (done)))
-          (.catch (fn [e]
-                    (is false (str "threw — " e))
-                    (done)))))))
-
-(deftest budgeted-top-level-values-resolve-or-reject-as-data
-  (async done
-    (-> (with-conn
-          (fn []
-            (-> (run-batch "pe-budget-ok" "turnprom-budget-ok"
-                  "(seon.eval/budget 250 (js/Promise.resolve {:budget/value 42}))")
-                (.then
-                  (fn [resolved]
-                    (is (= 1 (:seon.eval/n-ok resolved))
-                        "a fast budgeted Promise remains an ordinary successful form")
-                    (let [resolved-row (row (first (:seon.eval/ids resolved)))]
-                      (is (true? (:seon.eval/ok? resolved-row)))
-                      (is (str/includes? (:seon.eval/result-edn resolved-row)
-                                         ":budget/value")
-                          "the runtime wrapper is removed before recording"))
-                    (run-batch "pe-budget-reject" "turnprom-budget-reject"
-                      "(seon.eval/budget 250 (js/Promise.reject (js/Error. \"budget rejection fixture\")))")))
-                (.then
-                  (fn [rejected]
-                    (is (= 1 (:seon.eval/n-fail rejected))
-                        "a budgeted rejection remains an error value, never an escaped rejection")
-                    (let [rejected-row (row (first (:seon.eval/ids rejected)))]
-                      (is (false? (:seon.eval/ok? rejected-row)))
-                      (is (string? (:seon.eval/error rejected-row)))))))))
-        (.then (fn [_] (done)))
-        (.catch (fn [e]
-                  (is false (str "threw — " e))
-                  (done))))))
-
-;; ---------------------------------------------------------------------------
-;; defer e2e — the form does NOT block; it records the placeholder and stores
-;; the live Promise; re-referencing result/<id> auto-awaits it to data.
-;; ---------------------------------------------------------------------------
-
-(deftest defer-records-placeholder-stores-handle-and-re-reference-resolves
-  (async done
-    (let [!id (atom nil)]
-      (-> (with-conn
-            (fn []
-              (-> (run-batch "pe-defer-t" "turnprom0001"
-                    "(seon.eval/defer (js/Promise. (fn [resolve _] (js/setTimeout (fn [] (resolve {:deferred/data 42})) 150))))")
-                  (.then (fn [r]
-                           (is (= 1 (:seon.eval/n-ok r))
-                               "the deferred form records as OK (a placeholder value, not an error)")
-                           (let [id     (first (:seon.eval/ids r))
-                                 handle (seval/lookup-result id)
-                                 rrow   (row id)]
-                             (reset! !id id)
-                             (is (instance? js/Promise handle)
-                                 "result/<id> holds the still-running Promise handle")
-                             (is (true? (:seon.eval/ok? rrow)))
-                             (is (str/includes? (:seon.eval/result-edn rrow) ":seon.eval/pending")
-                                 "the recorded value is the :seon.eval/pending placeholder")
-                             (is (str/includes? (:seon.eval/result-edn rrow) (str "result/" id))
-                                 "the placeholder names result/<id> so the agent knows how to await it")
-                             handle)))         ; return the handle → next .then waits for it to resolve
-                  (.then (fn [_]
-                           (run-batch "pe-defer-ref-t" "turnprom0002"
-                                      (str "(identity result/" @!id ")"))))
-                  (.then (fn [r2]
-                           (is (= 1 (:seon.eval/n-ok r2)))
-                           (is (str/includes? (:seon.eval/result-edn (row (first (:seon.eval/ids r2))))
-                                              ":deferred/data")
-                               "re-reference records the RESOLVED data, not a Promise"))))))
-          (.then (fn [_] (done)))
-          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
-
-;; ---------------------------------------------------------------------------
-;; timeout e2e — a Promise that exceeds the per-form auto-await budget records
-;; a placeholder + stores the handle (same downstream as defer); re-reference
-;; resolves it. The `(budget …)` wrapper carries the bound with THIS form.
-;; ---------------------------------------------------------------------------
-
-(deftest timed-out-promise-stores-handle-and-re-reference-resolves
-  (async done
-    (let [!id (atom nil)]
-      (-> (with-conn
-            (fn []
-              (-> (run-batch "pe-timeout-t" "turnprom0003"
-                    "(seon.eval/budget 50 (js/Promise. (fn [resolve _] (js/setTimeout (fn [] (resolve {:timeout/data 7})) 500))))")
-                  (.then (fn [r]
-                           (is (= 1 (:seon.eval/n-ok r))
-                               "the timed-out form records as OK (placeholder, not error)")
-                           (let [id     (first (:seon.eval/ids r))
-                                 handle (seval/lookup-result id)]
-                             (reset! !id id)
-                             (is (instance? js/Promise handle)
-                                 "the auto-await TIMEOUT stores the live Promise handle, not the resolved value")
-                             (is (str/includes? (:seon.eval/result-edn (row id)) ":seon.eval/pending")
-                                 "timeout records the placeholder")
-                             handle)))         ; return the handle → next .then waits for it to resolve
-                  (.then (fn [_]
-                           (run-batch "pe-timeout-ref-t" "turnprom0004"
-                                      (str "(identity result/" @!id ")"))))
-                  (.then (fn [r2]
-                           (is (str/includes? (:seon.eval/result-edn (row (first (:seon.eval/ids r2))))
-                                              ":timeout/data")
-                               "re-reference resolves the timed-out handle to real data"))))))
-          (.then (fn [_] (done)))
-          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+          (.catch (fn [error] (is false (str error))))
+          (.finally done)))))

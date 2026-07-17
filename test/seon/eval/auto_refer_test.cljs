@@ -49,6 +49,14 @@
     [seon.repl :as repl]
     [seon.schema]))
 
+(def configuration
+  (config/resolve-config-singleton
+   {:seon.config/agent-context
+    {:seon.eval/home-requires home/home-ns-require-specs}
+    :seon.config/root-context
+    {:seon.eval/home-requires
+     '[[seon.agent :refer [start! delegate! set-purpose!]]]}}))
+
 ;; ---------------------------------------------------------------------------
 ;; Pure: augment-ns-source — string in, string out. No compile-state needed.
 ;; ---------------------------------------------------------------------------
@@ -113,7 +121,8 @@
 (deftest fresh-bootstrap-seeds-the-resolved-root-refers
   (async done
     (let [root-requires (:seon.eval/home-requires
-                          (config/resolve-agent-context "root" nil))
+                          (config/resolve-agent-context
+                            "root" nil configuration))
           root-spec '[seon.agent :refer [start! delegate! set-purpose!]]
           !cs (atom nil)]
       (is (some #(= root-spec %) root-requires)
@@ -127,7 +136,8 @@
                               ([_] (js/Promise.resolve root-requires))
                               ([_database _id]
                                (js/Promise.resolve root-requires)))]
-                (seval/setup-agent-ns! cs 'my.agent.root "root"))))
+                (seval/setup-agent-ns! configuration cs
+                                          'my.agent.root "root"))))
           (.then
             (fn [_]
               (let [cs @!cs
@@ -142,7 +152,8 @@
                 (seval/eval
                   cs
                   "(every? fn? [start! delegate! set-purpose!])"
-                  {:seon.eval/starting-ns 'my.agent.root
+                  {:seon.config/configuration configuration
+                   :seon.eval/starting-ns 'my.agent.root
                    :seon.eval/analyze-deps? false}))))
           (.then (fn [result]
                    (is (true? (:seon.eval/ok? result)))
@@ -159,7 +170,7 @@
                     (js/Promise.resolve
                       '[[seon.agent :refer [not-a-real-seon-agent-var]]])))]
                 (-> (seval/setup-agent-ns!
-                      @!cs 'my.agent.invalid-root "invalid-root")
+                      configuration @!cs 'my.agent.invalid-root "invalid-root")
                     (.then (fn [_]
                              (is false "a nonexistent referred var must fail")))
                     (.catch
@@ -177,10 +188,14 @@
     (-> (repl/ensure-bootstrap!)
         (.then (fn [cs]
                  (-> (seval/eval cs "(ns scratch.before-73)"
-                                 {:seon.eval/starting-ns 'cljs.user :seon.eval/analyze-deps? false})
+                                 {:seon.config/configuration configuration
+                                  :seon.eval/starting-ns 'cljs.user
+                                  :seon.eval/analyze-deps? false})
                      (.then (fn [_]
                               (seval/eval cs "(defn db-ok? [] (some? db/query))"
-                                          {:seon.eval/starting-ns 'scratch.before-73 :seon.eval/analyze-deps? false})))
+                                          {:seon.config/configuration configuration
+                                           :seon.eval/starting-ns 'scratch.before-73
+                                           :seon.eval/analyze-deps? false})))
                      (.then (fn [r]
                               (is (not (:seon.eval/ok? r))
                                   "without the canonical alias, db/query does not resolve")

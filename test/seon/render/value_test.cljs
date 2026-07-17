@@ -10,6 +10,8 @@
     [seon.config :as config]
     [seon.render.value :as v]))
 
+(def configuration (config/resolve-config-singleton {}))
+
 ;; Stand-ins for opaque runtime handles (the real ones are datahike's).
 (defrecord FakeDB [max-tx max-eid])
 (deftype FakeDatom [e a vv]
@@ -23,19 +25,20 @@
 
 (deftest small-value-fully-shown
   (testing "a small value samples to itself (no markers)"
-    (is (= [1 2 3] (:seon.render.value/shown (v/sample [1 2 3]))))
-    (is (= {:a 1 :b 2} (v/sample {:a 1 :b 2})))))
+    (is (= [1 2 3]
+           (:seon.render.value/shown (v/sample configuration [1 2 3] {}))))
+    (is (= {:a 1 :b 2} (v/sample configuration {:a 1 :b 2} {})))))
 
 (deftest breadth-bound-on-vectors
   (testing "a wide vector keeps max-items elements + an exact elided tail"
-    (let [skel (v/sample (vec (range 100)) {:max-items 8})]
+    (let [skel (v/sample configuration (vec (range 100)) {:max-items 8})]
       (is (= 8 (count (:seon.render.value/shown skel))))
       (is (= 92 (:seon.render.value/elided skel))))))
 
 (deftest breadth-bound-on-maps
   (testing "a wide map keeps max-keys entries + an elided-keys count"
     (let [m    (into {} (map (fn [i] [(keyword (str "k" i)) i]) (range 20)))
-          skel (v/sample m {:max-keys 6})]
+          skel (v/sample configuration m {:max-keys 6})]
       (is (= 6 (count (dissoc skel :seon.render.value/elided-keys))))
       (is (= 14 (:seon.render.value/elided-keys skel))))))
 
@@ -43,28 +46,29 @@
   (let [error {:seon.error/message "writer unavailable"
                :seon.error/kind :system
                :seon.error/data {:operation :transact}}
-        sampled (v/sample error)]
+        sampled (v/sample configuration error {})]
     (is (= error sampled))
     (is (not (contains? sampled :seon.db/ok?)))
     (is (not (contains? sampled :seon.db/error)))))
 
 (deftest depth-bound-prunes-nested
   (testing "nesting past max-depth becomes a typed+counted prune marker"
-    (let [skel (v/sample {:a {:b {:c {:d 1 :e 2}}}} {:max-depth 3})
+    (let [skel (v/sample configuration {:a {:b {:c {:d 1 :e 2}}}}
+                         {:max-depth 3})
           c    (get-in skel [:a :b :c])]
       (is (= :map (:seon.render.value/pruned c)))
       (is (= 2 (:seon.render.value/count c))))))
 
 (deftest empty-colls-not-pruned-at-depth
   (testing "an empty coll at the depth boundary renders verbatim, not a marker"
-    (let [skel (v/sample {:a {:b {:c []}}} {:max-depth 3})]
+    (let [skel (v/sample configuration {:a {:b {:c []}}} {:max-depth 3})]
       (is (= [] (:seon.render.value/shown (get-in skel [:a :b :c])))))))
 
 (deftest navigation-paths-preserved
   (testing "a path read off the skeleton resolves on the LIVE value"
     (let [live {:api/results [{:user/id 1 :user/name "John"}
                               {:user/id 2 :user/name "Jane"}]}
-          skel (v/sample live)]
+          skel (v/sample configuration live {})]
       ;; key + index retained → get-in path is identical on both
       (is (= 1 (get-in skel [:api/results :seon.render.value/shown 0 :user/id])))
       (is (= "John" (get-in live [:api/results 0 :user/name]))))))
@@ -77,7 +81,7 @@
   (testing "an infinite seq samples to a bounded head + :more, no hang"
     (let [realized (atom 0)
           s        (map (fn [i] (swap! realized inc) i) (range))
-          skel     (v/sample s {:max-items 8})]
+          skel     (v/sample configuration s {:max-items 8})]
       (is (= 8 (count (:seon.render.value/shown skel))))
       (is (= :more (:seon.render.value/elided skel)))
       ;; head+1 probe only — never the whole infinite seq
@@ -90,7 +94,7 @@
   ;; `ok? true` (lazy, unrealized); forcing it in the renderer must NOT
   ;; propagate — a propagated throw is recorded `:core` and CRASHES the pod.
   (testing "sample degrades a throw-on-realize seq to an opaque marker"
-    (let [skel (v/sample (keys [[1 2] [3 4]]))]
+    (let [skel (v/sample configuration (keys [[1 2] [3 4]]) {})]
       (is (contains? skel :seon.eval/opaque))
       (is (str/includes? (:seon.eval/opaque skel) "realization threw"))))
   (testing "render-ai NEVER throws on a poisoned value — top / nested / deep"
@@ -98,17 +102,18 @@
                  (vals [[1 2]])
                  {:a (map (fn [_] (throw (js/Error. "boom"))) [1 2 3])}
                  {:a {:b (keys [[9 9]])}}]]
-      (let [out (v/render-ai "rid" val)]
+      (let [out (v/render-ai configuration "rid" val)]
         (is (string? out))
         (is (str/includes? out "result/rid")))))
   (testing "a normal value still renders verbatim (guard is inert)"
-    (is (= "{:a 1, :b [1 2 3]}" (v/render-ai "n" {:a 1 :b [1 2 3]})))))
+    (is (= "{:a 1, :b [1 2 3]}"
+           (v/render-ai configuration "n" {:a 1 :b [1 2 3]})))))
 
 (deftest homogeneous-collection-shows-shared-keys
   (testing "a big collection of uniform maps carries its shared key-set"
     (let [rows (mapv (fn [i] {:seon.fn/name (str "f" i) :seon.fn/arity (mod i 3)})
                      (range 40))
-          skel (v/sample rows {:max-items 5})]
+          skel (v/sample configuration rows {:max-items 5})]
       (is (= [:seon.fn/arity :seon.fn/name] (:seon.render.value/shape skel)))
       (is (= 35 (:seon.render.value/elided skel))))))
 
@@ -117,21 +122,22 @@
 ;; ============================================================
 
 (deftest datahike-db-projects-to-opaque-marker
-  (let [skel (v/sample (->FakeDB 42 99))]
+  (let [skel (v/sample configuration (->FakeDB 42 99) {})]
     (is (= "datahike/DB" (:seon.eval/opaque skel)))
     (is (str/includes? (:seon.eval/summary skel) "max-tx=42"))))
 
 (deftest datom-projects-to-datom-marker
-  (let [skel (v/sample (FakeDatom. 42 :user/name "Jane"))]
+  (let [skel (v/sample configuration (FakeDatom. 42 :user/name "Jane") {})]
     (is (= [42 :user/name "Jane"] (:seon.eval/datom skel)))))
 
 (deftest opaque-handle-nested-in-collection-is-projected
   (testing "an opaque node inside a vector is sanitized, not just a top-level one"
-    (let [skel (v/sample [(->FakeDB 7 7) :ok])]
+    (let [skel (v/sample configuration [(->FakeDB 7 7) :ok] {})]
       (is (= "datahike/DB" (:seon.eval/opaque (first (:seon.render.value/shown skel))))))))
 
 (deftest long-string-clipped-with-length
-  (let [skel (v/sample (apply str (repeat 300 "x")) {:max-string 80})]
+  (let [skel (v/sample configuration (apply str (repeat 300 "x"))
+                       {:max-string 80})]
     (is (= 300 (:seon.render.value/string-len skel)))
     (is (<= (count (:seon.render.value/head skel)) 80))))
 
@@ -173,7 +179,8 @@
                                 (swap! realized inc)
                                 {:row/id i})
                               (range 2000))
-          prepared       (v/prepare-ai {::v/value raw})
+          prepared       (v/prepare-ai {:seon.config/configuration configuration
+                                        ::v/value raw})
           after-prepare  @realized
           first-out      (v/format-ai {::v/eval-id "first-id"
                                        ::v/prepared prepared})
@@ -196,7 +203,7 @@
 
 (deftest render-ai-small-value-has-no-hint
   (testing "a fully-shown value renders verbatim, no partial-view hint"
-    (let [out (v/render-ai "abc" [1 2 3])]
+    (let [out (v/render-ai configuration "abc" [1 2 3])]
       (is (= "[1 2 3]" out))
       (is (not (str/includes? out "partial view"))))))
 
@@ -205,14 +212,14 @@
             real nesting of its own stored data, not {…N keys}/\"…\""
     (let [v   {:name "widget" :stock {:warehouse {:shelf {:bin 42}}}
                :note (apply str (repeat 90 "x"))}
-          out (v/render-ai "s2" v)]
+          out (v/render-ai configuration "s2" v)]
       (is (= (pr-str v) out))
       (is (not (str/includes? out "partial view")))
       (is (not (str/includes? out "…"))))))
 
 (deftest render-ai-truncated-names-the-live-var
   (testing "a clipped value points the agent at result/<id> for the whole value"
-    (let [out (v/render-ai "xyz123" (vec (range 2000)))]
+    (let [out (v/render-ai configuration "xyz123" (vec (range 2000)))]
       (is (str/includes? out "partial view"))
       (is (str/includes? out "result/xyz123"))
       (is (str/includes? out "get-in")))))
@@ -226,7 +233,7 @@
                       :seon.agent.shell/err-tokens 17}
                      (concat [[:payload-a big] [:payload-b big] [:payload-c big]]
                              (for [i (range 8)] [(keyword (str "f" i)) mid])))
-          out  (v/render-ai "eid1" m)]
+          out  (v/render-ai configuration "eid1" m)]
       ;; the two tiny load-bearing keys survive
       (is (str/includes? out "c4685deadbeefc4685deadbeef"))
       (is (str/includes? out "err-tokens"))
@@ -250,7 +257,7 @@
                    :seon.agent.fs/lines-returned 53
                    :seon.agent.fs/total-lines 53
                    :seon.agent.fs/file-sha "f1b6e41cabc123"}
-          out     (v/render-ai "yPy-1" env)]
+          out     (v/render-ai configuration "yPy-1" env)]
       ;; a real body is shown — not just the first ~80 chars (the old stub
       ;; stopped around line 3; the body now reaches deep into the file)
       (is (str/includes? out "line 30 of the file body"))
@@ -268,7 +275,7 @@
             so each stays inline-clipped — the body-block rule must not fire"
     (let [s   (fn [n] (apply str (repeat 500 (str n))))
           m   {:a (s 1) :b (s 2) :c (s 3)}
-          out (v/render-ai "m1" m)]
+          out (v/render-ai configuration "m1" m)]
       ;; no single string is shown as a 500-char body block
       (is (not (str/includes? out (s 1))))
       (is (not (str/includes? out (s 2))))
@@ -278,7 +285,7 @@
 (deftest render-ai-hint-teaches-durability-promotion
   (testing "a partial view's drill hint names BOTH recovery and the my.blob/put!
             keep idiom when a result id exists"
-    (let [out (v/render-ai "keep1" (vec (range 2000)))]
+    (let [out (v/render-ai configuration "keep1" (vec (range 2000)))]
       (is (str/includes? out "partial view"))
       ;; recovery idiom
       (is (str/includes? out "get-in"))
@@ -287,7 +294,8 @@
       (is (str/includes? out "my.blob/put! result/keep1")))))
 
 (deftest render-ai-long-string-reports-length
-  (let [out (v/render-ai "s1" (apply str (repeat 2000 "x")))]
+  (let [out (v/render-ai configuration "s1"
+                         (apply str (repeat 2000 "x")))]
     (is (str/includes? out "tokens⟩"))
     (is (str/includes? out "result/s1"))))
 
@@ -296,12 +304,13 @@
     (let [huge (vec (repeat 500 (into {} (map (fn [i] [(keyword (str "k" i))
                                                        (vec (range 50))])
                                               (range 30)))))
-          out  (v/render-ai "big" huge)]
+          out  (v/render-ai configuration "big" huge)]
       (is (< (count out) 4000)))))
 
 (deftest render-ai-never-emits-fences-or-backticks
   (testing "output stays valid comment prose (no ``` / ` that break the eval'able context)"
-    (let [out (v/render-ai "h" {:a (vec (range 100)) :b "x"})]
+    (let [out (v/render-ai configuration "h"
+                           {:a (vec (range 100)) :b "x"})]
       (is (not (str/includes? out "`"))))))
 
 ;; ============================================================
@@ -309,13 +318,14 @@
 ;; ============================================================
 
 (deftest html-data-contract-shape
-  (let [data (v/render-html-data "eid42" (vec (range 100)))]
+  (let [data (v/render-html-data configuration "eid42" (vec (range 100)))]
     (is (= "eid42" (:seon.render.value/eval-id data)))
     (is (true? (:seon.render.value/truncated? data)))
     (is (string? (:seon.render.value/summary data)))
     (is (contains? data :seon.render.value/tree))
     ;; the tree is the same skeleton render-ai emits
-    (is (= (v/sample (vec (range 100))) (:seon.render.value/tree data)))))
+    (is (= (v/sample configuration (vec (range 100)) {})
+           (:seon.render.value/tree data)))))
 
 ;; ------------------------------------------------------------
 ;; Explicit-whitespace rendering (transcript-render redesign) — the central
@@ -324,49 +334,37 @@
 
 (deftest visible-whitespace-is-gated-and-central
   (testing "all knobs off (default) → byte-identical passthrough"
-    (with-redefs [config/render-whitespace   (constantly :raw)
-                  config/render-tabs         (constantly :literal)
-                  config/render-trailing-ws  (constantly :off)
-                  config/render-line-numbers? (constantly false)]
-      (is (= "a\tb c\n  x " (v/visible-whitespace "a\tb c\n  x ")))))
+    (is (= "a\tb c\n  x "
+           (v/visible-whitespace configuration "a\tb c\n  x "))))
   (testing ":visible → every space `·` and every tab `→`"
-    (with-redefs [config/render-whitespace   (constantly :visible)
-                  config/render-tabs         (constantly :literal)
-                  config/render-trailing-ws  (constantly :off)
-                  config/render-line-numbers? (constantly false)]
-      (is (= "a→b·c" (v/visible-whitespace "a\tb c")))))
+    (let [configuration (assoc configuration
+                               :seon.config.render/whitespace :visible)]
+      (is (= "a→b·c"
+             (v/visible-whitespace configuration "a\tb c")))))
   (testing ":tabs :arrow alone → tabs `→`, spaces untouched"
-    (with-redefs [config/render-whitespace   (constantly :raw)
-                  config/render-tabs         (constantly :arrow)
-                  config/render-trailing-ws  (constantly :off)
-                  config/render-line-numbers? (constantly false)]
-      (is (= "a→b c" (v/visible-whitespace "a\tb c")))))
+    (let [configuration (assoc configuration
+                               :seon.config.render/tabs :arrow)]
+      (is (= "a→b c"
+             (v/visible-whitespace configuration "a\tb c")))))
   (testing ":trailing-ws :dot marks ONLY trailing whitespace"
-    (with-redefs [config/render-whitespace   (constantly :raw)
-                  config/render-tabs         (constantly :literal)
-                  config/render-trailing-ws  (constantly :dot)
-                  config/render-line-numbers? (constantly false)]
-      (is (= "a b·\nx" (v/visible-whitespace "a b \nx"))
+    (let [configuration (assoc configuration
+                               :seon.config.render/trailing-ws :dot)]
+      (is (= "a b·\nx"
+             (v/visible-whitespace configuration "a b \nx"))
           "interior space kept, trailing space dotted")))
   (testing ":line-numbers prepends a 1-based gutter"
-    (with-redefs [config/render-whitespace   (constantly :raw)
-                  config/render-tabs         (constantly :literal)
-                  config/render-trailing-ws  (constantly :off)
-                  config/render-line-numbers? (constantly true)]
-      (is (= "1  a\n2  b" (v/visible-whitespace "a\nb"))))))
+    (let [configuration (assoc configuration
+                               :seon.config.render/line-numbers true)]
+      (is (= "1  a\n2  b"
+             (v/visible-whitespace configuration "a\nb"))))))
 
 (deftest render-ai-string-value-uses-whitespace-view-only-when-active
   (testing "default → string value renders as quoted pr-str (byte-identical)"
-    (with-redefs [config/render-whitespace   (constantly :raw)
-                  config/render-tabs         (constantly :literal)
-                  config/render-trailing-ws  (constantly :off)
-                  config/render-line-numbers? (constantly false)]
-      (is (= (pr-str "a\tb") (v/render-ai "eidX" "a\tb"))
-          "quoted/escaped form, exactly as today")))
+    (is (= (pr-str "a\tb")
+           (v/render-ai configuration "eidX" "a\tb"))
+        "quoted/escaped form, exactly as today"))
   (testing "whitespace active → string value renders RAW bytes with glyphs"
-    (with-redefs [config/render-whitespace   (constantly :visible)
-                  config/render-tabs         (constantly :literal)
-                  config/render-trailing-ws  (constantly :off)
-                  config/render-line-numbers? (constantly false)]
-      (is (= "a→b" (v/render-ai "eidX" "a\tb"))
+    (let [configuration (assoc configuration
+                               :seon.config.render/whitespace :visible)]
+      (is (= "a→b" (v/render-ai configuration "eidX" "a\tb"))
           "raw content with tab→ glyph, not the quoted pr-str form"))))

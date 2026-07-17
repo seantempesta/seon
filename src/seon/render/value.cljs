@@ -97,6 +97,7 @@
                    ::prepared-complete])
 (schema/register! ::prepare-ai-request
                   [:map {:closed true}
+                   [:seon.config/configuration :seon.config/singleton]
                    [::value ::value]])
 (schema/register! ::format-ai-request
                   [:map {:closed true}
@@ -108,29 +109,21 @@
 ;; sub-family) for token economy, read through `seon.config`.
 ;; ============================================================
 
-(def default-opts
-  {:max-depth    (config/value-max-depth)
-   :max-keys     (config/value-max-keys)
-   :max-items    (config/value-max-items)
-   :max-string   (config/value-max-string)
-   :shape-sample (config/value-shape-sample)})
+(defn- render-options [configuration]
+  {:max-depth    (config/value-max-depth configuration)
+   :max-keys     (config/value-max-keys configuration)
+   :max-items    (config/value-max-items configuration)
+   :max-string   (config/value-max-string configuration)
+   :shape-sample (config/value-shape-sample configuration)})
 
-(def ^:private verbatim-cap
-  "Char budget under which an eval value prints WHOLE (REPL-style) instead of
-   being skeletonized — small enough that the agent sees the REAL nesting of
-   its own just-stored data, not `{…2 keys}`/`\"…\"`. Grounded at the same
-   1500 as `seon.agent.ctx/eval-render-cap` (which can't be required here —
-   that ns sits ABOVE this one): a value this size is genuinely small, well
-   under the result-body clip. Override via SEON_RENDER_VALUE_VERBATIM_CAP."
-  (config/value-verbatim-cap))
-
-(def ^:private verbatim-probe-opts
+(defn- verbatim-probe-options
   "Generous bounds used ONLY to test — LAZY-SAFELY — whether `value` is small
    and fully plain before `pr-str`'ing it whole. `sample` realizes at most
    max-items+1 of any seq, so an untruncated probe PROVES the value is finite,
    opaque-free, and bounded: `pr-str` then cannot hang on a lazy/infinite seq
    nor blow up. Bounds far exceed anything a verbatim-cap-sized value reaches,
    so the char count stays the real gate."
+  [verbatim-cap]
   {:max-depth 64 :max-keys 256 :max-items 256
    :max-string verbatim-cap :shape-sample 8})
 
@@ -272,11 +265,11 @@
    where [[visible-whitespace]] diverges from `s`. Lets a caller bypass the
    pr-str/quote path for a string value ONLY when the operator asked for it,
    so the default render is byte-identical to today."
-  []
-  (not (and (= (config/render-whitespace) :raw)
-            (= (config/render-tabs) :literal)
-            (= (config/render-trailing-ws) :off)
-            (not (config/render-line-numbers?)))))
+  [configuration]
+  (not (and (= (config/render-whitespace configuration) :raw)
+            (= (config/render-tabs configuration) :literal)
+            (= (config/render-trailing-ws configuration) :off)
+            (not (config/render-line-numbers? configuration)))))
 
 (defn- mark-trailing-ws
   "Glyph only the TRAILING whitespace run of one line (`·` per space, `→` per
@@ -295,12 +288,13 @@
    `:line-numbers true` prepends a 1-based gutter. All knobs off (the default)
    short-circuits to `s` unchanged — byte-identical to today. DISPLAY only: the
    value behind `result/<id>` is the real bytes the agent matches against."
-  {:malli/schema [:=> [:catn [:seon.render.value/content :string]] :string]}
-  [s]
-  (let [ws     (config/render-whitespace)
-        tabs   (config/render-tabs)
-        trail  (config/render-trailing-ws)
-        lines? (config/render-line-numbers?)]
+  {:malli/schema [:=> [:catn [:seon.config/configuration :seon.config/singleton]
+                             [:seon.render.value/content :string]] :string]}
+  [configuration s]
+  (let [ws     (config/render-whitespace configuration)
+        tabs   (config/render-tabs configuration)
+        trail  (config/render-trailing-ws configuration)
+        lines? (config/render-line-numbers? configuration)]
     (if (and (= ws :raw) (= tabs :literal) (= trail :off) (not lines?))
       s
       (->> (str/split s #"\n" -1)
@@ -397,25 +391,18 @@
   "Depth + breadth bounded SKELETON of `x` (plain data + marker maps).
    `opts` overrides `default-opts`. Navigation paths (map keys, vector
    indices) are preserved on every retained node. Lazy-safe; never throws."
-  {:malli/schema [:function
-                  [:=> [:catn [:seon.render.value/x :any]] :any]
-                  [:=> [:catn [:seon.render.value/x :any]
-                              [:seon.render.value/opts :map]] :any]]}
-  ;; The 1-arity delegates with `{}` (NOT nil): the 2-arity's `opts` slot is
-  ;; schema'd `:map`, and under always-on instrumentation a nil there throws
-  ;; `:malli.core/invalid-input` on this internal self-call (uninstrumented,
-  ;; `merge` tolerated nil — the trap only fires once instrumented at boot).
-  ([x] (sample x {}))
-  ([x opts] (sample* x (merge default-opts opts) 0)))
+  {:malli/schema [:=> [:catn [:seon.config/configuration
+                              :seon.config/singleton]
+                             [:seon.render.value/x :any]
+                             [:seon.render.value/opts :map]] :any]}
+  [configuration x opts]
+  (sample* x (merge (render-options configuration) opts) 0))
 
 ;; ============================================================
 ;; EMIT — render the skeleton to structure-revealing comment text.
 ;; Markers become compact tokens; scalars via pr-str; collections print
 ;; INLINE when they fit a width budget, else break one child per line.
 ;; ============================================================
-
-(def ^:private width
-  (config/value-width))
 
 (defn- leaf-marker? [x]
   (and (map? x)
@@ -491,7 +478,7 @@
                                       (when tail [tail]))) "}"))
     :else (pr-str x)))
 
-(defn- fits? [x depth]
+(defn- fits? [x depth width]
   (let [s (emit-inline x)]
     (and (not (str/includes? s "\n"))
          (<= (+ (count s) (* 2 depth)) width))))
@@ -499,10 +486,10 @@
 (defn- emit
   "Render skeleton node `x` at `depth`; inline when it fits, else break one
    child per line."
-  [x depth]
+  [x depth width]
   (cond
     (leaf-marker? x) (emit-leaf x)
-    (fits? x depth)  (emit-inline x)
+    (fits? x depth width)  (emit-inline x)
 
     (:seon.render.value/kind x)
     (let [[open close] (case (:seon.render.value/kind x)
@@ -510,7 +497,7 @@
           [elems tail] (seqish-parts x)
           sep (str "\n" (ind (inc depth)))]
       (str open
-           (str/join sep (map #(emit % (inc depth)) elems))
+           (str/join sep (map #(emit % (inc depth) width) elems))
            (when (seq tail) (str sep tail))
            close))
 
@@ -518,7 +505,10 @@
     (let [[pairs tail] (map-parts x)
           sep (str "\n" (ind (inc depth)))]
       (str "{"
-           (str/join sep (map (fn [[k v]] (str k " " (emit v (inc depth)))) pairs))
+           (str/join sep
+                     (map (fn [[k v]]
+                            (str k " " (emit v (inc depth) width)))
+                          pairs))
            (when tail (str sep tail))
            "}"))
 
@@ -563,9 +553,9 @@
    something to reveal (longer than the inline stub). This is what makes a
    read function's own payload (`view`'s content, a fetched body) VISIBLE instead
    of a stub, without any per-function special-casing."
-  [value max-string]
+  [value options max-string]
   (when (and (map? value) (not (record? value)) (seq value)
-             (<= (count value) (:max-keys default-opts)))
+             (<= (count value) (:max-keys options)))
     ;; `(pr-str v)` sizes each RAW map value — a value that is a poisoned lazy
     ;; seq (see [[sample-seqish]]) throws when pr-str forces it. This is an
     ;; OPTIMIZATION (show a map's dominant string payload verbatim); if any
@@ -587,16 +577,20 @@
 (defn- prepare-bounded-view
   "Prepare the bounded body and ID-independent drill facts for a value too
    large, deep, or opaque to print whole."
-  [value]
-  (let [dom   (dominant-string-entry value (:max-string default-opts))
+  [configuration value]
+  (let [options (render-options configuration)
+        verbatim-cap (config/value-verbatim-cap configuration)
+        width (config/value-width configuration)
+        dom   (dominant-string-entry value options (:max-string options))
         skel  (if-some [[dk s] dom]
                 ;; re-clip only the dominant key's value to the body cap —
                 ;; every retained get-in path stays valid; the header keys
                 ;; render verbatim (all kept, since the map is ≤ max-keys).
-                (assoc (sample value) dk (clip-string s verbatim-cap))
-                (sample value))
+                (assoc (sample configuration value {})
+                       dk (clip-string s verbatim-cap))
+                (sample configuration value {}))
         clip? (truncated? skel)
-        body  (emit skel 0)
+        body  (emit skel 0 width)
         tsz   (top-type+size value)]
     (cond-> {::body body}
       clip? (assoc ::drill-hint
@@ -611,36 +605,40 @@
    with no reference to the original value, so an allocator may safely format
    it under any later eval id without repeating lazy effects."
   {:malli/schema [:=> [:cat ::prepare-ai-request] ::prepared-ai]}
-  [{::keys [value]}]
-  (try
-    (cond
+  [{::keys [value] configuration :seon.config/configuration}]
+  (let [verbatim-cap (config/value-verbatim-cap configuration)
+        width (config/value-width configuration)]
+    (try
+      (cond
       ;; EXPLICIT-CHARACTER view of a STRING value (file content the agent
       ;; edits) — ONLY when an operator turned a whitespace knob on. Renders the
       ;; RAW bytes with visible glyphs instead of the quoted/escaped pr-str form,
       ;; so tab-vs-space is visible for building an exact `replace!` find. Gated:
       ;; at defaults this branch is skipped and the pr-str path below is unchanged
       ;; (byte-identical to today).
-      (and (string? value) (whitespace-active?))
+      (and (string? value) (whitespace-active? configuration))
       (if (<= (count value) verbatim-cap)
-        {::body (visible-whitespace value)}
+        {::body (visible-whitespace configuration value)}
         {::body
-         (visible-whitespace (subs value 0 (max 0 (dec verbatim-cap))))
+         (visible-whitespace configuration
+                             (subs value 0 (max 0 (dec verbatim-cap))))
          ::string-token-estimate (tokens/estimate value)})
 
       :else
-      (let [probe (sample value verbatim-probe-opts)]
+      (let [probe (sample configuration value
+                          (verbatim-probe-options verbatim-cap))]
         (if (truncated? probe)
-          (prepare-bounded-view value)
+          (prepare-bounded-view configuration value)
           ;; probe untruncated ⇒ value is finite, opaque-free, bounded ⇒ pr-str
           ;; cannot hang. Print it WHOLE when it fits the char budget.
           (let [edn (pr-str value)]
             (if (<= (count edn) verbatim-cap)
               {::body edn}
-              (prepare-bounded-view value))))))
-    (catch :default e
-      {::body (emit (sample value) 0)
-       ::render-error-message
-       (or (some-> ^js e .-message) (str e))})))
+              (prepare-bounded-view configuration value))))))
+      (catch :default e
+        {::body (emit (sample configuration value {}) 0 width)
+         ::render-error-message
+         (or (some-> ^js e .-message) (str e))}))))
 
 (defn format-ai
   "Format immutable prepared render data under one allocated eval id.
@@ -692,12 +690,16 @@
    Convenience composition of [[prepare-ai]] and [[format-ai]]. Callers that
    allocate an eval id inside a retryable transaction prepare once OUTSIDE the
    retry, then invoke [[format-ai]] with the candidate id inside it."
-  {:malli/schema [:=> [:catn [:seon.render.value/eval-id :string]
+  {:malli/schema [:=> [:catn [:seon.config/configuration
+                              :seon.config/singleton]
+                             [:seon.render.value/eval-id :string]
                              [:seon.render.value/value :any]]
                   :string]}
-  [eval-id value]
+  [configuration eval-id value]
   (format-ai {::eval-id eval-id
-              ::prepared (prepare-ai {::value value})}))
+              ::prepared (prepare-ai
+                           {:seon.config/configuration configuration
+                            ::value value})}))
 
 ;; ============================================================
 ;; RENDER-HTML-DATA — the DATA CONTRACT for the interactive drill-down
@@ -724,11 +726,13 @@
    The `:tree` is the same plain-data skeleton `render-ai` emits — the
    panel renders each marker as a collapsible affordance and requests
    deeper slices by path. No hiccup here: styling + interactivity are U's."
-  {:malli/schema [:=> [:catn [:seon.render.value/eval-id :string]
+  {:malli/schema [:=> [:catn [:seon.config/configuration
+                              :seon.config/singleton]
+                             [:seon.render.value/eval-id :string]
                              [:seon.render.value/value :any]]
                   :map]}
-  [eval-id value]
-  (let [skel (sample value)]
+  [configuration eval-id value]
+  (let [skel (sample configuration value {})]
     {:seon.render.value/eval-id    eval-id
      :seon.render.value/summary    (or (top-type+size value)
                                        (some-> (:seon.eval/opaque skel))
@@ -740,7 +744,8 @@
 ;; Live integration:
 ;;
 ;; `seon.eval/render-result-edn` (the producer of `:seon.eval/result-edn`,
-;; the AI text) is `(render-ai eval-id value)` + a final char-cap backstop.
+;; the AI text) calls `(render-ai configuration eval-id value)` before its
+;; final char-cap backstop.
 ;; `seon.eval/sanitize-result-edn` (the read-side net for legacy rows)
 ;; reuses `project-plain`. The opaque-DETECTION + projection logic lives
 ;; ONLY here; `seon.eval` requires this ns — a one-way edge (eval →

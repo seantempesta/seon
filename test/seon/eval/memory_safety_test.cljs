@@ -24,7 +24,11 @@
     [cljs.test :as t :refer [deftest is testing]]
     [clojure.string :as str]
     [seon.ai.tokens :as tokens]
+    [seon.config :as config]
     [seon.eval :as seval]))
+
+(def configuration (config/resolve-config-singleton {}))
+(def database-edn-cap (config/database-edn-cap configuration))
 
 (defn- reported-elision-tokens
   "The token estimate carried by a generated cap marker, or nil."
@@ -46,37 +50,38 @@
 
 (deftest database-edn-cap-is-a-sane-positive-bound
   ;; ~10x the render cap (1500), ~600x below the 9.7M blob that OOM'd.
-  (is (= 16384 seval/database-edn-cap))
-  (is (pos? seval/database-edn-cap)))
+  (is (= 16384 database-edn-cap))
+  (is (pos? database-edn-cap)))
 
 (deftest cap-edn-truncates-a-huge-string-with-an-elision-marker
   (let [huge   (apply str (repeat (* 5 1024 1024) "x")) ; 5 MB string
-        capped (seval/cap-edn huge)
-        marker (subs capped seval/database-edn-cap)]
+        capped (seval/cap-edn huge database-edn-cap)
+        marker (subs capped database-edn-cap)]
     (testing "stored string is bounded — never the multi-MB original"
       (is (<= (count capped)
-              (+ seval/database-edn-cap 64))
+              (+ database-edn-cap 64))
           "capped length is the cap plus a short elision marker"))
     (testing "the kept prefix is the head of the original value"
-      (is (= (subs huge 0 seval/database-edn-cap)
-             (subs capped 0 seval/database-edn-cap))))
+      (is (= (subs huge 0 database-edn-cap)
+             (subs capped 0 database-edn-cap))))
     (testing "the generated marker reports the canonical omitted-token estimate"
-      (is (= (tokens/chars->tokens (- (count huge) seval/database-edn-cap))
+      (is (= (tokens/chars->tokens (- (count huge) database-edn-cap))
              (reported-elision-tokens marker)))
       (is (false? (raw-text-size-unit? marker))))))
 
 (deftest cap-edn-leaves-a-normal-small-result-verbatim
   ;; Regression: the cap must not truncate ordinary results.
   (let [small (pr-str {:seon.demo/total 42 :seon.demo/rows [1 2 3]})]
-    (is (< (count small) seval/database-edn-cap))
-    (is (= small (seval/cap-edn small))
+    (is (< (count small) database-edn-cap))
+    (is (= small (seval/cap-edn small database-edn-cap))
         "small string passes through unchanged — no marker, no truncation")
-    (is (nil? (reported-elision-tokens (seval/cap-edn small))))))
+    (is (nil? (reported-elision-tokens
+                (seval/cap-edn small database-edn-cap))))))
 
 (deftest cap-edn-is-nil-safe-and-stringifies
   ;; record-eval!'s pr-str fallback can hand cap-edn non-strings.
-  (is (= "" (seval/cap-edn nil)))
-  (is (= "123" (seval/cap-edn 123))))
+  (is (= "" (seval/cap-edn nil database-edn-cap)))
+  (is (= "123" (seval/cap-edn 123 database-edn-cap))))
 
 (deftest cap-edn-honours-an-explicit-limit
   (let [source "abcdefghijk"
@@ -101,7 +106,7 @@
                                       (str seval/result-ns-sym))
         legacy-key    (str "__seon_results_" eval-id)
         ;; what record-eval! WOULD persist for this value:
-        persisted (seval/cap-edn (pr-str big-value))]
+        persisted (seval/cap-edn (pr-str big-value) database-edn-cap)]
     ;; Isolate the reserved runtime namespace without a parallel key mirror. Its
     ;; enumerable properties are the live-result authority and eviction order.
     (js/Reflect.set js/globalThis (str seval/result-ns-sym)
@@ -109,7 +114,7 @@
     (seval/bind-result-var! compile-state eval-id big-value)
     (try
       (testing "persisted datom is bounded"
-        (is (<= (count persisted) (+ seval/database-edn-cap 64)))
+        (is (<= (count persisted) (+ database-edn-cap 64)))
         (is (< (count persisted) (count big-value))))
       (testing "the public var and internal lookup share one bounded descriptor"
         (let [retained (seval/lookup-result eval-id)]
@@ -156,19 +161,22 @@
 ;; ---------------------------------------------------------------------------
 
 (deftest small-collection-renders-verbatim-no-partial-hint
-  (let [edn (seval/render-result-edn "ev00000001" (vec (range 5)))]
+  (let [edn (seval/render-result-edn configuration "ev00000001"
+                                      (vec (range 5)))]
     (is (= "[0 1 2 3 4]" edn) "a small coll renders verbatim")
     (is (not (str/includes? edn "partial view")) "no false-positive hint")))
 
 (deftest scalar-map-renders-verbatim-no-partial-hint
-  (let [edn (seval/render-result-edn "ev00000002" {:seon.demo/x 1 :seon.demo/y 2})]
+  (let [edn (seval/render-result-edn configuration "ev00000002"
+                                      {:seon.demo/x 1 :seon.demo/y 2})]
     (is (not (str/includes? edn "partial view")))
     (is (str/includes? edn ":seon.demo/x"))))
 
 (deftest many-row-result-is-bounded-and-names-the-live-var
   (let [eval-id "ev00000003"
         total   5000
-        edn     (seval/render-result-edn eval-id (vec (range total)))]
+        edn     (seval/render-result-edn configuration eval-id
+                                          (vec (range total)))]
     (testing "output is BOUNDED — never a stringified 5000-element vector"
       (is (< (count edn) 2000))
       ;; the LAST shown element is far below the total — breadth-bounded
@@ -184,7 +192,8 @@
 (deftest opaque-handle-result-is-a-compact-marker-not-a-blob
   ;; A datahike-shaped handle returned by an eval must render as a compact
   ;; marker, never a multi-KB index dump.
-  (let [edn (seval/render-result-edn "ev00000005" {:seon.demo/db (->FakeStoreDB 42 99)})]
+  (let [edn (seval/render-result-edn configuration "ev00000005"
+                                      {:seon.demo/db (->FakeStoreDB 42 99)})]
     (is (< (count edn) 400) "marker is compact")
     (is (str/includes? edn "seon.demo/db"))
     (is (str/includes? edn "datahike/DB"))))
@@ -194,8 +203,9 @@
   ;; the bounded skeleton + its hint must survive that too (a no-op here,
   ;; since render-ai already keeps the output well under database-edn-cap).
   (let [eval-id "ev00000004"
-        edn     (seval/render-result-edn eval-id (vec (range 9000)))
-        capped  (seval/cap-edn edn)]
+        edn     (seval/render-result-edn configuration eval-id
+                                          (vec (range 9000)))
+        capped  (seval/cap-edn edn database-edn-cap)]
     (is (= edn capped) "bounded render is already under the store cap")
     (is (str/includes? capped (str "result/" eval-id)))))
 

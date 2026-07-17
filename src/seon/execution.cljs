@@ -5,6 +5,7 @@
    [clojure.walk :as walk]
    [malli.core :as m]
    [malli.registry :as mr]
+   [seon.config :as config]
    [seon.db :as db]
    [seon.db.protocol :as db.protocol]
    [seon.error :as error]
@@ -293,10 +294,25 @@
    :datahike.resource/max-results maximum-program-rows
    :datahike.resource/max-result-weight maximum-program-bytes})
 
+(defn- config-member [database]
+  {::db.protocol/operation db.protocol/pull-operation
+   ::db/db database
+   ::db.protocol/selector '[*]
+   ::db.protocol/entity-id [:seon.config/id config/cluster-config-id]
+   :datahike.resource/max-work 100000
+   :datahike.resource/max-results 1
+   :datahike.resource/max-result-weight 65536})
+
 (defn- query-result [member]
   (if (::db.protocol/success? member)
     (:datahike.query/result member)
     (throw (ex-info "Authored program acquisition failed."
+                    {:seon.db/error member :seon.error/kind :core-bug}))))
+
+(defn- pull-result [member]
+  (if (::db.protocol/success? member)
+    (::db.protocol/result member)
+    (throw (ex-info "Configuration acquisition failed."
                     {:seon.db/error member :seon.error/kind :core-bug}))))
 
 (defn- normalize-require-edge [edge]
@@ -467,20 +483,17 @@
                     ::function-identity identity))))
      invocation-plans)))
 
-(defn- ^:async acquire-program!
-  [database]
-  (let [result (await
-                (db/execute-many
-                  {::db/max-result-weight maximum-program-bytes
-                   ::db/members
-                  [(query-member database runtime-namespace-query [])
-                   (query-member database runtime-require-edge-query [])
-                   (query-member database runtime-function-query [])
-                   (query-member database runtime-test-query [])
-                   (query-member database schema-query [])
-                   (query-member database function-contract-query [])]}))
-        [namespaces edges functions tests schemas contracts]
-        (mapv query-result (::db/results result))
+(defn- program-members [database]
+  [(query-member database runtime-namespace-query [])
+   (query-member database runtime-require-edge-query [])
+   (query-member database runtime-function-query [])
+   (query-member database runtime-test-query [])
+   (query-member database schema-query [])
+   (query-member database function-contract-query [])])
+
+(defn- program-from-results [results]
+  (let [[namespaces edges functions tests schemas contracts]
+        (mapv query-result results)
         program (canonical-program namespaces edges [] functions tests
                                    schemas contracts)
         source-by-symbol
@@ -490,6 +503,15 @@
     (assoc program
            ::digest (source-digest program)
            ::source-by-symbol source-by-symbol)))
+
+(defn- ^:async acquire-program!
+  [database]
+  (let [result (await
+                (db/execute-many
+                 {::db/db database
+                  ::db/max-result-weight maximum-program-bytes
+                  ::db/members (program-members database)}))]
+    (program-from-results (::db/results result))))
 
 (defn- verify-authored-identity!
   [program invocation]
@@ -563,11 +585,21 @@
 (defn- ^:async prepare-eval-program!
   "Prepare the invocation database value's program and the child's compiler."
   [state invocation]
-  (let [program (await (acquire-program! (:seon.db/db invocation)))
+  (let [database (:seon.db/db invocation)
+        acquired (await
+                  (db/execute-many
+                   {::db/db database
+                    ::db/max-result-weight (+ maximum-program-bytes 65536)
+                    ::db/members (conj (program-members database)
+                                       (config-member database))}))
+        results (::db/results acquired)
+        program (program-from-results (subvec results 0 6))
+        configuration (db/decode-edn-values (pull-result (nth results 6)))
         symbols (vec (keys (::source-by-symbol program)))
         _ (await (install-program! state invocation program symbols false))]
     {::compile-state (::compile-state @state)
-     ::program program}))
+     ::program program
+     ::configuration configuration}))
 
 (declare exception-value)
 

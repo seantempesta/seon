@@ -604,8 +604,11 @@
    an error String (`:ai`) — siblings intact, never an exception. Unknown
    values fall through to the data panel (projected via `render-html-data`),
    so `block` renders ANYTHING."
-  {:malli/schema [:=> [:catn [::view :seon.render/view] [::x :any]] :any]}
-  [view x]
+  {:malli/schema [:=> [:catn [::view :seon.render/view]
+                             [:seon.config/configuration
+                              :seon.config/singleton]
+                             [::x :any]] :any]}
+  [view configuration x]
   (try
     (case view
       :html
@@ -616,7 +619,8 @@
         (data-projection? x) (data-panel x)
         (error-value? x)   (canvas/error-card x)
         (canvas/valid-hiccup? x) x
-        :else              (data-panel (value/render-html-data "inline" x)))
+        :else              (data-panel
+                             (value/render-html-data configuration "inline" x)))
 
       :ai
       (cond
@@ -627,7 +631,7 @@
                                    (when (:seon.render.value/truncated? x) " (partial)"))
         (error-value? x)   (:seon.error/message x)
         (canvas/valid-hiccup? x) (hiccup-text x)
-        :else              (value/render-ai "inline" x)))
+        :else              (value/render-ai configuration "inline" x)))
     (catch :default e
       ;; `block` dispatches to CORE renderers (md->hiccup, clj->hiccup, the
       ;; value panels) — a throw is our machinery (:core). Record BEFORE
@@ -652,6 +656,7 @@
 (schema/register! :seon.render/canvas-request
   [:map
    [:seon.agent/id :string]
+   [:seon.config/configuration :seon.config/singleton]
    [:seon.db/db    {:optional true} :seon.db/db]])
 
 (defn render-agent-canvas
@@ -668,7 +673,7 @@
    `:seon.render/ai` render for the agent. nil hiccup only when the
    agent entity doesn't exist (the canvas never crashes its caller)."
   {:malli/schema [:=> [:cat :seon.render/canvas-request] :seon.render/html-response]}
-  [{:seon.agent/keys [id] :seon.db/keys [db]}]
+  [{:seon.agent/keys [id] :seon.db/keys [db] :as input}]
   (let [db  (or db @db/*conn*)
         {ent :seon.render/entity
          configured :seon.render.canvas/configured}
