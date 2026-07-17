@@ -183,9 +183,9 @@ modest-hardware density checkpoint.
   compile with no warning in those two owners.
 - **Dependency-ready parallel portfolio:** lifecycle is factoring the one
   existing message transaction composer so completion can commit result,
-  optional message, close, and pointer retraction atomically; the database
-  session owner is restoring its one physical listen interest set after
-  reconnect without a second registry.
+  optional message, close, and pointer retraction atomically; listener
+  reconnection is integrated and the web/feed database-value cut is the next
+  dependency-ready refill.
 - **Next refills:** after derive/schedule, migrate the agent owner and atomic
   delegation; after lifecycle, migrate loop result handling; after listen
   recovery, close the web/feed database-value and rendered-transaction cut.
@@ -229,8 +229,14 @@ from durable receipt conflicts; and a canceled running mutation consults its
 receipt before reporting cancellation. Focused proof passes 16 UDS tests/61
 assertions, 11 facade tests/65 assertions, and 5 writer tests/30 assertions.
 The ordinary path adds no hop or copied frame. Physical database-listen
-interest restoration after reconnect remains a separate unsettled owner and
-is not hidden inside transaction recovery.
+interest restoration is settled separately at `a4f3c76b`: the existing
+handler map remains the sole logical owner, reconnect restores each current
+interest once after database acquisition, and the existing resynchronization
+event tells readers to reacquire. Logical unlisten removes ownership before
+awaiting transport, while owner close and stale close callbacks cannot restore
+or clear the wrong session. Focused proof passes 14 tests/75 assertions with
+no compile warning. Transaction recovery does not hide or duplicate this
+listener state.
 
 ## Settled laws
 
