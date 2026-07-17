@@ -304,7 +304,7 @@
     ::protocol/query-form '[:find (count ?a) . :where [?a :seon.agent/id]]
     ::protocol/arguments []
     :datahike.resource/max-work 1000000
-    :datahike.resource/max-results 1
+    :datahike.resource/max-results 16
     :datahike.resource/max-result-weight 1024}
    {::protocol/operation protocol/pull-operation
     ::protocol/selector '[*]
