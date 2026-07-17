@@ -30,6 +30,17 @@
     (is (= database @seen))
     (is (string? (::datastar/event result)))))
 
+(deftest nested-async-render-values-are-settled-before-serialization
+  (let [inner (js-obj "then"
+                      (fn [resolve _reject]
+                        (resolve [:main {:id "app-view"} "ready"])))
+        outer (js-obj "then" (fn [resolve _reject] (resolve inner)))
+        result (@#'datastar/rendered-view-patch outer)]
+    (is (string? (::datastar/event result)))
+    (is (re-find #"<main id=\"app-view\">ready</main>"
+                 (::datastar/event result)))
+    (is (not (re-find #"Promise" (::datastar/event result))))))
+
 (deftest subscriptions-render-only-for-declared-changed-attributes
   (let [affected? @#'datastar/subscription-affected?]
     (is (affected? {::datastar/dependencies #{:seon.agent/id}}

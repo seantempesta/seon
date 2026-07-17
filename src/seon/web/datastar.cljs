@@ -129,17 +129,19 @@
          html/->string
          patch-elements)}))
 
-(defn- rendered-view-patch [rendered]
-  (let [observed? (and (map? rendered) (contains? rendered ::element))
-        element (if observed? (::element rendered) rendered)]
-    (cond-> {::event (-> element html/->string patch-elements)}
-      (and observed? (contains? rendered ::dependencies))
-      (assoc ::dependencies (::dependencies rendered)))))
-
 (defn- promise-like? [value]
   (and (some? value)
        (or (object? value) (fn? value))
        (fn? (.-then value))))
+
+(defn- rendered-view-patch [rendered]
+  (if (promise-like? rendered)
+    (.then rendered rendered-view-patch render-error-patch)
+    (let [observed? (and (map? rendered) (contains? rendered ::element))
+          element (if observed? (::element rendered) rendered)]
+      (cond-> {::event (-> element html/->string patch-elements)}
+        (and observed? (contains? rendered ::dependencies))
+        (assoc ::dependencies (::dependencies rendered))))))
 
 (defn- view-fn-patch
   "Render a bound full-view fn into one event plus learned dependencies.
