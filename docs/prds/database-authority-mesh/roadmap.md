@@ -131,8 +131,17 @@ for the coordinated live authority export. The eval cut is grounded at
 [[research/eval-native-result-database-value-cut-2026-07-16]] and active: it
 retains one `eval-batch!` pipeline, advances through native `:db-after`, fences
 only read-derived record writes, and deletes local operation capture rather
-than replacing it. Final graduation remains one frozen-source full test, live
-browser/agent, crash/restart, packaging, and modest-hardware density checkpoint.
+than replacing it. The downstream web cut is grounded at
+[[research/web-rendered-tx-observability-unification-2026-07-16]]: the one
+`seon.agent.debug/turn` reconstruction owner feeds the composition boundary,
+attempts inherit their parent turn's `as-of` value, and eval-operation replay
+is deleted while restore/feed selector identity remains intact. Run lifecycle
+is grounded at [[research/run-native-result-database-value-cut-2026-07-16]];
+its retained owner uses targeted Datahike CAS and one database value per
+read-derived write, deletes duplicate run readers, and waits on the message
+result cut rather than accepting an adapter. Final graduation remains one
+frozen-source full test, live browser/agent, crash/restart, packaging, and
+modest-hardware density checkpoint.
 
 ## Settled laws
 
