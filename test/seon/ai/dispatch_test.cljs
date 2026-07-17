@@ -78,15 +78,23 @@
              (mapv #(get-in % [:seon.ai/resolved-config :seon.ai/provider])
                    @seen))))))
 
-(deftest missing-resolution-is-an-error-value
+(deftest invalid-direct-input-is-an-error-value
   (async done
     (let [llm (dispatch/llm-fn)]
-      (-> (llm "legacy bare context")
-          (.then (fn [response]
-                   (is (= "" (:text response)))
-                   (is (re-find #"config-resolution"
-                                (get-in response [:seon.ai/error
-                                                  :seon.ai/msg])))))
+      (-> (js/Promise.all
+            (clj->js
+              (map llm
+                   ["bare context"
+                    {:seon.ai/ctx "missing resolution"}
+                    {:seon.ai/ctx "extra field"
+                     :seon.ai/config-resolution (resolution :deepseek)
+                     :seon.ai/legacy true}])))
+          (.then (fn [responses]
+                   (doseq [response (array-seq responses)]
+                     (is (= "" (:text response)))
+                     (is (re-find #":seon.ai/request"
+                                  (get-in response [:seon.ai/error
+                                                    :seon.ai/msg]))))))
           (.then (fn [_] (done)))
           (.catch (fn [error]
                     (is false (str "rejected — " error))

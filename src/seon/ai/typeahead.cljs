@@ -998,9 +998,9 @@
   "Run the mode=step FSM loop for one rendered prompt; return the
    turn-loop reply shape `{:text … :seon.ai/raw …}` (plus
    `:seon.ai/error` when a step failed)."
-  [opts arg database menu-value affordances]
-  (let [prompt     (ai/llm-arg->ctx arg)
-        signal     (ai/llm-arg->abort-signal arg)
+  [opts request database menu-value affordances]
+  (let [prompt     (:seon.ai/ctx request)
+        signal     (:seon.ai/abort-signal request)
         opts       (cond-> opts signal (assoc :seon.ai/abort-signal signal))
         agent-id   (db/current-agent-id)
         policy     (::menu/policy menu-value)
@@ -1141,7 +1141,7 @@
                       (:seon.error/message error))}})
 
 (defn ^:async ^:private step-loop!
-  [opts arg]
+  [opts request]
   (let [database (await (db/db))]
     (if (:seon.error/message database)
       (provider-database-error database)
@@ -1160,11 +1160,11 @@
                               [])]
             (if (:seon.error/message affordances)
               (provider-database-error affordances)
-              (await (step-loop-at! opts arg database menu-value
+              (await (step-loop-at! opts request database menu-value
                                     affordances)))))))))
 
 (defn agent-adapter
-  "A fn-of-ctx-string suitable for `seon.agent`'s `llm-fn`.
+  "A request function suitable for the agent turn's `llm-fn`.
 
    The returned fn runs the step loop against the configured worker
    (`SEON_DG_ENDPOINT`) and returns a Promise of `{:text …
@@ -1177,4 +1177,4 @@
     [:=> [:cat] :any]
     [:=> [:catn [::opts ::opts]] :any]]}
   ([] (agent-adapter {}))
-  ([opts] (fn [arg] (step-loop! opts arg))))
+  ([opts] (fn [request] (step-loop! opts request))))

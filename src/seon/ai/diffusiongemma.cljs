@@ -33,8 +33,9 @@
    at call time. The `:seon.ai/config` row's `:seon.ai/max-tokens` becomes
    the worker's `max_new_tokens` (honored like every other provider).
 
-   One agent-facing fn: [[agent-adapter]] returns `(fn [ctx-string])`
-   compatible with `seon.agent`'s `llm-fn` (defaults `mode=generate` +
+   One agent-facing fn: [[agent-adapter]] consumes the closed
+   `:seon.ai/request` map passed by the agent turn's `llm-fn` (defaults
+   `mode=generate` +
    the FAST throughput knobs proven on the A100: entropy_bound 0.5,
    temp 0.8→0.4, 48-step cap)."
   (:require [clojure.string :as str]
@@ -605,7 +606,7 @@
               (.removeEventListener signal "abort" cancel-known!))))))))
 
 ;; ============================================================
-;; Adapter for seon.agent — (fn [ctx-string]) → Promise<{:text … :raw …}>.
+;; Adapter for seon.agent — request map → Promise<{:text … :raw …}>.
 ;; ============================================================
 
 (defn ^:async ^:private complete+wrap
@@ -614,10 +615,10 @@
    top level. Honors the request's authority-resolved
    `:seon.ai/max-tokens` as `::max-new-tokens`; precedence is explicit opt
    > resolved config > the worker's generation default."
-  [opts arg]
-  (let [ctx-text (ai/llm-arg->ctx arg)
-        signal   (ai/llm-arg->abort-signal arg)
-        resolution (when (map? arg) (:seon.ai/config-resolution arg))
+  [opts request]
+  (let [ctx-text (:seon.ai/ctx request)
+        signal   (:seon.ai/abort-signal request)
+        resolution (:seon.ai/config-resolution request)
         cfg-max (get-in resolution
                         [:seon.ai/resolved-config :seon.ai/max-tokens])
         request (cond-> (merge default-gen-opts opts {::prompt ctx-text})
@@ -631,7 +632,7 @@
       (:seon.ai/error resp) (assoc :seon.ai/error (:seon.ai/error resp)))))
 
 (defn agent-adapter
-  "A fn-of-ctx-string suitable for `seon.agent`'s `llm-fn`.
+  "A request function suitable for the agent turn's `llm-fn`.
 
    The returned fn submits a `generate` job (ctx as the prompt) with the
    A100-proven fast knobs (entropy_bound 0.5, temp 0.8→0.4, 48-step cap)
@@ -644,6 +645,5 @@
     [:=> [:cat] :any]
     [:=> [:catn [::opts ::opts]] :any]]}
   ([] (agent-adapter {}))
-  ;; Accept the widened string-or-map llm-fn arg (repl-mode); this adapter
-  ;; buffers, so it uses the ctx and ignores `:seon.ai/stream?`.
-  ([opts] (fn [arg] (complete+wrap opts arg))))
+  ;; This adapter buffers, so it ignores `:seon.ai/stream?`.
+  ([opts] (fn [request] (complete+wrap opts request))))

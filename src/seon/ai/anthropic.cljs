@@ -3,8 +3,8 @@
    `@anthropic-ai/sdk` Node SDK (SDK migration, 2026-06-16). ^:async —
    returns Promises. Same agent-adapter contract as
    [[seon.ai.openai-compat]]: one agent-facing fn, [[agent-adapter]],
-   returns `(fn [ctx-string])` compatible with
-   `seon.agent/run-turn-once!`'s `llm-fn`. Reads the API key from
+   consumes the closed `:seon.ai/request` map passed by the agent turn's
+   `llm-fn`. Reads the API key from
    `ANTHROPIC_API_KEY` in `process.env`. The SDK owns streaming
    (`.stream` + `.finalMessage`, buffered to one assembled Message) and
    sets the `anthropic-version` header itself.
@@ -397,11 +397,11 @@
    shape the turn loop expects. On failure `:seon.ai/error` is lifted
    to the TOP level (alongside `:text`) so the turn loop can surface
    it without digging into `:seon.ai/raw`."
-  [opts arg]
-  (let [ctx-text (ai/llm-arg->ctx arg)
-        signal   (ai/llm-arg->abort-signal arg)
-        system-prompt (when (map? arg) (:seon.ai/system-prompt arg))
-        resolution (when (map? arg) (:seon.ai/config-resolution arg))
+  [opts request]
+  (let [ctx-text (:seon.ai/ctx request)
+        signal   (:seon.ai/abort-signal request)
+        system-prompt (:seon.ai/system-prompt request)
+        resolution (:seon.ai/config-resolution request)
         resp (await (complete (cond-> (assoc opts :seon.ai/ctx ctx-text)
                                 signal (assoc :seon.ai/abort-signal signal)
                                 resolution
@@ -413,7 +413,7 @@
       (:seon.ai/error resp) (assoc :seon.ai/error (:seon.ai/error resp)))))
 
 (defn agent-adapter
-  "A fn-of-ctx-string suitable for `seon.agent/run-turn-once!`'s `llm-fn`.
+  "A request function suitable for the agent turn's `llm-fn`.
 
    Optional `opts` override
    request defaults (e.g. `{:seon.ai/max-tokens 2048}`). The returned
@@ -430,4 +430,4 @@
   ([opts]
    ;; This adapter buffers, so it ignores `:seon.ai/stream?`, but preserves the
    ;; request's attempt-cancellation signal.
-   (fn [arg] (complete+wrap opts arg))))
+   (fn [request] (complete+wrap opts request))))

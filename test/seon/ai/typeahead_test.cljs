@@ -21,6 +21,14 @@
     :seon.ai/provenance
     {:seon.ai/provider :default :seon.ai/base-url :default}}})
 
+(def ^:private request-resolution
+  {:seon.ai/resolved-config {:seon.ai/provider :typeahead}
+   :seon.ai/provenance {:seon.ai/provider :default}})
+
+(defn- request
+  [ctx]
+  {:seon.ai/ctx ctx :seon.ai/config-resolution request-resolution})
+
 (defn- json-response [status value]
   (js/Response.
    (.stringify js/JSON (clj->js value))
@@ -165,7 +173,8 @@
             (step-response {:transition "done" :locked ["(def b 2)"]
                             :new_draft ""})]
            #(db/with-agent agent-id
-              (fn [] ((ta/agent-adapter worker-options) "rendered prompt"))))
+              (fn [] ((ta/agent-adapter worker-options)
+                      (request "rendered prompt")))))
           (.then
            (fn [{:keys [value db-calls menu-requests tx-requests]}]
              (is (= "(def a 1)\n\n(def b 2)" (:text value)))
@@ -189,8 +198,8 @@
            #(db/with-agent
               agent-id
               (fn [] ((ta/agent-adapter worker-options)
-                      {:seon.ai/ctx "prompt"
-                       :seon.ai/abort-signal signal}))))
+                      (assoc (request "prompt")
+                             :seon.ai/abort-signal signal)))))
           (.then (fn [{:keys [value]}]
                    (is (= "(def a 1)" (:text value)))
                    (is (identical? signal (:signal (first @calls))))
@@ -208,7 +217,7 @@
               ([_]
                (js/Promise.resolve
                 {:seon.error/message "authority unavailable"}))))
-      (-> (js/Promise.resolve ((ta/agent-adapter) "prompt"))
+      (-> (js/Promise.resolve ((ta/agent-adapter) (request "prompt")))
           (.then (fn [result]
                    (is (= "" (:text result)))
                    (is (str/includes? (get-in result [:seon.ai/error :seon.ai/msg])

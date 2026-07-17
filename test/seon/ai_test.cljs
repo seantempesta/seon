@@ -97,12 +97,9 @@
 ;; Pure — thinking-mode parses the stored string.
 ;; ============================================================
 
-(deftest llm-request-map-exposes-process-local-abort-signal
+(deftest process-local-abort-signal-reports-cancellation
   (let [controller (js/AbortController.)
-        signal     (.-signal controller)
-        request    {::ai/ctx "ctx" ::ai/abort-signal signal}]
-    (is (identical? signal (ai/llm-arg->abort-signal request)))
-    (is (nil? (ai/llm-arg->abort-signal "legacy ctx")))
+        signal     (.-signal controller)]
     (is (false? (ai/aborted? signal)))
     (.abort controller)
     (is (true? (ai/aborted? signal)))

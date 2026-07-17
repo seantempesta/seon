@@ -160,35 +160,6 @@
     (catch :default _
       {::msg "The configured OpenAI endpoint is not a valid URL."})))
 
-(defn llm-arg->ctx
-  "The ctx string from a bare-string or request-map llm-fn argument.
-
-   The argument is EITHER a bare ctx string (the back-compat shape every
-   adapter still accepts) OR a request map carrying `:seon.ai/ctx` (the
-   widened shape the turn loop passes when it needs streaming). Coerce,
-   never break: a plain string passes through."
-  {:malli/schema [:=> [:catn [::arg :any]] :string]}
-  [arg]
-  (if (map? arg) (str (::ctx arg)) (str arg)))
-
-(defn llm-arg->stream?
-  "Whether the llm-fn argument requested streaming.
-
-   `:seon.ai/stream?` true on a request-map arg, false for a bare string
-   (back-compat)."
-  {:malli/schema [:=> [:catn [::arg :any]] :boolean]}
-  [arg]
-  (boolean (and (map? arg) (::stream? arg))))
-
-(defn llm-arg->abort-signal
-  "The optional host AbortSignal carried by a request-map LLM argument.
-
-   A legacy bare-string argument has no signal. The signal is process-local
-   transport control, never database data."
-  {:malli/schema [:=> [:catn [::arg :any]] [:maybe ::abort-signal]]}
-  [arg]
-  (when (map? arg) (::abort-signal arg)))
-
 (defn aborted?
   "True when `signal` is an aborted host AbortSignal. nil is false."
   {:malli/schema [:=> [:catn [::signal [:maybe ::abort-signal]]] :boolean]}
@@ -598,6 +569,13 @@
    [::agent-max-retries {:optional true} ::agent-max-retries]
    [::extra-body      {:optional true} ::extra-body]])
 (schema/register! ::config-resolution ::resolved-config-response)
+(schema/register! ::request
+  [:map {:closed true}
+   [::ctx ::ctx]
+   [::system-prompt {:optional true} ::system-prompt]
+   [::stream? {:optional true} ::stream?]
+   [::abort-signal {:optional true} ::abort-signal]
+   [::config-resolution ::config-resolution]])
 (schema/register! ::config-evidence
   [:map
    [::resolved-config ::resolved-config]

@@ -27,8 +27,8 @@
         default, pre-#30 behavior preserved);
      3. `SEON_AI_API_KEY` directly (the conventional fallback).
 
-   One agent-facing fn: [[agent-adapter]] returns `(fn [ctx-string])`
-   compatible with `seon.agent/run-turn-once!`'s `llm-fn`.
+   One agent-facing fn: [[agent-adapter]] consumes the closed
+   `:seon.ai/request` map passed by the agent turn's `llm-fn`.
 
    Call settings (model, temperature, max-tokens, thinking, timeout-ms,
    tools, tool-choice, extra-body) come from one explicit
@@ -541,25 +541,22 @@
 ;; ============================================================
 ;; Adapter for seon.agent.
 ;;
-;; seon.agent/run-turn-once! expects (fn [ctx-string]) → Promise of
-;; `{:text "..."}`. complete takes a request map and returns a Promise
-;; of namespaced keys. This bridges the two.
+;; The agent turn expects a Promise of `{:text "..."}` from one closed
+;; `:seon.ai/request` map. complete returns namespaced keys; this bridges the
+;; response shapes.
 ;; ============================================================
 
 (defn ^:async ^:private complete+wrap
   "Internal — call complete with merged opts, wrap response into the
-   shape the turn loop expects. `arg` is EITHER a bare ctx string
-   (back-compat) OR a request map carrying `:seon.ai/ctx` +
-   `:seon.ai/stream?` (the widened shape the turn loop passes for
-   repl-mode `:stream`). On failure `:seon.ai/error` is lifted to the TOP
+   shape the turn loop expects. On failure `:seon.ai/error` is lifted to the TOP
    level (alongside `:text`) so the turn loop can surface it without
    digging into `:seon.ai/raw`."
-  [opts arg]
-  (let [ctx-text (ai/llm-arg->ctx arg)
-        stream?  (ai/llm-arg->stream? arg)
-        signal   (ai/llm-arg->abort-signal arg)
-        system-prompt (when (map? arg) (:seon.ai/system-prompt arg))
-        resolution (when (map? arg) (:seon.ai/config-resolution arg))
+  [opts request]
+  (let [ctx-text (:seon.ai/ctx request)
+        stream?  (:seon.ai/stream? request)
+        signal   (:seon.ai/abort-signal request)
+        system-prompt (:seon.ai/system-prompt request)
+        resolution (:seon.ai/config-resolution request)
         resp (await (complete (cond-> (assoc opts :seon.ai/ctx ctx-text)
                                 stream? (assoc :seon.ai/stream? true)
                                 signal (assoc :seon.ai/abort-signal signal)
@@ -571,7 +568,7 @@
       (:seon.ai/error resp) (assoc :seon.ai/error (:seon.ai/error resp)))))
 
 (defn agent-adapter
-  "A fn-of-ctx-string suitable for `seon.agent/run-turn-once!`'s `llm-fn`.
+  "A request function suitable for the agent turn's `llm-fn`.
 
    Optional `opts` override
    request defaults (e.g. `{:seon.ai/temperature 0.2}`). The returned
@@ -585,4 +582,4 @@
     [:=> [:catn [::opts ::opts]] :any]]}
   ([] (agent-adapter {}))
   ([opts]
-   (fn [arg] (complete+wrap opts arg))))
+   (fn [request] (complete+wrap opts request))))
