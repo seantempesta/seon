@@ -548,8 +548,81 @@
                  (assoc :seon.agent/terminated-at
                         (:seon.agent/terminated-at agent))
                  (and open? (:seon.agent.run/paused-at current-run))
-                 (assoc :seon.agent.run/paused-at
-                        (:seon.agent.run/paused-at current-run))))})))))))
+                        (assoc :seon.agent.run/paused-at
+                               (:seon.agent.run/paused-at current-run))))})))))))
+
+(def ^:private pending-inbound-query
+  {:find '[?message ?message-tx]
+   :in '[$ ?agent-id ?hop-cap]
+   :where
+   '[[?agent :seon.agent/id ?agent-id]
+     [?message :seon.agent.message/to ?agent ?message-tx]
+     [?message :seon.agent.message/from ?sender]
+     [(not= ?sender ?agent)]
+     [(get-else $ ?message :seon.agent.message/origin :agent) ?origin]
+     [(not= ?origin :core)]
+     [(get-else $ ?message :seon.agent.message/hops 0) ?hops]
+     [(< ?hops ?hop-cap)]
+     (not-join [?agent ?message-tx]
+       [?run :seon.agent.run/agent ?agent]
+       [?run :seon.agent.run/status :closed ?close-tx]
+       [(>= ?close-tx ?message-tx)])]
+   :order-by '[?message-tx :asc ?message :asc]
+   :limit 1})
+
+(defn ^:async ^:private acquire-committed-work
+  "Read current run ownership and uncovered inbound work at one database value."
+  [id]
+  (let [database (await (db/db))]
+    (if (database-error? database)
+      database
+      (let [acquired
+            (await
+             (db/execute-many
+              {::db/db database
+               ::db/members
+               [(pull-member
+                 database
+                 [:db/id :seon.agent/terminated-at
+                  {:seon.agent/run
+                   [:seon.agent.run/id :seon.agent.run/status
+                    :seon.agent.run/paused-at]}]
+                 [:seon.agent/id id])
+                (assoc (query-member database pending-inbound-query
+                                     [id warn/hop-cap])
+                       :datahike.resource/max-results 1
+                       :datahike.resource/max-result-weight 4096)]
+               ::db/max-result-weight 524288}))
+            members (::db/results acquired)]
+        (cond
+          (database-error? acquired)
+          acquired
+
+          (not (and (= 2 (count members))
+                    (every? successful-member? members)))
+          (read-failure "Committed agent work acquisition failed." acquired)
+
+          :else
+          (let [[agent-member messages-member] members
+                agent (member-result agent-member)
+                current-run (:seon.agent/run agent)
+                open? (= :open (:seon.agent.run/status current-run))]
+            {::db/db database
+             ::agent agent
+             ::current-run-id
+             (when open? (:seon.agent.run/id current-run))
+             ::pending-inbound-eid
+             (when-not open?
+               (ffirst (member-result messages-member)))
+             ::state
+             (derive/state-from-primitives
+              (cond-> {:seon.agent.run/open? open?}
+                (:seon.agent/terminated-at agent)
+                (assoc :seon.agent/terminated-at
+                       (:seon.agent/terminated-at agent))
+                (and open? (:seon.agent.run/paused-at current-run))
+                (assoc :seon.agent.run/paused-at
+                       (:seon.agent.run/paused-at current-run))))}))))))
 
 ;; ============================================================
 ;; Wake — the per-tx listener fires on every transact; we filter for new
@@ -596,6 +669,29 @@
                      (or (.-message exception) exception)))))))
     0))
 
+(defn ^:async ^:private open-or-renew-message-run!
+  "Open and drive one message run, or renew the concurrent CAS winner."
+  [input cause-eid]
+  (let [id (:seon.agent/id input)
+        opened
+        (await
+         (run/open-run!
+          {:seon.agent/id id
+           :seon.agent.run/trigger :message
+           :seon.agent.run/cause cause-eid}))]
+    (if-not (database-error? opened)
+      (await (run-loop! input (:seon.agent.run/id opened)))
+      (let [latest (await (acquire-agent-state id))]
+        (if (database-error? latest)
+          (js/console.error
+           (str "seon.agent.loop: open-run! FAILED for " id ": "
+                (pr-str opened) "; refresh failed: " (pr-str latest)))
+          (if-let [winner (::current-run-id latest)]
+            (await (renew-current-run! id winner))
+            (js/console.error
+             (str "seon.agent.loop: open-run! FAILED for " id ": "
+                  (pr-str opened)))))))))
+
 (defn- schedule-message-run! [input cause-eid]
   (let [id (:seon.agent/id input)]
     (js/setTimeout
@@ -604,25 +700,7 @@
               (with-agent-repl
                 id
                 (fn ^:async wake! []
-                  (let [opened
-                        (await
-                          (run/open-run!
-                            {:seon.agent/id id
-                             :seon.agent.run/trigger :message
-                             :seon.agent.run/cause cause-eid}))]
-                    (if-not (database-error? opened)
-                      (await (run-loop! input (:seon.agent.run/id opened)))
-                      (let [latest (await (acquire-agent-state id))]
-                        (if (database-error? latest)
-                          (js/console.error
-                           (str "seon.agent.loop: open-run! FAILED for " id ": "
-                                (pr-str opened) "; refresh failed: "
-                                (pr-str latest)))
-                          (if-let [winner (::current-run-id latest)]
-                            (await (renew-current-run! id winner))
-                            (js/console.error
-                             (str "seon.agent.loop: open-run! FAILED for " id ": "
-                                  (pr-str opened))))))))))
+                  (await (open-or-renew-message-run! input cause-eid))))
             (.catch
               (fn [exception]
                 (js/console.error
@@ -718,54 +796,58 @@
                     (schedule-message-run! input (ffirst waking)))))))))))))
 
 ;; ============================================================
-;; Re-drive — RESUME re-enters the loop. The loop EXITS on :pause (the run
-;; stays open + paused); `seon.agent.run/resume!` clears `paused-at` and
-;; re-extends the deadline, flipping derived state back to :running — but
-;; nothing would drive turns again without this. `drive-run!` re-enters
-;; `run-loop!` on the agent's STILL-OPEN run, using the loop input the wake
-;; trigger was armed with (the process-local registry), via the SAME
-;; setTimeout(0) + `with-agent` re-scope the wake `:idle` branch uses
-;; (setTimeout breaks the ALS scope, so the loop's downstream
-;; db/current-agent-id needs the scope re-entered).
+;; Drive committed work. A host may start after its first message committed,
+;; or restart while a run is open. The one driver re-enters that open run or
+;; opens the oldest waking inbound message not covered by a later run close.
+;; The listener is installed before this runs, so a concurrent message and
+;; this reconciliation race only on open-run!'s existing absent-pointer CAS.
 ;; ============================================================
 
 (defn drive-run!
-  "Re-enter [[run-loop!]] for `id`'s CURRENTLY-OPEN run.
+  "Drive committed work for one hosted agent.
 
-   The re-drive entry
-   shared by RESUME (paused-at cleared) and any future external kick. Looks up
-   the loop `input` this process armed the wake trigger with (refreshed on
-   every [[install-wake-trigger!]], so as fresh as the live wake handler),
-   then kicks `run-loop!` on the open run. Fire-and-forget: schedules the
-   drive on the macrotask queue and returns. A loud no-op when the agent was
-   never armed in THIS process (no input — e.g. resume before a hot-reload
-   re-arm) or has no open run."
+   Re-enters an existing open run. When the agent is idle, opens a message run
+   for the oldest waking inbound message not covered by a later run close,
+   then drives it. Messages already folded into a closed run never replay.
+   Fire-and-forget: schedules the work on the macrotask queue. A loud no-op
+   when the agent was never armed in this process."
   {:malli/schema [:=> [:catn [:input [:map [:seon.agent/id :seon.agent/id]]]] :any]}
   [{:seon.agent/keys [id]}]
   (if-not (admission/available?)
     (admission/unavailable)
     (if-let [input (get @!loop-input id)]
-    (js/setTimeout
-      (fn []
-        (-> (js/Promise.resolve
-              (with-agent-repl
-                id
-                (fn ^:async redrive! []
-                  (let [database (await (acquire-agent-state id))]
-                    (if (database-error? database)
-                      database
-                      (when-let [run-id (::current-run-id database)]
-                        (await (run-loop! input run-id))))))))
-            (.catch (fn [e]
-                      (js/console.error
-                        (str "seon.agent.loop: drive-run! threw for "
-                             id ": " (or (.-message e) e)))))))
-      0)
-    (js/console.warn
-      (str "seon.agent.loop: drive-run! — no live loop input for agent " id
-           " (the wake trigger was never armed in this process); cannot "
-           "re-drive the resumed run. A hot-reload re-arm or boot installs "
-           "it.")))))
+      (js/setTimeout
+       (fn []
+         (->
+          (js/Promise.resolve
+           (with-agent-repl
+             id
+             (fn ^:async drive-committed! []
+               (let [work (await (acquire-committed-work id))]
+                 (cond
+                   (database-error? work)
+                   (js/console.error
+                    (str "seon.agent.loop: committed work acquisition FAILED for "
+                         id ": " (pr-str work)))
+
+                   (= :running (::state work))
+                   (await (run-loop! input (::current-run-id work)))
+
+                   (and (= :idle (::state work))
+                        (::pending-inbound-eid work))
+                   (await
+                    (open-or-renew-message-run!
+                     input (::pending-inbound-eid work))))))))
+          (.catch
+           (fn [e]
+             (js/console.error
+              (str "seon.agent.loop: drive-run! threw for "
+                   id ": " (or (.-message e) e)))))))
+       0)
+      (js/console.warn
+       (str "seon.agent.loop: drive-run! — no live loop input for agent " id
+            " (the wake trigger was never armed in this process); cannot drive "
+            "committed work.")))))
 
 ;; ============================================================
 ;; Scheduled-fn execution — the action half of cron. Injected into

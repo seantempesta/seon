@@ -5,6 +5,7 @@
     [my.plan.internal :as plan-internal]
     [seon.agent.loop :as loop]
     [seon.agent.run :as run]
+    [seon.agent.runtime :as runtime]
     [seon.agent.turn :as turn]
     [seon.db :as db]
     [seon.db.protocol :as db.protocol]
@@ -314,4 +315,251 @@
           (.finally
            (fn []
              (set! db/query query)
+             (done)))))))
+
+(deftest committed-work-query-is-one-ordered-exact-wake-rule
+  (let [query @#'loop/pending-inbound-query
+        where (:where query)]
+    (is (= '[?message-tx :asc ?message :asc] (:order-by query)))
+    (is (= 1 (:limit query)))
+    (is (some #{'[(not= ?sender ?agent)]} where))
+    (is (some #{'[(get-else $ ?message :seon.agent.message/origin :agent)
+                  ?origin]} where))
+    (is (some #{'[(not= ?origin :core)]} where))
+    (is (some #{'[(get-else $ ?message :seon.agent.message/hops 0) ?hops]}
+              where))
+    (is (some #{'[(< ?hops ?hop-cap)]} where))
+    (is (some #(and (seq? %) (= 'not-join (first %))) where)
+        "a run close at or after the message transaction covers that message")))
+
+(deftest drive-run-opens-committed-message-before-host-and-drives-it
+  (async done
+    (let [id "committed-child"
+          database {:db-name "default" :t 42 :as-of nil :since nil
+                    :history false
+                    :datahike/commit-id
+                    #uuid "20000000-0000-0000-0000-000000000002"}
+          db! db/db
+          execute-many db/execute-many
+          open-run! run/open-run!
+          run-loop! loop/run-loop!
+          available? admission/available?
+          requests (atom [])
+          opened (atom nil)
+          driven (atom nil)]
+      (swap! @#'loop/!loop-input assoc id
+             {:seon.agent/id id :seon.agent/llm-fn identity})
+      (set! admission/available? (constantly true))
+      (set! db/db (fn ([] (js/Promise.resolve database))
+                    ([_] (js/Promise.resolve database))))
+      (set! db/execute-many
+            (fn [request]
+              (swap! requests conj request)
+              (js/Promise.resolve
+               {::db/results
+                [(member {:db/id 7 :seon.agent/id id})
+                 (query-member [[11 536870914]])]})))
+      (set! run/open-run!
+            (fn [request]
+              (reset! opened request)
+              (js/Promise.resolve
+               {:seon.agent.run/id "run-a"
+                :seon.agent.run/status :open})))
+      (set! loop/run-loop!
+            (fn [input run-id]
+              (reset! driven [input run-id])
+              (js/Promise.resolve :idle)))
+      (loop/drive-run! {:seon.agent/id id})
+      (-> (js/Promise.
+           (fn [resolve _] (js/setTimeout resolve 20)))
+          (.then
+           (fn []
+             (is (= 1 (count @requests)))
+             (let [query-request (second (::db/members (first @requests)))]
+               (is (= 1 (get-in query-request
+                                [::db.protocol/query-form :limit])))
+               (is (= id (first (::db.protocol/arguments query-request)))))
+             (is (= {:seon.agent/id id
+                     :seon.agent.run/trigger :message
+                     :seon.agent.run/cause 11}
+                    @opened))
+             (is (= [id "run-a"]
+                    [(get-in @driven [0 :seon.agent/id]) (second @driven)]))))
+          (.catch (fn [error]
+                    (is false (str "committed drive rejected: " error))))
+          (.finally
+           (fn []
+             (swap! @#'loop/!loop-input dissoc id)
+             (set! db/db db!)
+             (set! db/execute-many execute-many)
+             (set! run/open-run! open-run!)
+             (set! loop/run-loop! run-loop!)
+             (set! admission/available? available?)
+             (done)))))))
+
+(deftest drive-run-redrives-open-run-and-ignores-covered-messages
+  (async done
+    (let [id "hosted-agent"
+          database {:db-name "default" :t 50 :as-of nil :since nil
+                    :history false
+                    :datahike/commit-id
+                    #uuid "30000000-0000-0000-0000-000000000003"}
+          db! db/db
+          execute-many db/execute-many
+          open-run! run/open-run!
+          run-loop! loop/run-loop!
+          available? admission/available?
+          opens (atom 0)
+          driven (atom [])]
+      (swap! @#'loop/!loop-input assoc id
+             {:seon.agent/id id :seon.agent/llm-fn identity})
+      (set! admission/available? (constantly true))
+      (set! db/db (fn ([] (js/Promise.resolve database))
+                    ([_] (js/Promise.resolve database))))
+      (set! db/execute-many
+            (fn [_]
+              (js/Promise.resolve
+               {::db/results
+                [(member {:db/id 7 :seon.agent/id id
+                          :seon.agent/run
+                          {:seon.agent.run/id "run-open"
+                           :seon.agent.run/status :open}})
+                 ;; The ordered query returns nothing when the prior close
+                 ;; transaction covers all inbound messages.
+                 (query-member [])]})))
+      (set! run/open-run!
+            (fn [_]
+              (swap! opens inc)
+              (js/Promise.resolve {:seon.agent.run/id "forbidden"})))
+      (set! loop/run-loop!
+            (fn [_ run-id]
+              (swap! driven conj run-id)
+              (js/Promise.resolve :idle)))
+      (loop/drive-run! {:seon.agent/id id})
+      (-> (js/Promise. (fn [resolve _] (js/setTimeout resolve 20)))
+          (.then (fn []
+                   (is (zero? @opens))
+                   (is (= ["run-open"] @driven))))
+          (.catch (fn [error]
+                    (is false (str "open re-drive rejected: " error))))
+          (.finally
+           (fn []
+             (swap! @#'loop/!loop-input dissoc id)
+             (set! db/db db!)
+             (set! db/execute-many execute-many)
+             (set! run/open-run! open-run!)
+             (set! loop/run-loop! run-loop!)
+             (set! admission/available? available?)
+             (done)))))))
+
+(deftest message-open-cas-loss-renews-the-winner
+  (async done
+    (let [id "agent-a"
+          db! db/db
+          execute-many db/execute-many
+          pull db/pull
+          open-run! run/open-run!
+          renew! run/renew!
+          run-loop! loop/run-loop!
+          available? admission/available?
+          renewed (atom nil)]
+      (swap! @#'loop/!loop-input assoc id
+             {:seon.agent/id id :seon.agent/llm-fn identity})
+      (set! admission/available? (constantly true))
+      (set! run/open-run!
+            (fn [_]
+              (js/Promise.resolve {:seon.error/message "CAS failed"})))
+      (set! db/db
+            (fn ([] (js/Promise.resolve ::database))
+              ([_] (js/Promise.resolve ::database))))
+      (set! db/execute-many
+            (fn [_]
+              (js/Promise.resolve
+               {::db/results
+                [(member {:db/id 7 :seon.agent/id id})
+                 (query-member [[11 536870914]])]})))
+      (set! db/pull
+            (fn
+              ([_]
+               (js/Promise.resolve
+                {:db/id 7
+                 :seon.agent/run {:seon.agent.run/id "winner"
+                                  :seon.agent.run/status :open}}))
+              ([_ _]
+               (js/Promise.reject (js/Error. "unexpected pull arity")))
+              ([_ _ _]
+               (js/Promise.reject (js/Error. "unexpected pull arity")))))
+      (set! run/renew!
+            (fn [request]
+              (reset! renewed request)
+              (js/Promise.resolve {:seon.agent.run/id "winner"})))
+      (set! loop/run-loop!
+            (fn [& _]
+              (js/Promise.reject
+               (js/Error. "the CAS loser must not start another driver"))))
+      (loop/drive-run! {:seon.agent/id id})
+      (-> (js/Promise. (fn [resolve _] (js/setTimeout resolve 20)))
+          (.then (fn []
+             (is (= {:seon.agent/id "agent-a"
+                     :seon.agent.run/id "winner"}
+                    @renewed))))
+          (.catch (fn [error]
+                    (is false (str "CAS adoption rejected: " error))))
+          (.finally
+           (fn []
+             (swap! @#'loop/!loop-input dissoc id)
+             (set! db/db db!)
+             (set! db/execute-many execute-many)
+             (set! db/pull pull)
+             (set! run/open-run! open-run!)
+             (set! run/renew! renew!)
+             (set! loop/run-loop! run-loop!)
+             (set! admission/available? available?)
+             (done)))))))
+
+(deftest runtime-installs-listener-before-driving-committed-work
+  (async done
+    (let [pull db/pull
+          available? admission/available?
+          install! loop/install-wake-trigger!
+          drive! loop/drive-run!
+          effects (atom [])]
+      (set! admission/available? (constantly true))
+      (set! db/pull
+            (fn
+              ([_]
+               (js/Promise.resolve {:seon.agent/id "agent-a"}))
+              ([_ _]
+               (js/Promise.reject (js/Error. "unexpected pull arity")))
+              ([_ _ _]
+               (js/Promise.reject (js/Error. "unexpected pull arity")))))
+      (set! loop/install-wake-trigger!
+            (fn [_]
+              (swap! effects conj :install-start)
+              (js/Promise.
+               (fn [resolve _]
+                 (js/setTimeout
+                  (fn []
+                    (swap! effects conj :install-finished)
+                    (resolve true))
+                  5)))))
+      (set! loop/drive-run!
+            (fn [_]
+              (swap! effects conj :drive)
+              nil))
+      (-> (runtime/resume!
+           {:seon.agent/id "agent-a"
+            :seon.agent.runtime/llm-fn identity})
+          (.then
+           (fn [result]
+             (is (true? (:seon.agent.runtime/resumed? result)))
+             (is (= [:install-start :install-finished :drive] @effects))))
+          (.catch (fn [error]
+                    (is false (str "runtime resume rejected: " error))))
+          (.finally
+           (fn []
+             (set! db/pull pull)
+             (set! admission/available? available?)
+             (set! loop/install-wake-trigger! install!)
+             (set! loop/drive-run! drive!)
              (done)))))))

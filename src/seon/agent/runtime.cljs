@@ -117,9 +117,12 @@
               (fn ^:async resume-agent! []
                 (when (admission/available?)
                   (if (wake-armed? entity)
-                    (loop/install-wake-trigger!
-                      {:seon.agent/id id
-                       :seon.agent/llm-fn llm})
+                    (do
+                      (await
+                       (loop/install-wake-trigger!
+                        {:seon.agent/id id
+                         :seon.agent/llm-fn llm}))
+                      (loop/drive-run! {:seon.agent/id id}))
                     (loop/uninstall-wake-trigger! {:seon.agent/id id}))))))
           (if (admission/available?)
             {:seon.agent/id id
