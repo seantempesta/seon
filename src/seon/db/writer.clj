@@ -2739,12 +2739,26 @@
       ::protocol/acquired? (::registry/acquired? result)})))
 
 (defn- single-outcome-response
-  [request [outcome value]]
-  (if (= ::executor/throwable outcome)
-    (request-failure-response value)
-    (if (read-operations (::protocol/operation request))
-      (protocol/success value)
-      value)))
+  [entry [outcome value]]
+  (let [request (::request entry)]
+    (if (= ::executor/throwable outcome)
+      (if (and (::canceled? entry)
+               (= protocol/transact-operation (::protocol/operation request)))
+        (if-let [recovered
+                 (recover-current (::connection entry)
+                                  (::database-name entry)
+                                  (::protocol/request-id request)
+                                  (protocol/logical-transaction-hash request)
+                                  (::protocol/generated-candidates request))]
+          (protocol/success recovered)
+          (protocol/failure
+           {::protocol/error-kind protocol/database-error
+            ::protocol/error "The database transaction was canceled."
+            ::protocol/body {::protocol/canceled? true}}))
+        (request-failure-response value))
+      (if (read-operations (::protocol/operation request))
+        (protocol/success value)
+        value))))
 
 (defn- reserve-single-job!
   [runtime request-id owner scope scopes job-id entry-data]
@@ -3197,7 +3211,7 @@
           (complete-execute-many! runtime request-id (::owner entry) job-id outcome)
           (when-not (::query-callback? entry)
             (let [request (::request entry)
-                  response (single-outcome-response request outcome)]
+                  response (single-outcome-response entry outcome)]
               (deliver-active-request! runtime request-id (::owner entry) response)
               (when (and (= protocol/transact-operation
                             (::protocol/operation request))
@@ -3323,7 +3337,9 @@
                                   (::executor/scopes submission)
                                   (::executor/job-id submission)
                                   (select-keys (::executor/request submission)
-                                               [::coordinate/attachment]))]
+                                               [::coordinate/attachment
+                                                ::connection
+                                                ::database-name]))]
     (try
       (executor/try-submit!
        (assoc submission ::executor/request-bytes request-bytes))
@@ -3645,7 +3661,8 @@
              request
              (protocol/failure
               {::protocol/error-kind protocol/request-conflict-error
-               ::protocol/error "The request id is already active or closed."})))
+               ::protocol/error "The request id is already active or closed."
+               ::protocol/body {::protocol/running? true}})))
            (catch Throwable throwable
              (log/error throwable "duplicate database request delivery failed"
                         {::protocol/request-id request-id}))))))))

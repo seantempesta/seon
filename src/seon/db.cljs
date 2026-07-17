@@ -167,6 +167,23 @@
    :seon.error/kind :core-bug
    :seon.error/data data})
 
+(defn- transport-failure-data [value]
+  (get-in value [:seon.error/data :seon.error/ex-data]))
+
+(defn- recoverable-transaction-delivery? [value]
+  (let [failure-data (transport-failure-data value)
+        transport-failure (::uds/failure failure-data)]
+    (or (and (contains? #{:seon.db.transport.uds.failure/closed
+                          :seon.db.transport.uds.failure/write
+                          :seon.db.transport.uds.failure/timeout}
+                        transport-failure)
+             (not (::uds/closed-by-owner? failure-data)))
+        (and (false? (::protocol/success? value))
+             (or (true? (::protocol/canceled? value))
+                 (and (= protocol/request-conflict-error
+                         (::protocol/error-kind value))
+                      (true? (::protocol/running? value))))))))
+
 (defn- error-value? [value]
   (and (map? value) (string? (:seon.error/message value))))
 
@@ -214,7 +231,11 @@
             (::protocol/current-coordinate response))
      (::protocol/generated-candidate response)
      (assoc ::protocol/generated-candidate
-            (::protocol/generated-candidate response)))})
+            (::protocol/generated-candidate response))
+     (contains? response ::protocol/canceled?)
+     (assoc ::protocol/canceled? (::protocol/canceled? response))
+     (contains? response ::protocol/running?)
+     (assoc ::protocol/running? (::protocol/running? response)))})
 
 (defn- valid-response-for? [request response]
   (and (protocol/valid-response? response)
@@ -290,7 +311,12 @@
                (fn [_]
                  (swap! !session
                         (fn [current]
-                          (if (identical? owner (::owner current)) nil current))))}))
+                          (if (identical? owner (::owner current))
+                            (-> current
+                                (dissoc ::session ::opening ::database-name
+                                        ::capabilities ::databases)
+                                (assoc ::interest-handlers {}))
+                            current))))}))
             _ (reset! opened session)
             _ (swap! !session
                      (fn [current]
@@ -354,7 +380,11 @@
         (when-let [session @opened] (uds/close! session))
         (swap! !session
                (fn [current]
-                 (if (identical? owner (::owner current)) nil current)))
+                 (if (identical? owner (::owner current))
+                   (when-not (true? (aget owner "closed"))
+                     {::owner owner ::selection selection
+                      ::interest-handlers {}})
+                   current)))
         (throw exception)))))
 
 (defn ^:async open-session!
@@ -369,12 +399,12 @@
       (and (= selection (::selection current)) (::opening current))
       (await (::opening current))
 
-      current
+      (and current (not= selection (::selection current)))
       (throw (ex-info "Another database session owns this process."
                       {::selection selection :seon.error/kind :core-bug}))
 
       :else
-      (let [owner (js-obj)
+      (let [owner (or (::owner current) (js-obj))
             opening (connect-selection! selection owner)]
         (reset! !session {::owner owner ::selection selection
                           ::opening opening ::interest-handlers {}})
@@ -386,6 +416,8 @@
   []
   (let [closed (atom nil)]
     (swap! !session (fn [current] (reset! closed current) nil))
+    (when-let [owner (::owner @closed)]
+      (aset owner "closed" true))
     (if-let [session (::session @closed)] (uds/close! session) false)))
 
 (defn attached?
@@ -535,7 +567,48 @@
                (contains? arg :seon.db.id/generated-candidates)
                (assoc ::protocol/generated-candidates
                       (:seon.db.id/generated-candidates arg))))
-            response (await (send-request! request 120000))]
+            selection (::selection @!session)
+            session-owner (::owner @!session)
+            response
+            (loop [delay-ms 1 ambiguous? false]
+              (if (and session-owner (true? (aget session-owner "closed")))
+                (session-error
+                 "The database session was closed by its owner."
+                 {::protocol/request-id (::protocol/request-id request)
+                  :seon.error/ex-data {::uds/closed-by-owner? true}})
+                (let [opened
+                      (if (active-session)
+                        true
+                        (if selection
+                          (await
+                           (-> (open-session! selection)
+                               (.then (constantly true))
+                               (.catch
+                                (fn [exception]
+                                  (session-error
+                                   (or (.-message exception)
+                                       "The database session failed to reopen.")
+                                   (cond->
+                                    {::protocol/request-id
+                                     (::protocol/request-id request)}
+                                     (ex-data exception)
+                                     (assoc :seon.error/ex-data
+                                            (ex-data exception))))))))
+                          false))
+                      opening-error? (error-value? opened)
+                      response
+                      (if (error-value? opened)
+                        opened
+                        (await (send-request! request 120000)))]
+                  (if (or (recoverable-transaction-delivery? response)
+                          (and ambiguous? opening-error?))
+                    (do
+                      (await
+                       (js/Promise.
+                        (fn [resolve _reject]
+                          (js/setTimeout resolve delay-ms))))
+                      (recur (min 250 (* 2 delay-ms)) true))
+                    response))))]
         (cond
           (error-value? response) response
           (not (::protocol/success? response)) (response-error response)

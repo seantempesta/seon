@@ -412,17 +412,25 @@
                            expired]
                      (when-let [current-entry (get @!pending request-id)]
                        (when (identical? expired-entry current-entry)
-                         ;; The caller deadline does not end physical work.
-                         ;; Retain the request ID and capacity until its late
-                         ;; response (or session close), but release the
-                         ;; already-settled Promise callbacks.
-                         (swap! !pending assoc request-id
-                                {::timed-out? true})
-                         (reject
-                          (failure
-                           "Database request timed out."
-                           :seon.db.transport.uds.failure/timeout
-                           {::protocol/request-id request-id}))
+                         ;; A transaction deadline requests cancellation but
+                         ;; cannot assert that the write did not commit. Keep
+                         ;; its one physical callback until the authority
+                         ;; resolves it or the session closes. Reads retain the
+                         ;; ordinary detach-and-reject deadline contract.
+                         (if (= protocol/transact-operation
+                                (::protocol/operation current-entry))
+                           (swap! !pending update request-id
+                                  #(-> %
+                                       (dissoc ::deadline-at)
+                                       (assoc ::timed-out? true)))
+                           (do
+                             (swap! !pending assoc request-id
+                                    {::timed-out? true})
+                             (reject
+                              (failure
+                               "Database request timed out."
+                               :seon.db.transport.uds.failure/timeout
+                               {::protocol/request-id request-id}))))
                          (enqueue-cancel! request-id))))))
                (deliver-message! [message frame-bytes]
                  (let [request-id (::protocol/request-id message)
@@ -488,7 +496,9 @@
                         (try
                           (let [frame (encode-frame message)
                                 entry (cond-> {::resolve resolve
-                                               ::reject reject}
+                                               ::reject reject
+                                               ::protocol/operation
+                                               (::protocol/operation message)}
                                         timeout-ms
                                         (assoc ::deadline-at
                                                (+ (js/Date.now) timeout-ms)))]
@@ -507,8 +517,10 @@
                  {::connected? (fn [] @!connected?)
                   ::request! request-map!
                   ::close! #(terminate!
-                             (failure "Database session was closed by its owner."
-                                      :seon.db.transport.uds.failure/closed))
+                             (failure
+                              "Database session was closed by its owner."
+                              :seon.db.transport.uds.failure/closed
+                              {::closed-by-owner? true}))
                   ::pending-count #(count @!pending)
                   ::queued-bytes #(::queued-bytes @!output)
                   ::pending-event-count #(count (::events @!events))

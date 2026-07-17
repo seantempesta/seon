@@ -40,14 +40,24 @@
      ::protocol/database-name database-name
      ::protocol/backend :memory})))
 
+(declare connection)
+
+(defn- current-database-value [database-name]
+  ((var-get (ns-resolve 'seon.db.writer 'database-value))
+   database-name
+   (d/db (connection database-name))))
+
 (defn- transact!
-  [runtime database-name request-id transaction-data]
-  (writer/handle-request
-   runtime
-   (protocol/transaction-request
-    {::protocol/database-name database-name
-     ::protocol/request-id request-id
-     ::protocol/transaction-data transaction-data})))
+  ([runtime database-name request-id transaction-data]
+   (transact! runtime database-name request-id transaction-data
+              (current-database-value database-name)))
+  ([runtime _database-name request-id transaction-data database-value]
+    (writer/handle-request
+     runtime
+     (protocol/transaction-request
+      {:seon.db/db database-value
+       ::protocol/request-id request-id
+       ::protocol/transaction-data transaction-data}))))
 
 (defn- connection
   [database-name]
@@ -72,25 +82,86 @@
      :db/valueType :db.type/string
      :db/cardinality :db.cardinality/one}]))
 
+(deftest active-request-conflict-is-distinct-from-a-durable-conflict
+  (let [active (atom {})
+        runtime {::writer/active-requests active}
+        request (protocol/ping-request
+                 {::protocol/request-id "receipt/still-running"})
+        claim-request! (var-get (ns-resolve 'seon.db.writer 'claim-request!))
+        remove-active-request!
+        (var-get (ns-resolve 'seon.db.writer 'remove-active-request!))
+        owner (claim-request! runtime nil request 0 (fn [_response]))
+        response (promise)]
+    (try
+      (writer/handle-request! runtime nil request 0 #(deliver response %))
+      (is (false? (::protocol/success? @response)))
+      (is (= protocol/request-conflict-error
+             (::protocol/error-kind @response)))
+      (is (true? (::protocol/running? @response)))
+      (finally
+        (remove-active-request! runtime (::protocol/request-id request) owner)))))
+
+(deftest canceled-mutation-completion-consults-the-durable-receipt
+  (let [runtime (runtime)
+        database-name (str "receipt-canceled-" (random-uuid))]
+    (ensure-database! runtime database-name)
+    (install-schema! runtime database-name)
+    (let [connection (connection database-name)
+          frozen-database (current-database-value database-name)
+          request
+          (protocol/transaction-request
+           {:seon.db/db frozen-database
+            ::protocol/request-id "receipt/canceled-running"
+            ::protocol/transaction-data
+            [{:db/id "canceled-running" :receipt/value "committed"}]})
+          first-response (writer/handle-request runtime request)
+          single-outcome-response
+          (var-get (ns-resolve 'seon.db.writer 'single-outcome-response))
+          canceled-outcome
+          [::executor/throwable (ex-info "canceled" {})]
+          recovered
+          (single-outcome-response
+           {::writer/request request
+            ::writer/canceled? true
+            ::writer/connection connection
+            ::writer/database-name database-name}
+           canceled-outcome)
+          not-committed
+          (single-outcome-response
+           {::writer/request
+            (assoc request ::protocol/request-id "receipt/canceled-queued")
+            ::writer/canceled? true
+            ::writer/connection connection
+            ::writer/database-name database-name}
+           canceled-outcome)]
+      (is (true? (::protocol/success? first-response)))
+      (is (true? (::protocol/success? recovered)))
+      (is (true? (::protocol/recovered? recovered)))
+      (is (false? (::protocol/success? not-committed)))
+      (is (true? (::protocol/canceled? not-committed))))))
+
 (deftest repeated-request-recovers-the-one-durable-commit
   (let [runtime (runtime)
         database-name (str "receipt-recovery-" (random-uuid))]
     (is (true? (::protocol/success?
                 (ensure-database! runtime database-name))))
-    (is (true? (::protocol/success?
+      (is (true? (::protocol/success?
                 (install-schema! runtime database-name))))
     (let [connection (connection database-name)
+          frozen-database (current-database-value database-name)
           reports (atom [])
           _ (d/listen connection ::capture #(swap! reports conj %))
           request-id "receipt/recover"
           first-response
           (transact!
            runtime database-name request-id
-           [{:db/id -1 :receipt/value "only-once"}])
+           [{:db/id -1 :receipt/value "only-once"}]
+           frozen-database)
           recovered-response
           (transact!
            runtime database-name request-id
-           [(array-map :receipt/value "only-once" :db/id -1)])]
+           [(array-map :receipt/value "only-once" :db/id -1)]
+           frozen-database)]
       (is (true? (::protocol/success? first-response)))
       (is (true? (::protocol/success? recovered-response)))
       (is (true? (::protocol/recovered? recovered-response)))
@@ -124,6 +195,7 @@
     (ensure-database! runtime database-name)
     (install-schema! runtime database-name)
     (let [connection (connection database-name)
+          frozen-database (current-database-value database-name)
           reports (atom [])
           _ (d/listen connection ::capture #(swap! reports conj %))
           start (promise)
@@ -132,7 +204,8 @@
             @start
             (transact!
              runtime database-name "receipt/concurrent"
-             [{:db/id "entity" :receipt/value "parallel"}]))
+             [{:db/id "entity" :receipt/value "parallel"}]
+             frozen-database))
           first-attempt (future (invoke))
           second-attempt (future (invoke))]
       (deliver start true)
@@ -423,6 +496,7 @@
       (is (false? (::protocol/success? conflict-response)))
       (is (= protocol/request-conflict-error
              (::protocol/error-kind conflict-response)))
+      (is (not (true? (::protocol/running? conflict-response))))
       (is (nil?
            (d/q '[:find ?entity .
                   :where [?entity :receipt/value "different"]]

@@ -548,6 +548,46 @@
                                  "\n" (.-stack error)))
                   (done))))))
 
+(deftest transaction-deadline-retains-the-authoritative-response
+  (async done
+    (-> (with-fake-bun
+          []
+          (fn [session fixture]
+            (let [request (assoc (request-message "transaction-deadline")
+                                 ::protocol/operation
+                                 protocol/transact-operation)
+                  settled? (atom false)
+                  response
+                  (-> (uds/request!
+                       {::uds/session session
+                        ::uds/message request
+                        ::uds/timeout-ms 1})
+                      (.finally #(reset! settled? true)))]
+              (js/Promise.
+               (fn [resolve _reject]
+                 (js/setTimeout
+                  (fn []
+                    (is (false? @settled?)
+                        "a write deadline cannot claim physical completion")
+                    (is (= 1 ((::uds/pending-count session))))
+                    (is (= 2 (count @(::writes fixture)))
+                        "the deadline sends one cancel beside the transaction")
+                    (inject! fixture
+                             (encode-frame
+                              (response-message "transaction-deadline"
+                                                :authoritative)))
+                    (resolve response))
+                  300))))))
+        (.then
+         (fn [response]
+           (is (= :authoritative (::protocol/result response)))
+           (done)))
+        (.catch
+         (fn [error]
+           (is false (str "transaction deadline failed: " error
+                          "\n" (.-stack error)))
+           (done))))))
+
 (deftest repeated-deadlines-cannot-exceed-physical-in-flight-capacity
   (async done
     (-> (with-fake-bun
