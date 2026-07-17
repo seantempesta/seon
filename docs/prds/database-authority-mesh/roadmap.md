@@ -221,6 +221,20 @@ Commit `60777866` also deletes the flat `/call` action door; the one retained
 database-seeded `POST /agent/{id}/call` route reaches the existing capability
 handler, with focused proof passing 7 router tests/24 assertions and 12
 transform tests/30 assertions.
+Commit `06ff234a` migrates knowledge recall and skill listing to one immutable
+database value per operation while preserving their established result data;
+focused proof passes 10 knowledge tests/52 assertions and 9 skill tests/31
+assertions without embedded Datahike or client compatibility fixtures. The
+synchronous shared-instructions renderer defect exposed by that compilation is
+tracked at
+[[../../seon/issues/shared-instructions-renderer-calls-async-database-function-synchronously]].
+Commit `d32bdd15` leaves one closed `:seon.ai/request` map at the LLM boundary.
+Dispatch validates it once, providers consume its namespaced fields directly,
+and bare-string coercion plus its stale documentation are deleted. Focused
+proof passes 5 dispatch tests/27 assertions, 2 provider-routing tests/3
+assertions, and 7 typeahead tests/27 assertions. The broader provider suites
+remain part of the pending config/database-lifecycle migration rather than a
+reason to restore removed APIs.
 `3ebfcaf5` leaves one current artifact manifest/application digest and removes
 the four historical readers; `9a66bb78` leaves one generated-identity
 allocator; and `c453a5bd` makes that allocator consume the same native
@@ -264,16 +278,17 @@ modest-hardware density checkpoint.
   startup, converged reload, advertisement, and runtime hosting reuse ordinary
   database values and native transaction reports; fresh and warm startup both
   execute the one ordered sequence.
-- **Dependency-ready parallel portfolio:** crash recovery is active; the
-  knowledge/skills immutable-database-value cut and the one-map LLM request cut
-  are independent consumers; the web/render single-owner audit is durable at
+- **Dependency-ready parallel portfolio:** crash recovery and atomic eval
+  publication are active; the MCP eval-alias deletion is an independent
+  compatibility cleanup; the web/render single-owner audit is durable at
   [[research/web-render-single-owner-audit-2026-07-17]]; the plan consumer cut
   is grounded at [[research/plan-single-owner-audit-2026-07-17]] and explicitly
   rejects the current dirty coordinate/oversized-row prototype. The complete
   parallel-system inventory is durable at
   [[research/parallel-behavior-unification-audit-2026-07-17]].
 - **Next refills:** finish recovery, then migrate config, membership, and
-  quiescence in ordered complete cuts; close the web/feed
+  quiescence in ordered complete cuts; finish atomic eval publication and
+  remove the MCP alias independently; close the web/feed
   database-value and rendered-transaction owner next, followed by the
   operation-specific plan consumers and atomic eval publication.
   The final graduation gate remains the full frozen-source correctness, live
