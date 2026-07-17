@@ -460,16 +460,15 @@
              (is (= configuration
                     (:seon.config/configuration
                      (:seon.execution.runtime-test/context @observed)))
-                 "the eval operation exposes its one decoded configuration to injection")
-             (done)))
+                 "the eval operation exposes its one decoded configuration to injection")))
           (.catch
            (fn [error]
-             (is false (str "eval adapter rejected: " error))
-             (done)))
+             (is false (str "eval adapter rejected: " error))))
           (.finally
            (fn []
              (set! eval/eval-batch! original-eval)
-             (set! db/current-agent-id original-agent)))))))
+             (set! db/current-agent-id original-agent)
+             (done)))))))
 
 (deftest agent-view-projection-resolves-literal-and-async-authored-surfaces
   (async done
