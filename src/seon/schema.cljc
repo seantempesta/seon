@@ -147,7 +147,7 @@
 ;; consistency with :string, :int, etc. The quoted predicate is pure data and
 ;; round-trips through the canonical database schema fact.
 (defonce ^:private _inst-type
-  (update-candidate-forms! assoc :inst 'inst?))
+  (update-candidate-forms! merge internal/primitive-schema-forms))
 
 ;; :seon.db/lookup-ref-value — the value position in a lookup-ref. Datahike
 ;; accepts strings, uuids, keywords, and ints as unique-attr values.

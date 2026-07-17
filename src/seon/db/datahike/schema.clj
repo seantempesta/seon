@@ -22,7 +22,8 @@
    - `malli-type->datahike-type` -- leaf type mapping
    - `malli-map->datahike-schema` -- full schema vector derivation"
   (:require [malli.core :as m]
-            [malli.registry :as mr]))
+            [malli.registry :as mr]
+            [seon.schema.internal :as schema.internal]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Type Mapping
@@ -287,6 +288,7 @@
   [forms attribute form]
   (let [registry (mr/composite-registry
                   (m/default-schemas)
+                  (mr/fast-registry schema.internal/primitive-schema-forms)
                   (mr/fast-registry forms))
         compiled (m/schema form {:registry registry})]
     (assoc (schema->attr-partial attribute nil compiled)

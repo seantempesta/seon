@@ -336,6 +336,15 @@
            (dhs/malli-form->datahike-attribute
             forms :example/render (:example/render forms))))))
 
+(deftest canonical-primitive-alias-compiles-in-an-isolated-registry
+  (is (= {:db/ident :example/completed-at
+          :db/valueType :db.type/instant
+          :db/cardinality :db.cardinality/one}
+         (dhs/malli-form->datahike-attribute
+          {:example/completed-at :inst}
+          :example/completed-at
+          :inst))))
+
 (deftest e2e-derive-install-transact-test
   (testing "derived schema installs and accepts valid data"
     (schema/register! :seon.db.datahike.schema-test/id

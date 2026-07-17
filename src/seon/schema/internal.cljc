@@ -15,6 +15,10 @@
             [malli.core :as m]
             [malli.registry :as mr]))
 
+(def primitive-schema-forms
+  "Seon's canonical primitive aliases missing from Malli's built-in registry."
+  {:inst 'inst?})
+
 (defn attr-form-properties
   "The Malli props map from an attr-schema form, or nil. Mirrors
    `seon.db/form-properties` (kept here to avoid a db→schema cycle)."
