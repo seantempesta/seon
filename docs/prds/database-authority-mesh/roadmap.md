@@ -125,15 +125,22 @@ assertions. Datahike's maintained lookup-ref transaction test proves that a
 reference resolves against the intermediate database value after the identity
 assertion earlier in the same transaction.
 
-Earliest unsettled contract: `seon.agent.runtime/resume!` currently installs
-only the future database interest. A task committed before child hosting can
-therefore miss the listener edge and remain idle. Resume must use one general
-committed-fact reconciliation path that also handles a process dying after the
-commit; no delegate-only wake, resend, processed flag, queue, or replay path is
-allowed. The retained design must either commit/open the ordinary run in the
-same allocation and re-drive open runs on every host, or derive pending inbound
-work without replaying already-covered messages; the shorter source-grounded
-one-owner design wins.
+Commit `e33db778` closes the commit-before-host gap through the existing
+`drive-run!` owner. Runtime awaits the ordinary database interest before it
+drives committed work. One frozen grouped read either re-drives an open run or
+selects the oldest waking inbound message newer than every run close; live and
+host-time delivery share one CAS-protected open-or-renew path. There is no
+delegate-only wake, resend, processed flag, queue, replay registry, or new
+public reconciliation function. Focused loop proof passes 12 tests/51
+assertions, including listener-before-drive, commit-before-host, open-run
+re-drive, close coverage, and CAS-winner adoption.
+
+Earliest unsettled contract: the remaining home-require consumers and the
+central cold-start/reload owner must consume the settled asynchronous database
+value API. `seon.client` still names removed coordinate/envelope and resumable
+query behavior; it must retain one initialization, publication, recovery,
+advertisement, and runtime-host sequence without replaying forms or adding a
+second startup path.
 `seon.web.serve` also still
 references deleted turn, attempt, and eval-operation coordinate fields and must
 derive historical model evidence from the parent turn's `rendered-tx` without
@@ -216,18 +223,20 @@ modest-hardware density checkpoint.
 
 ### Current implementation checkpoint
 
-- **Earliest unsettled contract:** process hosting must reconcile committed
-  work so atomic delegation and crash recovery cannot miss a pre-listener task.
-- **Integrated proof that closes it:** a child task committed before hosting
-  starts exactly one ordinary run through the same retained run/loop owner;
-  rehosting an existing open run re-drives it; restart never resends a task or
-  creates a second run.
-- **Dependency-ready parallel portfolio:** the agent home read is removing its
-  last ambient connection; a read-only web/render audit is identifying the one
-  retained renderer/feed cut without taking ownership of active shared diffs.
-- **Next refills:** integrate resume-time committed-work reconciliation, then
-  close the web/feed database-value and rendered-transaction cut, followed by
-  the remaining toolkit/client consumers.
+- **Earliest unsettled contract:** migrate the exposed asynchronous home
+  consumers and the one cold-start/reload owner without adding wrappers or a
+  second initialization/publication path.
+- **Integrated proof that closes it:** eval, autocomplete, namespace context,
+  startup, converged reload, advertisement, and runtime hosting reuse ordinary
+  database values and native transaction reports; fresh and warm startup both
+  execute the one ordered sequence.
+- **Dependency-ready parallel portfolio:** the home consumer cut is active;
+  the client startup audit is grounding the next source boundary; the
+  web/render single-owner audit is durable at
+  [[research/web-render-single-owner-audit-2026-07-17]].
+- **Next refills:** integrate the client startup cut, then close the web/feed
+  database-value and rendered-transaction cut, followed by remaining toolkit
+  consumers.
   The final graduation gate remains the full frozen-source correctness, live
   Bun/JVM, multi-agent, child-crash, multi-database, and measured resource
   matrix.
