@@ -32,6 +32,16 @@
 (schema/register! ::agent-id [:string {:min 1}])
 (schema/register! ::invocation-id [:string {:min 1}])
 (schema/register! ::function-symbol :qualified-symbol)
+(schema/register! ::compiled-function 'fn?)
+(schema/register! ::pin-database? :boolean)
+(schema/register!
+ ::compiled-function-descriptor
+ [:map {:closed true}
+  [::compiled-function ::compiled-function]
+  [::pin-database? ::pin-database?]])
+(schema/register!
+ ::compiled-functions
+ [:map-of ::function-symbol ::compiled-function-descriptor])
 (schema/register! ::digest [:re "^[0-9a-f]{64}$"])
 (schema/register! ::artifact-digest ::digest)
 (schema/register! ::function-identity
@@ -866,12 +876,14 @@
               (receive! state encoded send-message! exit! (.now js/Date))))
            state)))))
 
+(defn- valid-compiled-functions?
+  [compiled-functions]
+  (schema/valid-candidate-value? ::compiled-functions compiled-functions))
+
 (defn -main
   "Attach one Bun child to its database and serve parent IPC."
   [compiled-functions]
-  (when-not (and (map? compiled-functions)
-                 (every? qualified-symbol? (keys compiled-functions))
-                 (every? fn? (vals compiled-functions)))
+  (when-not (valid-compiled-functions? compiled-functions)
     (throw
      (ex-info "The execution artifact must supply a closed compiled function map."
               {:seon.error/kind :core-bug})))

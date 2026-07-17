@@ -1492,6 +1492,15 @@ two real Bun children and an accepted database program change. Exact source and
 decisions are in
 [[research/universal-current-program-publication-audit-2026-07-16]].
 
+The real-process proof audit exposed and closed one startup contract mismatch:
+the runtime supplies one closed compiled-function descriptor containing the
+callable and its database-pinning policy, while the child entrypoint had still
+validated obsolete bare function values. Startup now validates the same closed
+descriptor consumed by dispatch; bare functions, missing policy, and extra
+fields fail. The complete execution and host gate passes 31 tests/133
+assertions. The two-child authority fixture is now the earliest unsettled
+proof, not another runtime implementation.
+
 The cold schema audit corrects one temporary workaround rather than preserving
 it. `schema/register!` should collect EDN declarations without resolving
 references against partial namespace load state; one complete

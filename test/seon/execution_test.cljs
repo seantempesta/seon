@@ -29,6 +29,25 @@
    ::execution/deadline-ms 9999999999999
    ::execution/result-limit-bytes 4096})
 
+(deftest compiled-function-map-is-one-closed-descriptor-contract
+  (let [descriptor {::execution/compiled-function (fn [_ _ _ _] :ok)
+                    ::execution/pin-database? true}
+        valid {'seon.execution.runtime/render-prompt! descriptor}]
+    (is (@#'execution/valid-compiled-functions? valid))
+    (is (false?
+         (@#'execution/valid-compiled-functions?
+          {'seon.execution.runtime/render-prompt!
+           (::execution/compiled-function descriptor)}))
+        "bare callables are not a second compiled-function representation")
+    (is (false?
+         (@#'execution/valid-compiled-functions?
+          {'seon.execution.runtime/render-prompt!
+           (dissoc descriptor ::execution/pin-database?)})))
+    (is (false?
+         (@#'execution/valid-compiled-functions?
+          {'seon.execution.runtime/render-prompt!
+           (assoc descriptor ::execution/extra true)})))))
+
 (def startup
   {::execution/protocol-version execution/protocol-version
    ::execution/agent-id "agent-1"
