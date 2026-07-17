@@ -6,7 +6,6 @@
    lifecycle transport validates one closed EDN shape rather than maintaining
    platform-specific approximations."
   (:require
-   [seon.db.coordinate :as coordinate]
    [seon.schema :as schema]))
 
 (schema/register!
@@ -20,7 +19,6 @@
   [:map {:closed true}
    [:seon.client/quiesced? [:= true]]
    [::process-generation {:optional true} ::process-generation]
-   [::coordinate/coordinate ::coordinate/coordinate]
    [:seon.client/quiesced-run-ids [:vector :string]]
    [:seon.client/completed-turn-ids [:vector :string]]
    [:seon.client/errored-turn-ids [:vector :string]]

@@ -1320,7 +1320,6 @@
                    :seon.db.registry/released? true}]}})
         pod-result
         {:seon.client/quiesced? true
-         :seon.db.coordinate/coordinate coordinate
          :seon.client/quiesced-run-ids []
          :seon.client/completed-turn-ids []
          :seon.client/errored-turn-ids []
@@ -1352,11 +1351,7 @@
                     (:seon.dev.process/results result)))))))
 
 (deftest clean-or-force-retains-the-completed-prefix-on-uncertainty
-  (let [coordinate {:seon.db.coordinate/database-id (random-uuid)
-                    :seon.db.coordinate/branch :db
-                    :seon.db.coordinate/commit-id (random-uuid)
-                    :seon.db.coordinate/t 42}
-        configuration (operator-config)
+  (let [configuration (operator-config)
         calls (atom [])]
     (with-redefs [process/read-process (fn [_ _] {:record true})
                   process/stop!
@@ -1369,7 +1364,6 @@
                   (fn [_ _ _]
                     {:seon.dev.process/application-result
                      {:seon.client/quiesced? true
-                      :seon.db.coordinate/coordinate coordinate
                       :seon.client/quiesced-run-ids []
                       :seon.client/completed-turn-ids []
                       :seon.client/errored-turn-ids []
@@ -1469,14 +1463,8 @@
 (deftest bounded-quiesce-client-uses-one-closed-loopback-edn-response
   (let [directory (fs/create-temp-dir {:prefix "seon-quiesce-http-"})
         port-file (str (fs/path directory "pod-port"))
-        coordinate
-        {:seon.db.coordinate/database-id (random-uuid)
-         :seon.db.coordinate/branch :db
-         :seon.db.coordinate/commit-id (random-uuid)
-         :seon.db.coordinate/t 42}
         response
         {:seon.client/quiesced? true
-         :seon.db.coordinate/coordinate coordinate
          :seon.client/quiesced-run-ids []
          :seon.client/completed-turn-ids []
          :seon.client/errored-turn-ids []

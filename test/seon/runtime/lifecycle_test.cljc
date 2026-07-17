@@ -6,17 +6,8 @@
    [malli.core :as m]
    [seon.runtime.lifecycle :as lifecycle]))
 
-(def ^:private coordinate
-  {:seon.db.coordinate/database-id
-   #uuid "bb0ad686-ea57-4aa4-b946-f69f1504c482"
-   :seon.db.coordinate/branch :db
-   :seon.db.coordinate/commit-id
-   #uuid "595448fe-77d7-485d-88ca-481989e4dd2e"
-   :seon.db.coordinate/t 42})
-
 (def ^:private success
   {:seon.client/quiesced? true
-   :seon.db.coordinate/coordinate coordinate
    :seon.client/quiesced-run-ids ["f5m5ckg3k2pf"]
    :seon.client/completed-turn-ids ["turn-1"]
    :seon.client/errored-turn-ids []
@@ -33,12 +24,11 @@
          ::lifecycle/quiesce-response
          {:seon.client/quiesced? false
           :seon.client/quiesce-error "cleanup remains retryable"})))
-  (testing "the discriminator, complete coordinate, and closed shape are exact"
+  (testing "the discriminator and closed shape are exact"
     (is (not (m/validate ::lifecycle/quiesce-response
                          (assoc success :seon.client/quiesced? false))))
     (is (not (m/validate
               ::lifecycle/quiesce-response
-              (update success :seon.db.coordinate/coordinate
-                      dissoc :seon.db.coordinate/commit-id))))
+              (assoc success :seon.db.coordinate/coordinate {}))))
     (is (not (m/validate ::lifecycle/quiesce-response
                          (assoc success :seon.runtime.lifecycle/extra true))))))

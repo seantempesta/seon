@@ -409,13 +409,6 @@
                           (is (= "application/edn; charset=utf-8"
                                  (get (::headers @observed) "Content-Type")))
                           (is (= {:seon.client/quiesced? true
-                                  :seon.db.coordinate/coordinate
-                                  {:seon.db.coordinate/database-id
-                                   #uuid "00000000-0000-0000-0000-000000000001"
-                                   :seon.db.coordinate/branch :db
-                                   :seon.db.coordinate/commit-id
-                                   #uuid "00000000-0000-0000-0000-000000000002"
-                                   :seon.db.coordinate/t 42}
                                   :seon.client/quiesced-run-ids []
                                   :seon.client/completed-turn-ids []
                                   :seon.client/errored-turn-ids []
@@ -432,13 +425,6 @@
           "the HTTP response remains open while remote release is pending")
       (@resolve-result
        {:seon.client/quiesced? true
-        :seon.db.coordinate/coordinate
-        {:seon.db.coordinate/database-id
-         #uuid "00000000-0000-0000-0000-000000000001"
-         :seon.db.coordinate/branch :db
-         :seon.db.coordinate/commit-id
-         #uuid "00000000-0000-0000-0000-000000000002"
-         :seon.db.coordinate/t 42}
         :seon.client/quiesced-run-ids []
         :seon.client/completed-turn-ids []
         :seon.client/errored-turn-ids []
