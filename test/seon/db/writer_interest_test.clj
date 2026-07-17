@@ -33,18 +33,21 @@
   [channel request]
   (uds/call! {::uds/channel channel ::uds/message request}))
 
+(defn- database-value
+  [database-name native]
+  {:db-name database-name
+   :t (:max-tx native)
+   :as-of nil
+   :since nil
+   :history false
+   :datahike/commit-id (d/commit-id native)})
+
 (defn- acquire!
   [channel database-name label]
-  (let [head
-        (call! channel
-               (protocol/resolve-head-request
-                {::protocol/request-id (str label "/head")
-                 ::protocol/database-name database-name}))]
-    (call! channel
-           (protocol/acquire-database-request
-            {::protocol/request-id (str label "/acquire")
-             ::protocol/database-name database-name
-             ::protocol/attachment (::protocol/attachment head)}))))
+  (call! channel
+         (protocol/acquire-database-request
+          {::protocol/request-id (str label "/acquire")
+           ::protocol/database-name database-name})))
 
 (defn- read-next
   [channel]
@@ -60,11 +63,11 @@
         :else (do (Thread/sleep 5) (recur))))))
 
 (defn- transact!
-  [channel database-name request-id transaction-data]
+  [channel database request-id transaction-data]
   (call! channel
          (protocol/transaction-request
           {::protocol/request-id request-id
-           ::protocol/database-name database-name
+           :seon.db/db database
            ::protocol/transaction-data transaction-data})))
 
 (defn- fake-transport-connection
@@ -91,7 +94,7 @@
               connection)))
         (vals @(::uds/connections (::writer/request-server server)))))
 
-(deftest duplicate-live-listen-id-preserves-the-original-interest
+(deftest repeated-listen-id-replaces-the-original-interest
   (let [database-name (str "writer-interest-duplicate-" (random-uuid))
         request-path (socket-path "duplicate-request")
         server
@@ -106,10 +109,10 @@
         request-id "duplicate/listen"]
     (try
       (let [acquired (acquire! listener database-name "duplicate/listener")
-            _ (acquire! writer-channel database-name "duplicate/writer")
-            _
+            writer-acquired (acquire! writer-channel database-name "duplicate/writer")
+            schema-report
             (transact!
-             writer-channel database-name "duplicate/schema"
+             writer-channel (:seon.db/db writer-acquired) "duplicate/schema"
              [{:db/ident :duplicate/original
                :db/valueType :db.type/string
                :db/cardinality :db.cardinality/one}
@@ -120,43 +123,59 @@
             (call! listener
                    (protocol/listen-request
                     {::protocol/request-id request-id
-                     ::protocol/database-name database-name
-                     ::protocol/attachment (::protocol/attachment acquired)
+                     :seon.db/db (:db-after schema-report)
                      ::protocol/datom-patterns
                      [{:seon.db/a :duplicate/original}]}))
             connection (interest-connection server request-id)
-            interests-before @(::writer/interests connection)
-            indexes-before @(::writer/interest-state (::writer/runtime server))
-            duplicate
+            replacement
             (call! listener
                    (protocol/listen-request
                     {::protocol/request-id request-id
-                     ::protocol/database-name database-name
-                     ::protocol/attachment (::protocol/attachment acquired)
+                     :seon.db/db (:db-after schema-report)
                      ::protocol/datom-patterns
                      [{:seon.db/a :duplicate/replacement}]}))]
         (is (::protocol/listening? original) (pr-str original))
+        (is (= (:db-after schema-report) (:db-after original)))
+        (is (= (:seon.db/db acquired)
+               (:db-before schema-report)))
         (is (some? connection))
-        (is (= protocol/request-conflict-error
-               (::protocol/error-kind duplicate))
-            (pr-str duplicate))
-        (is (= request-id (::protocol/request-id duplicate)))
-        (is (= interests-before @(::writer/interests connection))
-            "the duplicate does not replace the connection-owned interest")
-        (is (= indexes-before
-               @(::writer/interest-state (::writer/runtime server)))
-            "the duplicate does not alter source, scope, or attribute indexes")
+        (is (::protocol/listening? replacement) (pr-str replacement))
+        (is (= [{:seon.db/a :duplicate/replacement}]
+               (get-in @(::writer/interests connection)
+                       [request-id ::writer/patterns])))
+        (is (= #{:duplicate/replacement}
+               (set (keys
+                     (get-in @(::writer/interest-state (::writer/runtime server))
+                             [::writer/by-scope
+                              (get-in @(::writer/interests connection)
+                                      [request-id ::writer/scope])
+                              ::writer/by-attribute])))))
 
-        (let [transaction
-              (transact! writer-channel database-name "duplicate/write"
-                         [{:duplicate/original "still-live"}])
-              event (deref (future (read-next listener)) 5000 ::timed-out)]
+        (let [original-transaction
+              (transact! writer-channel (:db-after schema-report)
+                         "duplicate/write-original"
+                         [{:duplicate/original "replaced"}])
+              replacement-transaction
+              (transact! writer-channel (:db-after original-transaction)
+                         "duplicate/write-replacement"
+                         [{:duplicate/replacement "still-live"}])
+              events (repeatedly 3
+                                 #(deref (future (read-next listener))
+                                         5000 ::timed-out))
+              event (some #(when (= protocol/datoms-event
+                                     (::protocol/event %)) %)
+                          events)]
+          (is (= 2 (count (filter #(= protocol/database-advanced-event
+                                      (::protocol/event %))
+                                  events))))
           (is (= protocol/datoms-event (::protocol/event event)))
           (is (= request-id (::protocol/request-id event)))
-          (is (= :duplicate/original
-                 (get-in event [::protocol/datoms 0 :seon.db/a])))
-          (is (= (::protocol/coordinate transaction)
-                 (::protocol/coordinate event))))
+          (is (= :duplicate/replacement
+                 (some (fn [[_entity attribute]]
+                         (when (= :duplicate/replacement attribute) attribute))
+                       (:tx-data event))))
+          (is (= (:db-after replacement-transaction) (:db-after event)))
+          (is (= (:tx-data replacement-transaction) (:tx-data event))))
 
         (let [unlisten
               (call! listener
@@ -195,10 +214,10 @@
     (try
       (let [acquired-a (acquire! a database-name "interest/a")
             acquired-b (acquire! b database-name "interest/b")
-            _ (acquire! writer-channel database-name "interest/writer")
-            _
+            writer-acquired (acquire! writer-channel database-name "interest/writer")
+            schema-report
             (transact!
-             writer-channel database-name "interest/schema"
+             writer-channel (:seon.db/db writer-acquired) "interest/schema"
              [{:db/ident :interest/a
                :db/valueType :db.type/string
                :db/cardinality :db.cardinality/one}
@@ -211,56 +230,69 @@
             (call! a
                    (protocol/listen-request
                     {::protocol/request-id listen-a-id
-                     ::protocol/database-name database-name
-                     ::protocol/attachment (::protocol/attachment acquired-a)
+                     :seon.db/db (:db-after schema-report)
                      ::protocol/query-form
                      '[:find ?value :where [_ :interest/a ?value]]}))
             listen-b
             (call! b
                    (protocol/listen-request
                     {::protocol/request-id listen-b-id
-                     ::protocol/database-name database-name
-                     ::protocol/attachment (::protocol/attachment acquired-b)
+                     :seon.db/db (:db-after schema-report)
                      ::protocol/datom-patterns [{:seon.db/a :interest/b}]}))
             pending-b (future (read-next b))
             transaction-a
-            (transact! writer-channel database-name "interest/write-a"
+            (transact! writer-channel (:db-after schema-report) "interest/write-a"
                        [{:interest/a "only-a"}])
-            event-a (deref (future (read-next a)) 5000 ::timed-out)]
+            events-a [(deref (future (read-next a)) 5000 ::timed-out)
+                      (deref (future (read-next a)) 5000 ::timed-out)]
+            event-a (some #(when (= protocol/datoms-event
+                                    (::protocol/event %)) %)
+                          events-a)
+            advanced-b (deref pending-b 5000 ::timed-out)]
         (when-not (and (::protocol/listening? listen-a)
                        (::protocol/listening? listen-b))
           (throw (ex-info "listen setup failed" {:a listen-a :b listen-b})))
         (is (::protocol/listening? listen-a) (pr-str listen-a))
         (is (::protocol/listening? listen-b) (pr-str listen-b))
-        (is (= (::protocol/coordinate listen-a)
-               (::protocol/coordinate listen-b)))
+        (is (= (:db-after schema-report) (:db-after listen-a)))
+        (is (= (:db-after listen-a) (:db-after listen-b)))
+        (is (= (:seon.db/db acquired-a) (:seon.db/db acquired-b)))
         (is (= protocol/datoms-event (::protocol/event event-a)))
         (is (= listen-a-id (::protocol/request-id event-a)))
-        (is (= :interest/a (get-in event-a [::protocol/datoms 0 :seon.db/a])))
-        (is (= (::protocol/coordinate transaction-a)
-               (::protocol/coordinate event-a)))
-        (is (= ::still-waiting (deref pending-b 100 ::still-waiting))
-            "an unrelated attribute does not wake the sibling session")
+        (is (some #(= :interest/a (nth % 1)) (:tx-data event-a)))
+        (is (= (:db-after transaction-a) (:db-after event-a)))
+        (is (= (:tx-data transaction-a) (:tx-data event-a)))
+        (is (= protocol/database-advanced-event
+               (::protocol/event advanced-b)))
+        (is (= (:db-after transaction-a) (:db-after advanced-b)))
 
-        (transact! writer-channel database-name "interest/write-b"
-                   [{:interest/b "only-b"}])
-        (let [event-b (deref pending-b 5000 ::timed-out)]
+        (let [transaction-b
+              (transact! writer-channel (:db-after transaction-a)
+                         "interest/write-b" [{:interest/b "only-b"}])
+              events-b [(deref (future (read-next b)) 5000 ::timed-out)
+                        (deref (future (read-next b)) 5000 ::timed-out)]
+              event-b (some #(when (= protocol/datoms-event
+                                      (::protocol/event %)) %)
+                            events-b)]
           (is (= protocol/datoms-event (::protocol/event event-b)))
           (is (= listen-b-id (::protocol/request-id event-b)))
-          (is (= :interest/b
-                 (get-in event-b [::protocol/datoms 0 :seon.db/a]))))
+          (is (some #(= :interest/b (nth % 1)) (:tx-data event-b)))
+          (is (= (:db-after transaction-b) (:db-after event-b))))
 
         (let [unlisten
               (call! a
                      (protocol/unlisten-request
                       {::protocol/request-id "interest/unlisten-a"
-                       ::protocol/target-request-id listen-a-id}))
-              after-ack (future (read-next a))]
+                       ::protocol/target-request-id listen-a-id}))]
           (is (false? (::protocol/listening? unlisten)))
-          (transact! writer-channel database-name "interest/write-a-again"
-                     [{:interest/a "after-ack"}])
-          (is (= ::still-waiting (deref after-ack 150 ::still-waiting))
-              "no event follows the unlisten acknowledgement")
+          (let [transaction
+                (transact! writer-channel (:db-after transaction-a)
+                           "interest/write-a-again"
+                           [{:interest/a "after-ack"}])
+                advanced (deref (future (read-next a)) 5000 ::timed-out)]
+            (is (= protocol/database-advanced-event
+                   (::protocol/event advanced)))
+            (is (= (:db-after transaction) (:db-after advanced))))
           (.close a))
         (.close b)
         (is (wait-until!
@@ -298,8 +330,7 @@
               request
               (protocol/listen-request
                {::protocol/request-id "gap/listen"
-                ::protocol/database-name "gap"
-                ::protocol/attachment attachment
+                :seon.db/db (database-value "gap" db-value)
                 ::protocol/datom-patterns [{:seon.db/a :gap/value}]})]
           (locking (::writer/interest-lock runtime)
             (#'writer/install-interest-locked!
@@ -319,8 +350,8 @@
               (is (not (identical? source replacement)))
               (is (= [{::protocol/event protocol/resynchronization-event
                        ::protocol/request-id "gap/listen"
-                       ::protocol/coordinate
-                       (coordinate/resolved (d/db connection))}]
+                       :db-after
+                       (database-value "gap" (d/db connection))}]
                      @sent))
               (is (= :datahike.committed-report.status/closed
                      (:datahike.committed-report/status
@@ -345,14 +376,16 @@
            {::uds/send-status uds/send-authority-full})}]
     (is (= uds/send-authority-full
            (#'writer/send-interest-event!
-            connection "pressure/listen" owner
+           connection "pressure/listen" owner
             {::protocol/event protocol/resynchronization-event
              ::protocol/request-id "pressure/listen"
-             ::protocol/coordinate
-             {::coordinate/database-id (random-uuid)
-              ::coordinate/branch :db
-              ::coordinate/commit-id (random-uuid)
-              ::coordinate/t 1}})))
+             :db-after
+             {:db-name "pressure"
+              :t 1
+              :as-of nil
+              :since nil
+              :history false
+              :datahike/commit-id (random-uuid)}})))
     (is (true? (deref closed 1000 false)))
     (is (.get ^AtomicBoolean (::writer/closing? connection)))))
 
@@ -427,7 +460,9 @@
           (is (= 1 (count @sent)))
           (is (= "fanout/0" (ffirst @sent)))
           (is (= target-eid
-                 (get-in @sent [0 1 ::protocol/datoms 0 :seon.db/e]))))
+                 (some (fn [[entity attribute]]
+                         (when (= :fanout/value attribute) entity))
+                       (get-in @sent [0 1 :tx-data])))))
         (finally
           (d/release connection)
           (d/delete-database configuration))))))
@@ -438,10 +473,13 @@
           (#'writer/listen-interest
            (protocol/listen-request
             {::protocol/request-id "empty/listen"
-             ::protocol/database-name "empty"
-             ::protocol/attachment
-             {::coordinate/database-id (random-uuid)
-              ::coordinate/branch :db}
+             :seon.db/db
+             {:db-name "empty"
+              :t 1
+              :as-of nil
+              :since nil
+              :history false
+              :datahike/commit-id (random-uuid)}
              ::protocol/query-form '[:find ?input :in ?input]})
            {::executor/database-name "empty"
             ::coordinate/attachment

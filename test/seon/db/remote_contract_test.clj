@@ -12,9 +12,7 @@
            [java.util Date]
            [java.util.concurrent CountDownLatch TimeUnit]))
 
-;; This namespace deliberately describes the replacement contract rather than
-;; preserving the coordinate protocol. Until the authority cut lands, failures
-;; identify missing source contracts behavior-by-behavior.
+;; These tests exercise the current ordinary database-value protocol directly.
 
 (defn- socket-path
   [label]
@@ -884,6 +882,9 @@
             (is (::protocol/listening? replacement-a)
                 "registering the same key replaces rather than conflicts")
             (is (::protocol/listening? first-b) (pr-str first-b))
+            (is (= db-a (:db-after first-a)))
+            (is (= db-a (:db-after replacement-a)))
+            (is (= db-b (:db-after first-b)))
             (when (every? ::protocol/listening?
                           [first-a replacement-a first-b])
               (let [pending-b (future (read-next listener-b))
@@ -912,6 +913,7 @@
                 (is (nil? (::protocol/request-id advanced-a))
                     "the latest database value is not another request")
                 (is (= (:db-after report-a) (:db-after event-a)))
+                (is (= (:tx-data report-a) (:tx-data event-a)))
                 (is (= "listen/a" (::protocol/request-id event-a)))
                 (is (= ::still-waiting
                        (deref pending-b 100 ::still-waiting))
