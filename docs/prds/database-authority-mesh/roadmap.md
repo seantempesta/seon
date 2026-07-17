@@ -95,14 +95,20 @@ transaction owners are deleted rather than retained as a compatibility path.
 Focused proof passes 10 CLJS tests/51 assertions for package construction and
 wire forwarding, plus 24 writer tests/117 assertions for authority admission.
 
-Current parallel portfolio is converged at the child checkpoint. The
-database-consumer audit supplies the ordered migration inventory, the
-real-process proof is implemented, and the artifact audit has isolated the
-single current manifest/application identity cut. Top level now owns the turn
-database-value migration; the next independent refill is artifact identity
-unification after this checkpoint is committed. Final graduation remains one
-frozen-source full test, live browser/agent, crash/restart, packaging, and
-modest-hardware density checkpoint.
+Current parallel portfolio is converged at the native-result checkpoint.
+`3ebfcaf5` leaves one current artifact manifest/application digest and removes
+the four historical readers; `9a66bb78` leaves one generated-identity
+allocator; and `c453a5bd` makes that allocator consume the same native
+transaction report/direct error contract as `seon.db`. Focused proof passes 10
+CLJS tests/55 assertions and 12 writer tests/75 assertions. The duplicate-owner
+audit at [[research/duplicate-runtime-owner-audit-2026-07-16]] ranks the next
+cuts: 28 production files still teach the removed database envelope and 19
+still assume an ambient local connection. Top level owns the turn
+database-value/rendered-transaction migration. The next dependency-ready
+refill is autocomplete/export identity and database-value unification after
+the turn contract settles. Final graduation remains one frozen-source full
+test, live browser/agent, crash/restart, packaging, and modest-hardware density
+checkpoint.
 
 ## Settled laws
 

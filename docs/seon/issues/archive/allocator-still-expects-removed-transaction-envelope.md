@@ -1,6 +1,6 @@
 ---
 type: issue
-status: active
+status: resolved
 severity: blocker
 tags: [issue, database, flow, agent]
 ---
@@ -47,3 +47,13 @@ restore a compatibility envelope.
   `seon.db/transact!`.
 - Focused proof exercises success, exact collision retry, retry exhaustion,
   and unrelated failure through the real facade response shapes.
+
+## Resolution
+
+Resolved by `c453a5bd`. Both CLJ and CLJS allocation now consume native
+transaction reports and direct `:seon.error/*` values. The facade preserves an
+exact protocol collision candidate in the direct error data; the allocator
+retries only that matching candidate and returns unrelated failures unchanged.
+Focused proof passes 10 CLJS tests/55 assertions and 12 writer tests/75
+assertions, including success, exact retry, bounded exhaustion, unrelated
+failure, and candidate preservation.
