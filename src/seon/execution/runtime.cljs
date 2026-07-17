@@ -387,14 +387,20 @@
     turn-id :seon.agent.turn/id-of-turn
     run-id :seon.agent.run/id-of-run}
    prepare-program!]
-  (let [{::execution/keys [compile-state program]}
+  (let [database (::db/db (db/current-tx-context))
+        {::execution/keys [compile-state program]}
         (await (prepare-program!))
         agent-id (db/current-agent-id)]
-    (await
-     (apply eval/eval-batch!
-            [compile-state parsed starting-ns agent-id turn-id run-id
-             (eval/authored-sources
-              (::execution/namespace-rows program))]))))
+    (db/with-tx-context
+     {::db/db nil}
+     (fn ^:async run-with-current-database! []
+       (await
+        (apply eval/eval-batch!
+               [compile-state parsed starting-ns agent-id turn-id run-id
+                {::eval/authored-sources
+                 (eval/authored-sources
+                  (::execution/namespace-rows program))
+                 ::db/db database}]))))))
 
 (def compiled-functions
   "Trusted functions directly reachable through this exact execution artifact."
@@ -408,7 +414,7 @@
    {::execution/compiled-function
     (fn [arguments _invoke-selected! _compile-state! prepare-program!]
       (apply eval-batch! (conj arguments prepare-program!)))
-    ::execution/pin-database? false}
+    ::execution/pin-database? true}
 
    'seon.execution.runtime/render-agent-view!
    {::execution/compiled-function

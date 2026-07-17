@@ -53,7 +53,6 @@
             [clojure.string :as str]
             [goog.object :as gobj]
             [malli.core :as m]
-            [my.blob :as blob]
             [shadow.cljs.bootstrap.node :as boot]
             [seon.agent.home :as home]
             [seon.ai.tokens :as tokens]
@@ -61,7 +60,6 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.db.id :as db.id]
-            [seon.db.internal :as db.internal]
             [seon.db.protocol :as db.protocol]
             [seon.db.process :as db.process]
             [seon.diffusion.grammar :as grammar]
@@ -110,11 +108,6 @@
 (schema/register! :seon.eval/ns :keyword)
 ;; Optional direct ref to the agent whose scope produced the eval.
 (schema/register! :seon.eval/agent :seon.db/ref)
-;; Full ordered database-operation evidence lives in the content-addressed
-;; blob tier. Absence means this eval observed no database operations.
-(schema/register! :seon.eval/database-operations-blob :seon.db/ref)
-
-
 ;; ============================================================
 ;; Per-form wall-clock timeout. Stability guard, not a security
 ;; boundary.
@@ -3134,9 +3127,13 @@
         (str "; <value could not be rendered as data; the live value is "
              "result/" eval-id ">")))))
 
+(defn- database-error?
+  [value]
+  (and (map? value) (string? (:seon.error/message value))))
+
 (defn- unsafe-to-reallocate?
-  [envelope]
-  (let [data (get-in envelope [:seon.db/error :seon.error/data])
+  [result]
+  (let [data (:seon.error/data result)
         error-tag (::db.id/error data)
         transaction-status (::db.protocol/status data)]
     (or (= "seon.db.id.error" (some-> error-tag namespace))
@@ -3144,73 +3141,10 @@
                      db.protocol/committed-status}
                    transaction-status))))
 
-(defn- stale-coordinate-failure?
-  [envelope]
+(defn- stale-database-failure?
+  [result]
   (= db.protocol/stale-coordinate-error
-     (get-in envelope [::db/error :seon.error/data
-                       ::db.protocol/error-kind])))
-
-(declare canonical-edn)
-
-(defn- canonical-order-key
-  "Injective sort key for normalized EDN values."
-  [value]
-  [(cond
-     (nil? value) "00-nil"
-     (boolean? value) "01-boolean"
-     (number? value) "02-number"
-     (string? value) "03-string"
-     (keyword? value) "04-keyword"
-     (symbol? value) "05-symbol"
-     (vector? value) "06-vector"
-     (list? value) "07-list"
-     (set? value) "08-set"
-     (map? value) "09-map"
-     :else "10-tagged-scalar")
-   (canonical-edn value)])
-
-(defn- canonical-edn
-  "Serialize normalized data to byte-stable, round-trippable EDN."
-  [value]
-  (cond
-    (map? value)
-    (str "{"
-         (str/join " "
-                   (map (fn [[k v]]
-                          (str (canonical-edn k) " " (canonical-edn v)))
-                        (sort-by (fn [[k v]]
-                                   [(canonical-order-key k)
-                                    (canonical-order-key v)])
-                                 value)))
-         "}")
-
-    (set? value)
-    (str "#{"
-         (str/join " "
-                   (map canonical-edn
-                        (sort-by canonical-order-key value)))
-         "}")
-
-    (vector? value)
-    (str "[" (str/join " " (map canonical-edn value)) "]")
-
-    (list? value)
-    (str "(" (str/join " " (map canonical-edn value)) ")")
-
-    :else (pr-str value)))
-
-(defn- ^:async persist-database-operations!
-  "Persist one nonempty ordered operation vector as canonical EDN bytes."
-  [operations]
-  (let [{ok? :my.blob/ok? hash :my.blob/hash error :my.blob/error}
-        (await
-          (blob/put! {:my.blob/content
-                      (canonical-edn (vec operations))
-                      :my.blob/media :edn}))]
-    (if ok?
-      {::database-operations-blob [:my.blob/hash hash]}
-      {::database-operations-error
-       (str "database operation evidence was not persisted: " error)})))
+     (get-in result [:seon.error/data ::db.protocol/error-kind])))
 
 (defn ^:async start-eval!
   "Allocate and commit one running eval receipt before its form executes.
@@ -3220,33 +3154,37 @@
    the returned `:seon.eval/id` to [[record-eval!]]."
   {:malli/schema [:=> [:catn [::start-request :map]] :any]}
   [{::keys [at narration source starting-ns]
+    database ::db/db
     turn-id :seon.agent.turn/id-of-turn}]
   (let [aid  (db/current-agent-id)
         started
         (await
           (db.id/allocate!
-            {::db.id/allocations
-             [{::db.id/key ::eval-allocation
-               ::db.id/identity-attr :seon.eval/id}]
-             ::db.id/transaction-builder
-             (fn [{eval-id ::eval-allocation}]
-               {:seon.db/tx-data
-                (eval.internal/start-tx-data
-                  (cond->
-                    {:seon.agent.turn/id turn-id
-                     :seon.eval/id eval-id
-                     :seon.eval/at at
-                     :seon.eval/source (or source "")
-                     :seon.eval/narration (or narration "")
-                     :seon.eval/ns (if (keyword? starting-ns)
-                                     starting-ns
-                                     (keyword (str starting-ns)))}
-                    aid
-                    (assoc :seon.eval/agent [:seon.agent/id aid])))})}))]
-    (if (:seon.db/ok? started)
-      {:seon.db/ok? true
-       :seon.eval/id (get-in started [::db.id/ids ::eval-allocation])}
-      started)))
+            (cond->
+              {::db.id/allocations
+               [{::db.id/key ::eval-allocation
+                 ::db.id/identity-attr :seon.eval/id}]
+               ::db.id/transaction-builder
+               (fn [{eval-id ::eval-allocation}]
+                 {:seon.db/tx-data
+                  (eval.internal/start-tx-data
+                    (cond->
+                      {:seon.agent.turn/id turn-id
+                       :seon.eval/id eval-id
+                       :seon.eval/at at
+                       :seon.eval/source (or source "")
+                       :seon.eval/narration (or narration "")
+                       :seon.eval/ns (if (keyword? starting-ns)
+                                       starting-ns
+                                       (keyword (str starting-ns)))}
+                      aid
+                      (assoc :seon.eval/agent [:seon.agent/id aid])))})}
+              database (assoc ::db/db database))))]
+    (if (database-error? started)
+      started
+      (assoc started
+             :seon.eval/id
+             (get-in started [::db.id/ids ::eval-allocation])))))
 
 (defn ^:async record-eval!
   "Commit one frozen eval outcome, terminalizing a running receipt when given.
@@ -3262,25 +3200,12 @@
    may commit a different fallback id. Allocator/protocol failures never enter
    the fallback. No result handle is bound here."
   {:malli/schema [:=> [:catn [::record-request :map]] :any]}
-  [{::keys [at narration source result duration-ms tee output pending?
-            database-operations eval-id]
-    expected-coordinate ::db/expected-coordinate
+  [{::keys [at narration source result duration-ms tee output pending? eval-id]
+    database ::db/db
+    expected-database ::db/expected-db
     turn-id :seon.agent.turn/id-of-turn
     ns      ::ending-ns}]
-  (let [operation-publication
-        (when (seq database-operations)
-          (await (persist-database-operations! database-operations)))
-        operation-publication-error (::database-operations-error
-                                      operation-publication)
-        result (if operation-publication-error
-                 {::ok? false
-                  :seon/error
-                  {:seon.error/kind :core
-                   :seon.error/message operation-publication-error
-                   :seon.error/data
-                   {:seon.eval/database-operation-evidence? true}}}
-                 result)
-        result (if (and (::ok? result) (not pending?))
+  (let [result (if (and (::ok? result) (not pending?))
                  (update result ::value admit-result-value)
                  result)
         aid  (db/current-agent-id)
@@ -3295,10 +3220,6 @@
                                           (keyword (str ns)))}
           aid
           (assoc :seon.eval/agent [:seon.agent/id aid])
-
-          (::database-operations-blob operation-publication)
-          (assoc :seon.eval/database-operations-blob
-                 (::database-operations-blob operation-publication))
 
           (and (string? output) (not (str/blank? output)))
           (assoc :seon.eval/output (cap-edn output))
@@ -3339,16 +3260,21 @@
         (fn ^:async allocate-record! [accepted-tee]
           (await
             (db.id/allocate!
-              {::db.id/allocations
-               [{::db.id/key ::eval-allocation
-                 ::db.id/identity-attr :seon.eval/id}]
-               ::db.id/transaction-builder
-               (fn [{eval-id ::eval-allocation}]
-                 (let [eval-row (eval-row-for eval-id)]
-                   {:seon.db/tx-data
-                    (into [{:seon.agent.turn/id turn-id
-                            :seon.agent.turn/evals [eval-row]}]
-                          accepted-tee)}))})))
+              (cond->
+                {::db.id/allocations
+                 [{::db.id/key ::eval-allocation
+                   ::db.id/identity-attr :seon.eval/id}]
+                 ::db.id/transaction-builder
+                 (fn [{eval-id ::eval-allocation}]
+                   (let [eval-row (eval-row-for eval-id)]
+                     (cond->
+                       {:seon.db/tx-data
+                        (into [{:seon.agent.turn/id turn-id
+                                :seon.agent.turn/evals [eval-row]}]
+                              accepted-tee)}
+                       expected-database
+                       (assoc ::db/expected-db expected-database))))}
+                database (assoc ::db/db database)))))
         terminalize-record!
         (fn ^:async terminalize-record! [accepted-tee]
           (let [status (if (::ok? result) :done :error)
@@ -3362,16 +3288,18 @@
                   {:seon.db/tx-data
                    (into [fence (merge (eval-row-for eval-id) terminal-row)]
                          accepted-tee)}
-                  expected-coordinate
-                  (assoc ::db/expected-coordinate expected-coordinate))))))
+                  database
+                  (assoc ::db/db database)
+                  expected-database
+                  (assoc ::db/expected-db expected-database))))))
         transact-record! (if eval-id terminalize-record! allocate-record!)
         primary (await (transact-record! (vec (or tee []))))
         committed-id (or eval-id
                          (get-in primary [::db.id/ids ::eval-allocation]))
         settled-read
         (when (and eval-id
-                   (not (:seon.db/ok? primary))
-                   (not (stale-coordinate-failure? primary)))
+                   (database-error? primary)
+                   (not (stale-database-failure? primary)))
           (await
             (db/pull
               {::db/pull-pattern [:seon.eval/status]
@@ -3380,15 +3308,15 @@
         (when-not (:seon.error/message settled-read)
           (eval.internal/receipt-state settled-read))]
     (cond
-      (:seon.db/ok? primary)
+      (not (database-error? primary))
       (cond->
-        {:seon.db/ok? true
-         :seon.eval/id committed-id
-         ::tee-recorded? true}
+        (assoc primary
+               :seon.eval/id committed-id
+               ::tee-recorded? true)
         (and (::ok? result) (not pending?))
         (assoc ::retained-value (::value result)))
 
-      (stale-coordinate-failure? primary)
+      (stale-database-failure? primary)
       ;; The caller may reacquire the small read-dependent program state and
       ;; recompile this frozen outcome. Do not inspect the receipt or enter the
       ;; transcript-without-tee fallback: neither can make a stale transaction
@@ -3396,32 +3324,29 @@
       primary
 
       (:seon.error/message settled-read)
-      {:seon.db/ok? false
-       :seon.eval/id eval-id
-       :seon.db/error settled-read}
+      (assoc settled-read :seon.eval/id eval-id)
 
       (contains? #{:done :error :interrupted} settled-status)
       ;; Recovery or another terminal writer won the exact receipt CAS. The
       ;; durable row is authoritative: never retry the form, retry the CAS, or
       ;; report transcript data loss. Return the competing terminal state as a
       ;; bounded non-success value so callers cannot publish this late result.
-      {:seon.db/ok? false
-       :seon.eval/id eval-id
-       :seon.eval/status settled-status
-       ::settled? true
-       :seon.db/error (:seon.db/error primary)}
+      (assoc primary
+             :seon.eval/id eval-id
+             :seon.eval/status settled-status
+             ::settled? true)
 
       :else
       (do
         (js/console.error "[seon.eval/record-eval!] tx FAILED:"
                           (cap-edn
-                            (-> primary :seon.db/error :seon.error/message)
+                            (:seon.error/message primary)
                             (config/eval-render-cap))
                           "— source:"
                           (cap-edn source (config/eval-render-cap)))
         (if (and (seq tee) (not (unsafe-to-reallocate? primary)))
           (let [fallback (await (transact-record! []))]
-            (if (:seon.db/ok? fallback)
+            (if-not (database-error? fallback)
               (let [eval-id (or eval-id
                                 (get-in fallback
                                         [::db.id/ids ::eval-allocation]))
@@ -3429,33 +3354,33 @@
                              (str (count tee) " program-graph tee row(s) "
                                   "DROPPED (will not survive a restart) — "
                                   "tee tx failed: "
-                                  (-> primary :seon.db/error
-                                      :seon.error/message)))
+                                  (:seon.error/message primary)))
                     stamped (await
                               (db/transact!
-                                {:seon.db/tx-data
+                                {::db/db (:db-after fallback)
+                                 :seon.db/tx-data
                                  [{:seon.eval/id eval-id
                                    :seon.eval/record-error reason}]}))]
                 (js/console.error
                   "[seon.eval/record-eval!] eval row RECOVERED without tee —"
                   (count tee) "program-graph tee row(s) DROPPED for eval"
                   eval-id)
-                (when-not (:seon.db/ok? stamped)
+                (when (database-error? stamped)
                   (js/console.error
                     "[seon.eval/record-eval!] could not stamp"
                     ":seon.eval/record-error on eval" eval-id ":"
-                    (-> stamped :seon.db/error :seon.error/message)))
+                    (:seon.error/message stamped)))
                 (cond->
-                  {:seon.db/ok? true
-                   :seon.eval/id eval-id
-                   ::tee-recorded? false}
+                  (assoc fallback
+                         :seon.eval/id eval-id
+                         ::tee-recorded? false)
                   (and (::ok? result) (not pending?))
                   (assoc ::retained-value (::value result))))
               (do
                 (js/console.error
                   "[seon.eval/record-eval!] DATA LOSS — eval row could not be"
                   "persisted even without tee:"
-                  (-> fallback :seon.db/error :seon.error/message)
+                  (:seon.error/message fallback)
                   "— source:" source)
                 fallback)))
           primary)))))
@@ -3748,8 +3673,9 @@
     [?process :seon.db.process/id ?process-id]])
 
 (defn- eval-query-member
-  [query arguments]
+  [database query arguments]
   {::db.protocol/operation db.protocol/query-operation
+   ::db/db database
    ::db.protocol/query-form query
    ::db.protocol/arguments arguments
    :datahike.resource/max-results 2048
@@ -3760,12 +3686,14 @@
   (if (::db.protocol/success? member)
     (:datahike.query/result member)
     (throw (ex-info "Eval program acquisition failed."
-                    {:seon.db/error member :seon.error/kind :core-bug}))))
+                    {:seon.error/data member :seon.error/kind :core-bug}))))
 
 (defn- ^:async acquire-eval-tee-inputs!
   "Acquire the two facts that make an eval program transaction read-dependent."
-  [{::keys [function-symbols ending-ns source]}]
-  (let [require? (seq (require-form-specs
+  [{::keys [function-symbols ending-ns source]
+    database ::db/db}]
+  (let [database (or database (await (db/db)))
+        require? (seq (require-form-specs
                        (first (or (try (read-all-forms source)
                                        (catch :default _ nil))
                                   []))))
@@ -3776,14 +3704,15 @@
         requests (cond-> []
                    (seq function-symbols)
                    (conj [::core-boot-function-symbols
-                          (eval-query-member eval-core-function-query
+                          (eval-query-member database eval-core-function-query
                                              [(vec function-symbols)])])
                    namespace
                    (conj [::namespace-source
-                          (eval-query-member eval-namespace-source-query
+                          (eval-query-member database eval-namespace-source-query
                                              [namespace])]))]
     (if (empty? requests)
-      {::core-boot-function-symbols #{}}
+      {::db/db database
+       ::core-boot-function-symbols #{}}
       (let [response (await
                        (db/execute-many
                         {::db/members (mapv second requests)
@@ -3794,7 +3723,7 @@
                           (map vector requests (::db/results response)))
             [stored-source source-process]
             (first (::namespace-source results))]
-        {::db/coordinate (::db/coordinate response)
+        {::db/db database
          ::core-boot-function-symbols
          (set (::core-boot-function-symbols results))
          ::stored-source stored-source
@@ -3904,11 +3833,10 @@
                ::pending? (::pending? compiled)
                ::output (::output frozen)
                ::tee (::tee compiled)}
-              (seq (::database-operations frozen))
-              (assoc ::database-operations (::database-operations frozen))
-              (::db/coordinate acquired)
-              (assoc ::db/expected-coordinate (::db/coordinate acquired)))))]
-      (if (stale-coordinate-failure? recorded)
+              (::db/db acquired)
+              (assoc ::db/db (::db/db acquired)
+                     ::db/expected-db (::db/db acquired)))))]
+      (if (stale-database-failure? recorded)
         (recur)
         {::recorded recorded ::compiled compiled}))))
 
@@ -3967,20 +3895,24 @@
     :where [?entity ?attribute ?symbol]])
 
 (defn- ^:async acquire-repl-form-inputs!
-  "Acquire one special form's database facts at one immutable coordinate."
-  [{::keys [form-namespace form-symbol repl-operation]}]
-  (let [requests
+  "Acquire one special form's facts at one immutable database value."
+  [{::keys [form-namespace form-symbol repl-operation]
+    database ::db/db}]
+  (let [database (or database (await (db/db)))
+        requests
         (case repl-operation
           ns-unmap
           [[::symbol-attributes
-            (eval-query-member repl-symbol-attributes-query
+            (eval-query-member database repl-symbol-attributes-query
                                [form-symbol
                                 [:seon.fn/sym :seon.test/sym]])]
            [::core-boot-function-symbols
-            (eval-query-member eval-core-function-query [[form-symbol]])]]
+            (eval-query-member database eval-core-function-query
+                               [[form-symbol]])]]
           ns-unalias
           [[::namespace-source
-            (eval-query-member eval-namespace-source-query [form-namespace])]]
+            (eval-query-member database eval-namespace-source-query
+                               [form-namespace])]]
           [])
         response (await
                   (db/execute-many
@@ -3991,7 +3923,7 @@
                              [label (eval-query-result member)]))
                       (map vector requests (::db/results response)))
         [stored-source source-process] (first (::namespace-source results))]
-    {::db/coordinate (::db/coordinate response)
+    {::db/db database
      ::symbol-attributes (set (::symbol-attributes results))
      ::core-boot-function-symbols
      (set (::core-boot-function-symbols results))
@@ -4169,26 +4101,12 @@
        (filter simple-symbol?)
        (mapv str)))
 
-(defn- graph-fn-names-in-ns
-  "Program-graph `:seon.fn/sym` NAME parts scoped to namespace `ns-str`
-   — the AR win: an agent's typo'd function name (`my.plan/addd!`) resolves
-   against REAL fns. Empty when no conn."
-  [ns-str]
-  (if db/*conn*
-    (into []
-          (keep (fn [fq]
-                  (when (= ns-str (candidates/ns-part fq))
-                    (candidates/name-part fq))))
-          (db/query '[:find [?s ...] :where [?e :seon.fn/sym ?s]]
-                    @db/*conn*))
-    []))
-
 (defn- repair-candidate-names
   "The candidate NAME pool for one unresolved `token`.
 
    QUALIFIED token → same-ns sources only: the RESOLVED ns's analyzer
-   defs, its live compiled members ([[ns-fn-members]]), and its
-   program-graph fns. BARE token → session defs (eval ns + `cljs.user`)
+   defs and its live compiled members ([[ns-fn-members]]). BARE token →
+   session defs (eval ns + `cljs.user`)
    plus `cljs.core` publics. Graph names are NOT candidates for a bare
    token — substituting an unqualified name for a fn that needs
    qualification can never compile-prove (qualifier fixes are the
@@ -4198,7 +4116,6 @@
     (-> #{}
         (into (analyzer-def-names compile-state (symbol resolved-prefix)))
         (into (map str (keys (ns-fn-members resolved-prefix))))
-        (into (graph-fn-names-in-ns resolved-prefix))
         vec)
     (-> #{}
         (into (analyzer-def-names compile-state eval-ns))
@@ -4440,6 +4357,7 @@
      ::source          — the source string to eval (repaired or original)."
   [{::keys [compile-state authored-sources current-ns n-ok n-fail
             failed-defs outer-test-run? narration source]
+    database ::db/db
     turn-id :seon.agent.turn/id-of-turn}]
   (let [;; Real requires (#73/#56): if this is a NEW agent-authored `(ns …)`
         ;; form, write the canonical short aliases into its REAL `:require`
@@ -4476,8 +4394,9 @@
                           ::duration-ms 0
                           ::narration   narration
                           ::source      source
-                          ::ending-ns   @current-ns
-                          ::result      result}))]
+                       ::ending-ns   @current-ns
+                          ::result      result
+                          ::db/db       database}))]
         (vswap! n-fail inc)
         recorded)
       (let [;; Pre-flight symbol repair (form-autofix, owner rulings
@@ -4509,7 +4428,8 @@
                          ::at at
                          ::narration narration
                          ::source source
-                         ::starting-ns @current-ns}))
+                         ::starting-ns @current-ns
+                         ::db/db database}))
             eval-id (:seon.eval/id started)
             ;; Snapshot analyzer + schema registry BEFORE eval
             ;; so detect-and-tee (v1.md §2.2 / Phase B item 10)
@@ -4531,35 +4451,23 @@
             ;; `.run` callback is an `^:async` iife so the store propagates
             ;; through eval + maybe-await-value; we await its result.
             out-bucket  (atom "")
-            operation-capture
-            (if (:seon.db/ok? started)
+            captured
+            (if-not (database-error? started)
               (await
-                (db.internal/capture-operations!
-                  (when db/*conn* @db/*conn*)
-                  (fn ^:async run-with-operation-capture! []
-                    (await
-                      (.run print-als out-bucket
-                        (fn ^:async run-with-print-capture! []
-                          (let [raw (await (eval compile-state source
-                                                 {::starting-ns @current-ns
-                                                  ::authored-sources
-                                                  authored-sources
-                                                  ::analyze-deps? false}))]
-                            {::raw raw
-                             ::awaited (when (::ok? raw)
-                                         (await (maybe-await-value
-                                                  (::value raw))))})))))))
-              {::db/result
-               {::raw
-                {::ok? false
-                 :seon/error
-                 (or (:seon.db/error started)
-                     {:seon.error/kind :core
-                      :seon.error/message
-                      "Eval receipt could not be committed; form was not executed."})}}
-               ::db/read-observations []})
-            captured    (::db/result operation-capture)
-            database-operations (::db/read-observations operation-capture)
+                (.run print-als out-bucket
+                  (fn ^:async run-with-print-capture! []
+                    (let [raw (await (eval compile-state source
+                                           {::starting-ns @current-ns
+                                            ::authored-sources
+                                            authored-sources
+                                            ::analyze-deps? false}))]
+                      {::raw raw
+                       ::awaited (when (::ok? raw)
+                                   (await (maybe-await-value
+                                            (::value raw))))}))))
+              {::raw
+               {::ok? false
+                :seon/error started}})
             raw-result  (::raw captured)
             awaited     (::awaited captured)
             ;; A still-running Promise — auto-await timeout OR an explicit
@@ -4681,10 +4589,9 @@
                ::duration-ms duration-ms
                ::narration narration
                ::output output
-               ::database-operations database-operations
                :seon.agent.turn/id-of-turn turn-id}
               attempt
-              (if (:seon.db/ok? started)
+              (if-not (database-error? started)
                 (await (record-eval-with-authority! frozen))
                 {::recorded started
                  ::compiled {::result result
@@ -4702,7 +4609,7 @@
               eval-id (:seon.eval/id recorded)
               new-projection
               (when (and (::candidate-projection candidate-outcome)
-                         (:seon.db/ok? recorded)
+                         (not (database-error? recorded))
                          (::tee-recorded? recorded))
                 (::candidate-projection candidate-outcome))
               publication
@@ -4727,7 +4634,7 @@
           ;; Bind only the committed id. A failed recorder leaves no orphaned
           ;; result slot; a rejected allocation candidate is never observable.
           (when (and publication-ok?
-                     (:seon.db/ok? recorded)
+                     (not (database-error? recorded))
                      (::ok? result))
             (let [live-value (if pending?
                                pending-promise
@@ -4742,7 +4649,7 @@
           ;; mix / revert rate = one Datalog query). A SEPARATE top-level
           ;; tx: nested attrs need a boot-schema entry, top-level attrs
           ;; lazy-install (the :seon.eval/record-error precedent).
-          (when (and (:seon.db/ok? recorded) fixed?)
+          (when (and (not (database-error? recorded)) fixed?)
             (let [fixes (:seon.repair/fixes pre)
                   r     (await
                           (db/transact!
@@ -4754,13 +4661,13 @@
                                (str/join " ; " (map :seon.repair/from fixes))
                                :seon.repair/to
                                (str/join " ; " (map :seon.repair/to fixes))}]}))]
-              (when-not (:seon.db/ok? r)
+              (when (database-error? r)
                 (js/console.error
                   "[seon.eval/preflight-repair] fix datoms failed for eval"
-                  eval-id ":" (-> r :seon.db/error :seon.error/message)))))
+                  eval-id ":" (:seon.error/message r)))))
           ;; Tests run only after the declaration transaction and exact
           ;; program projection publication both complete.
-          (when (and (:seon.db/ok? recorded)
+          (when (and (not (database-error? recorded))
                      (::tee-recorded? recorded)
                      publication-ok?
                      (::ok? result))
@@ -4806,7 +4713,8 @@
    tx. Mutates the caller's fold counters like eval-form-entry!."
   [{::keys [compile-state current-ns n-ok n-fail narration source
             value error tee committed!]
-    expected-coordinate ::db/expected-coordinate
+    database ::db/db
+    expected-database ::db/expected-db
     turn-id :seon.agent.turn/id-of-turn}]
   (let [result (if error
                  {::ok? false
@@ -4824,12 +4732,14 @@
                        ::ending-ns   @current-ns
                        ::result      result
                        ::tee         (vec (or tee []))}
-                      expected-coordinate
-                      (assoc ::db/expected-coordinate expected-coordinate))))]
-    (when-not (stale-coordinate-failure? recorded)
-      (when (and (:seon.db/ok? recorded) (::ok? result) committed!)
+                      database
+                      (assoc ::db/db database)
+                      expected-database
+                      (assoc ::db/expected-db expected-database))))]
+    (when-not (stale-database-failure? recorded)
+      (when (and (not (database-error? recorded)) (::ok? result) committed!)
         (await (committed!)))
-      (when (and (:seon.db/ok? recorded) (::ok? result))
+      (when (and (not (database-error? recorded)) (::ok? result))
         (bind-admitted-result-var! compile-state (:seon.eval/id recorded)
                                    (::retained-value recorded)))
       (if (::ok? result) (vswap! n-ok inc) (vswap! n-fail inc)))
@@ -4847,12 +4757,13 @@
            prepared (compile-record acquired)
            record-request
            (cond-> (merge m prepared)
-             (::db/coordinate acquired)
-             (assoc ::db/expected-coordinate (::db/coordinate acquired))
+             (::db/db acquired)
+             (assoc ::db/db (::db/db acquired)
+                    ::db/expected-db (::db/db acquired))
              committed!
              (assoc ::committed! committed!))
            recorded (await (record! record-request))]
-       (if (stale-coordinate-failure? recorded)
+       (if (stale-database-failure? recorded)
          (recur)
          recorded)))))
 
@@ -5125,7 +5036,7 @@
                           ::source      source
                           ::ending-ns   @current-ns
                           ::result      result}))]
-        (when (and (:seon.db/ok? recorded) (::ok? result))
+        (when (and (not (database-error? recorded)) (::ok? result))
           (bind-admitted-result-var! compile-state (:seon.eval/id recorded)
                                      (::retained-value recorded)))
         (if (::ok? result)
@@ -5254,9 +5165,10 @@
                      Mid-batch supersession is caught by the loop's next-turn
                      re-read (§8c); full per-write atomic isolation is the
                      Phase-2 worker-buffer keystone.
-     authored-sources — the ordinary namespace source map acquired at the
-                     batch coordinate. The six-argument arity supplies an
-                     empty map for existing core-only callers.
+     options       — the ordinary namespace source map and invocation database
+                     value acquired by the execution child. The six-argument
+                     arity acquires the current value and supplies no authored
+                     sources for existing core-only callers.
 
    Returns `{:seon.eval/ids    [<id> ...]   ; ordered, one per entry
              :seon.eval/n-ok   <int>        ; successful evals
@@ -5281,11 +5193,18 @@
                 [::agent-id :string]
                 [::turn-id :string]
                 [::run-id :any]
-                [::authored-sources ::authored-sources]]
+                [::options
+                 [:map {:closed true}
+                  [::authored-sources ::authored-sources]
+                  [::db/db :seon.db/db]]]]
          :map]]}
   ([compile-state parsed agent-ns-sym agent-id turn-id run-id]
-   (eval-batch! compile-state parsed agent-ns-sym agent-id turn-id run-id {}))
-  ([compile-state parsed agent-ns-sym agent-id turn-id run-id authored-sources]
+   (await
+     (eval-batch! compile-state parsed agent-ns-sym agent-id turn-id run-id
+                  {::authored-sources {}
+                   ::db/db (await (db/db))})))
+  ([compile-state parsed agent-ns-sym agent-id turn-id run-id
+    {::keys [authored-sources] database ::db/db}]
   (if-not (admission/available?)
     {:seon.eval/ids []
      :seon.eval/n-ok 0
@@ -5299,12 +5218,13 @@
         ;; when run-id is absent (a runless eval path).
         fence-lost?
         (when run-id
-          (false? (:seon.db/ok?
-                    (await (db/transact!
-                             {:seon.db/tx-data
-                              [(db/cas-assert [:seon.agent/id agent-id]
-                                              :seon.agent/run
-                                              [:seon.agent.run/id run-id])]})))))
+          (database-error?
+            (await (db/transact!
+                     {::db/db database
+                      :seon.db/tx-data
+                      [(db/cas-assert [:seon.agent/id agent-id]
+                                      :seon.agent/run
+                                      [:seon.agent.run/id run-id])]}))))
         ;; Fold-step local accumulators. Volatile! is a transient
         ;; mutation impl detail inside this one fn; not shared state.
         ;; current-ns is the per-form fold value: starts at agent
@@ -5335,7 +5255,7 @@
                 (await (body-fn))))))
         append-record!
         (fn [recorded]
-          (when (:seon.db/ok? recorded)
+          (when-not (database-error? recorded)
             (vswap! eids conj (:seon.eval/id recorded)))
           recorded)]
     ;; Fence lost ⇒ iterate over nil (zero entries) — the batch is skipped, the

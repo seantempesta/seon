@@ -256,8 +256,8 @@ path, await the derived `:idle` of the run it woke, return the truthful
 reply plus termination metadata (turns/evals scoped to this request's
 window, closed-reason, timed-out), an ordered `eval_evidence` projection of
 that same window's eval ids, times, sources, success facts, and present
-narration, the bounded captured database-operation evidence attached to those
-evals, plus the ordered bounded provider-attempt facts connected to those turns.
+narration and result data, plus the ordered bounded provider-attempt facts
+connected to those turns.
 The pure `seon.ai/resolved-config` reconstructs configuration intent at each
 attempt database value; stored attempt facts preserve non-derivable response
 identity and outcome. A response-time final database value is never mislabeled as
@@ -278,13 +278,11 @@ native sample metadata. These are derived evidence, not another config value.
 The eval projection is derived from the same final immutable database value
 and exact turn-entity set used for the response counts. General eval results,
 printed output, exception stacks, and unrelated source dumps never enter the
-door. An eval may carry a content-addressed vector of database operations
-captured by the ordinary `seon.db` observer. The final snapshot validates its
-blob size, schema, order, source, and complete database value before projecting a
-lossless bounded tagged value; absence or invalid evidence becomes a bounded
-status, never a preview or parser error. Inspect consumes this production
-response directly; it does not issue arbitrary forms through the writer REPL
-to reconstruct eval rows.
+door. The bounded result projection comes from the eval row recorded in the
+same database authority as the turn; it does not preserve a second execution
+trace or database-operation log. Inspect consumes this production response
+directly and does not issue arbitrary forms through the writer REPL to
+reconstruct eval rows.
 
 Standard Inspect tasks measure the selected model and scorer. Pod-backed Inspect
 tasks measure Seon's production agent/runtime behavior through this door; the

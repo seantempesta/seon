@@ -16,6 +16,14 @@
    ::coordinate/commit-id #uuid "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
    ::coordinate/t 42})
 
+(def database
+  {:db-name "default"
+   :t 42
+   :as-of nil
+   :since nil
+   :history false
+   :datahike/commit-id #uuid "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"})
+
 (defn- call-with-acquired-agent
   ([result request observed]
    (call-with-acquired-agent
@@ -389,7 +397,7 @@
           (.catch (fn [error] (is false (str error)) (done)))
           (.finally (fn [] (set! db/execute-many original)))))))
 
-(deftest eval-adapter-passes-one-explicit-coordinate-program-to-the-eval-owner
+(deftest eval-owner-receives-the-invocation-database-and-program
   (async done
     (let [original-eval eval/eval-batch!
           original-agent db/current-agent-id
@@ -411,16 +419,21 @@
       (set! db/current-agent-id (fn [] "agent-1"))
       (set! eval/eval-batch!
             (fn [& arguments]
-              (reset! observed arguments)
+              (reset! observed
+                      {:seon.execution.runtime-test/arguments arguments
+                       :seon.execution.runtime-test/context
+                       (db/current-tx-context)})
               (js/Promise.resolve {:seon.eval/n-ok 1
                                    :seon.eval/n-fail 0
                                    :seon.eval/ids ["eval-1"]})))
-      (-> (runtime/eval-batch!
-           request
-           (fn []
-             (js/Promise.resolve
-              {::execution/compile-state compile-state
-               ::execution/program program})))
+      (-> (db/with-tx-context
+           {::db/db database}
+           #(runtime/eval-batch!
+             request
+             (fn []
+               (js/Promise.resolve
+                {::execution/compile-state compile-state
+                 ::execution/program program}))))
           (.then
            (fn [result]
              (is (= {:seon.eval/n-ok 1
@@ -431,8 +444,14 @@
                      (:seon.eval/parsed request)
                      'my.agent.agent-1
                      "agent-1" "turn-1" "run-1"
-                     {:my.agent.agent-1 "(ns my.agent.agent-1)"}]
-                    @observed))
+                     {::eval/authored-sources
+                      {:my.agent.agent-1 "(ns my.agent.agent-1)"}
+                      ::db/db database}]
+                    (:seon.execution.runtime-test/arguments @observed)))
+             (is (nil?
+                  (::db/db
+                   (:seon.execution.runtime-test/context @observed)))
+                 "agent database calls advance from the session cache instead of an invocation pin")
              (done)))
           (.catch
            (fn [error]

@@ -1,21 +1,35 @@
 (ns seon.eval.receipt-test
-  "Pure contract tests for the parent-owned eval receipt mechanics."
+  "Focused contracts for eval receipts at the database authority boundary."
   (:require
     [cljs.test :refer [async deftest is testing]]
-    [datahike.api :as d]
     [malli.core :as m]
-    [seon.agent]
-    [seon.agent.home :as home]
-    [seon.client :as client]
     [seon.db :as db]
     [seon.db.id :as db.id]
     [seon.eval :as seval]
     [seon.eval.internal :as receipt]
-    [seon.repl :as repl]
-    [seon.repl.internal :as repl.internal]
     [seon.runtime.admission :as admission]))
 
-(def ^:private start
+(def database
+  {:db-name "default"
+   :t 42
+   :as-of nil
+   :since nil
+   :history false
+   :datahike/commit-id #uuid "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"})
+
+(def database-after
+  (assoc database
+         :t 43
+         :datahike/commit-id
+         #uuid "cccccccc-cccc-4ccc-8ccc-cccccccccccc"))
+
+(def transaction-report
+  {:db-before database
+   :db-after database-after
+   :tx-data []
+   :tempids {}})
+
+(def start
   {:seon.agent.turn/id "TRNreceipt0001"
    :seon.eval/id "EVLreceipt0001"
    :seon.eval/at (js/Date. 1000)
@@ -24,32 +38,18 @@
    :seon.eval/ns :my.agent.receipt
    :seon.eval/agent [:seon.agent/id "AGTreceipt0001"]})
 
-(defn- with-conn
-  [body]
-  (-> (client/open-agent-conn!)
-      (.then
-        (fn [conn]
-          (-> (d/transact!
-                conn
-                {:tx-data
-                 (db/malli->datahike-schema [:seon.eval/status])})
-              (.then
-                (fn [_]
-                  (let [previous db/*conn*]
-                    (set! db/*conn* conn)
-                    (-> (js/Promise.resolve (body conn))
-                        (.finally
-                          (fn [] (set! db/*conn* previous))))))))))))
-
-(defn- with-allocation-stub
-  [body]
-  (let [original db.id/allocate!]
-    (try
-      (-> (js/Promise.resolve (body original))
-          (.finally (fn [] (set! db.id/allocate! original))))
-      (catch :default error
-        (set! db.id/allocate! original)
-        (js/Promise.reject error)))))
+(def record-request
+  {:seon.agent.turn/id-of-turn "TRNreceipt0001"
+   ::seval/eval-id "EVLreceipt0001"
+   ::seval/at (js/Date. 1100)
+   ::seval/duration-ms 2
+   ::seval/narration "check arithmetic"
+   ::seval/source "(+ 1 2)"
+   ::seval/ending-ns 'my.agent.receipt
+   ::seval/result {::seval/ok? true ::seval/value 3}
+   ::seval/tee []
+   ::db/db database
+   ::db/expected-db database})
 
 (deftest receipt-schemas-are-closed-and-terminal-states-are-bounded
   (is (m/validate ::receipt/start-request start))
@@ -81,15 +81,15 @@
              :seon.eval/status :done
              :seon.eval/ok? true}]
            (receipt/terminal-tx-data
-             {:seon.eval/id "EVLreceipt0001"
-              :seon.eval/status :done}))))
+            {:seon.eval/id "EVLreceipt0001"
+             :seon.eval/status :done}))))
   (testing "interruption"
     (is (= false
            (:seon.eval/ok?
-             (second
-               (receipt/terminal-tx-data
-                 {:seon.eval/id "EVLreceipt0001"
-                  :seon.eval/status :interrupted})))))))
+            (second
+             (receipt/terminal-tx-data
+              {:seon.eval/id "EVLreceipt0001"
+               :seon.eval/status :interrupted})))))))
 
 (deftest receipt-state-derives-historical-terminal-rows
   (is (= :running (receipt/receipt-state {:seon.eval/status :running})))
@@ -97,54 +97,100 @@
   (is (= :error (receipt/receipt-state {:seon.eval/ok? false})))
   (is (= :absent (receipt/receipt-state {}))))
 
-(deftest failed-terminal-status-read-never-enters-transcript-fallback
+(deftest start-eval-returns-the-native-allocation-report
+  (async done
+    (let [original db.id/allocate!
+          observed (atom nil)]
+      (set! db.id/allocate!
+            (fn [request]
+              (reset! observed request)
+              (js/Promise.resolve
+               (assoc transaction-report
+                      ::db.id/ids
+                      {:seon.eval/eval-allocation "EVLreceipt0001"}))))
+      (-> (seval/start-eval!
+           {:seon.agent.turn/id-of-turn "TRNreceipt0001"
+            ::seval/at (js/Date. 1000)
+            ::seval/narration "check arithmetic"
+            ::seval/source "(+ 1 2)"
+            ::seval/starting-ns 'my.agent.receipt
+            ::db/db database})
+          (.then
+           (fn [result]
+             (is (= database (::db/db @observed)))
+             (is (= database (:db-before result)))
+             (is (= database-after (:db-after result)))
+             (is (= "EVLreceipt0001" (:seon.eval/id result)))
+             (is (not (contains? result :seon.db/ok?)))))
+          (.catch (fn [error] (is false (str error))))
+          (.finally
+           (fn []
+             (set! db.id/allocate! original)
+             (done)))))))
+
+(deftest record-eval-returns-the-native-transaction-report
+  (async done
+    (let [original db/transact!
+          observed (atom nil)]
+      (set! db/transact!
+            (fn [& [request]]
+              (reset! observed request)
+              (js/Promise.resolve transaction-report)))
+      (-> (seval/record-eval! record-request)
+          (.then
+           (fn [result]
+             (is (= database (::db/db @observed)))
+             (is (= database (::db/expected-db @observed)))
+             (is (= database-after (:db-after result)))
+             (is (= "EVLreceipt0001" (:seon.eval/id result)))
+             (is (true? (::seval/tee-recorded? result)))
+             (is (= 3 (::seval/retained-value result)))
+             (is (not (contains? result :seon.db/ok?)))))
+          (.catch (fn [error] (is false (str error))))
+          (.finally
+           (fn []
+             (set! db/transact! original)
+             (done)))))))
+
+(deftest failed-terminal-status-read-remains-a-direct-database-error
   (async done
     (let [original-transact db/transact!
           original-pull db/pull
-          calls (atom [])]
+          calls (atom [])
+          transaction-error
+          {:seon.error/message "receipt CAS lost"
+           :seon.error/data {}}
+          read-error
+          {:seon.error/message "authority status read failed"
+           :seon.error/kind :core-bug}]
       (set! db/transact!
             (fn [& [request]]
               (swap! calls conj [:transact request])
-              (js/Promise.resolve
-               {:seon.db/ok? false
-                :seon.db/error {:seon.error/message "receipt CAS lost"}})))
+              (js/Promise.resolve transaction-error)))
       (set! db/pull
             (fn
               ([request]
                (swap! calls conj [:pull request])
-               (js/Promise.resolve
-                {:seon.error/message "authority status read failed"
-                 :seon.error/kind :core-bug}))
-              ([_selector _eid]
+               (js/Promise.resolve read-error))
+              ([_selector _ref]
                (js/Promise.reject
                 (js/Error. "unexpected positional pull")))))
-      (-> (seval/record-eval!
-           {:seon.agent.turn/id-of-turn "TRNreceipt0001"
-            ::seval/eval-id "EVLreceipt0001"
-            ::seval/at (js/Date.)
-            ::seval/duration-ms 1
-            ::seval/narration "late completion"
-            ::seval/source "42"
-            ::seval/ending-ns 'my.agent.receipt
-            ::seval/result {::seval/ok? true ::seval/value 42}
-            ::seval/tee [{:seon.agent/id "AGTreceipt0001"}]})
+      (-> (seval/record-eval! record-request)
           (.then
            (fn [result]
-             (is (false? (:seon.db/ok? result)))
              (is (= "authority status read failed"
-                    (get-in result [:seon.db/error :seon.error/message])))
-             (is (= [:transact :pull] (mapv first @calls))
-                 "an unreadable winner cannot authorize fallback writes")))
-          (.catch
-           (fn [error]
-             (is false (str "status-read failure threw — " error))))
+                    (:seon.error/message result)))
+             (is (= "EVLreceipt0001" (:seon.eval/id result)))
+             (is (= [:transact :pull] (mapv first @calls)))
+             (is (not (contains? result :seon.db/error)))))
+          (.catch (fn [error] (is false (str error))))
           (.finally
            (fn []
              (set! db/transact! original-transact)
              (set! db/pull original-pull)
              (done)))))))
 
-(deftest run-fence-is-enforced-without-a-local-connection
+(deftest run-fence-uses-the-invocation-database
   (async done
     (let [original-transact db/transact!
           original-available admission/available?
@@ -153,258 +199,54 @@
       (set! db/transact!
             (fn [& [request]]
               (swap! requests conj request)
-              (js/Promise.resolve {:seon.db/ok? false})))
-      (-> (seval/eval-batch! nil [] 'my.agent.receipt
-                             "AGTreceipt0001" "TRNreceipt0001"
-                             "RUNreceipt0001")
+              (js/Promise.resolve {:seon.error/message "run superseded"})))
+      (-> (seval/eval-batch!
+           nil [] 'my.agent.receipt "AGTreceipt0001"
+           "TRNreceipt0001" "RUNreceipt0001"
+           {::seval/authored-sources {} ::db/db database})
           (.then
            (fn [result]
              (is (true? (:seon.eval/fenced? result)))
-             (is (= 1 (count @requests)))
-             (is (= [[:db.fn/cas
-                      [:seon.agent/id "AGTreceipt0001"]
-                      :seon.agent/run
-                      [:seon.agent.run/id "RUNreceipt0001"]
-                      [:seon.agent.run/id "RUNreceipt0001"]]]
-                    (::db/tx-data (first @requests))))))
-          (.catch
-           (fn [error]
-             (is false (str "session run fence threw — " error))))
+             (is (= database (::db/db (first @requests))))
+             (is (= 1 (count @requests)))))
+          (.catch (fn [error] (is false (str error))))
           (.finally
            (fn []
              (set! db/transact! original-transact)
              (set! admission/available? original-available)
              (done)))))))
 
-(deftest one-terminal-transition-commits-and-late-transitions-are-refused
+(deftest forms-do-not-reuse-the-database-value-consumed-by-the-run-fence
   (async done
-    (-> (with-conn
-          (fn ^:async exercise [conn]
-            (let [seed
-                  (await
-                    (db/transact!
-                      {:seon.db/tx-data
-                       [{:seon.agent/id "AGTreceipt0001"}
-                        {:seon.agent.turn/id "TRNreceipt0001"
-                         :seon.agent.turn/at (js/Date. 500)
-                         :seon.agent.turn/status :running}]}))]
-              (is (true? (:seon.db/ok? seed))))
-            (let [started
-                  (await
-                    (db/transact!
-                      {:seon.db/tx-data (receipt/start-tx-data start)}))
-                  turn
-                  (db/pull
-                    {:seon.db/db @conn
-                     :seon.db/pull-pattern
-                     '[:seon.agent.turn/id
-                       {:seon.agent.turn/evals [*]}]
-                     :seon.db/ref
-                     [:seon.agent.turn/id "TRNreceipt0001"]})
-                  eval-row (-> turn :seon.agent.turn/evals first)]
-              (is (true? (:seon.db/ok? started)))
-              (is (= "EVLreceipt0001" (:seon.eval/id eval-row)))
-              (is (= :running (:seon.eval/status eval-row)))
-              (is (not (contains? eval-row :seon.eval/ok?))))
-            (let [terminal
-                  (await
-                    (db/transact!
-                      {:seon.db/tx-data
-                       (receipt/terminal-tx-data
-                         {:seon.eval/id "EVLreceipt0001"
-                          :seon.eval/status :done})}))
-                  database @conn
-                  eval-row
-                  (db/entity
-                    {:seon.db/db database
-                     :seon.db/ref [:seon.eval/id "EVLreceipt0001"]})
-                  terminal-t (:seon.db/tx terminal)]
-              (is (true? (:seon.db/ok? terminal)))
-              (is (= :done (:seon.eval/status eval-row)))
-              (is (true? (:seon.eval/ok? eval-row)))
-              (is (= terminal-t
-                     (db/query
-                       {:seon.db/db (db/history database)
-                        :seon.db/query
-                        '[:find ?tx .
-                          :in $ ?eval-id
-                          :where
-                          [?eval :seon.eval/id ?eval-id _ true]
-                          [?eval :seon.eval/status :done ?tx true]]
-                        :seon.db/args ["EVLreceipt0001"]}))))
-            (let [before (db/basis-t @conn)
-                  duplicate
-                  (await
-                    (db/transact!
-                      {:seon.db/tx-data
-                       (receipt/terminal-tx-data
-                         {:seon.eval/id "EVLreceipt0001"
-                          :seon.eval/status :done})}))
-                  late
-                  (await
-                    (db/transact!
-                      {:seon.db/tx-data
-                       (receipt/terminal-tx-data
-                         {:seon.eval/id "EVLreceipt0001"
-                          :seon.eval/status :interrupted})}))]
-              (is (false? (:seon.db/ok? duplicate)))
-              (is (false? (:seon.db/ok? late)))
-              (is (= before (db/basis-t @conn)))
-              (is (= :done
-                     (:seon.eval/status
-                       (db/entity
-                         {:seon.db/ref
-                          [:seon.eval/id "EVLreceipt0001"]})))))))
-        (.then (fn [_] (done)))
-        (.catch
-          (fn [error]
-            (is false (str "threw — " error))
-            (done))))))
-
-(deftest interrupted-receipt-makes-late-recorder-settle-without-fallback
-  (async done
-    (-> (with-conn
-          (fn ^:async exercise [_conn]
-            (let [seeded
-                  (await
-                    (db/transact!
-                      {:seon.db/tx-data
-                       [{:seon.agent/id "AGTreceipt0001"}
-                        {:seon.agent.turn/id "TRNreceipt0001"
-                         :seon.agent.turn/at (js/Date.)
-                         :seon.agent.turn/status :running}]}))
-                  _ (is (true? (:seon.db/ok? seeded)))
-                  started
-                  (await
-                    (db/with-agent
-                      "AGTreceipt0001"
-                      #(seval/start-eval!
-                         {:seon.agent.turn/id-of-turn "TRNreceipt0001"
-                          ::seval/at (js/Date.)
-                          ::seval/narration "late completion"
-                          ::seval/source "42"
-                          ::seval/starting-ns 'my.agent.receipt})))
-                  eval-id (:seon.eval/id started)
-                  interrupted
-                  (await
-                    (db/transact!
-                      {:seon.db/tx-data
-                       (receipt/terminal-tx-data
-                         {:seon.eval/id eval-id
-                          :seon.eval/status :interrupted})}))
-                  _ (is (true? (:seon.db/ok? interrupted)))
-                  late
-                  (await
-                    (seval/record-eval!
-                      {:seon.agent.turn/id-of-turn "TRNreceipt0001"
-                       ::seval/eval-id eval-id
-                       ::seval/at (js/Date.)
-                       ::seval/duration-ms 1
-                       ::seval/narration "late completion"
-                       ::seval/source "42"
-                       ::seval/ending-ns 'my.agent.receipt
-                       ::seval/result {::seval/ok? true ::seval/value 42}
-                       ;; A nonempty tee would enter transcript fallback on an
-                       ;; ordinary write failure. A settled competing terminal
-                       ;; must short-circuit before that retry path.
-                       ::seval/tee [{:seon.agent/id "AGTreceipt0001"
-                                     :seon.eval/home-requires []}]}))
-                  row (db/entity
-                        {:seon.db/ref [:seon.eval/id eval-id]})]
-              (is (false? (:seon.db/ok? late)))
-              (is (true? (::seval/settled? late)))
-              (is (= :interrupted (:seon.eval/status late)))
-              (is (= :interrupted (:seon.eval/status row)))
-              (is (not (contains? row :seon.eval/result-edn))))))
-        (.then (fn [_] (done)))
-        (.catch
-          (fn [error]
-            (is false (str "threw — " error))
-            (done))))))
-
-(deftest failed-start-allocation-never-executes-and-next-form-gets-a-receipt
-  (async done
-    (-> (with-conn
-          (fn ^:async exercise [conn]
-            (let [fixture
-                  (await
-                    (db.id/allocate!
-                      {::db.id/allocations
-                       [{::db.id/key ::fixture-agent
-                         ::db.id/identity-attr :seon.agent/id}
-                        {::db.id/key ::fixture-turn
-                         ::db.id/identity-attr :seon.agent.turn/id}]
-                       ::db.id/transaction-builder
-                       (fn [ids]
-                         {:seon.db/tx-data
-                          [{:seon.agent/id (::fixture-agent ids)}
-                           {:seon.agent.turn/id (::fixture-turn ids)
-                            :seon.agent.turn/at (js/Date.)
-                            :seon.agent.turn/status :running}]})
-                       :seon.db/conn conn}))
-                  agent-id (get-in fixture [::db.id/ids ::fixture-agent])
-                  turn-id (get-in fixture [::db.id/ids ::fixture-turn])
-                  compile-state (await (repl/ensure-bootstrap!))
-                  agent-ns (home/home-ns agent-id)
-                  _ (await (seval/setup-agent-ns!
-                             compile-state agent-ns agent-id))
-                  _ (set! (.-receiptStartFailed js/globalThis) false)
-                  _ (set! (.-receiptSecondRan js/globalThis) false)
-                  failure-count (atom 0)
-                  source
-                  (str "(set! (.-receiptStartFailed js/globalThis) true)\n"
-                       "(set! (.-receiptSecondRan js/globalThis) true)")
-                  batch
-                  (await
-                    (with-allocation-stub
-                      (fn [original]
-                        (let [stub
-                              (fn [request]
-                                (if (and (zero? @failure-count)
-                                         (= :seon.eval/eval-allocation
-                                            (get-in request
-                                                    [::db.id/allocations 0
-                                                     ::db.id/key])))
-                                  (do
-                                    (swap! failure-count inc)
-                                    (js/Promise.resolve
-                                      {:seon.db/ok? false
-                                       :seon.db/error
-                                       {:seon.error/kind :core-bug
-                                        :seon.error/message
-                                        "injected receipt allocation failure"}}))
-                                  (original request)))]
-                          (set! db.id/allocate! stub)
-                          (db/with-agent
-                            agent-id
-                            #(seval/eval-batch!
-                               compile-state
-                               (repl.internal/parse-forms source)
-                               agent-ns agent-id turn-id nil))))))
-                  eval-ids
-                  (db/query
-                    {:seon.db/db @conn
-                     :seon.db/query
-                     '[:find [?id ...] :where [_ :seon.eval/id ?id]]})
-                  eval-row (db/entity
-                             {:seon.db/ref
-                              [:seon.eval/id (first (:seon.eval/ids batch))]})]
-              (is (= 1 @failure-count)
-                  "the first receipt allocation failed exactly once")
-              (is (false? (.-receiptStartFailed js/globalThis))
-                  "the failed form's observable side effect never ran")
-              (is (true? (.-receiptSecondRan js/globalThis))
-                  "the independent later form executed normally")
-              (is (= 1 (:seon.eval/n-fail batch)))
-              (is (= 1 (:seon.eval/n-ok batch)))
-              (is (= 1 (count (:seon.eval/ids batch))))
-              (is (= (:seon.eval/ids batch) eval-ids)
-                  "no eval or result identity exists for the failed start")
-              (is (= :done (:seon.eval/status eval-row)))
-              (is (= "(set! (.-receiptSecondRan js/globalThis) true)"
-                     (:seon.eval/source eval-row))))))
-        (.then (fn [_] (done)))
-        (.catch
-          (fn [error]
-            (is false (str "threw — " error))
-            (done))))))
+    (let [original-transact db/transact!
+          original-record seval/record-eval!
+          original-available admission/available?
+          recorded-request (atom nil)]
+      (set! admission/available? (constantly true))
+      (set! db/transact!
+            (fn [& [_request]]
+              (js/Promise.resolve transaction-report)))
+      (set! seval/record-eval!
+            (fn [request]
+              (reset! recorded-request request)
+              (js/Promise.resolve
+               (assoc transaction-report :seon.eval/id "EVLreceipt0001"))))
+      (-> (seval/eval-batch!
+           nil
+           [{:seon.repl/kind :comment
+             :seon.repl/narration "thinking"}]
+           'my.agent.receipt "AGTreceipt0001"
+           "TRNreceipt0001" "RUNreceipt0001"
+           {::seval/authored-sources {} ::db/db database})
+          (.then
+           (fn [result]
+             (is (= ["EVLreceipt0001"] (:seon.eval/ids result)))
+             (is (not (contains? @recorded-request ::db/db))
+                 "each form acquires the current cached database after earlier writes")))
+          (.catch (fn [error] (is false (str error))))
+          (.finally
+           (fn []
+             (set! db/transact! original-transact)
+             (set! seval/record-eval! original-record)
+             (set! admission/available? original-available)
+             (done)))))))

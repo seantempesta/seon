@@ -769,9 +769,6 @@
    :seon.eval/output
    :seon.eval/error
    :seon.eval/error-data
-   ;; Full ordered database-operation evidence is one canonical blob. This
-   ;; must be boot-installed because eval rows are nested turn components.
-   :seon.eval/database-operations-blob
    ;; :seon.eval/ns — ending ns from cljs.js/eval-str's :ns, or
    ;; unchanged accumulator on parse/eval failure (v1.md:236).
    :seon.eval/ns
