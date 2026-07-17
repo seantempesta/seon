@@ -2728,3 +2728,33 @@ Final graduation requires all ten units, deletion of the replica/feed/Node
 transport mechanisms, clean protocol conformance, real browser and agent
 journeys, full correctness gates, modest-hardware density, no-source packaging,
 restart/release proof, and the measured authority-shard decision.
+
+### 2026-07-17 canonical Bun cold-start checkpoint
+
+The normal operator now defaults its one `SEON_JS_RUNTIME` selection to Bun,
+and the canonical watcher → sole JVM writer → Bun pod sequence reaches full
+readiness against the existing default database. The successful checkpoint
+removed four cold-start defects rather than adding compatibility paths:
+
+- program initialization keeps every registered Malli schema as queryable
+  program data but derives Datahike declarations only from attributes named by
+  stored `[:map {:seon.db/entity true} ...]` schemas;
+- CLJ and CLJS share the existing canonical `:inst` primitive form while the
+  writer's database-authored registry remains isolated;
+- committed-program wrapper verification reports exact rejected symbols and
+  closed incorrect `query` and `pull` arity contracts; and
+- the public `seon.db` pull map again uses `:seon.db/pull-pattern`,
+  `:seon.db/ref`, and `:seon.db/refs`, translating only at the typed protocol
+  boundary. No transport `selector` or entity-id field remains in public call
+  sites.
+
+Focused proof is 16 writer tests/92 assertions for the schema bridge and
+initialization, 71 operator tests/320 assertions for runtime selection, 21 plan
+tests/70 assertions and 13 state tests/45 assertions under Bun. The integrated
+operator checkpoint reports watcher, writer, and pod ready. The next ordered
+exit was converged restart: `bin/seon restart` reused the canonical writer
+artifact, replaced all three supervised processes cleanly, reopened the existing
+database, and returned the Bun pod to readiness with explicit clean generations
+for watcher, writer, and pod. Crash/recovery remains to prove after the obsolete
+local-connection test fixtures are replaced; those fixtures currently obscure
+the maintained complete correctness gate but are not a runtime fallback.
