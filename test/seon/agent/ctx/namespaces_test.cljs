@@ -27,6 +27,7 @@
 ;; a fresh agent's current ns falls back to `(home-ns id)`.
 (def ^:private agent-id "tst-2606260000")
 (def ^:private cur-ns :my.agent.tst-2606260000)
+(def ^:private database {:datahike/commit-id "namespaces" :max-tx 1})
 
 ;; Unique body markers: present ⇒ the fn BODY was rendered (FULL); absent ⇒ the
 ;; body was elided (COMPACT). Markers, not format — robust to any render tweak.
@@ -153,65 +154,34 @@
       (is (not-any? #{'?all-names}
                     (tree-seq coll? seq (::protocol/query-form tx-member)))))))
 
-(deftest remote-namespace-failures-keep-member-and-coordinate-evidence
+(deftest remote-namespace-failures-keep-member-evidence
   (async done
-    (let [coordinate {:seon.db.coordinate/database-id "db"
-                      :seon.db.coordinate/branch "main"
-                      :seon.db.coordinate/commit-id "commit"
-                      :seon.db.coordinate/t 1}
-          moved (assoc coordinate :seon.db.coordinate/t 2)
-          original-execute-many db/execute-many
-          original-pull db/pull
-          responses
-          (atom
-            [{::db/coordinate coordinate
-              ::db/results
-              [(member {:seon.agent/id agent-id})
-               (fail-member "latest namespace failed")
-               (member {})]}
-             {::db/coordinate coordinate
-              ::db/results
-              [(member {:seon.agent/id agent-id})
-               (member [[cur-ns (js/Date. 1) 1]])
-               (member {})]}
-             {::db/coordinate moved
-              ::db/results [(member [eager-current-row])
-                            (member [[cur-ns 1]])]}])]
+    (let [original-execute-many db/execute-many
+          request (atom nil)]
       (set! db/execute-many
-            (fn [_]
-              (let [response (first @responses)]
-                (swap! responses subvec 1)
-                (js/Promise.resolve response))))
-      (set! db/pull (fn [_] (js/Promise.resolve eager-current-row)))
+            (fn [value]
+              (reset! request value)
+              (js/Promise.resolve
+                {::db/results
+                 [(member {:seon.agent/id agent-id})
+                  (fail-member "latest namespace failed")
+                  (member {})]})))
       (-> (nss/namespaces-block {:seon.agent/id agent-id
-                                 ::db/coordinate coordinate} nil)
+                                 ::db/db database} nil)
           (.then
             (fn [member-result]
               (let [member-failure (:seon.render/ai member-result)]
-              (is (str/includes? member-failure "initial member"))
-              (nss/namespaces-block {:seon.agent/id agent-id
-                                     ::db/coordinate coordinate} nil))))
-          (.then
-            (fn [coordinate-result]
-              (let [coordinate-failure (:seon.render/ai coordinate-result)]
-              (is (str/includes? coordinate-failure
-                                 ":seon.db/expected-coordinate"))
-              (is (str/includes? coordinate-failure
-                                 ":seon.db/actual-coordinate")))))
+                (is (str/includes? member-failure "initial member"))
+                (is (identical? database (::db/db @request))))))
           (.catch (fn [e] (is false (str "threw: " (.-message e)))))
           (.finally
             (fn []
               (set! db/execute-many original-execute-many)
-              (set! db/pull original-pull)
               (done)))))))
 
 (deftest grown-schema-frontier-keeps-the-production-cap-and-budgets
   (async done
-    (let [coordinate {:seon.db.coordinate/database-id "db"
-                      :seon.db.coordinate/branch "main"
-                      :seon.db.coordinate/commit-id "commit"
-                      :seon.db.coordinate/t 1}
-          left-keys (mapv #(keyword "grown.left" (str "k" %))
+    (let [left-keys (mapv #(keyword "grown.left" (str "k" %))
                           (range ctx/referenced-schema-cap))
           right-keys (mapv #(keyword "grown.right" (str "k" %))
                            (range ctx/referenced-schema-cap))
@@ -228,7 +198,7 @@
                 (mapv (fn [k] [k ":string"])
                       (first (::db/args request))))))
       (-> ((deref #'nss/acquire-schema-rows!)
-           {::db/coordinate coordinate
+           {::db/db database
             :seon.agent.ctx.namespaces/namespace-rows
             [{:seon.ns/name :grown.left
               :seon.fn/_ns [{:seon.fn/sym "grown.left/run"
@@ -245,7 +215,7 @@
               (doseq [request @requests]
                 (let [frontier (first (::db/args request))]
                   (is (= ctx/referenced-schema-cap (count frontier)))
-                  (is (= coordinate (::db/coordinate request)))
+                  (is (identical? database (::db/db request)))
                   (is (= 500000 (::db/max-work request)))
                   (is (= 256 (::db/max-results request)))
                   (is (= 262144 (::db/max-result-weight request)))))))
@@ -254,11 +224,7 @@
 
 (deftest schema-frontier-fails-instead-of-silently-truncating-the-aggregate
   (async done
-    (let [coordinate {:seon.db.coordinate/database-id "db"
-                      :seon.db.coordinate/branch "main"
-                      :seon.db.coordinate/commit-id "commit"
-                      :seon.db.coordinate/t 1}
-          namespace-count 52
+    (let [namespace-count 52
           rows
           (mapv
             (fn [namespace-index]
@@ -280,7 +246,7 @@
                 (mapv (fn [k] [k ":string"])
                       (first (::db/args request))))))
       (-> ((deref #'nss/acquire-schema-rows!)
-           {::db/coordinate coordinate
+           {::db/db database
             :seon.agent.ctx.namespaces/namespace-rows rows})
           (.then
             (fn [acquired]
@@ -296,11 +262,7 @@
 
 (deftest schema-acquisition-does-not-preselect-the-formatters-first-forty
   (async done
-    (let [coordinate {:seon.db.coordinate/database-id "db"
-                      :seon.db.coordinate/branch "main"
-                      :seon.db.coordinate/commit-id "commit"
-                      :seon.db.coordinate/t 1}
-          initial-keys (mapv #(keyword "z.branch" (str "k" %))
+    (let [initial-keys (mapv #(keyword "z.branch" (str "k" %))
                              (range ctx/referenced-schema-cap))
           earlier-child :a.branch/child
           row {:seon.ns/name :branch.root
@@ -320,7 +282,7 @@
                              ":string")])
                       (first (::db/args request))))))
       (-> ((deref #'nss/acquire-schema-rows!)
-           {::db/coordinate coordinate
+           {::db/db database
             :seon.agent.ctx.namespaces/namespace-rows [row]})
           (.then
             (fn [acquired]

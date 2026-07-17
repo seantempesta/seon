@@ -1,5 +1,5 @@
 (ns seon.agent.ctx.menu-test
-  "Focused proof for the coordinate-pinned function-menu acquisition."
+  "Focused proof for database-value-pinned function-menu acquisition."
   (:require
     [cljs.test :refer [async deftest is]]
     [clojure.string :as str]
@@ -8,13 +8,9 @@
     [seon.db.protocol :as protocol]))
 
 (def ^:private agent-id "menutestagentA")
-(def ^:private coordinate
-  {:seon.db.coordinate/database-id
-   #uuid "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
-   :seon.db.coordinate/branch :main
-   :seon.db.coordinate/commit-id
-   #uuid "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
-   :seon.db.coordinate/t 42})
+(def ^:private database
+  {:datahike/commit-id #uuid "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+   :max-tx 42})
 
 (defn- member [value]
   {::protocol/success? true ::protocol/result value})
@@ -39,14 +35,12 @@
    :seon.fn/doc "Author a whole plan."})
 
 (defn- responses [policy]
-  [{::db/coordinate coordinate
-    ::db/results
+  [{::db/results
     [(member policy)
      (query-member [[(js/Date. 3000) 13 "(plan/done! {})" :my.agent.menu]
                     [(js/Date. 2000) 12 "(plan/done! {})" :my.agent.menu]])
      (query-member [[(js/Date. 3000) 13 "(plan/done! {})" :my.agent.menu]])]}
-   {::db/coordinate coordinate
-    ::db/results
+   {::db/results
     [(member [{:seon.ns/name :my.agent.menu
                :seon.ns/require-edges
                [{:seon.ns.require/target :my.plan
@@ -55,17 +49,24 @@
      (query-member [[done-row] [plan-row]])
      (member [done-row])]}])
 
-(defn- render-with [policy]
-  (let [calls (atom (responses policy))]
-    (with-redefs [db/current-tx-context (fn [] {::db/coordinate coordinate})
-                  db/execute-many
-                  (fn [request]
-                    (is (= coordinate (::db/coordinate request))
-                        "every acquisition stays pinned")
-                    (let [response (first @calls)]
-                      (swap! calls subvec 1)
-                      (js/Promise.resolve response)))]
-      (menu/function-menu-block {:seon.agent/id agent-id} nil))))
+(defn- render-with
+  ([policy] (render-with policy {::db/db database}))
+  ([policy tx-context]
+   (let [calls (atom (responses policy))
+         original-context db/current-tx-context
+         original-execute db/execute-many]
+     (set! db/current-tx-context (constantly tx-context))
+     (set! db/execute-many
+           (fn [request]
+             (is (identical? database (::db/db request))
+                 "every acquisition uses the same database value")
+             (let [response (first @calls)]
+               (swap! calls subvec 1)
+               (js/Promise.resolve response))))
+     (-> (menu/function-menu-block {:seon.agent/id agent-id} nil)
+         (.finally (fn []
+                     (set! db/current-tx-context original-context)
+                     (set! db/execute-many original-execute)))))))
 
 (deftest prompt-menu-acquires-remotely-and-preserves-one-numbering
   (async done
@@ -92,13 +93,3 @@
                 "toolkit retains the first glyph when recent is empty")
             (done)))
         (.catch (fn [error] (is false (str error)) (done))))))
-
-(deftest absent-coordinate-fails-closed
-  (async done
-    (with-redefs [db/current-tx-context (constantly nil)]
-      (-> (menu/function-menu-block {:seon.agent/id agent-id} nil)
-          (.then (fn [out]
-                   (is (str/includes? out "render failed")
-                       "core acquisition failures remain visible")
-                   (done)))
-          (.catch (fn [error] (is false (str error)) (done)))))))

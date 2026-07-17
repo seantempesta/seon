@@ -131,11 +131,12 @@
      [] 2000000 65536 1048576)])
 
 (defn ^:async ^:private acquire-warnings
-  [agent-id]
+  [agent-id database]
   (let [first-result
         (await
           (db/execute-many
-            {::db/members
+            {::db/db database
+             ::db/members
              [(query-member latest-user-query)
               (query-member current-ns-query [agent-id] 1000000 1 8192)
               (query-member function-rows-query [] 5000000 65536 2097152)
@@ -145,7 +146,8 @@
               (query-member attribute-counts-query [] 5000000 65536 2097152)]
              ::db/max-result-weight 3670016}))
         first-members (::db/results first-result)]
-    (if-not (every? #(true? (::protocol/success? %)) first-members)
+    (if-not (and (not (:seon.error/message first-result))
+                 (every? #(true? (::protocol/success? %)) first-members))
       {:seon.error/message "Warning acquisition failed."
        :seon.error/data first-members}
       (let [[cutoff-member ns-member fn-member schema-member provenance-member
@@ -154,19 +156,17 @@
             now (js/Date.)
             runtime-result
             (await (db/execute-many
-                     {::db/coordinate (::db/coordinate first-result)
+                     {::db/db database
                       ::db/members (runtime-members cutoff now)
                       ::db/max-result-weight 3145728}))
             runtime (::db/results runtime-result)]
-        (if (or (not= (::db/coordinate first-result)
-                      (::db/coordinate runtime-result))
-                (not (every? #(true? (::protocol/success? %)) runtime)))
+        (if-not (and (not (:seon.error/message runtime-result))
+                     (every? #(true? (::protocol/success? %)) runtime))
           {:seon.error/message "Warning runtime acquisition failed."
            :seon.error/data runtime}
           (let [[failed fs-results hops record-errors slow failing canvases]
                 (map member-result runtime)]
-            {::db/coordinate (::db/coordinate first-result)
-             ::warn/current-ns (ffirst (member-result ns-member))
+            {::warn/current-ns (ffirst (member-result ns-member))
              ::warn/data
              {::warn/function-rows (member-result fn-member)
               ::warn/installed-schema (::protocol/schema schema-member)
@@ -197,7 +197,12 @@
   ;; (seon.render/render) — that is where a per-block :seon.warn/ns override
   ;; lives. (Reading :seon.agent.ctx/block here was a dead key: the input
   ;; never carries it, so the override was silently ignored.)
-  (let [acquired (await (acquire-warnings id))
+  (let [database (or (::db/db input)
+                     (::db/db (db/current-tx-context))
+                     (await (db/db)))
+        acquired (if (:seon.error/message database)
+                   database
+                   (await (acquire-warnings id database)))
         override (:seon.warn/ns (:seon.render/node input))
         scope    (cond
                    (= override :seon.warn/all) nil
@@ -259,7 +264,7 @@
         (:datahike.query/result member))))
 
 (defn- core-fault-rows
-  "Format ordinary core-fault query results at one database coordinate."
+  "Format ordinary core-fault query results at one database value."
   [cutoff-rows frame-rows rows]
   (let [cutoff (ffirst cutoff-rows)
         frame0 (into {} frame-rows)]
@@ -284,15 +289,22 @@
    are not theirs to fix; the affected agent already saw its in-place
    `:seon/error` envelope)."
   {:malli/schema [:=> [:cat :seon.render/section-request :any] :string]}
-  [_input _invoke-selected!]
-  (let [acquired (await (db/execute-many
-                          {::db/members
-                           (mapv query-member
-                                 [latest-user-query core-frame-query
-                                  core-fault-query])
-                           ::db/max-result-weight 4194304}))
+  [input _invoke-selected!]
+  (let [database (or (::db/db input)
+                     (::db/db (db/current-tx-context))
+                     (await (db/db)))
+        acquired (if (:seon.error/message database)
+                   database
+                   (await (db/execute-many
+                           {::db/db database
+                            ::db/members
+                            (mapv query-member
+                                  [latest-user-query core-frame-query
+                                   core-fault-query])
+                            ::db/max-result-weight 4194304})))
         members (::db/results acquired)
-        rows (when (every? #(true? (::protocol/success? %)) members)
+        rows (when (and (not (:seon.error/message acquired))
+                        (every? #(true? (::protocol/success? %)) members))
                (apply core-fault-rows (map member-result members)))]
     (cond
       (nil? rows)
@@ -330,12 +342,18 @@
    (`async-unwrappable?`) are excluded; the kill-switch (`SEON_INSTRUMENT`
    off) renders empty — no invariant to hold."
   {:malli/schema [:=> [:cat :seon.render/section-request :any] :string]}
-  [_input _invoke-selected!]
-  (let [result (await (db/query
-                        {:seon.db/query program-schema-query
-                         :datahike.resource/max-work 4000000
-                         :datahike.resource/max-results 65536
-                         :datahike.resource/max-result-weight 4194304}))
+  [input _invoke-selected!]
+  (let [database (or (::db/db input)
+                     (::db/db (db/current-tx-context))
+                     (await (db/db)))
+        result (if (:seon.error/message database)
+                 database
+                 (await (db/query
+                         {::db/db database
+                          :seon.db/query program-schema-query
+                          :datahike.resource/max-work 4000000
+                          :datahike.resource/max-results 65536
+                          :datahike.resource/max-result-weight 4194304})))
         gaps (when-not (:seon.error/message result)
                (instrument/coverage-gaps result))]
     (cond

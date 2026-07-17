@@ -250,23 +250,27 @@
    idle with a completed latest run: its `:seon.agent.run/result` (+ a ref
    pointer); closed abnormally: the closed-reason (so a dead child is
    visible, not just a succeeded one). A breaker-tripped child shows it.
-   Acquisition is bounded and coordinate-pinned; formatting uses ordinary data."
+   Acquisition is bounded at one database value; formatting uses ordinary data."
   {:malli/schema [:=> [:cat :seon.render/section-request :any] :string]}
-  [{:seon.agent/keys [id]} _invoke-selected!]
-  (let [stage-one
-        (await (db/execute-many
-                 {::db/members
-                  [(query-member direct-children-query [id] 4096 262144)
-                   (pull-member breaker-selector
-                                [:seon.config/id config/cluster-config-id])]
-                  ::db/max-result-weight 524288}))
-        coordinate (::db/coordinate stage-one)
+  [{:seon.agent/keys [id] :as input} _invoke-selected!]
+  (let [database (or (::db/db input)
+                     (::db/db (db/current-tx-context))
+                     (await (db/db)))
+        stage-one
+        (if (:seon.error/message database)
+          database
+          (await (db/execute-many
+                  {::db/db database
+                   ::db/members
+                   [(query-member direct-children-query [id] 4096 262144)
+                    (pull-member breaker-selector
+                                 [:seon.config/id config/cluster-config-id])]
+                   ::db/max-result-weight 524288})))
         [children-member breaker-member] (::db/results stage-one)
         children-result (member-result children-member)
         breaker-row (or (member-result breaker-member) {})]
     (cond
-      (or (nil? coordinate)
-          (not (true? (::protocol/success? children-member)))
+      (or (not (true? (::protocol/success? children-member)))
           (not (true? (::protocol/success? breaker-member))))
       (str "[subagents] render failed: " (pr-str (::db/results stage-one)))
 
@@ -283,7 +287,7 @@
             since (js/Date. (- (.getTime now) breaker-w))
             stage-two
             (await (db/execute-many
-                     {::db/coordinate coordinate
+                     {::db/db database
                       ::db/members
                       [(query-member open-runs-query [child-ids])
                        (query-member open-run-turn-counts-query [child-ids])
@@ -291,8 +295,7 @@
                        (query-member crash-counts-query [child-ids since])]
                       ::db/max-result-weight 3670016}))
             members (::db/results stage-two)
-            results (when (and (= coordinate (::db/coordinate stage-two))
-                               (every? #(true? (::protocol/success? %)) members))
+            results (when (every? #(true? (::protocol/success? %)) members)
                       (mapv member-result members))]
         (if-not results
           (str "[subagents] render failed: " (pr-str members))
@@ -343,12 +346,18 @@
    observe first). Root-only by config wiring (rides `:seon.config/root-context`,
    like `:core-faults`). Pure read of the db."
   {:malli/schema [:=> [:cat :seon.render/section-request :any] :string]}
-  [_input _invoke-selected!]
-  (let [acquired (await (db/execute-many
-                          {::db/members
-                           [(query-member orphan-query [])
-                            (query-member orphan-open-run-query [])]
-                           ::db/max-result-weight 1048576}))
+  [input _invoke-selected!]
+  (let [database (or (::db/db input)
+                     (::db/db (db/current-tx-context))
+                     (await (db/db)))
+        acquired (if (:seon.error/message database)
+                   database
+                   (await (db/execute-many
+                           {::db/db database
+                            ::db/members
+                            [(query-member orphan-query [])
+                             (query-member orphan-open-run-query [])]
+                            ::db/max-result-weight 1048576})))
         [orphan-member-result* run-member-result*] (::db/results acquired)
         rows (member-result orphan-member-result*)
         open-runs (member-result run-member-result*)

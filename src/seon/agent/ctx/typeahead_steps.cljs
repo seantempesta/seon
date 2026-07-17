@@ -3,7 +3,7 @@
    provider's observability twin (typeahead-design.md \"The live block\").
 
    ONE block, BOTH render slots. Acquisition is asynchronous and pinned to
-   the invocation coordinate; formatting is pure over ordinary values:
+   the invocation database value; formatting is pure over ordinary values:
 
      - `:seon.render/html` ([[steps-surface-html]]) — the agent-page live
        surface: a state banner (FSM state now, provider, step k/N, rounds,
@@ -83,12 +83,14 @@
 
 (defn ^:async ^:private acquire-prompt-provider
   [{agent-id :seon.agent/id :as input}]
-  (let [coordinate (or (::db/coordinate input)
-                       (::db/coordinate (db/current-tx-context)))
-        acquired (when coordinate
+  (let [database (or (::db/db input)
+                     (::db/db (db/current-tx-context))
+                     (await (db/db)))
+        acquired (if (:seon.error/message database)
+                   database
                    (await
                      (db/execute-many
-                       {::db/coordinate coordinate
+                       {::db/db database
                         ::db/members
                         [{::protocol/operation protocol/pull-operation
                           ::protocol/selector [:seon.ai/agent-provider]
@@ -103,7 +105,7 @@
                           :datahike.resource/max-results 8
                           :datahike.resource/max-result-weight 1024}]
                         ::db/max-result-weight 4096})))]
-    (if-not (and coordinate (= coordinate (::db/coordinate acquired))
+    (if-not (and (not (:seon.error/message acquired))
                  (every? #(true? (::protocol/success? %))
                          (::db/results acquired)))
       {:seon.error/message "Typeahead provider acquisition failed."
@@ -189,12 +191,14 @@
 
 (defn ^:async ^:private acquire-steps-surface
   [{agent-id :seon.agent/id :as input}]
-  (let [coordinate (or (::db/coordinate input)
-                       (::db/coordinate (db/current-tx-context)))
-        initial (when coordinate
+  (let [database (or (::db/db input)
+                     (::db/db (db/current-tx-context))
+                     (await (db/db)))
+        initial (if (:seon.error/message database)
+                  database
                   (await
                     (db/execute-many
-                      {::db/coordinate coordinate
+                      {::db/db database
                        ::db/members
                        [{::protocol/operation protocol/pull-operation
                          ::protocol/selector [:seon.ai/agent-provider]
@@ -211,7 +215,7 @@
                         (query-member latest-call-query [agent-id] 64 4096)]
                        ::db/max-result-weight 8192})))
         members (::db/results initial)]
-    (if-not (and coordinate (= coordinate (::db/coordinate initial))
+    (if-not (and (not (:seon.error/message initial))
                  (= 3 (count members))
                  (every? #(true? (::protocol/success? %)) members))
       {:seon.error/message "Typeahead surface acquisition failed."
@@ -225,14 +229,13 @@
           {:seon.typeahead/provider provider :seon.typeahead/steps []}
           (let [selected (await
                            (db/execute-many
-                             {::db/coordinate coordinate
+                             {::db/db database
                               ::db/members
                               [(query-member call-steps-query [agent-id call]
                                              2048 1048576)]
                               ::db/max-result-weight 1048576}))
                 member (first (::db/results selected))]
-            (if-not (and (= coordinate (::db/coordinate selected))
-                         (true? (::protocol/success? member)))
+            (if-not (true? (::protocol/success? member))
               {:seon.error/message "Typeahead step acquisition failed."
                :seon.error/kind :core-bug
                :seon.error/data selected}

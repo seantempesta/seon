@@ -48,18 +48,13 @@
                  (-> (db/transact! {:seon.db/tx-data (seed-tx)})
                      (.then (fn [_] (body @conn)))))))))
 
-(def ^:private coordinate
-  {:seon.db.coordinate/database-id "warnings-test"
-   :seon.db.coordinate/branch :db
-   :seon.db.coordinate/commit-id "commit"
-   :seon.db.coordinate/t 1})
+(def ^:private database {:datahike/commit-id "warnings-test" :max-tx 1})
 
 (defn- member [result]
   {::protocol/success? true ::protocol/result result})
 
 (defn- acquisition-responses []
-  [{::db/coordinate coordinate
-    ::db/results
+  [{::db/results
     [(member [])
      (member [[:wtest.warns (js/Date. 1) 1]])
      (member
@@ -70,15 +65,15 @@
      (member [])
      (member [])
      (member [])]}
-   {::db/coordinate coordinate
-    ::db/results (vec (repeat 7 (member [])))}])
+   {::db/results (vec (repeat 7 (member [])))}])
 
 (defn- block-for
   [scope-kw]
   (warnings/warnings-block
     {:seon.agent/id "wtest-agent"
      :seon.agent/entity {:seon.agent/id "wtest-agent"}
-     :seon.render/node {:seon.warn/ns scope-kw}}
+     :seon.render/node {:seon.warn/ns scope-kw}
+     ::db/db database}
     nil))
 
 (deftest warnings-block-honors-scope-override-on-the-block-node
@@ -108,9 +103,8 @@
             (fn [out]
               (is (= "" out))
               (is (= 6 (count @requests)) "each render uses two owner-local batches")
-              (is (every? #(= coordinate (::db/coordinate %))
-                          (take-nth 2 (rest @requests)))
-                  "every dependent runtime batch retains the first coordinate")))
+              (is (every? #(identical? database (::db/db %)) @requests)
+                  "every batch uses the invocation database value")))
           (.catch (fn [e] (is false (str "threw — " e))))
           (.finally (fn [] (set! db/execute-many original) (done)))))))
 
@@ -167,8 +161,11 @@
                  (pr-str async-gap-probe-spec)]
                 ["seon.agent.ctx.warnings-test/never-compiled"
                  (pr-str gap-probe-spec)]]
-          original db/query]
-      (set! db/query (fn [_] (js/Promise.resolve rows)))
+          original db/query
+          requests (atom [])]
+      (set! db/query (fn [request]
+                       (swap! requests conj request)
+                       (js/Promise.resolve rows)))
       (testing "sync and async live contracts are gaps; dead rows are not"
         (let [gaps (instrument/coverage-gaps rows)]
           (is (= ["seon.agent.ctx.warnings-test/async-gap-probe"
@@ -177,7 +174,9 @@
           (is (= [:seon.instrument/unwrapped :seon.instrument/unwrapped]
                  (mapv :seon.instrument/reason gaps)))))
       (-> (warnings/instrumentation-gaps-block
-            {:seon.agent/id "root" :seon.agent/entity {:seon.agent/id "root"}}
+            {:seon.agent/id "root"
+             :seon.agent/entity {:seon.agent/id "root"}
+             ::db/db database}
             nil)
           (.then
             (fn [out]
@@ -198,8 +197,11 @@
               (is (= [] (instrument/coverage-gaps rows)))
               (warnings/instrumentation-gaps-block
                 {:seon.agent/id "root"
-                 :seon.agent/entity {:seon.agent/id "root"}}
+                 :seon.agent/entity {:seon.agent/id "root"}
+                 ::db/db database}
                 nil)))
-          (.then (fn [out] (is (= "" out))))
+          (.then (fn [out]
+                   (is (= "" out))
+                   (is (every? #(identical? database (::db/db %)) @requests))))
           (.catch (fn [e] (is false (str "threw — " e))))
           (.finally (fn [] (set! db/query original) (done)))))))

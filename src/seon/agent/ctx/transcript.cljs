@@ -888,8 +888,9 @@
 
 (defn- ^:async acquire-transcript
   [{:seon.agent/keys [id entity] :as input}]
-  (let [coordinate (or (::db/coordinate input)
-                       (::db/coordinate (db/current-tx-context)))
+  (let [database (or (::db/db input)
+                     (::db/db (db/current-tx-context))
+                     (await (db/db)))
         node (:seon.render/node input)
         window-size (or (::turn-window-size node) default-turn-window-size)
         run (:seon.agent/run entity)
@@ -914,20 +915,13 @@
                                     500000 500000 4096)
                       (query-member run-form-count-query [run-id]
                                     500000 500000 4096)))
-        stage-one
-        (if coordinate
-          (await (db/execute-many {::db/coordinate coordinate
-                                   ::db/members stage-one-members
-                                   ::db/max-result-weight 131072}))
-          {::error {:seon.error/message
-                    "Transcript acquisition requires an exact database coordinate."
-                    :seon.error/kind :core-bug}})]
+        stage-one (if (database-error database)
+                    database
+                    (await (db/execute-many {::db/db database
+                                             ::db/members stage-one-members
+                                             ::db/max-result-weight 131072})))]
     (if-let [error (or (::error stage-one)
                        (database-error stage-one)
-                       (when-not (= coordinate (::db/coordinate stage-one))
-                         {:seon.error/message
-                          "Transcript acquisition moved database coordinates."
-                          :seon.error/kind :core-bug})
                        (acquisition-error (::db/results stage-one)))]
       (assoc input ::error error)
       (let [[config-member turn-count-member turns-member ns-member action-member
@@ -966,15 +960,11 @@
               (conj (query-member (previous-ns-query cutoff-at) [id cutoff-at]
                                   500000 500000 8192)))
             stage-two (await (db/execute-many
-                               {::db/coordinate coordinate
+                               {::db/db database
                                 ::db/members stage-two-members
                                 ::db/max-result-weight 790528}))]
         (if-let [error (or (::error stage-two)
                            (database-error stage-two)
-                           (when-not (= coordinate (::db/coordinate stage-two))
-                             {:seon.error/message
-                              "Transcript acquisition moved database coordinates."
-                              :seon.error/kind :core-bug})
                            (acquisition-error (::db/results stage-two)))]
           (assoc input ::error error)
           (let [[eval-member message-member previous-ns-member]
@@ -1027,7 +1017,7 @@
 (declare format-transcript-block)
 
 (defn ^:async transcript-block
-  "Acquire and render the transcript at the active database coordinate."
+  "Acquire and render the transcript at the active database value."
   {:malli/schema [:=> [:cat :seon.render/section-request :any] :string]}
   [input _invoke-selected!]
   (format-transcript-block (await (acquire-transcript input))))

@@ -1,10 +1,12 @@
 (ns seon.agent.ctx.transcript-test
-  "Pure transcript formatting and coordinate-required acquisition."
+  "Pure transcript formatting and database-value acquisition."
   (:require
     [cljs.test :refer [deftest is async]]
     [clojure.string :as str]
     [seon.agent.ctx.transcript :as transcript]
     [seon.db :as db]))
+
+(def ^:private database {:datahike/commit-id "transcript" :max-tx 7})
 
 (def acquired-empty
   {:seon.agent/id "agent"
@@ -48,27 +50,29 @@
            (mapv #(.getTime ^js (:seon.agent.ctx.transcript/at %))
                  (transcript/recent-html-events [] 2 events))))))
 
-(deftest missing-coordinate-fails-closed
+(deftest current-database-value-is-acquired-once-for-both-stages
   (async done
-    (let [original db/current-tx-context]
-      (set! db/current-tx-context (constantly nil))
-      (-> (transcript/transcript-block {:seon.agent/id "agent"} nil)
-          (.then (fn [text]
-                   (is (str/includes? text
-                                      "requires an exact database coordinate"))))
+    (let [requests (atom [])
+          original-execute db/execute-many]
+      (set! db/execute-many
+            (fn [request]
+              (swap! requests conj request)
+              (js/Promise.resolve
+                {::db/results
+                 (mapv (fn [result]
+                         {:seon.db.protocol/success? true
+                          :seon.db.protocol/result result})
+                       (if (= 1 (count @requests))
+                         [{} 0 [] [] []]
+                         [[]]))})))
+      (-> (transcript/transcript-block
+            {:seon.agent/id "agent" ::db/db database} nil)
+          (.then (fn [_]
+                   (is (every? #(identical? database (::db/db %)) @requests))))
           (.catch (fn [error] (is false (str error))))
-          (.finally (fn [] (set! db/current-tx-context original) (done)))))))
-
-(deftest missing-coordinate-html-is-an-error-surface
-  (async done
-    (let [original db/current-tx-context]
-      (set! db/current-tx-context (constantly nil))
-      (-> (transcript/transcript-block-html {:seon.agent/id "agent"} nil)
-          (.then (fn [hiccup]
-                   (is (str/includes? (pr-str hiccup)
-                                      "requires an exact database coordinate"))))
-          (.catch (fn [error] (is false (str error))))
-          (.finally (fn [] (set! db/current-tx-context original) (done)))))))
+          (.finally (fn []
+                      (set! db/execute-many original-execute)
+                      (done)))))))
 
 (deftest host-telemetry-remains-bounded
   (is (str/starts-with? (transcript/host-telemetry) "; host · load ")))

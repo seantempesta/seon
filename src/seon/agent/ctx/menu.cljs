@@ -24,7 +24,7 @@
    This ns also owns the `:seon.typeahead/*` driver-policy row — the ONE
    policy surface the typeahead design allows (no new config system).
    Defaults live in code ([[default-policy]]); the database row is acquired
-   at the invocation coordinate by [[function-menu-block]]. The keyword ns
+   at the invocation database value by [[function-menu-block]]. The keyword ns
    `seon.typeahead` names the DRIVER
    surface later phases add; the design doc pins these keyword names."
   (:require
@@ -388,11 +388,13 @@
 
 (defn ^:async ^:private acquire-prompt-menu
   [{agent-id :seon.agent/id :as input}]
-  (let [coordinate (or (::db/coordinate input)
-                       (::db/coordinate (db/current-tx-context)))
-        initial (when coordinate
-                  (await (db/execute-many
-                           {::db/coordinate coordinate
+  (let [database (or (::db/db input)
+                     (::db/db (db/current-tx-context))
+                     (await (db/db)))]
+    (if (:seon.error/message database)
+      database
+      (let [initial (await (db/execute-many
+                           {::db/db database
                             ::db/members
                             [{::protocol/operation protocol/pull-operation
                               ::protocol/selector (vec (cons :seon.typeahead/id
@@ -403,12 +405,13 @@
                               :datahike.resource/max-result-weight 4096}
                              (query-member prompt-eval-query [agent-id] 32768 262144)
                              (query-member cluster-eval-query [] 131072 1048576)]
-                            ::db/max-result-weight 1314816})))]
-    (if-not (and coordinate (= coordinate (::db/coordinate initial))
-                 (every? #(true? (::protocol/success? %)) (::db/results initial)))
-      {:seon.error/message "Function menu acquisition failed."
-       :seon.error/kind :core-bug :seon.error/data initial}
-      (let [[policy-member agent-member cluster-member] (::db/results initial)
+                            ::db/max-result-weight 1314816}))]
+        (if-not (and (not (:seon.error/message initial))
+                     (every? #(true? (::protocol/success? %))
+                             (::db/results initial)))
+          {:seon.error/message "Function menu acquisition failed."
+           :seon.error/kind :core-bug :seon.error/data initial}
+          (let [[policy-member agent-member cluster-member] (::db/results initial)
             agent-rows (mapv eval-row (member-result agent-member))
             cluster-rows (mapv eval-row (member-result cluster-member))
             current-ns (or (:seon.eval/ns (first agent-rows))
@@ -420,7 +423,7 @@
             direct-syms (directly-called-symbols
                           (concat agent-rows cluster-rows))
             selected (await (db/execute-many
-                              {::db/coordinate coordinate
+                              {::db/db database
                                ::db/members
                                [{::protocol/operation protocol/pull-many-operation
                                  ::protocol/selector prompt-ns-selector
@@ -448,19 +451,19 @@
                                  :datahike.resource/max-results 32768
                                  :datahike.resource/max-result-weight 1048576}]
                                ::db/max-result-weight 3211264}))]
-        (if-not (and (= coordinate (::db/coordinate selected))
-                     (every? #(true? (::protocol/success? %))
-                             (::db/results selected)))
-          {:seon.error/message "Function menu selected acquisition failed."
-           :seon.error/kind :core-bug :seon.error/data selected}
-          (let [[ns-member fn-member direct-member] (::db/results selected)]
-            {:policy-row (member-result policy-member)
-             :agent-rows agent-rows :cluster-rows cluster-rows
-             :current-ns current-ns
-             :namespace-rows (remove nil? (member-result ns-member))
-             :function-rows (into (mapv first (member-result fn-member))
-                                  (remove nil?)
-                                  (member-result direct-member))}))))))
+            (if-not (and (not (:seon.error/message selected))
+                         (every? #(true? (::protocol/success? %))
+                                 (::db/results selected)))
+              {:seon.error/message "Function menu selected acquisition failed."
+               :seon.error/kind :core-bug :seon.error/data selected}
+              (let [[ns-member fn-member direct-member] (::db/results selected)]
+                {:policy-row (member-result policy-member)
+                 :agent-rows agent-rows :cluster-rows cluster-rows
+                 :current-ns current-ns
+                 :namespace-rows (remove nil? (member-result ns-member))
+                 :function-rows (into (mapv first (member-result fn-member))
+                                      (remove nil?)
+                                      (member-result direct-member))}))))))))
 
 (defn ^:async function-menu-block
   "The `:function-menu` section — recent + toolkit functions, glyph-listed.

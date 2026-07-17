@@ -8,11 +8,9 @@
     [seon.db :as db]
     [seon.db.protocol :as protocol]))
 
-(def ^:private point
-  {:seon.db.coordinate/database-id #uuid "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
-   :seon.db.coordinate/branch :db
-   :seon.db.coordinate/commit-id #uuid "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
-   :seon.db.coordinate/t 42})
+(def ^:private database
+  {:datahike/commit-id #uuid "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+   :max-tx 42})
 
 (def ^:private absent :seon.agent.ctx.subagents/absent)
 (def ^:private now (js/Date. 7200000))
@@ -83,20 +81,18 @@
     (is (str/includes? out "more children"))
     (is (<= (tokens/estimate out) 900))))
 
-(deftest prompt-acquisition-is-bounded-and-coordinate-pinned
+(deftest prompt-acquisition-is-bounded-and-database-value-pinned
   (async done
     (let [original db/execute-many
           requests (atom [])
           contexts (atom [])
           responses
           (atom
-            [{::db/coordinate point
-              ::db/results
+            [{::db/results
               [(success [["child" "compute" absent]])
                (success {:seon.config.breaker/crash-count 4
                          :seon.config.breaker/window-ms 60000})]}
-             {::db/coordinate point
-              ::db/results
+             {::db/results
               [(success [["child" "run" 6 absent absent]])
                (success [["child" 1]])
                (success [])
@@ -109,20 +105,16 @@
                 (swap! responses subvec 1)
                 (js/Promise.resolve response))))
       (-> (db/with-tx-context
-            {::db/coordinate point}
+            {::db/db database}
             #(sub/subagents-block {:seon.agent/id "parent"} nil))
           (.then
             (fn [out]
               (is (str/includes? out "child [running]"))
               (is (= [2 4] (mapv (comp count ::db/members) @requests)))
-              (is (nil? (::db/coordinate (first @requests)))
-                  "the first request inherits the active coordinate")
-              (is (= point (::db/coordinate (second @requests)))
-                  "dependent detail acquisition is pinned to the same coordinate")
-              (is (every? #(= point (::db/coordinate %)) @contexts)
-                  "both requests execute inside the inherited coordinate context")
-              (is (every? #(not (contains? % :seon.db/db)) @requests)
-                  "no Datahike value crosses the prompt owner")
+              (is (every? #(identical? database (::db/db %)) @requests)
+                  "both batches use the inherited database value")
+              (is (every? #(identical? database (::db/db %)) @contexts)
+                  "both requests execute inside the inherited database context")
               (set! db/execute-many original)
               (done)))
           (.catch
@@ -139,9 +131,8 @@
             (fn [_]
               (swap! calls inc)
               (js/Promise.resolve
-                {::db/coordinate point
-                 ::db/results [(success []) (success {})]})))
-      (-> (sub/subagents-block {:seon.agent/id "parent"} nil)
+                {::db/results [(success []) (success {})]})))
+      (-> (sub/subagents-block {:seon.agent/id "parent" ::db/db database} nil)
           (.then (fn [out]
                    (is (= "" out))
                    (is (= 1 @calls))
@@ -161,15 +152,15 @@
             (fn [request]
               (reset! observed request)
               (js/Promise.resolve
-                {::db/coordinate point
-                 ::db/results
+                {::db/results
                  [(success [["orphan" "dead-parent" "research"]])
                   (success [["orphan" :running]])]})))
-      (-> (sub/orphaned-agents-block {} nil)
+      (-> (sub/orphaned-agents-block {::db/db database} nil)
           (.then (fn [out]
                    (is (str/includes? out "orphan [running]"))
                    (is (str/includes? out "parent dead-parent"))
                    (is (= 2 (count (::db/members @observed))))
+                   (is (identical? database (::db/db @observed)))
                    (set! db/execute-many original)
                    (done)))
           (.catch

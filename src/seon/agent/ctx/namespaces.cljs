@@ -328,16 +328,18 @@
    :seon.error/kind :core-bug})
 
 (defn ^:async ^:private acquire-namespace-rows!
-  "Acquire namespace rows at one database coordinate."
+  "Acquire namespace rows at one database value."
   [{id :seon.agent/id :as input}]
-  (let [coordinate (or (::db/coordinate input)
-                       (::db/coordinate (db/current-tx-context)))
-        initial (when coordinate
+  (let [database (or (::db/db input)
+                     (::db/db (db/current-tx-context))
+                     (await (db/db)))
+        initial (if (:seon.error/message database)
+                  database
                   (await (db/execute-many
-                           {::db/coordinate coordinate
+                           {::db/db database
                             ::db/members (initial-acquisition-members id)
                             ::db/max-result-weight 786432})))]
-    (if-not (and coordinate (= coordinate (::db/coordinate initial)))
+    (if (:seon.error/message initial)
       (acquisition-error "initial acquisition" initial)
       (let [[agent-member ns-member config-member] (::db/results initial)
             agent (member-result agent-member)
@@ -349,11 +351,11 @@
           (acquisition-error "initial member" (::db/results initial))
           (let [cur-ns (keyword (name (or latest-ns (home/home-ns id))))
                 current-row
-                (await (db/pull {::db/coordinate coordinate
-                                 ::db/pull-pattern
+                (await (db/pull {::db/db database
+                                 ::db/selector
                                  [:seon.ns/name
                                   {:seon.ns/require-edges require-edge-selector}]
-                                 ::db/ref [:seon.ns/name cur-ns]
+                                 ::db/eid [:seon.ns/name cur-ns]
                                  ::db/max-work 100000
                                  ::db/max-results 512
                                  ::db/max-result-weight 65536}))]
@@ -383,36 +385,31 @@
                                vec)
                     selected
                     (await (db/execute-many
-                             {::db/coordinate coordinate
+                             {::db/db database
                               ::db/members (selected-acquisition-members names)
                               ;; Leave 448 KiB beneath the 4 MiB frame ceiling
-                              ;; for the coordinate and protocol envelope.
-                              ::db/max-result-weight 3735552}))]
-                (if-not (= coordinate (::db/coordinate selected))
-                  (acquisition-error
-                    "selected coordinate check"
-                    {:seon.db/expected-coordinate coordinate
-                     :seon.db/actual-coordinate (::db/coordinate selected)})
-                  (let [[rows-member tx-member] (::db/results selected)]
-                    (if-not (and (true? (::protocol/success? rows-member))
-                                 (true? (::protocol/success? tx-member)))
-                      (acquisition-error "selected member" (::db/results selected))
-                      (let [rows (member-result rows-member)
-                            txs (into {} (member-result tx-member))]
-                        {:seon.db/coordinate coordinate
-                         :seon.agent/id id
-                         :seon.agent.ctx.render-fns/current-ns cur-ns
-                         :seon.config/current-ns
-                         (or (:seon.config/current-ns config-row) :full)
-                         ::full-source full-source-cfg
-                         ::with-tests with-tests-cfg
-                         ::current-full? current-full?
-                         ::current-tests? current-tests?
-                         ::namespace-rows
-                         (mapv (fn [nm row]
-                                 (cond-> (or row {:seon.ns/name nm})
-                                   (get txs nm) (assoc :seon.db/tx (get txs nm))))
-                               names rows)}))))))))))))
+                              ;; for the protocol response.
+                              ::db/max-result-weight 3735552}))
+                    [rows-member tx-member] (::db/results selected)]
+                (if-not (and (true? (::protocol/success? rows-member))
+                             (true? (::protocol/success? tx-member)))
+                  (acquisition-error "selected member" (::db/results selected))
+                  (let [rows (member-result rows-member)
+                        txs (into {} (member-result tx-member))]
+                    {::db/db database
+                     :seon.agent/id id
+                     :seon.agent.ctx.render-fns/current-ns cur-ns
+                     :seon.config/current-ns
+                     (or (:seon.config/current-ns config-row) :full)
+                     ::full-source full-source-cfg
+                     ::with-tests with-tests-cfg
+                     ::current-full? current-full?
+                     ::current-tests? current-tests?
+                     ::namespace-rows
+                     (mapv (fn [nm row]
+                             (cond-> (or row {:seon.ns/name nm})
+                               (get txs nm) (assoc :seon.db/tx (get txs nm))))
+                           names rows)}))))))))))
 
 (def ^:private schema-frontier-query
   '[:find ?requested ?form
@@ -424,8 +421,8 @@
 (def ^:private schema-row-aggregate-cap 2048)
 
 (defn- schema-frontier-request
-  [coordinate frontier]
-  {::db/coordinate coordinate
+  [database frontier]
+  {::db/db database
    ::db/query schema-frontier-query
    ::db/args [frontier]
    ::db/max-work 500000
@@ -437,7 +434,7 @@
   (when (and (map? value) (string? (:seon.error/message value))) value))
 
 (defn ^:async ^:private acquire-one-schema-closure!
-  [coordinate row state]
+  [database row state]
   (let [own-keys (into #{} (keep :seon.schema/key) (:seon.schema/_ns row))
         sources (into []
                       (remove str/blank?)
@@ -458,7 +455,7 @@
                                frontier)
               response (if (seq unknown)
                          (await (db/query (schema-frontier-request
-                                           coordinate unknown)))
+                                           database unknown)))
                          [])]
           (if-let [error (database-error response)]
             (assoc state ::error
@@ -499,7 +496,7 @@
   [input]
   (if-let [error (database-error input)]
     (assoc input ::error error)
-    (let [coordinate (::db/coordinate input)
+    (let [database (::db/db input)
           namespace-rows (::namespace-rows input)]
       (loop [rows namespace-rows
              state {::schema-rows-by-key {}
@@ -513,7 +510,7 @@
             (::error state) (assoc ::error (::error state)))
           (recur (subvec rows 1)
                  (await (acquire-one-schema-closure!
-                          coordinate (first rows) state))))))))
+                          database (first rows) state))))))))
 
 (defn- full?
   "True when an included ns `nm` renders FULL (its whole real source); false
@@ -660,7 +657,7 @@
       card)))
 
 (defn ^:async namespaces-block
-  "Acquire and render namespaces at the active database coordinate."
+  "Acquire and render namespaces at the active database value."
   {:malli/schema [:=> [:cat :seon.render/section-request :any] :map]}
   [input _invoke-selected!]
   (let [acquired

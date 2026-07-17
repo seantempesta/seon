@@ -124,8 +124,8 @@
        ::surface-sym))
 
 (defn ^:async ^:private acquire-canvas!
-  "Acquire the canvas identity from ordinary discovery data at one coordinate."
-  [id agent]
+  "Acquire the canvas identity from ordinary discovery data at one database value."
+  [id agent database]
   (let [{entity :seon.render/entity
          :as state} (discovery-state agent)
         base-wired (canvas/wired-content state)]
@@ -139,12 +139,12 @@
       :else
       (let [candidates-response
             (await (db/execute-many
-                     {::db/members [(candidate-member id)]
+                     {::db/db database
+                      ::db/members [(candidate-member id)]
                       ::db/max-result-weight 1179648}))]
-        (if-not (::db/coordinate candidates-response)
+        (if (:seon.error/message candidates-response)
           (acquisition-error "candidate acquisition" candidates-response)
-          (let [coordinate (::db/coordinate candidates-response)
-                member (first (::db/results candidates-response))]
+          (let [member (first (::db/results candidates-response))]
             (if-not (true? (::protocol/success? member))
               (acquisition-error "candidate member" member)
               (let [rows (candidate-rows (member-result member))
@@ -152,13 +152,13 @@
                     history-response
                     (when (seq attrs)
                       (await (db/execute-many
-                               {::db/coordinate coordinate
+                               {::db/db database
                                 ::db/members [(history-member id attrs)]
                                 ::db/max-result-weight 1179648})))
                     attr-txs
                     (cond
                       (empty? attrs) {}
-                      (not= coordinate (::db/coordinate history-response)) nil
+                      (:seon.error/message history-response) nil
                       :else
                       (let [history-member-result
                             (first (::db/results history-response))]
@@ -171,8 +171,7 @@
                         wired (canvas/wired-content
                                 (cond-> state
                                   derived (assoc ::canvas/derived derived)))]
-                    {:seon.db/coordinate coordinate
-                     :seon.render/entity entity
+                    {:seon.render/entity entity
                      ::canvas/wired wired}))))))))))
 
 (defn- clip-marker
@@ -266,7 +265,7 @@
    independently bounded by the one render-fn token cap; a canvas cannot
    consume an unbounded share of every later turn.
 
-   Acquires the wired canvas at this turn's exact database coordinate and
+   Acquires the wired canvas at this turn's exact database value and
    invokes a selected renderer inside the execution child. Renderer input is
    ordinary data; database work uses the asynchronous `seon.db` API rather
    than receiving a Datahike value.
@@ -294,10 +293,15 @@
    the section is always present; the unwired branch is the
    correctness floor."
   {:malli/schema [:=> [:cat :seon.render/section-request :any] :string]}
-  [{:seon.agent/keys [id entity]} invoke-selected!]
+  [{:seon.agent/keys [id entity] :as input} invoke-selected!]
   (try
-    (let [{wired ::canvas/wired :as acquired}
-          (await (acquire-canvas! id entity))
+    (let [database (or (::db/db input)
+                       (::db/db (db/current-tx-context))
+                       (await (db/db)))
+          _ (when (:seon.error/message database)
+              (throw (ex-info (:seon.error/message database) database)))
+          {wired ::canvas/wired :as acquired}
+          (await (acquire-canvas! id entity database))
           value (::canvas/value wired)
           result (when (symbol? value)
                    (first

@@ -4,22 +4,15 @@
     [cljs.test :refer [async deftest is testing]]
     [datahike.api :as d]
     [seon.agent.ctx.canvas :as canvas-ctx]
-    [seon.config :as config]
     [seon.db :as db]
     [seon.db.protocol :as protocol]
-    [seon.render :as render]
     [seon.render.canvas :as canvas]))
 
 (def ^:private agent-id "tst-canvas-remote")
 
-(def ^:private coordinate
-  {:seon.db.coordinate/database-id #uuid "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
-   :seon.db.coordinate/branch :db
-   :seon.db.coordinate/commit-id #uuid "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
-   :seon.db.coordinate/t 42})
-
-(def ^:private other-coordinate
-  (assoc coordinate :seon.db.coordinate/t 43))
+(def ^:private database
+  {:datahike/commit-id #uuid "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+   :max-tx 42})
 
 (deftest ordinary-formatting-tail-preserves-the-current-caller-bytes
   (let [response
@@ -49,12 +42,6 @@
                 "(defn current [_] {:seon.render/ai \"Agent meaning\"})"
                 2000)))
         (is (zero? @reads)))
-      (testing "the retained caller delegates without changing bytes"
-        (is (= expected
-               (with-redefs [render/render-agent-canvas (constantly response)
-                             config/render-fn-token-cap (constantly 2000)]
-                 (canvas-ctx/canvas-block
-                   {:seon.agent/id agent-id})))))
       (finally
         (set! db/query original-query)
         (set! db/pull original-pull)))))
@@ -106,7 +93,7 @@
     (let [calls (atom 0)
           original-execute-many db/execute-many
           acquire! (fn [agent]
-                     (@#'canvas-ctx/acquire-canvas! agent-id agent))]
+                     (@#'canvas-ctx/acquire-canvas! agent-id agent nil))]
       (set! db/execute-many
             (fn [_]
               (swap! calls inc)
@@ -133,46 +120,47 @@
                       (set! db/execute-many original-execute-many)
                       (done)))))))
 
-(deftest coordinate-mismatch-and-member-failure-are-data
+(deftest database-member-failures-are-data
   (async done
     (let [original-execute-many db/execute-many
+          requests (atom [])
           responses
           (atom
-            [{::db/coordinate coordinate
-              ::db/results
+            [{::db/results
               [{::protocol/success? true
                 :datahike.query/result
                 #{["my.canvas/view"
                    "[:=> [:cat :map] [:map [:seon.render/hiccup [:vector :any]]]]"
                    100 false {:seon.fn/read-attrs [:seon.agent/purpose]}]}}]}
-             {::db/coordinate other-coordinate
-              ::db/results
-              [{::protocol/success? true
-                :datahike.query/result
-                #{[:seon.agent/purpose 101]}}]}])]
+             {::db/results
+              [{::protocol/success? false
+                ::protocol/error
+                {:seon.error/message "history failed"}}]}])]
       (set! db/execute-many
-            (fn [_]
+            (fn [request]
+              (swap! requests conj request)
               (let [response (first @responses)]
                 (swap! responses subvec 1)
                 (js/Promise.resolve response))))
-      (-> (@#'canvas-ctx/acquire-canvas!
-            agent-id {:seon.agent/id agent-id})
+      (-> (js/Promise.resolve
+            (@#'canvas-ctx/acquire-canvas!
+              agent-id {:seon.agent/id agent-id} database))
           (.then
             (fn [result]
               (is (= "Canvas history acquisition failed."
                      (:seon.error/message result)))
               (reset! responses
-                      [{::db/coordinate coordinate
-                        ::db/results
+                      [{::db/results
                         [{::protocol/success? false
                           ::protocol/error
                           {:seon.error/message "candidate failed"}}]}])
               (@#'canvas-ctx/acquire-canvas!
-                agent-id {:seon.agent/id agent-id})))
+                agent-id {:seon.agent/id agent-id} database)))
           (.then
             (fn [result]
               (is (= "Canvas candidate member failed."
-                     (:seon.error/message result)))))
+                     (:seon.error/message result)))
+              (is (every? #(identical? database (::db/db %)) @requests))))
           (.catch (fn [error]
                     (is false (str "error-path probe threw: " (.-message error)))))
           (.finally (fn []
