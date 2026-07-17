@@ -53,6 +53,11 @@ second eval path, or second lifecycle path may be added to make an intermediate
 state pass. A replacement strengthens the existing owner and deletes the
 superseded owner with its last consumer. If a unit becomes much harder than its
 behavior suggests, pause for an adversarial design pass before adding code.
+Public function names and namespaces never carry migration versions. Honest
+serialized wire or persisted-data format identities may remain versioned, but
+they are decoded by the one current owner; they do not authorize parallel
+functions, adapters, or behavioral implementations. Every consumer cut must
+name the retained owner and the superseded owner it deletes.
 
 The current ordered spine is:
 
