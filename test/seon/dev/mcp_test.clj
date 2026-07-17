@@ -2,6 +2,7 @@
   (:require [cheshire.core :as json]
             [clojure.core.server :as core-server]
             [clojure.java.io :as io]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [seon.dev.mcp :as mcp])
   (:import [java.net ServerSocket]))
@@ -18,16 +19,26 @@
 (defn- response-data [response]
   (json/parse-string (get-in response [:content 0 :text]) true))
 
-(deftest tool-contract-exposes-both-runtimes-and-compatibility-alias
+(deftest tool-contract-exposes-one-name-for-each-runtime
   (let [by-name (into {} (map (juxt :name identity)) mcp/tools)]
     (is (contains? by-name "eval_clj"))
     (is (contains? by-name "eval_cljs"))
-    (is (contains? by-name "eval"))
+    (is (not (contains? by-name "eval")))
     (doseq [tool-name ["eval_clj" "eval_cljs"]]
       (is (= ["code"] (get-in by-name [tool-name :inputSchema :required])))
       (is (= "integer"
              (get-in by-name [tool-name :inputSchema :properties
                               :max_output_tokens :type]))))))
+
+(deftest eval-dispatch-has-no-compatibility-alias
+  (with-redefs-fn {#'mcp/execute-eval identity}
+    (fn []
+      (is (= {:code "(+ 1 2)"}
+             (#'mcp/execute-tool "eval_cljs" {"code" "(+ 1 2)"})))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Unknown tool: eval"
+                            (#'mcp/execute-tool "eval"
+                                                {"code" "(+ 1 2)"}))))))
 
 (deftest shadow-discovery-derives-every-artifact-flavor-port-file
   (let [root "/tmp/seon-mcp-root"]
@@ -184,7 +195,7 @@
         err (java.io.StringWriter.)]
     (binding [*out* out *err* err]
       (#'mcp/handle-request {:jsonrpc "2.0" :id 7 :method "tools/list"}))
-    (let [lines (clojure.string/split-lines (str out))
+    (let [lines (str/split-lines (str out))
           response (json/parse-string (first lines) true)]
       (is (= 1 (count lines)))
       (is (= 7 (:id response)))

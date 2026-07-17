@@ -32,21 +32,21 @@ bound HTTP port to `tmp/seon-port` (default `7890`; override via
 
 ### MCP eval against the running pod
 
-The active CLJS MCP server is registered as `seon_cljs`:
+The active CLJS MCP server advertises the `eval_cljs` tool:
 
 ```clojure
 ;; Smoke — proves the real cluster database is attached
-mcp__seon_cljs__eval {
+eval_cljs {
   code: "(seon.db/basis-t)"
 }
 ;; => <current transaction id>
 
 ;; Inspect process-lifetime state
-mcp__seon_cljs__eval { code: "@seon.client/!state" }
+eval_cljs { code: "@seon.client/!state" }
 ;; => {:boot-at "...", :reload-count <N>, :heartbeat-id #object [Timeout ...]}
 
 ;; Configure the fs sandbox (default is deny-all)
-mcp__seon_cljs__eval { code: "(seon.fs/configure!
+eval_cljs { code: "(seon.fs/configure!
                                   {:seon.fs/allowed-roots [\"/Users/me/work\"]
                                    :seon.fs/read-only? false})" }
 
@@ -64,7 +64,7 @@ is shaped or how `:tx-meta` propagates.
 
 ```clojure
 ;; Once per pod boot. Idempotent — subsequent calls are O(atom-deref).
-mcp__seon_cljs__eval { code: "(.then (seon.repl/dev-init!) prn)" }
+eval_cljs { code: "(.then (seon.repl/dev-init!) prn)" }
 ;; => {:compile-state #object[Atom ...] :conn #object[Atom ...]}
 
 ;; After init:
@@ -80,7 +80,7 @@ one whose semantics match the question you're asking.
 
 | Surface | Mechanism | Use when |
 |---|---|---|
-| **Host eval** | `mcp__seon_cljs__eval` piggybacks shadow's nREPL into the `:client` runtime. Forms see every var statically required by `seon.client` (rewrite-clj, datahike, cljs.js, the whole core). | Core-library questions. "Does rewrite-clj parse comments alongside forms?" "Does `(d/history db)` return the tx datoms I expect?" — no in-pod simulation needed. |
+| **Host eval** | `eval_cljs` piggybacks shadow's nREPL into the `:client` runtime. Forms see every var statically required by `seon.client` (rewrite-clj, datahike, cljs.js, the whole core). | Core-library questions. "Does rewrite-clj parse comments alongside forms?" "Does `(d/history db)` return the tx datoms I expect?" — no in-pod simulation needed. |
 | **Bootstrap-CLJS eval** | `(seon.eval/eval @seon.repl/!compile-state "...")` compiles + runs the string through `cljs.js` against the persistent compile-state. | The question IS what an LLM-emitted form experiences. Error shapes (`:kind :compile` vs `:runtime`), `(ns other)` switches, `(def x …)` cross-call persistence gotcha, `^:async`/`await`. |
 
 Both surfaces write to the same datahike conn (`@seon.repl/!conn`)
@@ -89,11 +89,11 @@ tagging and history queries behave the same through either path.
 
 ```clojure
 ;; Host eval — testing a core library
-mcp__seon_cljs__eval { code:
+eval_cljs { code:
   "(rewrite-clj.parser/parse-string-all \";; hi\\n(+ 1 2)\\n\")" }
 
 ;; Bootstrap-CLJS eval — testing what the agent will see
-mcp__seon_cljs__eval { code:
+eval_cljs { code:
   "(.then (seon.eval/eval @seon.repl/!compile-state \"Let\")
           (fn [r] (js/console.log (pr-str r))))" }
 

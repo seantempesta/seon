@@ -24,8 +24,7 @@
 ;; Canonical tools:
 ;;   - eval_cljs          Eval CLJS code in the current pod runtime.
 ;;   - eval_clj           Eval CLJ code in the current writer runtime.
-;; Compatibility tools retained under Claude's `seon_cljs` server name:
-;;   - eval               Alias for eval_cljs.
+;; Session and runtime tools:
 ;;   - create_session     Clone a persistent CLJS session for *1/*2/*3.
 ;;   - list_sessions      List known sessions.
 ;;   - stop_session       Forget a session (does not interrupt eval).
@@ -1073,7 +1072,7 @@
           (if-let [sid (create-cljs-session! port build-id cid)]
           (mcp-success (str "session=" sid " build=" build-id
                             " cluster=" cluster " client-id=" cid
-                            " (use this sid in mcp__seon_cljs__eval's session_id)"))
+                            " (use this sid in eval_cljs session_id)"))
           (mcp-error (str "failed to clone/pivot CLJS session into " build-id
                           " pinned to cluster " cluster
                           " (watcher up? build watched? see stderr log)"))))
@@ -1085,7 +1084,7 @@
                                       (all-advertisements!))))))
       (if-let [sid (create-cljs-session! default-port build-id)]
         (mcp-success (str "session=" sid " build=" build-id
-                          " (use this sid in mcp__seon_cljs__eval's session_id)"))
+                          " (use this sid in eval_cljs session_id)"))
         (mcp-error (str "failed to clone/pivot CLJS session into " build-id
                         " (watcher up? build watched? see stderr log)"))))))
 
@@ -1203,20 +1202,6 @@
                                :max_output_tokens {:type "integer" :minimum 64 :maximum 16000}}
                   :required ["code"]}}
 
-   ;; Claude compatibility alias retained while existing prompts migrate.
-   {:name "eval"
-    :description "Evaluate ClojureScript code in a watched shadow-cljs build's runtime. Returns {value, ns, out, err}. Reload-on-save is automatic — your source edits propagate without restart. Use session_id 'default' for the singleton :repl-build session, or a 6-char hex sid from create_session for an isolated session."
-    :inputSchema {:type "object"
-                  :properties {:code {:type "string"
-                                      :description "ClojureScript code to evaluate. Must reference fully-qualified names (cljs.user has no implicit aliases beyond core)."}
-                               :agent_id {:type "string"
-                                          :description "Address the pod for a database agent: the core :seon.agent/id, optionally cluster-qualified as '<cluster>/<id>' (for example 'default/root'). Each pod projects its agent ids directly from its database. A bare id present in several clusters errors with the candidates; it is never assigned arbitrarily. Process restart is handled by re-resolving the new Shadow client id. Omit this field to use the default session pinned to this checkout's cluster."}
-                               :session_id {:type "string"
-                                            :description "Session sid. 'default' for the singleton :repl build session (auto-created). Or a sid from create_session. Ignored when agent_id is set."}
-                               :timeout_ms {:type "integer"
-                                            :description "Eval timeout. Default 30000ms."}}
-                  :required ["code"]}}
-
    {:name "create_session"
     :description "Clone a fresh nREPL session and pivot it into the named shadow-cljs build's CLJS REPL. Returns a 6-char sid. Use this when you want a session distinct from 'default'. Pass cluster to PIN the session to a specific cluster's runtime — without it, shadow's :runtime-select :latest picks whichever runtime of the build connected last (with several pods on one build that may be another cluster's pod)."
     :inputSchema {:type "object"
@@ -1270,7 +1255,6 @@
       (case name
         "eval_cljs" (execute-eval args')
         "eval_clj" (execute-clj-eval args')
-        "eval" (execute-eval args')
         "create_session" (execute-create-session args')
         "list_sessions" (execute-list-sessions args')
         "stop_session" (execute-stop-session args')
