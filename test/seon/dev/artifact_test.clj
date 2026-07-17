@@ -343,26 +343,35 @@
         (is (= 5 @build-count) "a corrupt cached jar rebuilds"))
       (finally (fs/delete-tree directory)))))
 
-(deftest sequential-flavors-publish-immutable-bootstrap-roots
+(deftest sequential-flavors-publish-immutable-runtime-roots
   (let [directory (fs/create-temp-dir {:prefix "seon-bootstrap-root-test-"})
         source (fs/path directory "out/bootstrap/example.txt")
-        config {:seon.dev.config/root (str directory)}]
+        execution (fs/path directory "out/execution/main.js")
+        config {:seon.dev.config/root (str directory)
+                :seon.dev.config/execution-output (str execution)}]
     (try
       (fs/create-dirs (fs/parent source))
+      (fs/create-dirs (fs/parent execution))
       (doseq [relative ["src" "test" "resources"]]
         (fs/create-dirs (fs/path directory relative)))
       (spit (str source) "default-bootstrap")
+      (spit (str execution) "default-execution")
       (let [default-digest (artifact/digest-paths
                              directory ["out/bootstrap"])
+            default-execution-digest
+            (artifact/current-execution-digest config)
             default-root (#'artifact/publish-runtime-root!
-                           config default-digest)]
+                           config default-digest default-execution-digest)]
         (is (= "default-bootstrap"
                (slurp (str (fs/path default-root
                                     "out/bootstrap/example.txt")))))
+        (is (= "default-execution"
+               (slurp (str (fs/path default-root "execution/main.js")))))
 
         (spit (str source) "acme-bootstrap")
         (let [acme-digest (artifact/digest-paths directory ["out/bootstrap"])
-              acme-root (#'artifact/publish-runtime-root! config acme-digest)]
+              acme-root (#'artifact/publish-runtime-root!
+                         config acme-digest default-execution-digest)]
           (is (not= default-root acme-root))
           (is (= default-digest
                  (artifact/digest-paths default-root ["out/bootstrap"])))
@@ -373,8 +382,18 @@
                                       "out/bootstrap/example.txt"))))
               "the later ACME publication cannot mutate the default root")
           (is (= acme-root
-                 (#'artifact/publish-runtime-root! config acme-digest))
-              "an identical bootstrap reuses its verified content address")))
+                 (#'artifact/publish-runtime-root!
+                  config acme-digest default-execution-digest))
+              "identical runtime bytes reuse their verified content address")
+          (spit (str execution) "changed-execution")
+          (let [changed-execution-digest
+                (artifact/current-execution-digest config)
+                changed-root (#'artifact/publish-runtime-root!
+                              config acme-digest changed-execution-digest)]
+            (is (not= acme-root changed-root))
+            (is (= "default-execution"
+                   (slurp (str (fs/path acme-root "execution/main.js"))))
+                "a watcher rebuild cannot mutate an admitted child artifact"))))
       (finally (fs/delete-tree directory)))))
 
 (defn- git-coordinate [suffix]
@@ -497,7 +516,8 @@
         (spit (str path) value))
       (with-redefs [artifact/maintained-dependencies (fn [_] @dependencies)
                     artifact/publish-runtime-root!
-                    (fn [_ digest] (str "/runtime/" digest))]
+                    (fn [_ bootstrap-digest execution-digest]
+                      (str "/runtime/" bootstrap-digest "-" execution-digest))]
         (let [initial (#'artifact/output-manifest config)]
           (swap! dependencies assoc-in
                  [0 :seon.dev.artifact/dependency-git-sha]

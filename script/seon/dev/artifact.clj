@@ -243,8 +243,11 @@
 (defn current-execution-digest
   "Hash the exact flavor-owned execution artifact bytes."
   [config]
-  (digest-paths (:seon.dev.config/root config)
-                [(:seon.dev.config/execution-output config)]))
+  (let [digest (MessageDigest/getInstance "SHA-256")]
+    (with-open [stream (io/input-stream
+                       (:seon.dev.config/execution-output config))]
+      (update-stream! digest stream))
+    (bytes->hex (.digest digest))))
 
 (defn- digest-jar [path]
   ;; Zip entry timestamps are packaging metadata. Hash the entry names and
@@ -499,27 +502,45 @@
 
 (def ^:private runtime-root-links ["src" "test" "guest-cljs" "resources"])
 
-(defn- verify-runtime-root! [runtime-root bootstrap-digest]
-  (let [actual (digest-paths runtime-root ["out/bootstrap"])]
-    (when-not (= bootstrap-digest actual)
+(defn- runtime-execution-output [runtime-root]
+  (fs/path runtime-root "execution/main.js"))
+
+(defn- verify-runtime-root!
+  [runtime-root bootstrap-digest execution-digest]
+  (let [actual-bootstrap (digest-paths runtime-root ["out/bootstrap"])
+        execution-output (runtime-execution-output runtime-root)
+        actual-execution
+        (current-execution-digest
+         {:seon.dev.config/execution-output (str execution-output)})]
+    (when-not (= bootstrap-digest actual-bootstrap)
       (throw (ex-info "An immutable runtime root has unexpected bootstrap bytes."
                       {:seon.dev.artifact/runtime-root (str runtime-root)
                        :seon.dev.artifact/expected bootstrap-digest
-                       :seon.dev.artifact/actual actual})))
+                       :seon.dev.artifact/actual actual-bootstrap})))
+    (when-not (= execution-digest actual-execution)
+      (throw (ex-info "An immutable runtime root has unexpected execution bytes."
+                      {:seon.dev.artifact/runtime-root (str runtime-root)
+                       :seon.dev.artifact/expected execution-digest
+                       :seon.dev.artifact/actual actual-execution})))
     (str runtime-root)))
 
-(defn- publish-runtime-root! [config bootstrap-digest]
+(defn- publish-runtime-root!
+  [config bootstrap-digest execution-digest]
   (let [root (fs/path (:seon.dev.config/root config))
         parent (fs/path root "tmp/seon-runtime-artifacts")
-        runtime-root (fs/path parent bootstrap-digest)]
+        identity (str bootstrap-digest "-" execution-digest)
+        runtime-root (fs/path parent identity)]
     (if (fs/directory? runtime-root)
-      (verify-runtime-root! runtime-root bootstrap-digest)
-      (let [temporary (fs/path parent (str "." bootstrap-digest "."
+      (verify-runtime-root! runtime-root bootstrap-digest execution-digest)
+      (let [temporary (fs/path parent (str "." identity "."
                                                 (random-uuid) ".tmp"))]
         (try
           (fs/create-dirs (fs/path temporary "out"))
           (fs/copy-tree (fs/path root "out/bootstrap")
                         (fs/path temporary "out/bootstrap"))
+          (fs/create-dirs (fs/path temporary "execution"))
+          (fs/copy (:seon.dev.config/execution-output config)
+                   (runtime-execution-output temporary))
           ;; The bootstrap is the immutable member fixed in this slice. Keep
           ;; today's source/assets behavior through explicit development-only
           ;; links until the downstream package publishes its bounded corpus.
@@ -527,7 +548,7 @@
                   :let [source (fs/path root relative)]
                   :when (fs/exists? source)]
             (fs/create-sym-link (fs/path temporary relative) source))
-          (verify-runtime-root! temporary bootstrap-digest)
+          (verify-runtime-root! temporary bootstrap-digest execution-digest)
           (fs/create-dirs parent)
           (fs/move temporary runtime-root {:atomic-move true})
           (str runtime-root)
@@ -553,7 +574,9 @@
           execution-digest (current-execution-digest config)
           bootstrap-digest (digest-paths root [bootstrap])
           css-digest (digest-paths root [css])
-          runtime-root (publish-runtime-root! config bootstrap-digest)
+          runtime-root
+          (publish-runtime-root! config bootstrap-digest execution-digest)
+          execution-output (str (runtime-execution-output runtime-root))
           application-digest
           (derive-application-digest
            config maintained-dependencies writer-digest client-digest
@@ -572,7 +595,7 @@
          :seon.dev.artifact/client-output
          (:seon.dev.config/client-output config)
          :seon.dev.artifact/execution-output
-         (:seon.dev.config/execution-output config)
+         execution-output
          :seon.dev.artifact/runtime-root runtime-root
          :seon.dev.artifact/maintained-dependencies maintained-dependencies
          :seon.dev.artifact/writer-digest writer-digest

@@ -298,7 +298,7 @@
   [::execution-digest ::execution-digest]])
 
 (defn with-execution-artifact
-  "Bind one launch to its flavor-owned execution artifact."
+  "Bind one launch to its immutable flavor-owned execution artifact."
   {:malli/schema
    [:=> [:cat ::with-execution-artifact-request] ::descriptor]}
   [{descriptor ::descriptor
@@ -310,14 +310,11 @@
                 "The execution build does not match the launch flavor."
                 {::execution-build-id execution-build-id
                  ::runtime runtime})
-    (invariant! (= (normalize-path execution-output)
-                   (normalize-path (::execution-output runtime)))
-                "The execution output does not match the launch flavor."
-                {::execution-output execution-output
-                 ::runtime runtime})
     (validate-descriptor
      (assoc descriptor ::runtime
-            (assoc runtime ::execution-digest execution-digest)))))
+            (assoc runtime
+                   ::execution-output (normalize-path execution-output)
+                   ::execution-digest execution-digest)))))
 
 (defn branch-descriptor
   "Derive one non-autonomous branch descriptor from its source launch."

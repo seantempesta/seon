@@ -2152,32 +2152,55 @@
       (is (some #(str/includes? % "acme.pod") acme-argv))
       (finally (fs/delete-tree directory)))))
 
-(deftest pod-spec-and-readiness-bind-the-published-bootstrap-root
+(deftest pod-spec-and-readiness-bind-the-published-runtime-artifact
   (let [configuration (test-config)
         directory (:seon.dev.test/directory configuration)
         runtime-root (fs/path directory "runtime")
-        bootstrap-file (fs/path runtime-root "out/bootstrap/example.txt")]
+        bootstrap-file (fs/path runtime-root "out/bootstrap/example.txt")
+        execution-file (fs/path runtime-root "execution/main.js")]
     (try
       (fs/create-dirs (fs/parent bootstrap-file))
+      (fs/create-dirs (fs/parent execution-file))
       (spit (str bootstrap-file) "published")
+      (spit (str execution-file) "published-execution")
       (let [selected (target-config configuration directory)
             digest (artifact/digest-paths runtime-root ["out/bootstrap"])
+            execution-digest
+            (artifact/current-execution-digest
+             {:seon.dev.config/execution-output (str execution-file)})
             manifest (assoc (target-manifest-for selected)
                             :seon.dev.artifact/runtime-root (str runtime-root)
-                            :seon.dev.artifact/bootstrap-digest digest)
+                            :seon.dev.artifact/bootstrap-digest digest
+                            :seon.dev.artifact/execution-output
+                            (str execution-file)
+                            :seon.dev.artifact/execution-digest
+                            execution-digest)
             specs (process/specs selected manifest)
             watcher (get specs process/watcher-id)
-            pod (get specs process/pod-id)]
+            pod (get specs process/pod-id)
+            descriptor
+            (edn/read-string
+             (get-in pod [:seon.dev.process/environment
+                          "SEON_LAUNCH_DESCRIPTOR"]))]
         (is (nil? (get-in watcher [:seon.dev.process/environment
                                    "SEON_RUNTIME_ROOT"])))
         (is (= (str runtime-root)
                (get-in pod [:seon.dev.process/environment
                             "SEON_RUNTIME_ROOT"])))
         (is (= digest (:seon.dev.process/bootstrap-digest pod)))
-        (is (#'process/runtime-bootstrap-ready? pod))
+        (is (= (str execution-file)
+               (get-in descriptor [::launch/runtime
+                                   ::launch/execution-output])))
+        (is (= execution-digest
+               (:seon.dev.process/execution-digest pod)))
+        (is (#'process/runtime-artifact-ready? pod))
+        (spit (str execution-file) "mutated")
+        (is (not (#'process/runtime-artifact-ready? pod))
+            "readiness rejects changed execution bytes")
+        (spit (str execution-file) "published-execution")
         (spit (str bootstrap-file) "mutated")
-        (is (not (#'process/runtime-bootstrap-ready? pod))
-            "readiness rejects bytes that no longer match the manifest"))
+        (is (not (#'process/runtime-artifact-ready? pod))
+            "readiness rejects changed bootstrap bytes"))
       (finally (fs/delete-tree directory)))))
 
 (deftest structured-status-reports-a-foreign-pod-without-advertising-it

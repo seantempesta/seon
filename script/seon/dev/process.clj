@@ -42,6 +42,7 @@
     [:re #"[0-9a-f]{64}"]]
    [:seon.dev.process/execution-digest {:optional true}
     [:re #"[0-9a-f]{64}"]]
+   [:seon.dev.process/execution-output {:optional true} :string]
    [:seon.dev.process/artifact-digest :string]])
 
 (def process-spec-schema
@@ -291,10 +292,27 @@
   "Derive the complete development process graph from one manifest."
   [config manifest]
   (let [environment (:seon.dev.config/environment config)
-        descriptor (:seon.dev.config/launch-descriptor config)
+        source-descriptor (:seon.dev.config/launch-descriptor config)
+        source-runtime (::launch/runtime source-descriptor)
+        configured-artifact
+        [(:seon.dev.config/artifact-flavor config)
+         (:seon.dev.config/client-build-id config)
+         (:seon.dev.config/execution-build-id config)
+         (:seon.dev.config/execution-output config)]
+        selected-source-artifact
+        [(::launch/artifact-flavor source-runtime)
+         (::launch/client-build-id source-runtime)
+         (::launch/execution-build-id source-runtime)
+         (::launch/execution-output source-runtime)]
+        _ (when-not (= configured-artifact selected-source-artifact)
+            (throw
+             (ex-info "The launch descriptor selects another artifact."
+                      {:seon.dev.process/configured-artifact configured-artifact
+                       :seon.dev.process/selected-artifact
+                       selected-source-artifact})))
         descriptor
         (launch/with-execution-artifact
-         {::launch/descriptor descriptor
+         {::launch/descriptor source-descriptor
           ::launch/execution-build-id
           (:seon.dev.artifact/execution-build-id manifest)
           ::launch/execution-output
@@ -304,21 +322,6 @@
         descriptor-runtime (::launch/runtime descriptor)
         descriptor-writer (::launch/writer-owner descriptor)
         descriptor-process (::launch/process descriptor)
-        selected-artifact
-        [(::launch/artifact-flavor descriptor-runtime)
-         (::launch/client-build-id descriptor-runtime)
-         (::launch/execution-build-id descriptor-runtime)
-         (::launch/execution-output descriptor-runtime)]
-        configured-artifact
-        [(:seon.dev.config/artifact-flavor config)
-         (:seon.dev.config/client-build-id config)
-         (:seon.dev.config/execution-build-id config)
-         (:seon.dev.config/execution-output config)]
-        _ (when-not (= configured-artifact selected-artifact)
-            (throw
-             (ex-info "The launch descriptor selects another artifact."
-                      {:seon.dev.process/configured-artifact configured-artifact
-                       :seon.dev.process/selected-artifact selected-artifact})))
         autonomous?
         (true? (get-in descriptor
                        [::launch/runtime :seon.client/launch-capability
@@ -360,7 +363,11 @@
            (:seon.dev.artifact/application-digest manifest)}
           runtime-root
           (assoc :seon.dev.process/bootstrap-digest
-                 (:seon.dev.artifact/bootstrap-digest manifest))
+                 (:seon.dev.artifact/bootstrap-digest manifest)
+                 :seon.dev.process/execution-digest
+                 (:seon.dev.artifact/execution-digest manifest)
+                 :seon.dev.process/execution-output
+                 (:seon.dev.artifact/execution-output manifest))
 
           (not autonomous?)
           (assoc :seon.dev.process/external-dependencies
@@ -551,21 +558,30 @@
        (catch Throwable _ false))
      true)))
 
-(defn- runtime-bootstrap-ready? [spec]
+(defn- runtime-artifact-ready? [spec]
   (if-let [expected (:seon.dev.process/bootstrap-digest spec)]
     (let [runtime-root (get-in spec [:seon.dev.process/environment
-                                     "SEON_RUNTIME_ROOT"])]
+                                     "SEON_RUNTIME_ROOT"])
+          execution-output (:seon.dev.process/execution-output spec)
+          expected-execution (:seon.dev.process/execution-digest spec)]
       (and runtime-root
            (fs/directory? (fs/path runtime-root "out/bootstrap"))
+           execution-output
+           (fs/regular-file? execution-output)
            (try
-             (= expected (artifact/digest-paths runtime-root ["out/bootstrap"]))
+             (and
+              (= expected
+                 (artifact/digest-paths runtime-root ["out/bootstrap"]))
+              (= expected-execution
+                 (artifact/current-execution-digest
+                  {:seon.dev.config/execution-output execution-output})))
              (catch Throwable _ false))))
     true))
 
 (defn- pod-ready? [config spec record]
   (let [port-file (or (:seon.dev.process/http-port-file spec)
                       (:seon.dev.config/http-port-file config))]
-    (and (runtime-bootstrap-ready? spec)
+    (and (runtime-artifact-ready? spec)
          (fs/regular-file? port-file)
          (some-> (slurp port-file) str/trim parse-long http-ready?))))
 
