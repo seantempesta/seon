@@ -551,11 +551,7 @@
          (ex-info "The attached database has no config singleton."
                   {:seon.config/id config/cluster-config-id
                    :seon.error/kind :core-bug})))
-      (reduce-kv
-       (fn [result attribute value]
-         (assoc result attribute (db/decode-edn-value attribute value)))
-       {}
-       stored))))
+      (db/decode-edn-values stored))))
 
 (defn shadow-build-notify!
   "Close on build start; reconstruct and rehost only after a complete build."
