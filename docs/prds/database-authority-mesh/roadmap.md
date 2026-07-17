@@ -455,6 +455,12 @@ is a narrow real-writer/live proof of recursive reads, generated-ID writes,
 document round-trip, prompt/HTML agreement, and consult once-per-episode.
 - **Dependency-ready parallel portfolio:** the web/render single-owner audit is
   durable at [[research/web-render-single-owner-audit-2026-07-17]] and the
+  native Datastar/Bun/Datahike seam is grounded at
+  [[research/datastar-bun-authority-interface-audit-2026-07-17]]. That audit
+  keeps transaction-report interests as selective wakeups, preserves native
+  Datahike query-dependency evidence, shares identical database work only in
+  Datahike, shares equivalent completed renders only in the UI host, and makes
+  `Bun.serve` a transport replacement rather than a second reactive system. The
   rendered-transaction boundary at
   [[research/web-rendered-tx-observability-unification-2026-07-16]]. The plan
   consumer cut is grounded at [[research/plan-single-owner-audit-2026-07-17]]
@@ -481,21 +487,27 @@ or introduce a second bootstrap authority.
 
 After that dependency gate:
 
-1. Add bounded phase timing and rerender-count evidence to the existing
+1. Preserve Datahike's native query-dependency evidence through the existing
+   grouped read and let the existing database interest accept that concrete
+   attribute set. Delete fabricated dependency queries and redundant fixed
+   query-attribute lists; unknown reads conservatively remain `:all`.
+2. Add bounded phase timing and rerender-count evidence to the existing
    operator, database protocol, renderer, and Datastar feed.
-2. Measure the current complete render path before changing its demand model.
+3. Measure the current complete render path before changing its demand model.
    Final startup numbers are deliberately deferred until the dependency work
    above is integrated; the historical 0.44--0.58 second figure is comparison
    evidence, not a claim about the completed design.
-3. Keep one renderer and one Datastar feed. If evidence shows complete rendering
+4. Keep one renderer and one Datastar feed. If evidence shows complete rendering
    is still expensive, make costly closed transcript, debug, and plan bodies
    independently demanded inside that same mechanism. Do not add partial
    renderers, alternate feeds, or another cache authority.
-4. Optimize converged program admission only from measured phase evidence. A
+5. Optimize converged program admission only from measured phase evidence. A
    content/digest or delta protocol is admissible only if it preserves exact
    source identity, race-free publication, and idempotent initialization.
-5. Replace the outer HTTP/SSE host with native `Bun.serve` as a separate
-   transport cut after semantic parity. Routing, render derivation, feed
+6. Replace the outer HTTP/SSE host with native `Bun.serve` as a separate
+   transport cut after semantic parity. Start with an ordinary `ReadableStream`
+   or async-generator response so Bun owns HTTP backpressure; retain Seon's
+   bounded latest-complete-event policy. Routing, render derivation, feed
    sharing, and database contracts stay unchanged.
 
 ### Finish-line execution plan

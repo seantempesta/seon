@@ -234,6 +234,98 @@ connection. Remote servers, thin clients, Tauri, mobile packaging, and stronger
 execution isolation consume the same versioned protocol and may implement only
 the capabilities their platform supports.
 
+### Canonical data flow
+
+```mermaid
+flowchart TB
+  Supervisor["Babashka supervisor\nstart · observe · stop · restart"]
+
+  subgraph Bun["Bun processes"]
+    Web["UI host\nroutes · demanded views · Datastar encoding"]
+    Root["root agent child\ncompiled Seon package"]
+    Agent1["task-agent child A\ncompiled Seon package"]
+    AgentN["task-agent child N\ncompiled Seon package"]
+  end
+
+  subgraph JVM["One JVM Datahike authority"]
+    Sessions["persistent multiplexed sessions\nframing · cancellation · fair admission"]
+    Readers["bounded parallel reads\nquery · pull · entity · index"]
+    DB1["cluster database A\none connection · ordered writes\nimmutable database values + query cache"]
+    DB2["cluster database B\none connection · ordered writes\nimmutable database values + query cache"]
+    Reports["committed transaction reports\ndb-before · db-after · tx-data"]
+  end
+
+  Browser["browser\nDatastar ID-aware morph"]
+  Feed["one SSE feed per browser\nlatest complete pending event"]
+
+  Supervisor -->|"supervise"| Web
+  Supervisor -->|"supervise"| Root
+  Supervisor -->|"supervise"| Agent1
+  Supervisor -->|"supervise"| AgentN
+  Supervisor -->|"supervise"| Sessions
+
+  Browser -->|"HTTP action as namespaced data"| Web
+  Web -->|"demand agent-authored render"| Root
+  Web -->|"demand agent-authored render"| Agent1
+
+  Web -->|"database name + operation + database value"| Sessions
+  Root -->|"query · pull · transact"| Sessions
+  Agent1 -->|"query · pull · transact"| Sessions
+  AgentN -->|"query · pull · transact"| Sessions
+
+  Sessions --> Readers
+  Readers -->|"parallel work against captured value"| DB1
+  Readers -->|"parallel work against captured value"| DB2
+  Sessions -->|"serialized only within database A"| DB1
+  Sessions -->|"serialized only within database B"| DB2
+  DB1 --> Reports
+  DB2 --> Reports
+
+  Reports -->|"changed attributes wake matching demanded views"| Web
+  Web -->|"affected reads at exact db-after"| Sessions
+  Sessions -->|"ordinary data; identical reads share Datahike work"| Web
+  Root -->|"complete stable-ID hiccup + read dependencies"| Web
+  Agent1 -->|"complete stable-ID hiccup + read dependencies"| Web
+  Web -->|"one render + serialization per equivalent demand"| Feed
+  Feed -->|"Bun HTTP backpressure; optional measured compression"| Browser
+```
+
+The database name selects an authority-owned connection; the immutable
+database value selects the exact basis transaction and temporal view. A
+process's no-argument `seon.db/db` returns its current database value, while
+`seon.db/db` with `:seon.db/database-name` acquires another database value from
+the same multiplexed authority session. Reads that combine databases pass the
+required database values as ordinary Datalog sources. This is not a return to
+`*conn*`: connections and native Datahike values remain inside the authority,
+and every child receives only ordinary immutable descriptors and results.
+
+One committed transaction report is sufficient to wake every interested
+consumer of one database. The report's changed attributes are compared with
+each demanded view's observed query dependencies. Unaffected views do no work;
+affected equivalent views coalesce at the newest exact `db-after` and share one
+render. Their identical queries over the same immutable database value meet in
+Datahike's value-owned cache and in-flight computation, so agents, browser
+sockets, and renderers reuse database work without a Seon-owned result cache.
+The cache and interest are always database-scoped; database A can neither wake
+nor satisfy a read for database B.
+
+Datastar owns the browser's ID-aware morph. Datahike owns indexed computation,
+cache validity, and committed transaction reports. Bun owns agent isolation,
+HTTP delivery, and transport backpressure. Seon owns only the policy between
+them: database selection, dependency union, bounded coalescing, equivalent-view
+fanout, latest-event retention, cancellation, and reconnect from current
+database truth. A disconnected authority session stops new renders; after
+reacquiring the named database and its interest, every live demand receives a
+complete current view rather than a replay of UI events.
+
+The default feed sends one complete stable-ID element because Datastar's morph
+engine applies the minimal DOM change while the server retains no DOM mirror.
+Expensive closed surfaces may be independently demanded after measurement, but
+they remain functions in the same view and ride the same ordered feed. First
+paint, reconnect, and structural changes always send the complete `#app-view`.
+Seon does not introduce server-side DOM diffing, a per-surface event bus, or a
+second render cache merely to reduce bytes.
+
 ### Downstream distribution boundary
 
 Seon's source repository is the release producer; a downstream product does
