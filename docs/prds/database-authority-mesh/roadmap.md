@@ -3426,3 +3426,30 @@ real-browser interaction journey remains independently blocked by unavailable
 browser tooling. Once recovery is proven, the next ordered boundary is the
 honest cold/warm startup, database-hop, query-reuse, render/feed, event-loop,
 CPU, heap, and RSS baseline before any transport optimization.
+
+The first read-path baseline now exercises the public ClojureScript facade over
+the native Unix-domain socket rather than Datahike directly. At database value
+`default` basis transaction `536873633`, five sequential identical cached
+agent-count queries took 1.67–2.57 ms round trip. Eight simultaneous cached
+queries took 2.32–7.00 ms. A new exact query key launched eight callers at
+once: one was the computation owner, four joined that computation, and three
+arrived after the result was cached; all returned the same result in 5.31–6.65
+ms. Datahike's bounded evidence increased `saved-computations` and
+`waiter-hits` by four and returned both active-flight and active-waiter gauges
+to zero. This proves that shared computation is working across protocol
+requests; no Seon query cache is required.
+
+The live development process snapshot after about 32 minutes was 2.18 GiB RSS
+for the Shadow compiler, 1.18 GiB for the JVM writer, and 852 MiB for the Bun
+pod. The production-relevant subtotal is writer plus pod; Shadow is a
+development compiler and must stay separate in every report. These are point
+measurements, not leak slopes or final budgets.
+
+A proposed real-process crash fixture was rejected before commit. A bare
+writer process has only genesis data, while an ordinary Bun transaction
+correctly carries the program's provenance schema. Teaching the test a second
+mini-bootstrap would duplicate the initialization owner. The retained
+real-process recovery proof must therefore launch the ordinary initialized
+package and place the response-dropping cut around that session. Existing
+focused tests continue to prove exact frozen-request redelivery, durable
+receipt recovery, reconnect coalescing, and listener restoration separately.
