@@ -242,3 +242,46 @@
       (finally
         (writer/stop! server)
         (.delete socket-file)))))
+
+(deftest initialization-installs-attributes-from-entity-schema-forms
+  (let [database-name (str "writer-entity-schema-" (random-uuid))
+        socket-file (File. "tmp" (str database-name ".sock"))
+        server
+        (writer/start!
+         {::writer/dependencies (dependencies)
+          ::writer/database-name database-name
+          ::writer/backend :memory
+          ::writer/request-socket-path (.getAbsolutePath socket-file)})
+        runtime (::writer/runtime server)
+        initialization
+        (-> initialization
+            (assoc :seon.db/attributes [])
+            (update :seon.db/program into
+                    [{:seon.schema/key :example/id
+                      :seon.schema/form
+                      "[:and {:seon.db/identity true} :string]"}
+                     {:seon.schema/key :example/entity
+                      :seon.schema/form
+                      "[:map {:seon.db/entity true} [:example/id :example/id]]"}])
+            (assoc :seon.db/initial-data [{:example/id "singleton"}]))]
+    (try
+      (let [response
+            (writer/handle-request
+             runtime
+             (protocol/ensure-database-request
+              {::protocol/request-id "entity-schema/initialization"
+               ::protocol/database-name database-name
+               ::protocol/backend :memory
+               :seon.db/initialization initialization}))
+            db-value
+            (d/db (::registry/conn
+                   (registry/resolve-connection
+                    {::registry/database-name (keyword database-name)})))]
+        (is (::protocol/success? response) (pr-str response))
+        (is (= :db.unique/identity
+               (get-in db-value [:schema :example/id :db/unique])))
+        (is (= "singleton" (:example/id (d/entity db-value
+                                                   [:example/id "singleton"])))))
+      (finally
+        (writer/stop! server)
+        (.delete socket-file)))))

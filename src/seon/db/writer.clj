@@ -408,8 +408,8 @@
       []
       (compile-schema-declarations db-value transaction-data candidates))))
 
-(defn- derive-declared-schema
-  [db-value transaction-data]
+(defn- declared-entity-attributes
+  [transaction-data]
   (let [forms
         (into {}
               (map (fn [[schema-key form-string]]
@@ -428,6 +428,11 @@
                        (let [attribute (when (vector? entry) (first entry))]
                          (when (qualified-keyword? attribute) attribute)))))
               forms)]
+    attributes))
+
+(defn- derive-declared-schema
+  [db-value transaction-data]
+  (let [attributes (declared-entity-attributes transaction-data)]
     (if (empty? attributes)
       []
       (compile-schema-declarations db-value transaction-data attributes))))
@@ -1435,7 +1440,10 @@
                       schema-declarations
                       (compile-schema-declarations before-program
                                                    desired-program
-                                                   (set attributes))
+                                                   (set/union
+                                                    (set attributes)
+                                                    (declared-entity-attributes
+                                                     desired-program)))
                       transaction-data
                       (into (vec schema-declarations)
                             (concat
