@@ -1326,6 +1326,15 @@
 ;;; (three-tier rule: the DB stores projections, not these).
 (schema/register! ::ending-ns :symbol)
 
+(defn- valid-ending-ns?
+  "True when an evaluator result names a real analyzer namespace."
+  [compile-state ns-sym]
+  (and (symbol? ns-sym)
+       (seq (str ns-sym))
+       (or (= user-ns-sym ns-sym)
+           (some? (:name (get-in @compile-state
+                                 [:cljs.analyzer/namespaces ns-sym]))))))
+
 ;;; `eval` opts (C21) — ::starting-ns is the TARGET ns an eval runs in:
 ;;; a SYMBOL, the input twin of ::ending-ns. Deliberately NOT the
 ;;; persisted :keyword attr ::ns (same type-clash reasoning that named
@@ -1508,7 +1517,15 @@
                                "running in background; JS has no preemption — "
                                "Phase 2 worker_thread or Phase 3 wasmtime "
                                "needed for hard cancellation)")))}
-         {::ok? true ::value (::value raced) ::ending-ns (::ending-ns raced)}))
+         (let [reported-ns (::ending-ns raced)]
+           {::ok? true
+            ::value (::value raced)
+            ;; cljs.js may report an empty namespace after emitted async host
+            ;; calls. It is not a namespace switch and must not corrupt the
+            ;; caller's per-form fold.
+            ::ending-ns (if (valid-ending-ns? compile-state reported-ns)
+                          reported-ns
+                          ns)})))
      (catch :default e
        ;; The `seon.eval` compile/eval conduit: a throw from raw-eval is
        ;; where an AGENT form's failure first surfaces, so classify by the

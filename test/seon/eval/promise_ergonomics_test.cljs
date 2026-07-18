@@ -2,9 +2,22 @@
   "Value-local defer and deadline behavior before database recording."
   (:require
    [cljs.test :refer [async deftest is]]
-   [seon.eval :as eval]))
+   [seon.config :as config]
+   [seon.eval :as eval]
+   [seon.repl :as repl]))
+
+(def configuration (config/resolve-config-singleton {}))
 
 (def ^:private maybe-await-value (deref #'eval/maybe-await-value))
+(def ^:private valid-ending-ns? (deref #'eval/valid-ending-ns?))
+
+(deftest only-real-analyzer-namespaces-can-advance-the-eval-fold
+  (let [compile-state
+        (atom {:cljs.analyzer/namespaces
+               {'my.agent.promise {:name 'my.agent.promise}}})]
+    (is (valid-ending-ns? compile-state 'my.agent.promise))
+    (is (not (valid-ending-ns? compile-state (symbol ""))))
+    (is (not (valid-ending-ns? compile-state 'invented.namespace)))))
 
 (deftest defer-wraps-promises-and-passes-ordinary-values
   (is (instance? eval/Deferred (eval/defer (js/Promise.resolve 1))))
@@ -65,3 +78,25 @@
           (.then (fn [_] (assert-order! [::long ::short])))
           (.catch (fn [error] (is false (str error))))
           (.finally done)))))
+
+(deftest promise-returning-form-preserves-its-namespace
+  (async done
+    (-> (repl/ensure-bootstrap!)
+        (.then
+         (fn [compile-state]
+           (-> (eval/eval compile-state "(ns scratch.promise-namespace)"
+                          {:seon.config/configuration configuration
+                           ::eval/starting-ns 'cljs.user
+                           ::eval/analyze-deps? false})
+               (.then
+                (fn [_]
+                  (eval/eval compile-state "(js/Promise.resolve 323)"
+                             {:seon.config/configuration configuration
+                              ::eval/starting-ns 'scratch.promise-namespace
+                              ::eval/analyze-deps? false}))))))
+        (.then
+         (fn [result]
+           (is (::eval/ok? result) (pr-str result))
+           (is (= 'scratch.promise-namespace (::eval/ending-ns result)))))
+        (.catch (fn [error] (is false (str error))))
+        (.finally done))))
