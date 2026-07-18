@@ -1478,14 +1478,21 @@
 ;;; Canonical operation handlers
 
 (defn- registry-request
-  [database-name backend-kind database-path connection-id connection-initializer]
-  (cond->
-   {::registry/database-name (keyword database-name)
-    ::registry/backend backend-kind
-    ::registry/initial-tx protocol-native-schema
-    ::registry/initialize-connection! connection-initializer}
-    connection-id (assoc ::registry/connection-id connection-id)
-    database-path (assoc ::registry/path database-path)))
+  ([database-name backend-kind database-path connection-id
+    connection-initializer]
+   (registry-request database-name backend-kind database-path connection-id
+                     connection-initializer nil))
+  ([database-name backend-kind database-path connection-id
+    connection-initializer transport-connection]
+   (cond->
+    {::registry/database-name (keyword database-name)
+     ::registry/backend backend-kind
+     ::registry/initial-tx protocol-native-schema
+     ::registry/initialize-connection! connection-initializer}
+     connection-id (assoc ::registry/connection-id connection-id)
+     database-path (assoc ::registry/path database-path)
+     transport-connection
+     (assoc ::registry/transport-connection transport-connection))))
 
 (defn- connection-initializer
   [runtime initialization initialized-db]
@@ -1499,7 +1506,7 @@
       result)))
 
 (defn- handle-ensure-database
-  [runtime request]
+  [runtime transport-connection request]
   (let [database-name (::protocol/database-name request)
         initialization (:seon.db/initialization request)
         initialized-db (volatile! nil)
@@ -1511,7 +1518,8 @@
             (::protocol/backend request)
             (::protocol/database-path request)
             (::branch/connection-id request)
-            (connection-initializer runtime initialization initialized-db)))
+            (connection-initializer runtime initialization initialized-db)
+            transport-connection))
           (catch clojure.lang.ExceptionInfo exception
             (let [data (ex-data exception)
                   requested-branch (second (::branch/connection-id request))]
@@ -3344,7 +3352,7 @@
          (throw (ex-info "Cancellation requires callback completion." {}))
 
          :seon.db.protocol.operation/ensure-database
-         (handle-ensure-database runtime request)
+         (handle-ensure-database runtime transport-connection request)
 
          :seon.db.protocol.operation/observe-database-lifecycle
          (handle-observe-database-lifecycle request)

@@ -994,7 +994,8 @@
               (cond
                 (error-value? response) response
                 (not (::protocol/success? response)) (response-error response)
-                :else {::results (::protocol/results response)}))))))
+                :else {::db database
+                       ::results (::protocol/results response)}))))))
     (catch :default exception
       (let [value (error/->map exception)]
         (cond-> value

@@ -571,7 +571,8 @@
                       {::db/db database ::db/members [member member]})))
                   (.then
                    (fn [result]
-                     (is (= #{::db/results} (set (keys result))))
+                     (is (= #{::db/db ::db/results} (set (keys result))))
+                     (is (= database (::db/db result)))
                      (is (= 2 (count (::db/results result))))
                      (let [request (first
                                     (operation-requests

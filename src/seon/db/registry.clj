@@ -138,6 +138,8 @@
                    [::path {:optional true} ::path]
                    [::connection-id {:optional true} ::connection-id]
                    [::initial-tx {:optional true} ::initial-tx]
+                   [::transport-connection {:optional true}
+                    ::transport-connection]
                    [::initialize-connection! 'fn?]])
 
 (schema/register! ::initialize-connection-request
@@ -627,6 +629,7 @@
    failure releases the connection and is rethrown; no broken entry survives."
   {:malli/schema [:=> [:cat ::ensure-database!-request] ::ensure-database!-response]}
   [{::keys [database-name backend path connection-id initial-tx
+            transport-connection
             initialize-connection!]
     :or {backend :file}}]
   (let [request (backend-request
@@ -639,17 +642,30 @@
         connection-id* (::branch/connection-id facts)
         backend-path (::backend/path facts)]
     (if-let [entry (get @!registry database-name)]
-      (if (get entry ::ensured? true)
+      (if (or (get entry ::ensured? true)
+              (and transport-connection
+                   (some #(identical? transport-connection %)
+                         (::transport-connections entry #{}))))
         (validate-existing-route!
          database-name entry connection-id* backend backend-path)
         (locking !registry
-          (ensure-existing-reference!
-           database-name (get @!registry database-name)
-           connection-id* backend backend-path)))
+          (let [entry (get @!registry database-name)]
+            (if (and transport-connection
+                     (some #(identical? transport-connection %)
+                           (::transport-connections entry #{})))
+              (validate-existing-route!
+               database-name entry connection-id* backend backend-path)
+              (ensure-existing-reference!
+               database-name entry connection-id* backend backend-path)))))
       (locking !registry
         (if-let [entry (get @!registry database-name)]
-          (ensure-existing-reference!
-           database-name entry connection-id* backend backend-path)
+          (if (and transport-connection
+                   (some #(identical? transport-connection %)
+                         (::transport-connections entry #{})))
+            (validate-existing-route!
+             database-name entry connection-id* backend backend-path)
+            (ensure-existing-reference!
+             database-name entry connection-id* backend backend-path))
           (let [registry @!registry]
             (validate-route-bijection!
              registry database-name connection-id* backend backend-path)

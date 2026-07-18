@@ -264,6 +264,28 @@
     (is (= {} (registry/lookup-connection
                {::registry/database-name database-name})))))
 
+(deftest ensure-from-owning-transport-does-not-retain-an-administrative-reference
+  (let [database-name :registry/transport-refresh
+        connection (Object.)
+        opened (ensure-database!
+                {::registry/database-name database-name
+                 ::registry/backend :memory})]
+    (registry/acquire-database!
+     {::registry/database-name database-name
+      ::registry/connection-id (::registry/connection-id opened)
+      ::registry/transport-connection connection})
+    (ensure-database!
+     {::registry/database-name database-name
+      ::registry/backend :memory
+      ::registry/transport-connection connection})
+    (is (::registry/released?
+         (registry/release-database-acquisition!
+          {::registry/database-name database-name
+           ::registry/transport-connection connection
+           ::registry/drain! (fn [_] nil)})))
+    (is (= {} (registry/lookup-connection
+               {::registry/database-name database-name})))))
+
 (deftest final-connection-release-fences-reacquire-and-stale-close
   (let [database-name :registry/final-release-race
         connection-a (Object.)
