@@ -42,28 +42,24 @@
    (defn find-js-var
      "Resolve the live JS fn object for `[ns-sym fn-sym]`, or nil.
 
-      Walks the munged goog.global path — the same lookup malli.instrument
-      uses to find the var it wraps. THE one symbol→live-fn mechanism
+      Resolves the namespace through ClojureScript's bootstrap namespace
+      owner, which covers development globals and simple-optimized Node module
+      scope. THE one instrumentation symbol→live-fn mechanism
       (`seon.ai.typeahead`'s prefill-fn resolution reuses it); nil when the
       fn is not loaded. The result is a raw JS object — a third-party
       boundary, hence `:any`."
      {:malli/schema [:=> [:catn [::ns-sym :symbol] [::fn-sym :symbol]] :any]}
      [ns-sym fn-sym]
      (try
-       (gobj/getValueByKeys
-         js/goog.global
-         (into-array (map munge (conj (str/split (str ns-sym) #"\.")
-                                      (name fn-sym)))))
+       (when-let [ns-object (cljs.core/find-ns-obj ns-sym)]
+         (gobj/get ns-object (munge (name fn-sym))))
        (catch :default _ nil))))
 
 #?(:cljs
    (defn- set-js-var!
      "Replace one live namespace var at the same JS path as `find-js-var`."
      [ns-sym fn-sym f]
-     (when-let [ns-object
-                (gobj/getValueByKeys
-                 js/goog.global
-                 (into-array (map munge (str/split (str ns-sym) #"\."))))]
+     (when-let [ns-object (cljs.core/find-ns-obj ns-sym)]
        (gobj/set ns-object (munge (name fn-sym)) f)
        f)))
 

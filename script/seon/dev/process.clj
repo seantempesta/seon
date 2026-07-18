@@ -240,7 +240,7 @@
        :seon.dev.artifact/execution-output
        (:seon.dev.config/execution-output config)
        :seon.dev.artifact/execution-digest
-       (member-sha :seon.dev.release/execution-member)
+       (artifact/current-execution-digest config)
        :seon.dev.artifact/runtime-root
        (:seon.dev.config/runtime-assets config)
        :seon.dev.artifact/bootstrap-digest
