@@ -3844,3 +3844,22 @@ and four-agent load. The next memory boundary is production packaging without
 Shadow plus source-grounded attribution of the writer's roughly 450 MiB
 non-heap/native footprint; it must not displace the remaining browser,
 multi-cluster, patched-Bun, and transport graduation gates.
+
+The same source-frozen runtime now has an explicit two-cluster proof. The
+operator opened `graduation-secondary` with its own database and Bun pod on a
+dynamic web port while `default` stayed ready. Process inspection found exactly
+one database-server JVM at the measured 512 MiB limit and two pod processes;
+the secondary pod connected to that writer through the existing request socket
+and opened database value `{:db-name "graduation-secondary", ...}` with its own
+store ID, basis transaction, and commit ID. A real secondary agent evaluated
+forms, committed the exact reply `secondary cluster green`, and completed. The
+same agent identity was absent from the default database.
+
+An ordinary `cluster restart` replaced only the secondary pod, selected a new
+dynamic web port, reopened the same database, and read the committed reply back.
+`cluster close` then drained that pod cleanly while the default watcher, sole
+writer, and default pod remained ready. This closes basic database isolation,
+shared-writer routing, pod restart, durable read-back, and clean shutdown for
+multiple clusters. Remaining multi-cluster graduation is concurrent load and
+failure pressure across both databases once the production package and patched
+Bun runtime are selected; it does not require another JVM or writer path.
