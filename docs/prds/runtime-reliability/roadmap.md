@@ -287,6 +287,18 @@ proof passes 13/71. The ordered spine returns to the complete current-source
 gate and package-evidence reconciliation; malformed-program recovery and the
 shared cross-namespace reactive action are no longer open contracts.
 
+The prevention side of malformed-program recovery is now explicit and tested.
+Commit `cbb1632b` proves that unreadable source traverses the normal batch owner
+as a failed eval containing the exact source and error but no program
+transaction data. Successful declarations alone enter the atomic eval/program
+authority write; runtime failures restore analyzer and schema state first.
+Focused receipt proof passes 13 tests/56 assertions. The complete current-source
+checkpoint is green: ClojureScript 1,140 tests/5,078 assertions, JVM writer
+219/1,821, and operator 278/1,570, all with zero failures or errors. The next
+ordered boundary is regenerating and auditing the final source-free package on
+this exact source, then reconciling its restart/reconnect, ACME, multi-cluster,
+and 1/2/4-child evidence against the graduation ledger.
+
 The downstream production overlay now passes the same immutable boundary.
 ACME supplies separate Shadow mains for the Bun pod and Bun execution child,
 so its source is compiled and dynamically reachable in both isolated runtime
