@@ -3931,3 +3931,43 @@ refills are the generated grown-transcript fixture and browser proof, followed
 by package load/memory measurement and the patched-Bun runtime/transport
 decision. Final graduation remains the complete correctness, browser,
 multi-cluster, resource-budget, and ACME downstream matrix.
+
+## 2026-07-18 source-free package resume checkpoint
+
+The production package now includes the exact Babashka operator, explicit
+configuration, and the containment helper used by the existing process owner.
+Mutable database, process, socket, port, and operator-log paths derive from an
+external `SEON_STATE_DIR`; the source-checkout defaults remain unchanged. The
+integrated release/config/process/CLI boundary passes 112 tests and 468
+assertions at commit `acd69fbc`.
+
+Two faults found only by the relocated package proof are fixed and committed.
+Commit `904824be` retains the complete process generation in operator state but
+bounds the transient Unix-domain socket filename, avoiding the host path-length
+limit; the focused process gate passes 59 tests and 297 assertions. Commit
+`19819610` stops confusing the release inventory's typed member digest with the
+raw byte digest consumed by the pod. The package now hashes the already-verified
+`program-sources.edn` bytes at admission; focused proof passes 59 tests and 298
+assertions.
+
+Release v5 was built with application SHA-256
+`e855d0628c20b1e91be7d38f5ffd59638ebf1141ce85ff85b465d8e347f15ba6`, copied
+to a differently named directory, and started through that copy's own
+`bin/seon`. Its JVM writer and Bun pod both reached readiness with no watcher or
+Clojure development process. The readiness endpoint returned an available
+runtime admission value. This is not yet final source-free graduation: the
+first ordinary root request returned HTTP 500, and the running pod created
+`logs/pod-events.log` plus `tmp/` beneath the immutable package root. Moving
+those generated paths aside restored package verification; package `down` then
+drained the writer cleanly and forcibly stopped the pod after quiesce failed.
+The final status proves both processes absent.
+
+The earliest unsettled contract on resume is eliminating every pod write below
+the package root by deriving its event log and remaining temporary paths from
+the admitted external state paths, then rebuilding a fresh package. The
+integrated proof is: unchanged package digest across `up`, root and `/data`
+HTTP 200, gzip Datastar feed, real agent/eval/reply, clean package restart and
+read-back, and clean `down`. Only after that proof count package memory or
+advance the grown-transcript/browser and 1/2/4-child load gates. A restarted
+Codex task must also perform the pending bare default MCP reconnect proof using
+the newly loaded stdio server.
