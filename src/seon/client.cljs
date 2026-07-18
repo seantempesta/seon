@@ -62,6 +62,7 @@
     [seon.db :as db]
     [seon.db.branch :as db.branch]
     [seon.db.id :as id]
+    [seon.db.internal :as db.internal]
     [seon.db.process :as db.process]
     [seon.derive :as derive]
     [seon.error :as error]
@@ -973,10 +974,11 @@
    carrying NO rows — re-running asserts zero new datoms and never
    clobbers runtime appends.
 
-   Reopening the database never clobbers runtime appends."
+  Reopening the database never clobbers runtime appends."
   [configuration]
-  (into [configuration {:seon.user/id "user"}]
-        (my.kb.shared/seed-tx-data)))
+  (db.internal/encode-edn-slot-values
+   (into [configuration {:seon.user/id "user"}]
+         (my.kb.shared/seed-tx-data))))
 
 ;; ---------------------------------------------------------------------------
 ;; index-core! — runtime introspection of compiled core fns

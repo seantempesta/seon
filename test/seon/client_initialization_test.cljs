@@ -7,6 +7,7 @@
    [seon.client :as client]
    [seon.config :as config]
    [seon.db :as db]
+   [seon.db.internal :as db.internal]
    [seon.launch :as launch]
    [seon.runtime.admission :as admission]
    [seon.runtime.recovery :as recovery]
@@ -72,9 +73,10 @@
     (is (not-any? #(or (contains? % :seon.fn/created-at)
                        (contains? % :seon.schema/created-at))
                   (:seon.db/program forward)))
-    (is (= [configuration
-            {:seon.user/id "user"}
-            {:my.kb.shared/id "shared"}]
+    (is (= (db.internal/encode-edn-slot-values
+            [configuration
+             {:seon.user/id "user"}
+             {:my.kb.shared/id "shared"}])
            (:seon.db/initial-data forward)))))
 
 (deftest startup-recovery-accepts-domain-data-and-throws-direct-errors
