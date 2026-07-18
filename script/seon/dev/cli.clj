@@ -49,6 +49,12 @@
       (stop-processes!
        configuration :seon.dev.process.operation/recover targets))))
 
+(defn- live-managed-process?
+  [configuration id]
+  (when-let [record (process/read-process configuration id)]
+    (= :seon.dev.process.status/alive
+       (process/reported-process-status record))))
+
 (defn- legacy-database-path [configuration]
   (let [cluster (:seon.dev.config/cluster-dir configuration)
         database (fs/path cluster "db")
@@ -125,7 +131,9 @@
    (process/with-startup-ownership
     configuration
     (fn [start-owned!]
-      (if-let [manifest (artifact/current-manifest configuration)]
+      (if-let [manifest (when (live-managed-process?
+                              configuration process/watcher-id)
+                          (artifact/current-manifest configuration))]
         (let [late-recovery (recover-dead-processes! configuration)
               stop-results (cond-> prior-stop-results
                              late-recovery (conj late-recovery))]

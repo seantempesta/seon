@@ -223,6 +223,7 @@
     (with-redefs-fn
       {#'cli/assert-current-database-layout! identity
        #'cli/recover-dead-processes! (constantly nil)
+       #'cli/live-managed-process? (constantly true)
        #'process/with-startup-ownership
        (fn [_ transition]
          (transition (fn [_ acquire!] (acquire!))))
@@ -245,6 +246,39 @@
                  (:seon.dev.target/status target)))
           (is (= [] (:seon.dev.target/stop-results target))))))
     (is (= [process/writer-id process/watcher-id process/pod-id] @ensured))))
+
+(deftest reconcile-republishes-after-the-manifest-watcher-stopped
+  (let [configuration {:seon.dev.config/cluster-dir "/cluster"}
+        manifest {:seon.dev.artifact/application-digest
+                  (apply str (repeat 64 "a"))
+                  :seon.dev.artifact/changed #{}}
+        built? (atom false)]
+    (with-redefs-fn
+      {#'cli/assert-current-database-layout! identity
+       #'cli/recover-dead-processes! (constantly nil)
+       #'cli/live-managed-process? (constantly false)
+       #'process/with-startup-ownership
+       (fn [_ transition]
+         (transition (fn [_ acquire!] (acquire!))))
+       #'process/clean-or-force!
+       (fn [{:seon.dev.process/keys [operation targets]}]
+         (stop-result operation targets))
+       #'artifact/current-manifest
+       (fn [& _] (throw (ex-info "stopped watcher reused manifest" {})))
+       #'artifact/build!
+       (fn [_ prepare-client!]
+         (reset! built? true)
+         (prepare-client!)
+         manifest)
+       #'process/prepare-watcher! (fn [& _] nil)
+       #'process/admit-watcher-artifact! (fn [& _] nil)
+       #'process/specs (fn [& _] {})
+       #'process/start-order (fn [_] [])
+       #'process/status
+       (fn [& _]
+         {:seon.dev.target/status :seon.dev.target.status/ready})}
+      (fn [] (#'cli/reconcile-development! configuration)))
+    (is (true? @built?))))
 
 (deftest reconcile-recovers-only-definitely-dead-managed-processes
   (let [configuration {:seon.dev.config/cluster-dir "/cluster"}
