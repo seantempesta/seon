@@ -2666,6 +2666,9 @@
           (is (= (:seon.dev.config/program-source config)
                  (get-in pod [:seon.dev.process/environment
                               "SEON_PROGRAM_SOURCE_PATH"])))
+          (is (= (artifact/current-program-source-digest config)
+                 (get-in pod [:seon.dev.process/environment
+                              "SEON_PROGRAM_SOURCE_DIGEST"])))
           (is (= (:seon.dev.release/application-sha-256 manifest)
                  (:seon.dev.process/release-manifest-digest pod)))))
       (testing "an external-writer package owns pod and requires only writer"

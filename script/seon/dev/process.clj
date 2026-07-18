@@ -248,7 +248,7 @@
        :seon.dev.artifact/program-source-path
        (:seon.dev.config/program-source config)
        :seon.dev.artifact/program-source-digest
-       (member-sha :seon.dev.release/program-source-member)
+       (artifact/current-program-source-digest config)
        :seon.dev.artifact/application-digest
        (:seon.dev.release/application-sha-256 manifest)
        :seon.dev.artifact/release-manifest-digest
