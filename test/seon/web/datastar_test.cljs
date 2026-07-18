@@ -1,5 +1,6 @@
 (ns seon.web.datastar-test
-  (:require [cljs.test :refer [deftest is]]
+  (:require [cljs.test :refer [async deftest is]]
+            [seon.db :as db]
             [seon.execution :as execution]
             [seon.ui.html :as html]
             [seon.web.datastar :as datastar]))
@@ -11,6 +12,38 @@
    :since nil
    :history false
    :datahike/commit-id #uuid "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"})
+
+(deftest unknown-agent-page-redirects-before-serving-a-loading-shell
+  (async done
+    (let [original-db db/db
+          original-query db/query
+          status (atom nil)
+          headers (atom nil)
+          body (atom nil)
+          response #js {:writeHead (fn [value value-headers]
+                                     (reset! status value)
+                                     (reset! headers value-headers))
+                        :end #(reset! body %)}]
+      (set! db/db (fn ([] (js/Promise.resolve database))
+                    ([_] (js/Promise.resolve database))))
+      (set! db/query
+            (fn [request]
+              (is (identical? database (::db/db request)))
+              (js/Promise.resolve #{})))
+      (-> (datastar/serve-agent-page!
+           {:seon.http/node-res response
+            :path-params {:id "no-such-agent"}})
+          (.then
+           (fn [_]
+             (is (= 302 @status))
+             (is (= "/" (aget @headers "Location")))
+             (is (= "" @body))))
+          (.catch (fn [error] (is false (str error))))
+          (.finally
+           (fn []
+             (set! db/db original-db)
+             (set! db/query original-query)
+             (done)))))))
 
 (deftest native-interest-events-become-render-evidence
   (let [change (@#'datastar/event-change

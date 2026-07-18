@@ -1210,7 +1210,7 @@
                            "Cache-Control" "no-store, no-cache, must-revalidate"})
   (.end res (agent-page-html id)))
 
-(defn serve-agent-page!
+(defn ^:async serve-agent-page!
   "Serve the per-agent view shim page (the seeded :seon.route/agent handler).
    A Ring handler: takes the Ring request `r`, self-extracts the node res + the
    `{id}` path-param. Invalid ids 404. Public — db->routes resolves its symbol
@@ -1227,10 +1227,24 @@
       (not (safe-id? id))
       (do (.writeHead res 302 #js {"Location" "/" "Cache-Control" "no-store"})
           (.end res ""))
-      ;; #28 — a well-formed but unknown agent (stale bookmark, reset database,
-      ;; typo) gracefully redirects HOME rather than serving an empty view or
-      ;; a raw 404.
-      :else (write-agent-page! res id))))
+      :else
+      (let [database (await (db/db))]
+        (if (:seon.error/message database)
+          (write-database-error! res database)
+          (let [exists? (await (agent-exists? database id))]
+            (cond
+              (:seon.error/message exists?)
+              (write-database-error! res exists?)
+
+              exists?
+              (write-agent-page! res id)
+
+              ;; #28 — a well-formed but unknown agent (stale bookmark,
+              ;; reset database, typo) redirects home before a feed opens.
+              :else
+              (do (.writeHead res 302
+                              #js {"Location" "/" "Cache-Control" "no-store"})
+                  (.end res "")))))))))
 
 (defn serve-root!
   "Serve `/` — root's view (the all-agents dashboard).

@@ -7,6 +7,7 @@
    [clojure.string :as str]
    [seon.agent.debug :as agent-debug]
    [seon.db :as db]
+   [seon.render.system :as system]
    [seon.schema :as schema]
    [seon.ui.header :as header]
    [seon.ui.html :as html]
@@ -39,10 +40,8 @@
         [:title (brand/page-title b title)]
         [:link {:rel "stylesheet" :href "/css/output.css"}]
         (brand-style)
-        [:script {:type "module" :src "/js/datastar.js"}]]
+       [:script {:type "module" :src "/js/datastar.js"}]]
        [:body {:class "min-h-screen bg-base-950 text-text-50 font-sans p-4"}
-        (header/system-header header/default-projection)
-        header/header-spacer
         [:main {:id "app-view"
                 :class "text-xs font-mono text-text-500"}
          loading]
@@ -65,9 +64,17 @@
   (write-status! res 503 "text/plain; charset=utf-8"
                  (or (:seon.error/message error) "database unavailable")))
 
-(defn- debug-element [agent-id preview]
+(defn- header-projection [agents]
+  (if (:seon.error/message agents)
+    header/default-projection
+    {::header/brand-name "seon"
+     ::header/agent-count (count agents)
+     ::header/running-count
+     (count (filter #(= :running (::system/state %)) agents))}))
+
+(defn- debug-element [agent-id preview agents]
   [:main {:id "app-view" :class "flex flex-col gap-2 p-3"}
-   (header/system-header header/default-projection)
+   (header/system-header (header-projection agents))
    header/header-spacer
    [:h1 {:class "text-signal font-mono"} (str "debug · " agent-id)]
    (if-let [message (:seon.error/message preview)]
@@ -77,10 +84,13 @@
       (:seon.render/text preview)])])
 
 (defn- render-debug! [agent-id database]
-  (-> (agent-debug/ctx-preview
-       {:seon.agent/id agent-id
-        ::db/db database})
-      (.then #(debug-element agent-id %))))
+  (-> (js/Promise.all
+       #js [(agent-debug/ctx-preview
+             {:seon.agent/id agent-id
+              ::db/db database})
+            (system/acquire-fleet-summary database)])
+      (.then (fn [[preview agents]]
+               (debug-element agent-id preview agents)))))
 
 (defn- debug-feed-definition [agent-id view-id]
   {:seon.web.feed/key [:seon.web.feed/debug agent-id]
@@ -146,9 +156,9 @@
 (defn- data-attribute [^js request]
   (some-> (query-value request "attr") not-empty keyword))
 
-(defn- data-element [page]
+(defn- data-element [page agents]
   [:main {:id "app-view" :class "flex flex-col gap-2 p-3"}
-   (header/system-header header/default-projection)
+   (header/system-header (header-projection agents))
    header/header-spacer
    [:div {:class "flex items-baseline gap-3"}
     [:h1 {:class "text-signal font-mono"} "database"]
@@ -160,13 +170,15 @@
       (pr-str (:datahike.index-page/datoms page))])])
 
 (defn- render-data! [database attribute]
-  (-> (db/index-page
-       (cond-> {::db/db database
-                ::db/index :aevt
-                ::db/direction :forward
-                ::db/limit 50}
-         attribute (assoc ::db/components [attribute])))
-      (.then data-element)))
+  (-> (js/Promise.all
+       #js [(db/index-page
+             (cond-> {::db/db database
+                      ::db/index :aevt
+                      ::db/direction :forward
+                      ::db/limit 50}
+               attribute (assoc ::db/components [attribute])))
+            (system/acquire-fleet-summary database)])
+      (.then (fn [[page agents]] (data-element page agents)))))
 
 (defn- data-feed-definition [attribute view-id]
   {:seon.web.feed/key [:seon.web.feed/data attribute]

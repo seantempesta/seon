@@ -18,6 +18,7 @@
     [seon.db.branch :as branch]
     [seon.db.restore :as restore]
     [seon.eval :as seval]
+    [seon.render.system :as system]
     [seon.runtime.admission :as admission]
     [seon.web.debug :as debug]
     [seon.web.router :as router]
@@ -34,6 +35,7 @@
 (deftest database-view-uses-the-public-index-page-fields
   (async done
     (let [original db/index-page
+          original-fleet system/acquire-fleet-summary
           request (atom nil)]
       (set! db/index-page
             (fn index-page-stub
@@ -45,6 +47,12 @@
               ([_database _options]
                (js/Promise.reject
                 (js/Error. "database view must use the map request")))))
+      (set! system/acquire-fleet-summary
+            (fn [value]
+              (is (identical? database value))
+              (js/Promise.resolve
+               [{:seon.agent/id "root" ::system/state :idle}
+                {:seon.agent/id "worker" ::system/state :running}])))
       (-> (js/Promise.resolve nil)
           (.then (fn [] ((deref #'debug/render-data!) database nil)))
           (.then
@@ -55,12 +63,20 @@
                      ::db/limit 50}
                     @request))
              (is (str/includes? (pr-str element) ":seon.agent/id")
-                 "the view consumes Datahike's index-page datoms field")))
+                 "the view consumes Datahike's index-page datoms field")
+             (is (str/includes? (pr-str element) ":data-agent-count 2"))
+             (is (str/includes? (pr-str element) ":data-running-agents 1"))))
           (.catch (fn [error] (is false (str error))))
           (.finally
            (fn []
              (set! db/index-page original)
+             (set! system/acquire-fleet-summary original-fleet)
              (done)))))))
+
+(deftest database-and-debug-shells-leave-the-header-to-the-feed-morph
+  (let [markup ((deref #'debug/page-html) "data" "/data/feed" "loading")]
+    (is (= 1 (count (re-seq #"id=\"app-view\"" markup))))
+    (is (not (str/includes? markup "id=\"system-header\"")))))
 
 (deftest agent-run-timeout-uses-explicit-value-or-run-policy
   (async done

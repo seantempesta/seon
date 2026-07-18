@@ -58,6 +58,14 @@
                       :seon.agent/id))
        vec))
 
+(defn ^:async acquire-fleet-summary
+  "Acquire the ordered cluster summary at one immutable database value."
+  [database]
+  (let [rows (await (db/query {::db/db database ::db/query agent-query}))]
+    (if (:seon.error/message rows)
+      rows
+      (fleet-summary rows))))
+
 (def ^:private state-style
   {:idle ["●" "text-text-500"]
    :running ["●" "text-amber-400"]
