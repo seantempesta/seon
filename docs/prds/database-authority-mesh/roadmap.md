@@ -3563,3 +3563,55 @@ measurement, followed by a source-frozen restart/startup checkpoint and the
 measured `Bun.serve` transport cut. The retained render investigation can proceed only
 where it simplifies the measured debug or root owner; it does not displace
 those graduation gates.
+
+The coordinated source-frozen restart rebuilt the maintained writer and CLJS
+artifacts, drained every owned process normally, and returned watcher, writer,
+and pod ready with matching artifact digests. The complete operator cut took
+about 29 seconds including dependency preparation, writer packaging,
+self-host bootstrap, CSS, and process readiness. The Bun pod itself moved from
+process start to ready web service in about 4.7 seconds and resumed all 95
+existing agents without replaying the program per agent.
+
+The staged load then opened eight equivalent gzip feeds and two real isolated
+agents. Every feed returned HTTP 200, `content-encoding: gzip`, the same
+97,390-byte complete Datastar morph, and fanout eight; after aborting on the
+first complete event the registry returned to zero views and subscriptions.
+Latest-wins transaction churn requested seven renders, started two, completed
+one, and superseded one. The completed root render was 79.0 ms; the earlier
+superseded debug-sized render remained the expensive 1,836.7 ms owner. Eight
+backpressured writes drained in at most 2.36 ms, again falsifying socket drain
+as the dominant latency.
+
+The first two-agent prompt deliberately exposed model-discipline behavior: one
+agent emitted bare prose/forms and closed `:no-forms`, while the other reached
+the requested reply after the short 45-second request bound. Repeating with
+the actual interface stated explicitly and the normal 120-second work budget
+closed four concurrent real agents `:completed` in one turn with exact replies,
+zero timeouts, and zero errors in 13.9--15.4 seconds. A bounded timer-lag sampler
+around that run measured p50 2.01 ms, p95 2.46 ms, p99 3.74 ms, and maximum
+19.90 ms. The pod consumed 2.21 CPU-seconds over 39.4 seconds.
+
+The parent retained no child leak: all four children left the one host registry
+and OS process table after idle grace. Bun JSC heap moved from 122,183,644 to
+128,210,483 bytes after final full collection, and process RSS moved from
+875,151,360 to 916,422,656 bytes. The JVM heap used 188,464,040 bytes before
+load and later settled at 346,357,264 bytes while committed heap fell from
+827,326,464 to 556,793,856 bytes. Query cache weight remained bounded near
+0.8 MiB, active flights/callers/waiters returned to zero, and saved
+computations rose from zero to 25.
+
+An explicit same-database-value query proof sent eight identical callers at
+once. It produced one `miss-owner`, one `miss-joined`, and six hits; the second
+eight-call wave was entirely hits. The cache therefore shares computation
+across clients and remains directly reusable by feeds and agents without a
+Seon-side cache.
+
+The graduation load is functionally green, but it makes the dominant modest-
+hardware blocker sharper: the four active execution children occupied
+851--859 MiB RSS each, about 3.4 GiB before the pod and writer. This is tracked
+at [[../../seon/issues/execution-children-retain-hundreds-of-megabytes]]. The
+earliest unsettled contract is now reducing the active child's retained
+compiler/context footprint without weakening process isolation or persistent
+namespaces. The measured `Bun.serve` transport cut follows that dominant
+architecture boundary; complete maintained tests, browser, multi-cluster, and
+failure graduation remain final.

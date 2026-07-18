@@ -22,6 +22,16 @@ even though process isolation and parallel execution work correctly.
 - The supervising Bun pod retained 906,096 KiB RSS before the child was
   killed, so one cluster with one warm child was already around 1.5 GiB before
   including the JVM writer.
+- A source-frozen four-agent load on 2026-07-18 completed all four isolated
+  children concurrently in one turn, in 13.9--15.4 seconds. While executing,
+  their RSS values were 856,704, 851,504, 859,392, and 855,216 KiB. The pod
+  remained responsive, but the four children alone therefore required about
+  3.4 GiB RSS.
+- All four children exited through the existing idle-grace owner. The host
+  registry and OS process list returned to zero children, and the supervising
+  pod's fully collected JSC heap returned within 6.1 MiB of its pre-load value.
+  The retained cost belongs inside each active child rather than a parent-side
+  leak or failed eviction.
 
 ## Owner
 
