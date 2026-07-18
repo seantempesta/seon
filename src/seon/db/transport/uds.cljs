@@ -444,7 +444,10 @@
                        (enqueue-event! message frame-bytes)
                        (throw
                         (failure "Database session received an invalid event."
-                                 :seon.db.transport.uds.failure/protocol)))
+                                 :seon.db.transport.uds.failure/protocol
+                                 {::protocol/response message
+                                  ::protocol/explanation
+                                  (protocol/explain-response message)})))
                      (do
                        (when-not (string? request-id)
                          (throw

@@ -252,6 +252,32 @@
                                    "\n" (.-stack error)))
                     (done)))))))
 
+(deftest invalid-event-failure-preserves-the-response-and-explanation
+  (async done
+    (let [event (assoc (database-advanced-event database)
+                       :seon.db.protocol/unexpected true)
+          !terminal-errors (atom [])]
+      (-> (with-fake-bun
+            []
+            {::uds/on-close! #(swap! !terminal-errors conj %)}
+            (fn [session fixture]
+              (inject! fixture (encode-frame event))
+              (-> (after-event-turn)
+                  (.then
+                   (fn [_]
+                     (let [error (first @!terminal-errors)]
+                       (is (false? (uds/connected? session)))
+                       (is (= 1 (count @!terminal-errors)))
+                       (is (= event
+                              (::protocol/response (ex-data error))))
+                       (is (map?
+                            (::protocol/explanation (ex-data error))))))))))
+          (.then (fn [_] (done)))
+          (.catch (fn [error]
+                    (is false (str "invalid-event diagnostics failed: " error
+                                   "\n" (.-stack error)))
+                    (done)))))))
+
 (deftest event-queue-is-bounded-and-repetition-coalesces-to-resynchronization
   (let [first-event (datoms-event "listen/shared")
         events (-> (empty-events)
