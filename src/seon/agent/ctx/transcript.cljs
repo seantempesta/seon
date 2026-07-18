@@ -816,18 +816,86 @@
     (not [?turn :seon.agent.turn/scheduled? true])
     [?turn :seon.agent.turn/evals ?eval]])
 
-(def ^:private eval-rows-query
-  '[:find ?turn
-          (pull ?eval [:db/id :seon.eval/id :seon.eval/at
-                       :seon.eval/source :seon.eval/narration
-                       :seon.eval/output :seon.eval/ok?
-                       :seon.eval/result-edn :seon.eval/error
-                       :seon.eval/error-data :seon.eval/ns
-                       :seon.render/full?])
-    :in $ [?turn ...]
-    :where
-    [?turn :seon.agent.turn/evals ?eval]
-    [?eval :seon.eval/at _]])
+(def ^:private ai-eval-selector
+  '[:db/id :seon.eval/id :seon.eval/at
+    :seon.eval/source :seon.eval/narration
+    :seon.eval/output :seon.eval/ok? :seon.eval/duration-ms
+    :seon.eval/result-edn :seon.eval/error
+    :seon.eval/error-data :seon.eval/ns
+    :seon.render/full?])
+
+(def ^:private html-eval-selector
+  '[:db/id :seon.eval/id :seon.eval/at
+    :seon.eval/narration
+    :seon.eval/ok? :seon.eval/duration-ms :seon.eval/ns])
+
+(def ^:private ordered-eval-ids-query
+  {:find '[?turn ?eval ?at]
+   :in '[$ [?turn ...]]
+   :where '[[?turn :seon.agent.turn/evals ?eval]
+            [?eval :seon.eval/at ?at]]
+   :order-by '[?at :asc ?eval :asc]})
+
+(defn- eval-page-query
+  [selector]
+  [:find '?turn
+   (list 'pull '?eval selector)
+   :in '$ '[[?turn ?eval]]
+   :where
+   ['?turn :seon.agent.turn/evals '?eval]
+   ['?eval :seon.eval/at '_]])
+
+(def ^:private eval-page-size 8)
+
+(declare query-result acquisition-error database-error)
+
+(defn- ^:async acquire-eval-pages
+  "Read eval IDs, then pull independently bounded, cacheable pages."
+  [database turns selector]
+  (let [ids-response
+        (if (seq turns)
+          (await
+            (db/execute-many
+              {::db/db database
+               ::db/members
+               [(query-member database ordered-eval-ids-query
+                              [(mapv :db/id turns)]
+                              1000000 1000000 524288)]
+               ::db/max-result-weight 589824}))
+          {::db/results [{::protocol/success? true
+                          :datahike.query/result []}]})
+        ids-error (or (::error ids-response)
+                      (database-error ids-response)
+                      (acquisition-error (::db/results ids-response)))
+        eval-ids (when-not ids-error
+                   (mapv (fn [[turn eval _at]] [turn eval])
+                         (or (query-result (first (::db/results ids-response))) [])))
+        requests
+        (mapv
+          (fn [eval-page]
+            (db/execute-many
+              {::db/db database
+               ::db/members
+               [(query-member database (eval-page-query selector)
+                              [eval-page]
+                              1000000 1000000 524288)]
+               ::db/max-result-weight 589824}))
+          (partition-all eval-page-size eval-ids))
+        responses (if (and (not ids-error) (seq requests))
+                    (array-seq (await (js/Promise.all (into-array requests))))
+                    [])
+        error (or ids-error
+                  (some #(or (::error %)
+                             (database-error %)
+                             (acquisition-error (::db/results %)))
+                        responses))]
+    (if error
+      {::error error}
+      {::eval-rows
+       (into []
+             (mapcat (fn [response]
+                       (or (query-result (first (::db/results response))) [])))
+             responses)})))
 
 (def ^:private message-selector
   '[:db/id :seon.agent.message/id :seon.agent.message/content
@@ -889,7 +957,7 @@
   (when (and (map? value) (string? (:seon.error/message value))) value))
 
 (defn- ^:async acquire-transcript
-  [{:seon.agent/keys [id entity] :as input}]
+  [{:seon.agent/keys [id entity] :as input} eval-selector]
   (let [database (or (::db/db input)
                      (::db/db (db/current-tx-context))
                      (await (db/db)))
@@ -943,12 +1011,9 @@
                        (filterv #(>= (::turn-idx %) cutoff-index)))
             cutoff-at (:seon.agent.turn/at (first turns))
             rotated? (pos? cutoff-index)
+            eval-pages (acquire-eval-pages database turns eval-selector)
             stage-two-members
             (cond-> []
-              (seq turns)
-              (conj (query-member database eval-rows-query
-                                  [(mapv :db/id turns)]
-                                  1000000 1000000 524288))
               true
               (conj (query-member database (messages-query cutoff-at)
                                   (cond-> [id] cutoff-at (conj cutoff-at))
@@ -956,19 +1021,22 @@
               rotated?
               (conj (query-member database (previous-ns-query cutoff-at) [id cutoff-at]
                                   500000 500000 8192)))
-            stage-two (await (db/execute-many
-                               {::db/db database
-                                ::db/members stage-two-members
-                                ::db/max-result-weight 790528}))]
-        (if-let [error (or (::error stage-two)
+            joined (array-seq
+                     (await (js/Promise.all
+                              #js [eval-pages
+                                   (db/execute-many
+                                     {::db/db database
+                                      ::db/members stage-two-members
+                                      ::db/max-result-weight 327680})])))
+            eval-page-result (first joined)
+            stage-two (second joined)]
+        (if-let [error (or (::error eval-page-result)
+                           (::error stage-two)
                            (database-error stage-two)
                            (acquisition-error (::db/results stage-two)))]
           (assoc input ::error error)
-          (let [[eval-member message-member previous-ns-member]
-                (if (seq turns)
-                  (::db/results stage-two)
-                  (into [nil] (::db/results stage-two)))
-                evals-by-turn (group-by first (or (query-result eval-member) []))
+          (let [[message-member previous-ns-member] (::db/results stage-two)
+                evals-by-turn (group-by first (::eval-rows eval-page-result))
                 turns (mapv (fn [turn]
                               (assoc turn :seon.agent.turn/evals
                                      (->> (get evals-by-turn (:db/id turn))
@@ -1017,7 +1085,7 @@
   "Acquire and render the transcript at the active database value."
   {:malli/schema [:=> [:cat :seon.render/section-request :any] :string]}
   [input _invoke-selected!]
-  (format-transcript-block (await (acquire-transcript input))))
+  (format-transcript-block (await (acquire-transcript input ai-eval-selector))))
 
 (defn- format-transcript-block
   "The WHOLE bottom of the context: the [[masthead]], then the agent's
@@ -1181,8 +1249,7 @@
    context. With no turns yet, retain the newest `retained` events. A zero
    window renders no history.
 
-   This is a pure projection over database-derived turns/events. Call it before
-   [[coalesce-events]] so an error run is bounded before it is summarized."
+   This is a pure projection over database-derived turns/events."
   {:malli/schema [:=> [:catn [::turn-ats [:sequential :inst]]
                              [::retained :int]
                              [::events [:sequential :map]]]
@@ -1212,18 +1279,6 @@
         (if preceding
           (into [preceding] recent)
           recent)))))
-
-(defn- coalesced-card-html
-  "One fixed-size activity row for a coalesced error run.
-
-   The normal transcript never embeds the member eval cards in a closed
-  disclosure: their technical payload remains database data and the exact AI
-  transcript remains available in the debug web UI."
-  [{::keys [signature count]}]
-  [:div {:class "agent-activity flex items-baseline gap-1.5 px-2 py-1 text-xs min-w-0"}
-   [:span {:class "font-medium text-text-400 truncate"}
-    (tokens/clip-str signature 30)]
-   [:span {:class "font-mono text-error shrink-0"} (str count "× failed")]])
 
 (defn- message-card-html
   "Render one already-acquired message row without another database read."
@@ -1256,8 +1311,7 @@
         retained (or (::turns-retained node) default-turns-retained)
         turn-ats (mapv :seon.agent.turn/at turns)
         events (->> (ordered-events input)
-                    (recent-html-events turn-ats retained)
-                    coalesce-events)
+                    (recent-html-events turn-ats retained))
         render-message
         (fn [event]
           (message-card-html configuration id (::entity event)))
@@ -1266,7 +1320,6 @@
              (keep
                (fn [event]
                  (case (::kind event)
-                   :coalesced (coalesced-card-html event)
                    :message (render-message event)
                    :eval (eval-handler/render-activity-html
                            {:seon.config/configuration configuration
@@ -1296,7 +1349,7 @@
   {:malli/schema [:=> [:cat :seon.render/section-request :any]
                   [:maybe :seon.render.canvas/hiccup]]}
   [input _invoke-selected!]
-  (let [acquired (await (acquire-transcript input))]
+  (let [acquired (await (acquire-transcript input html-eval-selector))]
     (if-let [error (::error acquired)]
       [:div {:class "text-error p-2 text-xs font-mono"}
        (str "transcript render failed: " (pr-str error))]
