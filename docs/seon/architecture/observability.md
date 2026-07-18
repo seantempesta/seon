@@ -99,6 +99,25 @@ capability instead of ad-hoc log files:
   search/embedding capabilities when explicitly requested; `my.blob` does not
   create another index.
 
+Execution-child telemetry follows the same storage law. Bun process handles,
+active invocation timers, and demanded live CPU/RSS samples remain transient in
+the parent execution host. Healthy sampling does not write transactions. On
+deadline, exit, or explicit forensic capture, one bounded terminal snapshot
+becomes queryable recovery datoms and the complete structured report becomes one
+`:diagnostic` blob. The blob contains sample history, raw or source-mapped stack
+frames, full invocation identity, and complete retained output; the recovery
+entity keeps only measurement units and clipped tails needed for ordinary
+queries and the root system view.
+
+Stack attribution is evidence, not certainty. A thrown exception supplies an
+ordinary JSC stack. A non-responsive child may receive a short on-demand native
+sample after the soft threshold; generated frames are mapped through the exact
+ClojureScript source map and trimmed to the first agent-authored frame plus its
+callers and the owning Seon boundary. Reports retain raw frames and sample share
+so optimized, native, or blocked-system-call cases can say that attribution is
+incomplete rather than inventing an exact source line. Always-on JSC profiling
+is diagnostic-only unless measured overhead proves it suitable for the default.
+
 ## Replay, diff, search
 
 Three functions make a turn a first-class object of study:

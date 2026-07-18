@@ -617,25 +617,32 @@ temporal cut inside its containing retained commit only.
 The complete transition contract is
 [[docs/prds/runtime-reliability/provenance-and-lifecycle-design]].
 
-The external cluster supervisor performs process recovery; the in-pod root agent
-cannot survive stopping its own pod. A clean planned restart first quiesces at
-turn boundaries. An unexpected crash is deliberately more conservative: the
-supervisor acts as the logical root database user, CAS-fences every interrupted
-open run, marks its running turn `:interrupted`, closes the run `:crashed`, and
-retracts its pointer. It does not fabricate an eval row for work whose result
-never committed; already committed eval facts remain unchanged. Every affected
-nonterminated agent therefore derives back to `:idle`; no replacement run opens
-and no source/effect is replayed.
+The parent execution host performs child-process recovery; the in-child agent
+cannot recover its own blocked JavaScript thread. A clean planned restart first
+quiesces at turn boundaries. An unexpected child exit or deadline CAS-fences the
+exact interrupted run, marks its running turn and eval receipts `:interrupted`,
+closes the run `:crashed`, and retracts its pointer. It does not fabricate an eval
+row for work whose receipt never committed; already committed transactions remain
+true history and no source or external effect is replayed.
 
 That same transaction also asserts one `:seon.runtime.recovery/id` anchor with
-the unexpected-exit reason and optional bounded diagnostic. It does not copy
+the unexpected-exit reason, bounded terminal process facts, and a ref to the
+full content-addressed diagnostic blob. It does not copy
 affected agent/run/turn refs or prior/current database values: those are derived by
 joining the anchor's transaction to the run/turn/pointer datoms it changed and
-to the commit graph. The root-visible notice is a render of that fact and stays
-prominent while an affected agent has opened no later run. Root or the human
-decides by sending a new message; recovery never guesses. Runtime handles/wake
-state are rebuilt only after the one durable transaction. There is no stored
-acknowledgement, per-agent resume checklist, or auto-recovery turn.
+to the commit graph.
+
+The first crash after useful work opens one new bounded recovery run in a clean
+child. Its first prompt includes the interrupted eval's concise crash error and
+the diagnostic-blob ref; it never resumes the interrupted turn or replays its
+effect. A successful later turn clears the condition by ordinary history. If
+the replacement crashes again before completing useful work, no third run opens:
+the existing inbound-message mechanism wakes root with the derived recovery
+evidence. Root can inspect the source, diagnostic blob, and current database,
+repair the program, and explicitly resume. The breaker is derived from recovery
+anchors and later terminal turns, not a mutable retry counter or acknowledgement
+flag. Runtime handles and wake state are rebuilt only after the durable recovery
+transaction.
 
 The same external supervisor quiesces writers/hosts, records durable restore
 intent outside the branch being replaced, preserves an undo head, and

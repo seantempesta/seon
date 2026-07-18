@@ -522,14 +522,26 @@ pair to the resolver's data map, never a second mechanism.
 ### 4.5 crash recovery — `:seon.runtime.recovery/*`
 
 Crash recovery writes one small anchor in the same deterministic transaction as
-the run/turn/pointer repairs. It stores the fact that an unexpected recovery
-happened, not a materialized incident report:
+the run/turn/pointer repairs. Queryable terminal facts remain datoms; the full
+diagnostic report is a content-addressed blob:
 
 | attribute | malli | datahike facet | notes |
 |---|---|---|---|
 | `:seon.runtime.recovery/id` | `[:and {:seon.db/identity true :seon.db.id/generator :seon.db.id.generator/compact} :seon.db.id/compact-value]` | string / one / identity | frozen operation identity; retry upserts the same anchor |
 | `:seon.runtime.recovery/reason` | `[:enum :unexpected-exit]` | keyword / one | the observed durable cause |
 | `:seon.runtime.recovery/detail` | `[:string {:max 2048}]` | string / one | optional bounded diagnostic only when it is not derivable from transaction facts |
+| `:seon.runtime.recovery/diagnostic-blob` | `[:ref :my.blob/hash]` | ref / one | full process, invocation, sampled-stack, and output report |
+| `:seon.runtime.recovery/pid` | `:int` | long / one | failed Bun child process ID |
+| `:seon.runtime.recovery/exit-code` | `:int` | long / one | process exit code when observed |
+| `:seon.runtime.recovery/signal` | `:string` | string / one | terminating signal when observed |
+| `:seon.runtime.recovery/cpu-user-microseconds` | `:int` | long / one | Bun `resourceUsage.cpuTime.user` terminal sample |
+| `:seon.runtime.recovery/cpu-system-microseconds` | `:int` | long / one | Bun `resourceUsage.cpuTime.system` terminal sample |
+| `:seon.runtime.recovery/cpu-total-microseconds` | `:int` | long / one | Bun `resourceUsage.cpuTime.total` terminal sample |
+| `:seon.runtime.recovery/rss-bytes` | `:int` | long / one | Bun live `resourceUsage.rss` terminal sample |
+| `:seon.runtime.recovery/max-rss-bytes` | `:int` | long / one | Bun `resourceUsage.maxRSS` when available |
+| `:seon.runtime.recovery/elapsed-ms` | `:int` | long / one | parent-observed invocation duration |
+| `:seon.runtime.recovery/stdout-tail` | `[:string {:max 2048}]` | string / one | clipped child stdout tail |
+| `:seon.runtime.recovery/stderr-tail` | `[:string {:max 2048}]` | string / one | clipped child stderr tail |
 
 The anchor does **not** copy agent/run/turn refs, timestamps, prior/current
 database values, acknowledgement state, or a rendered notice. Query the
@@ -538,8 +550,10 @@ turn status, and pointer-retraction datoms in that transaction; transaction
 metadata supplies user/process/time, and the commit graph supplies prior/current
 database values. Root's recovery notice and “still needs a decision” prominence are
 projections of that join and whether each affected agent has opened a later run.
-An interrupted eval that never committed has no durable result, so recovery does
-not invent one; already committed eval rows remain facts as recorded.
+A running eval receipt becomes `:interrupted` with a concise crash error; recovery
+does not invent an eval row when no receipt committed. The diagnostic blob owns
+sample history, raw frames, complete output, and the full invocation report so
+large forensic evidence never becomes datom text.
 
 ### 4.6 blob projection — `:my.blob/*`
 
