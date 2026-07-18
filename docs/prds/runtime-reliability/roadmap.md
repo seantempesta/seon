@@ -315,6 +315,19 @@ before and after runtime activity. This closes exact-current package
 immutability/restart/read-back; remaining reconciliation is current ACME,
 multi-cluster, and resource evidence rather than another package mechanism.
 
+The current downstream/shared-writer boundary also passes after safely clearing
+one stale pre-migration process record through normal `bin/acme down`. ACME
+application `91252536…` ran beside the ready default cluster with its own
+watcher and Bun pod and the default-owned JVM writer as its only external
+dependency. Chrome rendered the ACME dashboard and downstream surfaces without
+console errors. A clean ACME restart replaced only its watcher/pod; default
+watcher PID 24043, writer PID 25509, and pod PID 34428 remained unchanged.
+ACME retained its database/dashboard, and clean ACME shutdown left default
+ready. [[../../seon/issues/acme-operator-migration-drift]] records the remaining
+friction: `up` safely refused obsolete `wire-server` records until one normal
+`down` removed them. The architecture boundary itself is green; current
+resource evidence and the complete audit remain.
+
 The downstream production overlay now passes the same immutable boundary.
 ACME supplies separate Shadow mains for the Bun pod and Bun execution child,
 so its source is compiled and dynamically reachable in both isolated runtime

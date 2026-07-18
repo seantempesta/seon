@@ -251,3 +251,22 @@ fenced ownership remain with `inspect-live-cluster-caller-drift.md`.
   two process/database namespaces do not cross-talk, exercises its overlay and
   routes in a browser/feed, restarts it without data loss, and confirms a scoped
   reset cannot touch the default or preserved pre-migration databases.
+
+## Current shared-writer proof and remaining stale-record friction — 2026-07-18
+
+Current-source ACME application `91252536…` starts beside the ready default
+cluster through the semantic operator and reports the default writer as its
+external dependency. ACME owns only its watcher and Bun pod; the one JVM writer
+remained default-owned at PID 25509. Chrome rendered the downstream dashboard
+and surfaces without console errors. A clean ACME restart replaced only its
+watcher/pod, retained the ACME database/dashboard, and left the default watcher,
+writer, and pod unchanged. `bin/acme down` then drained only ACME while the
+default cluster remained ready.
+
+The first `bin/acme up` attempt encountered retired `wire-server` process files
+under `tmp/proc-acme` and refused with `containment-uncertain` before starting
+anything. A normal `bin/acme down` removed that stale migration state, after
+which the same `up` passed. This is safe but unnecessary operator friction:
+semantic `up` should classify and retire records for process IDs absent from
+the current descriptor without requiring a separate manual `down`, while still
+refusing any live or unprovably contained foreign process.
