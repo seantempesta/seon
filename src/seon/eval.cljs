@@ -442,12 +442,21 @@
     ;; existing namespace owners, not copied runtimes.
     (set! (.-goog js/global) js/goog)
     (set! (.-cljs js/global) (cljs.core/find-ns-obj 'cljs))
-    (await (js/Promise.
-             (fn [resolve _reject]
-               (boot/init state
-                          {:path bootstrap-path
-                           :load-on-init '#{cljs.core}}
-                          (fn [] (resolve nil))))))
+    (let [global-eval (.-globalEval js/goog)]
+      ;; Shadow's Node bootstrap uses `goog.globalEval`, whose indirect eval
+      ;; cannot see dependencies kept in this simple bundle's lexical scope.
+      ;; During bootstrap only, make that call a direct eval in this artifact;
+      ;; restore Closure's owner before returning to the long-lived runtime.
+      (set! (.-globalEval js/goog) (fn [source] (js/eval source)))
+      (try
+        (await (js/Promise.
+                 (fn [resolve _reject]
+                   (boot/init state
+                              {:path bootstrap-path
+                               :load-on-init '#{cljs.core}}
+                              (fn [] (resolve nil))))))
+        (finally
+          (set! (.-globalEval js/goog) global-eval))))
     (bootstrap-cache/load-all! state bootstrap-path)
     (when-not (and (some? (.-cljs js/global))
                    (some? (.-core (.-cljs js/global))))

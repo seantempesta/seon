@@ -20,11 +20,15 @@ and loaded `cljs` namespace objects are module-scoped, while
 `shadow.cljs.bootstrap.node/init` evaluates bootstrap namespace files in global
 scope. Publishing only `goog` advanced the failure into `cljs.core$macros`,
 where the global script could not see the module's existing `cljs.core`.
+Publishing `cljs` then advanced into `malli.core$macros`, proving that exporting
+dependency roots individually would merely chase the complete bootstrap graph.
 
 ## Owner and acceptance
 
 `seon.eval/init-bootstrap!` owns bootstrap initialization for the execution
 runtime. It must publish the bundle's exact `goog` and `cljs` namespace-owner
-objects before the loader runs. A fresh relocated package must execute an
-agent-authored form, commit the reply, retire the child normally, restart, and
-read the committed result back without changing the package inventory.
+objects for Shadow's bookkeeping and scope the loader's indirect global eval
+to direct artifact eval during initialization. A fresh relocated package must
+execute an agent-authored form, commit the reply, retire the child normally,
+restart, and read the committed result back without changing the package
+inventory.
