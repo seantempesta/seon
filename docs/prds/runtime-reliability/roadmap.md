@@ -72,6 +72,16 @@ measured bottlenecks; then finish the Bun-native and downstream packaging cut.
 The older unit table remains a coverage ledger, not six independent runtime
 tracks and not a requirement to preserve obsolete intermediate mechanisms.
 
+As of 2026-07-18, one JVM writer has passed the complete autonomous sibling
+cluster lifecycle: fresh initialization, distinct database values and store
+IDs, concurrent agents and gzip feeds, isolated writes, pod-only restart,
+config-free reopen, and final database-reference release. The default
+watcher/writer/pod remained unchanged throughout the sibling restart. The
+complete ClojureScript gate passes 1,098 tests/4,880 assertions and the affected
+writer selection passes 79/538. The ordered boundary is now the complete
+correctness/browser journey and concurrent agent/failure load, followed by
+resource measurement and only then the Bun-native HTTP/SSE transport cut.
+
 The existing remote query surface now exposes its protocol-native historical
 view, closing the only facade gap needed by coordinate-pinned startup birth.
 LLM configuration and brand startup sync also use bounded coordinate-fenced

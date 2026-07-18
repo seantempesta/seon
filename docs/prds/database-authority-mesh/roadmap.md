@@ -3230,3 +3230,59 @@ fresh autonomous cluster that becomes ready, runs an agent, isolates writes
 and feeds, restarts only its pod, reopens config-free, and closes without
 changing the default pod or sole writer generation. Complete correctness,
 real-browser, load, and measured resource gates remain ordered after it.
+
+The Datahike edge and the complete autonomous-cluster lifecycle are now
+closed. Maintained Datahike commit `4c55791b` makes a nil attribute an empty
+positive merge instead of passing it into EAVT. Source probing also established
+that attribute-position input variables do not resolve keyword idents, even
+when installed. Commit `e8f51488` therefore uses Datahike's ordinary schema
+datoms—`[?attribute :db/ident ?identity-attr]`—before querying an entity by its
+numeric attribute ref. The focused regression passes 2 assertions and the
+complete Datahike query-planner namespace passes 30 tests/126 assertions;
+Seon's affected initialization/reconciliation selection passes 57/331.
+
+The next clean launch exposed one more initialization mismatch: the retained
+config singleton's mixed-union EDN fields were encoded by ordinary
+transactions but not by the atomic initial-data transaction. Commit `398ae753`
+routes initial data through that same pure encoding transformation. Focused
+client initialization passes 7 tests/22 assertions. A fresh
+`experiment-proof` database then initialized successfully and reached ready.
+
+The integrated live proof used one watcher PID `18422` and one JVM writer PID
+`18795` for both databases. The default and experiment pods had distinct PIDs,
+database paths, store IDs, basis transactions, commit IDs, and HTTP ports.
+Cluster-qualified MCP selected both roots while bare `root` was rejected as
+ambiguous. Concurrent `POST /agents` calls created `dark-schools-smash` in the
+default database and `slimy-spies-admire` in the experiment database. Separate
+`:seon.user/id` marker transactions remained mutually absent from the other
+database. Both gzip Datastar feeds returned HTTP 200 and streamed complete
+payloads concurrently.
+
+Restarting only `experiment-proof` changed its pod PID from `20186` to `24115`;
+the default watcher, writer, and pod PIDs (`18422`, `18795`, `19339`) remained
+unchanged. The reopened pod retained its config singleton, experiment-only
+marker, and agents without reading a manifest or reapplying initial data.
+
+The first close then found that repeated program initialization reacquired an
+administrative Datahike reference after the transport connection already owned
+the database. Commit `179ddc51` makes ensure aware of that exact process-local
+transport connection, so route validation does not acquire a redundant
+reference. It also restores the immutable database value selected by
+`seon.db/execute-many`, fixing the LLM config transaction's nil basis fence.
+Focused registry/initialization proof passes 26 tests/159 assertions, the
+affected writer selection passes 79/538, and the complete ClojureScript gate
+passes 1,098/4,880.
+
+The source-frozen live repeat opened the existing experiment database
+config-free, logged no LLM config synchronization error, and showed
+`:seon.db.registry/ensured? false` with exactly one transport connection.
+`cluster close experiment-proof` stopped only that pod, preserved the database
+directory, and left `seon.db.registry/list-databases` containing only
+`:default`. The default cluster remained ready.
+
+The earliest unsettled boundary is now the complete correctness and browser
+journey, followed by concurrent multi-agent load and failure injection. Once
+those are green, record cold/warm startup, database-hop latency, query-cache
+reuse, feed/render work, event-loop delay, CPU, heap, and RSS before changing
+transport or pursuing micro-optimizations. Bun-native HTTP/SSE remains the
+last transport cut after behavioral and resource baselines are honest.
