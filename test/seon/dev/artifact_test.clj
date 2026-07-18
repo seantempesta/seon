@@ -57,7 +57,8 @@
         application-digest
         (fn [identity]
           (#'artifact/derive-application-digest
-           config identity [] digest digest digest digest digest digest))
+           config identity [] digest digest "out/program-sources.edn" digest
+           digest digest digest digest))
         initial (application-digest bun)]
     (doseq [[field changed]
             [[:seon.dev.artifact/bun-executable "/other-bun"]
@@ -112,6 +113,8 @@
         output-digests
         {:seon.dev.artifact/writer-digest digest-a
          :seon.dev.artifact/client-digest digest-a
+         :seon.dev.artifact/program-source-path "out/client/program-sources.edn"
+         :seon.dev.artifact/program-source-digest digest-a
          :seon.dev.artifact/execution-digest digest-a
          :seon.dev.artifact/execution-runtime-digest digest-a
          :seon.dev.artifact/bootstrap-digest digest-a
@@ -148,6 +151,7 @@
 (deftest current-client-digest-owns-output-and-runtime-closure
   (let [directory (fs/create-temp-dir {:prefix "seon-client-digest-test-"})
         output (fs/path directory "out-acme/client/main.js")
+        program-source (fs/path directory "out-acme/client/program-sources.edn")
         runtime (fs/path directory
                          "shadow/builds/acme-client/dev/out/cljs-runtime/a.js")
         config {:seon.dev.config/root (str directory)
@@ -159,9 +163,13 @@
       (fs/create-dirs (fs/parent output))
       (fs/create-dirs (fs/parent runtime))
       (spit (str output) "main-a")
+      (spit (str program-source) "program-a")
       (spit (str runtime) "runtime-a")
       (let [digest (artifact/current-client-digest config)]
         (is (= digest (artifact/current-client-digest config)))
+        (spit (str program-source) "program-b")
+        (is (not= digest (artifact/current-client-digest config)))
+        (spit (str program-source) "program-a")
         (spit (str runtime) "runtime-b")
         (is (not= digest (artifact/current-client-digest config))))
       (finally (fs/delete-tree directory)))))
@@ -183,6 +191,7 @@
 (deftest current-output-identity-rehashes-every-runtime-component
   (let [component (atom {:writer (apply str (repeat 64 "a"))
                          :client (apply str (repeat 64 "b"))
+                         :program-source (apply str (repeat 64 "7"))
                          :execution (apply str (repeat 64 "c"))
                          :execution-runtime (apply str (repeat 64 "d"))
                          :bootstrap (apply str (repeat 64 "e"))
@@ -200,6 +209,8 @@
         #(with-redefs-fn
            {#'artifact/current-writer-digest (fn [_] (:writer @component))
             #'artifact/current-client-digest (fn [_] (:client @component))
+            #'artifact/current-program-source-digest
+            (fn [_] (:program-source @component))
             #'artifact/current-execution-digest
             (fn [_] (:execution @component))
             #'artifact/current-execution-runtime-digest
@@ -213,10 +224,12 @@
            (fn [] (artifact/current-output-digests config)))]
     (let [initial (observe)]
       (is (= (select-keys @component
-                          [:writer :client :execution :execution-runtime
+                          [:writer :client :program-source :execution :execution-runtime
                            :bootstrap :css])
              {:writer (:seon.dev.artifact/writer-digest initial)
               :client (:seon.dev.artifact/client-digest initial)
+              :program-source
+              (:seon.dev.artifact/program-source-digest initial)
               :execution (:seon.dev.artifact/execution-digest initial)
               :execution-runtime
               (:seon.dev.artifact/execution-runtime-digest initial)
@@ -225,6 +238,7 @@
       (doseq [[component-key manifest-key]
               [[:writer :seon.dev.artifact/writer-digest]
                [:client :seon.dev.artifact/client-digest]
+               [:program-source :seon.dev.artifact/program-source-digest]
                [:execution :seon.dev.artifact/execution-digest]
                [:execution-runtime
                 :seon.dev.artifact/execution-runtime-digest]
@@ -475,22 +489,28 @@
 (deftest sequential-flavors-publish-immutable-runtime-roots
   (let [directory (fs/create-temp-dir {:prefix "seon-bootstrap-root-test-"})
         source (fs/path directory "out/bootstrap/example.txt")
+        client (fs/path directory "out/client/main.js")
+        program-source (fs/path directory "out/client/program-sources.edn")
         execution (fs/path directory "out/execution/main.js")
         execution-runtime
         (fs/path directory
                  ".shadow-cljs/builds/execution/dev/out/cljs-runtime/a.js")
         config {:seon.dev.config/root (str directory)
+                :seon.dev.config/client-output (str client)
                 :seon.dev.config/execution-output (str execution)
                 :seon.dev.config/execution-build-id "execution"
                 :seon.dev.config/shadow-cache-root
                 (str (fs/path directory ".shadow-cljs"))}]
     (try
       (fs/create-dirs (fs/parent source))
+      (fs/create-dirs (fs/parent client))
       (fs/create-dirs (fs/parent execution))
       (fs/create-dirs (fs/parent execution-runtime))
       (doseq [relative ["src" "test" "resources"]]
         (fs/create-dirs (fs/path directory relative)))
       (spit (str source) "default-bootstrap")
+      (spit (str client) "default-client")
+      (spit (str program-source) "default-program-source")
       (spit (str execution) "default-execution")
       (spit (str execution-runtime) "default-runtime")
       (let [default-digest (artifact/digest-paths
@@ -499,9 +519,12 @@
             (artifact/current-execution-digest config)
             default-runtime-digest
             (artifact/current-execution-runtime-digest config)
+            default-program-source-digest
+            (artifact/current-program-source-digest config)
             default-root (#'artifact/publish-runtime-root!
                            config default-digest default-execution-digest
-                           default-runtime-digest)]
+                           default-runtime-digest
+                           default-program-source-digest)]
         (is (= "default-bootstrap"
                (slurp (str (fs/path default-root
                                     "out/bootstrap/example.txt")))))
@@ -512,12 +535,16 @@
                (slurp (str (fs/path
                             default-root
                             ".shadow-cljs/builds/execution/dev/out/cljs-runtime/a.js")))))
+        (is (= "default-program-source"
+               (slurp (str (fs/path default-root
+                                    "out/client/program-sources.edn")))))
 
         (spit (str source) "acme-bootstrap")
         (let [acme-digest (artifact/digest-paths directory ["out/bootstrap"])
               acme-root (#'artifact/publish-runtime-root!
                          config acme-digest default-execution-digest
-                         default-runtime-digest)]
+                         default-runtime-digest
+                         default-program-source-digest)]
           (is (not= default-root acme-root))
           (is (= default-digest
                  (artifact/digest-paths default-root ["out/bootstrap"])))
@@ -530,19 +557,33 @@
           (is (= acme-root
                  (#'artifact/publish-runtime-root!
                   config acme-digest default-execution-digest
-                  default-runtime-digest))
+                  default-runtime-digest default-program-source-digest))
               "identical runtime bytes reuse their verified content address")
           (spit (str execution) "changed-execution")
           (let [changed-execution-digest
                 (artifact/current-execution-digest config)
                 changed-root (#'artifact/publish-runtime-root!
                               config acme-digest changed-execution-digest
-                              default-runtime-digest)]
+                              default-runtime-digest
+                              default-program-source-digest)]
             (is (not= acme-root changed-root))
             (is (= "default-execution"
                    (slurp (str (fs/path acme-root
                                         "out/execution/main.js"))))
-                "a watcher rebuild cannot mutate an admitted child artifact"))))
+                "a watcher rebuild cannot mutate an admitted child artifact"))
+          (spit (str execution) "default-execution")
+          (spit (str program-source) "changed-program-source")
+          (let [changed-program-source-digest
+                (artifact/current-program-source-digest config)
+                changed-root (#'artifact/publish-runtime-root!
+                              config acme-digest default-execution-digest
+                              default-runtime-digest
+                              changed-program-source-digest)]
+            (is (not= acme-root changed-root))
+            (is (= "default-program-source"
+                   (slurp (str (fs/path acme-root
+                                        "out/client/program-sources.edn"))))
+                "a later source publication cannot mutate an admitted root"))))
       (finally (fs/delete-tree directory)))))
 
 (defn- git-coordinate [suffix]
@@ -639,6 +680,7 @@
   (let [directory (fs/create-temp-dir {:prefix "seon-v4-identity-test-"})
         writer (fs/path directory "target/writer.jar")
         client (fs/path directory "out/client/main.js")
+        program-source (fs/path directory "out/client/program-sources.edn")
         execution (fs/path directory "out/execution/main.js")
         runtime (fs/path directory
                          ".shadow-cljs/builds/client/dev/out/cljs-runtime/a.js")
@@ -662,6 +704,7 @@
     (try
       (write-test-jar! writer "writer-a")
       (doseq [[path value] [[client "client"] [execution "execution"]
+                            [program-source "program-source"]
                             [runtime "runtime"]
                             [execution-runtime "execution-runtime"]
                             [bootstrap "bootstrap"] [css "css"]]]
@@ -669,9 +712,10 @@
         (spit (str path) value))
       (with-redefs [artifact/maintained-dependencies (fn [_] @dependencies)
                     artifact/publish-runtime-root!
-                    (fn [_ bootstrap-digest execution-digest runtime-digest]
+                    (fn [_ bootstrap-digest execution-digest runtime-digest
+                         program-source-digest]
                       (str "/runtime/" bootstrap-digest "-" execution-digest
-                           "-" runtime-digest))]
+                           "-" runtime-digest "-" program-source-digest))]
         (let [bun (artifact/bun-identity! {})
               initial (#'artifact/output-manifest config bun)]
           (swap! dependencies assoc-in
@@ -706,6 +750,9 @@
          :seon.dev.artifact/execution-build-id "execution"
          :seon.dev.artifact/shadow-cache-root "/checkout/.shadow-cljs"
          :seon.dev.artifact/client-output "/checkout/out/client/main.js"
+         :seon.dev.artifact/program-source-path
+         "out/client/program-sources.edn"
+         :seon.dev.artifact/program-source-digest digest
          :seon.dev.artifact/execution-output "/checkout/out/execution/main.js"
          :seon.dev.artifact/runtime-root "/checkout/runtime/content"
          :seon.dev.artifact/source-input-digest digest
