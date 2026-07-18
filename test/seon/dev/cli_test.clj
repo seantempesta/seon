@@ -212,6 +212,34 @@
                        :seon.dev.process/targets)
                  @requests)))))
 
+(deftest reconcile-recovers-only-definitely-dead-managed-processes
+  (let [configuration {:seon.dev.config/cluster-dir "/cluster"}
+        records {process/writer-id {:seon.dev.process/id process/writer-id
+                                    :seon.dev.process/pid 41}
+                 process/pod-id {:seon.dev.process/id process/pod-id
+                                 :seon.dev.process/pid 42}}
+        requests (atom [])
+        recovered (stop-result :seon.dev.process.operation/recover
+                               #{process/writer-id})]
+    (with-redefs-fn
+      {#'process/read-process (fn [_ id] (get records id))
+       #'process/process-status
+       (fn [record]
+         (if (= process/writer-id (:seon.dev.process/id record))
+           :seon.dev.process.status/dead
+           (if record :seon.dev.process.status/alive
+               :seon.dev.process.status/absent)))
+       #'process/clean-or-force!
+       (fn [request]
+         (swap! requests conj request)
+         recovered)}
+      (fn []
+        (is (= recovered (#'cli/recover-dead-processes! configuration)))))
+    (is (= [{:seon.dev.process/configuration configuration
+             :seon.dev.process/operation :seon.dev.process.operation/recover
+             :seon.dev.process/targets #{process/writer-id}}]
+           @requests))))
+
 (deftest reconcile-consumes-prior-stop-evidence
   (let [configuration {:seon.dev.config/cluster-dir "/cluster"}
         prior (stop-result :seon.dev.process.operation/restart

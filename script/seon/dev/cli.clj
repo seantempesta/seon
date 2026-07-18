@@ -34,6 +34,20 @@
 (defn- stop-development! [configuration operation]
   (stop-processes! configuration operation (set process/target-processes)))
 
+(defn- recover-dead-processes!
+  [configuration]
+  (let [targets
+        (into #{}
+              (filter
+               (fn [id]
+                 (= :seon.dev.process.status/dead
+                    (process/process-status
+                     (process/read-process configuration id)))))
+              process/target-processes)]
+    (when (seq targets)
+      (stop-processes!
+       configuration :seon.dev.process.operation/recover targets))))
+
 (defn- legacy-database-path [configuration]
   (let [cluster (:seon.dev.config/cluster-dir configuration)
         database (fs/path cluster "db")
@@ -92,6 +106,9 @@
    ;; Quiesce both readers before building; the writer can safely keep running
    ;; from its already-loaded jar until its digest is known to have changed.
    (assert-current-database-layout! configuration)
+   (let [recovery (recover-dead-processes! configuration)
+         prior-stop-results (cond-> (vec prior-stop-results)
+                              recovery (conj recovery))]
    (process/with-startup-ownership
     configuration
     (fn [start-owned!]
@@ -129,7 +146,7 @@
         (assoc (process/status configuration manifest)
                :seon.dev.target/artifact-digest
                (:seon.dev.artifact/application-digest manifest)
-               :seon.dev.target/stop-results stop-results))))))
+               :seon.dev.target/stop-results stop-results)))))))
 
 (defn- ordinary-agent-url [base-url]
   ;; The feed's first patch is immediate and contains the database-derived

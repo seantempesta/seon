@@ -460,7 +460,15 @@
                (into completed ready)
                (into ordered ready))))))
 
-(defn- process-status [record]
+(defn process-status
+  "Classify one retained workload identity without changing process state."
+  {:malli/schema
+   [:=> [:cat [:maybe :map]]
+    [:enum :seon.dev.process.status/absent
+     :seon.dev.process.status/alive
+     :seon.dev.process.status/reused
+     :seon.dev.process.status/dead]]}
+  [record]
   (cond
     (nil? record) :seon.dev.process.status/absent
     (state/process-identity-alive? record) :seon.dev.process.status/alive
@@ -1286,6 +1294,7 @@
 (def ^:private lifecycle-reserve-ms 120000)
 (def ^:private operations
   #{:seon.dev.process.operation/down
+    :seon.dev.process.operation/recover
     :seon.dev.process.operation/restart
     :seon.dev.process.operation/rebuild-readers
     :seon.dev.process.operation/rebuild-writer
