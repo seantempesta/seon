@@ -82,6 +82,27 @@ writer selection passes 79/538. The ordered boundary is now the complete
 correctness/browser journey and concurrent agent/failure load, followed by
 resource measurement and only then the Bun-native HTTP/SSE transport cut.
 
+The source-free production boundary now also passes its first complete real
+agent and restart/read-back proof. Release application
+`114dad143fc79caeee2d62815649ea9e4acfec68479c1d8a19cf3e482d314d7b`
+was relocated outside the checkout and ran its JVM writer, Bun pod, and Bun
+execution child without development tooling. Instrumentation accepted all
+754 selected functions. Agent `common-parents-shout` evaluated `(+ 20 22)`;
+the next immutable database value rendered `(+ 20 22) ⟹ 42`, and the agent
+sent a user message grounded in that result. All seven transcript renders were
+healthy. A clean package restart changed both process generations, and the
+gzip debug feed read the committed `42` back. The resumed agent then executed
+`(complete "The result is 42")` in one turn; `/agents/run` closed
+`:completed` with that exact reply in 7.79 seconds. A complete before/after
+inventory of the relocated package remained byte-identical. Commits `35cd07ac` and
+`554946f5` close the two defects found by the drive: ordinary forms were
+compiled in ClojureScript statement context, and paged transcript query
+arguments retained lazy `partition-all` sequences. The next package gate is
+concurrent multi-agent failure and reconnect proof. The first drive also
+exposed a convergence smell: the model finished its generated one-step plan,
+messaged the answer, and chose `wait` after 40.9 seconds before the direct
+resumed completion took one turn.
+
 The existing remote query surface now exposes its protocol-native historical
 view, closing the only facade gap needed by coordinate-pinned startup birth.
 LLM configuration and brand startup sync also use bounded coordinate-fenced
@@ -636,7 +657,7 @@ after this branch's local graduation evidence. The implementation order is:
    source/assets, maintained fork identities, npm lock, and license/SBOM data;
 2. publish the maintained dependencies and public CLJS source/macros as an
    immutable downstream SDK coordinate;
-3. produce a relocatable, devtools-free Node runtime package with bootstrap,
+3. produce a relocatable, devtools-free Bun runtime package with bootstrap,
    bounded program-source corpus, static assets, and production npm closure;
 4. project development as watcher + writer + pod and packaged operation as
    writer + pod from the one operator process graph;

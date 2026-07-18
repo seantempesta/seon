@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, cljs, pod, web]
 ---
@@ -48,3 +48,11 @@ registry or export list to compensate for a compiler/runtime mismatch.
   runs; logs and temporary paths are outside the package root.
 - Real agent execution, clean restart/read-back, and clean shutdown pass from
   the same package.
+
+## Resolution
+
+Resolved by the simple-optimization production cut plus `897b1436` and the
+compiled namespace-root repair at `6657f373`. Relocated release `114dad14…`
+instrumented all 754 selected functions, served the web UI and gzip feeds,
+executed and persisted a real scalar result, restarted cleanly, and read that
+result back without mutating any packaged file.

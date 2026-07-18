@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 tags: [issue, pod, cljs]
 ---
 
@@ -35,3 +35,12 @@ objects plus every other compiled root derived from Shadow's maintained
 fresh relocated package must execute an agent-authored form, commit the reply,
 retire the child normally, restart, and read the committed result back without
 changing the package inventory.
+
+## Resolution
+
+Resolved by `6657f373`. The execution child publishes the compiled namespace
+roots derived from Shadow's `bootstrap.env/loaded-ref`, allowing Shadow's
+bootstrap loader to evaluate its dependency-ordered files against the exact
+module-owned namespaces. Relocated release `114dad14…` ran a real Bun child,
+committed scalar and lifecycle evals, restarted cleanly, read the result back
+through gzip Datastar, and left the package inventory byte-identical.

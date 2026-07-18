@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, database, agent, cljs]
 ---
@@ -28,3 +28,12 @@ before calling `seon.db/execute-many`. Its focused test must validate each
 complete paged request with `seon.db.protocol/ordinary-wire-value?`. A real
 agent in the source-free Bun package must see the prior scalar result, call
 `complete`, and return the committed reply.
+
+## Resolution
+
+Resolved by `554946f5`. Every `partition-all` page is materialized as a vector,
+and the focused test validates each complete request as an ordinary wire value.
+In relocated release `114dad14…`, all seven real-agent transcript acquisitions
+rendered successfully and exposed the prior scalar result after a clean
+restart. The model selected `wait` rather than the requested `complete`, which
+remains separate agent-runtime evidence rather than a transcript defect.

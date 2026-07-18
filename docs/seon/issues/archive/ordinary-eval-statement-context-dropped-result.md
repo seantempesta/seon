@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, cljs, agent, pod]
 ---
@@ -26,3 +26,9 @@ source comment already recorded that def, ns, and defn forms work there.
 as a REPL expression and preserve its successful value through the Bun child,
 the eval transaction, transcript rendering, and a completed real-agent reply.
 A focused semantic test must fail when an ordinary scalar is reduced to nil.
+
+## Resolution
+
+Resolved by `35cd07ac`. `raw-eval` now uses ClojureScript `:expr` context for
+every REPL form. The focused Bun test returned `42`, and relocated release
+`114dad14…` committed and rendered `(+ 20 22) ⟹ 42` to a real agent.
