@@ -2844,3 +2844,39 @@ way. After those consumers are gone, the next frozen-source checkpoint is the
 complete CLJS and writer gates, followed immediately by supervised child-crash
 and reconstruction proof. No compatibility connection or local Datahike test
 authority is being restored.
+
+### 2026-07-17 compiled-child and live-render checkpoint
+
+The per-agent Bun child now opens its direct authority session, reconstructs
+and instruments the committed program present in its compiled artifact, and
+only then reports ready to the existing supervisor. Contracts whose CLJS Vars
+are absent from that artifact remain canonical database facts but are not
+false instrumentation failures; every live Var remains verified. Child errors
+retain each ordinary namespaced ex-data field independently, so Malli function,
+schema, and readable-argument evidence crosses IPC without carrying live JS or
+Malli objects.
+
+That stronger boundary exposed and removed four pre-existing interface drifts:
+the canvas block now consistently returns its established render-result map;
+the rendered-context tail receives only its declared request; database query
+resource limits use the public `seon.db` request keys; and instrumentation
+coverage accepts Datahike's native set of query tuples. The compiled system
+canvas explicitly requests the existing selected-function capability while an
+agent-authored canvas continues to receive only its ordinary declared input.
+
+Focused proof passes 22 execution tests/87 assertions, 10 instrumentation
+tests/110 assertions, 8 canvas/warnings tests/39 assertions, and 12 execution
+runtime tests/61 assertions. The complete CLJS gate passes 1,078 tests/4,789
+assertions. A converged `bin/seon restart` reports watcher, writer, and Bun pod
+ready. In a real browser, `/agent/root/debug` renders a 108,060-character
+child-produced prompt with its system boundary and system canvas, with no
+instrumentation gap, failed render, broken canvas, or Malli error. A bounded
+server-side client receives `/agent/root/feed` as HTTP 200,
+`text/event-stream`, and gzip, decoding 9,068 bytes before the intentional
+three-second cutoff. The resolved source inventory is archived at
+[[../../seon/issues/archive/live-data-and-debug-views-exposed-schema-boundary-drift]].
+
+The earliest unsettled live contract is now supervised child death and clean
+reconstruction, followed by writer crash recovery and independent cluster
+database proof. Measurements and Bun-native HTTP replacement remain later
+gates and do not displace that recovery order.

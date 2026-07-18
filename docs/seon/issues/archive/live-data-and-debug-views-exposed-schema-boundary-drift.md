@@ -1,6 +1,6 @@
 ---
 type: issue
-status: active
+status: resolved
 severity: blocker
 tags: [issue, web, database, schema]
 ---
@@ -80,4 +80,25 @@ existing unit gates:
 - A live pod probe showed the Malli schema registered while the installed
   Datahike schema did not contain the attribute.
 - Focused regressions currently pass for the AI entity declaration and the
-  database view's index-page request. Live restart proof remains pending.
+  database view's index-page request.
+
+## Resolution
+
+Resolved across commits `7faafe9b` through `6eb7649c`. The public database
+requests, installed entity schemas, namespace component schema, prompt pull
+budgets, and Datahike result fields now agree with their maintained producers
+and consumers. Child readiness now follows committed-program publication, and
+instrumentation wraps every live CLJS Var in the child's compiled artifact.
+The live pass also corrected the canvas block's render-result contract, the
+compiled canvas renderer's selected-function call, and the instrumentation
+coverage input to accept Datahike's native set of query tuples.
+
+Focused proof includes 22 execution tests/87 assertions, 10 instrumentation
+tests/110 assertions, 8 canvas/warnings tests/39 assertions, and 12 execution
+runtime tests/61 assertions. The complete CLJS gate passes 1,078 tests and
+4,789 assertions. After a converged supervised restart, `/data` renders 50
+AEVT rows and `/agent/root/debug` renders a 108,060-character prompt with the
+system boundary and root system canvas present, no instrumentation gap, no
+failed render, and no Malli error. A bounded server-side client received the
+root Datastar feed as HTTP 200, `text/event-stream`, gzip-encoded, and decoded
+9,068 bytes before its intentional three-second timeout.
