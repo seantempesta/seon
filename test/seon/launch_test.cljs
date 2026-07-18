@@ -94,7 +94,32 @@
                      [::launch/database ::protocol/database-path])))
       (is (= {:seon.client/autonomous? true}
              (get-in descriptor
-                     [::launch/runtime :seon.client/launch-capability]))))))
+                     [::launch/runtime :seon.client/launch-capability])))
+      (is (= {::launch/process-dir "tmp/source-process"}
+             (::launch/watcher-owner descriptor)))
+      (is (= "tmp/source-process"
+             (get-in descriptor
+                     [::launch/writer-owner ::launch/writer-process-dir]))))))
+
+(deftest default-descriptor-can-own-its-watcher-and-use-an-external-writer
+  (let [descriptor
+        (launch/default-descriptor
+         {::launch/cluster-dir "data/clusters/acme"
+          ::launch/artifact-flavor :seon.dev.artifact.flavor/acme
+          ::launch/client-build-id "acme-client"
+          ::launch/request-socket-path "tmp/default-req.sock"
+          ::launch/writer-repl-port-file "tmp/default-writer.port"
+          ::launch/writer-process-dir "tmp/default-process"
+          ::launch/process-dir "tmp/acme-process"
+          ::launch/log-dir "logs/acme"
+          ::launch/http-port 7994
+          ::launch/http-port-file "tmp/acme-http.port"})]
+    (is (= "tmp/acme-process"
+           (get-in descriptor [::launch/watcher-owner
+                               ::launch/process-dir])))
+    (is (= "tmp/default-process"
+           (get-in descriptor [::launch/writer-owner
+                               ::launch/writer-process-dir])))))
 
 (deftest process-descriptor-decodes-the-operator-published-value
   (let [descriptor (ordinary "data/clusters/default"

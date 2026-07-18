@@ -793,6 +793,8 @@
            (swap! requests conj request)
            (stop-result operation targets
                         :seon.dev.process.classification/forced))
+         #'process/target-process-ids
+         (constantly process/all-process-ids)
          #'cli/select-config (fn [selected _path] selected)
          #'cli/reconcile-development!
          (fn [selected stop-results]

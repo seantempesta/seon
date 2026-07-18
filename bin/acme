@@ -4,8 +4,9 @@
 # downstream consumer; NEVER put a real product name in this repo.
 #
 # This wrapper is pure env composition — ZERO seon-src edits. It gives Acme its
-# own ports, sockets, database, supervisor pid/lock namespace, and logs, plus the
-# downstream overlay (SEON_EXTRA_*) and branding (SEON_BRAND_*) wiring.
+# own port, database, Bun process namespace, and logs, plus the downstream
+# overlay (SEON_EXTRA_*) and branding (SEON_BRAND_*) wiring. The default JVM
+# writer remains the one Datahike authority for both databases.
 #
 #   bin/acme up                    # build and reconcile the complete target
 #   bin/acme down                  # stop the whole cluster
@@ -33,7 +34,6 @@ if [ -f "$SEON_ROOT/.env.acme" ]; then set -a; . "$SEON_ROOT/.env.acme"; set +a;
 #     The web port is stable for humans; the writer development REPL must bind
 #     port zero and publish its actual cluster-qualified port file. ---
 export SEON_PORT="${SEON_PORT:-7994}"
-export SEON_WRITER_REPL_PORT="${SEON_WRITER_REPL_PORT:-0}"
 export SEON_CLUSTER_DIR="${SEON_CLUSTER_DIR:-data/clusters/acme}"
 ACME_CLUSTER_PATH="${SEON_CLUSTER_DIR%/}"
 ACME_CLUSTER_NAME="${ACME_CLUSTER_PATH##*/}"
@@ -42,10 +42,12 @@ if [ "$ACME_CLUSTER_NAME" = "acme" ]; then
 else
   ACME_INSTANCE_SUFFIX="-$ACME_CLUSTER_NAME"
 fi
-export SEON_REQ_SOCK="${SEON_REQ_SOCK:-tmp/acme-cluster${ACME_INSTANCE_SUFFIX}-req.sock}"
 export SEON_PROC_DIR="${SEON_PROC_DIR:-tmp/proc-acme${ACME_INSTANCE_SUFFIX}}"
 export SEON_LOG_DIR="${SEON_LOG_DIR:-logs/acme${ACME_INSTANCE_SUFFIX}}"
 export SEON_PORT_FILE="${SEON_PORT_FILE:-tmp/seon-port-acme${ACME_INSTANCE_SUFFIX}}"
+export SEON_WRITER_PROC_DIR="${SEON_WRITER_PROC_DIR:-tmp/seon-operator}"
+export SEON_REQ_SOCK="${SEON_REQ_SOCK:-tmp/seon-cluster-default-req.sock}"
+export SEON_WRITER_REPL_PORT_FILE="${SEON_WRITER_REPL_PORT_FILE:-tmp/seon-writer-repl-port-default}"
 
 # --- embeddings: default OFF (opt-in; owner-disabled in our configs
 #     2026-07-02 — .env.acme carries SEON_EMBED=0). Export GEMINI_API_KEY for
@@ -93,8 +95,9 @@ export SEON_BRAND_NAME="${SEON_BRAND_NAME:-Acme}"
 export SEON_BRAND_TAGLINE="${SEON_BRAND_TAGLINE:-Acme — the third-party harness}"
 export SEON_BRAND_CSS="$SEON_ROOT/acme/branding/acme.css"
 
-# The shared operator owns ACME's flavor-aware build, watcher, writer, and pod
-# graph. This wrapper contributes only target data plus consumer-only commands.
+# The shared operator owns ACME's flavor-aware watcher and Bun pod graph while
+# the default operator owns the one JVM writer. This wrapper contributes only
+# target data plus consumer-only commands.
 case "${1:-}" in
   build|compile|start|stop|tail)
     echo "bin/acme no longer exposes '$1'; use up, down, restart, status, or logs" >&2

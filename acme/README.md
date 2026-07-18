@@ -39,7 +39,9 @@ the place we iterate on the "consume Seon without forking it" story.
 ## Operator status
 
 The downstream wrapper now contributes only ACME target data. The shared
-operator owns its artifact, watcher, writer, pod, readiness, and shutdown graph.
+operator owns its artifact, watcher, Bun pod, readiness, and shutdown graph.
+The default operator's JVM writer serves ACME's isolated database through the
+same typed database protocol.
 The preserved legacy `store` databases are deliberately rejected; they must be
 archived and read back before the current `db` layout can be created.
 
@@ -57,14 +59,14 @@ After the preservation gate is closed, a scoped current-layout reset is:
 bin/acme cluster reset acme
 ```
 
-## Isolation (zero overlap with the live cluster)
+## Isolation with one JVM writer
 
 | | live default | acme |
 |---|---|---|
 | pod HTTP | 7890 | 7980 |
-| database-server REPL | dynamic | dynamic |
+| JVM writer | default authority | same default authority |
 | database | `data/clusters/default/db` | `data/clusters/acme/db` |
-| req/pub sockets | `tmp/seon-cluster-default-*.sock` | `tmp/acme-cluster-*.sock` |
+| database request socket | default writer socket | same default writer socket |
 | supervisor state | `tmp/proc` | `tmp/proc-acme` |
 | logs | `logs/` | `logs/acme/` |
 

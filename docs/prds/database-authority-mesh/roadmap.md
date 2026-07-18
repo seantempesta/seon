@@ -74,6 +74,21 @@ The current ordered spine is:
    system; and
 6. measure the final architecture, then optimize only the retained bottlenecks.
 
+### 2026-07-18 one-writer downstream checkpoint
+
+ACME no longer starts a second JVM. The immutable launch descriptor names the
+Shadow watcher owner independently from the Datahike writer owner. This lets a
+downstream runtime own its flavor-specific watcher and Bun pod while using the
+default writer's request socket and process evidence. Ordinary sibling clusters
+continue to reuse both default owners and launch only a Bun pod.
+
+Live proof kept default and ACME ready together with one actual JVM writer.
+Restarting ACME changed only its watcher and Bun pod; restarting the default
+writer left ACME's Bun pod alive and it reconnected to the new writer process.
+Both Datastar feeds then served complete patches. ACME shutdown left the
+default watcher, writer, and Bun pod ready. The final maintained checkpoint is
+green: CLJS 1,136/5,053, writer 219/1,821, and operator 272/1,537.
+
 ### 2026-07-17 live recovery checkpoint
 
 The authority/package boundary now has live evidence beyond isolated tests.

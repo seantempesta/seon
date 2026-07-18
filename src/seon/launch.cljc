@@ -57,6 +57,10 @@
   [::request-socket-path ::request-socket-path]
   [::writer-repl-port-file ::writer-repl-port-file]])
 (schema/register!
+ ::watcher-owner
+ [:map {:closed true}
+  [::process-dir ::process-dir]])
+(schema/register!
  ::process
  [:map {:closed true}
   [::process-dir ::process-dir]
@@ -106,6 +110,7 @@
  [:map {:closed true}
   [::runtime ::runtime]
   [::database ::database]
+  [::watcher-owner {:optional true} ::watcher-owner]
   [::writer-owner ::writer-owner]
   [::process ::process]
   [::blob-storage-view ::blob-storage-view]
@@ -121,6 +126,7 @@
   [::execution-output {:optional true} ::execution-output]
   [::request-socket-path ::request-socket-path]
   [::writer-repl-port-file ::writer-repl-port-file]
+  [::writer-process-dir {:optional true} ::writer-process-dir]
   [::process-dir ::process-dir]
   [::log-dir ::log-dir]
   [::http-port ::http-port]
@@ -242,7 +248,7 @@
   {:malli/schema [:=> [:cat ::default-descriptor-request] ::descriptor]}
   [{::keys [cluster-dir artifact-flavor client-build-id execution-build-id
             execution-output request-socket-path
-            writer-repl-port-file process-dir log-dir
+            writer-repl-port-file writer-process-dir process-dir log-dir
             http-port http-port-file]}]
   (let [cluster-dir (normalize-path cluster-dir)
         cluster (basename cluster-dir)]
@@ -262,9 +268,11 @@
       {::protocol/database-name cluster
        ::protocol/backend :file
        ::protocol/database-path (str cluster-dir "/db")}
+      ::watcher-owner
+      {::process-dir (normalize-path process-dir)}
       ::writer-owner
       {::writer-cluster cluster
-       ::writer-process-dir (normalize-path process-dir)
+       ::writer-process-dir (normalize-path (or writer-process-dir process-dir))
        ::request-socket-path request-socket-path
        ::writer-repl-port-file writer-repl-port-file}
       ::process
@@ -386,6 +394,7 @@
        ::branch/head target-branch-head
        ::protocol/backend (::protocol/backend source-database)
        ::protocol/database-path (::protocol/database-path source-database)}
+      ::watcher-owner (::watcher-owner source-descriptor)
       ::writer-owner (::writer-owner source-descriptor)
       ::process
       {::process-dir (normalize-path process-dir)
@@ -445,6 +454,7 @@
       {::protocol/database-name target-database-name
        ::protocol/backend (::protocol/backend source-database)
        ::protocol/database-path (normalize-path database-path)}
+      ::watcher-owner (::watcher-owner source-descriptor)
       ::writer-owner (::writer-owner source-descriptor)
       ::process
       {::process-dir (normalize-path process-dir)
@@ -497,6 +507,10 @@
            ::writer-repl-port-file
            (or (platform/env-val "SEON_WRITER_REPL_PORT_FILE")
                (str "tmp/seon-writer-repl-port-" cluster))
+           ::writer-process-dir
+           (or (platform/env-val "SEON_WRITER_PROC_DIR")
+               (platform/env-val "SEON_PROC_DIR")
+               "tmp/seon-operator")
            ::process-dir
            (or (platform/env-val "SEON_PROC_DIR") "tmp/seon-operator")
            ::log-dir

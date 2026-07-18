@@ -681,7 +681,8 @@
                   (stop-processes!
                    configuration
                    :seon.dev.process.operation/reset
-                   #{process/pod-id process/writer-id})]
+                   (disj (set (process/target-process-ids configuration))
+                         process/watcher-id))]
               (when (fs/exists? database) (fs/delete-tree database))
               (reconcile-development! (select-config configuration nil)
                                       [stopped])))]

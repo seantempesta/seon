@@ -202,8 +202,19 @@ retired, and `down` drained the Bun pod and JVM writer cleanly. Generated state
 remained outside the immutable package. Native `Bun.serve` intentionally keeps
 loopback SSE uncompressed; remote configurable compression remains a separate
 transport graduation item and is not silently represented as a gzip result.
-The remaining ordered gate is downstream ACME against this settled release,
-then the remote compression/complete final matrix.
+The downstream ACME boundary now also uses the one JVM authority. Launch data
+separates the Shadow watcher owner from the Datahike writer owner: ACME owns
+its `acme-client`/`acme-execution` watcher and Bun pod while pointing directly
+at the default writer's process directory, request socket, and REPL port file.
+Default and ACME were concurrently ready with one actual JVM writer. An ACME
+restart replaced only its watcher and Bun pod while default process IDs stayed
+unchanged. A later default writer restart left the ACME Bun pod alive; its
+external dependency followed the replacement writer PID and both Datastar
+feeds served complete patches. `bin/acme down` then retired only ACME's watcher
+and Bun pod while default remained ready. Complete proof on the final source
+passes 1,136 CLJS tests/5,053 assertions, 219 writer tests/1,821 assertions,
+and 272 operator tests/1,537 assertions. The remaining ordered gate is remote
+configurable compression and the complete final package matrix.
 
 The existing remote query surface now exposes its protocol-native historical
 view, closing the only facade gap needed by coordinate-pinned startup birth.

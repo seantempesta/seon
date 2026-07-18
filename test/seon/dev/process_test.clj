@@ -2612,6 +2612,39 @@
       (finally
         (fs/delete-tree directory)))))
 
+(deftest downstream-runtime-owns-its-watcher-and-uses-the-existing-writer
+  (let [configuration (test-config)
+        directory (:seon.dev.test/directory configuration)
+        base (target-config configuration directory)
+        base-descriptor (:seon.dev.config/launch-descriptor base)
+        external-writer-process (str (fs/path directory "default-process"))
+        descriptor
+        (assoc base-descriptor ::launch/writer-owner
+               {::launch/writer-cluster "default"
+                ::launch/writer-process-dir external-writer-process
+                ::launch/request-socket-path
+                (str (fs/path directory "default-req.sock"))
+                ::launch/writer-repl-port-file
+                (str (fs/path directory "default-writer.port"))})
+        selected (dev-config/select-launch-descriptor base descriptor)
+        manifest (target-manifest-for selected)
+        specs (process/specs selected manifest)
+        pod (get specs process/pod-id)]
+    (try
+      (is (= #{process/watcher-id process/pod-id} (set (keys specs))))
+      (is (= [process/watcher-id process/pod-id]
+             (process/start-order specs)))
+      (is (= [process/watcher-id]
+             (:seon.dev.process/dependencies pod)))
+      (is (= [process/writer-id]
+             (mapv :seon.dev.process/id
+                   (:seon.dev.process/external-dependencies pod))))
+      (is (= external-writer-process
+             (get-in pod [:seon.dev.process/external-dependencies 0
+                          :seon.dev.process/owner-process-dir])))
+      (finally
+        (fs/delete-tree directory {:force true})))))
+
 (deftest selected-runtime-owns-only-its-required-processes
   (let [configuration (test-config)
         directory (:seon.dev.test/directory configuration)

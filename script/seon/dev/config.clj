@@ -379,6 +379,7 @@
         cluster-name (str (fs/file-name cluster-dir))
         proc-dir (get environment "SEON_PROC_DIR"
                       (str (fs/path state-dir "tmp/seon-operator")))
+        writer-proc-dir (get environment "SEON_WRITER_PROC_DIR" proc-dir)
         log-dir (get environment "SEON_LOG_DIR"
                      (str (fs/path state-dir "logs/operator")))
         req-sock (get environment "SEON_REQ_SOCK"
@@ -394,6 +395,7 @@
                       "SEON_REQ_SOCK" req-sock
                       "SEON_PORT_FILE" port-file
                       "SEON_WRITER_REPL_PORT_FILE" writer-port-file
+                      "SEON_WRITER_PROC_DIR" writer-proc-dir
                       "SEON_FS_ROOT" root
                       "SEON_FS_READ_ONLY" "1")
         http-port (parse-long (get environment "SEON_PORT" "7890"))
@@ -410,6 +412,7 @@
           (:seon.dev.config/execution-output artifact)
           ::launch/request-socket-path req-sock
           ::launch/writer-repl-port-file writer-port-file
+          ::launch/writer-process-dir writer-proc-dir
           ::launch/process-dir proc-dir
           ::launch/log-dir log-dir
           ::launch/http-port http-port

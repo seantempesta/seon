@@ -185,14 +185,25 @@
      (get-in descriptor [::launch/writer-owner
                          ::launch/writer-process-dir])))
 
+(defn- owns-watcher-process?
+  [descriptor]
+  (let [writer-process-dir
+        (get-in descriptor [::launch/writer-owner
+                            ::launch/writer-process-dir])]
+    (= (get-in descriptor [::launch/process ::launch/process-dir])
+       (get-in descriptor [::launch/watcher-owner ::launch/process-dir]
+               writer-process-dir))))
+
 (defn target-process-ids
   "Return the processes owned by the selected runtime configuration."
   [config]
   (let [source-checkout? (not= false (:seon.dev.config/source-checkout? config))
-        owns-writer? (owns-writer-processes?
-                      (:seon.dev.config/launch-descriptor config))]
+        descriptor (:seon.dev.config/launch-descriptor config)
+        owns-writer? (owns-writer-processes? descriptor)
+        owns-watcher? (and source-checkout? (owns-watcher-process? descriptor))]
     (cond
-      (and source-checkout? owns-writer?) all-process-ids
+      (and owns-watcher? owns-writer?) all-process-ids
+      owns-watcher? [watcher-id pod-id]
       owns-writer? [writer-id pod-id]
       :else [pod-id])))
 
@@ -409,6 +420,8 @@
                        [::launch/runtime :seon.client/launch-capability
                         :seon.client/autonomous?]))
         owns-writer-processes? (owns-writer-processes? descriptor)
+        owns-watcher-process? (and source-checkout?
+                                   (owns-watcher-process? descriptor))
         runtime-root (:seon.dev.artifact/runtime-root manifest)
         program-source-relative-path
         (:seon.dev.artifact/program-source-path manifest)
@@ -473,11 +486,9 @@
               (:seon.dev.artifact/client-output manifest))]
            :seon.dev.process/environment pod-environment
            :seon.dev.process/dependencies
-           (if owns-writer-processes?
-             (if source-checkout?
-               [watcher-id writer-id]
-               [writer-id])
-             [])
+           (cond-> []
+             owns-watcher-process? (conj watcher-id)
+             owns-writer-processes? (conj writer-id))
            :seon.dev.process/http-port-file
            (::launch/http-port-file descriptor-process)
            :seon.dev.process/readiness :seon.dev.process.readiness/pod
@@ -504,23 +515,26 @@
           (not owns-writer-processes?)
           (assoc :seon.dev.process/external-dependencies
                   (cond-> []
-                    source-checkout?
-                    (conj (cond->
-                    {:seon.dev.process/id watcher-id
-                     :seon.dev.process/owner-process-dir
-                     (::launch/writer-process-dir descriptor-writer)
-                     :seon.dev.process/readiness
-                     :seon.dev.process.readiness/watcher
-                     :seon.dev.process/client-digest
-                     (:seon.dev.artifact/client-digest manifest)
-                     :seon.dev.process/execution-digest
-                     (:seon.dev.artifact/execution-digest manifest)
-                     :seon.dev.process/artifact-digest
-                     (:seon.dev.artifact/application-digest manifest)}
-                     (:seon.dev.artifact/execution-runtime-digest manifest)
-                     (assoc :seon.dev.process/execution-runtime-digest
-                            (:seon.dev.artifact/execution-runtime-digest
-                             manifest))))
+                    (and source-checkout? (not owns-watcher-process?))
+                    (conj
+                     (cond->
+                      {:seon.dev.process/id watcher-id
+                       :seon.dev.process/owner-process-dir
+                       (get-in descriptor
+                               [::launch/watcher-owner ::launch/process-dir]
+                               (::launch/writer-process-dir descriptor-writer))
+                       :seon.dev.process/readiness
+                       :seon.dev.process.readiness/watcher
+                       :seon.dev.process/client-digest
+                       (:seon.dev.artifact/client-digest manifest)
+                       :seon.dev.process/execution-digest
+                       (:seon.dev.artifact/execution-digest manifest)
+                       :seon.dev.process/artifact-digest
+                       (:seon.dev.artifact/application-digest manifest)}
+                       (:seon.dev.artifact/execution-runtime-digest manifest)
+                       (assoc :seon.dev.process/execution-runtime-digest
+                              (:seon.dev.artifact/execution-runtime-digest
+                               manifest))))
                     true
                     (conj {:seon.dev.process/id writer-id
                            :seon.dev.process/owner-process-dir
