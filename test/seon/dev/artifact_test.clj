@@ -292,6 +292,57 @@
     (is (= ["clj" "-M:cljs" "compile" "client"]
            (artifact/cljs-command config "compile" "client")))))
 
+(deftest release-programs-use-isolated-process-cache-and-existing-builds
+  (let [directory (fs/create-temp-dir {:prefix "seon-release-programs-test-"})
+        config {:seon.dev.config/root (str directory)
+                :seon.dev.config/environment {"EXISTING" "value"}}
+        release
+        {:seon.dev.artifact/release-cache-root
+         (str (fs/path directory "cache"))
+         :seon.dev.artifact/release-client-output
+         (str (fs/path directory "runtime/pod.js"))
+         :seon.dev.artifact/release-execution-output
+         (str (fs/path directory "runtime/execution.js"))
+         :seon.dev.artifact/release-program-source-output
+         (str (fs/path directory "runtime/program-sources.edn"))}
+        calls (atom [])]
+    (try
+      (with-redefs [artifact/run-step!
+                    (fn [observed-config label argv]
+                      (swap! calls conj [observed-config label argv]))]
+        (is (= release (artifact/build-release-programs! config release))))
+      (is (= ["build release pod" "build release execution child"]
+             (mapv second @calls)))
+      (doseq [[observed-config _ argv] @calls]
+        (is (= "value"
+               (get-in observed-config
+                       [:seon.dev.config/environment "EXISTING"])))
+        (is (= {:cache-root
+                (:seon.dev.artifact/release-cache-root release)}
+               (edn/read-string
+                (get-in observed-config
+                        [:seon.dev.config/environment "SHADOW_CLJS"]))))
+        (is (= ["clj" "-M:cljs" "release"] (subvec argv 0 3)))
+        (is (some #{"--force-spawn"} argv)))
+      (let [pod-argv (nth (first @calls) 2)
+            execution-argv (nth (second @calls) 2)
+            pod-merge (edn/read-string (last pod-argv))
+            execution-merge (edn/read-string (last execution-argv))]
+        (is (= "client" (nth pod-argv 3)))
+        (is (= "execution" (nth execution-argv 3)))
+        (is (= (:seon.dev.artifact/release-client-output release)
+               (:output-to pod-merge)))
+        (is (= [['seon.dev.program-artifact/publish!
+                 "runtime/program-sources.edn"]]
+               (:build-hooks pod-merge)))
+        (is (= {:enabled false :preloads [] :build-notify nil}
+               (:devtools pod-merge)))
+        (is (= (:seon.dev.artifact/release-execution-output release)
+               (:output-to execution-merge)))
+        (is (= {:enabled false} (:devtools execution-merge))))
+      (finally
+        (fs/delete-tree directory)))))
+
 (deftest source-publication-orders-the-watcher-flush-before-one-manifest
   (let [events (atom [])
         manifest {:seon.dev.artifact/writer-digest "writer"

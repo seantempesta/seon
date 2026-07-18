@@ -565,6 +565,17 @@
                   ["-M:cljs" action build-id]
                   (drop-while #(not= "--config-merge" %) extra-args)))))
 
+(def ^:private release-programs-schema
+  [:map {:closed true}
+   [:seon.dev.artifact/release-cache-root :string]
+   [:seon.dev.artifact/release-client-output :string]
+   [:seon.dev.artifact/release-execution-output :string]
+   [:seon.dev.artifact/release-program-source-output :string]])
+
+(defn- cljs-release-command [build-id config-merge]
+  ["clj" "-M:cljs" "release" build-id "--force-spawn"
+   "--config-merge" (pr-str config-merge)])
+
 (defn- run-step! [config label argv]
   (println (str "▶ " label))
   (let [started (System/nanoTime)
@@ -574,6 +585,57 @@
         elapsed-ms (quot (- (System/nanoTime) started) 1000000)]
     (println (str "  ● " label " (" elapsed-ms "ms)"))
     result))
+
+(defn build-release-programs!
+  "Build the existing pod and execution entries as isolated Shadow releases.
+
+   The release owns a separate cache and output tree. `--force-spawn` makes
+   the process boundary explicit and prevents an npm/shim invocation from
+   attaching to the managed development watcher if the command carrier ever
+   changes."
+  {:malli/schema
+   [:=> [:cat
+         [:map
+          [:seon.dev.config/root :string]
+          [:seon.dev.config/environment [:map-of :string :string]]]
+         release-programs-schema]
+    release-programs-schema]}
+  [config release]
+  (let [root (fs/absolutize (fs/path (:seon.dev.config/root config)))
+        cache-root (:seon.dev.artifact/release-cache-root release)
+        client-output (:seon.dev.artifact/release-client-output release)
+        execution-output
+        (:seon.dev.artifact/release-execution-output release)
+        program-source-output
+        (:seon.dev.artifact/release-program-source-output release)
+        program-source-relative
+        (str (fs/relativize root
+                            (fs/absolutize (fs/path program-source-output))))
+        release-config
+        (update config :seon.dev.config/environment
+                assoc "SHADOW_CLJS" (pr-str {:cache-root cache-root}))]
+    (when (str/starts-with? program-source-relative "..")
+      (throw
+       (ex-info "The release program source must stay in the build root."
+                {:seon.dev.artifact/release-program-source-output
+                 program-source-output})))
+    (doseq [path [client-output execution-output program-source-output]]
+      (fs/create-dirs (fs/parent path)))
+    (run-step!
+     release-config "build release pod"
+     (cljs-release-command
+      "client"
+      {:output-to client-output
+       :build-hooks
+       [['seon.dev.program-artifact/publish! program-source-relative]]
+       :devtools {:enabled false :preloads [] :build-notify nil}}))
+    (run-step!
+     release-config "build release execution child"
+     (cljs-release-command
+      "execution"
+      {:output-to execution-output
+       :devtools {:enabled false}}))
+    release))
 
 (defn- capture-command! [config argv]
   (let [result (process/shell {:dir (:seon.dev.config/root config)

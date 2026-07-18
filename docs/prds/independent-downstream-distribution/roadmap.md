@@ -25,6 +25,25 @@ consumer contract.
 The complete consumer remains checkout-dependent: its operator, Shadow build,
 CLJS runtime, public SDK, bootstrap/source corpus, static assets, npm closure,
 base config, and dependency overrides all come from the Seon repository.
+
+The first production-entry boundary is now implemented and directly proven.
+The pod no longer requires `shadow.cljs.devtools.client.env`; its build identity
+comes from the admitted launch descriptor shared with packaged operation. One
+maintained `seon.dev.artifact/build-release-programs!` operation builds the
+existing `client` and `execution` entries with devtools disabled, an isolated
+Shadow cache, explicit process isolation, and staging-owned outputs. It does
+not add production-specific build IDs or a second runtime entry.
+
+The current source-frozen proof produced a 4.0 MiB pod entry, a 6.9 MiB
+execution-child entry, and a 3.0 MiB bounded program-source file. Neither
+JavaScript entry contains `shadow.cljs.devtools`, `SHADOW_IMPORT_PATH`, a
+Shadow cache path, or the producer checkout path. The managed Shadow PID and
+its server/CLI/nREPL files remained byte- and timestamp-identical across the
+isolated release. Focused artifact proof passes 26 tests/127 assertions. The
+earliest unsettled contract is now the pure relocatable inventory and release
+manifest, followed by selecting writer plus pod from the one operator process
+graph and booting the extracted package while this checkout is unavailable.
+ACME remains the downstream acceptance fixture after core package parity.
 The audit found that a later ACME build replaced the shared `out/bootstrap`
 after the default manifest was published. The bounded implementation now
 publishes bootstrap bytes beneath a content-addressed runtime root, records

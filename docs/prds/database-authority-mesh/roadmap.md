@@ -3863,3 +3863,23 @@ shared-writer routing, pod restart, durable read-back, and clean shutdown for
 multiple clusters. Remaining multi-cluster graduation is concurrent load and
 failure pressure across both databases once the production package and patched
 Bun runtime are selected; it does not require another JVM or writer path.
+
+The modest-hardware graduation matrix now separates installed application
+memory from development tooling. The source-free package is admitted only if
+its process tree contains writer plus pod and demanded execution children--no
+Shadow server, Clojure CLI, watcher, or producer-checkout path. Current hard
+physical-footprint limits are 900 MiB settled for writer plus pod, 250 MiB
+retained and 450 MiB peak per active child, and 2.0 GiB total with four active
+children. The improvement targets are 768 MiB fixed and 1.8 GiB with four.
+Under four-agent load, pod timer-lag p95/p99/max must remain below 5/10/25 ms,
+every child must retire, and no writer, query, settlement, or out-of-memory
+fault is allowed. These budgets use macOS physical footprint rather than
+additive RSS and report the development-only Shadow process separately.
+
+The devtools-free CLJS entry proof is green: one isolated release operation
+builds the existing pod and execution-child entries to staging-owned files,
+and neither output contains Shadow devtools/cache or producer-checkout paths.
+The next dependency boundary is the relative, content-verified release
+inventory and the existing operator's packaged writer-plus-pod projection.
+Only the extracted source-free runtime can supply final startup, idle, and
+1/2/4-child memory evidence.
