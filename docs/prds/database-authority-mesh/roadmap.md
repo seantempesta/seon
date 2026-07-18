@@ -3620,3 +3620,24 @@ without weakening process isolation or persistent namespaces. The measured
 `Bun.serve` transport cut follows that dominant architecture boundary;
 complete maintained tests, browser, multi-cluster, and failure graduation
 remain final.
+
+Commit `72569d9a` closes the first material child-memory cause without adding a
+second admission path. Execution children still acquire, build, validate, and
+activate the exact committed schema projection, but the one admission owner now
+lets them omit pod-wide Malli function wrappers that are useful only in the
+long-lived host. The selection survives every later publication and
+detach/reopen transition. Focused admission, execution, runtime, and host proof
+passes 67 tests and 321 assertions.
+
+The live physical-memory comparison used identical source-frozen artifacts and
+process boundaries. A ready child fell from 323.0 to 218.8 MiB physical memory
+and from 293.0 to 194.7 MiB dirty WebKit/JSC memory. After two real agent forms,
+the child fell from 392.3 to 310.0 MiB physical memory, from 351.8 to 270.6 MiB
+dirty WebKit/JSC memory, and from 177.8 to 130.0 MiB JSC heap. Its peak physical
+memory fell from 521.8 to 450.0 MiB, and the real agent completed normally in
+10.8 seconds with the exact requested terminal result. The ready and active
+children remain about 19 and 10 MiB above the provisional 200/300 MiB bounds,
+so the blocker remains open. The next falsifier is the execution artifact's
+eager runtime dependency graph; bundle byte size alone is not an optimization
+target. The retained code-execution contract, process isolation, persistent
+namespace, and current-program application may not weaken to reach the bound.

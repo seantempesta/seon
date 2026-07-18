@@ -38,6 +38,17 @@ even though process isolation and parallel execution work correctly.
   pod's fully collected JSC heap returned within 6.1 MiB of its pre-load value.
   The retained cost belongs inside each active child rather than a parent-side
   leak or failed eviction.
+- A direct ready-only child baseline separated bootstrap from first eval. Before
+  the first memory cut it used 323.0 MiB physical memory and 293.0 MiB dirty
+  WebKit/JSC memory. After two forms it used 392.3 MiB physical memory, 351.8
+  MiB dirty WebKit/JSC memory, and 177.8 MiB JSC heap.
+- Commit `72569d9a` keeps exact schema projection acquisition, validation, and
+  activation in the one admission owner but omits pod-wide Malli function
+  wrappers in execution children. The same ready-only measurement fell to
+  218.8 MiB physical and 194.7 MiB dirty WebKit/JSC memory. A real two-form
+  agent fell to 310.0 MiB physical, 270.6 MiB dirty WebKit/JSC, and 130.0 MiB
+  JSC heap; it returned the exact requested terminal result in 10.8 seconds.
+  Focused proof passes 67 tests and 321 assertions.
 
 ## Owner
 
@@ -56,3 +67,7 @@ the process boundary.
   unnecessarily per child.
 - Several simultaneous children fit the modest-hardware graduation profile
   without losing process isolation, hot code application, or first-turn tools.
+- A warm ready child should use at most 200 MiB physical memory and an active
+  evaluated child at most 300 MiB. The current measured values are 218.8 and
+  310.0 MiB, so this issue remains open while the eager execution dependency
+  graph is tested. Bundle size by itself is not an acceptance measure.
