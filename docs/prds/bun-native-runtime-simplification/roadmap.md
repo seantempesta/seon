@@ -130,13 +130,19 @@ Seon child. SCI 0.15.56 at release commit
 parity workload and 117 MB for persistent namespaces, host calls, schema
 registration, protocols, records, metadata discovery, and async evaluation.
 The high-impact candidate is therefore one SCI context per execution child,
-with an expected saving around 90 MB private memory. Build-time indexing can
-publish compiled program facts, but mutable agent-authored definitions still
-need one runtime evaluator. The next gate is a bounded public-envelope and
-database-row parity corpus covering namespaces, functions, schemas, tests,
-errors, instrumentation, and host calls. If it passes, replace `cljs.js` and
-its bootstrap/analyzer adapters in one cut; do not retain a hybrid evaluator or
-fork the official compiler.
+with an expected saving around 90 MB private memory. A bounded parity probe then
+falsified the required drop-in seam: SCI interns a new var before a failed
+definition finishes, while Seon's official-analyzer path removes phantom
+definitions after failure. Matching the existing contract therefore begins
+with explicit rollback and expands into replacements for analyzer-backed
+namespace, warning, test, instrumentation, and introspection semantics. That is
+a new compatibility layer, not a dependency swap. Seon retains official
+`cljs.js` for agent-authored evaluation and exact ClojureScript semantics; SCI
+remains only in its existing renderer cage. Build-time indexing still publishes
+compiled program facts and removes startup filesystem work independently.
+Revisit the evaluator only if measured active-child capacity becomes a real
+graduation blocker; do not retain a hybrid evaluator or fork the official
+compiler.
 
 The same audit found an interrupted `bun out/test/test.js` orphan that had
 survived for over an hour: 3.61 GB RSS, 690 MB current private physical, and
