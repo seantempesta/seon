@@ -596,3 +596,35 @@
              (set! loop/install-wake-trigger! install!)
              (set! loop/drive-run! drive!)
              (done)))))))
+
+(deftest restored-wake-listener-drives-committed-work
+  (async done
+    (let [listen! db/listen!
+          drive! loop/drive-run!
+          request (atom nil)
+          driven (atom [])
+          listen-stub
+          (fn [value]
+            (reset! request value)
+            (js/Promise.resolve (:seon.db/key value)))]
+      (set! (.-cljs$core$IFn$_invoke$arity$1 listen-stub) listen-stub)
+      (set! db/listen! listen-stub)
+      (set! loop/drive-run! #(swap! driven conj %))
+      (-> (loop/install-wake-trigger!
+           {:seon.agent/id "agent-a" :seon.agent/llm-fn identity})
+          (.then
+           (fn [_]
+             ((:seon.db/handler @request)
+              {::db.protocol/event db.protocol/resynchronization-event})
+             (is (= [{:seon.agent/id "agent-a"
+                      :seon.agent/llm-fn identity}]
+                    @driven))))
+          (.catch
+           (fn [error]
+             (is false (str "wake resynchronization rejected: " error))))
+          (.finally
+           (fn []
+             (swap! @#'loop/!loop-input dissoc "agent-a")
+             (set! db/listen! listen!)
+             (set! loop/drive-run! drive!)
+             (done)))))))

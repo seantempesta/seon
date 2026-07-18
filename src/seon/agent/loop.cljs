@@ -973,12 +973,18 @@
   ;; One stable listener key per agent so re-arming REPLACES the prior
   ;; listener (a hot reload must not leave two listeners firing for one
   ;; agent).
-  (let [k [:seon.agent/user-message-trigger id]]
+  (let [k [:seon.agent/user-message-trigger id]
+        handle-datoms! (wake-handler input)]
     (db/listen!
       {:seon.db/key     k
        :seon.db/datom-patterns
        [{:seon.db/a :seon.agent.message/to :seon.db/added? true}]
-       :seon.db/handler (wake-handler input)})))
+       :seon.db/handler
+       (fn [event]
+         (if (= db.protocol/resynchronization-event
+                (::db.protocol/event event))
+           (drive-run! input)
+           (handle-datoms! event)))})))
 
 (defn uninstall-wake-trigger!
   "Remove one agent's wake listener and process-local loop input.
