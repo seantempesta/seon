@@ -53,8 +53,8 @@
      (assoc :seon.db/db (:seon.db/db invocation)))))
 
 (defn- canceled-error
-  ([invocation] (canceled-error invocation false))
-  ([invocation child-retired?]
+  ([invocation] (canceled-error invocation nil))
+  ([invocation diagnostic]
    {::execution/message execution/error-message
     ::execution/protocol-version execution/protocol-version
     ::execution/invocation-id (::execution/invocation-id invocation)
@@ -62,8 +62,8 @@
     ::execution/error
     (cond-> {:seon.error/message "The invocation was canceled."
              :seon.error/kind :agent}
-      child-retired?
-      (assoc :seon.error/data {::execution/child-retired? true}))}))
+      diagnostic
+      (assoc :seon.error/data diagnostic))}))
 
 (defn- append-tail [tail text]
   (let [combined (str tail text)
@@ -80,6 +80,45 @@
 
 (defn- host-configuration [] (::configuration @!host))
 (defn- child [agent-id] (get-in @!host [::children agent-id]))
+
+(defn- child-evidence [current]
+  (let [usage ((::subprocess/resource-usage! (::control current)))]
+    (cond-> {::pid (::pid current)
+             ::artifact-digest (::artifact-digest current)
+             ::stdout-tail (::stdout-tail current)
+             ::stderr-tail (::stderr-tail current)}
+      usage (assoc ::resource-usage usage))))
+
+(defn processes
+  "Return one demanded ordinary-data snapshot of supervised execution children.
+
+   Sampling is parent-owned and synchronous; it does not ask the child event
+   loop to cooperate and does not retain or transact healthy measurements."
+  []
+  (->> (::children @!host)
+       (map (fn [[agent-id current]]
+              (let [active (::active current)
+                    invocation (::invocation active)
+                    usage ((::subprocess/resource-usage! (::control current)))]
+                (cond-> {::execution/agent-id agent-id
+                         ::pid (::pid current)
+                         ::artifact-digest (::artifact-digest current)
+                         ::ready? (boolean (::ready? current))
+                         ::retiring? (boolean (::retiring? current))
+                         ::stdout-tail (::stdout-tail current)
+                         ::stderr-tail (::stderr-tail current)}
+                  usage (assoc ::resource-usage usage)
+                  active
+                  (assoc ::invocation
+                         {::execution/invocation-id
+                          (::execution/invocation-id invocation)
+                          ::execution/function-identity
+                          (::execution/function-identity invocation)
+                          ::execution/deadline-ms
+                          (::execution/deadline-ms invocation)
+                          ::started-at (::started-at active)})))))
+       (sort-by ::execution/agent-id)
+       vec))
 
 (defn- same-child?
   [agent-id generation child-id]
@@ -418,6 +457,7 @@
                                           {::invocation invocation
                                            ::artifact-digest
                                            (::artifact-digest current)
+                                           ::started-at (js/Date.)
                                            ::resolve! (::resolve! completion)})))
                             host))))
                (case @decision
@@ -493,14 +533,17 @@
         (js/setTimeout
          (fn []
            (reset! expired? true)
-           (when @started?
-             ;; A head invocation may be active or still waiting for child
-             ;; readiness. Retire only that head's child; queued invocations
-             ;; time out without disturbing the active predecessor.
-             (when-not (cancel! agent-id invocation-id true)
-               (stop-child! agent-id)))
-           ((::resolve! completion)
-            (canceled-error invocation @started?)))
+           ;; A head invocation may be active or still waiting for child
+           ;; readiness. Retire only that head's child; queued invocations
+           ;; time out without disturbing the active predecessor. A successful
+           ;; cancel settles through the active invocation so its process
+           ;; evidence is not replaced by this queue-level fallback.
+           (when-not (and @started? (cancel! agent-id invocation-id true))
+             (when @started? (stop-child! agent-id))
+             ((::resolve! completion)
+              (canceled-error
+               invocation
+               (when @started? {::execution/child-retired? true})))))
          remaining)
         queued (atom nil)]
     (swap! !invocation-tails
@@ -619,7 +662,9 @@
         (settle-active! agent-id generation child-id
                         (canceled-error
                          (get-in current [::active ::invocation])
-                         child-retired?))
+                         (when child-retired?
+                           (assoc (child-evidence current)
+                                  ::execution/child-retired? true))))
         (when
          (send-message!
           control

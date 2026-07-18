@@ -67,7 +67,9 @@
    ::execution/result value
    ::execution/result-bytes 32})
 
-(defn fake-process [pid]
+(defn fake-process
+  ([pid] (fake-process pid nil))
+  ([pid live-resource-usage]
   (let [sent (atom [])
         kills (atom [])
         resolve-exit! (atom nil)
@@ -81,10 +83,14 @@
     (aset process "exited" exited)
     (aset process "send" #(swap! sent conj (execution/decode-message %)))
     (aset process "kill" #(swap! kills conj %))
+    (aset process "resourceUsage"
+          (fn [^js options]
+            (when (true? (some-> options .-live))
+              live-resource-usage)))
     {:process process
      :sent sent
      :kills kills
-     :resolve-exit! @resolve-exit!}))
+     :resolve-exit! @resolve-exit!})))
 
 (defn configure [spawn!]
   (host/configure!
@@ -176,6 +182,42 @@
            (fn [error]
              (is false (str "unexpected host failure: " error))
              (done)))))))
+
+(deftest process-snapshot-samples-the-child-without-child-cooperation
+  (async done
+    (let [options (atom nil)
+          child (fake-process
+                 109
+                 #js {:cpuTime #js {:user (js/BigInt 100)
+                                    :system (js/BigInt 20)
+                                    :total (js/BigInt 120)}
+                      :rss 2048})
+          _ (configure (fn [value]
+                         (reset! options value)
+                         (:process child)))
+          completion (host/invoke! (invocation "live-process"))]
+      (feed! @options (:process child) (ready-message))
+      (-> (js/Promise.resolve nil)
+          (.then
+           (fn [_]
+             (let [process (first (host/processes))]
+               (is (= "agent-1" (::execution/agent-id process)))
+               (is (= 109 (::host/pid process)))
+               (is (= 2048
+                      (get-in process [::host/resource-usage
+                                       ::subprocess/rss-bytes])))
+               (is (= "live-process"
+                      (get-in process [::host/invocation
+                                       ::execution/invocation-id])))
+               (is (inst? (get-in process [::host/invocation
+                                           ::host/started-at]))))
+             (feed! @options (:process child)
+                    (result-message "live-process" :ok))
+             completion))
+          (.then (fn [_] ((:resolve-exit! child) 0)))
+          (.catch (fn [error]
+                    (is false (str "process snapshot rejected: " error))))
+          (.finally (fn [] (done)))))))
 
 (deftest failed-ipc-send-preserves-the-cause-and-child-evidence
   (async done
@@ -525,7 +567,12 @@
 (deftest parent-deadline-retires-a-non-settling-child
   (async done
     (let [options (atom [])
-          first-child (fake-process 106)
+          first-child (fake-process
+                       106
+                       #js {:cpuTime #js {:user (js/BigInt 90)
+                                          :system (js/BigInt 10)
+                                          :total (js/BigInt 100)}
+                            :rss 3072})
           sibling-child (fake-process 107)
           children (atom [first-child sibling-child])
           _ (configure
@@ -545,6 +592,10 @@
                                     :seon.error/message])))
              (is (true? (get-in result [::execution/error :seon.error/data
                                         ::execution/child-retired?])))
+             (is (= 3072
+                    (get-in result [::execution/error :seon.error/data
+                                    ::host/resource-usage
+                                    ::subprocess/rss-bytes])))
              (feed! (first @options) (:process first-child)
                     (result-message "non-settling" {:my.render/value :late}))
              (is (nil? (::execution/result result))
