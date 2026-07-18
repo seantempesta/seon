@@ -2303,10 +2303,9 @@
 
 (defn- close-pressured-connection!
   [transport-connection status request-id]
-  (when (= uds/send-authority-full status)
-    (log/warn "database event session closed after authority delivery pressure"
-              {::protocol/request-id request-id
-               ::uds/send-status status}))
+  (log/warn "database event session closed after delivery pressure"
+            {::protocol/request-id request-id
+             ::uds/send-status status})
   (when (.compareAndSet ^java.util.concurrent.atomic.AtomicBoolean
                         (::closing? transport-connection) false true)
     ((::close! transport-connection))))
