@@ -16,8 +16,10 @@ Agents with plan facts therefore displayed a render error.
 
 ## Resolution
 
-The one plan renderer now realizes those bounded collections as vectors. No
-rendering or protocol alternative was added.
+The one plan renderer now realizes and splices those bounded collections into
+their parent hiccup vectors with `into`. This keeps the complete result
+ordinary without making a child vector look like an element tag. No rendering
+or protocol alternative was added.
 
 ## Evidence
 

@@ -1651,9 +1651,10 @@
          (str (:my.plan/done ru) "/" (:my.plan/total ru))])]
      (step-detail-html rows node)
      (when-not leaf?
-       [:ul {:class "flex flex-col"
-             :data-show (str "!$planclosed.includes(' " id " ')")}
-        (mapv #(step-row-html rows % next-id (inc depth)) children)])]))
+       (into
+        [:ul {:class "flex flex-col"
+              :data-show (str "!$planclosed.includes(' " id " ')")}]
+        (map #(step-row-html rows % next-id (inc depth)) children)))]))
 
 (defn- root-card-html
   "One bounded, collapsible plan-root card."
@@ -1683,8 +1684,9 @@
              :style "height:2px;border-radius:2px;overflow:hidden"}
        [:div {:style (str "height:2px;background:#f0b429;width:" pct "%")}]]]
      [:div {:class "plan-tree px-2 py-1 border-t border-base-800"}
-      [:ul {:class "flex flex-col"}
-       (mapv #(step-row-html rows % next-id 0) (:my.plan/children root))]]]))
+      (into
+       [:ul {:class "flex flex-col"}]
+       (map #(step-row-html rows % next-id 0) (:my.plan/children root)))]]))
 
 (defn ^:async plan-block-html
   "Live, explorable HTML twin of [[plan-block]] — a `/agent/{id}` surface.
@@ -1737,11 +1739,14 @@
                        (sort-by #(-> % :my.plan/completed-at .getTime) >)
                        (take recent-done-limit)
                        vec)]
-        [:div {:class "flex flex-col gap-2 text-xs font-mono"
-               :data-signals__ifmissing
-               "{planstep: '', planclosed: '', planfull: false, plandone: false}"}
-         (mapv #(root-card-html rows % next-id focused-root-id) forest)
-         (when (pos? done-count)
+        (cond->
+         (into
+          [:div {:class "flex flex-col gap-2 text-xs font-mono"
+                 :data-signals__ifmissing
+                 "{planstep: '', planclosed: '', planfull: false, plandone: false}"}]
+          (map #(root-card-html rows % next-id focused-root-id) forest))
+         (pos? done-count)
+         (conj
            [:div {:class (str "flex items-center gap-1 text-2xs text-text-400 "
                               "cursor-pointer select-none")
                   (keyword "data-on:click") "$planfull = !$planfull"}
@@ -1750,16 +1755,18 @@
                                     "'show all " done-count
                                     " completed steps in place'")}
              (str "show all " done-count " completed steps in place")]])
-         (when (seq dones)
+         (seq dones)
+         (conj
            [:div {:class "flex flex-col"}
             [:div {:class (str "flex items-center gap-1 text-2xs text-text-500 "
                                "cursor-pointer select-none")
                    (keyword "data-on:click") "$plandone = !$plandone"}
              [:span {:data-text "$plandone ? '▾' : '▸'"} "▸"]
              [:span (str "recently completed (" (count dones) ")")]]
-            [:ul {:class "flex flex-col" :data-show "$plandone"
-                  :style "display:none"}
-             (mapv (fn [{:my.plan/keys [title completed-at]}]
-                     [:li {:class "text-2xs text-text-500 truncate"}
-                      (str "✓ [" (stamp completed-at) "] " title)])
-                   dones)]])]))))))
+            (into
+             [:ul {:class "flex flex-col" :data-show "$plandone"
+                   :style "display:none"}]
+             (map (fn [{:my.plan/keys [title completed-at]}]
+                    [:li {:class "text-2xs text-text-500 truncate"}
+                     (str "✓ [" (stamp completed-at) "] " title)])
+                  dones))]))))))))
