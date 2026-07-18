@@ -1,7 +1,7 @@
 ---
 type: issue
-status: active
-severity: major
+status: resolved
+severity: blocker
 tags: [issue, agent, pod]
 ---
 
@@ -37,3 +37,12 @@ Normal idle retirement, explicit stop, cancellation, and unexpected exit each
 settle every active or waiting invocation once. Focused host tests cover the
 retirement interval, and live proof returns the same compiled prompt without a
 caller retry.
+
+## Resolution
+
+Commit `31cfbb5e` gives each child an exit Promise and makes `ensure-child!`
+wait through retirement before selecting or starting its replacement. Thirteen
+focused host tests pass with 59 assertions. In the live default cluster, an
+immediate prompt invocation after `stop-child!` returned from the replacement
+without caller retry: both results were 107,036 characters at the identical
+database value, with no error.

@@ -3020,3 +3020,11 @@ waits for or starts the replacement without retry. Unexpected child death,
 writer crash recovery, gzip feed reconnect, independent cluster databases,
 the complete writer/operator gates, and measured CPU/memory/latency remain the
 ordered graduation gates after it.
+
+Commit `31cfbb5e` already implemented that retirement wait. The post-fix live
+proof now closes the contract: `stop-child!` retired root's existing execution
+child and an immediate prompt call waited for the replacement, returning the
+same 107,036-character prompt at the identical database value without caller
+retry. Thirteen focused host tests pass with 59 assertions. The earliest
+unsettled contract is therefore unexpected execution-child death and automatic
+reconstruction, followed by writer crash recovery.
