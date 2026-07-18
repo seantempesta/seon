@@ -27,6 +27,10 @@ mistake previously repaired in agent birth.
 The participant allowance then passed in the live REPL, exposing the adjacent
 human-message barrier query: its scalar `(max ?at)` request also set the
 resource budget to one and failed with `datahike query-results budget exceeded`.
+Raising that allowance to 64 only postponed the same defect: a populated
+default database exceeded it during three concurrent public agent launches on
+2026-07-17, and every `message/user` and `complete` call then returned
+`Message database acquisition failed`.
 
 ## Owner
 

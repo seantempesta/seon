@@ -63,6 +63,7 @@
   '[:db/id :seon.user/id :seon.agent/id])
 
 (def ^:private participant-max-results 64)
+(def ^:private human-message-max-results 65536)
 
 (defn- query-member
   [database query arguments max-results]
@@ -114,7 +115,7 @@
                [?message :seon.agent.message/from ?user]
                [?user :seon.user/id _]
                [?message :seon.agent.message/at ?at]]
-             [] 64)]
+             [] human-message-max-results)]
            ::db/max-result-weight 131072}))]
     (if-not (and (= 2 (count (::db/results initial)))
                  (every? #(true? (::protocol/success? %))

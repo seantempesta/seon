@@ -162,11 +162,11 @@
                      (get-in (first @requests)
                              [::db/members 0
                               :datahike.resource/max-results])))
-              (is (= 64
+              (is (= 65536
                      (get-in (first @requests)
                              [::db/members 1
                               :datahike.resource/max-results]))
-                  "the scalar barrier query has retained-node headroom")
+                  "the scalar barrier query remains valid in a populated database")
               (is (every? #(= database (::db/db %))
                           (::db/members (first @requests))))
               (is (= database (::db/db (second @requests)))
