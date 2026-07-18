@@ -1495,8 +1495,8 @@ test logs are bounded to the newest 20, and normal client/ACME/bench bundles no
 longer preload the platform test graph.
 
 The giant root instrumentation warning was traced to a real hot-reload defect,
-not suppressed as context. The Node pod was calling Shadow's browser-only
-reload-source filter after Node had already loaded the files, so it selected no
+not suppressed as context. The Bun pod was calling Shadow's browser-only
+reload-source filter after Bun had already loaded the files, so it selected no
 namespaces and left fresh definitions unwrapped. Reload selection now follows
 Shadow's Node client semantics and re-instruments the exact changed namespaces;
 a cold live census reports zero gaps. The warning remains a derived invariant

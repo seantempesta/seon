@@ -495,7 +495,7 @@ Losing a named REPL session loses only process-local values, not database truth.
 Live diagnosis and narrow behavioral verification start through the repository
 MCP server loaded by `.codex/config.toml` and `.mcp.json`:
 
-- use `eval_cljs` for the running Node pod, keeping `agent_id` cluster-qualified
+- use `eval_cljs` for the running Bun pod, keeping `agent_id` cluster-qualified
   when more than one live pod can host the id;
 - use `eval_clj` for the selected JVM writer's stateful `io-prepl` session;
 - use the default session for disposable probes and a named `session_id` only

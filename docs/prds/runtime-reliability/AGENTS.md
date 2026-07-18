@@ -192,7 +192,7 @@ process verbs are not primary UX.
 
 - The permanent Java component is a small JVM database/heavy-compute server,
   not the old JVM application. The canonical agent/runtime/renderer remains
-  CLJS and server agents run as Node processes beside the JVM.
+  CLJS and server agents run as Bun processes beside the JVM.
 - The retained writer reaches twelve namespaces. Its complete `:writer` basis
   excludes the paused application and is also the `writer-uber` basis.
 - `writer-uber` originally built from `[:writer]` while runtime used the
