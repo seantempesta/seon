@@ -57,6 +57,17 @@ repair, reactive-canvas, and packaging changes did not recreate the earlier
 apparent 500 MiB-per-child regression; that number was RSS counting shared
 mapped pages rather than private physical pressure.
 
+The database-hop and query-reuse measurement is now retained in
+[[research/database-hop-query-reuse-2026-07-18]]. Direct warm Datahike queries
+measured 0.0188 ms p50; the complete Bun/ClojureScript → native UDS → JVM →
+Bun path measured 1.033 ms p50 and 2.936 ms p99. Thirty-two simultaneous pod
+calls produced one cache owner and 31 hits. Eight independent Bun processes
+over a nonempty 400-row query produced one owner and seven joined callers, and
+every caller received the complete result. The hop is therefore measurable but
+healthy; the next ordered performance boundary is the complete Datastar
+invalidation/render/serialize/write/browser path, not database-hop
+micro-optimization.
+
 The Bun source audit
 [[research/bun-production-runtime-integration-audit-2026-07-15]] establishes a
 candidate full JavaScript-runtime migration after exact-artifact parity: Shadow

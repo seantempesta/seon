@@ -182,12 +182,18 @@
           ::writer/selected-processors 8
           ::writer/request-socket-path request-path})]
     (try
-      (let [transaction
+      (let [head
+            (writer/handle-request
+             (::writer/runtime server)
+             (protocol/resolve-head-request
+              {::protocol/request-id "authority-density/head"
+               ::protocol/database-name database-name}))
+            transaction
             (writer/handle-request
              (::writer/runtime server)
              (protocol/transaction-request
-              {::protocol/database-name database-name
-               ::protocol/request-id "authority-density/seed"
+              {::protocol/request-id "authority-density/seed"
+               :seon.db/db (:seon.db/db head)
                ::protocol/transaction-data
                (into
                 [{:db/ident :seon.authority-density/id
@@ -200,6 +206,7 @@
                        {:seon.authority-density/id value
                         :seon.authority-density/group "shared"}))
                 (range 400))}))]
+        (is (::protocol/success? head) (pr-str head))
         (is (::protocol/success? transaction) (pr-str transaction)))
       (testing "one child establishes the cold-owner and hit baseline"
         (run-wave! database-name request-path 1))

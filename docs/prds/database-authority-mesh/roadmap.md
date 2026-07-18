@@ -4090,3 +4090,23 @@ This closes the final package and transport boundary. Program completion now
 requires one explicit requirement-by-requirement audit against all accumulated
 browser, recovery, multi-cluster, ACME, resource, reconnect, and terminology
 evidence rather than inferring graduation from this last local gate alone.
+
+## 2026-07-18 database-hop and query-reuse checkpoint
+
+The retained authority boundary now has direct and complete-path latency
+evidence. Over one immutable database value, warm direct Datahike measured
+0.0188 ms p50 and 0.0775 ms p99. Two hundred complete Bun/ClojureScript,
+Transit, native Unix-domain socket, JVM authority, and Promise round trips
+measured 1.033 ms p50 and 2.936 ms p99. Thirty-two simultaneous identical pod
+calls produced one cache owner and 31 hits. Eight independent Bun processes
+over a seeded 400-row query produced one owner and seven joined callers, with
+all results complete and all sessions released. Focused proof passes one test
+and 51 assertions.
+
+This closes the risk that separate execution children duplicate identical
+Datahike query computation. The earliest unsettled performance contract is now
+the complete Datastar path: changed database facts through affected render
+selection, query reuse, Hiccup construction, serialization, compression,
+socket backpressure, and browser morph. The integrated proof must count actual
+rerenders and phase time under one and many identical feeds before changing
+render demand or cache policy.
