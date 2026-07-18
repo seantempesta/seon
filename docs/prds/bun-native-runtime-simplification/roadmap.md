@@ -133,7 +133,8 @@ absolute `bun --use-system-ca` pod launch. Shell syntax, diff checks, and a real
 isolated Unix-socket acceptance probe pass. Cross-architecture image builds and
 container browser/recovery proof remain required; the image still packages
 `src` and `test` honestly until the program-source artifact replaces filesystem
-source acquisition.
+source acquisition. The exact existing-seam design and falsifiers are durable
+at [[research/no-source-program-artifact-audit-2026-07-18]].
 Multi-cluster, no-source packaging, recovery/soak, and final percentile and
 resource measurements remain graduation gates.
 
