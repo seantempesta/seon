@@ -3374,10 +3374,35 @@ supervisor restart. The evidence is retained in
 `docs/seon/issues/hot-reload-schema-import-can-partially-fail.md`; it remains a
 resilience gate, not a reason to weaken source validation.
 
-The earliest unsettled contract is the real browser journey and controlled
-failure injection under concurrent public agent work. Browser tooling remains
-unavailable, so the next dependency-ready work is server-side agent/load and
-writer/session failure injection, followed by the honest startup, database-hop,
-query-reuse, render/feed, event-loop, CPU, heap, and RSS baseline. Bun-native
-HTTP/SSE and packaging remain the final transport cut after those behavioral
-and resource measurements.
+The first four-agent drive exposed a shared-session pressure failure. Three
+agents completed in 12.5–16.4 seconds while one closed `:error` before opening a
+turn. The Bun client admits 256 pending database requests, but the JVM formerly
+closed the socket when request 65 could not reserve one of 64 per-session
+response slots. Commit `0c510a01` applies socket read backpressure instead:
+retain the valid header, pause `OP_READ`, and resume when bounded input or
+response capacity is released. Focused UDS proof passes 31 tests/157 assertions.
+
+The next live drive completed all four agents but retained reconnects. Commit
+`92575de7` exposed every event-pressure status and proved `send/session-full`:
+every hosted agent listened only by the shared
+`:seon.agent.message/to` attribute, so one target message crossed the socket
+once per retained agent and was filtered in the pod. Commit `e679d082` adds the
+resolved target agent entity ID to that existing Datahike datom pattern. The
+source-frozen repeat completed four fresh agents in parallel, each with its
+exact reply, one terminal turn, inline model evidence, and valid historical
+configuration. No database session ended, the writer logged no event pressure,
+and the operator remained ready.
+
+The first idle development measurement, with roughly 80 retained agents, is
+2.29 GiB RSS for Shadow's watcher JVM, 1.21 GiB for the Datahike writer JVM,
+and 0.86 GiB for the Bun pod. This is not a production baseline—the watcher is
+a compiler and the database has accumulated test state—but it identifies
+process/artifact separation and retained runtime state as the high-impact
+memory work.
+
+The earliest unsettled contract is now the real browser journey and controlled
+writer/session failure injection during concurrent public work. Browser tooling
+remains unavailable, so the dependency-ready work is failure/recovery proof,
+then honest cold/warm startup, database-hop, query-reuse, render/feed,
+event-loop, CPU, heap, and RSS measurement. Bun-native HTTP/SSE and packaging
+remain the final transport cut after those behavioral and resource baselines.
