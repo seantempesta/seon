@@ -1496,13 +1496,29 @@
         initialization (:seon.db/initialization request)
         initialized-db (volatile! nil)
         entry
-        (registry/ensure-database!
-         (registry-request
-          database-name
-          (::protocol/backend request)
-          (::protocol/database-path request)
-          (::branch/connection-id request)
-          (connection-initializer runtime initialization initialized-db)))
+        (try
+          (registry/ensure-database!
+           (registry-request
+            database-name
+            (::protocol/backend request)
+            (::protocol/database-path request)
+            (::branch/connection-id request)
+            (connection-initializer runtime initialization initialized-db)))
+          (catch clojure.lang.ExceptionInfo exception
+            (let [data (ex-data exception)
+                  requested-branch (second (::branch/connection-id request))]
+              (if (and (not= :db requested-branch)
+                       (= :seon.db.registry.error/connection-id-conflict
+                          (:seon.error/kind data))
+                       (set? (::registry/available-branches data))
+                       (not (contains? (::registry/available-branches data)
+                                       requested-branch)))
+                (throw
+                 (ex-info (.getMessage exception)
+                          (assoc data ::failure-kind
+                                 protocol/branch-missing-error)
+                          exception))
+                (throw exception)))))
         connection-id (::registry/connection-id entry)
         _ (when (and initialization
                      (not= :db (second connection-id)))

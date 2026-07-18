@@ -517,7 +517,6 @@
                            (= (::db.branch/basis-t target-head) (:t released-db))
                            (= (::db.branch/commit-id target-head)
                               (:datahike/commit-id released-db))
-                           (true? (::protocol/released? release-response))
                          (= target-head
                             (::protocol/expected-target-head delete-request))
                          (= (::protocol/source-database-name create-request)
@@ -628,7 +627,9 @@
                    (= (::protocol/database-path target-database)
                       (::protocol/database-path ensured))
                    (= (::db.branch/connection-id target-database)
-                      (:store-id (:seon.db/db ensured))))
+                      (-> (:seon.db/db ensured)
+                          db.branch/head-from-database-value
+                          db.branch/connection-id)))
       (throw (ex-info "The writer ensured a different target connection-id."
                       {:seon.dev.branch/target-database target-database
                        :seon.dev.branch/ensure-response ensured})))
@@ -673,7 +674,12 @@
   ([configuration lifecycle-path record]
    (close-record! configuration lifecycle-path record false))
   ([configuration lifecycle-path record pod-absence-proved?]
-   (let [closing-intent
+   (if (= :seon.dev.branch.phase/closed (::phase record))
+     (do
+       (cleanup-private! record)
+       (fs/delete-if-exists lifecycle-path)
+       record)
+     (let [closing-intent
          (write-record!
           lifecycle-path
           (-> record
@@ -747,7 +753,7 @@
           (write-record! lifecycle-path closed)
           (cleanup-private! closed)
           (fs/delete-if-exists lifecycle-path)
-          closed))))))
+          closed)))))))
 
 (defn- open-under-lock!
   [request acquire-owned! initial-record pod-absence-proved?]

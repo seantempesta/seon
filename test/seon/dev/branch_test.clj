@@ -91,7 +91,9 @@
 
 (defn- database-value [database-name head]
   {:db-name database-name
-   :store-id [(::db.branch/store-id head) (::db.branch/name head)]
+   :store-id [(::db.branch/store-id head)
+              (::db.branch/name head)
+              :seon.db.id.writer/serialized]
    :t (::db.branch/basis-t head)
    :as-of nil
    :since nil
@@ -515,7 +517,7 @@
 
             :seon.db.protocol.operation/release-database
             {::protocol/success? true
-             ::protocol/released? true}
+             ::protocol/released? false}
 
             :seon.db.protocol.operation/delete-branch
             (do

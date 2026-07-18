@@ -209,3 +209,36 @@
       (finally
         (writer/stop! server)
         (.delete socket-file)))))
+
+(deftest ensuring-an-absent-native-branch-reports-branch-missing
+  (let [database-name (str "writer-missing-main-" (random-uuid))
+        branch-name (str "writer-missing-branch-" (random-uuid))
+        socket-file (File. "tmp" (str database-name ".sock"))
+        server
+        (writer/start!
+         {::writer/dependencies (dependencies)
+          ::writer/database-name database-name
+          ::writer/backend :memory
+          ::writer/request-socket-path (.getAbsolutePath socket-file)})
+        runtime (::writer/runtime server)
+        main
+        (registry/resolve-connection
+         {::registry/database-name (keyword database-name)})
+        connection-id
+        (assoc (::registry/connection-id main) 1 :experiment/absent)]
+    (try
+      (let [response
+            (writer/handle-request
+             runtime
+             (protocol/ensure-database-request
+              {::protocol/request-id "branch/absent"
+               ::protocol/database-name branch-name
+               ::protocol/backend :memory
+               ::branch/connection-id connection-id}))]
+        (is (false? (::protocol/success? response)))
+        (is (= protocol/branch-missing-error
+               (::protocol/error-kind response))
+            (pr-str response)))
+      (finally
+        (writer/stop! server)
+        (.delete socket-file)))))
