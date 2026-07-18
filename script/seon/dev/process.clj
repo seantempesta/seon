@@ -460,15 +460,7 @@
                (into completed ready)
                (into ordered ready))))))
 
-(defn process-status
-  "Classify one retained workload identity without changing process state."
-  {:malli/schema
-   [:=> [:cat [:maybe :map]]
-    [:enum :seon.dev.process.status/absent
-     :seon.dev.process.status/alive
-     :seon.dev.process.status/reused
-     :seon.dev.process.status/dead]]}
-  [record]
+(defn- process-status [record]
   (cond
     (nil? record) :seon.dev.process.status/absent
     (state/process-identity-alive? record) :seon.dev.process.status/alive
@@ -2063,7 +2055,15 @@
           (.removeShutdownHook runtime shutdown-hook)
           (catch IllegalStateException _))))))
 
-(defn- reported-process-status [record]
+(defn reported-process-status
+  "Derive one managed generation's containment-aware operator status."
+  {:malli/schema
+   [:=> [:cat [:maybe :map]]
+    [:enum :seon.dev.process.status/absent
+     :seon.dev.process.status/alive
+     :seon.dev.process.status/drained
+     :seon.dev.process.status/containment-uncertain]]}
+  [record]
   (let [recorded (process-status record)
         containment (:seon.dev.process/containment record)]
     (cond

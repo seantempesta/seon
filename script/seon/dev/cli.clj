@@ -40,9 +40,10 @@
         (into #{}
               (filter
                (fn [id]
-                 (= :seon.dev.process.status/dead
-                    (process/process-status
-                     (process/read-process configuration id)))))
+                 (let [record (process/read-process configuration id)]
+                   (and record
+                        (not= :seon.dev.process.status/alive
+                              (process/reported-process-status record))))))
               process/target-processes)]
     (when (seq targets)
       (stop-processes!

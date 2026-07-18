@@ -223,10 +223,10 @@
                                #{process/writer-id})]
     (with-redefs-fn
       {#'process/read-process (fn [_ id] (get records id))
-       #'process/process-status
+       #'process/reported-process-status
        (fn [record]
          (if (= process/writer-id (:seon.dev.process/id record))
-           :seon.dev.process.status/dead
+           :seon.dev.process.status/drained
            (if record :seon.dev.process.status/alive
                :seon.dev.process.status/absent)))
        #'process/clean-or-force!
