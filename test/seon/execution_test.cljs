@@ -321,6 +321,12 @@
     (is (= 256 (:datahike.resource/max-results member)))
     (is (= 65536 (:datahike.resource/max-result-weight member)))))
 
+(deftest authored-program-queries-bound-retained-results-and-bytes
+  (let [member (@#'execution/query-member database '[:find ?value] [])]
+    (is (= 16384 (:datahike.resource/max-results member)))
+    (is (= (* 3 1024 1024)
+           (:datahike.resource/max-result-weight member)))))
+
 (deftest source-identity-hashes-exact-utf8-bytes
   (let [source "(defn view [_] :ok)\n"
         expected (-> (.createHash (js/require "node:crypto") "sha256")

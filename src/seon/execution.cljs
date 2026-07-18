@@ -228,7 +228,7 @@
 
 ;;; Authored program read at one immutable database value
 
-(def ^:private maximum-program-rows 2048)
+(def ^:private maximum-program-results 16384)
 (def ^:private maximum-program-bytes (* 3 1024 1024))
 
 (def ^:private runtime-namespace-query
@@ -292,7 +292,7 @@
   {::db.protocol/operation db.protocol/query-operation
    ::db.protocol/query-form query
    ::db.protocol/arguments (into [database] arguments)
-   :datahike.resource/max-results maximum-program-rows
+   :datahike.resource/max-results maximum-program-results
    :datahike.resource/max-result-weight maximum-program-bytes})
 
 (defn- config-member [database]
