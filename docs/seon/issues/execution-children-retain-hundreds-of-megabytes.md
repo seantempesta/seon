@@ -25,8 +25,14 @@ even though process isolation and parallel execution work correctly.
 - A source-frozen four-agent load on 2026-07-18 completed all four isolated
   children concurrently in one turn, in 13.9--15.4 seconds. While executing,
   their RSS values were 856,704, 851,504, 859,392, and 855,216 KiB. The pod
-  remained responsive, but the four children alone therefore required about
-  3.4 GiB RSS.
+  remained responsive.
+- macOS `vmmap` corrected the additive interpretation of those RSS values. An
+  858,160 KiB-RSS child had a 336.1 MiB physical footprint and a 525.1 MiB
+  peak. Its private cost was dominated by 297.5 MiB dirty WebKit/JSC memory;
+  about 408 MiB of resident `__LINKEDIT` pages are shareable across Bun
+  processes. Four children therefore do not consume 3.4 GiB of independent
+  physical memory, but their roughly 300 MiB private compiler heaps still make
+  parallel agents the dominant modest-hardware cost.
 - All four children exited through the existing idle-grace owner. The host
   registry and OS process list returned to zero children, and the supervising
   pod's fully collected JSC heap returned within 6.1 MiB of its pre-load value.
@@ -42,7 +48,9 @@ the process boundary.
 
 ## Acceptance
 
-- A repeatable cold/warm measurement separates pod, writer, and each child RSS.
+- A repeatable cold/warm measurement separates pod, writer, child physical
+  footprint/private dirty memory, and shared Bun/JSC image pages; raw RSS is
+  not treated as additive.
 - The child retains only state required for its persistent namespace and
   evaluation contract; shared immutable program/package data is not copied
   unnecessarily per child.

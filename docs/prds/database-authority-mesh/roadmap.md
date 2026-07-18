@@ -3607,11 +3607,16 @@ across clients and remains directly reusable by feeds and agents without a
 Seon-side cache.
 
 The graduation load is functionally green, but it makes the dominant modest-
-hardware blocker sharper: the four active execution children occupied
-851--859 MiB RSS each, about 3.4 GiB before the pod and writer. This is tracked
-at [[../../seon/issues/execution-children-retain-hundreds-of-megabytes]]. The
-earliest unsettled contract is now reducing the active child's retained
-compiler/context footprint without weakening process isolation or persistent
-namespaces. The measured `Bun.serve` transport cut follows that dominant
-architecture boundary; complete maintained tests, browser, multi-cluster, and
-failure graduation remain final.
+hardware blocker sharper. The four active execution children reported
+851--859 MiB RSS each, but `vmmap` showed why raw RSS must not be added across
+Bun processes: one 858 MiB-RSS child had a 336.1 MiB physical footprint and
+525.1 MiB peak, including 297.5 MiB private dirty WebKit/JSC memory, while
+about 408 MiB of resident `__LINKEDIT` pages are shareable. The real target is
+therefore each child's roughly 300 MiB private compiler heap, not a fictional
+3.4 GiB of independent RSS. This is tracked at
+[[../../seon/issues/execution-children-retain-hundreds-of-megabytes]]. The
+earliest unsettled contract is reducing that active compiler/context footprint
+without weakening process isolation or persistent namespaces. The measured
+`Bun.serve` transport cut follows that dominant architecture boundary;
+complete maintained tests, browser, multi-cluster, and failure graduation
+remain final.
