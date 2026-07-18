@@ -3749,3 +3749,34 @@ eval, and the second immediate failure wakes root through the existing inbound
 message path with the recorded recovery and blob refs. Source-free packaging,
 browser/load/multi-cluster proof, resource budgets, and the measured
 `Bun.serve` cut remain the final graduation gates.
+
+The automatic policy is now implemented at `c9031657`. Before the scoped
+recovery commits, one history query derives the agent's latest prior recovery
+transaction and whether an ordinary later turn reached `:done`. No prior
+recovery, or a completed turn after it, permits one clean `:recovery` run. A
+prior recovery with no completed turn permits no further automatic run and
+messages root through the existing inbound path with the recovery ID and
+diagnostic-blob hash. The current run loop returns before the replacement is
+opened, so the existing per-agent run-promise owner cannot form a self-wait;
+the public committed-work driver then derives and runs the CAS winner. The
+complete ClojureScript gate passes 1,130 tests/5,015 assertions.
+
+The first live drive rebuilt the version-9 canonical artifact and returned the
+watcher, writer, and pod ready. It then falsified two adjacent Malli contracts:
+the four/five-argument `invoke-compiled!` and five/six-argument
+`compiled-invocation` implementations deliberately delegate with a nil run
+fence, while their instrumented internal arities rejected nil. Commit
+`77b94664` makes those schemas describe the existing optional run fence;
+focused execution proof passes 40 tests/168 assertions and the live prompt
+invocation then completed normally. This was a live-instrumentation defect,
+not a reason to disable instrumentation.
+
+The missing native Bun execution gate is also closed. LLVM 21.1 and Ninja were
+installed, the vendored Bun debug binary built at `d8ecf098`, and the exact
+upstream spawn test passed 3 tests/59 expectations. Its non-cooperating busy
+child produced increasing CPU time and RSS through
+`resourceUsage({live: true})`; ten process-exit races remained safe; ordinary
+post-exit usage still worked. Seon's running release binary remains Bun 1.3.14,
+so its demanded `processes` view correctly omits the unsupported live fields
+rather than fabricating them. A packaged-runtime switch to the patched Bun is
+still required before Seon-level live resource assertions count as graduation.
