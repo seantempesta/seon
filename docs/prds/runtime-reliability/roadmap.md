@@ -103,6 +103,23 @@ exposed a convergence smell: the model finished its generated one-step plan,
 messaged the answer, and chose `wait` after 40.9 seconds before the direct
 resumed completion took one turn.
 
+The same boundary now passes concurrent execution and bounded crash recovery.
+Two agents ran concurrently in separate Bun execution children and completed
+in 7.72 and 7.90 seconds. Release application
+`62dfd2e233dc03fde08bc762e4079209fab0534afde537dcb78b17bda18d5d2e`
+then ran outside the checkout against a fresh database. The exact eval source
+`(js/process.exit 1)` retired one execution child, received its one automatic
+replacement, and retired that replacement; `/agents/run` returned
+`:crashed` without a third execution while the Bun pod stayed responsive.
+A later inbound message started a fresh child and completed
+`(complete "replacement child recovered")` in one turn and 7.66 seconds.
+The release inventory remained byte-identical and `bin/seon down` cleanly
+drained both the Bun pod and JVM writer. The apparent shutdown pause was an
+active root turn completing under the existing bounded-turn drain contract,
+not a file-lock or containment deadlock. Commit `6fae602b` and the archived
+crash-breaker issue own the implementation and exact live evidence. The next
+ordered boundary is complete correctness plus browser/feed/reconnect proof.
+
 The existing remote query surface now exposes its protocol-native historical
 view, closing the only facade gap needed by coordinate-pinned startup birth.
 LLM configuration and brand startup sync also use bounded coordinate-fenced
