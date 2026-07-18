@@ -299,6 +299,22 @@ ordered boundary is regenerating and auditing the final source-free package on
 this exact source, then reconciling its restart/reconnect, ACME, multi-cluster,
 and 1/2/4-child evidence against the graduation ledger.
 
+Current-source release application
+`0d8bc9c2ff2088de3103f951d1bd3f94f96d2c80cb4f4ccf6a035aaa9f96197b`
+now passes the source-free runtime boundary from `/Users/sean/seon-release-9df21b23`
+with all mutable data under `/Users/sean/seon-state-9df21b23`. Its process
+inventory contained only the JVM writer and Bun pod until agent demand created
+the Bun execution child; no watcher or development runtime was present. Root,
+`/data`, and the gzip root feed passed, and Chrome rendered root without console
+errors. Agent `funny-ideas-chew` evaluated `(+ 40 2)` to `42` and completed with
+`source-free current release green: 42`; after a clean writer/pod restart,
+Chrome read that exact committed result back. Normal `down` retired both
+processes. The complete package-tree digest remained exactly
+`2528ac810e8b77a6f5108b2f18df906a5ecedbac3cd07e7dc372f768aa016da3`
+before and after runtime activity. This closes exact-current package
+immutability/restart/read-back; remaining reconciliation is current ACME,
+multi-cluster, and resource evidence rather than another package mechanism.
+
 The downstream production overlay now passes the same immutable boundary.
 ACME supplies separate Shadow mains for the Bun pod and Bun execution child,
 so its source is compiled and dynamically reachable in both isolated runtime
