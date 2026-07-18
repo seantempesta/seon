@@ -264,7 +264,7 @@ enough to run on every puzzling drive.
 
 ## Cluster lifecycle and the composition door
 
-Isolation is the CLUSTER: one shared db + its agents, one Node pod per
+Isolation is the CLUSTER: one shared db + its agents, one Bun pod per
 cluster, all databases hosted by the one JVM database server (the registry). From
 inside a cluster there is ONE conn and ONE database — agents never know
 other clusters exist. Database enumeration, fork, release, and deletion are

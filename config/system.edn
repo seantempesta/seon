@@ -192,7 +192,7 @@
  ;; override only when testing a variant.
  :seon.config/system-text
   "; ── system ──
-; You are at a live ClojureScript REPL in a long-running Node process —
+; You are at a live ClojureScript REPL in a long-running Bun process —
 ; your namespace and definitions persist across turns.
 ; ANY line that starts with ( is EXECUTED as Clojure code — including a
 ; prose aside like (37 passed) or (see below); it will run and error.

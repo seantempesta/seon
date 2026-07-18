@@ -120,6 +120,19 @@ not a file-lock or containment deadlock. Commit `6fae602b` and the archived
 crash-breaker issue own the implementation and exact live evidence. The next
 ordered boundary is complete correctness plus browser/feed/reconnect proof.
 
+Deterministic live configuration now also reconverges under the normally
+instrumented Bun pod. Reconciliation passes each managed identity attribute as
+one scalar Datahike query input inside one immutable database value and one
+`execute-many` request; this follows maintained Datahike's explicit rule that
+collection-bound keywords are not resolved in datom attribute position. The
+focused state/startup selection passes 21 tests/78 assertions, and two
+consecutive `bin/seon config apply config/system.edn` operations both returned
+unchanged with zero transactions. The drive also isolated an independent
+compiled `execute-many` predicate-query failure, recorded in the owning issue;
+the bounded indexed reconciliation path does not depend on it. Browser/feed
+transition and reconnect proof remains the earliest unsettled product
+contract, followed by multi-cluster load and resource measurement.
+
 The existing remote query surface now exposes its protocol-native historical
 view, closing the only facade gap needed by coordinate-pinned startup birth.
 LLM configuration and brand startup sync also use bounded coordinate-fenced

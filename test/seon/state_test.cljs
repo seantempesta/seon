@@ -79,7 +79,33 @@
          ((deref #'state/lookup-ref-pairs)
           {:seon.state.scratch.a/id "owner"
            :seon.state.scratch.a/ref
-           [:seon.state.scratch.b/id "target"]}))))
+           [:seon.state.scratch.b/id "target"]})))
+  (is (= #{[:seon.state.scratch.b/id "target"]}
+         ((deref #'state/lookup-ref-pairs)
+          {:seon.state.scratch.a/children
+           [{:seon.state.scratch.a/id "left"}
+            {:seon.state.scratch.a/ref
+             [:seon.state.scratch.b/id "target"]}]}))
+      "an ordinary two-member vector is traversed, not treated as a lookup ref"))
+
+(deftest reconcile-queries-use-identity-keywords-in-attribute-position
+  (doseq [query [(deref #'state/reconcile-state-query)
+                 (deref #'state/reconcile-lookup-ref-query)
+                 (deref #'state/reconcile-provenance-query)
+                 (deref #'state/reconcile-transaction-process-query)]]
+    (is (not-any? #(= '[?attribute :db/ident ?identity-attr] %)
+                  (tree-seq coll? seq query))
+        "Datahike attribute positions consume the bound ident keyword, not its schema eid"))
+  (is (some #{'[?e ?identity-attr _]}
+            (tree-seq coll? seq (deref #'state/reconcile-state-query))))
+  (is (some #{'[?e ?identity-attr ?identity-value]}
+            (tree-seq coll? seq (deref #'state/reconcile-lookup-ref-query))))
+  (doseq [query [(deref #'state/reconcile-state-query)
+                 (deref #'state/reconcile-provenance-query)
+                 (deref #'state/reconcile-transaction-process-query)]]
+    (is (some #(= [:in '$ '?identity-attr] (vec %))
+              (partition 3 1 query))
+        "each indexed query takes one scalar attribute keyword; Datahike intentionally does not resolve collection-bound attribute keywords in attribute position")))
 
 (def authority-database
   {:db-name "default"

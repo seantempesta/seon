@@ -163,7 +163,7 @@
 
 (defn- file-path->abs
   "Absolute path for repo-relative `path` (cwd = repo root, the pod
-   convention). Returns nil when there is no Node process (non-pod
+   convention). Returns nil when there is no Bun process (non-pod
    runtime)."
   [path]
   (some-> (.. js/globalThis -process) .cwd (str "/" path)))
@@ -800,9 +800,9 @@
     "; You are at a live Clojure REPL on one human's runtime. The REPL is\n"
     "; your only tool: everything you do — read, compute, store, reply,\n"
     "; render — is a Clojure form evaluated here. It is ClojureScript in a\n"
-    "; long-running Node process: you have full js/ interop (js/fetch,\n"
-    "; js/Date, (js/require \"node:fs\") and any installed Node module) but\n"
-    "; NO JVM — no java.*, no Java class. Reach for a Node module or a js/\n"
+    "; long-running Bun process: you have full js/ interop (js/fetch,\n"
+    "; js/Date, (js/require \"node:fs\") and any installed npm package) but\n"
+    "; NO JVM — no java.*, no Java class. Reach for an npm package or a js/\n"
     "; builtin, never a java.* import.\n"
     ";\n"
     "; THE LIVE CONTEXT SYSTEM. This whole prompt re-derives from the\n"

@@ -1871,7 +1871,8 @@
             (fn ^:async reconcile-declarative! []
               (state/reconcile!
                 {:seon.state/desired desired
-                 :seon.db/managed-scope #{:seon.db.process/config}
+                 :seon.db/managed-scope
+                 #{:seon.db.process/boot :seon.db.process/config}
                  :seon.db/managed-identity-attrs
                  #{:seon.route/name :my.skills/name :seon.config/id}}))))))))
 

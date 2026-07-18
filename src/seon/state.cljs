@@ -333,32 +333,28 @@
 
 (def ^:private reconcile-state-query
   '[:find ?e (pull ?e [*])
-    :in $ [?identity-attr ...]
+    :in $ ?identity-attr
     :where
-    [?attribute :db/ident ?identity-attr]
-    [?e ?attribute _]])
+    [?e ?identity-attr _]])
 
 (def ^:private reconcile-lookup-ref-query
   '[:find ?e (pull ?e [*])
-    :in $ [[?identity-attr ?identity-value] ...]
+    :in $ ?identity-attr ?identity-value
     :where
-    [?attribute :db/ident ?identity-attr]
-    [?e ?attribute ?identity-value]])
+    [?e ?identity-attr ?identity-value]])
 
 (def ^:private reconcile-provenance-query
   '[:find ?e ?tx
-    :in $ [?identity-attr ...]
+    :in $ ?identity-attr
     :where
-    [?attribute :db/ident ?identity-attr]
-    [?e ?attribute _]
+    [?e ?identity-attr _]
     [?e _ _ ?tx]])
 
 (def ^:private reconcile-transaction-process-query
   '[:find ?tx ?process-id
-    :in $ [?identity-attr ...]
+    :in $ ?identity-attr
     :where
-    [?attribute :db/ident ?identity-attr]
-    [?e ?attribute _]
+    [?e ?identity-attr _]
     [?e _ _ ?tx]
     [?tx :seon.db/process ?process]
     [?process :seon.db.process/id ?process-id]])
@@ -391,6 +387,7 @@
   (cond
     (and (vector? value)
          (= 2 (count value))
+         (keyword? (first value))
          (schema/identity-attr? (first value)))
     #{value}
 
@@ -404,48 +401,54 @@
 
 (defn- ^:async acquire-reconcile-state!
   [database desired identity-attrs]
-  (let [lookup-refs (lookup-ref-pairs desired)
-        members
-        (cond->
-          [{::protocol/operation protocol/schema-operation}
-           {::protocol/operation protocol/query-operation
-            ::protocol/query-form reconcile-state-query
-            ::protocol/arguments [(vec identity-attrs)]}
-           {::protocol/operation protocol/query-operation
-            ::protocol/query-form reconcile-provenance-query
-            ::protocol/arguments [(vec identity-attrs)]}
-           {::protocol/operation protocol/query-operation
-            ::protocol/query-form reconcile-transaction-process-query
-            ::protocol/arguments [(vec identity-attrs)]}]
-          (seq lookup-refs)
-          (conj {::protocol/operation protocol/query-operation
-                 ::protocol/query-form reconcile-lookup-ref-query
-                 ::protocol/arguments [(vec lookup-refs)]}))
+  (let [lookup-refs (sort-by pr-str (lookup-ref-pairs desired))
+        identity-attrs (sort identity-attrs)
+        query-member
+        (fn [query arguments]
+          {::protocol/operation protocol/query-operation
+           ::protocol/query-form query
+           ::protocol/arguments arguments})
+        described-members
+        (into [[:schema {::protocol/operation protocol/schema-operation}]]
+              (concat
+                (mapcat (fn [identity-attr]
+                          [[:entity (query-member reconcile-state-query
+                                                  [identity-attr])]
+                           [:provenance
+                            (query-member reconcile-provenance-query
+                                          [identity-attr])]
+                           [:process
+                            (query-member reconcile-transaction-process-query
+                                          [identity-attr])]])
+                        identity-attrs)
+                (map (fn [[identity-attr identity-value]]
+                       [:entity
+                        (query-member reconcile-lookup-ref-query
+                                      [identity-attr identity-value])])
+                     lookup-refs)))
         result (await
                  (db/execute-many
                    {::db/db database
-                    ::db/members members}))
-        [schema-member entity-member provenance-member process-member
-         lookup-member]
-        (::db/results result)]
+                    ::db/members (mapv second described-members)}))
+        described-results
+        (map vector (map first described-members) (::db/results result))]
     (if (and (map? result) (string? (:seon.error/message result)))
       result
-      {::installed-schema
-       (member-value! "schema acquisition" schema-member ::protocol/schema)
-       ::rows
-       (acquisition-rows
-        (vec
-         (into {}
-               (cond->
-                 (member-value! "entity acquisition" entity-member
-                                :datahike.query/result)
-                 lookup-member
-                 (into (member-value! "lookup-ref acquisition" lookup-member
-                                      :datahike.query/result)))))
-        (member-value! "provenance acquisition"
-                       provenance-member :datahike.query/result)
-        (member-value! "transaction process acquisition"
-                       process-member :datahike.query/result))})))
+      (let [results-for
+            (fn [description result-key]
+              (into []
+                    (mapcat (fn [[_ member]]
+                              (member-value! (str (name description) " acquisition")
+                                             member result-key)))
+                    (filter #(= description (first %)) described-results)))]
+        {::installed-schema
+         (member-value! "schema acquisition"
+                        (second (first described-results)) ::protocol/schema)
+         ::rows
+         (acquisition-rows
+          (vec (into {} (results-for :entity :datahike.query/result)))
+          (results-for :provenance :datahike.query/result)
+          (results-for :process :datahike.query/result))}))))
 
 (defn- error-value?
   [value]

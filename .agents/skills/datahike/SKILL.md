@@ -21,7 +21,7 @@ and the pod↔database-server read/write split.
 
 ## The runtime: one connection, local reads, typed database writes
 
-The ACTIVE runtime is the **CLJS pod** (a long-running Node process). It does
+The ACTIVE runtime is the **CLJS pod** (a long-running Bun process). It does
 **NOT** embed datahike. The picture:
 
 - **Your database is ONE connection.** `seon.db/*conn*` is bound for you before

@@ -628,7 +628,7 @@
 
    Load averages use the conventional 1/5/15-minute order; they are runnable
    queue averages, not CPU percentages. RSS and used heap come from this pod's
-   Node process. Always comment-shaped and clipped below 50 estimated tokens."
+   Bun process. Always comment-shaped and clipped below 50 estimated tokens."
   {:malli/schema [:=> [:cat] :string]}
   []
   (let [[one five fifteen] (js->clj (.loadavg node-os))

@@ -162,6 +162,7 @@
           resolve-count (atom 0)
           opened-configuration (atom nil)
           applied-configuration (atom nil)
+          applied-request (atom nil)
           cleanup!
           (fn []
             (set! config/resolve-config-singleton original-resolve)
@@ -185,6 +186,7 @@
               ([_directory] [])))
       (set! state/reconcile!
             (fn [request]
+              (reset! applied-request request)
               (reset! applied-configuration
                       (last (:seon.state/desired request)))
               (js/Promise.resolve
@@ -204,7 +206,10 @@
                (fn [_]
                  (is (= 1 @resolve-count))
                  (is (identical? selected @opened-configuration))
-                 (is (identical? selected @applied-configuration))))
+                 (is (identical? selected @applied-configuration))
+                 (is (= #{:seon.db.process/boot
+                          :seon.db.process/config}
+                        (:seon.db/managed-scope @applied-request)))))
               (.catch
                (fn [error]
                  (is false (str "selected startup rejected: " error
