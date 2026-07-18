@@ -56,7 +56,7 @@
 (def authored-program
   [{:seon.ns/name :my.execution-proof
     :seon.ns/source
-    "(ns my.execution-proof (:require [seon.db :as db] [seon.eval :as eval]))"}
+    "(ns my.execution-proof (:require [seon.db :as db] [seon.eval :as eval] [seon.render :as render]))"}
    {:seon.fn/sym "my.execution-proof/current"
     :seon.fn/ns [:seon.ns/name :my.execution-proof]
     :seon.fn/source old-current-source}
@@ -68,7 +68,16 @@
     :seon.fn/source
     (str "(defn ^:async publish! [database tx-data]\n"
          "  (await (db/transact! {:seon.db/db database\n"
-         "                        :seon.db/tx-data tx-data})))")}])
+         "                        :seon.db/tx-data tx-data})))")}
+   {:seon.fn/sym "my.execution-proof/spin"
+    :seon.fn/ns [:seon.ns/name :my.execution-proof]
+    :seon.fn/source "(defn spin [_] (loop [] (recur)))"}
+   {:seon.fn/sym "my.execution-proof/nested-render"
+    :seon.fn/ns [:seon.ns/name :my.execution-proof]
+    :seon.fn/source
+    (str "(defn nested-render []\n"
+         "  (render/render :seon.render/ai {}\n"
+         "                 {:seon.render/ai 'my.execution-proof/spin}))")}])
 
 (defn- dependencies []
   {::writer/database-initializer (fn [_connection _database-name] nil)
@@ -193,7 +202,10 @@
                  (d/db connection))
             _ (is (= #{["my.execution-proof/current" :seon.db.process/repl]
                        ["my.execution-proof/removed" :seon.db.process/repl]
-                       ["my.execution-proof/publish!" :seon.db.process/repl]}
+                       ["my.execution-proof/publish!" :seon.db.process/repl]
+                       ["my.execution-proof/spin" :seon.db.process/repl]
+                       ["my.execution-proof/nested-render"
+                        :seon.db.process/repl]}
                      (set (filter #(= :seon.db.process/repl (second %))
                                   authored-rows)))
                   (pr-str authored-rows))
@@ -250,6 +262,32 @@
             (pr-str spawns))
         (is (every? #(apply not= %) (vals spawns))
             "each agent replaces exactly one process")
+        (is (= "The invocation was canceled."
+               (get-in evidence
+                       [:seon.execution-proof/stuck-result
+                        :seon.execution.integration-driver/failure
+                        :seon.execution/error :seon.error/message])))
+        (is (= :after
+               (get-in evidence
+                       [:seon.execution-proof/agent-b-during-stuck
+                        :seon.execution.integration-driver/value
+                        :seon.execution-proof/value]))
+            "another agent remains responsive while one renderer is stuck")
+        (is (= :after
+               (get-in evidence
+                       [:seon.execution-proof/agent-a-replacement
+                        :seon.execution.integration-driver/value
+                        :seon.execution-proof/value]))
+            "the retired child reloads current program source")
+        (is (not=
+             (get-in (second after)
+                     [:seon.execution.integration-driver/value
+                      :seon.execution-proof/pid])
+             (get-in evidence
+                     [:seon.execution-proof/agent-a-replacement
+                      :seon.execution.integration-driver/value
+                      :seon.execution-proof/pid]))
+            "the replacement runs in a new Bun process")
         (wait-until! "execution proof session release" 5000
                      #(zero? (transport-count database-name))))
       (finally

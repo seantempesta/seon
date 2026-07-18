@@ -526,10 +526,8 @@
    symbol (`format_count` → `format-count`).
 
    This surfaces UNSPECCED helpers that the `:seon.fn` index can't (the index
-   holds only `:malli/schema`-carrying vars), which is why `seon.render.sci`
-   unions this with the index — an aliased call to an unspecced compiled helper
-   (`h/format-count`) must resolve under SCI or the canvas falls to the unbounded
-   compiled path.
+   holds only `:malli/schema`-carrying vars). Self-host namespace setup,
+   require validation, autocomplete, and parity checks use that live surface.
 
    Returns `{}` when the ns isn't on `globalThis` (never-loaded / core stub) or
    on any failure. Never throws."
@@ -607,12 +605,8 @@
    (`grounded_dims` → `grounded-dims`) via the ONE munge scheme
    ([[lookup-ns-object]]).
 
-   Why this exists: `seon.render.sci`'s `expose-ns` exposes a canvas's own-ns
-   (and required-ns) fn members so SCI can resolve them, but a canvas that
-   references an own-ns NON-fn `(def …)` data value found no entry under SCI
-   → 'Unable to resolve symbol' → the canvas fell to the unbounded compiled path.
-   Merging these into the SCI namespace map alongside the fns resolves the
-   constant so the canvas stays interrupt-bounded.
+   Self-host namespace setup merges these values with live fn members so real
+   referred constants resolve alongside functions.
 
    `nil`-valued props are dropped (a SCI namespace map shouldn't carry a nil
    binding; `nil` reads identically whether bound or absent, and absence is the
@@ -2668,8 +2662,8 @@
 ;; were ALWAYS known structurally when the tee wrote the row (the
 ;; analyzer's :requires/:uses maps; the already-read defn form) — but
 ;; were stored only as SOURCE TEXT and re-derived by a reader/regex at
-;; render time (seon.render.sci ns env rebuild; the canvas-default
-;; derivation in seon.agent.ctx.render-fns). Store them at tee time;
+;; render time. Store them at tee time; canvas-default derivation in
+;; seon.agent.ctx.render-fns reads them as data;
 ;; render-time consumers read datoms, with the text parse kept ONLY as
 ;; the documented fallback for pre-existing rows (which self-backfill:
 ;; every replay/re-eval writes the structural attrs).

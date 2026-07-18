@@ -215,7 +215,7 @@
 ;; them on the `:seon.ns` row instead of re-parsing `:seon.ns/source`
 ;; text at render time). One edge per required ns, carrying the `:as`
 ;; alias and `:refer` set when present. The attr registrations live HERE
-;; (this ns loads before seon.eval → seon.render.sci → seon.client, so
+;; (this ns loads before seon.eval → seon.client, so
 ;; every reader/writer sees them registered on a cold boot).
 ;; ---------------------------------------------------------------------------
 
@@ -304,8 +304,7 @@
 
    One `::require-edge` map per RUNTIME-required ns (the analyzer's
    `:requires` vals ∪ `:uses` vals, self excluded — macro-only
-   `:require-macros` deps are NOT edges; the SCI env rebuild has no
-   macro surface, and resume's load-fn satisfies transitive requires
+   `:require-macros` deps are NOT edges; resume's load-fn satisfies transitive requires
    on demand regardless of topo edges). The `:as` alias is the `:requires` KEY mapping to the
    target where key ≠ target; the `:refer` set is the `:uses` keys
    grouped by target. `#{}` for an unknown / never-eval'd ns. The ns
@@ -313,8 +312,8 @@
    each yield an edge flagged `:seon.ns.require/as-alias? true`, unless
    the same target is also genuinely required. This is
    what the tee stores as `:seon.ns/require-edges` (component rows) so
-   `seon.render.sci` rebuilds the lexical env from datoms, never from a
-   reader over `:seon.ns/source` text (M4)."
+   runtime consumers use datoms, never a reader over `:seon.ns/source`
+   text (M4)."
   {:malli/schema [:=> [:cat ::compile-state :symbol] ::require-edges]}
   [compile-state ns-sym]
   (let [ns-info    (get-in @compile-state [:cljs.analyzer/namespaces ns-sym])

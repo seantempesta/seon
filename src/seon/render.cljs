@@ -33,7 +33,6 @@
     [seon.eval :as eval]
     [seon.render.canvas :as canvas]
     [seon.render.schema]
-    [seon.render.sci :as render-sci]
     [seon.render.value :as value]
     [seon.code :as code]
     [seon.ai.tokens :as tokens]
@@ -736,9 +735,7 @@
      1. read the slot (already decoded — DB-pulled blocks are slot-decoded
         before they become nodes; in-memory blocks carry literal values);
      2. string → verbatim; shallow-hiccup vector → verbatim;
-     3. fn-symbol → the fn. An AGENT-authored symbol is invoked SCI-BOUNDED
-        (a runaway agent fn must not freeze the single-threaded pod);
-        a core symbol calls direct (fast, trusted);
+     3. fn-symbol → the compiled fn in the isolated execution child;
      4. absent → the schema-default (the node's primary schema's converter);
      5. none → the GENERIC default (any data → Clojure / a dump)."
   [view node]
@@ -747,31 +744,8 @@
       (string? slot-val) (fn [_] slot-val)
       (vector? slot-val) (fn [_] slot-val)
       (symbol? slot-val)
-      (if (err/agent-authored-sym? slot-val)
-        (fn [in]
-          (let [r (render-sci/invoke-bounded slot-val in view)]
-            (cond
-              ;; deadline tripped → render nothing (a block never crashes
-              ;; its siblings; the recovery path warns the agent).
-              (and (map? r) (:seon.render.sci/interrupt r)) nil
-              ;; SCI could not run it — FAIL-LOUD. A symbol that resolves
-              ;; NOWHERE is a genuinely-missing slot → the legible self-heal
-              ;; line; anything else throws into the walker's guard
-              ;; (strict dial → loud; prod → the in-place ⚠ line / error
-              ;; canvas). Never the unbounded compiled call: a hang there
-              ;; would wedge the single-threaded pod.
-              (and (map? r) (:seon.render.sci/error r))
-              (if (nil? (eval/lookup-value slot-val))
-                (missing-render view (renderable-id node) slot-val)
-                (throw (ex-info
-                         (str "render fn " slot-val " could not run under "
-                              "SCI bounding — "
-                              (get-in r [:seon.render.sci/error
-                                         :seon.error/message]))
-                         {:seon/error (:seon.render.sci/error r)})))
-              :else r)))
-        (let [f (eval/lookup-value slot-val)]
-          (if f f (fn [_] (missing-render view (renderable-id node) slot-val)))))
+      (let [f (eval/lookup-value slot-val)]
+        (if f f (fn [_] (missing-render view (renderable-id node) slot-val))))
       ;; no explicit slot: try the node's primary-schema converter; if no
       ;; schema matches (nil), fall to the generic any-data default.
       :else (fn [input]
@@ -803,8 +777,7 @@
         (unwrap-response view (f in))           ;; bare OR html-response envelope
         (catch :default e
           ;; Classify by the node's slot value: an agent-authored render
-          ;; symbol → :agent (its SCI-bounding funnel usually recorded it
-          ;; already — recorded? skips the dup), anything else (core section,
+          ;; symbol → :agent, anything else (core section,
           ;; schema/generic default converter) → :core. Record BEFORE
           ;; strict-fail! (re-throws in strict mode).
           (when-not (err/recorded? e)

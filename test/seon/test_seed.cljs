@@ -1,10 +1,7 @@
 (ns seon.test-seed
-  "Hermetic-store seed for tests that RENDER agent context.
+  "Hermetic-store seed for tests that render agent context.
 
-   SCI bounding is FAIL-LOUD: a `my.*` render fn with no stored
-   `:seon.fn/source` renders a `:seon/error` block in place instead of
-   falling back to the unbounded compiled path (a hang there would wedge
-   the single-threaded pod). The default ctx blocks reference `my.*` fns
+   The default ctx blocks reference `my.*` fns
    (`my.kb.shared/instructions-block`, `my.plan.internal/plan-block`,
    `my.skills/catalog-block` / `skill-block`), so a hermetic test store
    that renders context must carry their source rows — exactly what the

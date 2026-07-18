@@ -184,9 +184,8 @@
 
 ;; ============================================================
 ;; Fault discriminator — "what were we calling", never "whose turn is
-;; it". Moved here (the leaf error ns) from seon.render.sci so the
-;; instrumentation wrapper can use it without a require cycle; render /
-;; render.sci / render-fns all read THIS one.
+;; it". The instrumentation wrapper, renderer, and render-fn derivation all
+;; read this leaf owner without a require cycle.
 ;; ============================================================
 
 (defn agent-authored-sym?

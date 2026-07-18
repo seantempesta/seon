@@ -38,19 +38,24 @@
       ::launch/execution-digest execution-digest})))
 
 (defn- ^:async invoke!
-  [database agent-id function-symbol arguments]
-  (let [messages
-        (await
-         (host/invoke-plans!
-          database
-          [(execution/invocation-plan agent-id function-symbol arguments)]))
-        message (first messages)]
-    (if (= execution/result-message (::execution/message message))
-      {::value (::execution/result message)
-       ::database (:seon.db/db message)}
-      (throw
-       (ex-info "Execution child invocation failed."
-                {:seon.execution.integration-driver/message message})))))
+  ([database agent-id function-symbol arguments]
+   (await (invoke! database agent-id function-symbol arguments nil)))
+  ([database agent-id function-symbol arguments deadline-ms]
+   (let [messages
+         (await
+          (host/invoke-plans!
+           database
+           [(cond-> (execution/invocation-plan agent-id function-symbol arguments)
+              deadline-ms (assoc ::execution/deadline-ms deadline-ms))]))
+         message (first messages)]
+     (if (= execution/result-message (::execution/message message))
+       {::value (::execution/result message)
+        ::database (:seon.db/db message)}
+       (if deadline-ms
+         {::failure message}
+         (throw
+          (ex-info "Execution child invocation failed."
+                   {:seon.execution.integration-driver/message message})))))))
 
 (defn- parallel-invoke!
   [database agent-ids function-symbol arguments]
@@ -74,6 +79,7 @@
         agent-ids ["agent-a" "agent-b"]
         current-symbol 'my.execution-proof/current
         publish-symbol 'my.execution-proof/publish!
+        nested-render-symbol 'my.execution-proof/nested-render
         new-current-source
         (str "(defn current []\n"
              "  {:seon.execution-proof/agent (db/current-agent-id)\n"
@@ -131,7 +137,7 @@
                  [?function :seon.fn/source ?source ?tx]
                  [?tx :seon.db/process ?process]
                  [?process :seon.db.process/id :seon.db.process/repl]]}))
-            _ (when-not (= 3 (count program-probe))
+            _ (when-not (= 5 (count program-probe))
                 (throw
                  (ex-info "The driver cannot see the seeded current program."
                           {:seon.execution-proof/program-probe program-probe
@@ -157,12 +163,23 @@
                        (:seon.execution-proof/pid value)))
              {}
              all-results)
+            stuck
+            (invoke! current-database "agent-a" nested-render-symbol []
+                     (+ (.now js/Date) 100))
+            agent-b-during-stuck
+            (await (invoke! current-database "agent-b" current-symbol []))
+            stuck-result (await stuck)
+            agent-a-replacement
+            (await (invoke! current-database "agent-a" current-symbol []))
             evidence
             {:seon.execution-proof/initial-database initial-database
              :seon.execution-proof/current-database current-database
              :seon.execution-proof/before before
              :seon.execution-proof/after [agent-b-after agent-a-after]
-             :seon.execution-proof/spawns spawns}]
+             :seon.execution-proof/spawns spawns
+             :seon.execution-proof/stuck-result stuck-result
+             :seon.execution-proof/agent-b-during-stuck agent-b-during-stuck
+             :seon.execution-proof/agent-a-replacement agent-a-replacement}]
         (emit! evidence)
         evidence)
       (finally
