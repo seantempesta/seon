@@ -435,18 +435,18 @@ fresh pod log.
   the producer and consumer source types; no generic database coordinate or
   attachment remains as a third concept.
 - **Integrated proof that closes it:** the complete JVM database gate now
-  passes 214 tests/1,797 assertions. Focused UDS transport, remote contract,
+  passes 214 tests/1,794 assertions. Focused UDS transport, remote contract,
   server shutdown, and selective-interest proof passes 58 tests/348 assertions.
   The migration deletes the obsolete pod-local database browser and old
-  coordinate namespace; the remaining CLJS and operator consumers are the
-  current breakage inventory, not compatibility obligations.
+  coordinate namespace. The complete Bun-executed CLJS gate passes 1,069
+  tests/4,769 assertions and the operator gate passes 231 tests/1,339
+  assertions. Commit `67b7f9ec` is the coherent source checkpoint.
 - **Dependency-ready parallel portfolio:** no new parallel source lane owns
   this shared database boundary. Independent provider/test-fixture lanes remain
   outside these paths. The top-level lane owns the terminology and native-result
   cut until the complete CLJS and operator gates are green.
-- **Next refill:** after the public boundary is coherent and committed, restore
-  the complete CLJS gate, then the operator gate; only then begin live cold
-  initialization, crash/restart, browser, and multiple-cluster proof.
+- **Next refill:** begin live cold initialization, crash/restart, browser, and
+  multiple-cluster proof against this frozen source checkpoint.
 - **Final graduation gate:** unit 9 still requires the destructive acceptance
   matrix, real-browser journey, explicit cold/warm latency, idle CPU,
   event-loop, heap/RSS, feed/render, and grown-database budgets, followed by the
