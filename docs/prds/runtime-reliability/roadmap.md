@@ -154,6 +154,22 @@ child. Fresh-agent context now states this real process boundary directly
 instead of implying a shared Bun process. Grown-transcript correctness is the
 next gate, followed by exact 1/2/4-child resource measurement.
 
+The grown-transcript gate now passes against a real generated database. Fifty
+retained turns and 400 evals, each carrying 16,384-character source, output,
+and result projections, reproduced the original Datahike result-weight failure
+on the actual agent feed. Instrumentation showed the active blocker was a
+redundant ordered full-history current-namespace query, not merely the paged
+eval pulls. Current namespace now derives from the same bounded eval pages;
+four-row pages are calibrated against Datahike's complete pull weight, and
+`record-eval!` also bounds structured Malli error projections at their write
+owner. The corrected acquisition made 57 bounded database calls with zero
+failed members. After a clean supervised restart, the same grown database
+served a 75,408-byte complete Datastar patch with no error card. Focused tests
+pass 19 tests/77 assertions. A failed feed event remaining cached across hot
+reload was isolated as an independent Datastar invalidation issue; it does not
+change the now-green cold/restart grown-database boundary. Exact 1/2/4-child
+resource measurement is next.
+
 The existing remote query surface now exposes its protocol-native historical
 view, closing the only facade gap needed by coordinate-pinned startup birth.
 LLM configuration and brand startup sync also use bounded coordinate-fenced

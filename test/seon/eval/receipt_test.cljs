@@ -167,6 +167,42 @@
              (set! db/transact! original)
              (done)))))))
 
+(deftest record-eval-bounds-structured-error-data-at-the-write-owner
+  (async done
+    (let [original db/transact!
+          observed (atom nil)
+          huge (apply str (repeat 100000 "x"))
+          request
+          (assoc record-request
+                 ::seval/result
+                 {::seval/ok? false
+                  :seon/error
+                  {:seon.error/message "instrumented call failed"
+                   :seon.error/data
+                   {:seon.error/kind
+                    :seon.error.kind/malli-instrument-input
+                    :seon.error.malli/got-edn huge}}})]
+      (set! db/transact!
+            (fn [& [transaction]]
+              (reset! observed transaction)
+              (js/Promise.resolve transaction-report)))
+      (-> (seval/record-eval! request)
+          (.then
+           (fn [_]
+             (let [eval-row (second (:seon.db/tx-data @observed))
+                   error-data (:seon.eval/error-data eval-row)
+                   cap (config/database-edn-cap configuration)]
+               (is (<= (count error-data) (+ cap 64)))
+               (is (re-find #"tokens elided" error-data))
+               (is (= (:seon.eval/source record-request)
+                      (:seon.eval/source eval-row))
+                   "exact executed source remains program evidence"))))
+          (.catch (fn [error] (is false (str error))))
+          (.finally
+           (fn []
+             (set! db/transact! original)
+             (done)))))))
+
 (deftest failed-program-publication-does-not-commit-a-transcript
   (async done
     (let [original-transact db/transact!

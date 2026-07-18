@@ -48,7 +48,6 @@
               (mapv (fn [turn]
                       [turn (js/Date. turn) false (+ 1000 turn) (str "run-" turn)])
                     (range 1 (inc turn-count)))
-              [["my.agent.test" (js/Date. turn-count) turn-count]]
               nil])
 
            (and (str/includes? query-text "seon.eval")
@@ -106,8 +105,7 @@
                          {:seon.db.protocol/success? true
                           :datahike.query/result result})
                        (if (= 1 (count @requests))
-                         [1 [[101 (js/Date. 1) false 201 "run-1"]]
-                          [["my.agent.test"]] nil]
+                         [1 [[101 (js/Date. 1) false 201 "run-1"]] nil]
                          [[] []]))})))
       (-> (transcript/transcript-block
             {:seon.agent/id "agent" ::db/db database} nil)
@@ -211,7 +209,7 @@
                                                       ::protocol/query-form pr-str)]
                                (and (str/includes? query-text "seon.eval/id")
                                     (str/includes? query-text "pull"))))))]
-                (is (= [1 8 8]
+                (is (= [1 4 4 4 4]
                        (sort (map #(count (-> % ::db/members first
                                              ::protocol/arguments first))
                                   eval-requests))))

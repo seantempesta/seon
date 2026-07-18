@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, agent, database, web, cljs]
 ---
@@ -94,3 +94,32 @@ verify where complete forensic evidence is retained. Do not truncate exact
 `:seon.eval/source`; source remains program evidence. The current claim that
 all complete output/result evidence is already blob-backed is not established
 by `record-eval!` and must be proved or corrected rather than assumed.
+
+## Resolution
+
+The existing owners are strengthened without another cache, feed, or
+transcript representation:
+
+- `record-eval!` applies the configured database projection cap to
+  `:seon.eval/error-data`, while exact `:seon.eval/source` remains unchanged;
+- AI eval pulls use four-row pages, calibrated against Datahike's measured pull
+  structure rather than raw string arithmetic;
+- the redundant ordered full-history current-namespace query is deleted;
+  current namespace derives from the already acquired successful eval rows,
+  falling back to the existing pre-window query only after window rotation; and
+- HTML retains its minimal selector and omits AI-only payloads.
+
+A real database fixture allocated 50 retained turns and 400 evals through
+`seon.db.id/allocate!`, with source, output, and result projections each at
+16,384 characters. Before the correction, its real Datastar feed returned the
+reported result-weight error. Instrumented acquisition after the correction
+completed through 57 bounded database calls with no failed member. After a
+clean supervised restart, the same grown database produced a 75,408-byte
+complete Datastar patch with no render or result-weight error. Focused
+transcript and eval-receipt tests pass 19 tests/77 assertions.
+
+The exact model reply is retained by `:seon.agent.turn/reply-blob`, the exact
+executed form remains `:seon.eval/source`, and structured error datoms are
+bounded projections under the architecture's storage rule. The earlier
+suggestion that complete arbitrary eval results were already blob-backed was
+not true and is not relied upon by this correction.

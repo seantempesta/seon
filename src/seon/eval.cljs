@@ -3244,8 +3244,10 @@
                (einstrument/instrument-error?
                  (some-> result :seon/error :seon.error/data)))
           (assoc :seon.eval/error-data
-                 (einstrument/pr-str-readable
-                   (-> result :seon/error :seon.error/data))))
+                 (cap-edn
+                   (einstrument/pr-str-readable
+                     (-> result :seon/error :seon.error/data))
+                   (config/database-edn-cap configuration))))
         prepared-value
         (when (and (::ok? result) (not pending?))
           (value/prepare-ai {:seon.config/configuration configuration

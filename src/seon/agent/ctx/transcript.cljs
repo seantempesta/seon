@@ -773,19 +773,6 @@
     [?run :seon.agent.run/agent ?agent]
     [?turn :seon.agent.turn/run ?run]])
 
-(def ^:private current-ns-query
-  '{:find [?ns ?at ?eval]
-    :in [$ ?agent-id]
-    :where [[?agent :seon.agent/id ?agent-id]
-            [?run :seon.agent.run/agent ?agent]
-            [?turn :seon.agent.turn/run ?run]
-            [?turn :seon.agent.turn/evals ?eval]
-            [?eval :seon.eval/ok? true]
-            [?eval :seon.eval/at ?at]
-            [?eval :seon.eval/ns ?ns]]
-    :order-by [?at :desc ?eval :desc]
-    :limit 1})
-
 (def ^:private last-action-query
   '[:find (max ?at) .
     :in $ ?agent-id
@@ -845,7 +832,11 @@
    ['?turn :seon.agent.turn/evals '?eval]
    ['?eval :seon.eval/at '_]])
 
-(def ^:private eval-page-size 8)
+;; Four maximum-size stored eval projections plus Datahike pull structure stay
+;; below the member's certified result-weight bound. Eight looked safe by raw
+;; string arithmetic but fails against a real 50-turn database because
+;; Datahike also charges the retained pull structure.
+(def ^:private eval-page-size 4)
 
 (declare query-result acquisition-error database-error)
 
@@ -977,7 +968,6 @@
            ;; the grown-query fixture calibrates them independently.
            (query-member database turn-count-query [id] 1000000 1000000 4096)
            (query-member database (turns-query window-size) [id] 1000000 1000000 65536)
-           (query-member database current-ns-query [id] 500000 500000 8192)
            (query-member database last-action-query [id] 500000 500000 8192)]
           open? (conj (query-member database run-turn-count-query [run-id]
                                     500000 500000 4096)
@@ -992,7 +982,7 @@
                        (database-error stage-one)
                        (acquisition-error (::db/results stage-one)))]
       (assoc input ::error error)
-      (let [[turn-count-member turns-member ns-member action-member
+      (let [[turn-count-member turns-member action-member
              run-turn-member run-form-member] (::db/results stage-one)
             turn-count (or (query-result turn-count-member) 0)
             newest-rows (->> (query-result turns-member)
@@ -1047,9 +1037,15 @@
                                           (sort-by (juxt :seon.eval/at :db/id))
                                           vec)))
                             turns)
-                current-ns (or (ffirst (query-result ns-member))
-                               (home/home-ns id))
                 previous-ns (ffirst (query-result previous-ns-member))
+                current-ns (or (->> (::eval-rows eval-page-result)
+                                    (map second)
+                                    (filter :seon.eval/ok?)
+                                    (sort-by (juxt :seon.eval/at :db/id))
+                                    last
+                                    :seon.eval/ns)
+                               previous-ns
+                               (home/home-ns id))
                 mode (or (:seon.config/repl-mode configuration) :batch)
                 policy (merge (config/default-run-policy) configuration)
                 state (derive/state-from-primitives
