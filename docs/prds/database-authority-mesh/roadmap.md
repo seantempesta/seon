@@ -3126,3 +3126,26 @@ correctness/browser/agent/load gates. Measured CPU, memory, and latency work
 follows correctness. Artifact verification itself took roughly 20 seconds in
 the live writer-only path and remains a measured operator-latency smell to
 attribute after the ordered recovery proofs.
+
+The gzip feed reconnect contract is now complete. The first server-side frame
+correctly exposed a pre-existing root render failure on the populated database:
+the scalar agent-count query returned one number but retained 18 matching
+relation nodes against an allowance of 16. Commit `a98dc231` keeps the scalar query
+and gives its internal relation an independent finite allowance; the affected
+59 tests pass with 362 assertions.
+
+In the integrated repeat, the old gzip stream opened with HTTP 200, closed when
+the supervised pod stopped, and a retrying client tolerated the unavailable
+interval. At `01:06:08` the replacement pod accepted the connection and sent a
+complete `datastar-patch-elements` frame containing a healthy `#app-view`, the
+30-agent system header, and the full root canvas without a render error. The
+operator reported clean new watcher, writer, and pod generations. The browser
+connector was unavailable in this task and the installed Chromium launcher was
+stale, so the real-browser console/layout gate remains explicitly pending in
+the final browser checkpoint rather than being inferred from server-side SSE.
+
+The earliest unsettled contract is independent cluster databases. Its proof
+must show isolated database values, writers, agents, feeds, and lifecycle
+operations can run concurrently without cross-cluster selection. Complete
+correctness, real-browser, multi-agent load, and measured CPU/memory/latency
+remain the graduation gates after it.
