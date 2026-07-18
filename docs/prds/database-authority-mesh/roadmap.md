@@ -3506,3 +3506,21 @@ sizes and zero new feed mechanism. Focused proof passes 13 tests and 45
 assertions. Debug still took 1,702.6 ms and root 79.6 ms; the ordered render
 investigation therefore moves into those retained projection owners rather
 than gzip, socket, or listener scheduling.
+
+The previously blocked real-browser boundary is now closed. Headless Chrome
+loaded `/`, `/data`, `/agent/root/debug`, and an ordinary agent page through
+their real Datastar clients with HTTP 200, complete morphs, and no console or
+page errors. The browser then created `new-turkeys-worry` through `POST
+/agents`, submitted its task through the visible Datastar chat form, observed
+the input clear and the live `running` to `idle` morph, and received the exact
+assistant reply `browser journey green.` with its one-step plan complete. The
+root header advanced from 94 to 95 agents through the same live database path.
+
+The earliest unsettled contract is therefore deterministic ungraceful
+writer/session recovery around an accepted ordinary-package transaction. Its
+integrated proof must show one durable commit, exact request redelivery,
+listener restoration, and subsequent public work without inventing a second
+database initializer. After that, concurrent failure/load and startup/resource
+growth measurements are dependency-ready. The final admission gate remains
+the complete maintained tests plus recovery, browser/agent, multi-cluster,
+load/resource, and Bun-native transport evidence.
