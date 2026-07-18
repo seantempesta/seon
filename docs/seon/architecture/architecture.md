@@ -74,6 +74,12 @@ concept to `ns`/`defn`/`require`/refs/var-meta/a db value.)
    present: the minimal base plus relevant namespace source beats a standing
    skills manual, and composition functions render their complete relevant
    value — [[laws]].)
+   The program graph is cluster-shared: a committed function, schema, or test
+   authored by one agent becomes available to every execution child through
+   the same database program delta. Agents build one coherent application
+   across ordinary namespaces; namespace organizes code and never encodes
+   process ownership. Dynamic context makes relevant shared capabilities
+   discoverable when their schemas and data fit the work at hand.
 3. **The agent authors its own environment.** A `defn` returning
    `:seon.render/ai` and/or `:seon.render/hiccup` supplies one or both render
    twins —
@@ -83,6 +89,10 @@ concept to `ns`/`defn`/`require`/refs/var-meta/a db value.)
    prose is where agents lie, [[laws]]). Every specced fn an agent writes
    teaches the system when to surface it. Anchors: the render twins,
    `install!`/`remove!`, current-ns auto-run — [[context]].
+   Authorship provenance remains on the source transaction for attribution,
+   maintenance, and policy without making that agent's home namespace a
+   permanent silo. Published agent-authored functions are shared capabilities;
+   the invoking agent may differ from the original author.
 4. **Perpetual motion = plan + location + window.** Grounding that survives
    forever: purpose + the `my.plan` anchor (WHAT I'm doing) + current-ns
    (WHERE I am) + the sliding transcript window (what I'm doing RIGHT NOW). A

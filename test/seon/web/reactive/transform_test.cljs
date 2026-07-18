@@ -28,6 +28,7 @@
 
 (deftest fn-call-slot-rewrites-to-standard-datastar-post
   (let [out    (transform/transform-hiccup
+                 "tst"
                  'my.agent.tst
                  [:button {:on-click (list 'cancel-order! "o-1")} "Cancel"])
         attrs  (second out)
@@ -40,41 +41,44 @@
       (is (str/starts-with? action "@post('"))
       (is (= "/agent/tst/call" (.-pathname (action->url action)))))
     (let [sp (action->params action)]
-      (testing "namespace is the route — the bare handler qualified to the authoring ns"
+      (testing "a bare handler qualifies to the ordinary authoring namespace"
         (is (= "my.agent.tst/cancel-order!" (.get sp "fn"))))
       (testing "render-time args ride the query, transit-serialized, decoding back"
         (is (= ["o-1"] (transform/decode-args (.get sp "args"))))))))
 
 (deftest fn-call-keeps-an-already-qualified-symbol
   (let [out   (transform/transform-hiccup
+                "tst"
                 'my.agent.tst
                 [:button {:on-click (list 'my.agent.other/do-it 1 2)}])
         action (get (second out) on-click)
         sp    (action->params action)]
     (testing "an explicitly-qualified handler symbol is NOT re-qualified"
       (is (= "my.agent.other/do-it" (.get sp "fn"))))
-    (testing "the qualified function's agent owns the action route"
-      (is (= "/agent/other/call" (.-pathname (action->url action)))))
+    (testing "the rendering agent owns the action route, not the namespace"
+      (is (= "/agent/tst/call" (.-pathname (action->url action)))))
     (testing "all render-time args survive the round trip in order"
       (is (= [1 2] (transform/decode-args (.get sp "args")))))))
 
-(deftest non-agent-handler-is-omitted
+(deftest any-qualified-application-namespace-retains-the-render-owner
   (doseq [[authoring-ns handler]
-          [['my.agent.tst 'seon.system/stop!]
+          [['my.orders 'my.shared/stop!]
            ['my.system 'stop!]]]
     (let [out (transform/transform-hiccup
+                "tst"
                 authoring-ns
                 [:button {:class "keep" :on-click handler} "Stop"])
           attrs (second out)]
       (is (= "keep" (:class attrs)))
       (is (not (contains? attrs :on-click)))
-      (is (not (contains? attrs on-click)))
-      (is (not (str/includes? (pr-str out) "/call"))))))
+      (is (= "/agent/tst/call"
+             (.-pathname (action->url (get attrs on-click))))))))
 
 (deftest fn-call-args-with-apostrophe-stay-quote-safe
   ;; A string arg containing an apostrophe must not break the single-quoted
   ;; @post('…') expression — the encoder %27-escapes it; it decodes back whole.
   (let [out   (transform/transform-hiccup
+                "tst"
                 'my.agent.tst
                 [:button {:on-click (list 'note! "O'Brien")}])
         sp    (action->params (get (second out) on-click))]
@@ -86,6 +90,7 @@
 
 (deftest fn-ref-slot-rewrites-without-args
   (let [out    (transform/transform-hiccup
+                 "tst"
                  'my.agent.tst
                  [:form {:on-submit 'submit-order!}])
         attrs  (second out)
@@ -107,12 +112,13 @@
                    :data-on:click "@post('/sse')"   ; already a Datastar string
                    :id "y"}
              [:span "hi"]]
-        out (transform/transform-hiccup 'my.agent.tst in)]
+        out (transform/transform-hiccup "tst" 'my.agent.tst in)]
     (testing "a tile with no fn-call/fn-ref handler slots is returned unchanged"
       (is (= in out)))))
 
 (deftest nested-handler-slots-are-rewritten
   (let [out (transform/transform-hiccup
+              "tst"
               'my.agent.tst
               [:div {:class "wrap"}
                [:button {:on-click (list 'a!)} "A"]

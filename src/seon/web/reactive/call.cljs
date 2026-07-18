@@ -1,33 +1,34 @@
 (ns seon.web.reactive.call
-  "The `/agent/{id}/call` route — agent fn-calls authored as hiccup, routed by NAMESPACE
-   into the owning agent's sandbox.
+  "The `/agent/{id}/call` route — agent fn-calls authored as hiccup, routed
+   into the selected agent's sandbox.
 
    This is the THIRD door of the one sandboxed-execution service (eval +
    render are the other two): an interaction is just an eval authored as
    hiccup and routed by its namespace. The browser POSTs a standard Datastar
    `@post('/agent/{id}/call?fn=…&args=…')` (produced by
    `seon.web.reactive.transform`).
-   We resolve the OWNING AGENT from the fn symbol's namespace, capability-check
-   that the fn is one of that agent's GRANTED fns, then invoke it through the
-   agent's own eval — which transacts, and the existing reactive feed
+   The route supplies the executing agent independently from the function's
+   ordinary Clojure namespace. We capability-check that the route agent is live
+   and the function is an agent-authored fact in the shared program graph, then
+   invoke it through the route agent's eval —
+   which transacts, and the existing reactive feed
    (`listen!` → render → SSE push) updates the UI.
 
-   ## Namespace IS the route
+   ## Agent is the route; namespace organizes code
 
-   The name is the route: a fn symbol `my.agent.<id>/foo` resolves to
-   agent `<id>` (`seon.agent.home/home-ns` is the canonical id↔ns mapping). No
-   routing table.
+   `/agent/{id}/call` selects the supervised agent runtime. `fn` remains the
+   exact qualified Clojure function, which may live in any namespace the agent
+   authored. Namespace structure never has to encode an agent id.
 
    ## The capability gate (the security boundary)
 
    [[capability-check]] is the refusal point — it runs BEFORE any invocation:
 
-   1. The fn's namespace must be `my.agent.<id>` according to the canonical
-      `seon.agent.home/home-ns` round trip. `fs/readFileSync`, `seon.client/…`,
-      and other namespaces are refused without a database request.
-   2. One query at the request's immutable database value proves both that the
-      agent is live and that the fn is a registered `:seon.fn` owned by that
-      agent's home namespace. A dead agent or missing fn row is refused.
+   One query at the request's immutable database value proves that the route
+   agent is live and that the registered `:seon.fn` source transaction was
+   authored by an agent through the REPL process. Agent-authored functions are
+   shared capabilities; a dead route agent, core function, or missing function
+   is refused.
 
    A refused call is NEVER invoked; it returns a clean error value (403).
    This is the same surface idea as the SCI canvas sandbox that denies `fs` (the
@@ -39,7 +40,7 @@
    A granted call is NOT synthesized into a source string and eval'd — that
    would let an attacker-controlled arg expression execute (an arg printed into
    source then re-read as code is the classic break-out). Instead [[invoke!]]
-   resolves the granted symbol in the owning supervised Bun child and applies
+   resolves the granted symbol in the selected supervised Bun child and applies
    it to the args as VALUES. The
    resolved `f` is still the always-on-instrumented var, so its own
    `:malli/schema` is enforced (no second validator to drift); a bad arg or a
@@ -49,7 +50,6 @@
    refused before invoke — belt-and-suspenders behind resolve-and-apply."
   (:require
     [clojure.string :as str]
-    [seon.agent.home :as home]
     [seon.db :as db]
     [seon.execution :as execution]
     [seon.execution.host :as execution.host]
@@ -61,54 +61,42 @@
 ;; Capability gate — one query at one immutable database value.
 ;; ============================================================
 
-(defn- owning-agent-id
-  "Return the agent id encoded by an exact home namespace, or nil."
-  [fn-sym]
-  (let [ns-str (namespace fn-sym)
-        prefix "my.agent."]
-    (when (and ns-str (str/starts-with? ns-str prefix))
-      (let [id (subs ns-str (count prefix))]
-        (when (and (seq id)
-                   (= (str (home/home-ns id)) ns-str))
-          id)))))
-
 (defn ^:async capability-check
-  "Resolve and gate `fn-sym` against one immutable database value.
+  "Gate one route agent and function against one immutable database value.
 
-   Returns `{::agent-id <id>}` when the fn is granted to its owning
+   Returns `{::agent-id <id>}` when the shared fn is available to the live route
    agent, else `{::refused <reason>}`. Never invokes anything —
    the refusal is the security boundary, evaluated before any execution."
-  {:malli/schema [:=> [:catn [::db :seon.db/db] [::fn-sym :symbol]] :map]}
-  [database fn-sym]
-  (if-let [agent-id (owning-agent-id fn-sym)]
-    (let [home-ns-name (keyword (str (home/home-ns agent-id)))
-          granted
-          (await
-           (db/query
-            {:seon.db/db database
-             :seon.db/query
-             '[:find ?function .
-               :in $ ?agent-id ?function-symbol ?namespace-name
-               :where
-               [?agent :seon.agent/id ?agent-id]
-               [?agent :seon.eval/home-requires _]
-               (not [?agent :seon.agent/terminated-at _])
-               [?function :seon.fn/sym ?function-symbol]
-               [?function :seon.fn/ns ?namespace]
-               [?namespace :seon.ns/name ?namespace-name]]
-             :seon.db/args [agent-id (str fn-sym) home-ns-name]}))]
-      (cond
-        (:seon.error/message granted) granted
-        (some? granted) {::agent-id agent-id}
-        :else
-        {::refused
-         (str "`" fn-sym "` is not a granted :seon.fn of live agent " agent-id
-              " — an interactive handler must be a fn the agent defined in its "
-              "home ns " (home/home-ns agent-id) ".")}))
-    {::refused
-     (str "no agent owns the namespace of `" fn-sym
-          "` — agent calls route only into an agent's home ns (my.agent.<id>); "
-          "fs / core / cross-agent symbols are refused.")}))
+  {:malli/schema [:=> [:catn [::db :seon.db/db]
+                       [::agent-id :string]
+                       [::fn-sym :symbol]] :map]}
+  [database agent-id fn-sym]
+  (let [granted
+        (await
+         (db/query
+          {:seon.db/db database
+           :seon.db/query
+           '[:find ?function .
+             :in $ ?agent-id ?function-symbol
+             :where
+             [?agent :seon.agent/id ?agent-id]
+             (not [?agent :seon.agent/terminated-at _])
+             [?function :seon.fn/sym ?function-symbol]
+             [(get-else $ ?function :seon.fn/private? false) ?private]
+             [(= false ?private)]
+             [?function :seon.fn/source _ ?source-tx]
+             [?source-tx :seon.db/user ?author]
+             [?author :seon.agent/id _]
+             [?source-tx :seon.db/process ?process]
+             [?process :seon.db.process/id :seon.db.process/repl]]
+           :seon.db/args [agent-id (str fn-sym)]}))]
+    (cond
+      (:seon.error/message granted) granted
+      (some? granted) {::agent-id agent-id}
+      :else
+      {::refused
+       (str "`" fn-sym "` is not a shared agent-authored function available "
+            "to live agent " agent-id ".")})))
 
 ;; ============================================================
 ;; Invoke — through the one supervised authored-execution service.
@@ -243,16 +231,18 @@
                       ::error
                       (get-in (admission/unavailable)
                               [:seon/error :seon.error/message])})
-      (let [fn-str (query-val req "fn")]
-       (if (str/blank? fn-str)
+      (let [fn-str (query-val req "fn")
+            route-agent-id (get-in request [:path-params :id])]
+       (if (or (str/blank? route-agent-id) (str/blank? fn-str))
          (json-response 400 {::ok? false
-                             ::error "missing 'fn' query param"})
+                             ::error "missing route agent id or 'fn' query param"})
          (try
            (let [fn-sym (symbol fn-str)
                  database (await (db/db))
                  cap (if (:seon.error/message database)
                        database
-                       (await (capability-check database fn-sym)))]
+                       (await (capability-check
+                               database route-agent-id fn-sym)))]
              (cond
                (:seon.error/message cap)
                (json-response 503 {::ok? false

@@ -13,6 +13,7 @@
    [seon.agent]
    [seon.agent.ctx :as ctx]
    [seon.agent.ctx.canvas :as ctx-canvas]
+   [seon.agent.home :as home]
    [seon.agent.ctx.menu]
    [seon.agent.ctx.namespaces]
    [seon.agent.ctx.render-fns :as render-fns]
@@ -38,7 +39,8 @@
    [seon.render.canvas :as canvas]
    [seon.render.surface :as surface]
    [seon.render.system]
-   [seon.schema :as schema]))
+   [seon.schema :as schema]
+   [seon.web.reactive.transform :as reactive-transform]))
 
 (schema/register! ::render-prompt-request
   [:map {:closed true}
@@ -73,15 +75,36 @@
   [value]
   (render/unwrap-response :seon.render/ai value))
 
+(defn- interactive-hiccup
+  "Rewrite handlers only for agent-authored dynamic renders and literal canvas.
+
+   A dynamic render's function namespace is its ordinary Clojure authoring
+   namespace. Literal canvas hiccup has no function symbol, so the rendering
+   agent's canonical home namespace supplies the same lexical meaning for a
+   bare handler symbol. Core/context hiccup is not rewritten."
+  [id block hiccup]
+  (let [renderer (:seon.render/html block)
+        authoring-ns
+        (cond
+          (and (symbol? renderer) (error/agent-authored-sym? renderer))
+          (symbol (namespace renderer))
+
+          (and (vector? renderer)
+               (= "canvas" (:seon.render.surface/selection block)))
+          (home/home-ns id))]
+    (if (and authoring-ns hiccup)
+      (reactive-transform/transform-hiccup id authoring-ns hiccup)
+      hiccup)))
+
 (defn- html-value
-  [block result]
+  [id block result]
   (if (::execution/ok? result)
     (let [value (render/unwrap-response
                  :seon.render/html
                  (::execution/value result))]
       (cond
         (or (vector? value) (nil? value))
-        value
+        (interactive-hiccup id block value)
 
         :else
         (canvas/error-card
@@ -490,6 +513,7 @@
                                (fn [{:keys [index]} result]
                                  [index
                                   (html-value
+                                   id
                                    (nth all-blocks index)
                                    result)])
                                targets
@@ -502,7 +526,7 @@
                                       hiccup
                                       (cond
                                         (vector? renderer)
-                                        renderer
+                                        (interactive-hiccup id block renderer)
 
                                         (symbol? renderer)
                                         (get hiccup-by-index index)

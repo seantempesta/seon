@@ -9,7 +9,8 @@
    Controls are ordinary hiccup carrying handler forms understood by Seon's
    render transform. A handler symbol is qualified to the renderer's agent
    namespace and routed through the existing `/agent/{id}/call` capability
-   gate. Buttons do not create routes. Reuse these primitives directly or
+   gate for the rendering agent. Buttons do not create routes. Reuse these
+   primitives directly or
    build domain-specific helpers from them in your own namespace."
   (:require
     [clojure.string :as str]

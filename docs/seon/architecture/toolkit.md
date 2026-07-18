@@ -43,7 +43,7 @@ protected implementation or invent a second tool protocol.
 | Layer | Ownership | Mutation policy | Purpose |
 |---|---|---|---|
 | Protected substrate | `seon.*` | changed as core source, never redefined by an agent | enforce capabilities, schemas, bounds, database and runtime contracts |
-| Editable composition | `my.*` | ordinary program facts an agent may extend | compose domain data, plan, canvas, skills, and reusable helpers |
+| Editable composition | allowed application namespaces, conventionally `my.*` | ordinary cluster-shared program facts agents may extend | compose domain data, plan, canvas, skills, applications, and reusable helpers |
 
 An agent's home requirements expose only the protected capabilities and `my.*`
 namespaces appropriate to that agent. Root receives a complete curated
@@ -69,9 +69,24 @@ capabilities remain protected `seon.agent.*`, `seon.test.*`, or other `seon.*`
 namespaces selected by home requirements. A future editable wrapper enters the
 table only with one real owner and an implementation PRD.
 
-The per-agent home namespace `my.agent.<id>` is not a shared toolkit package. It
-is the agent's editable local composition point and carries its purpose and
-agent-owned definitions.
+The per-agent home namespace `my.agent.<id>` is a safe starting namespace, not
+a code silo or ownership scheme. An agent may author a coherent application in
+`my.orders`, `my.customers`, `my.reporting`, or any other allowed namespace.
+Those committed functions, schemas, tests, declarations, and require edges are
+one shared program graph and become available to every child through program
+deltas. Source-transaction provenance records the author independently from
+the function's namespace.
+
+As the program grows, an ordinary database ref may assign a resident agent
+stewardship of a namespace. Stewardship means sustained attention, not
+exclusive edit authority: every agent can call and improve shared functions.
+An agent that finds a bug fixes it and adds the regression test immediately;
+it never waits for or forwards the defect to the steward. The steward derives
+callers, input shapes, failures, resource evidence, changes by other agents,
+and tests from the shared graph and continuously improves the namespace behind
+its published schemas. Every change uses the same validation, instrumentation,
+and test gate. Namespace names never encode agent IDs, and a steward process
+holds no private copy of the code.
 
 ## Protected capabilities
 

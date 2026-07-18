@@ -267,11 +267,29 @@ messaging required. Planning in full detail *is* showing the human the plan.
 
 ## What puts a fn in scope — writing it, or pinning it
 
+The code corpus is cluster-shared. A function written by one agent is a
+committed `:seon.fn` fact with its namespace, schema, source, dependencies, and
+source-transaction provenance. Other agents do not replay the author's eval;
+their execution children receive the accepted program delta and can resolve the
+same function with normal Clojure semantics. Context then selects relevant
+namespace source and function contracts from that one graph. Capabilities
+therefore accumulate as the application grows instead of remaining private to
+the process that first authored them.
+
+A resident namespace steward is another database-derived consumer of this
+graph. Its context can include the namespace's current source, dependents,
+observed calls, failures, performance evidence, tests, and changes by other
+agents, letting it improve a shared capability in response to real use. Any
+agent that discovers a defect fixes the shared namespace directly and adds the
+test; the steward observes and builds on that transaction. Stewardship is a ref
+to an agent, not a namespace naming convention, edit lock, or exclusive runtime.
+
 Two ways, one mechanism (a render fn run over the db); they differ only in
 what makes the fn visible:
 
 - **Being in its namespace (derived, zero ceremony).** The render fns of the
-  agent's current `ns` are in scope. Authoring context is just writing a
+  agent's current `ns` are in scope regardless of which agent first authored
+  them. Authoring context is just writing a
   `defn` in the namespace it belongs to; move to that `ns` (`in-ns`, plain
   REPL) and its renderers run. Nothing stored — pure derivation from
   code-in-the-graph + `*ns*`.

@@ -320,18 +320,23 @@ registered per [[data-model]].)
   routes. The one action door is
   `/agent/{id}/call` (POST); `POST /agents` is the sole agent-birth HTTP door
   and shares the same database route projection.
-  Agents add `/agent/{id}/app/{x}` rows
-  (capability-gated, handler in the agent's own `my.agent.<id>` ns).
+  Agents add `/agent/{id}/app/{x}` rows. Application functions may live in any
+  allowed namespace; route ownership and source-transaction authorship are
+  independent from namespace organization.
 - **Nested routes ARE nested layouts** — reitit meta-merges route-data parent →
   child (`:seon.route/owner` + middleware flow down). `match-by-name` gives reverse
   routing; build-time path/name conflict detection catches overlaps the
   hand-rolled `cond` silently shadowed.
 - **`/agent/{id}/call` is the one action door, and the capability gate
-  (`seon.web.reactive.call`) is unchanged.** reitit dispatches the URL to that one
+  (`seon.web.reactive.call`) remains the authorization boundary.** reitit dispatches the URL to that one
   per-agent door; the fn rides as a route-data **descriptor** (the `?fn=` param),
   NOT its own route — **namespaces are not a routing level**. The gate authorizes
-  the fn by resolving its owning agent from the fn's `my.agent.<id>` namespace and
-  granting it only if it is a registered `:seon.fn` in that agent's home ns;
+  the fn by proving at one immutable database value that the route agent is
+  live and that the registered function's source transaction was authored by
+  an agent through the REPL process and that the function is not private.
+  Public agent-authored functions are shared
+  cluster capabilities: the caller and original author may differ, and the
+  function may live in any allowed application namespace;
   refusal precedes any invoke; args stay data; the call runs in the owning
   bounded Bun child → it transacts → the page re-derives and the stream morphs.
   reitit replaces the FRAGILE dispatch, not the SECURE gate.
@@ -340,6 +345,9 @@ registered per [[data-model]].)
   fn-ref `submit-order!` into one standard datastar `@post` to the agent's
   `/agent/{id}/call` door (fn-call args transit-serialized in the query; the
   fn-ref case pulls form values from datastar **signals** — the POST body).
+  The render owner supplies the agent id; ordinary Clojure resolution supplies
+  the fully qualified function symbol. Bare symbols resolve in the renderer's
+  authoring namespace, while already-qualified symbols remain unchanged.
   Transient client state — an input value, a popover, a time-slider — lives in
   datastar signals, never in DOM attributes, so a whole-element morph never
   clobbers it. Routing is orthogonal to this rewrite.

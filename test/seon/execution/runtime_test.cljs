@@ -29,6 +29,18 @@
 
 (def configuration (config/resolve-config-singleton {}))
 
+(defn- handler-action [hiccup event]
+  (some (fn [value]
+          (when (and (map? value) (contains? value event))
+            (get value event)))
+        (tree-seq coll? seq hiccup)))
+
+(defn- handler-function [hiccup event]
+  (some->> (handler-action hiccup event)
+           (re-find #"fn=([^&']+)")
+           second
+           js/decodeURIComponent))
+
 (deftest execution-package-includes-the-agent-home-functions
   (doseq [sym '[my.plan/active!
                 my.plan/done!
@@ -521,12 +533,14 @@
                      :seon.render/html (pr-str [:div "literal"])}
                     {:seon.agent.ctx/name :authored
                      :seon.agent.ctx/priority 2
-                     :seon.render/html (pr-str 'my.agent.agent-1/view)
+                     :seon.render/html (pr-str 'my.orders/view)
                      :seon.fn/read-attrs [:my.example/value]}
                     {:seon.agent.ctx/name :canvas
                      :seon.agent.ctx/priority 3
                      :seon.render.canvas/content
-                     (pr-str [:div "configured canvas"])}]}}
+                     (pr-str
+                      [:div "configured canvas"
+                       [:form {:on-submit 'save-canvas!}]])}]}}
                  {::protocol/success? true
                   :datahike.query/result 3}
                  {::protocol/success? true
@@ -540,21 +554,35 @@
                (js/Promise.resolve
                 [{::execution/ok? true
                   ::execution/value
-                  {:seon.render/hiccup [:div "authored"]}}]))))
+                  {:seon.render/hiccup
+                   [:div "authored"
+                    [:button {:on-click 'save-authored!}]]}}]))))
           (.then
            (fn [projection]
-             (is (= ['my.agent.agent-1/view]
+             (is (= ['my.orders/view]
                     (mapv ::execution/function-symbol @calls)))
              (is (= #{"literal" "authored" "canvas"}
                     (into #{}
                           (map :seon.render.surface/label)
                           (:seon.render.surface/surfaces projection))))
-             (is (= [:div "configured canvas"]
-                    (->> (:seon.render.surface/surfaces projection)
-                         (some #(when (= "canvas"
-                                         (:seon.render.surface/label %))
-                                  (:seon.render.surface/expanded %)))))
-                 "the page uses the configured canvas block before derivation")
+             (let [by-label
+                   (into {}
+                         (map (juxt :seon.render.surface/label identity))
+                         (:seon.render.surface/surfaces projection))
+                   canvas-form
+                   (get-in by-label
+                           ["canvas" :seon.render.surface/expanded 2])
+                   authored-button
+                   (get-in by-label
+                           ["authored" :seon.render.surface/expanded 2])]
+               (is (= "my.agent.agent-1/save-canvas!"
+                      (handler-function
+                       canvas-form (keyword "data-on:submit")))
+                   "literal canvas handlers use the owning home namespace")
+               (is (= "my.orders/save-authored!"
+                      (handler-function
+                       authored-button (keyword "data-on:click")))
+                   "dynamic handlers use the render function namespace"))
              (is (= 3 (count (::db/members @acquisition)))
                  "the page acquires the agent, count, and configuration")
              (is (= 65536

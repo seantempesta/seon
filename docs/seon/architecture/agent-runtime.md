@@ -156,6 +156,13 @@ The eval boundary (`seon.eval/dispatch-repl-form!`) implements the real-REPL
 movement/update semantics the transcript teaches, so an agent's reflexive
 REPL moves work:
 
+Namespaces are shared application places, not per-process containers. The home
+namespace is only a safe starting point. An agent can move into or create an
+allowed domain namespace; once its transaction publishes successfully, the
+namespace declaration, functions, schemas, tests, and require edges belong to
+the cluster program graph and reach every execution child through the normal
+program delta.
+
 - **`(in-ns 'foo)` is THE movement form** — state-preserving switch of the
   current-ns accumulator (the cursor + namespaces block follow via the
   recorded `:seon.eval/ns`). A DB-known-but-unloaded ns loads through the
@@ -682,7 +689,9 @@ not a root-only documentation system.
   `:seon.agent/parent` = the caller**. That write *is* the activation of
   `:seon.agent/parent`; no separate writer exists. Two spawn
   controls are real. The `/call` HTTP gate separately admits only registered
-  home-namespace browser callbacks; it neither grants nor mediates an agent's
+  shared browser callbacks whose source transaction was authored by an agent;
+  the route agent and original author may differ, and the callback may live in
+  any allowed application namespace. It neither grants nor mediates an agent's
   direct call to this core function:
   - **Soft gate — home-requires.** `start!` sits only in **root's**
     `:seon.eval/home-requires`
@@ -707,7 +716,8 @@ not a root-only documentation system.
   operations those functions allow. "Orchestrator" discovers spawn/terminate/
   system functions; "worker" does not. Discovery is not enforcement: `start!`
   itself checks caller/depth. The `/call` HTTP gate protects interactive
-  agent-owned callbacks only; it does not grant core lifecycle functions to an
+  agent-authored callbacks only; namespace is not evidence of ownership, and
+  the gate does not grant core lifecycle functions to an
   eval. No discriminator field is involved (the attribute-presence rule is
   owned by [[data-model]]).
 - **Root initialization follows genesis; it is not genesis.** The un-attributed

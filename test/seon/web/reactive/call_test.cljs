@@ -1,17 +1,16 @@
 (ns seon.web.reactive.call-test
-  "The agent-call security boundary and namespace-routed invocation.
+  "The agent-call security boundary and agent-routed invocation.
 
    (b) The capability gate performs one query at one immutable database value.
-       A granted home-ns fn resolves + is allowed; a fn NOT granted to the owning agent, a
-       cross-agent/dead-agent namespace, and `fs`/core symbols are REFUSED
-       (no owning agent or no `:seon.fn` row) — never invoked.
+       An agent-authored function resolves + is allowed regardless of its
+       application namespace or original author; `fs`/core symbols are refused
+       because they have no agent-authored source transaction.
 
    (c) A granted call captures one immutable database value and sends one ordinary
        positional invocation through the supervised execution child."
   (:require
     [clojure.string :as str]
     [cljs.test :refer [async deftest is]]
-    [seon.agent.home :as home]
     [seon.db :as db]
     [seon.execution :as execution]
     [seon.execution.host :as execution.host]
@@ -21,10 +20,7 @@
 
 ;; A valid 14-char id (`:seon.db/id` is [:string {:min 14 :max 14}]).
 (def ^:private agent-id "tst-2606260000")
-(def ^:private home-ns (home/home-ns agent-id))            ; my.agent.tst-2606260000
-(def ^:private home-kw (keyword (str home-ns)))           ; :my.agent.tst-2606260000
-
-(def ^:private granted-sym (symbol (str home-ns) "set-purpose!"))
+(def ^:private granted-sym 'my.orders/set-purpose!)
 
 (def ^:private database
   {:db-name "test"
@@ -42,7 +38,7 @@
   (async done
     (let [original-query db/query
           requests (atom [])
-          ghost (symbol (str home-ns) "not-a-real-fn")]
+          ghost 'my.orders/not-a-real-fn]
       (set! db/query
             (fn
               ([request]
@@ -58,29 +54,36 @@
                           :seon.db/args inputs})))))
       (-> (js/Promise.all
            (clj->js
-            [(call/capability-check database granted-sym)
-             (call/capability-check database 'fs/readFileSync)
-             (call/capability-check database 'seon.client/start-agent!)
-             (call/capability-check database ghost)
-             (call/capability-check
-              database 'my.agent.someone-else9/do-it)]))
+            [(call/capability-check database agent-id granted-sym)
+             (call/capability-check database agent-id 'fs/readFileSync)
+             (call/capability-check database agent-id 'seon.client/start-agent!)
+             (call/capability-check database agent-id ghost)
+             (call/capability-check database "someone-else9" granted-sym)]))
           (.then
            (fn [results]
-             (let [[granted fs core missing dead]
+             (let [[granted fs core missing shared]
                    (vec (array-seq results))
                    query (:seon.db/query (first @requests))]
                (is (= agent-id (::call/agent-id granted)))
                (is (= database (:seon.db/db (first @requests))))
-               (is (= [agent-id (str granted-sym) home-kw]
+               (is (= [agent-id (str granted-sym)]
                       (:seon.db/args (first @requests))))
-               (is (some #{'[?agent :seon.eval/home-requires _]} query))
+               (is (some #{'[?function :seon.fn/source _ ?source-tx]} query))
+               (is (some #{'[(get-else $ ?function
+                               :seon.fn/private? false) ?private]} query))
+               (is (some #{'[(= false ?private)]} query))
+               (is (some #{'[?source-tx :seon.db/user ?author]} query))
+               (is (some #{'[?author :seon.agent/id _]} query))
+               (is (some #{'[?process :seon.db.process/id
+                             :seon.db.process/repl]} query))
                (is (some #{'(not [?agent :seon.agent/terminated-at _])}
                          query))
                (is (some? (::call/refused fs)))
                (is (some? (::call/refused core)))
                (is (some? (::call/refused missing)))
-               (is (some? (::call/refused dead)))
-               (is (= 3 (count @requests))))))
+               (is (= "someone-else9" (::call/agent-id shared))
+                   "a different live route agent can use shared authored code")
+               (is (= 5 (count @requests))))))
           (.catch (fn [error] (is false (str error))))
           (.finally
            (fn []
@@ -157,7 +160,8 @@
             (if args-str
               (str base "&args=" (js/encodeURIComponent args-str))
               base))
-       (or options #js {:method "POST"}))})))
+       (or options #js {:method "POST"}))
+      :path-params {:id agent-id}})))
 
 (deftest datastar-success-is-an-empty-acknowledgement
   (let [req (js/Request. "http://seon.test/agent/id/call"
@@ -229,7 +233,8 @@
               ([] (js/Promise.resolve database))
               ([_] (js/Promise.resolve database))))
       (set! call/capability-check
-            (fn [database-value _]
+            (fn [database-value route-agent-id _]
+              (is (= agent-id route-agent-id))
               (swap! observed conj database-value)
               (js/Promise.resolve {::call/agent-id agent-id})))
       (set! call/invoke!
@@ -265,7 +270,7 @@
                     ([] (js/Promise.resolve database))
                     ([_] (js/Promise.resolve database))))
       (set! call/capability-check
-            (fn [_ _] (js/Promise.resolve {::call/agent-id agent-id})))
+            (fn [_ _ _] (js/Promise.resolve {::call/agent-id agent-id})))
       (set! call/invoke! (fn [& _] (swap! invocations inc)))
       (-> (call/handle! (call-req granted-sym payload))
           (.then
@@ -292,7 +297,7 @@
                     ([] (js/Promise.resolve database))
                     ([_] (js/Promise.resolve database))))
       (set! call/capability-check
-            (fn [_ _] (js/Promise.resolve {::call/agent-id agent-id})))
+            (fn [_ _ _] (js/Promise.resolve {::call/agent-id agent-id})))
       (-> (call/handle! (call-req granted-sym "not-valid-transit-%%%"))
           (.then
            (fn [response]

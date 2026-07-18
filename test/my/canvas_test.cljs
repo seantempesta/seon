@@ -16,7 +16,7 @@
     (is (= (list 'approve! {:my.order/id "o-7"}) (:on-click attrs)))
     (is (= "Approve" label))
     (is (str/includes? (:class attrs) "cursor-pointer"))
-    (let [wired (transform/transform-hiccup 'my.agent.x h)
+    (let [wired (transform/transform-hiccup "x" 'my.agent.x h)
           action (:data-on:click (second wired))]
       (is (str/includes? action "/agent/x/call?fn=my.agent.x%2Fapprove!"))
       (is (str/includes? action "args="))
@@ -39,7 +39,7 @@
     (is (= 3 (count (re-seq #"seon_[A-Za-z0-9_-]+" rendered))))
     (is (str/includes? rendered ":type \"checkbox\""))
     (is (some #(and (vector? %) (= :button (first %))) (drop 2 form)))
-    (let [wired (transform/transform-hiccup 'my.agent.x form)]
+    (let [wired (transform/transform-hiccup "x" 'my.agent.x form)]
       (is (str/includes? (:data-on:submit (second wired))
                          "/agent/x/call?fn=my.agent.x%2Fsave-note!")))))
 

@@ -26,10 +26,10 @@
      {:on-click 'submit-order!}
        => {:data-on:click \"@post('/agent/X/call?fn=my.agent.X%2Fsubmit-order%21')\"}
 
-   The door is the owning agent's hierarchical `/agent/<id>/call` (`<id>` =
-   the fn's namespace minus `my.agent.`); the capability gate
-   (`seon.web.reactive.call`) still resolves + authorizes the owning agent
-   from the fn's NAMESPACE, so the `<id>` segment is just the routing level.
+   The rendering agent supplies the agent id for `/agent/<id>/call`; it is
+   independent from the function namespace. The capability gate proves the
+   route agent is live and the function is an agent-authored fact in the shared
+   program graph.
    A bare handler symbol is qualified to `ns-sym` (the authoring namespace the
    rewrite is bound to) — Clojure
    semantics: a bare name means the current ns. An already-qualified symbol
@@ -42,7 +42,7 @@
    single-quoted Datastar expression.
 
    Pure data transform — no side effects, no state. Positional args
-   (`(transform-hiccup ns hiccup)`) rather than map-in/map-out: it's a pure
+   (`(transform-hiccup agent-id ns hiccup)`) rather than map-in/map-out: it is a pure
    transformation library where that call shape is the natural one."
   (:require
     [clojure.string :as str]
@@ -118,33 +118,19 @@
 (defn- url-enc [s]
   (str/replace (js/encodeURIComponent (str s)) "'" "%27"))
 
-(defn- agent-id-of
-  "The agent id that owns `fn-sym` — its namespace minus the `my.agent.`
-   prefix — or nil when the namespace isn't an agent home ns. Drives the
-   hierarchical `/agent/<id>/call` door."
-  [fn-sym]
-  (let [ns-str (namespace fn-sym)
-        prefix "my.agent."]
-    (when (and ns-str (str/starts-with? ns-str prefix))
-      (not-empty (subs ns-str (count prefix))))))
-
 (defn- call-action
-  "The standard Datastar `@post('/agent/<id>/call?…')` expression for a
-   resolved fn symbol + optional render-time args. `<id>` is the owning
-   agent (the fn's namespace minus `my.agent.`) — the hierarchical action
-   door; the fn's own namespace still authorizes (the `{id}` segment is the
-   routing level, not an auth input). A non-agent namespace has no action
-   door, so this returns nil and the caller omits that handler. fn-CALL passes
-   `args` (transit in the query); fn-REF passes none (the body's signals become
-   the fn's arg)."
-  [fn-sym args]
-  (when-let [id (agent-id-of fn-sym)]
-    (let [base (str "@post('/agent/" (url-enc id) "/call?fn="
-                    (url-enc (str fn-sym)))]
-      (str (if (seq args)
-             (str base "&args=" (url-enc (encode-args args)))
-             base)
-           "')"))))
+  "The standard Datastar action for one rendering agent and function.
+
+   `agent-id` selects the supervised runtime; `fn-sym` retains its ordinary
+   application namespace. fn-CALL carries render-time values as transit;
+   fn-REF sends current browser signals as one map argument."
+  [agent-id fn-sym args]
+  (let [base (str "@post('/agent/" (url-enc agent-id) "/call?fn="
+                  (url-enc (str fn-sym)))]
+    (str (if (seq args)
+           (str base "&args=" (url-enc (encode-args args)))
+           base)
+         "')")))
 
 ;; ============================================================
 ;; Handler-slot detection + rewrite.
@@ -187,17 +173,17 @@
 (defn- rewrite-attr
   "Rewrite one [k v] pair. An event-handler key whose value is a fn-call /
    fn-ref becomes `[:data-on:<event> \"@post('/agent/<id>/call?…')\"]` when
-   its qualified function namespace owns an agent. An unsupported non-agent
-   handler is omitted. Everything else passes through unchanged."
-  [ns-sym k v]
+   the rendering agent supplies the action route independently from namespace.
+   Everything else passes through unchanged."
+  [agent-id ns-sym k v]
   (if-let [[fn-sym args] (and (event-attr? k) (call-or-ref ns-sym v))]
-    (when-let [action (call-action fn-sym args)]
-      [(keyword (str "data-on:" (event-name k))) action])
+    [(keyword (str "data-on:" (event-name k)))
+     (call-action agent-id fn-sym args)]
     [k v]))
 
-(defn- rewrite-attrs [ns-sym attrs]
+(defn- rewrite-attrs [agent-id ns-sym attrs]
   (if (map? attrs)
-    (into {} (keep (fn [[k v]] (rewrite-attr ns-sym k v))) attrs)
+    (into {} (keep (fn [[k v]] (rewrite-attr agent-id ns-sym k v))) attrs)
     attrs))
 
 (defn- hiccup-element? [form]
@@ -215,12 +201,14 @@
    function outside `my.agent.*` has no action door, so its handler is omitted.
    Elements without an attr map and attrs that aren't fn-call/fn-ref handler
    slots are untouched, so this is a no-op on non-interactive hiccup."
-  {:malli/schema [:=> [:catn [::ns-sym :symbol] [::hiccup :any]] :any]}
-  [ns-sym hiccup]
+  {:malli/schema [:=> [:catn [::agent-id :string]
+                       [::ns-sym :symbol]
+                       [::hiccup :any]] :any]}
+  [agent-id ns-sym hiccup]
   (walk/postwalk
     (fn [form]
       (if (hiccup-element? form)
         (let [[tag attrs & children] form]
-          (into [tag (rewrite-attrs ns-sym attrs)] children))
+          (into [tag (rewrite-attrs agent-id ns-sym attrs)] children))
         form))
     hiccup))
