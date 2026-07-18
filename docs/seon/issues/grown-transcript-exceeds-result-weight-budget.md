@@ -60,3 +60,37 @@ cache.
 - Small transcripts retain the current two-stage grouped-read behavior and
   query-cache reuse.
 - A real grown agent page and Datastar feed render without an error card.
+
+## Source-grounded correction
+
+The failure is the eval member query's `:datahike.resource/max-result-weight`,
+not the outer `execute-many` result allowance. Datahike's maintained
+`scalar-weight` charges a string by its complete character count plus one.
+Both a newly computed result and a query-cache hit are certified against the
+caller's limit, so reuse cannot admit the current all-evals relation after it
+has grown beyond 524,288 units.
+
+Strengthen `acquire-transcript` in place:
+
+- keep stage one and one immutable database value;
+- query lightweight eval IDs and turn refs first;
+- acquire complete AI eval facts in bounded, ordered pages through the existing
+  query and `db/execute-many` operations;
+- acquire normal HTML activity rows with a minimal selector that omits output,
+  result, error, and error-data payloads; and
+- page messages at the same owner when the generated maximum-content fixture
+  proves one message relation can exceed its bound.
+
+Datahike already includes query form, non-database arguments, offset, limit,
+and database value in query-cache identity, so equivalent readers can reuse
+identical pages. No new protocol, cache, stored activity projection, raw index
+assembler, or blanket allowance increase is required. Measure the existing
+paged operations before considering protocol streaming.
+
+The generated fixture must also expose one independently unbounded write
+projection: `record-eval!` caps output, error, and result EDN but does not cap
+`:seon.eval/error-data`. Bound that projection at the existing write owner and
+verify where complete forensic evidence is retained. Do not truncate exact
+`:seon.eval/source`; source remains program evidence. The current claim that
+all complete output/result evidence is already blob-backed is not established
+by `record-eval!` and must be proved or corrected rather than assumed.
