@@ -175,6 +175,17 @@
     (is (not (contains? (get-in affected [::datastar/subscriptions :agent])
                         ::datastar/rendered-db)))))
 
+(deftest listener-refresh-does-not-duplicate-render-work-for-the-same-database
+  (let [covered? @#'datastar/subscription-has-database?
+        next-database (assoc database :t 43)]
+    (is (covered? {::datastar/rendered-db database} database))
+    (is (covered? {::datastar/active-render {::datastar/db database}}
+                  database))
+    (is (covered? {::datastar/pending-render {::datastar/db database}}
+                  database))
+    (is (not (covered? {::datastar/rendered-db database}
+                       next-database)))))
+
 (deftest completed-render-becomes-the-shared-reconnect-event
   (let [event "event: datastar-patch-elements\n\n"
         recorded (@#'datastar/record-complete-event

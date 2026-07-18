@@ -754,10 +754,19 @@
                 (::subscriptions @!feeds))
       (schedule-broadcast! change))))
 
+(defn- subscription-has-database?
+  "Whether completed or already-requested work covers `database`."
+  [subscription database]
+  (boolean
+   (some #(= database %)
+         [(::rendered-db subscription)
+          (get-in subscription [::active-render ::db])
+          (get-in subscription [::pending-render ::db])])))
+
 (defn- refresh-behind-listener! [database]
   (doseq [[subscription-key subscription] (::subscriptions @!feeds)
           :when (and (::live? subscription)
-                     (not= database (::rendered-db subscription)))]
+                     (not (subscription-has-database? subscription database)))]
     (enqueue-render! subscription-key {::db database})))
 
 (defn- remove-listener! [generation]
