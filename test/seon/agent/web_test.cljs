@@ -207,6 +207,37 @@
                      (is (str/includes? msg "127.0.0.1") "names the offending address")))))
       done)))
 
+(deftest bun-dns-normalizes-ip-literals-to-address-values
+  (async done
+    (-> (js/Promise.all
+          #js [(int/resolve-addrs "127.0.0.1")
+               (int/resolve-addrs "::1")])
+        (.then (fn [answers]
+                 (is (= ["127.0.0.1"] (first answers)))
+                 (is (= ["::1"] (second answers)))
+                 (done)))
+        (.catch (fn [e]
+                  (is false (str "Bun DNS rejected an IP literal — " e))
+                  (done))))))
+
+(deftest any-private-dns-answer-blocks-the-host
+  (async done
+    (reset! int/!lookup-impl
+            (fn [_]
+              (js/Promise.resolve
+                #js [#js {:address "93.184.216.34"}
+                     #js {:address "127.0.0.1"}])))
+    (reset! int/!fetch-impl
+            (fn [_ _] (throw (js/Error. "mixed-address host must not be fetched"))))
+    (run-test
+      (fn [_]
+        (-> (web/fetch {:seon.agent.web/url "https://example.com/page"})
+            (.then (fn [{ok? :seon.agent.web/ok?
+                         msg :seon.error/message}]
+                     (is (false? ok?))
+                     (is (re-find #"(?i)private|loopback" msg))))))
+      done)))
+
 ;; ---------------------------------------------------------------------------
 ;; 2a'. The :open policy reaches loopback — bench clusters serving loopback
 ;; fixtures. Policy is host-owned config; grants surfaces the resolved mode.
@@ -263,7 +294,13 @@
 
 (deftest redirect-to-private-range-is-blocked
   (async done
-    (reset! int/!lookup-impl (public-dns)) ; example.com resolves public
+    ;; Every redirect hop gets its own DNS answer.
+    (reset! int/!lookup-impl
+            (fn [hostname]
+              (js/Promise.resolve
+                #js [#js {:address (if (= "127.0.0.1" hostname)
+                                      hostname
+                                      "93.184.216.34")}])))
     (reset! int/!fetch-impl
             (fake-fetch (fn [url]
                           (if (str/includes? url "example.com")
@@ -372,4 +409,23 @@
                    (done)))
           (.catch (fn [e]
                     (is false (str "private body reader rejected — " e))
+                    (done)))))))
+
+(deftest private-body-reader-preserves-utf8-split-across-chunks
+  (async done
+    (let [bytes   (.encode (js/TextEncoder.) "A€B")
+          stream  (js/ReadableStream.
+                    #js {:start (fn [controller]
+                                  (.enqueue controller (.slice bytes 0 2))
+                                  (.enqueue controller (.slice bytes 2 3))
+                                  (.enqueue controller (.slice bytes 3))
+                                  (.close controller))})
+          response (js/Response. stream)]
+      (-> (int/read-body-capped response 32)
+          (.then (fn [^js body]
+                   (is (= "A€B" (.-text body)))
+                   (is (false? (.-truncated body)))
+                   (done)))
+          (.catch (fn [e]
+                    (is false (str "split UTF-8 body rejected — " e))
                     (done)))))))

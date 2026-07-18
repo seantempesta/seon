@@ -55,7 +55,6 @@
     [seon.agent.web.internal :as int]
     [seon.ai.tokens :as tokens]
     [seon.db :as db]
-    [seon.platform :as platform]
     [seon.schema :as schema]))
 
 ;; ============================================================
@@ -311,9 +310,6 @@
          max-age-ms         0}}]
   (try
     (cond
-      (not= :node (platform/host))
-      (int/err url "seon.agent.web requires the :node host (no :wasi fetch yet).")
-
       (not (int/granted?))
       (int/ungranted url)
 
@@ -454,9 +450,6 @@
          timeout-ms  int/default-timeout-ms}}]
   (try
     (cond
-      (not= :node (platform/host))
-      (int/search-err query "seon.agent.web/search requires the :node host (no :wasi fetch yet).")
-
       (not (int/granted?))
       (int/search-ungranted query)
 

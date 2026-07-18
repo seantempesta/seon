@@ -1,6 +1,6 @@
 (ns seon.agent.web.internal
   "Plumbing behind `seon.agent.web` — the SSRF/private-range guard, the
-   redirect-following capped-body transport (built-in `fetch`/undici, zero
+   redirect-following capped-body transport (direct `Bun.fetch`, zero
    new transport deps), the readability + regex HTML→markdown extraction
    pipeline (ported from openclaw's `web-fetch-utils.ts`), the `SEON_WEB`
    grant read, and the errors-as-values envelope helpers.
@@ -16,10 +16,9 @@
 
    [[!fetch-impl]] and [[!lookup-impl]] are override atoms so a hermetic
    test injects a fake transport / DNS resolver and never touches the
-   network. The live pod leaves both nil (real `js/fetch` + node DNS)."
+   network. The live pod leaves both nil (direct `Bun.fetch` +
+   `Bun.dns.lookup`)."
   (:require
-    ["node:dns/promises" :as dns]
-    ["node:net" :as net]
     [clojure.string :as str]
     [goog.object :as gobj]
     [my.blob :as blob]
@@ -147,8 +146,6 @@
 
 (def blocked-hostnames #{"localhost" "localhost.localdomain" "metadata.google.internal"})
 
-(defn ip-literal? [h] (not= 0 (.isIP net h)))
-
 (defn private-ipv4?
   "True iff `s` is a loopback / RFC-1918 / link-local / CGNAT / 0.0.0.0
    IPv4 literal. Fails CLOSED (true) on a malformed literal."
@@ -181,7 +178,7 @@
   (if (str/includes? addr ":") (private-ipv6? addr) (private-ipv4? addr)))
 
 ;; Override the DNS resolver (a hostname->#js[{:address ..}] fn returning a
-;; Promise) in a hermetic test; nil = real node DNS.
+;; Promise) in a hermetic test; nil = direct Bun DNS.
 (defonce !lookup-impl (atom nil))
 
 (defn ^:async resolve-addrs
@@ -191,7 +188,8 @@
   (try
     (let [res (if-let [f @!lookup-impl]
                 (await (f hostname))
-                (await (.lookup dns hostname #js {:all true})))]
+                (await (.lookup (.-dns js/Bun) hostname
+                                #js {:family "any" :socketType "tcp"})))]
       (vec (map #(.-address ^js %) (array-seq res))))
     (catch :default _ nil)))
 
@@ -216,18 +214,13 @@
         (str "host " hostname " is not in the web allowlist (policy :allowlist)"))
 
       :open
-      (when (and (not (ip-literal? hostname))
-                 (empty? (await (resolve-addrs hostname))))
+      (when (empty? (await (resolve-addrs hostname)))
         ::dns-fail)
 
       ;; :public-only (the default) — the SSRF private-range guard.
       (cond
         (contains? blocked-hostnames hostname)
         (str "blocked host name: " hostname)
-
-        (ip-literal? hostname)
-        (when (private-ip? hostname)
-          (str "private/loopback IP address: " hostname))
 
         :else
         (let [addrs (await (resolve-addrs hostname))]
@@ -405,11 +398,11 @@
 ;; output discipline on top of it.
 ;; ============================================================
 
-;; Override `js/fetch` (a (url, init-#js) -> Promise<Response> fn) in a
-;; hermetic test; nil = real global fetch (undici).
+;; Override `Bun.fetch` (a (url, init-#js) -> Promise<Response> fn) in a
+;; hermetic test; nil = direct Bun fetch.
 (defonce !fetch-impl (atom nil))
 
-(defn- fetch-fn [] (or @!fetch-impl js/fetch))
+(defn- fetch-fn [] (or @!fetch-impl (.-fetch js/Bun)))
 
 (def ^:private redirect-statuses #{301 302 303 307 308})
 
@@ -436,13 +429,16 @@
         (loop [acc "" total 0]
           (let [chunk (await (.read reader))]
             (if (.-done chunk)
-              #js {:text acc :truncated false}
+              #js {:text (str acc (.decode dec)) :truncated false}
               (let [value (.-value chunk)
                     len   (.-byteLength value)]
                 (if (> (+ total len) max-bytes)
                   (let [slice (.slice value 0 (max 0 (- max-bytes total)))]
                     (.cancel reader)
-                    #js {:text (str acc (.decode dec slice)) :truncated true})
+                    #js {:text (str acc
+                                    (.decode dec slice #js {:stream true})
+                                    (.decode dec))
+                         :truncated true})
                   (recur (str acc (.decode dec value #js {:stream true})) (+ total len)))))))))))
 
 (defn ^:async transport
