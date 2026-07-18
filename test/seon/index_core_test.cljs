@@ -420,6 +420,14 @@
            (select-keys installed [:db/valueType :db/cardinality]))
         "the persisted policy attr is installed by the pod bootstrap schema")))
 
+(deftest bootstrap-schema-installs-first-prompt-render-attributes
+  (let [installed-idents (into #{}
+                               (map :db/ident)
+                               (db/malli->datahike-schema
+                                client/agent-bootstrap-attrs))]
+    (is (contains? installed-idents :seon.render/full?)
+        "the first transcript prompt can pull the render opt-out before lazy namespace loading")))
+
 (deftest malli-bridge-preserves-explicit-avet-indexing
   (is (= {:db/ident ::indexed-value
           :db/valueType :db.type/string

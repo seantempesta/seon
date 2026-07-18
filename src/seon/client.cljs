@@ -676,6 +676,10 @@
    ;; --- Render slots (A-6) — symbol-only at storage. ---
    :seon.render/ai
    :seon.render/html
+   ;; Transcript eval rows may opt out of the ordinary authored-content cap.
+   ;; This is read during the first prompt, so it must exist before lazy
+   ;; namespace loading can install the rest of seon.render's schema.
+   :seon.render/full?
 
    ;; --- Ctx section entities (seon.agent.ctx) — the one slot attr is
    ;; :seon.render/ai (above), string-or-symbol via the bridge's
