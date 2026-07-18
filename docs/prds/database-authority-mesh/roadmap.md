@@ -3464,3 +3464,33 @@ but leaves roughly 0.1 second of warm root feed work. The next implementation
 boundary is bounded phase and rerender evidence inside the one existing
 Datastar feed registry, separating render, serialization, gzip/write,
 backpressure, and fanout before changing the renderer or `Bun.serve` transport.
+
+Commit `9a6ff91b` adds bounded phase aggregates to that existing registry; it
+does not add a second feed, renderer, history, or observability endpoint. A
+source-live reset followed by one data, root-debug, and root feed produced six
+render attempts, of which three emitted and three were superseded. The six
+render-plus-serialization samples totaled 1,988.7 ms; the maximum was the
+debug surface at 1,672.5 ms and the latest root sample was 63.7 ms. The emitted
+events were 3,893, 134,016, and 94,618 decoded bytes. Two of three gzip writes
+briefly applied backpressure, but both drains completed in 0.80--0.88 ms. This
+falsifies the socket drain as the present dominant latency and directs the next
+render investigation toward the expensive debug body and the remaining warm
+root computation.
+
+The same Bun process reported 897 MiB RSS, 234.7 MiB JavaScript heap capacity,
+145.3 MiB used JavaScript heap, 40.9 MiB external memory, and 1.1 MiB array
+buffers after roughly 39 minutes. A native five-second event-loop-delay sample
+reported 2.01 ms median, 2.05 ms p95, 3.04 ms p99, and 4.72 ms maximum. The JVM
+writer reported 778.9 MiB committed heap and 465.1 MiB used heap inside its
+1.18 GiB RSS. These point measurements establish where memory resides; they do
+not yet establish growth rates or production budgets.
+
+The ordered spine remains deterministic ordinary-package writer/session crash
+recovery, followed by the real browser interaction journey. The safe parallel
+measurement boundary is now the retained render owners identified above; its
+integrated proof is unchanged behavior plus fewer render attempts or lower
+render duration under the same feed payload. The next refill after recovery is
+concurrent agent failure/load and startup measurement. Final graduation still
+requires the complete maintained gates, browser and agent journeys, recovery,
+multi-cluster isolation, measured load/resources, and only then the
+`Bun.serve` transport cut.
