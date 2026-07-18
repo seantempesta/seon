@@ -491,10 +491,12 @@
       (run! root environment bun "run" "--bun" "css:build")
       ((requiring-resolve 'seon.dev.artifact/build-release-programs!)
        config release-programs)
-      (production-package-json! (fs/path root "package.json")
-                                (fs/path closure "package.json"))
+      (copy-file! (fs/path root "package.json")
+                  (fs/path closure "package.json"))
       (copy-file! (fs/path root "bun.lock") (fs/path closure "bun.lock"))
       (run! closure environment bun "install" "--production" "--frozen-lockfile")
+      (production-package-json! (fs/path root "package.json")
+                                (fs/path closure "package.json"))
       (assemble-package!
        {::package-root (str stage)
         ::bun bun
