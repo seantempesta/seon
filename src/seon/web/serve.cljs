@@ -707,8 +707,9 @@
                                  (ai/model-transport-pull-pattern))
                            ::db/ref [:seon.config/id config/cluster-config-id]})]))
           [config-row agent-row cluster-row] (array-seq values)]
-      (if (some :seon.error/message [config-row agent-row cluster-row])
-        false
+      (if-let [error (some #(when (:seon.error/message %) %)
+                           [config-row agent-row cluster-row])]
+        error
         (let [resolved
               (:seon.ai/resolved-config
                (ai/resolved-config-from-rows
@@ -865,12 +866,15 @@
                     turn-eid-by-attempt
                     (into {} (map (fn [[turn-eid attempt-eid]]
                                     [attempt-eid turn-eid])) rows)]
-                (project-model-transport-rows
-                 turn-rows rows
-                 #(get attempts %)
-                 #(true? (get turn-validity
-                              (get turn-eid-by-attempt %)))
-                 cap)))))))))
+                (if-let [error (some #(when (:seon.error/message %) %)
+                                     (vals turn-validity))]
+                  error
+                  (project-model-transport-rows
+                   turn-rows rows
+                   #(get attempts %)
+                   #(true? (get turn-validity
+                                (get turn-eid-by-attempt %)))
+                   cap))))))))))
 
 (defn- project-eval-evidence
   "Stable external projection of selected eval rows."

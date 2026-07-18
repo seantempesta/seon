@@ -281,6 +281,24 @@
              (set! ai/resolved-config-from-rows original-resolve)
              (done)))))))
 
+(deftest historical-attempt-validation-preserves-database-errors
+  (async done
+    (let [original db/pull
+          database-error {:seon.error/message "historical database unavailable"
+                          :seon.error/kind :core-bug}
+          pull-stub (fn [_] (js/Promise.resolve database-error))]
+      (set! (.-cljs$core$IFn$_invoke$arity$1 pull-stub) pull-stub)
+      (set! db/pull pull-stub)
+      (-> (js/Promise.resolve
+           ((deref #'serve/historical-turn-valid?)
+            database "agent-1" 20 [(model-attempt 0)]))
+          (.then (fn [result] (is (= database-error result))))
+          (.catch (fn [error] (is false (str error))))
+          (.finally
+           (fn []
+             (set! db/pull original)
+             (done)))))))
+
 (deftest model-transport-projection-is-ordered-bounded-and-fail-closed
   (let [project (deref #'serve/project-model-transport-rows)
         attempts {101 (model-attempt 1)
