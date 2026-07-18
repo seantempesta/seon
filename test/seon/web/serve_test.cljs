@@ -194,7 +194,7 @@
               ([request]
                (is (identical? database (:seon.db/db request)))
                (js/Promise.resolve
-                [{:seon.agent.turn/rendered-tx 20} {}]))
+                [{:seon.agent.turn/rendered-tx {:db/id 20}} {}]))
               ([_selector _entity-ids]
                (js/Promise.reject
                 (js/Error. "unexpected positional pull-many")))

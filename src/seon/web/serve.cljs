@@ -960,7 +960,10 @@
          :seon.error/kind :core-bug}
         :else
         (mapv (fn [row turn]
-                (conj row (:seon.agent.turn/rendered-tx turn)))
+                (let [rendered-tx (:seon.agent.turn/rendered-tx turn)]
+                  (conj row (if (map? rendered-tx)
+                              (:db/id rendered-tx)
+                              rendered-tx))))
               turn-rows pulled)))))
 
 (defn- ^:async final-agent-task-result
