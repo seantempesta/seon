@@ -1,7 +1,16 @@
 (ns seon.execution.runtime
   "Composition root and compiled prompt entrypoint for execution children."
   (:require
+   [my.blob]
+   [my.canvas]
+   [my.data]
+   [my.kb]
+   [my.ns]
+   [my.plan]
    [my.plan.internal]
+   [my.skills]
+   [my.ui]
+   [seon.agent]
    [seon.agent.ctx :as ctx]
    [seon.agent.ctx.canvas :as ctx-canvas]
    [seon.agent.ctx.menu]
@@ -12,6 +21,11 @@
    [seon.agent.ctx.typeahead-steps]
    [seon.agent.ctx.warnings]
    [seon.agent.message :as message]
+   [seon.agent.fs]
+   [seon.agent.lifecycle]
+   [seon.agent.search]
+   [seon.agent.shell]
+   [seon.agent.web]
    [seon.ai :as ai]
    [seon.config :as config]
    [seon.db :as db]

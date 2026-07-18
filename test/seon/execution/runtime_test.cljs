@@ -29,6 +29,16 @@
 
 (def configuration (config/resolve-config-singleton {}))
 
+(deftest execution-package-includes-the-agent-home-functions
+  (doseq [sym '[my.plan/active!
+                my.plan/done!
+                seon.agent.message/user
+                seon.agent.lifecycle/complete
+                seon.db/query
+                my.canvas/show!
+                seon.agent.fs/read-file]]
+    (is (fn? (eval/lookup-value sym)) (str sym " is compiled"))))
+
 (defn- call-with-acquired-agent
   ([result request observed]
    (call-with-acquired-agent
