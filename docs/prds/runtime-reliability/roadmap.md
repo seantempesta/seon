@@ -142,7 +142,17 @@ that fresh agents had no executable syntax example; a second agent produced the
 right forms but commented them all out. One comment-plus-form example in the
 existing system text corrected that missing context without an output rewrite.
 Two independent fresh agents then closed `:completed` in one turn at 10.72 and
-9.24 seconds. Concurrent load and resource measurement are now the next gates.
+9.24 seconds. Four subsequently launched agents occupied separate supervised
+Bun execution children at the same time. Three ordinary tasks completed in one
+turn at 10.84--12.30 seconds while a fourth hostile process-exit request was
+refused and remained bounded by the 45-second caller deadline; none of the
+three sibling runs or the Bun pod was disrupted. The immutable source-free
+package separately proves the stronger failure case: two exact
+`(js/process.exit 1)` executions retired two successive children, the breaker
+prevented a third automatic attempt, and a later message completed in a fresh
+child. Fresh-agent context now states this real process boundary directly
+instead of implying a shared Bun process. Grown-transcript correctness is the
+next gate, followed by exact 1/2/4-child resource measurement.
 
 The existing remote query surface now exposes its protocol-native historical
 view, closing the only facade gap needed by coordinate-pinned startup birth.
