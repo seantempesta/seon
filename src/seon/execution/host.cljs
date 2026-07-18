@@ -5,7 +5,8 @@
    [seon.db.protocol :as db.protocol]
    [seon.execution :as execution]
    [seon.launch :as launch]
-   [seon.schema :as schema]))
+   [seon.schema :as schema]
+   [seon.subprocess :as subprocess]))
 
 (def ^:private default-ready-timeout-ms 10000)
 (def ^:private default-idle-timeout-ms 30000)
@@ -31,7 +32,6 @@
 
 (defonce ^:private !host (atom {::generation 0 ::children {}}))
 (defonce ^:private !invocation-tails (atom {}))
-(defonce ^:private text-decoder (js/TextDecoder. "utf-8"))
 
 (defn- deferred []
   (let [resolve! (atom nil)
@@ -67,67 +67,38 @@
       combined
       (subs combined (- length maximum-tail-characters)))))
 
-(defn- pump-stream!
-  [stream append!]
-  (when (and stream (fn? (.-getReader stream)))
-    (let [reader (.getReader stream)]
-      (letfn [(step []
-                (-> (.read reader)
-                    (.then
-                     (fn [read]
-                       (when-not (.-done read)
-                         (append! (.decode text-decoder (.-value read)
-                                           #js {:stream true}))
-                         (step))))
-                    (.catch (fn [_] nil))))]
-        (step)))))
+(defn- send-message! [control message]
+  ((::subprocess/send! control) (execution/encode-message message)))
 
-(defn- native-spawn! [options]
-  (js-invoke js/Bun "spawn"
-             #js {:cmd (clj->js (::cmd options))
-                  :ipc (::ipc options)
-                  :stdout (::stdout options)
-                  :stderr (::stderr options)}))
-
-(defn- send-message! [^js process message]
-  (try
-    (.send process (execution/encode-message message))
-    nil
-    (catch :default exception
-      {:seon.error/message "The execution IPC send failed."
-       :seon.error/data {:seon.error/cause (ex-message exception)}})))
-
-(defn- kill-process! [^js process]
-  (try
-    (.kill process "SIGKILL")
-    true
-    (catch :default _ false)))
+(defn- kill-process! [control]
+  ((::subprocess/kill! control) "SIGKILL"))
 
 (defn- host-configuration [] (::configuration @!host))
 (defn- child [agent-id] (get-in @!host [::children agent-id]))
 
 (defn- same-child?
-  [agent-id generation process]
+  [agent-id generation child-id]
   (let [current (child agent-id)]
     (and (= generation (::generation current))
-         (identical? process (::process current)))))
+         (= child-id (::child-id current)))))
 
 (declare cancel! stop-child! settle-active!)
 
 (defn- remove-child!
-  [agent-id generation process]
+  [agent-id generation child-id]
   (swap! !host
          (fn [host]
-           (if (same-child? agent-id generation process)
+           (if (same-child? agent-id generation child-id)
              (update host ::children dissoc agent-id)
              host))))
 
 (defn- exit-child!
-  [agent-id generation ^js process exit-code]
-  (when (same-child? agent-id generation process)
+  [agent-id generation child-id result]
+  (when (same-child? agent-id generation child-id)
     (let [current (child agent-id)
           active (::active current)
-          exit (::exit current)]
+          exit (::exit current)
+          exit-code (::subprocess/exit result)]
       (when-let [timer (::ready-timer current)] (js/clearTimeout timer))
       (when-let [timer (::idle-timer current)] (js/clearTimeout timer))
       (when-let [timer (::kill-timer current)] (js/clearTimeout timer))
@@ -136,7 +107,7 @@
          (host-error
           {::execution/invocation-id "startup"}
           "The execution child exited before becoming ready."
-          {::pid (.-pid process)
+          {::pid (::pid current)
            ::exit-code exit-code
            ::stdout-tail (::stdout-tail current)
            ::stderr-tail (::stderr-tail current)
@@ -146,36 +117,36 @@
          (host-error
           (::invocation active)
           "The execution child exited before returning a result."
-          {::pid (.-pid process)
+          {::pid (::pid current)
            ::exit-code exit-code
            ::stdout-tail (::stdout-tail current)
            ::stderr-tail (::stderr-tail current)
            ::artifact-digest (::artifact-digest current)
            :seon.db/db
            (get-in active [::invocation :seon.db/db])})))
-      (remove-child! agent-id generation process)
+      (remove-child! agent-id generation child-id)
       ((::resolve! exit) exit-code))))
 
 (defn- schedule-idle-stop!
-  [agent-id generation process]
+  [agent-id generation child-id]
   (let [timeout-ms (get-in (host-configuration) [::idle-timeout-ms])
         timer (js/setTimeout
                (fn []
-                 (when (and (same-child? agent-id generation process)
+                 (when (and (same-child? agent-id generation child-id)
                             (nil? (::active (child agent-id))))
                    (stop-child! agent-id)))
                timeout-ms)]
     (swap! !host assoc-in [::children agent-id ::idle-timer] timer)))
 
 (defn- settle-active!
-  [agent-id generation process message]
+  [agent-id generation child-id message]
   (let [accepted (atom nil)]
     (swap! !host
            (fn [host]
              (let [current (get-in host [::children agent-id])
                    active (::active current)]
                (if (and (= generation (::generation current))
-                        (identical? process (::process current))
+                        (= child-id (::child-id current))
                         (= (::execution/invocation-id message)
                            (get-in active
                                    [::invocation
@@ -189,7 +160,7 @@
     (when-let [{::keys [active retiring?]} @accepted]
       ((::resolve! active) message)
       (when-not retiring?
-        (schedule-idle-stop! agent-id generation process))
+        (schedule-idle-stop! agent-id generation child-id))
       true)))
 
 (defn- ready-message-valid?
@@ -218,8 +189,8 @@
              (current-run-fence? (::execution/run-fence invocation))))))
 
 (defn- receive!
-  [agent-id generation process encoded]
-  (when (and (string? encoded) (same-child? agent-id generation process))
+  [agent-id generation child-id encoded]
+  (when (and (string? encoded) (same-child? agent-id generation child-id))
     (try
       (let [message (execution/decode-message encoded)
             current (child agent-id)]
@@ -235,7 +206,7 @@
                 ((::resolve! ready)
                  (host-error {::execution/invocation-id "startup"}
                              "The execution child reported another artifact."))
-                (kill-process! process))))
+                (kill-process! (::control current)))))
 
           (:seon.execution.message/result :seon.execution.message/error)
           (if (and (= execution/error-message (::execution/message message))
@@ -244,15 +215,16 @@
             ((get-in current [::ready ::resolve!]) message)
             (when-let [active (::active current)]
               (if (result-current? (host-configuration) active message)
-                (settle-active! agent-id generation process message)
+                (settle-active! agent-id generation child-id message)
                 (settle-active!
-                 agent-id generation process
+                 agent-id generation child-id
                  (host-error (::invocation active)
                              "The execution result is no longer current.")))))
 
           nil))
       (catch :default _
-        (kill-process! process)))))
+        (when-let [control (::control (child agent-id))]
+          (kill-process! control))))))
 
 (defn- startup-value
   [config agent-id]
@@ -282,28 +254,39 @@
           runtime (get-in config [::launch-descriptor ::launch/runtime])
           startup (startup-value config agent-id)
           ready (deferred)
-          options
-          {::cmd [(:seon.execution.host/javascript-runtime config)
-                  (::launch/execution-output runtime)
-                  (execution/encode-message startup)]
-           ::ipc (fn [message process & _]
-                   (receive! agent-id generation process message))
-           ::stdout "pipe"
-           ::stderr "pipe"}
-          ^js process ((::spawn! config) options)
+          start! (or (::spawn! config) subprocess/start!)
+          control
+          (start!
+           {::subprocess/cmd
+             [(:seon.execution.host/javascript-runtime config)
+              (::launch/execution-output runtime)
+              (execution/encode-message startup)]
+             ::subprocess/ipc
+             (fn [message child-id]
+               (receive! agent-id generation child-id message))
+             ::subprocess/on-out
+             #(swap! !host update-in [::children agent-id ::stdout-tail]
+                     append-tail %)
+             ::subprocess/on-err
+             #(swap! !host update-in [::children agent-id ::stderr-tail]
+                     append-tail %)
+             ::subprocess/capture-output? false})
+          child-id (::subprocess/id control)
           timeout
           (js/setTimeout
            (fn []
-             (when (and (same-child? agent-id generation process)
+             (when (and (same-child? agent-id generation child-id)
                         (not (::ready? (child agent-id))))
                ((::resolve! ready)
                 (host-error {::execution/invocation-id "startup"}
                             "The execution child did not become ready."))
-               (kill-process! process)))
+               (kill-process! control)))
            (::ready-timeout-ms config))
           exit (deferred)
           state {::generation generation
-                 ::process process
+                 ::child-id child-id
+                 ::control control
+                 ::pid (::subprocess/pid control)
                  ::exit exit
                  ::artifact-digest (::launch/execution-digest runtime)
                  ::ready ready
@@ -312,15 +295,10 @@
                  ::stdout-tail ""
                  ::stderr-tail ""}]
       (swap! !host assoc-in [::children agent-id] state)
-      (pump-stream! (.-stdout process)
-                    #(swap! !host update-in [::children agent-id ::stdout-tail]
-                            append-tail %))
-      (pump-stream! (.-stderr process)
-                    #(swap! !host update-in [::children agent-id ::stderr-tail]
-                            append-tail %))
-      (-> (.-exited process)
-          (.then #(exit-child! agent-id generation process %))
-          (.catch #(exit-child! agent-id generation process -1)))
+      (-> (::subprocess/exited control)
+          (.then #(exit-child! agent-id generation child-id %))
+          (.catch #(exit-child! agent-id generation child-id
+                                {::subprocess/exit -1})))
       (::promise ready))
     (catch :default error
       (js/Promise.resolve
@@ -330,7 +308,7 @@
 
 (defn- retire-child!
   [current grace-ms]
-  (let [process (::process current)]
+  (let [control (::control current)]
     (when-let [timer (::ready-timer current)] (js/clearTimeout timer))
     (when-let [timer (::idle-timer current)] (js/clearTimeout timer))
     (when-let [timer (::kill-timer current)]
@@ -345,11 +323,11 @@
                    "The execution host configuration changed.")))
     (when
      (send-message!
-      process
+      control
       {::execution/message execution/shutdown-message
        ::execution/protocol-version execution/protocol-version})
-      (kill-process! process))
-    (js/setTimeout #(kill-process! process) grace-ms)))
+      (kill-process! control))
+    (js/setTimeout #(kill-process! control) grace-ms)))
 
 (defn- ensure-child!
   [agent-id]
@@ -393,7 +371,7 @@
                                       default-ready-timeout-ms)
                ::idle-timeout-ms (or idle-timeout-ms default-idle-timeout-ms)
                ::cancel-grace-ms (or cancel-grace-ms default-cancel-grace-ms)
-               ::spawn! (or spawn! native-spawn!)
+               ::spawn! spawn!
                ::run-fence-current? (or run-fence-current? (constantly true))}
               ::children {}}))
     (reset! !invocation-tails {})
@@ -420,8 +398,8 @@
                                    (not (::retiring? current))
                                    (= (::generation ready)
                                       (::generation current))
-                                   (identical? (::process ready)
-                                               (::process current)))
+                                   (= (::child-id ready)
+                                      (::child-id current)))
                             (if (::active current)
                               (do (reset! decision :busy) host)
                               (do
@@ -438,22 +416,25 @@
                (case @decision
                  :claimed
                  (let [current @claimed
-                       ^js process (::process current)]
+                       control (::control current)
+                       child-id (::child-id current)]
                    (if-let [send-error
-                            (send-message! process invocation)]
+                            (send-message! control invocation)]
                      (let [message
                            (host-error
                             invocation
                             "The execution invocation could not be sent."
                             {:seon.error/cause
-                             (get-in send-error
-                                     [:seon.error/data :seon.error/cause])
-                             ::pid (.-pid process)
+                             (or (:seon.error/message send-error)
+                                 (get-in send-error
+                                         [:seon.error/data
+                                          :seon.error/cause]))
+                             ::pid (::pid current)
                              ::stdout-tail (::stdout-tail current)
                              ::stderr-tail (::stderr-tail current)})]
                        (settle-active! agent-id (::generation current)
-                                       process message)
-                       (kill-process! process)
+                                       child-id message)
+                       (kill-process! control)
                        (::promise completion))
                      (::promise completion)))
 
@@ -479,9 +460,9 @@
              message
              (let [current (child agent-id)]
                (when current
-                 (kill-process! (::process current))
+                 (kill-process! (::control current))
                  (remove-child! agent-id (::generation current)
-                                (::process current)))
+                                (::child-id current)))
                (invoke-once! invocation)))))
         (.catch
          (fn [exception]
@@ -603,28 +584,29 @@
     (if (= invocation-id
            (get-in current [::active ::invocation
                             ::execution/invocation-id]))
-      (let [process (::process current)
+      (let [control (::control current)
+            child-id (::child-id current)
             generation (::generation current)
             timer (js/setTimeout
                    (fn []
-                     (when (same-child? agent-id generation process)
-                       (kill-process! process)))
+                     (when (same-child? agent-id generation child-id)
+                       (kill-process! control)))
                    (get-in (host-configuration) [::cancel-grace-ms]))]
         (swap! !host
                (fn [host]
                  (-> host
                      (assoc-in [::children agent-id ::retiring?] true)
                      (assoc-in [::children agent-id ::kill-timer] timer))))
-        (settle-active! agent-id generation process
+        (settle-active! agent-id generation child-id
                         (canceled-error
                          (get-in current [::active ::invocation])))
         (when
          (send-message!
-          process
+          control
           {::execution/message execution/cancel-message
            ::execution/protocol-version execution/protocol-version
            ::execution/invocation-id invocation-id})
-          (kill-process! process))
+          (kill-process! control))
         true)
       false)
     false))
@@ -634,19 +616,20 @@
   {:malli/schema [:=> [:cat ::execution/agent-id] :boolean]}
   [agent-id]
   (if-let [current (child agent-id)]
-    (let [process (::process current)
+    (let [control (::control current)
+          child-id (::child-id current)
           generation (::generation current)]
       (swap! !host assoc-in [::children agent-id ::retiring?] true)
       (when
        (send-message!
-        process
+        control
         {::execution/message execution/shutdown-message
          ::execution/protocol-version execution/protocol-version})
-        (kill-process! process))
+        (kill-process! control))
       (js/setTimeout
        (fn []
-         (when (same-child? agent-id generation process)
-           (kill-process! process)))
+         (when (same-child? agent-id generation child-id)
+           (kill-process! control)))
        (get-in (host-configuration) [::cancel-grace-ms]))
       true)
     false))

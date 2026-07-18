@@ -37,7 +37,7 @@
      ; ⟹ «map: ::ok? true, ::exit 0, ::out/::err strings, ::out-tokens/::err-tokens ints, ::timed-out?/::truncated? bools»
      (seon.agent.shell/py-run {:seon.agent.shell/source \"import sys\\nprint(sys.version)\"})
 
-   Plumbing (caps, grant read, cwd gate, execFile wrapper) lives in
+   Plumbing (caps, grant read, cwd gate, subprocess request) lives in
    [[seon.agent.shell.internal]]."
   (:require
     [clojure.string :as str]
@@ -45,7 +45,6 @@
     [seon.agent.testrun :as testrun]
     [seon.ai.tokens :as tokens]
     [seon.db :as db]
-    [seon.platform :as platform]
     [seon.schema :as schema]))
 
 ;; ============================================================
@@ -268,7 +267,7 @@
    streams (with honest :seon.agent.shell/out-tokens / err-tokens sizes) —
    display economy is the render layer's, not the function's: a big value stashes
    as result/<id> and renders as a bounded skeleton you re-reference to read
-   in full. The only bound is a hard per-stream RAM ceiling: when reached Node
+   in full. The only bound is a hard per-stream RAM ceiling: when reached Bun
    kills the child and :seon.agent.shell/truncated? is set with a guiding hint
    (use [[run-bg!]] for an unbounded stream). To PERSIST output durably, that is
    your explicit choice — (my.blob/put! {:my.blob/content
@@ -288,9 +287,6 @@
     :or {timeout-ms in/default-timeout-ms}}]
   (try
     (cond
-      (not= :node (platform/host))
-      (in/fail "seon.agent.shell requires the :node host (no :wasi child processes).")
-
       (not (in/granted?))
       (in/ungranted)
 
@@ -300,15 +296,15 @@
       :else
       (if-let [denied (when cwd (in/gate-cwd cwd))]
         denied
-        (let [^js r   (await (in/exec cmd (vec (or args [])) cwd stdin timeout-ms))
-              ^js err (.-err r)
-              stdout  (str (.-stdout r))
-              stderr  (str (.-stderr r))]
+        (let [r       (await (in/exec cmd (vec (or args [])) cwd stdin timeout-ms))
+              stdout  (str (:seon.subprocess/out r))
+              stderr  (str (:seon.subprocess/err r))
+              spawn-error (:seon.subprocess/spawn-error r)]
           (await
             (attach-testrun! cmd args
               (cond
                 ;; Binary not found — could not run at all.
-                (and err (= "ENOENT" (.-code err)))
+                (= "ENOENT" (:seon.error/code spawn-error))
                 (in/fail (str "command not found: " (pr-str cmd) " — argv[0] is "
                               "PATH-resolved; check the name or use an absolute "
                               "path.")
@@ -316,17 +312,24 @@
 
                 ;; RAM-ceiling overflow — the child was killed, but the captured
                 ;; partial output IS the (truncated) answer.
-                (and err (= "ERR_CHILD_PROCESS_STDIO_MAXBUFFER" (.-code err)))
-                (in/ran-envelope (in/exit-code err) stdout stderr false true)
+                (:seon.subprocess/output-truncated? r)
+                (in/ran-envelope (or (:seon.subprocess/exit r) in/killed-exit)
+                                 stdout stderr false true)
 
-                ;; Timeout — execFile SIGTERM'd the child; deliver the honest
+                ;; Timeout — the shared owner stopped the child; deliver the honest
                 ;; partial output with the authoritative timed-out? flag.
-                (and err (.-killed err))
+                (:seon.subprocess/timed-out? r)
                 (in/ran-envelope in/killed-exit stdout stderr true false)
+
+                spawn-error
+                (in/fail (str "command failed to start: "
+                              (:seon.error/message spawn-error))
+                         {:seon.agent.shell/cmd cmd})
 
                 ;; Ran (exit 0 or non-zero) — exit/out/err is the answer.
                 :else
-                (in/ran-envelope (in/exit-code err) stdout stderr false false)))))))
+                (in/ran-envelope (or (:seon.subprocess/exit r) in/killed-exit)
+                                 stdout stderr false false)))))))
     (catch :default e
       (in/fail (str "unexpected error in seon.agent.shell/run: "
                     (or (some-> e .-message) (str e)))))))
@@ -390,9 +393,6 @@
   [{:seon.agent.shell/keys [cmd args cwd stdin]}]
   (try
     (cond
-      (not= :node (platform/host))
-      (in/fail "seon.agent.shell requires the :node host (no :wasi child processes).")
-
       (not (in/granted?))
       (in/ungranted)
 

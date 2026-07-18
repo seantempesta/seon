@@ -49,7 +49,7 @@
                     ::out (numeric-value (.-out ops))})))))
 
 (defn- stream-pump!
-  [stream maximum-bytes on-chunk! on-limit!]
+  [stream maximum-bytes capture-output? on-chunk! on-limit!]
   (if-not (and stream (fn? (.-getReader stream)))
     (js/Promise.resolve {::text "" ::bytes 0 ::truncated? false})
     (let [reader (.getReader stream)
@@ -70,7 +70,8 @@
                   (when (pos? (.-byteLength accepted))
                     (swap! bytes + (.-byteLength accepted))
                     (let [decoded (.decode decoder accepted #js {:stream true})]
-                      (swap! text str decoded)
+                      (when capture-output?
+                        (swap! text str decoded))
                       (notify! decoded)))
                   (when (> length remaining)
                     (when (compare-and-set! truncated? false true)
@@ -78,7 +79,8 @@
               (finish []
                 (let [tail (.decode decoder)]
                   (when-not (= "" tail)
-                    (swap! text str tail)
+                    (when capture-output?
+                      (swap! text str tail))
                     (notify! tail)))
                 (cond-> {::text @text
                          ::bytes @bytes
@@ -102,6 +104,8 @@
          ::err (::text err-result)
          ::out-bytes (::bytes out-result)
          ::err-bytes (::bytes err-result)
+         ::out-truncated? (boolean (::truncated? out-result))
+         ::err-truncated? (boolean (::truncated? err-result))
          ::output-truncated? (boolean (or (::truncated? out-result)
                                           (::truncated? err-result)))
          ::out-stream-error (::stream-error out-result)
@@ -110,8 +114,9 @@
 (defn start!
   "Start one subprocess and return only ordinary control functions and data."
   [{::keys [cmd cwd env stdin timeout-ms max-output-bytes abort-signal
-            kill-grace-ms on-out on-err ipc spawn!]
+            kill-grace-ms capture-output? on-out on-err ipc spawn!]
     :or {max-output-bytes js/Number.MAX_SAFE_INTEGER
+         capture-output? true
          kill-grace-ms default-kill-grace-ms}}]
   (let [spawn! (or spawn! native-spawn!)]
     (try
@@ -159,9 +164,11 @@
             _ (when abort-signal
                 (.addEventListener abort-signal "abort" abort! #js {:once true})
                 (when (.-aborted abort-signal) (abort!)))
-            out-promise (stream-pump! (.-stdout process) max-output-bytes on-out
+            out-promise (stream-pump! (.-stdout process) max-output-bytes
+                                      capture-output? on-out
                                       #(request-stop! :output-limit))
-            err-promise (stream-pump! (.-stderr process) max-output-bytes on-err
+            err-promise (stream-pump! (.-stderr process) max-output-bytes
+                                      capture-output? on-err
                                       #(request-stop! :output-limit))
             exited
             (-> (js/Promise.all #js [(.-exited process) out-promise err-promise])
@@ -204,6 +211,8 @@
                       ::err ""
                       ::out-bytes 0
                       ::err-bytes 0
+                      ::out-truncated? false
+                      ::err-truncated? false
                       ::timed-out? false
                       ::aborted? false
                       ::output-limited? false

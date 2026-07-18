@@ -1,6 +1,6 @@
 (ns seon.agent.search.internal
   "Plumbing behind `seon.agent.search/grep` — the hard caps, the envelope
-   helpers, the npm boundary (lazy `js/require` + `execFile`), the
+   helpers, the npm boundary (lazy `js/require` + shared subprocess), the
    seon.agent.fs allowlist gate, and the rg `--json` parser.
 
    This namespace is INTERNAL: it is never rendered into agent context (the
@@ -14,24 +14,24 @@
    `:as-alias`): the keyword namespace tracks the OWNING DATA namespace
    (`seon.agent.search`), not the file the code lives in."
   (:require
-    ["node:child_process" :as cp]
     [clojure.string :as str]
     [seon.agent.fs :as fs]
     [seon.agent.search :as-alias search]
     [seon.ai.tokens :as tokens]
     [seon.db :as db]
-    [seon.db.protocol :as protocol]))
+    [seon.db.protocol :as protocol]
+    [seon.subprocess :as subprocess]))
 
 ;; ============================================================
 ;; Hard caps.
 ;; ============================================================
 
 (def timeout-ms
-  "Kill the rg process after this long (SIGTERM via execFile :timeout)."
+  "Kill the rg subprocess after this long."
   10000)
 
 (def max-output-bytes
-  "execFile :maxBuffer — rg stdout beyond this is dropped; the partial
+  "The rg stdout capture ceiling; later bytes are dropped, while partial
    output IS still parsed and returned with ::search/truncated? true."
   (* 8 1024 1024))
 
@@ -72,7 +72,7 @@
    ::search/truncated?  false})
 
 ;; ============================================================
-;; npm boundary — lazy require + execFile wrapper.
+;; npm boundary — lazy require + shared Bun subprocess owner.
 ;; ============================================================
 
 (defn rg-path
@@ -88,17 +88,11 @@
 
 (defn exec-rg
   "Run rg with `args` (vector of argv strings — never a shell string).
-   ALWAYS resolves, to a JS object {err stdout stderr} (err nil on exit 0).
-   Timeout + output cap enforced by execFile options."
+   Always resolves to the ordinary shared subprocess result."
   [bin args]
-  (js/Promise.
-    (fn [resolve _]
-      (.execFile cp bin (into-array args)
-                 #js {:timeout     timeout-ms
-                      :maxBuffer   max-output-bytes
-                      :windowsHide true}
-                 (fn [err stdout stderr]
-                   (resolve #js {:err err :stdout stdout :stderr stderr}))))))
+  (subprocess/run! {::subprocess/cmd (into [bin] args)
+                    ::subprocess/timeout-ms timeout-ms
+                    ::subprocess/max-output-bytes max-output-bytes}))
 
 ;; ============================================================
 ;; Allowlist gate — delegate to seon.agent.fs, never reimplement.

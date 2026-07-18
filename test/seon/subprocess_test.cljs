@@ -126,6 +126,8 @@
        (fn [result]
          (is (= "abcd" (::subprocess/out result)))
          (is (= 4 (::subprocess/out-bytes result)))
+         (is (true? (::subprocess/out-truncated? result)))
+         (is (false? (::subprocess/err-truncated? result)))
          (is (true? (::subprocess/output-limited? result)))
          (is (true? (::subprocess/output-truncated? result)))
          (is (= ["SIGTERM" "SIGKILL"] @(:kills fake))))))))
@@ -174,6 +176,26 @@
        (fn [result]
          (is (true? @drained?))
          (is (= "late" (::subprocess/out result))))))))
+
+(deftest callbacks-can-drain-without-retaining-long-lived-output
+  (async done
+    (let [out (atom [])
+          err (atom [])
+          fake (fake-process {:out ["first" "second"] :err ["warning"]})]
+      (settle!
+       done
+       (subprocess/run!
+        {::subprocess/cmd ["long-lived"]
+         ::subprocess/capture-output? false
+         ::subprocess/on-out #(swap! out conj %)
+         ::subprocess/on-err #(swap! err conj %)
+         ::subprocess/spawn! (constantly (:process fake))})
+       (fn [result]
+         (is (= "" (::subprocess/out result)))
+         (is (= "" (::subprocess/err result)))
+         (is (= 11 (::subprocess/out-bytes result)))
+         (is (= ["first" "second"] @out))
+         (is (= ["warning"] @err)))))))
 
 (deftest synchronous-spawn-failure-is-an-ordinary-result
   (async done

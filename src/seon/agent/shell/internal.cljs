@@ -1,9 +1,7 @@
 (ns seon.agent.shell.internal
   "Plumbing behind `seon.agent.shell` — the hard caps, the envelope
    helpers, the `SEON_SHELL` grant read, the seon.agent.fs cwd gate, and
-   the `execFile` wrapper (cloned from `seon.agent.search.internal`, the
-   proven exemplar, with the rg-specific parsing swapped for generic
-   exit/out/err classification).
+   the shared subprocess request, and generic exit/out/err classification.
 
    This namespace is INTERNAL: it is never rendered into agent context
    (the `*.internal` ns name IS the filter). Agents call the public face
@@ -15,7 +13,6 @@
    fs/search. (toolkit.md's §my.shell sketch spells the keys
    `:seon.shell/*`; the code ns is the truth, per the root convention.)"
   (:require
-    ["node:child_process" :as cp]
     [clojure.string :as str]
     [seon.agent.fs :as fs]
     [seon.agent.shell :as-alias shell]
@@ -23,25 +20,23 @@
     [seon.ai.tokens :as tokens]
     [seon.config :as config]
     [seon.db :as db]
-    [seon.platform :as platform]))
+    [seon.subprocess :as subprocess]))
 
 ;; ============================================================
 ;; Hard caps.
 ;; ============================================================
 
 (def default-timeout-ms
-  "SIGTERM the child after this long when the request doesn't say
-   (execFile :timeout)."
+  "SIGTERM the child after this long when the request doesn't say."
   30000)
 
 (def max-output-bytes
-  "execFile :maxBuffer — the FULL-capture ceiling for a foreground [[run]],
+  "The full-capture ceiling for a foreground [[run]],
    mirroring web-fetch's 2MB body cap. Per-stream output up to this is
    captured whole (and, when it exceeds the preview cap, persisted to
-   my.blob so nothing is discarded at the boundary); beyond it Node kills
+   my.blob so nothing is discarded at the boundary); beyond it Bun stops
    the child and ::shell/truncated? is set with the honest byte overflow.
-   Long/high-volume output belongs in a background job (spawn-based, not
-   maxBuffer-bounded)."
+   Long/high-volume output belongs in a background job."
   2000000)
 
 (def killed-exit
@@ -72,10 +67,8 @@
    from the env on every call — the host owns the knob; nothing inside
    the pod can flip it. Any non-blank value other than \"0\" grants."
   []
-  (case (platform/host)
-    :node (let [v (config/env-string "SEON_SHELL")]
-            (boolean (and v (not= "0" v))))
-    :wasi false))
+  (let [v (config/env-string "SEON_SHELL")]
+    (boolean (and v (not= "0" v)))))
 
 (defn ungranted
   "The guiding default-deny envelope."
@@ -142,44 +135,17 @@
                   "long-running stream use "
                   "(seon.agent.shell/run-bg! …) and page it with job-output.")))))
 
-(defn exit-code
-  "The child's exit code as data: 0 when execFile reported no error, the
-   numeric error code when it exited non-zero, [[killed-exit]] when it
-   was killed (no numeric code — timeout / overflow / external signal)."
-  [err]
-  (cond
-    (nil? err)             0
-    (number? (.-code err)) (.-code err)
-    :else                  killed-exit))
-
-;; ============================================================
-;; The child_process boundary — execFile wrapper, always resolves.
-;; ============================================================
-
 (defn exec
   "Run `cmd` with `args` (vector of argv strings — NEVER a shell string;
-   no `sh -c`, no injection surface). ALWAYS resolves, to a JS object
-   {err stdout stderr} (err nil on exit 0). Timeout + output cap enforced
-   by execFile options; `stdin` (a string or nil) is written to the
-   child then the stream is ALWAYS closed so stdin-readers see EOF."
+   no `sh -c`, no injection surface). Always resolves to the ordinary shared
+   subprocess result. String stdin is closed so readers see EOF."
   [cmd args cwd stdin timeout-ms]
-  (js/Promise.
-    (fn [resolve _]
-      (let [opts  #js {:timeout     timeout-ms
-                       :maxBuffer   max-output-bytes
-                       :windowsHide true}
-            _     (when cwd (set! (.-cwd opts) cwd))
-            child (.execFile cp cmd (into-array args) opts
-                             (fn [err stdout stderr]
-                               (resolve #js {:err err :stdout stdout :stderr stderr})))
-            in    (.-stdin child)]
-        (when in
-          ;; A fast-exiting child EPIPEs the stdin write; an unhandled
-          ;; stream error would crash the single-threaded pod. Swallow it
-          ;; — the callback envelope carries the child's real outcome.
-          (.on in "error" (fn [_] nil))
-          (when (some? stdin) (.write in stdin))
-          (.end in))))))
+  (subprocess/run!
+   (cond-> {::subprocess/cmd (into [cmd] args)
+            ::subprocess/timeout-ms timeout-ms
+            ::subprocess/max-output-bytes max-output-bytes}
+     cwd (assoc ::subprocess/cwd cwd)
+     (some? stdin) (assoc ::subprocess/stdin stdin))))
 
 ;; ============================================================
 ;; Background jobs — a VOLATILE process-lifetime table (globalThis tier,
@@ -278,7 +244,7 @@
    output and edited without re-running (a future refinement could gate on
    `no green since last edit` instead; out of scope here). `record!` is
    `^:async` and returns an envelope (never throws); swallow its promise so
-   nothing rejects into the node event handler (never throw into the loop)."
+   nothing rejects into the completion callback (never throw into the loop)."
   [j]
   (let [aid (::shell/agent-id j)]
     (when (and aid (testrun/pytest-argv? (::shell/cmd j) (vec (::shell/args j))))
@@ -297,9 +263,15 @@
         ;; the exit-time testrun persist can scope to the spawning agent —
         ;; runtime-only state on !jobs (like ::shell/child), never a datom.
         agent-id (db/current-agent-id)
-        opts     #js {:windowsHide true}
-        _        (when cwd (aset opts "cwd" cwd))
-        child    (.spawn cp cmd (into-array args) opts)]
+        started  (subprocess/start!
+                  (cond-> {::subprocess/cmd (into [cmd] args)
+                           ::subprocess/max-output-bytes bg-max-stream-bytes
+                           ::subprocess/on-out
+                           #(append-capped id ::shell/out ::shell/out-truncated? %)
+                           ::subprocess/on-err
+                           #(append-capped id ::shell/err ::shell/err-truncated? %)}
+                    cwd (assoc ::subprocess/cwd cwd)
+                    (some? stdin) (assoc ::subprocess/stdin stdin)))]
     (swap! !jobs assoc id
            {::shell/job-id        id
             ::shell/cmd           cmd
@@ -307,7 +279,7 @@
             ::shell/cwd           cwd
             ::shell/agent-id      agent-id
             ::shell/started-at    (js/Date.)
-            ::shell/child         child
+            ::shell/child         started
             ::shell/out           ""
             ::shell/err           ""
             ::shell/out-truncated? false
@@ -315,42 +287,29 @@
             ::shell/state         :running
             ::shell/exit          nil
             ::shell/ended-at      nil})
-    (.on (.-stdout child) "data"
-         (fn [d] (append-capped id ::shell/out ::shell/out-truncated? d)))
-    (.on (.-stderr child) "data"
-         (fn [d] (append-capped id ::shell/err ::shell/err-truncated? d)))
-    (.on child "error"
-         (fn [e]
+    (-> (::subprocess/exited started)
+        (.then
+         (fn [result]
            (swap! !jobs update id
                   (fn [j] (when j
-                            (assoc j
-                                   ::shell/state    :exited
-                                   ::shell/exit     killed-exit
-                                   ::shell/ended-at (js/Date.)
-                                   ::shell/err      (str (::shell/err j)
-                                                         "\n[spawn error] "
-                                                         (or (some-> e .-message) (str e)))))))
-           ;; A spawn error usually won't parse as pytest — then this no-ops;
-           ;; if it does parse (an errored run), it records like any red run.
+                            (cond-> (assoc j
+                                           ::shell/state (if (= :stopped (::shell/state j))
+                                                           :stopped
+                                                           :exited)
+                                           ::shell/exit (or (::subprocess/exit result)
+                                                            killed-exit)
+                                           ::shell/ended-at (js/Date.))
+                              (::subprocess/out-truncated? result)
+                              (assoc ::shell/out-truncated? true)
+                              (::subprocess/err-truncated? result)
+                              (assoc ::shell/err-truncated? true)
+                              (::subprocess/spawn-error result)
+                              (update ::shell/err str "\n[spawn error] "
+                                      (get-in result [::subprocess/spawn-error
+                                                      :seon.error/message]))))))
            (some-> (get @!jobs id) maybe-record-testrun!)
            (prune-exited!)))
-    (.on child "close"
-         (fn [code signal]
-           (swap! !jobs update id
-                  (fn [j] (when j
-                            (assoc j
-                                   ::shell/state    (if (= :stopped (::shell/state j)) :stopped :exited)
-                                   ::shell/exit     (cond (number? code) code signal killed-exit :else 0)
-                                   ::shell/ended-at (js/Date.)))))
-           ;; Persist-at-exit: the ONE place a finished bg pytest run becomes a
-           ;; testrun datom, so the complete-gate is not blind to bg tests.
-           (some-> (get @!jobs id) maybe-record-testrun!)
-           (prune-exited!)))
-    (let [in (.-stdin child)]
-      (when in
-        (.on in "error" (fn [_] nil))
-        (when (some? stdin) (.write in stdin))
-        (.end in)))
+        (.catch (fn [_] nil)))
     id))
 
 (defn stop-job!
@@ -359,7 +318,7 @@
   (let [j (get @!jobs id)]
     (when (and j (= :running (::shell/state j)))
       (swap! !jobs assoc-in [id ::shell/state] :stopped)
-      (try (.kill ^js (::shell/child j) "SIGTERM") (catch :default _ nil)))))
+      ((::subprocess/kill! (::shell/child j)) "SIGTERM"))))
 
 (defn slice-since
   "The captured stream `s` from char offset `since` (default 0) to the end.

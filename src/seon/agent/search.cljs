@@ -260,13 +260,13 @@
                                  multiline?        (conj "-U" "--multiline-dotall"))
                          (conj "--regexp" pattern "--")
                          (into roots))
-                ^js r  (await (in/exec-rg bin args))
-                ^js err (.-err r)
-                stdout (.-stdout r)
-                stderr (.-stderr r)]
+                r       (await (in/exec-rg bin args))
+                exit    (:seon.subprocess/exit r)
+                stdout  (:seon.subprocess/out r)
+                stderr  (:seon.subprocess/err r)
+                spawn-error (:seon.subprocess/spawn-error r)]
             (cond
-              ;; Timeout — execFile killed the child.
-              (and err (.-killed err))
+              (:seon.subprocess/timed-out? r)
               (in/fail (str "search timed out after " in/timeout-ms "ms — "
                             "narrow :seon.agent.search/paths, add a "
                             ":seon.agent.search/glob, or use a more specific "
@@ -274,29 +274,31 @@
                        stderr)
 
               ;; Binary vanished between rg-path check and spawn.
-              (and err (= "ENOENT" (.-code err)))
+              (= "ENOENT" (:seon.error/code spawn-error))
               (in/fail (str "ripgrep binary failed to spawn (" bin ") — "
                             "run `npm install` in the repo root.")
-                       (.-message err))
+                       (:seon.error/message spawn-error))
 
               ;; Output cap — partial stdout is still parseable.
-              (and err (= "ERR_CHILD_PROCESS_STDIO_MAXBUFFER" (.-code err)))
+              (:seon.subprocess/output-truncated? r)
               (assoc (in/success-from stdout paths glob max-results full? ctx)
                      :seon.agent.search/truncated? true)
 
               ;; rg exit 1 = searched fine, found nothing. NOT an error.
-              (and err (= 1 (.-code err)))
+              (= 1 exit)
               (in/ok-empty)
 
               ;; rg exit 2 (or anything else) — bad regex is the common case.
-              err
+              (or spawn-error (not= 0 exit))
               (in/fail (str "ripgrep rejected the search — most often an "
                             "invalid regex in :seon.agent.search/pattern (it is a "
                             "REGEX, not a literal: escape ( ) [ ] { } . with "
                             "\\\\). Detail: "
                             (or (first (str/split-lines (str stderr)))
-                                (.-message err)))
-                       (if (str/blank? (str stderr)) (.-message err) stderr))
+                                (:seon.error/message spawn-error)))
+                       (if (str/blank? (str stderr))
+                         (:seon.error/message spawn-error)
+                         stderr))
 
               :else
               (in/success-from stdout paths glob max-results full? ctx))))))

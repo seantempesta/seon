@@ -3,7 +3,8 @@
    [cljs.test :refer [async deftest is testing]]
    [seon.execution :as execution]
    [seon.execution.host :as host]
-   [seon.launch :as launch]))
+   [seon.launch :as launch]
+   [seon.subprocess :as subprocess]))
 
 (def digest (apply str (repeat 64 "e")))
 (def database
@@ -92,7 +93,15 @@
     ::host/ready-timeout-ms 1000
     ::host/idle-timeout-ms 60000
     ::host/cancel-grace-ms 5
-    ::host/spawn! spawn!}))
+    ::host/spawn!
+    (fn [request]
+      (subprocess/start!
+       (assoc request ::subprocess/spawn!
+              (fn [^js options]
+                (spawn! {::host/cmd (vec (js->clj (.-cmd options)))
+                         ::host/ipc (.-ipc options)
+                         ::host/stdout "pipe"
+                         ::host/stderr "pipe"})))))}))
 
 (defn feed! [options process message]
   ((::host/ipc options) (execution/encode-message message) process))

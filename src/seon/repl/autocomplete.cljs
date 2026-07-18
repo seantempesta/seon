@@ -334,13 +334,19 @@
        (take k)
        vec))
 
-(defn- git-head-sha
+(defn- ^:async git-head-sha
   "The repo's current git HEAD sha (the projection version stamp), or
    \"unknown\" outside a git checkout."
   []
-  (try (str/trim (.toString (.execSync child-process "git rev-parse HEAD"
-                                       #js {:stdio #js ["ignore" "pipe" "ignore"]})))
-       (catch :default _ "unknown")))
+  (let [result (await
+                 (subprocess/run!
+                   {::subprocess/cmd ["git" "rev-parse" "HEAD"]
+                    ::subprocess/max-output-bytes 4096}))]
+    (if (and (nil? (::subprocess/spawn-error result))
+             (zero? (::subprocess/exit result))
+             (not (::subprocess/output-truncated? result)))
+      (str/trim (::subprocess/out result))
+      "unknown")))
 
 (defn- database-name
   "This cluster's database name — the basename of `SEON_CLUSTER_DIR`
@@ -392,7 +398,7 @@
           :else "test")))
 
 (defn- ^:async source-identity [projection-sha]
-  (let [head (git-head-sha)
+  (let [head (await (git-head-sha))
         result (await
                  (subprocess/run!
                    {::subprocess/cmd
@@ -533,7 +539,7 @@
   [{db :seon.db/db ::keys [out-path projection-sha distractors]}]
   (try
     (let [database-value (result! (or db (await (db/db))))
-          sha   (or projection-sha (git-head-sha))
+          sha   (or projection-sha (await (git-head-sha)))
           k     (or distractors 3)
           database (database-name)
           runtime-artifact (runtime-artifact-identity)

@@ -37,20 +37,6 @@
       ::launch/execution-output execution-output
       ::launch/execution-digest execution-digest})))
 
-(defn- native-spawn!
-  [spawns options]
-  (let [startup (execution/decode-message
-                 (nth (::host/cmd options) 2))
-        process
-        (js/Bun.spawn
-         #js {:cmd (clj->js (::host/cmd options))
-              :ipc (::host/ipc options)
-              :stdout (::host/stdout options)
-              :stderr (::host/stderr options)})]
-    (swap! spawns update (::execution/agent-id startup) (fnil conj [])
-           (.-pid process))
-    process))
-
 (defn- ^:async invoke!
   [database agent-id function-symbol arguments]
   (let [messages
@@ -85,7 +71,6 @@
           {:seon.db/socket-path socket-path
            :seon.db/database-name database-name
            :seon.db/backend :memory}))
-        spawns (atom {})
         agent-ids ["agent-a" "agent-b"]
         current-symbol 'my.execution-proof/current
         publish-symbol 'my.execution-proof/publish!
@@ -111,8 +96,7 @@
       ::host/javascript-runtime "bun"
       ::host/ready-timeout-ms 30000
       ::host/idle-timeout-ms 120000
-      ::host/cancel-grace-ms 1000
-      ::host/spawn! (partial native-spawn! spawns)})
+      ::host/cancel-grace-ms 1000})
     (try
       (let [schema-report
             (await
@@ -163,12 +147,22 @@
             (await (invoke! current-database "agent-b" current-symbol []))
             agent-a-after
             (await (invoke! current-database "agent-a" current-symbol []))
+            all-results (concat before [agent-b-after agent-a-after])
+            spawns
+            (reduce
+             (fn [by-agent {::keys [value]}]
+               (update by-agent
+                       (:seon.execution-proof/agent value)
+                       (fnil conj [])
+                       (:seon.execution-proof/pid value)))
+             {}
+             all-results)
             evidence
             {:seon.execution-proof/initial-database initial-database
              :seon.execution-proof/current-database current-database
              :seon.execution-proof/before before
              :seon.execution-proof/after [agent-b-after agent-a-after]
-             :seon.execution-proof/spawns @spawns}]
+             :seon.execution-proof/spawns spawns}]
         (emit! evidence)
         evidence)
       (finally

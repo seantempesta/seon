@@ -206,7 +206,7 @@
 
 (deftest over-ram-ceiling-truncates-honestly-with-hint
   (async done
-    ;; Exceed the private maxBuffer guard: the captured head is the answer,
+    ;; Exceed the private capture guard: the captured head is the answer,
     ;; truncated? is true, and the hint points at run-bg!.
     (-> (resolves!
           (shell/run {:seon.agent.shell/cmd  node-bin
