@@ -904,8 +904,10 @@
     (-> (db/open-session! (::database-selection startup))
         (.then
          (fn [{database :seon.db/db}]
-           (-> (admission/prepare-committed!
-                {::admission/record-failures? false})
+           (-> (error/with-configuration
+                {:seon.config/on-core-error :gate}
+                #(admission/prepare-committed!
+                  {::admission/record-failures? false}))
                (.then
                 admission/admit-prepared!)
                (.then
