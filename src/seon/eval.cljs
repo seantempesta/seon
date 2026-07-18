@@ -435,6 +435,11 @@
         ;; own project root finds the bootstrap output in the seon
         ;; checkout; unset = "out/bootstrap" (CWD-relative) as before.
         bootstrap-path (platform/artifact-path "out/bootstrap")]
+    ;; Shadow's bootstrap loader evaluates emitted namespace files in the
+    ;; global scope. A simple-optimized Node bundle owns `goog` in module
+    ;; scope, so publish that exact object before the loader evaluates its
+    ;; first `goog.provide`. This is one object, not a copied runtime.
+    (set! (.-goog js/global) js/goog)
     (await (js/Promise.
              (fn [resolve _reject]
                (boot/init state

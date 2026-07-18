@@ -254,9 +254,10 @@
   ;; Bootstrap-CLJS bundle (spec-02 §6.1). The :target :bootstrap
   ;; output is the analysis-cache + per-namespace compiled JS for
   ;; each namespace in :entries, suitable for runtime loading via
-  ;; `shadow.cljs.bootstrap.node/init`. The loader uses
-  ;; goog.globalEval, which is indirect eval, which runs in global
-  ;; scope — so the namespaces land on globalThis, which is what
+  ;; `shadow.cljs.bootstrap.node/init`. The loader evaluates in global
+  ;; scope; `seon.eval/init-bootstrap!` first publishes the simple bundle's
+  ;; module-scoped `goog` object there, then loaded namespaces land on
+  ;; globalThis, which is what
   ;; cljs.core/find-ns-obj needs (`js/eval("cljs")` resolves
   ;; globally). That sidesteps the "TypeError: Cannot read
   ;; properties of null (reading 'findInternedVar')" mode the prior
