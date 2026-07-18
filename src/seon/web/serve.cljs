@@ -745,12 +745,18 @@
                       (->> (get attempt-eids-by-turn turn-eid [])
                            (sort-by (comp :seon.ai.attempt/ordinal pull-row))
                            vec)
-                      attempts (mapv pull-row attempt-eids)]
+                      attempts (mapv pull-row attempt-eids)
+                      attempt-ordinals-valid? (ordered? attempts)
+                      attempt-rows-valid? (every? valid-row? attempts)
+                      historical-config-valid?
+                      (every? #(true? (historical-valid? %)) attempt-eids)]
                   {:turn_id turn-id
-                   :valid (and (ordered? attempts)
-                               (every? valid-row? attempts)
-                               (every? #(true? (historical-valid? %))
-                                       attempt-eids))
+                   :valid (and attempt-ordinals-valid?
+                               attempt-rows-valid?
+                               historical-config-valid?)
+                   :attempt_ordinals_valid attempt-ordinals-valid?
+                   :attempt_rows_valid attempt-rows-valid?
+                   :historical_config_valid historical-config-valid?
                    :attempts attempts
                    :attempt-eids attempt-eids}))
               (map (fn [[turn-eid turn-id & _]] [turn-eid turn-id]) turn-rows))
@@ -760,7 +766,15 @@
       {:status "absent"}
 
       (not-every? :valid raw-turns)
-      {:status "malformed"}
+      {:status "malformed"
+       :invalid_turns
+       (into []
+             (comp
+              (remove :valid)
+              (map #(select-keys
+                     % [:turn_id :attempt_ordinals_valid
+                        :attempt_rows_valid :historical_config_valid])))
+             raw-turns)}
 
       :else
       (let [projected-turns

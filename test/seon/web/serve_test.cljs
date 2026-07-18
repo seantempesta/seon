@@ -301,12 +301,16 @@
     (is (= 0.0 (:temperature (first projected))))
     (is (false? (:transport_drift proof)))
     (is (every? true? (map :historical_config_valid projected)))
-    (is (= "malformed"
-           (:status
-            (project [[10 "turn-a"]] [[10 100]]
-                     (fn [_] (model-attempt 1))
-                     (constantly true) 10000)))
-        "a missing ordinal zero fails closed")
+    (is (= {:status "malformed"
+            :invalid_turns
+            [{:turn_id "turn-a"
+              :attempt_ordinals_valid false
+              :attempt_rows_valid true
+              :historical_config_valid true}]}
+           (project [[10 "turn-a"]] [[10 100]]
+                    (fn [_] (model-attempt 1))
+                    (constantly true) 10000))
+        "a missing ordinal zero fails closed with bounded evidence")
     (is (= "malformed"
            (:status
             (project [[10 "turn-a"]] [[10 100]]
