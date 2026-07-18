@@ -832,6 +832,11 @@
         (run! root environment "clojure" "-T:build" "writer-uber")
         (run! root environment "clojure" "-M:cljs" "compile" "bootstrap")
         (run! root environment (str (fs/path root "bin/fix-bootstrap-macros")))
+        ;; The SDK is an exact source/build artifact, not a snapshot of the
+        ;; producer's node_modules. Resolve the lock-pinned build closure
+        ;; explicitly before Tailwind runs; production dependencies are copied
+        ;; later from their own --production closure.
+        (run! root environment bun "install" "--frozen-lockfile")
         (run! root environment bun "run" "--bun" "css:build")
         ((requiring-resolve 'seon.dev.artifact/build-release-programs!)
          config release-programs)

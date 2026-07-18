@@ -8,8 +8,9 @@
   ;; display version may fall back without making Git a consumer dependency.
   (format "0.1.%s"
           (or (System/getenv "SEON_BUILD_REVISION_COUNT")
-              (try (b/git-count-revs nil)
-                   (catch Throwable _ 0)))))
+              (when (.exists (java.io.File. ".git"))
+                (b/git-count-revs nil))
+              0)))
 (def class-dir "target/classes")
 (def basis (b/create-basis {:project "deps.edn"}))
 (def jar-file (format "target/%s-%s.jar" (name lib) version))
