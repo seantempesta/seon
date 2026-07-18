@@ -405,6 +405,80 @@ in the changed listener, router, Datastar, debug, or route owners.
 
 ### Current implementation checkpoint
 
+### 2026-07-17 working-system graduation checklist
+
+This is the complete ordered checklist for the current autonomous work period.
+A green item is evidence for one boundary, not permission to stop before the
+remaining items. Local defects stay on the spine only when they block the next
+unchecked item; independent findings are recorded in their owning issue and do
+not displace this order.
+
+- [x] Build and start the canonical watcher, sole JVM writer, and Bun pod from
+  one frozen artifact snapshot; `bin/seon up` reports all three ready.
+- [x] Pass every maintained correctness door: operator 231 tests/1,339
+  assertions, writer 214 tests/1,794 assertions, and Bun-executed CLJS 1,078
+  tests/4,790 assertions, all with zero failures and zero errors.
+- [x] Make an invocation arriving during child retirement wait for the old
+  process to exit and settle exactly once from one replacement child. Focused
+  host proof passes 11 tests/51 assertions at `31cfbb5e`.
+- [ ] Prove the real web UI in a browser: `/`, a newly created `/agent/{id}`,
+  `/agent/{id}/debug`, `/data`, canvas interaction, reconnect, and independent
+  gzip Datastar feeds, with no console, render, instrumentation, or core fault.
+- [ ] Drive real root and task agents through prompt acquisition, database
+  reads and writes, eval, messages, plans, tests, authored functions, turns,
+  transcript, and debug reconstruction; verify their resulting database facts
+  and visible output rather than trusting HTTP status alone.
+- [ ] Drive several agents concurrently. Prove separate Bun children execute
+  concurrently, one slow or failed child does not block or kill siblings, each
+  invocation settles once, and child/session counts return to the configured
+  idle state afterward.
+- [ ] Prove process recovery under active work: cooperative child retirement,
+  unexpected child exit, Bun pod restart, JVM writer restart, feed reconnect,
+  ambiguous transaction delivery, and initialization interruption. Each case
+  must converge without duplicate domain effects, lost committed work, stale
+  database values, or caller retry requirements.
+- [ ] Prove two simultaneous cluster databases through the same artifact and
+  operator contracts. Writes remain serialized per database while immutable
+  reads and unrelated databases proceed in parallel; one cluster failure does
+  not damage or stall the other.
+- [ ] Exercise the downstream artifact through the same no-source launch,
+  database, child, and web contracts after the default cluster is green.
+- [ ] Establish repeatable one-agent and concurrent-agent load profiles over
+  cold, warm, fresh, converged, grown-database, restart, and sustained-feed
+  cases. Record request and turn latency distributions, throughput, queueing,
+  query-cache sharing, query execution, rendering, serialization,
+  compression/socket delivery, rerender counts, errors, and timeouts.
+- [ ] Record idle and loaded CPU, event-loop delay, Bun heap/RSS, child RSS,
+  JVM heap/RSS/GC, file descriptors, database/cache growth, and cleanup after
+  load. Use exact artifact identities and enough duration to expose spikes and
+  retained resources.
+- [ ] Investigate every correctness failure and every dominant latency or
+  resource spike at its owning seam. Prefer removing repeated work, broad
+  acquisition, serialization, retained state, or duplicate ownership; reject
+  speculative micro-optimization and new cache or rendering authorities.
+- [ ] Re-run the complete correctness doors and the real browser/concurrent-
+  agent/recovery/multi-cluster journeys after each architectural correction.
+- [ ] Replace the remaining Node-shaped process, Unix-socket, and HTTP/SSE host
+  mechanics in place with measured Bun-native interfaces, including
+  `Bun.serve`, without forking routing, rendering, feeds, or database behavior.
+- [ ] Delete superseded runtime, database, rendering, transport, dependency,
+  test, and instruction paths; prove active-source and classpath searches find
+  only the retained mechanisms.
+- [ ] Graduate no-source packaging and modest-hardware density with bounded
+  startup, shutdown, crash containment, resource use, and the complete
+  destructive acceptance matrix.
+
+**Earliest unsettled contract:** the real browser and newly created agent must
+prove the same database, child, renderer, and feed boundaries that are green in
+the suites. **Integrated proof:** browser-visible output, console and pod logs,
+database facts, and child lifecycle evidence from the frozen artifact.
+**Parallel portfolio:** no source-editing lanes are active during this live
+checkpoint; the three completed fixture lanes are integrated commits and the
+top level owns the cross-boundary proof. **Next refill:** after browser parity,
+separate read-only load analysis and multi-cluster proof can proceed while the
+top level owns recovery fixes. **Final graduation gate:** every unchecked item
+above, followed by one frozen-source rerun of all correctness and live gates.
+
 The live execution boundary is now closed through the real system. Commits
 `99afc40f` and `4f3db199` make the manifest's execution identity the raw bytes
 verified by Bun and publish the complete Shadow execution closure beside the
