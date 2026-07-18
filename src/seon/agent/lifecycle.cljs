@@ -64,6 +64,17 @@
   (= protocol/stale-database-value-error
      (get-in value [:seon.error/data ::protocol/error-kind])))
 
+(def ^:private maximum-lifecycle-attempts 32)
+
+(defn ^:async ^:private retry-stale!
+  [operation]
+  (loop [attempt 1]
+    (let [result (await (operation))]
+      (if (and (stale-database-error? result)
+               (< attempt maximum-lifecycle-attempts))
+        (recur (inc attempt))
+        result))))
+
 (defn- completed-test-error
   [test-runs]
   (when-let [{:seon.agent.testrun/keys [passed failed errors]}
@@ -249,11 +260,8 @@
 
 (defn ^:async ^:private complete*
   [result result-ref]
-  (let [first-result (await (complete-once result result-ref))
-        final-result
-        (if (stale-database-error? first-result)
-          (await (complete-once result result-ref))
-          first-result)]
+  (let [final-result
+        (await (retry-stale! #(complete-once result result-ref)))]
     (if (error-value? final-result) final-result :idle)))
 
 (defn ^{:async true :seon.fn/agent-facing? true} complete
@@ -388,11 +396,8 @@
   (if-let [caller-id (db/current-agent-id)]
     (if (= "root" target-id)
       (error-value "terminate: the cluster root cannot be terminated.")
-      (let [first-result (await (terminate-once caller-id target-id))
-            final-result
-            (if (stale-database-error? first-result)
-              (await (terminate-once caller-id target-id))
-              first-result)]
+      (let [final-result
+            (await (retry-stale! #(terminate-once caller-id target-id)))]
         (when (= :terminated final-result)
           (runtime/unhost! {:seon.agent/id target-id}))
         final-result))

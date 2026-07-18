@@ -9,6 +9,7 @@
    [seon.agent.run :as run]
    [seon.db :as db]
    [seon.db.id :as db.id]
+   [seon.db.protocol :as protocol]
    [seon.runtime.admission :as admission]))
 
 (def database
@@ -168,6 +169,7 @@
           allocate! db.id/allocate!
           message! message/message!
           allocation (atom nil)
+          attempts (atom 0)
           standalone-message-calls (atom 0)]
       (set! db/current-agent-id (constantly "agent-a"))
       (set! db/db (fn ([] (js/Promise.resolve database))
@@ -211,14 +213,21 @@
       (set! db.id/allocate!
             (fn [request]
               (reset! allocation request)
-              (let [built
+              (let [attempt (swap! attempts inc)
+                    built
                     ((::db.id/transaction-builder request)
                      {:seon.agent.message/id "message-a"})]
-                (js/Promise.resolve
-                 (assoc native-report
-                        :tx-data (::db/tx-data built)
-                        ::db.id/ids
-                        {:seon.agent.message/id "message-a"})))))
+                (if (< attempt 3)
+                  (js/Promise.resolve
+                   {:seon.error/message "The database changed before commit."
+                    :seon.error/data
+                    {::protocol/error-kind
+                     protocol/stale-database-value-error}})
+                  (js/Promise.resolve
+                   (assoc native-report
+                          :tx-data (::db/tx-data built)
+                          ::db.id/ids
+                          {:seon.agent.message/id "message-a"}))))))
       (set! message/message!
             (fn [_]
               (swap! standalone-message-calls inc)
@@ -228,6 +237,8 @@
            (.then
             (fn [result]
               (is (= :idle result))
+              (is (= 3 @attempts)
+                  "completion reacquires through multiple unrelated writes")
               (is (zero? @standalone-message-calls))
               (let [built
                     ((::db.id/transaction-builder @allocation)
