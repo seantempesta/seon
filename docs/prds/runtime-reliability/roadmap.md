@@ -262,6 +262,17 @@ into the corrected program, then resume the cross-namespace browser action
 proof. No SCI, pod-side authored eval, second compiler, or alternate registry
 is admissible.
 
+Commit `d34cbc2e` now closes the repair-capability half of that boundary. In an
+isolated real database, valid `my.broken/run` was followed by deliberately
+invalid current namespace source and a complete clean restart. The fresh child
+retained the same supervised eval door, committed a corrective `ns` and `defn`
+in two successful evals, restarted cleanly again, and returned `:repaired`
+through the ordinary shared-function action path. The trusted compiler, exact
+source map, and normal program transaction remain the only mechanism. Direct
+failing-namespace/form reporting remains open in the issue; it no longer blocks
+the agent's ability to repair. The ordered spine returns to the cross-namespace
+browser action proof.
+
 The downstream production overlay now passes the same immutable boundary.
 ACME supplies separate Shadow mains for the Bun pod and Bun execution child,
 so its source is compiled and dynamically reachable in both isolated runtime
