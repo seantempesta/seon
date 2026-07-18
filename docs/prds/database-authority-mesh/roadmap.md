@@ -3286,3 +3286,23 @@ those are green, record cold/warm startup, database-hop latency, query-cache
 reuse, feed/render work, event-loop delay, CPU, heap, and RSS before changing
 transport or pursuing micro-optimizations. Bun-native HTTP/SSE remains the
 last transport cut after behavioral and resource baselines are honest.
+
+The first broader load cut found a count budget rather than a compute failure.
+Sixteen simultaneous `POST /agents` births filled the serialized mutation
+lane: one write ran, eight waited, and seven were rejected. Commit `1579954e`
+raises mutation admission to 64 queued requests per process and database while
+retaining the existing queued-request-byte allowance as the memory bound.
+Datahike still serializes each database's writes and the executor still rotates
+fairly among distinct databases. The focused executor gate passes 26 tests/674
+assertions. After a source-frozen rebuild, 32 simultaneous births returned 32
+HTTP 200 responses with 32 distinct IDs in 8.25 seconds.
+
+The maintained gates are green but their checkpoint qualification is explicit:
+the complete writer door passed 218 tests/1,813 assertions in 19.65 seconds and
+the operator door passed 243/1,393 in 26.14 seconds immediately before the
+mutation-budget edit. The next complete writer run must cover `1579954e` before
+graduation. Browser-client tooling was unavailable, but server-side route and
+gzip-feed inspection found three correctness owners now ahead of model load:
+debug/data headers use a static zero-agent projection; two retained agents have
+visible feed render failures; and a nonexistent ordinary-agent page serves a
+loading shell whose feed returns 404. Those are the current ordered falsifiers.

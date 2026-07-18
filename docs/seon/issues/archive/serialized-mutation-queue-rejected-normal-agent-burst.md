@@ -27,5 +27,8 @@ database and distinct databases retain fair rotation.
 - Before the change, the live 16-request burst produced exactly nine successes
   and seven queue-capacity failures.
 - The focused executor gate passes 26 tests and 674 assertions.
-- The source-frozen live repeat and complete writer gate are recorded in the
-  database-authority roadmap before this issue is considered graduated.
+- After a source-frozen rebuild, 32 simultaneous `POST /agents` requests
+  returned 32 HTTP 200 responses with 32 distinct agent IDs in 8.25 seconds.
+- The immediately preceding complete writer gate passed 218 tests and 1,813
+  assertions; the executor change itself is covered by the focused gate and
+  remains included in the next source-frozen complete checkpoint.
