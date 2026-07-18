@@ -168,6 +168,79 @@
              (is false (str "unexpected host failure: " error))
              (done)))))))
 
+(deftest same-agent-invocations-share-one-ordered-child-queue
+  (async done
+    (let [options (atom nil)
+          child (fake-process 120)
+          _ (configure (fn [value]
+                         (reset! options value)
+                         (:process child)))
+          first-completion (host/invoke! (invocation "queued-first"))
+          second-completion (host/invoke! (invocation "queued-second"))]
+      (feed! @options (:process child) (ready-message))
+      (-> (js/Promise.resolve nil)
+          (.then
+           (fn [_]
+             (is (= ["queued-first"]
+                    (mapv ::execution/invocation-id @(:sent child)))
+                 "the second invocation waits while the first is active")
+             (feed! @options (:process child)
+                    (result-message "queued-first" :first))
+             first-completion))
+          (.then
+           (fn [first-result]
+             (is (= :first (::execution/result first-result)))
+             (js/Promise.resolve nil)))
+          (.then
+           (fn [_]
+             (is (= ["queued-first" "queued-second"]
+                    (mapv ::execution/invocation-id @(:sent child))))
+             (feed! @options (:process child)
+                    (result-message "queued-second" :second))
+             second-completion))
+          (.then
+           (fn [second-result]
+             (is (= :second (::execution/result second-result)))
+             ((:resolve-exit! child) 0)))
+          (.catch
+           (fn [error]
+             (is false (str "same-agent queue rejected: " error))))
+          (.finally (fn [] (done)))))))
+
+(deftest queued-deadline-does-not-retire-the-active-predecessor
+  (async done
+    (let [options (atom nil)
+          child (fake-process 121)
+          _ (configure (fn [value]
+                         (reset! options value)
+                         (:process child)))
+          first-completion (host/invoke! (invocation "long-first"))
+          queued (host/invoke!
+                  (assoc (invocation "short-second")
+                         ::execution/deadline-ms (+ (.now js/Date) 5)))]
+      (feed! @options (:process child) (ready-message))
+      (-> queued
+          (.then
+           (fn [result]
+             (is (= "The invocation was canceled."
+                    (get-in result [::execution/error :seon.error/message])))
+             (is (empty? @(:kills child)))
+             (is (not-any? #(= execution/shutdown-message
+                                (::execution/message %))
+                           @(:sent child))
+                 "the queued deadline leaves the active predecessor alone")
+             (feed! @options (:process child)
+                    (result-message "long-first" :finished))
+             first-completion))
+          (.then
+           (fn [result]
+             (is (= :finished (::execution/result result)))
+             ((:resolve-exit! child) 0)))
+          (.catch
+           (fn [error]
+             (is false (str "queued deadline rejected: " error))))
+          (.finally (fn [] (done)))))))
+
 (deftest changed-program-replaces-one-child-and-retries-once
   (async done
     (let [options (atom [])

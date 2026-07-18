@@ -30,6 +30,7 @@
   [::run-fence-current? {:optional true} ::run-fence-current?]])
 
 (defonce ^:private !host (atom {::generation 0 ::children {}}))
+(defonce ^:private !invocation-tails (atom {}))
 (defonce ^:private text-decoder (js/TextDecoder. "utf-8"))
 
 (defn- deferred []
@@ -393,6 +394,7 @@
                ::spawn! (or spawn! native-spawn!)
                ::run-fence-current? (or run-fence-current? (constantly true))}
               ::children {}}))
+    (reset! !invocation-tails {})
     true))
 
 (defn- invoke-once!
@@ -455,26 +457,10 @@
   (true? (get-in message [::execution/error :seon.error/data
                           ::execution/reload-required?])))
 
-(defn invoke!
-  "Run once, replacing a source-stale child and retrying exactly once."
-  {:malli/schema [:=> [:cat :seon.execution/invoke] :any]}
+(defn- invoke-now!
+  "Run the head invocation, replacing a source-stale child once."
   [invocation]
-  (let [agent-id (::execution/agent-id invocation)
-        invocation-id (::execution/invocation-id invocation)
-        remaining (min execution/maximum-invocation-ms
-                       (max 0 (- (::execution/deadline-ms invocation)
-                                 (.now js/Date))))
-        completion (deferred)
-        timer (js/setTimeout
-               (fn []
-                 ;; The parent owns the deadline even while a child is still
-                 ;; spawning. If no active invocation can be canceled yet,
-                 ;; retire the pending child so its later readiness cannot
-                 ;; claim and send already-expired work.
-                 (when-not (cancel! agent-id invocation-id)
-                   (stop-child! agent-id))
-                 ((::resolve! completion) (canceled-error invocation)))
-               remaining)]
+  (let [agent-id (::execution/agent-id invocation)]
     (-> (invoke-once! invocation)
         (.then
          (fn [message]
@@ -486,17 +472,70 @@
                  (remove-child! agent-id (::generation current)
                                 (::process current)))
                (invoke-once! invocation)))))
-        (.then (fn [message]
-                 (js/clearTimeout timer)
-                 ((::resolve! completion) message)))
         (.catch
          (fn [exception]
-           (js/clearTimeout timer)
-           ((::resolve! completion)
-            (host-error invocation
-                        "The execution host invocation failed."
-                        {:seon.error/cause (ex-message exception)})))))
-    (::promise completion)))
+           (host-error invocation
+                       "The execution host invocation failed."
+                       {:seon.error/cause (ex-message exception)}))))))
+
+(defn invoke!
+  "Queue one invocation in its agent's child; agents remain parallel."
+  {:malli/schema [:=> [:cat :seon.execution/invoke] :any]}
+  [invocation]
+  (let [agent-id (::execution/agent-id invocation)
+        invocation-id (::execution/invocation-id invocation)
+        completion (deferred)
+        started? (atom false)
+        expired? (atom false)
+        remaining (min execution/maximum-invocation-ms
+                       (max 0 (- (::execution/deadline-ms invocation)
+                                 (.now js/Date))))
+        timer
+        (js/setTimeout
+         (fn []
+           (reset! expired? true)
+           (when @started?
+             ;; A head invocation may be active or still waiting for child
+             ;; readiness. Retire only that head's child; queued invocations
+             ;; time out without disturbing the active predecessor.
+             (when-not (cancel! agent-id invocation-id)
+               (stop-child! agent-id)))
+           ((::resolve! completion) (canceled-error invocation)))
+         remaining)
+        queued (atom nil)]
+    (swap! !invocation-tails
+           (fn [tails]
+             (let [prior (get tails agent-id)
+                   work
+                   (if prior
+                     (.then
+                      prior
+                      (fn [_]
+                        (if @expired?
+                          (canceled-error invocation)
+                          (do
+                            (reset! started? true)
+                            (invoke-now! invocation)))))
+                     (do
+                       (reset! started? true)
+                       (invoke-now! invocation)))]
+               (reset! queued work)
+               (assoc tails agent-id work))))
+    (let [work @queued]
+      (-> work
+          (.then
+           (fn [message]
+             (js/clearTimeout timer)
+             ((::resolve! completion) message)
+             message))
+          (.finally
+           (fn []
+             (swap! !invocation-tails
+                    (fn [tails]
+                      (if (identical? work (get tails agent-id))
+                        (dissoc tails agent-id)
+                        tails))))))
+      (::promise completion))))
 
 (defn ^:async invoke-plans!
   "Prepare and execute ordinary authored calls at one database value."
