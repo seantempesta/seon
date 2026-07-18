@@ -30,6 +30,11 @@
     (spit (str (fs/path root "seon")) "launcher")
     (spit (str (fs/path root "system.edn")) "{}")
     (spit (str (fs/path root "babashka-license.txt")) "EPL")
+    (spit (str (fs/path root "bun-license.txt")) "MIT and linked licenses")
+    (spit (str (fs/path root "datahike-license.txt")) "EPL")
+    (spit (str (fs/path root "SOURCE.edn")) "{}")
+    (spit (str (fs/path root "sbom.cdx.json")) "{}")
+    (spit (str (fs/path root "THIRD_PARTY_NOTICES.md")) "# Notices")
     (spit (str (fs/path root "web" "nested" "style.css")) "css")
     root))
 
@@ -45,7 +50,12 @@
    :seon.release.member/detach-helper "detach.py"
    :seon.release.member/launcher "seon"
    :seon.release.member/config "system.edn"
-   :seon.release.member/babashka-license "babashka-license.txt"})
+   :seon.release.member/babashka-license "babashka-license.txt"
+   :seon.release.member/bun-license "bun-license.txt"
+   :seon.release.member/datahike-license "datahike-license.txt"
+   :seon.release.member/source "SOURCE.edn"
+   :seon.release.member/sbom "sbom.cdx.json"
+   :seon.release.member/notices "THIRD_PARTY_NOTICES.md"})
 
 (def runtime-identity
   {:seon.dev.release/bun-version "1.4.0"
@@ -72,7 +82,13 @@
    :seon.dev.release/launcher-member :seon.release.member/launcher
    :seon.dev.release/config-member :seon.release.member/config
    :seon.dev.release/babashka-license-member
-   :seon.release.member/babashka-license})
+   :seon.release.member/babashka-license
+   :seon.dev.release/bun-license-member :seon.release.member/bun-license
+   :seon.dev.release/datahike-license-member
+   :seon.release.member/datahike-license
+   :seon.dev.release/source-member :seon.release.member/source
+   :seon.dev.release/sbom-member :seon.release.member/sbom
+   :seon.dev.release/notices-member :seon.release.member/notices})
 
 (deftest manifest-is-relocatable-deterministic-and-closed
   (let [root (fixture!)]
@@ -211,6 +227,11 @@
                ["seon" "launcher"] ["config/system.edn" "{}"]
                ["brand.css" ".brand {}"]
                ["babashka-license.txt" "EPL"]
+               ["bun-license.txt" "MIT and linked licenses"]
+               ["datahike-license.txt" "EPL"]
+               ["SOURCE.edn" "{}"]
+               ["sbom.cdx.json" "{\"bomFormat\":\"CycloneDX\"}"]
+               ["THIRD_PARTY_NOTICES.md" "# Notices"]
                ["bootstrap/core.js" "bootstrap"]
                ["public/output.css" "css"]
                ["production-node-modules/lib/index.js" "module"]
@@ -244,6 +265,14 @@
               ::release/brand-css (str (fs/path inputs "brand.css"))
               ::release/babashka-license
               (str (fs/path inputs "babashka-license.txt"))
+              ::release/bun-license
+              (str (fs/path inputs "bun-license.txt"))
+              ::release/datahike-license
+              (str (fs/path inputs "datahike-license.txt"))
+              ::release/source (str (fs/path inputs "SOURCE.edn"))
+              ::release/sbom (str (fs/path inputs "sbom.cdx.json"))
+              ::release/notices
+              (str (fs/path inputs "THIRD_PARTY_NOTICES.md"))
               ::release/node-modules (str node-modules)
               ::release/package-json (str (fs/path inputs "package.json"))
               ::release/bun-lock (str (fs/path inputs "bun.lock"))
@@ -254,6 +283,12 @@
         (is (fs/executable? (fs/path package "runtime/bb")))
         (is (fs/executable? (fs/path package "bin/seon")))
         (is (fs/regular-file? (fs/path package "runtime/detach.py")))
+        (is (fs/regular-file? (fs/path package "sbom.cdx.json")))
+        (is (fs/regular-file? (fs/path package "SOURCE.edn")))
+        (is (fs/regular-file?
+             (fs/path package "THIRD_PARTY_LICENSES/bun-LICENSE.md")))
+        (is (fs/regular-file?
+             (fs/path package "THIRD_PARTY_LICENSES/datahike-EPL-1.0.txt")))
         (is (fs/regular-file? (fs/path package "config/selected.edn")))
         (is (fs/regular-file?
              (fs/path package "runtime-root/out/bootstrap/core.js")))
@@ -308,4 +343,31 @@
       (#'release/normalize-jar! second-jar)
       (is (= (seq (fs/read-all-bytes first-jar))
              (seq (fs/read-all-bytes second-jar))))
+      (finally (fs/delete-tree root {:force true})))))
+
+(deftest release-metadata-inventories-the-production-closures
+  (let [root (fs/create-temp-dir {:prefix "seon-release-metadata-"})
+        node-modules (fs/path root "node_modules/example")
+        writer (fs/path root "writer.jar")]
+    (try
+      (fs/create-dirs node-modules)
+      (spit (str (fs/path node-modules "package.json"))
+            "{\"name\":\"example\",\"version\":\"1.2.3\",\"license\":\"MIT\"}")
+      (with-open [output (JarOutputStream. (io/output-stream (str writer)))]
+        (let [entry (JarEntry.
+                     "META-INF/maven/org.example/library/pom.properties")]
+          (.putNextEntry output entry)
+          (.write output
+                  (.getBytes "groupId=org.example\nartifactId=library\nversion=4.5.6\n"
+                             "UTF-8"))
+          (.closeEntry output)))
+      (is (= [{:seon.release.component/ecosystem "npm"
+               :seon.release.component/name "example"
+               :seon.release.component/version "1.2.3"
+               :seon.release.component/license "MIT"
+               :seon.release.component/purl "pkg:npm/example@1.2.3"}]
+             (#'release/npm-components node-modules)))
+      (is (= "pkg:maven/org.example/library@4.5.6"
+             (:seon.release.component/purl
+              (first (#'release/writer-components writer)))))
       (finally (fs/delete-tree root {:force true})))))

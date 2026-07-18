@@ -11,6 +11,7 @@
   (:import [java.nio.charset StandardCharsets]
            [java.nio.file Files LinkOption]
            [java.security MessageDigest]
+           [java.util Properties]
            [java.util.jar JarEntry JarFile JarOutputStream]))
 
 (def current-version 1)
@@ -61,6 +62,13 @@
    :seon.release.member/config "config"
    :seon.release.member/babashka-license
    "THIRD_PARTY_LICENSES/babashka-EPL-1.0.txt"
+   :seon.release.member/bun-license
+   "THIRD_PARTY_LICENSES/bun-LICENSE.md"
+   :seon.release.member/datahike-license
+   "THIRD_PARTY_LICENSES/datahike-EPL-1.0.txt"
+   :seon.release.member/source "SOURCE.edn"
+   :seon.release.member/sbom "sbom.cdx.json"
+   :seon.release.member/notices "THIRD_PARTY_NOTICES.md"
    :seon.release.member/node-modules "node_modules"
    :seon.release.member/package-json "package.json"
    :seon.release.member/bun-lock "bun.lock"
@@ -95,7 +103,12 @@
    [:seon.dev.release/detach-helper-member :qualified-keyword]
    [:seon.dev.release/launcher-member :qualified-keyword]
    [:seon.dev.release/config-member :qualified-keyword]
-   [:seon.dev.release/babashka-license-member :qualified-keyword]])
+   [:seon.dev.release/babashka-license-member :qualified-keyword]
+   [:seon.dev.release/bun-license-member :qualified-keyword]
+   [:seon.dev.release/datahike-license-member :qualified-keyword]
+   [:seon.dev.release/source-member :qualified-keyword]
+   [:seon.dev.release/sbom-member :qualified-keyword]
+   [:seon.dev.release/notices-member :qualified-keyword]])
 
 (def release-manifest-schema
   [:map {:closed true}
@@ -116,7 +129,12 @@
    :seon.dev.release/detach-helper-member
    :seon.dev.release/launcher-member
    :seon.dev.release/config-member
-   :seon.dev.release/babashka-license-member])
+   :seon.dev.release/babashka-license-member
+   :seon.dev.release/bun-license-member
+   :seon.dev.release/datahike-license-member
+   :seon.dev.release/source-member
+   :seon.dev.release/sbom-member
+   :seon.dev.release/notices-member])
 
 (defn- bytes->hex [bytes]
   (apply str (map #(format "%02x" (bit-and 0xff %)) bytes)))
@@ -596,7 +614,137 @@
    :seon.dev.release/launcher-member :seon.release.member/launcher
    :seon.dev.release/config-member :seon.release.member/config
    :seon.dev.release/babashka-license-member
-   :seon.release.member/babashka-license})
+   :seon.release.member/babashka-license
+   :seon.dev.release/bun-license-member :seon.release.member/bun-license
+   :seon.dev.release/datahike-license-member
+   :seon.release.member/datahike-license
+   :seon.dev.release/source-member :seon.release.member/source
+   :seon.dev.release/sbom-member :seon.release.member/sbom
+   :seon.dev.release/notices-member :seon.release.member/notices})
+
+(defn- package-license [value]
+  (cond
+    (string? value) value
+    (map? value) (or (:type value) (:name value) "NOASSERTION")
+    (sequential? value) (str/join " OR " (map package-license value))
+    :else "NOASSERTION"))
+
+(defn- npm-components [node-modules]
+  (->> (file-seq (io/file (str node-modules)))
+       (filter #(and (.isFile ^java.io.File %)
+                     (= "package.json" (.getName ^java.io.File %))))
+       (keep (fn [file]
+               (try
+                 (let [{:keys [name version license]}
+                       (json/parse-string (slurp file) true)]
+                   (when (and (string? name) (string? version))
+                     {:seon.release.component/ecosystem "npm"
+                      :seon.release.component/name name
+                      :seon.release.component/version version
+                      :seon.release.component/license
+                      (package-license license)
+                      :seon.release.component/purl
+                      (str "pkg:npm/"
+                           (str/replace name "@" "%40") "@" version)}))
+                 (catch Exception _ nil))))
+       (distinct)
+       (sort-by (juxt :seon.release.component/name
+                      :seon.release.component/version))
+       vec))
+
+(defn- writer-components [writer]
+  (with-open [jar (JarFile. (str writer))]
+    (->> (enumeration-seq (.entries jar))
+         (filter #(re-matches #"META-INF/maven/.+/pom\.properties"
+                              (.getName ^JarEntry %)))
+         (keep (fn [entry]
+                 (with-open [input (.getInputStream jar entry)]
+                   (let [properties (doto (Properties.) (.load input))
+                         group (.getProperty properties "groupId")
+                         name (.getProperty properties "artifactId")
+                         version (.getProperty properties "version")]
+                     (when (every? string? [group name version])
+                       {:seon.release.component/ecosystem "maven"
+                        :seon.release.component/group group
+                        :seon.release.component/name name
+                        :seon.release.component/version version
+                        :seon.release.component/license "NOASSERTION"
+                        :seon.release.component/purl
+                        (str "pkg:maven/" group "/" name "@" version)})))))
+         distinct
+         (sort-by (juxt :seon.release.component/group
+                        :seon.release.component/name
+                        :seon.release.component/version))
+         vec)))
+
+(defn- cyclone-component
+  [{:seon.release.component/keys [ecosystem group name version license purl]}]
+  (cond-> {:type "library"
+           :group (or group "")
+           :name name
+           :version version
+           :licenses [{:license {:name license}}]
+           :purl purl}
+    ecosystem (assoc :properties [{:name "seon:ecosystem"
+                                    :value ecosystem}])))
+
+(defn- write-release-metadata!
+  [root build-root writer node-modules]
+  (let [source-revision (command-output! root "git" "rev-parse" "HEAD")
+        source-url (command-output! root "git" "remote" "get-url" "origin")
+        datahike-root (fs/path root "reference-code/datahike")
+        datahike-revision
+        (command-output! datahike-root "git" "rev-parse" "HEAD")
+        datahike-url
+        (command-output! datahike-root "git" "remote" "get-url" "origin")
+        npm (npm-components node-modules)
+        maven (writer-components writer)
+        components (vec (concat maven npm))
+        source-path (fs/path build-root "SOURCE.edn")
+        sbom-path (fs/path build-root "sbom.cdx.json")
+        notices-path (fs/path build-root "THIRD_PARTY_NOTICES.md")
+        source {:seon.release.source/revision source-revision
+                :seon.release.source/git-url source-url
+                :seon.release.source/datahike-revision datahike-revision
+                :seon.release.source/datahike-git-url datahike-url
+                :seon.release.source/bun-revision patched-bun-revision
+                :seon.release.source/bun-git-url
+                "https://github.com/oven-sh/bun.git"
+                :seon.release.source/babashka-revision
+                babashka-source-revision
+                :seon.release.source/babashka-git-url
+                "https://github.com/babashka/babashka.git"}
+        sbom {:bomFormat "CycloneDX"
+              :specVersion "1.6"
+              :version 1
+              :metadata {:component {:type "application"
+                                     :name "seon"
+                                     :version source-revision
+                                     :licenses
+                                     [{:license {:id "AGPL-3.0-only"}}]}}
+              :components (mapv cyclone-component components)}]
+    (spit (str source-path) (str (pr-str source) "\n"))
+    (spit (str sbom-path)
+          (str (json/generate-string sbom {:pretty true}) "\n"))
+    (spit (str notices-path)
+          (str "# Third-party notices\n\n"
+               "The complete machine-readable component inventory is in "
+               "`sbom.cdx.json`. License declarations below are copied from "
+               "installed package metadata; `NOASSERTION` means the package "
+               "did not expose one there. Bun, Datahike, and Babashka license "
+               "texts ship in `THIRD_PARTY_LICENSES/`.\n\n"
+               "## Components\n\n"
+               (str/join "\n"
+                         (map (fn [{:seon.release.component/keys
+                                   [ecosystem group name version license]}]
+                                (str "- " ecosystem ": "
+                                     (when group (str group "/"))
+                                     name " " version " — " license))
+                              components))
+               "\n"))
+    {::source (str source-path)
+     ::sbom (str sbom-path)
+     ::notices (str notices-path)}))
 
 (defn assemble-package!
   "Assemble and verify one source-free release from built runtime inputs."
@@ -620,6 +768,11 @@
            [::config :string]
            [::brand-css {:optional true} :string]
            [::babashka-license :string]
+           [::bun-license :string]
+           [::datahike-license :string]
+           [::source :string]
+           [::sbom :string]
+           [::notices :string]
            [::node-modules :string]
            [::package-json :string]
            [::bun-lock :string]
@@ -628,8 +781,9 @@
   [{::keys [package-root bun bun-version writer pod execution bootstrap
             public-assets program-source babashka babashka-asset operator
             detach-helper
-            launcher config brand-css babashka-license node-modules package-json bun-lock
-            license]}]
+            launcher config brand-css babashka-license bun-license
+            datahike-license source sbom notices node-modules package-json
+            bun-lock license]}]
   (let [root (fs/path package-root)
         runtime (fs/path root "runtime")
         runtime-root (fs/path root "runtime-root")]
@@ -658,6 +812,13 @@
     (copy-file! config (fs/path root "config/selected.edn"))
     (copy-file! babashka-license
                 (fs/path root "THIRD_PARTY_LICENSES/babashka-EPL-1.0.txt"))
+    (copy-file! bun-license
+                (fs/path root "THIRD_PARTY_LICENSES/bun-LICENSE.md"))
+    (copy-file! datahike-license
+                (fs/path root "THIRD_PARTY_LICENSES/datahike-EPL-1.0.txt"))
+    (copy-file! source (fs/path root "SOURCE.edn"))
+    (copy-file! sbom (fs/path root "sbom.cdx.json"))
+    (copy-file! notices (fs/path root "THIRD_PARTY_NOTICES.md"))
     (copy-directory! bootstrap (fs/path runtime-root "out/bootstrap"))
     (copy-directory! public-assets
                      (fs/path runtime-root "resources/public"))
@@ -890,8 +1051,13 @@
               "--frozen-lockfile")
         (production-package-json! (fs/path root "package.json")
                                   (fs/path closure "package.json"))
-        (assemble-package!
-         {::package-root (str stage)
+        (let [metadata
+              (write-release-metadata!
+               root build-root
+               (fs/path root "target/seon-database-server-standalone.jar")
+               (fs/path closure "node_modules"))]
+          (assemble-package!
+           {::package-root (str stage)
         ::bun bun
         ::bun-version version
         ::writer (str (fs/path root
@@ -912,10 +1078,16 @@
         ::brand-css brand-css
         ::babashka-license
         (str (fs/path root "reference-code/babashka/LICENSE"))
+        ::bun-license (str (fs/path root "reference-code/bun/LICENSE.md"))
+        ::datahike-license
+        (str (fs/path root "reference-code/datahike/LICENSE"))
+        ::source (::source metadata)
+        ::sbom (::sbom metadata)
+        ::notices (::notices metadata)
         ::node-modules (str (fs/path closure "node_modules"))
         ::package-json (str (fs/path closure "package.json"))
         ::bun-lock (str (fs/path closure "bun.lock"))
-          ::license (str (fs/path root "LICENSE"))}))
+            ::license (str (fs/path root "LICENSE"))})))
       (fs/move stage target {:atomic-move true})
       (read-manifest! (str (fs/path target "release.edn")))
       (finally
