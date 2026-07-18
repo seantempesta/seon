@@ -557,11 +557,11 @@
                  "the page uses the configured canvas block before derivation")
              (is (= 3 (count (::db/members @acquisition)))
                  "the page acquires the agent, count, and configuration")
-             (is (= 16
+             (is (= 65536
                     (get-in @acquisition
                             [::db/members 1
                              :datahike.resource/max-results]))
-                 "the scalar count includes result and cache evidence nodes")
+                 "the scalar count budgets its retained matching relation")
              (is (= 4096
                     (get-in @acquisition
                             [::db/members 2

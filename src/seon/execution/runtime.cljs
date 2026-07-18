@@ -320,7 +320,9 @@
     ::protocol/query-form '[:find (count ?a) . :where [?a :seon.agent/id]]
     ::protocol/arguments []
     :datahike.resource/max-work 1000000
-    :datahike.resource/max-results 16
+    ;; The scalar output is one number; Datahike charges the matching relation
+    ;; nodes it retains while computing that aggregate.
+    :datahike.resource/max-results 65536
     :datahike.resource/max-result-weight 1024}
    {::protocol/operation protocol/pull-operation
     ::protocol/selector '[*]
