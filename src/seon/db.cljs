@@ -19,7 +19,12 @@
 (schema/register! ::tx-data [:vector :any])
 (schema/register! ::opts :map)
 (schema/register! ::tx-meta :map)
-(schema/register! ::error :map)
+(schema/register!
+ ::error
+ [:map
+  [:seon.error/message :string]
+  [:seon.error/kind :keyword]
+  [:seon.error/data {:optional true} :map]])
 (schema/register! ::branch-head :seon.db.branch/head)
 (schema/register! ::query-form [:or [:vector :any] :map :string])
 (schema/register! ::query :any)
@@ -65,7 +70,7 @@
   [:seon.db.id/generated-candidates {:optional true}
    :seon.db.id/generated-candidates]])
 (schema/register!
- ::transact-response
+ ::transaction-report
  [:map {:closed true}
   [:db-before :db-before]
   [:db-after :db-after]
@@ -75,6 +80,7 @@
   [:seon.db.id/eids {:optional true} :seon.db.id/eids]
   [:seon.db.id/recovered-commit?
    {:optional true} :seon.db.id/recovered-commit?]])
+(schema/register! ::transact-response [:or ::transaction-report ::error])
 (schema/register!
  ::query-request
  [:map {:closed true}

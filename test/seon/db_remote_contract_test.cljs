@@ -5,7 +5,8 @@
    [seon.db :as db]
    [seon.db.protocol :as protocol]
    [seon.db.transport.uds :as uds]
-   [seon.instrument :as instrument]))
+   [seon.instrument :as instrument]
+   [seon.schema :as schema]))
 
 (def ^:private database-name "contract-default")
 (def ^:private socket-path "tmp/db-remote-contract.sock")
@@ -18,6 +19,13 @@
    :since nil
    :history false
    :datahike/commit-id #uuid "10000000-0000-0000-0000-000000000002"})
+
+(deftest transaction-response-includes-ordinary-database-errors
+  (is (schema/valid-candidate-value?
+       :seon.db/transact-response
+       {:seon.error/message "transaction refused"
+        :seon.error/kind :core-bug
+        :seon.error/data {:seon.db.protocol/request-id "request-1"}})))
 
 (defn- success
   [request body]
