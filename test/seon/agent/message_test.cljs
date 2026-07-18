@@ -230,7 +230,9 @@
                                 (second (::protocol/prefix %)))
                             (::db/members index-request)))
                 (is (= [22 21] (::db/refs pull-request)))
-                (is (= database (::db/db pull-request))))))
+                (is (= database (::db/db pull-request)))
+                (is (not (contains? pull-request ::db/max-results))
+                    "nested pull values are weight-bounded, not row-count bounded"))))
            (.finally
             (fn []
               (set! db/execute-many execute-many)
@@ -274,7 +276,9 @@
               (let [[db-value options] (first @requests)]
                 (is (= database db-value))
                 (is (= :reverse (::db/direction options))))
-              (is (= [4 3] (::db/refs (second @requests))))))
+              (is (= [4 3] (::db/refs (second @requests))))
+              (is (not (contains? (second @requests) ::db/max-results))
+                  "the index page already bounds the message entities")))
            (.finally
             (fn []
               (set! db/index-page index-page)

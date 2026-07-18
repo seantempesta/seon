@@ -6,6 +6,7 @@
     [my.plan :as plan]
     [my.plan.internal :as internal]
     [seon.db :as db]
+    [seon.db.protocol :as protocol]
     [seon.schema :as schema]))
 
 (def ^:private database
@@ -53,7 +54,9 @@
           (.then
            (fn [hiccup]
              (is (vector? hiccup))
-             (is (str/includes? (pr-str hiccup) "Ship"))))
+             (is (str/includes? (pr-str hiccup) "Ship"))
+             (is (protocol/ordinary-wire-value? hiccup)
+                 "complete nested plan hiccup crosses the child boundary")))
           (.finally (fn [] (set! db/query original-query)))
           (.then (fn [_] (done)))
           (.catch (fn [error] (is false (str error)) (done)))))))

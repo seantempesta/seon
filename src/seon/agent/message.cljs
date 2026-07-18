@@ -166,7 +166,6 @@
                     {::db/db database
                      ::db/pull-pattern recent-pull-pattern
                      ::db/refs entity-ids
-                     ::db/max-results limit
                      ::db/max-result-weight 524288}))
                   [])]
             (if (failed-read? messages)
@@ -200,7 +199,6 @@
                     {::db/db database
                      ::db/pull-pattern recent-pull-pattern
                      ::db/refs entity-ids
-                     ::db/max-results limit
                      ::db/max-result-weight 524288}))
                   [])]
             (if (failed-read? messages)
