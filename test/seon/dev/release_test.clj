@@ -1,7 +1,20 @@
 (ns seon.dev.release-test
   (:require [babashka.fs :as fs]
+            [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing]]
-            [seon.dev.release :as release]))
+            [seon.dev.release :as release])
+  (:import [java.util.jar JarEntry JarOutputStream]))
+
+(defn- write-jar! [path timestamp]
+  (with-open [output (JarOutputStream. (io/output-stream (str path)))]
+    (doseq [[name content] [["META-INF/MANIFEST.MF" "Manifest-Version: 1.0\n"]
+                            ["example.txt" "same bytes"]]]
+      (let [entry (JarEntry. name)]
+        (.setTime entry timestamp)
+        (.putNextEntry output entry)
+        (.write output (.getBytes content "UTF-8"))
+        (.closeEntry output))))
+  path)
 
 (defn- fixture! []
   (let [root (fs/create-temp-dir {:prefix "seon-release-test-"})]
@@ -277,4 +290,15 @@
         (spit (str (fs/path source "deps.edn")) "{:changed true}\n")
         (is (thrown-with-msg? Exception #"source digest does not match"
                               (release/verify-sdk! (str root) manifest))))
+      (finally (fs/delete-tree root {:force true})))))
+
+(deftest jar-normalization-removes-packaging-time-from-executable-bytes
+  (let [root (fs/create-temp-dir {:prefix "seon-normalized-jar-"})
+        first-jar (write-jar! (fs/path root "first.jar") 1000000000000)
+        second-jar (write-jar! (fs/path root "second.jar") 2000000000000)]
+    (try
+      (#'release/normalize-jar! first-jar)
+      (#'release/normalize-jar! second-jar)
+      (is (= (seq (fs/read-all-bytes first-jar))
+             (seq (fs/read-all-bytes second-jar))))
       (finally (fs/delete-tree root {:force true})))))

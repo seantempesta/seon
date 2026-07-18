@@ -10,7 +10,8 @@
             [seon.db.protocol :as database-protocol])
   (:import [java.nio.charset StandardCharsets]
            [java.nio.file Files LinkOption]
-           [java.security MessageDigest]))
+           [java.security MessageDigest]
+           [java.util.jar JarEntry JarFile JarOutputStream]))
 
 (def current-version 1)
 
@@ -428,6 +429,35 @@
   (fs/copy-tree source target {:replace-existing true})
   target)
 
+(defn- normalize-jar! [path]
+  ;; tools.build writes current ZIP timestamps. Re-emit the identical entry
+  ;; names and bytes in one sorted order with a fixed timestamp so a release's
+  ;; executable bytes—not only its semantic digest—are reproducible.
+  (let [path (fs/path path)
+        temporary (fs/path (fs/parent path)
+                           (str "." (fs/file-name path) "."
+                                (random-uuid) ".tmp"))]
+    (try
+      (with-open [jar (JarFile. (str path))
+                  output (JarOutputStream. (io/output-stream (str temporary)))]
+        (doseq [entry (->> (enumeration-seq (.entries jar))
+                           (remove #(.isDirectory ^JarEntry %))
+                           (sort-by (fn [entry]
+                                      (let [name (.getName ^JarEntry entry)]
+                                        [(if (= "META-INF/MANIFEST.MF" name)
+                                           0 1)
+                                         name]))))]
+          (let [normalized (JarEntry. (.getName ^JarEntry entry))]
+            (.setTime normalized 0)
+            (.putNextEntry output normalized)
+            (with-open [input (.getInputStream jar entry)]
+              (.transferTo input output))
+            (.closeEntry output))))
+      (fs/move temporary path {:replace-existing true})
+      path
+      (finally
+        (when (fs/exists? temporary) (fs/delete temporary))))))
+
 (def ^:private sdk-source-paths
   ["bin" "src" "resources" "script" "test" "java" "externs" "config"
    "seon-skills" "build.clj" "bb.edn" "deps.edn" "shadow-cljs.edn"
@@ -825,12 +855,17 @@
         (fs/create-dirs directory))
       (let [{:seon.dev.release/keys [executable identity]}
             (download-babashka! build-root environment)
-            operator (build-operator! root build-root environment executable)
+            operator (normalize-jar!
+                      (build-operator! root build-root environment executable))
             launcher (write-launcher! (fs/path build-root "bin/seon"))]
         (run! root environment "clojure" "-X:deps" "prep" ":aliases"
               "[:writer :cljs]")
         (run! root environment "clojure" "-T:build" "writer-uber")
-        (run! root environment "clojure" "-M:cljs" "compile" "bootstrap")
+        (normalize-jar!
+         (fs/path root "target/seon-database-server-standalone.jar"))
+        (run! root environment "clojure" "-M:cljs" "compile" "bootstrap"
+              "--config-merge"
+              (pr-str {:compiler-options {:parallel-build false}}))
         (run! root environment (str (fs/path root "bin/fix-bootstrap-macros")))
         ;; The SDK is an exact source/build artifact, not a snapshot of the
         ;; producer's node_modules. Resolve the lock-pinned build closure

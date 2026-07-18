@@ -399,6 +399,10 @@
         (is (= 'acme.pod/-main (:main pod-merge)))
         (is (= {:enabled false :preloads [] :build-notify nil}
                (:devtools pod-merge)))
+        (is (false? (get-in pod-merge
+                            [:compiler-options :parallel-build])))
+        (is (false? (get-in execution-merge
+                            [:compiler-options :parallel-build])))
         (is (= 'acme.execution/-main (:main execution-merge))))
       (finally
         (fs/delete-tree directory)

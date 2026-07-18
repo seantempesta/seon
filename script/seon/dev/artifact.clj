@@ -647,6 +647,7 @@
       "client"
       (cond->
        {:output-to client-output
+        :compiler-options {:parallel-build false}
         :build-hooks
         [['seon.dev.program-artifact/publish! program-source-relative]]
         :devtools {:enabled false :preloads [] :build-notify nil}}
@@ -666,6 +667,7 @@
       "execution"
       (cond->
        {:output-to execution-output
+        :compiler-options {:parallel-build false}
         :devtools {:enabled false}}
         (not (str/blank?
               (get-in release-config
