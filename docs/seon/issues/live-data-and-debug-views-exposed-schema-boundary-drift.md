@@ -40,6 +40,10 @@ existing unit gates:
   consumers. Those maps used `selector`/`eid`/`eids`; the one public
   `seon.db` API and its Datomic-shaped call sites use
   `pull-pattern`/`ref`/`refs`.
+- With the public pull map restored, the namespace selector reached its stored
+  require-edge components and showed they were not declared as stored entity
+  data. `:seon.ns` now declares its component ref and the existing analyzer
+  require-edge map is marked as the stored component entity it already is.
 
 ## Acceptance
 
@@ -52,6 +56,8 @@ existing unit gates:
 - The namespace block's agent/block configuration selector contains only
   Datahike-installed attributes.
 - No maintained source or test uses the removed pull request keys.
+- Namespace and require-edge entity schemas install every attribute used by
+  the structural require-edge pull selector.
 - The data view consumes Datahike's `:datahike.index-page/datoms` result
   directly.
 - Prompt acquisition uses bounded but realistic Datahike result-tree and

@@ -389,6 +389,16 @@
                  :seon.agent.ctx.namespaces/current-tests?])
         "agent context settings are native Datahike attributes at initialization")))
 
+(deftest namespace-entities-declare-structural-require-edges
+  (let [namespace-attributes
+        (into #{}
+              (map first)
+              (drop 2 (schema/schema-definition :seon.ns)))
+        edge-form (schema/schema-definition :seon.analyzer-info/require-edge)]
+    (is (contains? namespace-attributes :seon.ns/require-edges))
+    (is (true? (:seon.db/entity (second edge-form)))
+        "stored require-edge component attributes install before optional pulls")))
+
 (deftest index-schemas-persists-generator-policy-as-data
   (let [rows      @schemas-tx
         by-key    (into {} (map (juxt :seon.schema/key identity)) rows)

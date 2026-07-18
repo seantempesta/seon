@@ -263,7 +263,8 @@
          :seon.render/ai   'seon.handlers.ns/render-ai
          :seon.render/html 'seon.handlers.ns/render-html}
    [:seon.ns/name   :seon.ns/name]
-   [:seon.ns/source :seon.ns/source]])
+   [:seon.ns/source :seon.ns/source]
+   [:seon.ns/require-edges {:optional true} :seon.ns/require-edges]])
 
 ;; :seon.agent — the agent's OWN entity shape. Its page/canvas operation
 ;; selects the surface renderer after acquiring one immutable agent value;

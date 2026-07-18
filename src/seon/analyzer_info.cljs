@@ -236,7 +236,7 @@
 (schema/register! :seon.ns.require/as-alias? :boolean)
 
 (schema/register! ::require-edge
-                  [:map
+                  [:map {:seon.db/entity true}
                    [:seon.ns.require/target :seon.ns.require/target]
                    [:seon.ns.require/alias {:optional true} :seon.ns.require/alias]
                    [:seon.ns.require/refers {:optional true} :seon.ns.require/refers]
