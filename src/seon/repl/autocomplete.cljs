@@ -21,7 +21,6 @@
    datasets are STALE — re-export, never patch (source identity is manifest
    content and therefore changes its digest)."
   (:require
-    ["node:child_process" :as child-process]
     ["node:crypto" :as node-crypto]
     ["node:fs" :as nfs]
     ["node:path" :as npath]
@@ -39,7 +38,8 @@
     [seon.ai.tokens :as tokens]
     [seon.config :as config]
     [seon.db :as db]
-    [seon.schema :as schema]))
+    [seon.schema :as schema]
+    [seon.subprocess :as subprocess]))
 
 ;; ============================================================
 ;; Curation attrs — datoms ON the turn entity (`:seon.agent.turn/id` is
@@ -391,16 +391,20 @@
           (< bucket 90) "milestone"
           :else "test")))
 
-(defn- source-identity [projection-sha]
+(defn- ^:async source-identity [projection-sha]
   (let [head (git-head-sha)
-        diff (try
-               (.toString
-                 (.execFileSync child-process "git"
-                   #js ["diff" "--binary" "HEAD" "--"
-                        "src" "config" "deps.edn" "shadow-cljs.edn"
-                        "package.json" "package-lock.json"]
-                   #js {:stdio #js ["ignore" "pipe" "ignore"]}))
-               (catch :default _ "source-diff-unavailable"))]
+        result (await
+                 (subprocess/run!
+                   {::subprocess/cmd
+                    ["git" "diff" "--binary" "HEAD" "--"
+                     "src" "config" "deps.edn" "shadow-cljs.edn"
+                     "package.json" "package-lock.json"]
+                    ::subprocess/max-output-bytes (* 16 1024 1024)}))
+        diff (if (and (nil? (::subprocess/spawn-error result))
+                      (zero? (::subprocess/exit result))
+                      (not (::subprocess/output-truncated? result)))
+               (::subprocess/out result)
+               "source-diff-unavailable")]
     {"revision" head
      "projection_sha" projection-sha
      ;; Diagnostic source-world identity. The runtime artifact's application
@@ -533,7 +537,7 @@
           k     (or distractors 3)
           database (database-name)
           runtime-artifact (runtime-artifact-identity)
-          source (source-identity sha)
+          source (await (source-identity sha))
           turn-pairs
           (result!
             (await
