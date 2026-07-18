@@ -3,9 +3,7 @@
   (:require
    [cljs.test :refer [async deftest is]]
    [seon.agent.lifecycle :as lifecycle]
-   [seon.agent.loop :as loop]
    [seon.agent.message :as message]
-   [seon.agent.runtime :as runtime]
    [seon.agent.run :as run]
    [seon.db :as db]
    [seon.db.id :as db.id]
@@ -107,7 +105,6 @@
           pause! run/pause!
           resume! run/resume!
           available? admission/available?
-          drive! loop/drive-run!
           calls (atom [])]
       (set! db/current-agent-id (constantly "root"))
       (set! db/db (fn ([] (js/Promise.resolve database))
@@ -132,9 +129,6 @@
               (swap! calls conj [:resume request])
               (js/Promise.resolve native-report)))
       (set! admission/available? (constantly true))
-      (set! loop/drive-run!
-            (fn [request]
-              (swap! calls conj [:drive request])))
       (finish!
        (-> (lifecycle/pause {:seon.agent/id "agent-a"})
            (.then
@@ -146,8 +140,7 @@
               (is (= :running resumed))
               (is (every?
                    #(identical? database (::db/db (second %)))
-                   (remove #(= :drive (first %)) @calls)))
-              (is (= 1 (count (filter #(= :drive (first %)) @calls)))))))
+                   @calls)))))
        done
        [[#(set! db/current-agent-id %) current-agent-id]
         [#(set! db/db %) db!]
@@ -155,8 +148,7 @@
         [#(set! run/current-run %) current]
         [#(set! run/pause! %) pause!]
         [#(set! run/resume! %) resume!]
-        [#(set! admission/available? %) available?]
-        [#(set! loop/drive-run! %) drive!]]))))
+        [#(set! admission/available? %) available?]]))))
 
 (deftest complete-commits-result-message-close-and-pointer-retract-once
   (async done
@@ -327,9 +319,7 @@
           pull db/pull
           current run/current-run
           transact! db/transact!
-          unhost! runtime/unhost!
-          transaction (atom nil)
-          unhosted (atom nil)]
+          transaction (atom nil)]
       (set! db/current-agent-id (constantly "root"))
       (set! db/db (fn ([] (js/Promise.resolve database))
                     ([_] (js/Promise.resolve database))))
@@ -346,17 +336,11 @@
             (fn [& call-args]
               (reset! transaction (first call-args))
               (js/Promise.resolve native-report)))
-      (set! runtime/unhost!
-            (fn [request]
-              (reset! unhosted request)
-              {:seon.agent/id "agent-a"
-               :seon.agent.runtime/unhosted? true}))
       (finish!
        (-> (lifecycle/terminate "agent-a")
            (.then
             (fn [result]
               (is (= :terminated result))
-              (is (= {:seon.agent/id "agent-a"} @unhosted))
               (let [tx (::db/tx-data @transaction)]
                 (is (identical? database (::db/db @transaction)))
                 (is (identical? database (::db/expected-db @transaction)))
@@ -369,5 +353,4 @@
         [#(set! db/db %) db!]
         [#(set! db/pull %) pull]
         [#(set! run/current-run %) current]
-        [#(set! db/transact! %) transact!]
-        [#(set! runtime/unhost! %) unhost!]]))))
+        [#(set! db/transact! %) transact!]]))))

@@ -3641,3 +3641,23 @@ so the blocker remains open. The next falsifier is the execution artifact's
 eager runtime dependency graph; bundle byte size alone is not an optimization
 target. The retained code-execution contract, process isolation, persistent
 namespace, and current-program application may not weaken to reach the bound.
+
+The next source-grounded cut removes a wrongly duplicated control plane rather
+than trimming compiled bytes. The public agent and lifecycle namespaces had
+pulled `seon.agent.runtime`, `seon.agent.loop`, `seon.execution.host`, turn
+driving, and every provider adapter into each execution child. Child-side
+creation, delegation, pause, resume, and termination now commit only their
+ordinary database transitions. The existing pod runtime-advertisement interest
+is strengthened in place to react to agent identity, termination, wake, and run
+pause datoms; it derives the affected agent IDs at the event's `db-after` and
+idempotently resumes or unhosts through `seon.agent.runtime`. Cold boot and hot
+reload call that pod owner directly. No poller, second listener registry, or
+child-to-parent command protocol is added.
+
+Before this ownership cut, the canonical complete gate passed operator 243
+tests/1,393 assertions, writer 219/1,821, and CLJS 1,109/4,937 with zero
+failures or errors. The first focused implementation proof passes 41 tests and
+224 assertions across durable birth, lifecycle transitions, pod database-event
+reaction, initialization/reload, and admission. Live delegation, termination,
+pod restart, and physical-memory evidence are still required before this cut is
+settled.

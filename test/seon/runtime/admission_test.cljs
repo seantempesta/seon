@@ -427,12 +427,10 @@
               (agent/delegate!
                 {:seon.agent.message/content "closed task"})
               runtime-resume-result
-              (runtime/resume! {:seon.agent/id "closed-agent"})
-              agent-resume-result
-              (agent/resume! {:seon.agent/id "closed-agent"})]
+              (runtime/resume! {:seon.agent/id "closed-agent"})]
           (-> (js/Promise.all
                 #js [message-result start-result delegate-result
-                     runtime-resume-result agent-resume-result])
+                     runtime-resume-result])
               (.then
                 (fn [results]
                   (doseq [result (array-seq results)]
@@ -497,8 +495,7 @@
           original-pull db/pull
           original-current-run run/current-run
           original-current-agent-id db/current-agent-id
-          original-transact db/transact!
-          original-unhost runtime/unhost!]
+          original-transact db/transact!]
       (set! db/db
             (fn
               ([] (js/Promise.resolve ::database))
@@ -519,10 +516,6 @@
             (fn [& _]
               (swap! !effects conj :terminate-write)
               (js/Promise.resolve {:seon.db/ok? true})))
-      (set! runtime/unhost!
-            (fn [_]
-              (swap! !effects conj :unhost)
-              {:seon.agent.runtime/unhosted? true}))
       (-> (js/Promise.all
             #js [(lifecycle/wait "drain")
                  (lifecycle/complete "")
@@ -539,8 +532,8 @@
                 (is (string? (:seon.error/message pause-result))
                     "pause reached its ordinary no-open-run diagnosis")
                 (is (= :terminated terminate-result))
-                (is (= [:terminate-write :unhost] @!effects)
-                    "terminate performs its durable write before unhosting"))))
+                (is (= [:terminate-write] @!effects)
+                    "terminate performs only its durable transition"))))
           (.catch (fn [error]
                     (is false (str "drain control threw — " error))))
           (.finally
@@ -549,8 +542,7 @@
               (set! db/pull original-pull)
               (set! run/current-run original-current-run)
               (set! db/current-agent-id original-current-agent-id)
-              (set! db/transact! original-transact)
-              (set! runtime/unhost! original-unhost)))
+              (set! db/transact! original-transact)))
           (.then (fn [_] (done)))))))
 
 (deftest available-baseline-preserves-domain-validation-and-schedule-effects

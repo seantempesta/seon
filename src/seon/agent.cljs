@@ -61,7 +61,6 @@
     [seon.agent.home :as home]
     [seon.agent.internal :as internal]
     [seon.agent.message :as msg]
-    [seon.agent.runtime :as runtime]
     [seon.agent.ctx :as ctx]
     [seon.agent.ctx.namespaces :as ctx-namespaces]
     [seon.agent.ctx.transcript :as ctx-transcript]
@@ -732,10 +731,10 @@
    [:seon.agent/default-turn-limit  {:optional true}
     :seon.agent/default-turn-limit]])
 (schema/register! ::start-response
-  [:or ::create-response :seon.agent.runtime/resume-response])
+  ::create-response)
 
 (defn ^:async ^:private spawn-child!
-  "Commit one child birth, then host it from the committed facts."
+  "Commit one child birth; the pod hosts it from the committed transaction."
   [database configuration purpose default-turn-limit parent-id
    initial-message-transaction]
   (let [res
@@ -753,12 +752,7 @@
             parent-id
             (assoc :seon.agent/parent [:seon.agent/id parent-id]))))
         child-id (get-in res [::db.id/ids :seon.agent/id])]
-    (if (error-value? res)
-      res
-      (let [resumed (await (runtime/resume! {:seon.agent/id child-id}))]
-        (if (:seon.agent.runtime/resumed? resumed)
-          {:seon.agent/id child-id}
-          resumed)))))
+    (if (error-value? res) res {:seon.agent/id child-id})))
 
 (defn- spawn-depth-error
   [function-name parent-id depth cap]
@@ -839,8 +833,8 @@
    `db/current-agent-id`) in the same transaction. The child is IDLE: it does
    no work until it receives a message (which opens its run #1).
 
-   The minted child's process runtime is resumed before this returns. Use
-   `delegate!` when child birth and an initial task must be one transaction.
+   The pod observes the committed birth and hosts the child. Use `delegate!`
+   when child birth and an initial task must be one transaction.
 
    Resolves to `{:seon.agent/id child-id}`. Called outside an agent scope, the
    child is created parentless, matching `create!`."
@@ -865,7 +859,7 @@
    [:seon.agent/default-turn-limit  {:optional true}
     :seon.agent/default-turn-limit]])
 (schema/register! ::delegate-response
-  [:or ::create-response :seon.agent.runtime/resume-response])
+  ::create-response)
 
 (defn ^:async delegate!
   "Spawn a child AND hand it its task in ONE call.
@@ -884,8 +878,7 @@
    `:seon.agent/default-turn-limit` (optional) seeds the child's work
    bound. RESOLVES to `{:seon.agent/id child-id}` on success — the id you
    address for any follow-up. A database failure commits neither child nor
-   task. A hosting failure returns the runtime error while the committed facts
-   remain available for runtime reconciliation."
+   task. The pod hosts the committed child from the same database event."
   {:malli/schema [:=> [:cat ::delegate-request] ::delegate-response]}
   [{:seon.agent/keys [purpose default-turn-limit]
     content :seon.agent.message/content}]
@@ -896,34 +889,6 @@
        (spawn-child-with-retry!
         "delegate!" parent-id purpose default-turn-limit content))
       (internal/no-agent-error "delegate!"))))
-
-;; ============================================================
-;; Process lifecycle. Durable birth is above; these delegate to the one
-;; process-local runtime owner.
-;; ============================================================
-
-(defn ^:async resume!
-  "Reconstruct an existing nonterminated agent's process-local runtime."
-  {:malli/schema
-   [:=> [:cat :seon.agent.runtime/resume-request]
-    :seon.agent.runtime/resume-response]}
-  [request]
-  (if-not (admission/available?)
-    (let [id (:seon.agent/id request)]
-      {:seon.agent/id id
-       :seon.agent.runtime/resumed? false
-       :seon.agent.runtime/error
-       "resume!: runtime program generation is unavailable"
-       :seon/error (:seon/error (admission/unavailable))})
-    (await (runtime/resume! request))))
-
-(defn unhost!
-  "Remove an agent's listener, loop input, and runtime advertisement."
-  {:malli/schema
-   [:=> [:cat :seon.agent.runtime/unhost-request]
-    :seon.agent.runtime/unhost-response]}
-  [request]
-  (runtime/unhost! request))
 
 ;; ============================================================
 ;; message! lives in [[seon.agent.message]] (the keyword namespace matches

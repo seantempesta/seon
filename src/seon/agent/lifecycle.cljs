@@ -9,9 +9,7 @@
   (:require
    [clojure.string :as str]
    [seon.agent.internal :as internal]
-   [seon.agent.loop :as loop]
    [seon.agent.message :as message]
-   [seon.agent.runtime :as runtime]
    [seon.agent.run :as run]
    [seon.db :as db]
    [seon.db.id :as db.id]
@@ -350,10 +348,7 @@
                          (error-value? report) report
                          (not (admission/available?))
                          (:seon/error (admission/unavailable))
-                         :else
-                         (do
-                           (loop/drive-run! {:seon.agent/id target-id})
-                           :running))))))))))))))
+                         :else :running)))))))))))))
 
 (defn ^:async ^:private terminate-once
   [caller-id target-id]
@@ -396,9 +391,5 @@
   (if-let [caller-id (db/current-agent-id)]
     (if (= "root" target-id)
       (error-value "terminate: the cluster root cannot be terminated.")
-      (let [final-result
-            (await (retry-stale! #(terminate-once caller-id target-id)))]
-        (when (= :terminated final-result)
-          (runtime/unhost! {:seon.agent/id target-id}))
-        final-result))
+      (await (retry-stale! #(terminate-once caller-id target-id))))
     (internal/no-agent-error "terminate")))

@@ -4,6 +4,7 @@
    [my.skills :as skills]
    [seon.agent :as agent]
    [seon.agent.loop :as agent-loop]
+   [seon.agent.runtime :as agent-runtime]
    [seon.client :as client]
    [seon.config :as config]
    [seon.db :as db]
@@ -275,7 +276,7 @@
           original-begin admission/begin-publication!
           original-publish admission/publish-committed!
           original-unavailable admission/mark-unavailable!
-          original-resume agent/resume!
+          original-resume agent-runtime/resume!
           original-install agent-loop/install-ticker!
           original-heartbeat client/start-heartbeat!
           effects (atom [])
@@ -316,7 +317,7 @@
                 ::admission/instrumentation {}})))
       (set! admission/mark-unavailable!
             (fn [_] (swap! effects conj :unavailable) true))
-      (set! agent/resume!
+      (set! agent-runtime/resume!
             (fn [request]
               (swap! effects conj [::resume request])
               (@rehost-started-resolve true)
@@ -372,7 +373,7 @@
              (set! admission/begin-publication! original-begin)
              (set! admission/publish-committed! original-publish)
              (set! admission/mark-unavailable! original-unavailable)
-             (set! agent/resume! original-resume)
+             (set! agent-runtime/resume! original-resume)
              (set! agent-loop/install-ticker! original-install)
              (set! client/start-heartbeat! original-heartbeat)
              (done)))))))
@@ -387,7 +388,7 @@
           original-begin admission/begin-publication!
           original-publish admission/publish-committed!
           original-unavailable admission/mark-unavailable!
-          original-resume agent/resume!
+          original-resume agent-runtime/resume!
           original-install agent-loop/install-ticker!
           original-heartbeat client/start-heartbeat!
           effects (atom [])
@@ -424,7 +425,7 @@
               (swap! effects conj :unavailable)
               (@finish true)
               true))
-      (set! agent/resume!
+      (set! agent-runtime/resume!
             (fn [_]
               (swap! effects conj :rehost)
               (js/Promise.resolve {:seon.agent.runtime/resumed? true})))
@@ -454,7 +455,7 @@
              (set! admission/begin-publication! original-begin)
              (set! admission/publish-committed! original-publish)
              (set! admission/mark-unavailable! original-unavailable)
-             (set! agent/resume! original-resume)
+             (set! agent-runtime/resume! original-resume)
              (set! agent-loop/install-ticker! original-install)
              (set! client/start-heartbeat! original-heartbeat)
              (done)))))))

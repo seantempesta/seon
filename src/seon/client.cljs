@@ -375,14 +375,79 @@
                  state)))
       refresh)))
 
+(def ^:private runtime-agent-datom-patterns
+  [{::db/a :seon.agent/id}
+   {::db/a :seon.agent/terminated-at}
+   {::db/a :seon.agent.runtime/wake?}
+   {::db/a :seon.agent.run/paused-at}])
+
+(def ^:private agent-ids-for-entities-query
+  '[:find [?id ...]
+    :in $ [?entity ...]
+    :where [?entity :seon.agent/id ?id]])
+
+(def ^:private agent-ids-for-runs-query
+  '[:find [?id ...]
+    :in $ [?run ...]
+    :where
+    [?agent :seon.agent/run ?run]
+    [?agent :seon.agent/id ?id]])
+
+(defn- event-entity-ids
+  [tx-data attributes]
+  (into []
+        (comp (filter (fn [[_ attribute]] (contains? attributes attribute)))
+              (map first)
+              (distinct))
+        tx-data))
+
+(defn- ^:async reconcile-agent-runtimes!
+  "Apply committed agent lifecycle facts to the pod's process-local runtimes."
+  [{database :db-after tx-data :tx-data}]
+  (when database
+    (let [agent-entities
+          (event-entity-ids
+           tx-data
+           #{:seon.agent/id :seon.agent/terminated-at
+             :seon.agent.runtime/wake?})
+          run-entities
+          (event-entity-ids tx-data #{:seon.agent.run/paused-at})
+          direct-ids
+          (if (seq agent-entities)
+            (await
+             (db/query
+              {::db/db database
+               ::db/query agent-ids-for-entities-query
+               ::db/args [agent-entities]}))
+            [])
+          run-ids
+          (if (seq run-entities)
+            (await
+             (db/query
+              {::db/db database
+               ::db/query agent-ids-for-runs-query
+               ::db/args [run-entities]}))
+            [])
+          failure
+          (some #(when (:seon.error/message %) %) [direct-ids run-ids])]
+      (if failure
+        (throw (ex-info "Agent runtime projection failed." failure))
+        (let [ids (into [] (comp cat (distinct)) [direct-ids run-ids])]
+          (doseq [id ids]
+            (await (agent-runtime/resume! {:seon.agent/id id})))
+          ids)))))
+
 (defn- runtime-advertisement-event!
   [owner event]
   (when-let [database (:db-after event)]
-    (-> (refresh-runtime-advertisement! owner database)
+    (-> (js/Promise.all
+         #js [(refresh-runtime-advertisement! owner database)
+              (reconcile-agent-runtimes! event)])
+        (.then (fn [results] (aget results 0)))
         (.catch
          (fn [error]
            (log/error-console! "seon.client"
-                               "runtime advertisement refresh failed" error))))))
+                               "runtime agent refresh failed" error))))))
 
 (defn- ^:async attach-runtime-advertisement-owner!
   [owner]
@@ -394,7 +459,7 @@
               (await
                (db/listen!
                 {::db/key ::runtime-advertisement
-                 ::db/query derive/resumable-agent-ids-query
+                 ::db/datom-patterns runtime-agent-datom-patterns
                  ::db/handler #(runtime-advertisement-event! owner %)}))]
           (when (:seon.error/message interest-key)
             (throw (ex-info "Runtime advertisement interest failed."
@@ -1776,7 +1841,7 @@
 (defn- rehost-agent-runtimes!
   "Reconstruct every nonterminated agent after a code reload.
 
-   This is process-local work only: [[seon.agent/resume!]] per
+   This is process-local work only: [[seon.agent.runtime/resume!]] per
    database-derived id. Each agent's execution child reconstructs its accepted
    program lazily; the pod owns no compiler or program replay."
   []
@@ -1785,7 +1850,7 @@
         (.then
          (fn ^:async rehost! [ids]
            (doseq [id ids]
-             (await (agent/resume! {:seon.agent/id id})))
+             (await (agent-runtime/resume! {:seon.agent/id id})))
            (log/info-console! "seon.client"
                               "reload: agent runtimes rehosted"
                               {:seon.client/reinstalled ids})
@@ -2146,7 +2211,7 @@
                     (doseq [id resumable-ids]
                       (vswap! !results conj
                               (await
-                               (agent/resume!
+                               (agent-runtime/resume!
                                 (cond->
                                   {:seon.agent/id id}
                                   (fn? llm-fn)

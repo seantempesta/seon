@@ -411,10 +411,11 @@ run #1.
 Agent creation compiles configured initial EDN into the same canonical entity/
 component/program maps every later reader uses, validates all of them, and
 commits them atomically with the actual submitting user and REPL process. The
-runtime then establishes the analyzer namespace, loads only the safe persisted
-declarations, installs one wake trigger, and hosts the agent. Initial context and
-functions appear because those facts exist, not because Seon manufactured quiet
-eval transcript rows or replayable seed commands.
+pod observes the committed agent facts through its one runtime interest, then
+installs one wake trigger and hosts the agent. The execution child never owns a
+pod loop, listener registry, provider dispatcher, or another execution-child
+supervisor. Initial context and functions appear because those facts exist, not
+because Seon manufactured quiet eval transcript rows or replayable seed commands.
 
 `:my.agent/purpose` and the reusable home-namespace functions/schemas are normal
 canonical schema/program facts. The purpose value lives on the agent and remains
@@ -562,9 +563,11 @@ Mint, resume, config apply, and render do no instrumentation work.
 A warm agent birth never calls this sequence. Birth commits the complete durable
 birth value in one transaction under the actual submitting user/REPL process:
 the agent, initial components, home namespace, home-require rows, and safe
-declarations. Only after that commit does it create the transient wake trigger
-and runtime host. Resume is a third explicit operation that reconstructs one
-existing host without creating or overwriting initial state.
+declarations. The pod's runtime interest reacts to that committed transaction
+and creates the transient wake trigger and runtime host. Pause, resume, and
+termination likewise commit ordinary run or agent facts; the pod applies their
+process-local consequences. Runtime reconstruction reads existing facts without
+creating or overwriting initial state.
 
 Runtime “replay” is limited to declaration loading. Scratch/effectful evals,
 Promises, handles, sockets, and external effects are never re-executed to mimic
@@ -646,11 +649,11 @@ not a root-only documentation system.
     child created), never a throw. It is a **config-dialed number, never a name
     list** — raise the dial + add the spawn requires to the general agent-context to
     deepen the tree.
-- **Start = durable creation + transient host, leaving the child idle.** `start!`
-  commits the child's complete initial facts, establishes its safe runtime
-  projection, and stops. The child does no work until it receives a trigger; to
-  make it work, root (or anyone) sends it a message—that message opens run #1.
-  Two steps, one entry function.
+- **Start = durable creation observed by the pod, leaving the child idle.**
+  `start!` commits the child's complete initial facts and returns its id. The
+  pod establishes the safe runtime projection from that same committed
+  transaction. The child does no work until it receives a trigger; to make it
+  work, root (or anyone) sends it a message—that message opens run #1.
 - **Roles are capability-SETS, not a stored `:kind`/`:role`.** A role is the set
   of functions its home requires/context makes discoverable plus the guarded
   operations those functions allow. "Orchestrator" discovers spawn/terminate/

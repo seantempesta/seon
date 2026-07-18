@@ -6,7 +6,6 @@
    [seon.agent :as agent]
    [seon.agent.ctx :as ctx]
    [seon.agent.message :as message]
-   [seon.agent.runtime :as runtime]
    [seon.config :as config]
    [seon.db :as db]
    [seon.db.id :as db.id]
@@ -178,7 +177,7 @@
         [#(set! db/transact! %) transact!]
         [#(set! ctx/initial-agent-context %) initial-agent-context]]))))
 
-(deftest delegate-commits-child-and-first-task-once-before-hosting
+(deftest delegate-commits-child-and-first-task-once
   (async done
     (let [available? admission/available?
           current-agent-id db/current-agent-id
@@ -187,11 +186,8 @@
           initial-agent-context ctx/initial-agent-context
           initial-message message/initial-agent-transaction
           allocate! db.id/allocate!
-          resume! runtime/resume!
           standalone-message message/agent
           allocation (atom nil)
-          committed? (atom false)
-          hosted (atom nil)
           creation-configurations (atom [])
           standalone-calls (atom 0)]
       (set! admission/available? (constantly true))
@@ -242,21 +238,12 @@
               (let [ids {:seon.agent/id "child"
                          :seon.agent.message/id "message"}
                     built ((::db.id/transaction-builder request) ids)]
-                (reset! committed? true)
                 (js/Promise.resolve
                  {:db-before database
                   :db-after database-after
                   :tx-data (::db/tx-data built)
                   :tempids {}
                   ::db.id/ids ids}))))
-      (set! runtime/resume!
-            (fn [request]
-              (is @committed? "hosting begins only after the database commit")
-              (reset! hosted request)
-              (js/Promise.resolve
-               {:seon.agent/id "child"
-                :seon.agent/ns 'my.agent.child
-                :seon.agent.runtime/resumed? true})))
       (set! message/agent
             (fn [& _]
               (swap! standalone-calls inc)
@@ -268,7 +255,6 @@
            (.then
             (fn [result]
               (is (= {:seon.agent/id "child"} result))
-              (is (= {:seon.agent/id "child"} @hosted))
               (is (zero? @standalone-calls))
               (is (= #{:seon.agent/id :seon.agent.message/id}
                      (set (map ::db.id/key
@@ -305,7 +291,6 @@
         [#(set! ctx/initial-agent-context %) initial-agent-context]
         [#(set! message/initial-agent-transaction %) initial-message]
         [#(set! db.id/allocate! %) allocate!]
-        [#(set! runtime/resume! %) resume!]
         [#(set! message/agent %) standalone-message]]))))
 
 (deftest start-reacquires-after-concurrent-births
@@ -315,12 +300,10 @@
           db! db/db
           pull-many db/pull-many
           allocate! db.id/allocate!
-          resume! runtime/resume!
           databases [database database-after latest-database]
           db-calls (atom 0)
           acquired (atom [])
-          allocations (atom 0)
-          hosted (atom 0)]
+          allocations (atom 0)]
       (set! admission/available? (constantly true))
       (set! db/current-agent-id (constantly nil))
       (set! db/db
@@ -351,12 +334,6 @@
                     :tx-data []
                     :tempids {}
                     ::db.id/ids {:seon.agent/id "child"}})))))
-      (set! runtime/resume!
-            (fn [_]
-              (swap! hosted inc)
-              (js/Promise.resolve
-               {:seon.agent/id "child"
-                :seon.agent.runtime/resumed? true})))
       (finish!
        (-> (agent/start! {})
            (.then
@@ -365,16 +342,13 @@
               (is (= databases @acquired)
                   "each stale transaction reacquires all database-derived input")
               (is (= 3 @db-calls))
-              (is (= 3 @allocations))
-              (is (= 1 @hosted)
-                  "only the committed child is hosted"))))
+              (is (= 3 @allocations)))))
        done
        [[#(set! admission/available? %) available?]
         [#(set! db/current-agent-id %) current-agent-id]
         [#(set! db/db %) db!]
         [#(set! db/pull-many %) pull-many]
-        [#(set! db.id/allocate! %) allocate!]
-        [#(set! runtime/resume! %) resume!]]))))
+        [#(set! db.id/allocate! %) allocate!]]))))
 
 (deftest set-purpose-authorizes-and-writes-at-one-database-value
   (async done
