@@ -244,8 +244,16 @@ roles. Release application `8f8fb5da…` loaded its selected Aero manifest with
 the relative include graph intact, rendered its canvas and supporting surfaces
 over gzip, ran a real agent through two ACME functions, restarted, and read the
 committed results back. Its recursively read-only package hash remained exactly
-`3e9775bd…`. The remaining downstream gate is build independence through a
-separate version-matched SDK while this producer checkout is unavailable.
+`3e9775bd…`. Build independence is now also closed. SDK revision `cc093dcf…`
+contains committed Seon build source, exact maintained Datahike source, the
+patched Bun binary, and Babashka license with complete digest `cc1ebcdb…`.
+Two pristine SDK extractions, each denied all reads beneath the producer
+checkout by the host sandbox, produced byte-identical complete ACME packages
+with application digest `8d5877b9…` and release-manifest SHA-256 `3db8fe1a…`.
+The next distribution boundary is clean downstream development MCP plus the
+remaining selected-source/license/notice/SBOM inventory and general downstream
+descriptor; production runtime immutability and reproducibility no longer
+block it.
 
 The existing remote query surface now exposes its protocol-native historical
 view, closing the only facade gap needed by coordinate-pinned startup birth.

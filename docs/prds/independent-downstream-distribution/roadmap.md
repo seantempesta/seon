@@ -1,6 +1,6 @@
 ---
 type: prd
-status: planned
+status: active
 tags: [prd, component, cljs, flow]
 ---
 
@@ -22,10 +22,13 @@ digest `80054020…` and resolve the same maintained dependency SHAs. That close
 writer collision and parity inside this checkout; it does not publish a
 consumer contract.
 
-The downstream build remains checkout-dependent: its operator, Shadow build,
-public SDK, bootstrap/source corpus, static assets, npm closure, base config,
-and dependency overrides all come from the Seon repository. The resulting
-production runtime itself is now source-free and independent.
+The downstream build no longer depends on the producer checkout. One release
+command emits the source-free runtime and an optional, separate build SDK. The
+SDK is assembled from committed source with `git archive`, includes the exact
+maintained Datahike source and patched Bun executable selected by its manifest,
+and carries the source, Datahike, Bun, and Babashka revisions plus a complete
+source digest. A downstream build resolves its lock-pinned build dependencies
+inside that SDK and packages only the production npm closure.
 
 The production downstream overlay boundary is directly proven. Release
 application `8f8fb5da…` used ACME's source directory plus two ordinary Shadow
@@ -48,9 +51,23 @@ read both values back. The complete package file hash remained exactly
 the Bun pod and JVM writer. Focused release/config/artifact proof passes 44
 tests/212 assertions.
 
-The earliest unsettled contract is therefore no longer the production runtime
-overlay. It is the separate version-matched downstream build SDK: ACME must be
-able to perform the same build while the producer checkout is inaccessible.
+The separate version-matched SDK now passes the stronger build-independence
+proof. SDK revision `cc093dcf…` selects Datahike `4c55791b…`, patched Bun
+`d8ecf098…`, and Babashka `0fb349c4…`; its complete source digest is
+`cc1ebcdb…`. Two pristine SDK extractions built the complete ACME overlay under
+a macOS sandbox rule that denied every read beneath the producer checkout.
+Both resulting source-free package trees are byte-for-byte identical and have
+application digest `8d5877b9…`; their release manifests share SHA-256
+`3db8fe1a…`. The reproducibility cut disables parallel release compilation,
+normalizes JAR entry metadata, and replaces Shadow's bootstrap source
+timestamps with the zero value that Shadow's own freshness checks explicitly
+support. It does not normalize or ignore differing executable bytes.
+
+The earliest unsettled distribution contract is now the development-tooling
+and release-metadata remainder: prove cluster-qualified CLJ and CLJS MCP from a
+clean downstream SDK root, publish the complete selected-source/license/
+notice/SBOM inventory, and replace the remaining closed development flavor map
+with the validated downstream descriptor before final graduation.
 
 The first production-entry boundary is now implemented and directly proven.
 The pod no longer requires `shadow.cljs.devtools.client.env`; its build identity

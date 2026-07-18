@@ -9,27 +9,28 @@ tags: [issue, component, cljs, flow]
 
 ## Problem
 
-ACME is intended to prove that a third party can consume and customize Seon
-without a Seon source checkout, but its build and operator still require that
-checkout. The current “packaged” branch verifies a manifest and then tries to
-start a Shadow watcher. The current CLJS entry is a development loader into an
-unpackaged, checkout-local Shadow runtime tree.
-
-The standalone writer uberjar solves only the database process. There is no
-released CLJS runtime/SDK, source corpus, bootstrap/assets/npm closure, packaged
-operator, compatibility manifest, or one-command release/downstream build.
+ACME now proves that a third party can build and run a customized source-free
+Seon production package without access to the producer checkout. The remaining
+blocker is completing the public distribution contract around that working
+runtime: clean downstream development MCP, a general downstream descriptor,
+and the complete selected-source/license/notice/SBOM inventory.
 
 ## Evidence
 
-- `bin/acme` resolves and execs the adjacent checkout's `bin/seon`.
-- `acme/deps.edn` declares no Seon coordinate; the root artifact builder injects
-  it into the root `:cljs` classpath as a local dependency.
-- `shadow-cljs.edn` owns the hard-coded `acme-client` build.
-- `out-acme/client/main.js` loads 1,037 files from
-  `tmp/shadow/acme/builds/acme-client/dev/out/cljs-runtime` and embeds the
-  current Shadow server identity.
-- `seon.dev.process/specs` always emits the `clj -M:cljs watch` process even
-  when `:seon.dev.config/source-checkout?` is false.
+- The production package contains a standalone JVM writer, compiled Bun pod,
+  compiled Bun execution child, self-host bootstrap, bounded program source,
+  assets, production npm closure, packaged operator, configuration include
+  graph, and license. It starts no Shadow watcher and needs no Clojure CLI.
+- `bin/seon release <runtime> --sdk <sdk>` emits the runtime and separate build
+  SDK. The SDK comes from committed source, carries exact source/Datahike/Bun/
+  Babashka revisions, and does not copy the producer's mutable dependency tree.
+- Two pristine SDK extractions built complete ACME packages while the host
+  denied all reads beneath the producer checkout. Their entire package trees
+  are byte-identical with application digest `8d5877b9…` and identical release
+  manifests (`3db8fe1a…`).
+- The production ACME package has rendered custom surfaces and CSS, run ACME
+  functions in a real Bun execution child, restarted, read committed results
+  back, and remained recursively immutable.
 - Development artifact manifest version 4 still contains absolute
   client/cache paths and omits release/protocol/SDK/runtime/license
   compatibility data. It now binds the exact six maintained public-Git
@@ -44,10 +45,11 @@ operator, compatibility manifest, or one-command release/downstream build.
   [[shared-bootstrap-output-mutates-running-artifact]].
 - `seon.platform` and `seon.client` read bootstrap, source corpus, and web
   assets from checkout-shaped paths at runtime.
-- The current MCP adapter is itself checkout-owned. CLJS eval requires a Shadow
+- The current MCP adapter is still checkout-owned. CLJS eval requires a Shadow
   nREPL and CLJ eval requires the development writer `io-prepl`, while the
   production process boundary deliberately ships neither.
-- Root `LICENSE` is AGPL-3.0 while `package.json` declares ISC.
+- Root `LICENSE` is AGPL-3.0 while `package.json` declares ISC; the complete
+  notice/SBOM and selected-source inventory is not yet shipped.
 - Selected ClojureScript is `1.12.145`, but the current
   `reference-code/clojurescript` mirror identifies itself as `1.12.41`.
   Exact source is also absent for Clojure, tools.build, superv.async, and
