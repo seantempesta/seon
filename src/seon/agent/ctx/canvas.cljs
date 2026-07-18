@@ -294,7 +294,7 @@
    missing) — every created agent is welcome-wired, so in practice
    the section is always present; the unwired branch is the
    correctness floor."
-  {:malli/schema [:=> [:cat :seon.render/section-request :any] :string]}
+  {:malli/schema [:=> [:cat :seon.render/section-request :any] :map]}
   [{:seon.agent/keys [id entity] :as input} invoke-selected!]
   (try
     (let [database (or (::db/db input)
@@ -330,14 +330,15 @@
     ;; and even then the agent reads a clear, actionable safe-state, not
     ;; a swallowed error keyword. Self-heals on the next clean render.
     (catch :default e
-      (str "; Your canvas — loading (safe-state placeholder this turn).\n"
-           "; The per-turn canvas derivation hit an unexpected error and\n"
-           "; degraded gracefully; your human sees the calm core welcome\n"
-           "; card, never a broken panel. This is a transient render\n"
-           "; hiccup that self-heals next turn.\n"
-           ";\n"
-           "; Diagnostic: " (ex-message e) "\n"
-           ";\n"
-           "; To (re)wire your canvas, transact a qualified fn symbol or\n"
-           "; literal hiccup onto :seon.render.canvas/content on your\n"
-           "; agent entity."))))
+      {:seon.render/ai
+       (str "; Your canvas — loading (safe-state placeholder this turn).\n"
+            "; The per-turn canvas derivation hit an unexpected error and\n"
+            "; degraded gracefully; your human sees the calm core welcome\n"
+            "; card, never a broken panel. This is a transient render\n"
+            "; hiccup that self-heals next turn.\n"
+            ";\n"
+            "; Diagnostic: " (ex-message e) "\n"
+            ";\n"
+            "; To (re)wire your canvas, transact a qualified fn symbol or\n"
+            "; literal hiccup onto :seon.render.canvas/content on your\n"
+            "; agent entity.")})))
