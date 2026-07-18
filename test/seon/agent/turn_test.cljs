@@ -136,8 +136,9 @@
           parsed [{:seon.repl/kind :form
                    :seon.repl/source "(+ 1 2)"}]]
       (set! execution.host/invoke-compiled!
-            (fn [database agent-id function-symbol arguments]
-              (reset! observed [database agent-id function-symbol arguments])
+            (fn [database agent-id function-symbol arguments run-fence]
+              (reset! observed [database agent-id function-symbol arguments
+                                run-fence])
               (js/Promise.resolve
                {::execution/message execution/result-message
                 :seon.db/db database
@@ -153,16 +154,44 @@
                      :seon.eval/n-fail 0
                      :seon.eval/ids ["eval-1"]}
                     result))
-             (is (= [database "agent-1"
-                     'seon.execution.runtime/eval-batch!
-                     [{:seon.eval/parsed parsed
-                       :seon.eval/starting-ns 'my.agent.agent-1
-                       :seon.agent.turn/id-of-turn "turn-1"
-                       :seon.agent.run/id-of-run "run-1"}]]
-                    @observed))))
+              (is (= [database "agent-1"
+                      'seon.execution.runtime/eval-batch!
+                      [{:seon.eval/parsed parsed
+                        :seon.eval/starting-ns 'my.agent.agent-1
+                        :seon.agent.turn/id-of-turn "turn-1"
+                        :seon.agent.run/id-of-run "run-1"}]
+                      {:seon.agent.run/id "run-1"}]
+                     @observed))))
           (.catch
            (fn [error]
              (is false (str "eval invocation rejected: " error))))
+          (.finally
+           (fn []
+             (set! execution.host/invoke-compiled! original)
+             (done)))))))
+
+(deftest retired-child-eval-error-preserves-the-recovery-signal
+  (async done
+    (let [original execution.host/invoke-compiled!]
+      (set! execution.host/invoke-compiled!
+            (fn [database _agent-id _function-symbol _arguments _run-fence]
+              (js/Promise.resolve
+               {::execution/message execution/error-message
+                :seon.db/db database
+                ::execution/error
+                {:seon.error/message "The invocation timed out."
+                 :seon.error/kind :agent
+                 :seon.error/data {::execution/child-retired? true}}})))
+      (-> (turn/eval-parsed!
+           "agent-1" database [] 'my.agent.agent-1 "turn-1" "run-1")
+          (.then
+           (fn [result]
+             (is (= "The invocation timed out."
+                    (:seon.error/message result)))
+             (is (true? (get-in result [:seon.error/data
+                                        ::execution/child-retired?])))))
+          (.catch (fn [error]
+                    (is false (str "eval invocation rejected: " error))))
           (.finally
            (fn []
              (set! execution.host/invoke-compiled! original)

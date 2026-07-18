@@ -55,9 +55,11 @@
     [seon.db.protocol :as db.protocol]
     [seon.derive :as derive]
     [seon.eval :as seval]
+    [seon.execution :as execution]
     [seon.log :as seon-log]
     [seon.repl.internal :as repl-internal]
     [seon.runtime.admission :as admission]
+    [seon.runtime.recovery :as recovery]
     [seon.schema :as schema]
     [seon.warn :as warn]))
 
@@ -344,6 +346,35 @@
   ;; this exceptional drain path intentionally lets close-run! acquire head.
   (await (close-loop-run! nil run-id :quiesced state :quiesce)))
 
+(defn ^:async ^:private recover-retired-child!
+  [agent-id run-id state]
+  (let [recovered
+        (await
+         (db/with-tx-context
+          {:seon.db/user [:seon.agent/id agent-id]
+           :seon.db/process [:seon.db.process/id :seon.db.process/repl]}
+          (fn []
+            (recovery/recover!
+             {:seon.agent/id agent-id
+              :seon.agent.run/id run-id
+              :seon.runtime.recovery/detail
+              "execution child retired during active work"}))))]
+    (if (::recovery/repaired? recovered)
+      (do
+        (log agent-id "halt" "execution child retired → run :crashed")
+        (transition state :error))
+      (let [latest (await (acquire-loop-state agent-id run-id))
+            event (if (database-error? latest)
+                    :error
+                    (next-event latest 0))]
+        (if (= :superseded event)
+          (transition state :superseded)
+          (do
+            (log agent-id "halt" "execution-child recovery failed")
+            (await
+             (close-loop-run! (::db/db latest) run-id
+                              :error state :error))))))))
+
 (defn ^:async run-loop!
   "Drive agentic turns for `run-id` until the FSM leaves :running.
 
@@ -429,6 +460,7 @@
                     ;; guarantee: a failed/fenced/hung open can NEVER masquerade
                     ;; as a successful no-op turn (which would recur `:turn-ok`
                     ;; forever — a retry storm).
+                    child-retired? (true? (::execution/child-retired? r))
                     errored? (or (= :error (:seon.agent.turn/status r))
                                  (database-error? r)
                                  (nil? (:seon.agent.turn/id r)))]
@@ -437,44 +469,35 @@
                   :unavailable (admission/unavailable)
                   :available
                   (if errored?
-                  ;; §8c — distinguish LOST AUTHORITY (the turn's leading CAS
-                  ;; aborted: open-turn! rejected because the run was
-                  ;; superseded/watchdog-closed mid-LLM) from a genuine turn
-                  ;; error. Re-derive over the LATEST db (streak 0 — purely to
-                  ;; classify): a stop event means the run is no longer ours to
-                  ;; close → route there; otherwise the loop owns the :error
-                  ;; close.
-                  (let [latest (await (acquire-loop-state id run-id))
-                        ev (if (database-error? latest)
-                             :error
-                             (next-event latest 0))]
-                    (if (contains? #{:superseded :wait :complete :terminate} ev)
-                      (do (log id "halt" (str "turn rejected/closed — " (name ev)))
-                          (transition state ev))
-                      (do (log id "halt" "turn :error → close run :error")
-                          (await
-                           (close-loop-run! (::db/db latest) run-id
-                                            :error state :error)))))
-                  ;; A productive turn (any actionable form ⇒ eval-count > 0)
-                  ;; resets the streak; a turn with zero forms extends it
-                  ;; (next-event halts at the cap). eval-count counts ATTEMPTED
-                  ;; forms (ok + failed), so a turn whose forms all ERRORED is
-                  ;; NOT empty — it yields a next turn that shows the error.
-                  (do
-                    ;; stuck×N → frontier re-plan escalation: the turn's evals
-                    ;; just landed, so the derived flag can only TRANSITION
-                    ;; here. maybe-consult! recomputes the wedge query and
-                    ;; fires the once-per-episode planner message (both sides
-                    ;; derived — see my.plan.internal's escalation section);
-                    ;; errors are values, a failed consult never stops the
-                    ;; loop.
-                    (await (await-bounded
-                             "plan/maybe-consult!"
-                             (plan-internal/maybe-consult! {:seon.agent/id id})))
-                    (recur (transition state :turn-ok)
-                           (if (zero? (or (:seon.agent/eval-count r) 0))
-                             (inc streak)
-                             0)))))))))
+                    (if child-retired?
+                      (recover-retired-child! id run-id state)
+                    ;; §8c — distinguish LOST AUTHORITY (the turn's leading
+                    ;; CAS aborted) from a genuine turn error.
+                      (let [latest (await (acquire-loop-state id run-id))
+                            ev (if (database-error? latest)
+                                 :error
+                                 (next-event latest 0))]
+                        (if (contains? #{:superseded :wait :complete :terminate}
+                                       ev)
+                          (do
+                            (log id "halt"
+                                 (str "turn rejected/closed — " (name ev)))
+                            (transition state ev))
+                          (do
+                            (log id "halt" "turn :error → close run :error")
+                            (await
+                             (close-loop-run! (::db/db latest) run-id
+                                              :error state :error))))))
+                    (do
+                      (await
+                       (await-bounded
+                        "plan/maybe-consult!"
+                        (plan-internal/maybe-consult!
+                         {:seon.agent/id id})))
+                      (recur (transition state :turn-ok)
+                             (if (zero? (or (:seon.agent/eval-count r) 0))
+                               (inc streak)
+                               0)))))))))
 
           (= :error event)
           (do (log id "halt" "database read failed → close run :error")

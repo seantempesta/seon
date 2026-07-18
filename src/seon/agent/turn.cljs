@@ -262,6 +262,12 @@
 (def ^:private eval-batch-function
   'seon.execution.runtime/eval-batch!)
 
+(defn- execution-child-retired?
+  [value]
+  (or (true? (::execution/child-retired? value))
+      (true? (get-in value [:seon.error/data
+                            ::execution/child-retired?]))))
+
 (defn ^:async render-prompt
   "Render one agent prompt inside its isolated execution child.
 
@@ -276,17 +282,23 @@
      ::prompt-result]
     [:=> [:cat :seon.agent/id :seon.db/db
           :seon.agent.ctx/profile]
+     ::prompt-result]
+    [:=> [:cat :seon.agent/id :seon.db/db
+          :seon.agent.ctx/profile [:or :nil :seon.agent.run/id]]
      ::prompt-result]]}
   ([agent-id database]
    (await (render-prompt agent-id database [])))
   ([agent-id database profile]
+   (await (render-prompt agent-id database profile nil)))
+  ([agent-id database profile run-id]
    (let [request (cond-> {:seon.agent/id agent-id}
                    (seq profile)
                    (assoc :seon.agent.ctx/profile (vec profile)))
          response
          (await
-           (execution.host/invoke-compiled!
-             database agent-id render-prompt-function [request]))]
+           (apply execution.host/invoke-compiled!
+                  (cond-> [database agent-id render-prompt-function [request]]
+                    run-id (conj {:seon.agent.run/id run-id}))))]
      (cond
        (not= database (:seon.db/db response))
        {:seon.error/message
@@ -335,8 +347,9 @@
                   run-id (assoc :seon.agent.run/id-of-run run-id))
         response
         (await
-         (execution.host/invoke-compiled!
-          database agent-id eval-batch-function [request]))]
+         (apply execution.host/invoke-compiled!
+                (cond-> [database agent-id eval-batch-function [request]]
+                  run-id (conj {:seon.agent.run/id run-id}))))]
     (cond
       (not= database (:seon.db/db response))
       {:seon.error/message
@@ -463,19 +476,25 @@
       ;; Mark the turn :error best-effort, then preserve the pre-allocation
       ;; propagation contract. Scheduled/direct callers still observe a
       ;; rejected Promise; the committed id travels with that rejection.
-      (let [message (turn-error-str e)]
-        (try
-          (await (db/transact!
-                   {:seon.db/tx-data
-                    [{:seon.agent.turn/id     id-of-turn
-                      :seon.agent.turn/status :error
-                      :seon.agent.turn/error  message}]}))
-          (catch :default _ nil))
+      (let [message (turn-error-str e)
+            failure-data (ex-data e)
+            child-retired? (execution-child-retired? failure-data)]
+        (when-not child-retired?
+          (try
+            (await (db/transact!
+                    {:seon.db/tx-data
+                     [{:seon.agent.turn/id     id-of-turn
+                       :seon.agent.turn/status :error
+                       :seon.agent.turn/error  message}]}))
+            (catch :default _ nil)))
         (throw
           (ex-info message
-                   {:seon.agent.turn/id     id-of-turn
-                    :seon.agent.turn/status :error
-                    :seon.error/data        message}
+                   (cond->
+                    {:seon.agent.turn/id     id-of-turn
+                     :seon.agent.turn/status :error
+                     :seon.error/data        message}
+                     child-retired?
+                     (assoc ::execution/child-retired? true))
                    e))))))
 
 ;; ============================================================
@@ -823,7 +842,7 @@
         ;; repl-mode read off the DB DATOM (config-through-DB), pinned to
         ;; the SAME frozen db the prompt renders from — the turn loop never
         ;; reads the config accessor.
-        prompt-result (await (render-prompt id database))
+        prompt-result (await (render-prompt id database [] run-id))
         _ (when (:seon.error/message prompt-result)
             (throw (ex-info (:seon.error/message prompt-result)
                             prompt-result)))
@@ -906,11 +925,14 @@
         ;; loop's concern (its finally resets :idle); the turn never touches it.
         ;; A body failure carries the identity already committed by open-turn!.
         (let [failure-data (ex-data e)
-              turn-id     (:seon.agent.turn/id failure-data)]
+              turn-id     (:seon.agent.turn/id failure-data)
+              child-retired? (execution-child-retired? failure-data)]
           (log id "run-turn! error" (str e))
           (cond-> {:seon.agent.turn/status :error
                    :seon.error/data        (str e)}
-            turn-id (assoc :seon.agent.turn/id turn-id)))))))
+            turn-id (assoc :seon.agent.turn/id turn-id)
+            child-retired?
+            (assoc ::execution/child-retired? true)))))))
 
 (defn ^:async run-turn!
   "Run one complete turn and convert every outer orchestration failure to data."

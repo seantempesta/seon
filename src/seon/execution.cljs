@@ -59,6 +59,7 @@
 (schema/register! ::deadline-ms [:int {:min 0}])
 (schema/register! ::result-limit-bytes
                   [:int {:min 1 :max maximum-result-bytes}])
+(schema/register! ::child-retired? :boolean)
 (schema/register! ::run-fence [:map-of :qualified-keyword :any])
 (schema/register! ::shadow-build-id [:string {:min 1}])
 (schema/register! ::bun-version [:string {:min 1}])
@@ -443,19 +444,28 @@
 
 (defn compiled-invocation
   "Pin one parent-selected core call to the verified execution artifact."
-  {:malli/schema [:=> [:cat ::agent-id ::function-symbol ::arguments :seon.db/db
-                       ::artifact-digest]
-                  ::invoke]}
-  [agent-id function-symbol arguments database artifact-digest]
-  (let [plan (invocation-plan agent-id function-symbol arguments)]
-    (-> plan
-        (dissoc ::function-symbol)
-        (assoc ::message invoke-message
-               ::protocol-version protocol-version
-               :seon.db/db database
-               ::function-identity
-               {::function-symbol function-symbol
-                ::artifact-digest artifact-digest}))))
+  {:malli/schema
+   [:function
+    [:=> [:cat ::agent-id ::function-symbol ::arguments :seon.db/db
+          ::artifact-digest]
+     ::invoke]
+    [:=> [:cat ::agent-id ::function-symbol ::arguments :seon.db/db
+          ::artifact-digest ::run-fence]
+     ::invoke]]}
+  ([agent-id function-symbol arguments database artifact-digest]
+   (compiled-invocation agent-id function-symbol arguments database
+                        artifact-digest nil))
+  ([agent-id function-symbol arguments database artifact-digest run-fence]
+   (let [plan (cond-> (invocation-plan agent-id function-symbol arguments)
+                run-fence (assoc ::run-fence run-fence))]
+     (-> plan
+         (dissoc ::function-symbol)
+         (assoc ::message invoke-message
+                ::protocol-version protocol-version
+                :seon.db/db database
+                ::function-identity
+                {::function-symbol function-symbol
+                 ::artifact-digest artifact-digest})))))
 
 (defn ^:async prepare-invocations!
   "Pin ordinary invocation plans to their authored source identities."
@@ -746,8 +756,9 @@
     ::protocol-version protocol-version
     ::invocation-id (::invocation-id invocation)
     :seon.db/db (:seon.db/db invocation)
-    ::error {:seon.error/message "The invocation timed out."
-             :seon.error/kind :agent}})
+   ::error {:seon.error/message "The invocation timed out."
+             :seon.error/kind :agent
+             :seon.error/data {::child-retired? true}}})
   (exit! 1))
 
 (defn- begin-invocation!

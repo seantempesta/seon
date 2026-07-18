@@ -147,6 +147,19 @@ Revisit the evaluator only if measured active-child capacity becomes a real
 graduation blocker; do not retain a hybrid evaluator or fork the official
 compiler.
 
+Execution-child failure now reaches the existing database recovery owner
+without waiting for a pod restart. Parent deadline and abnormal-exit errors are
+distinguished from ordinary cancellation; prompt and eval invocations carry the
+current `:seon.agent.run/id`; and the loop calls the agent/run-scoped form of
+`seon.runtime.recovery/recover!`. Its leading Datahike CAS remains the authority:
+one transaction retracts only that run pointer, closes the run `:crashed`, and
+marks still-running turns and eval receipts `:interrupted`; a later run or a
+duplicate exit wins without a second write. The complete CLJS checkpoint passes
+1,126 tests / 4,995 assertions. Remaining before automatic recovery is enabled:
+persist a bounded terminal process snapshot plus diagnostic blob, open one new
+recovery run, and derive the repeated-crash breaker from recovery and later-turn
+history.
+
 The same audit found an interrupted `bun out/test/test.js` orphan that had
 survived for over an hour: 3.61 GB RSS, 690 MB current private physical, and
 2.7 GB peak private physical. The test runner now owns explicit Bun/output PIDs

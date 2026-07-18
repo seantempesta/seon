@@ -60,7 +60,64 @@
                        (apply str (repeat 2049 "x")))))
   (is (m/validate ::recovery/recover-request {}))
   (is (m/validate ::recovery/recover-request
-                  {:seon.runtime.recovery/detail "signal 9"})))
+                  {:seon.runtime.recovery/detail "signal 9"}))
+  (is (m/validate ::recovery/recover-request
+                  {:seon.agent/id "alpha"
+                   :seon.agent.run/id "n12345678901"
+                   :seon.runtime.recovery/detail "execution child deadline"}))
+  (is (not (m/validate ::recovery/recover-request
+                       {:seon.agent/id "alpha"}))))
+
+(deftest execution-child-recovery-is-scoped-to-one-agent-run
+  (async done
+    (let [!execute-request (atom nil)
+          !built (atom nil)
+          allocate
+          (fn [request]
+            (let [built ((::db.id/transaction-builder request)
+                         {:seon.runtime.recovery/id "r12345678901"})]
+              (reset! !built built)
+              (js/Promise.resolve
+               {:db-before database
+                :db-after database-after
+                :tx-data (::db/tx-data built)
+                :tempids {}
+                :tx-meta {}
+                ::db.id/ids {:seon.runtime.recovery/id "r12345678901"}})))]
+      (-> (with-authority-stubs
+           (acquisition #{["alpha" "n12345678901" :open]}
+                        #{["n12345678901" "turn-a"]}
+                        #{["n12345678901" "turn-a" "eval-a"]})
+           allocate
+           (fn []
+             (let [original db/execute-many]
+               (set! db/execute-many
+                     (fn [request]
+                       (reset! !execute-request request)
+                       (original request)))
+               (recovery/recover!
+                {:seon.agent/id "alpha"
+                 :seon.agent.run/id "n12345678901"
+                 :seon.runtime.recovery/detail
+                 "execution child deadline"}))))
+          (.then
+           (fn [result]
+             (let [members (::db/members @!execute-request)
+                   tx (::db/tx-data @!built)]
+               (is (= 4 (count members)))
+               (is (= [["alpha" "n12345678901"]
+                       ["alpha" "n12345678901"]
+                       ["alpha" "n12345678901"]
+                       []]
+                      (mapv ::protocol/arguments members)))
+               (is (= ["alpha"] (::recovery/agent-ids result)))
+               (is (= ["n12345678901"] (::recovery/run-ids result)))
+               (is (some #{(db/cas-assert
+                            [:seon.agent/id "alpha"]
+                            :seon.agent/run
+                            [:seon.agent.run/id "n12345678901"])} tx)))))
+          (.catch (fn [error] (is false (str "threw — " error))))
+          (.finally done)))))
 
 (deftest incomplete-runs-turns-and-evals-compile-one-fenced-transaction
   (async done

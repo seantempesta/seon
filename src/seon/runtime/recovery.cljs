@@ -51,10 +51,17 @@
 (schema/register! ::run-ids [:vector ::db.id/compact-value])
 (schema/register! ::turn-ids [:vector ::db.id/compact-value])
 (schema/register! ::eval-ids [:vector ::db.id/compact-value])
-(schema/register! ::recover-request
-  [:map
+(schema/register!
+ ::recover-request
+ [:or
+  [:map {:closed true}
    [:seon.runtime.recovery/detail
-    {:optional true} :seon.runtime.recovery/detail]])
+    {:optional true} :seon.runtime.recovery/detail]]
+  [:map {:closed true}
+   [:seon.agent/id :string]
+   [:seon.agent.run/id ::db.id/compact-value]
+   [:seon.runtime.recovery/detail
+    {:optional true} :seon.runtime.recovery/detail]]])
 (schema/register! ::recover-response
   [:or
    [:map
@@ -104,11 +111,46 @@
     [?schema :seon.schema/key :seon.runtime.recovery/id]
     [?schema :seon.db.id/generator ?generator]])
 
+(def ^:private scoped-repair-target-query
+  '[:find ?agent-id ?run-id ?status
+    :in $ ?agent-id ?run-id
+    :where
+    [?agent :seon.agent/id ?agent-id]
+    [?agent :seon.agent/run ?run]
+    [?run :seon.agent.run/id ?run-id]
+    [?run :seon.agent.run/status ?status]
+    (not [?agent :seon.agent/terminated-at _])])
+
+(def ^:private scoped-running-turns-query
+  '[:find ?run-id ?turn-id
+    :in $ ?agent-id ?run-id
+    :where
+    [?agent :seon.agent/id ?agent-id]
+    [?agent :seon.agent/run ?run]
+    [?run :seon.agent.run/id ?run-id]
+    [?turn :seon.agent.turn/run ?run]
+    [?turn :seon.agent.turn/id ?turn-id]
+    [?turn :seon.agent.turn/status :running]])
+
+(def ^:private scoped-running-evals-query
+  '[:find ?run-id ?turn-id ?eval-id
+    :in $ ?agent-id ?run-id
+    :where
+    [?agent :seon.agent/id ?agent-id]
+    [?agent :seon.agent/run ?run]
+    [?run :seon.agent.run/id ?run-id]
+    [?turn :seon.agent.turn/run ?run]
+    [?turn :seon.agent.turn/id ?turn-id]
+    [?turn :seon.agent.turn/evals ?eval]
+    [?eval :seon.eval/id ?eval-id]
+    [?eval :seon.eval/status :running]])
+
 (defn- query-member
-  [query]
-  {::protocol/operation protocol/query-operation
-   ::protocol/query-form query
-   ::protocol/arguments []})
+  ([query] (query-member query []))
+  ([query arguments]
+   {::protocol/operation protocol/query-operation
+    ::protocol/query-form query
+    ::protocol/arguments arguments}))
 
 (defn- member-value!
   [operation member]
@@ -120,15 +162,21 @@
                      ::protocol/error-kind (::protocol/error-kind member)}))))
 
 (defn- ^:async acquire-recovery!
-  [database]
-  (let [acquired
+  [database agent-id run-id]
+  (let [scoped? (and agent-id run-id)
+        arguments (if scoped? [agent-id run-id] [])
+        queries (if scoped?
+                  [scoped-repair-target-query scoped-running-turns-query
+                   scoped-running-evals-query]
+                  [repair-targets-query running-turns-query
+                   running-evals-query])
+        acquired
         (await
          (db/execute-many
           {::db/db database
            ::db/members
-           (mapv query-member
-                 [repair-targets-query running-turns-query
-                  running-evals-query recovery-policy-query])}))]
+           (conj (mapv #(query-member % arguments) queries)
+                 (query-member recovery-policy-query))}))]
     (if (:seon.error/message acquired)
       acquired
       (let [[targets turns evals policy] (::db/results acquired)]
@@ -229,13 +277,15 @@
    returned as direct error values; no partial repair can commit."
   {:malli/schema [:=> [:catn [::request ::recover-request]]
                   ::recover-response]}
-  [{:seon.runtime.recovery/keys [detail]}]
+  [{:seon.runtime.recovery/keys [detail]
+    agent-id :seon.agent/id
+    run-id :seon.agent.run/id}]
   (try
     (let [database (await (db/db))]
       (if (error-value? database)
         database
         (let [{::keys [targets generator] :as acquired}
-              (await (acquire-recovery! database))]
+              (await (acquire-recovery! database agent-id run-id))]
           (cond
             (error-value? acquired)
             acquired

@@ -485,6 +485,8 @@
              (is (= "The invocation was canceled."
                     (get-in result [::execution/error
                                     :seon.error/message])))
+             (is (nil? (get-in result [::execution/error :seon.error/data
+                                       ::execution/child-retired?])))
              (is (nil? (::execution/result result))
                  "the late success was discarded")
              (let [after-cancel (host/invoke! (invocation "after-cancel"))]
@@ -541,6 +543,8 @@
              (is (= "The invocation was canceled."
                     (get-in result [::execution/error
                                     :seon.error/message])))
+             (is (true? (get-in result [::execution/error :seon.error/data
+                                        ::execution/child-retired?])))
              (feed! (first @options) (:process first-child)
                     (result-message "non-settling" {:my.render/value :late}))
              (is (nil? (::execution/result result))

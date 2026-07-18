@@ -9,7 +9,9 @@
     [seon.agent.turn :as turn]
     [seon.db :as db]
     [seon.db.protocol :as db.protocol]
-    [seon.runtime.admission :as admission]))
+    [seon.execution :as execution]
+    [seon.runtime.admission :as admission]
+    [seon.runtime.recovery :as recovery]))
 
 (defn- member [result]
   {::db.protocol/success? true
@@ -182,6 +184,83 @@
              (set! run/beat! beat)
              (set! turn/run-turn! run-turn)
              (set! plan-internal/maybe-consult! consult)
+             (set! admission/state admission-state)
+             (done)))))))
+
+(deftest retired-execution-child-recovers-the-exact-run
+  (async done
+    (let [admission-state admission/state
+          db-fn db/db
+          execute-many db/execute-many
+          beat run/beat!
+          run-turn turn/run-turn!
+          recover recovery/recover!
+          close-run run/close-run!
+          database {:db-name "default" :t 9 :as-of nil :since nil
+                    :history false
+                    :datahike/commit-id
+                    #uuid "10000000-0000-0000-0000-000000000009"}
+          open-run {:seon.agent.run/id "run-a"
+                    :seon.agent.run/status :open
+                    :seon.agent.run/turn-limit 4
+                    :seon.agent.run/deadline
+                    (js/Date. (+ (.now js/Date) 60000))}
+          !recovery-request (atom nil)
+          !ordinary-close-count (atom 0)
+          _ (set! admission/state
+                  (fn [] {::admission/status :available}))
+          _ (set! db/db
+                  (fn
+                    ([] (js/Promise.resolve database))
+                    ([_request] (js/Promise.resolve database))))
+          _ (set! db/execute-many
+                  (fn [_request]
+                    (js/Promise.resolve
+                     (loop-read open-run "run-a" :batch 0 0))))
+          _ (set! run/beat!
+                  (fn [_request]
+                    (js/Promise.resolve
+                     {:db-before database :db-after database
+                      :tx-data [] :tempids {} :tx-meta {}})))
+          _ (set! turn/run-turn!
+                  (fn [_input]
+                    (js/Promise.resolve
+                     {:seon.agent.turn/id "turn-a"
+                      :seon.agent.turn/status :error
+                      ::execution/child-retired? true})))
+          _ (set! recovery/recover!
+                  (fn [request]
+                    (reset! !recovery-request request)
+                    (js/Promise.resolve
+                     {::recovery/repaired? true
+                      ::recovery/agent-ids ["agent-a"]
+                      ::recovery/run-ids ["run-a"]
+                      ::recovery/turn-ids ["turn-a"]
+                      ::recovery/eval-ids []})))
+          _ (set! run/close-run!
+                  (fn [_request]
+                    (swap! !ordinary-close-count inc)
+                    (js/Promise.resolve nil)))]
+      (-> (loop/run-loop! {:seon.agent/id "agent-a"} "run-a")
+          (.then
+           (fn [result]
+             (is (= :idle result))
+             (is (= {:seon.agent/id "agent-a"
+                     :seon.agent.run/id "run-a"
+                     :seon.runtime.recovery/detail
+                     "execution child retired during active work"}
+                    @!recovery-request))
+             (is (zero? @!ordinary-close-count))))
+          (.catch (fn [error]
+                    (is false (str "run-loop! rejected: " error))))
+          (.finally
+           (fn []
+             (set! db/db db-fn)
+             (set! db/execute-many execute-many)
+             (set! run/beat! beat)
+             (set! turn/run-turn! run-turn)
+             (set! recovery/recover! recover)
+             (set! run/close-run! close-run)
              (set! admission/state admission-state)
              (done)))))))
 

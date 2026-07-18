@@ -52,13 +52,18 @@
      (:seon.db/db invocation)
      (assoc :seon.db/db (:seon.db/db invocation)))))
 
-(defn- canceled-error [invocation]
-  {::execution/message execution/error-message
-   ::execution/protocol-version execution/protocol-version
-   ::execution/invocation-id (::execution/invocation-id invocation)
-   :seon.db/db (:seon.db/db invocation)
-   ::execution/error {:seon.error/message "The invocation was canceled."
-                      :seon.error/kind :agent}})
+(defn- canceled-error
+  ([invocation] (canceled-error invocation false))
+  ([invocation child-retired?]
+   {::execution/message execution/error-message
+    ::execution/protocol-version execution/protocol-version
+    ::execution/invocation-id (::execution/invocation-id invocation)
+    :seon.db/db (:seon.db/db invocation)
+    ::execution/error
+    (cond-> {:seon.error/message "The invocation was canceled."
+             :seon.error/kind :agent}
+      child-retired?
+      (assoc :seon.error/data {::execution/child-retired? true}))}))
 
 (defn- append-tail [tail text]
   (let [combined (str tail text)
@@ -111,7 +116,8 @@
            ::exit-code exit-code
            ::stdout-tail (::stdout-tail current)
            ::stderr-tail (::stderr-tail current)
-           ::artifact-digest (::artifact-digest current)})))
+           ::artifact-digest (::artifact-digest current)
+           ::execution/child-retired? true})))
       (when active
         ((::resolve! active)
          (host-error
@@ -122,6 +128,7 @@
            ::stdout-tail (::stdout-tail current)
            ::stderr-tail (::stderr-tail current)
            ::artifact-digest (::artifact-digest current)
+           ::execution/child-retired? true
            :seon.db/db
            (get-in active [::invocation :seon.db/db])})))
       (remove-child! agent-id generation child-id)
@@ -490,9 +497,10 @@
              ;; A head invocation may be active or still waiting for child
              ;; readiness. Retire only that head's child; queued invocations
              ;; time out without disturbing the active predecessor.
-             (when-not (cancel! agent-id invocation-id)
+             (when-not (cancel! agent-id invocation-id true)
                (stop-child! agent-id)))
-           ((::resolve! completion) (canceled-error invocation)))
+           ((::resolve! completion)
+            (canceled-error invocation @started?)))
          remaining)
         queued (atom nil)]
     (swap! !invocation-tails
@@ -561,25 +569,36 @@
 
 (defn ^:async invoke-compiled!
   "Invoke one trusted function from the digest-verified execution artifact."
-  {:malli/schema [:=> [:cat :seon.db/db
-                       :seon.execution/agent-id
-                       :seon.execution/function-symbol
-                       :seon.execution/arguments]
-                  :map]}
-  [database agent-id function-symbol arguments]
-  (let [runtime (get-in (host-configuration)
-                        [::launch-descriptor ::launch/runtime])
-        invocation
-        (execution/compiled-invocation
-         agent-id function-symbol arguments database
-         (::launch/execution-digest runtime))]
-    (await (invoke! invocation))))
+  {:malli/schema
+   [:function
+    [:=> [:cat :seon.db/db :seon.execution/agent-id
+          :seon.execution/function-symbol :seon.execution/arguments]
+     :map]
+    [:=> [:cat :seon.db/db :seon.execution/agent-id
+          :seon.execution/function-symbol :seon.execution/arguments
+          :seon.execution/run-fence]
+     :map]]}
+  ([database agent-id function-symbol arguments]
+   (await (invoke-compiled! database agent-id function-symbol arguments nil)))
+  ([database agent-id function-symbol arguments run-fence]
+   (let [runtime (get-in (host-configuration)
+                         [::launch-descriptor ::launch/runtime])
+         invocation
+         (execution/compiled-invocation
+          agent-id function-symbol arguments database
+          (::launch/execution-digest runtime) run-fence)]
+     (await (invoke! invocation)))))
 
 (defn cancel!
   "Cancel one active invocation and bound non-cooperative shutdown."
-  {:malli/schema [:=> [:cat ::execution/agent-id ::execution/invocation-id]
-                  :boolean]}
-  [agent-id invocation-id]
+  {:malli/schema
+   [:function
+    [:=> [:cat ::execution/agent-id ::execution/invocation-id] :boolean]
+    [:=> [:cat ::execution/agent-id ::execution/invocation-id :boolean]
+     :boolean]]}
+  ([agent-id invocation-id]
+   (cancel! agent-id invocation-id false))
+  ([agent-id invocation-id child-retired?]
   (if-let [current (child agent-id)]
     (if (= invocation-id
            (get-in current [::active ::invocation
@@ -599,7 +618,8 @@
                      (assoc-in [::children agent-id ::kill-timer] timer))))
         (settle-active! agent-id generation child-id
                         (canceled-error
-                         (get-in current [::active ::invocation])))
+                         (get-in current [::active ::invocation])
+                         child-retired?))
         (when
          (send-message!
           control
@@ -609,7 +629,7 @@
           (kill-process! control))
         true)
       false)
-    false))
+    false)))
 
 (defn stop-child!
   "Ask one agent child to stop and kill it after the shutdown grace."
