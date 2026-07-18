@@ -73,10 +73,14 @@
                    (is (every?
                         (fn [request]
                           (every? #(identical? database
-                                               (first (::protocol/arguments %)))
+                                               (::db/db %))
                                   (::db/members request)))
                         @requests)
-                       "every grouped member names its database source")))
+                       "every grouped member names its database source")
+                   (is (= ["agent"]
+                          (-> @requests first ::db/members first
+                              ::protocol/arguments))
+                       "the database value is not a Datalog :in argument")))
           (.catch (fn [error] (is false (str error))))
           (.finally (fn []
                       (set! db/execute-many original-execute)

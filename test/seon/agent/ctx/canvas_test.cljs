@@ -192,6 +192,15 @@
     (is (= [:div "canvas"] (:seon.render/hiccup response)))
     (is (= wired (:seon.render.canvas/wired response)))))
 
+(deftest selected-canvas-call-uses-the-renderers-system-input
+  (let [entity {:seon.agent/id agent-id}
+        call (@#'canvas-ctx/selected-canvas-call
+              agent-id entity 'seon.render.canvas/welcome)
+        input (first (:seon.execution/arguments call))]
+    (is (= entity (:seon.agent/entity input)))
+    (is (not (contains? input :seon.render/entity))
+        "the canvas acquisition key stops at the renderer boundary")))
+
 (defn- probe-candidate-history!
   [conn]
   (let [subject-ids (mapv #(str "subject-" %) (range 800))]

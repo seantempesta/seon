@@ -259,6 +259,14 @@
                 ::canvas/content value})
              ::canvas/wired wired))))
 
+(defn- selected-canvas-call
+  [id entity value]
+  {:seon.execution/function-symbol value
+   :seon.execution/invoke-selected? true
+   :seon.execution/arguments
+   [{:seon.agent/id id
+     :seon.agent/entity entity}]})
+
 (defn ^:async canvas-block
   "Show and explain the agent's current live canvas.
 
@@ -309,12 +317,8 @@
                    (first
                      (await
                        (invoke-selected!
-                         [{:seon.execution/function-symbol value
-                           :seon.execution/invoke-selected? true
-                           :seon.execution/arguments
-                           [{:seon.agent/id id
-                             :seon.render/entity
-                             (:seon.render/entity acquired)}]}]))))
+                         [(selected-canvas-call
+                           id (:seon.render/entity acquired) value)]))))
           response (cond
                      (nil? wired) {:seon.render/hiccup nil}
                      (symbol? value) (selected-canvas-response wired result)

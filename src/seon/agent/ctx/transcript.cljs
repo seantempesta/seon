@@ -741,8 +741,9 @@
 (defn- query-member
   [database query arguments max-work max-results max-result-weight]
   {::protocol/operation protocol/query-operation
+   ::db/db database
    ::protocol/query-form query
-   ::protocol/arguments (into [database] arguments)
+   ::protocol/arguments arguments
    :datahike.resource/max-work max-work
    :datahike.resource/max-results max-results
    :datahike.resource/max-result-weight max-result-weight})
