@@ -31,7 +31,7 @@
     {:promise promise :resolve! @resolve!}))
 
 (defn- fake-process
-  [{:keys [out err exit-delay-ms exit resource-usage]
+  [{:keys [out err exit-delay-ms exit resource-usage live-resource-usage]
     :or {out [] err [] exit-delay-ms 0 exit 0}}]
   (let [{:keys [promise resolve!]} (deferred)
         kills (atom [])
@@ -46,7 +46,11 @@
                             (when (= "SIGKILL" signal) (resolve! 137))))
     (aset process "unref" (fn [] nil))
     (aset process "send" (fn [_] nil))
-    (aset process "resourceUsage" (fn [] resource-usage))
+    (aset process "resourceUsage"
+          (fn [^js options]
+            (if (true? (some-> options .-live))
+              live-resource-usage
+              resource-usage)))
     (when (some? exit-delay-ms)
       (js/setTimeout #(resolve! exit) exit-delay-ms))
     {:process process :kills kills :resolve-exit! resolve!}))
@@ -259,3 +263,23 @@
            (is (= {::subprocess/in 8 ::subprocess/out 9}
                   (::subprocess/ops resources)))
            (is (every? keyword? (keys resources)))))))))
+
+(deftest live-resource-usage-is-demanded-and-returned-as-ordinary-data
+  (let [live #js {:cpuTime #js {:user (js/BigInt 110)
+                                :system (js/BigInt 30)
+                                :total (js/BigInt 140)}
+                  :rss 4096
+                  :maxRSS 8192}
+        fake (fake-process {:exit-delay-ms nil
+                            :live-resource-usage live})
+        control (subprocess/start!
+                 {::subprocess/cmd ["busy"]
+                  ::subprocess/spawn! (constantly (:process fake))})]
+    (is (= {::subprocess/cpu-time
+            {::subprocess/user 110
+             ::subprocess/system 30
+             ::subprocess/total 140}
+            ::subprocess/rss-bytes 4096
+            ::subprocess/max-rss-bytes 8192}
+           ((::subprocess/resource-usage! control))))
+    ((::subprocess/kill! control) "SIGKILL")))

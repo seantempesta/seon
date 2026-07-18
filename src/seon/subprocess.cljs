@@ -48,6 +48,21 @@
                    {::in (numeric-value (.-in ops))
                     ::out (numeric-value (.-out ops))})))))
 
+(defn- live-resource-usage [^js process]
+  (when-let [usage (try
+                     (.resourceUsage process #js {:live true})
+                     (catch :default _ nil))]
+    (let [cpu (.-cpuTime usage)]
+      (cond-> {::rss-bytes (numeric-value (.-rss usage))}
+        (some? (.-maxRSS usage))
+        (assoc ::max-rss-bytes (numeric-value (.-maxRSS usage)))
+
+        cpu
+        (assoc ::cpu-time
+               {::user (numeric-value (.-user cpu))
+                ::system (numeric-value (.-system cpu))
+                ::total (numeric-value (.-total cpu))})))))
+
 (defn- stream-pump!
   [stream maximum-bytes capture-output? on-chunk! on-limit!]
   (if-not (and stream (fn? (.-getReader stream)))
@@ -207,6 +222,7 @@
         {::id id
          ::pid (.-pid process)
          ::exited exited
+         ::resource-usage! #(live-resource-usage process)
          ::kill! #(signal! (or % "SIGTERM"))
          ::unref! (fn [] (try (.unref process) true (catch :default _ false)))
          ::send! (fn [message]
@@ -232,6 +248,7 @@
                       ::resource-usage nil}]
           {::pid nil
            ::exited (js/Promise.resolve result)
+           ::resource-usage! (constantly nil)
            ::kill! (constantly false)
            ::unref! (constantly false)
            ::send! (constantly {:seon.error/message "The subprocess did not start."})})))))
