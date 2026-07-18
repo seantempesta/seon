@@ -74,6 +74,40 @@ The current ordered spine is:
    system; and
 6. measure the final architecture, then optimize only the retained bottlenecks.
 
+### 2026-07-17 live recovery checkpoint
+
+The authority/package boundary now has live evidence beyond isolated tests.
+Commit `68634002` reconnects the pod's explicit database attribute set to the
+typed initialization value; the JVM compiles missing declarations from the
+canonical schema forms into the same atomic program transaction. A populated
+database installs a newly selected dataless attribute once, preserves prior
+facts, and a converged ensure is write-free. Focused proof passes 13 writer
+tests/66 assertions, 7 client-initialization tests/22 assertions, 7 protocol
+tests/22 assertions, 5 session tests/20 assertions, and 15 remote-contract
+tests/77 assertions. A clean existing-cluster restart installed
+`:seon.render/full?`; fresh transcripts no longer fail their first pull.
+
+The first real-agent load exposed two execution-package omissions rather than
+a database defect. Commits `ead0ca81` and `fb557a24` compile the complete
+default agent toolkit into the existing execution entry point and initialize
+each retained child's configured home namespace before eval. Boot source is
+not replayed. Commit `7a76959a` keeps the one-argument public completion call
+inside its Malli contract instead of calling the two-argument arity with nil.
+Focused execution-package proof resolves seven representative public functions;
+runtime handoff and lifecycle suites pass 5 and 36 assertions respectively.
+A fresh real agent then activated and completed its plan, sent `323`, and
+closed `:completed` with no render error or timeout. A stricter alias-only
+replay still remains the immediate acceptance check for `fb557a24`.
+
+Earliest unsettled contract: prove a newly spawned child resolves the short
+home aliases and referred lifecycle functions on its first response, then run
+the complete maintained CLJS gate. After that, exercise concurrent agents,
+child death/reconstruction, gzip feed reconnect, and multiple cluster
+databases before measuring retained CPU, memory, and latency. The malformed
+model-transport evidence projection and occasional empty persisted eval
+namespace remain independent recorded defects; neither may displace the
+first-response child proof.
+
 The turn contract is settled by `e5eccfec`: prompt acquisition, eval dispatch,
 child execution, turn creation, and debug reconstruction use one ordinary
 request database value; the turn persists one native
