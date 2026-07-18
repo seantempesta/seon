@@ -3814,3 +3814,33 @@ behavior, pauses, query latency, and complete writer correctness before the
 launch descriptor changes. Production packaging without the development-only
 Shadow watcher, full browser/load/multi-cluster graduation, and the patched
 Bun runtime/transport switch remain downstream gates.
+
+The first heap experiment selects 512 MiB rather than carrying the workstation-
+sized 2 GiB default forward. The complete maintained writer gate passed 219
+tests/1,821 assertions in 23.9 seconds at `-Xmx512m`. A coordinated live restart
+then reopened the grown default database and resumed the pod normally. Writer
+startup physical-memory peak fell from about 1.19 GiB to 786.5 MiB; after the
+same explicit collection used by the baseline audit, the writer retained 63--79
+MiB of Java heap and 536.1 MiB of physical footprint. The cap therefore removes
+roughly 400 MiB of transient startup pressure but only about 12 MiB of settled
+process footprint; fixed non-heap/classpath/native allocation remains a later
+measured owner rather than being misclassified as live Datahike data.
+
+Four real agents then ran concurrently through the public `/agents/run` door.
+All four completed normally in 27.3--36.4 seconds with one or two turns and no
+writer, query, child, or out-of-memory fault. During that interval G1 performed
+76 young collections totaling 149 ms and 14 concurrent collections totaling
+32 ms; no additional full collection occurred. Eight identical queries against
+one immutable database value returned one cache owner, one joined caller, and
+six hits, with shared callers charging no duplicate query work. The full
+operator gate also passes after the configuration cut.
+
+The operator now owns one validated `SEON_WRITER_MAX_HEAP` value with a measured
+512 MiB default; process launch and embedding preflight consume that same value,
+while the static writer alias carries the same bounded test/build default.
+Focused configuration/process/artifact proof passes 87 tests/415 assertions.
+The 512 MiB cap is settled for current initialization, correctness, query reuse,
+and four-agent load. The next memory boundary is production packaging without
+Shadow plus source-grounded attribution of the writer's roughly 450 MiB
+non-heap/native footprint; it must not displace the remaining browser,
+multi-cluster, patched-Bun, and transport graduation gates.
