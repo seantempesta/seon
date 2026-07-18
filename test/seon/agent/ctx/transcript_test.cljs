@@ -222,6 +222,8 @@
                             eval-requests)
                     "each page keeps multiple maximum stored projections bounded")
                 (is (every? #(identical? database (::db/db %)) eval-requests))
+                (is (every? protocol/ordinary-wire-value? eval-requests)
+                    "every paged query is an eager database wire value")
                 (is (apply = (map #(-> % ::db/members first
                                       ::protocol/query-form)
                                   eval-requests))

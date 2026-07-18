@@ -880,7 +880,10 @@
                               [eval-page]
                               1000000 1000000 524288)]
                ::db/max-result-weight 589824}))
-          (partition-all eval-page-size eval-ids))
+          ;; `partition-all` returns lazy seqs. The database protocol accepts
+          ;; only eager ordinary values, so each collection-binding argument
+          ;; must become a vector before it reaches `execute-many`.
+          (map vec (partition-all eval-page-size eval-ids)))
         responses (if (and (not ids-error) (seq requests))
                     (array-seq (await (js/Promise.all (into-array requests))))
                     [])
