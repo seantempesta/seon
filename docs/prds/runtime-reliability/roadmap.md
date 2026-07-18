@@ -273,6 +273,20 @@ failing-namespace/form reporting remains open in the issue; it no longer blocks
 the agent's ability to repair. The ordered spine returns to the cross-namespace
 browser action proof.
 
+That cross-namespace browser boundary now passes after two defects were fixed
+at their existing owners. Commit `842d335f` removes the invented
+`execute-many` history flag and supplies Datahike's ordinary history database
+value instead. Commit `a8e845c6` carries the selected renderer's existing
+`:seon.fn/read-attrs` through canvas acquisition into the one Datastar feed's
+dependency set. After a complete clean restart, Chrome rendered
+`my.interaction.view/view`, posted through
+`my.interaction.actions/save!`, committed `reactive-1784413316743`, and the
+already-open feed morphed to the exact saved value without reload or console
+error. Focused canvas proof passes 9 tests/33 assertions and execution-runtime
+proof passes 13/71. The ordered spine returns to the complete current-source
+gate and package-evidence reconciliation; malformed-program recovery and the
+shared cross-namespace reactive action are no longer open contracts.
+
 The downstream production overlay now passes the same immutable boundary.
 ACME supplies separate Shadow mains for the Bun pod and Bun execution child,
 so its source is compiled and dynamically reachable in both isolated runtime

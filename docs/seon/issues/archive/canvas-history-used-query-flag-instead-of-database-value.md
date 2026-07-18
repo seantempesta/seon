@@ -44,7 +44,14 @@ database protocol must not grow a second history mechanism.
 
 ## Resolution
 
-The owning code now sends `(assoc database :history true)` for its history
-query and removes the invalid member flag. Focused proof passes 8 tests / 31
-assertions. The browser interaction portion of acceptance remains the immediate
-integrated proof before this resolution is considered graduated.
+Commit `842d335f` sends `(assoc database :history true)` for the history query
+and removes the invalid member flag. Commit `a8e845c6` preserves the selected
+renderer's `:seon.fn/read-attrs` through canvas acquisition and surface
+materialization. Focused canvas proof passes 9 tests / 33 assertions and
+execution-runtime proof passes 13 tests / 71 assertions.
+
+After a complete clean watcher/writer/pod restart, Chrome rendered the
+cross-namespace `my.interaction.view/view`, submitted
+`reactive-1784413316743` through `my.interaction.actions/save!`, and the same
+open feed morphed to `Saved: reactive-1784413316743` with no console errors.
+The database retained the exact value and no reload or second feed was used.
