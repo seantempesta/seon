@@ -434,6 +434,43 @@
              (schema/restore-state! schema-state)
              (done)))))))
 
+(deftest failed-persisted-program-keeps-the-eval-repair-door-open
+  (async done
+    (let [compile-state (atom {})
+          state (atom {::execution/startup startup})
+          empty-query-result
+          {::protocol/success? true
+           :datahike.query/result []}
+          response
+          {::db/results
+           (conj (vec (repeat 6 empty-query-result))
+                 {::protocol/success? true
+                  :datahike.pull/result {}})}]
+      (with-redefs [db/execute-many (fn [_] (js/Promise.resolve response))
+                    seval/init-bootstrap!
+                    (fn [] (js/Promise.resolve compile-state))
+                    seval/load-authored-program!
+                    (fn [_]
+                      (js/Promise.reject
+                       (ex-info "broken persisted namespace"
+                                {:seon.error/kind :compile})))]
+        (-> (js/Promise.resolve
+             (@#'execution/prepare-eval-program! state invocation))
+            (.then
+             (fn [prepared]
+               (is (identical? compile-state
+                               (::execution/compile-state prepared)))
+               (is (= "broken persisted namespace"
+                      (get-in prepared [::execution/program-load-error
+                                        :seon.error/message])))
+               (is (map? (::execution/program prepared))
+                   "the exact source map remains available to a repair form")
+               (done)))
+            (.catch
+             (fn [error]
+               (is false (str "repair preparation rejected: " error))
+               (done))))))))
+
 (deftest selected-compiled-functions-skip-authored-acquisition
   (async done
     (let [reads (atom 0)

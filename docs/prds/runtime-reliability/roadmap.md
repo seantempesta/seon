@@ -248,6 +248,20 @@ is now the complete program audit across the already-recorded browser,
 reconnect, recovery, multi-cluster, ACME, resource, terminology, and package
 evidence.
 
+The final interaction audit reopened one recovery contract before browser
+graduation. A persisted action namespace referenced a schema namespace without
+requiring it. Warm eval order masked the missing edge; after restart, complete
+program preparation failed before the same agent could evaluate the corrective
+`ns` form. This violates the self-healing invariant: persisted authored code
+must never remove the supervised repair door for persisted authored code.
+[[../../seon/issues/persisted-program-error-prevents-agent-repair]] owns the
+exact evidence and acceptance criteria. The ordered spine is now: retain the
+trusted child compiler and exact source map after program-load failure, prove a
+corrective form commits through the normal eval/program transaction, restart
+into the corrected program, then resume the cross-namespace browser action
+proof. No SCI, pod-side authored eval, second compiler, or alternate registry
+is admissible.
+
 The downstream production overlay now passes the same immutable boundary.
 ACME supplies separate Shadow mains for the Bun pod and Bun execution child,
 so its source is compiled and dynamically reachable in both isolated runtime

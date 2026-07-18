@@ -335,6 +335,18 @@ reconstructs the current namespace sections, functions, schemas, tests, aliases,
 and instrumentation from database program facts. It never replays every eval or
 assumes a process-local value survived.
 
+Persisted authored code can never remove the agent's ability to repair
+persisted authored code. A fresh child first boots the trusted compiled
+artifact and its one `cljs.js` compiler. It then attempts to load the current
+database program. If one persisted namespace, schema, function, or test fails,
+ordinary application invocation remains refused, but the same supervised child
+retains a bounded eval door with the exact database source map. A corrective
+`ns`, schema registration, `defn`, `deftest`, `ns-unmap`, or removal commits
+through the normal program transaction; the replacement child then reconstructs
+only the corrected current program. The failure identifies the source namespace
+and form. There is no SCI fallback, pod-side authored eval, second compiler,
+second registry, or provenance bypass.
+
 Recovery preserves history rather than pretending to reverse execution. Every
 database transaction that committed before the crash remains true. The exact
 running eval is terminalized `:interrupted`, its turn records the process loss,

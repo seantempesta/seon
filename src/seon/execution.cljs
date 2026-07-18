@@ -648,8 +648,15 @@
     (await (install-program! state invocation program function-symbols
                              verify-identity?))))
 
+(declare exception-value)
+
 (defn- ^:async prepare-eval-program!
-  "Prepare the invocation database value's program and the child's compiler."
+  "Prepare the invocation database value's program and the child's compiler.
+
+   A persisted program error must not remove the agent's repair door. Attempt
+   the normal complete-program load, but retain the trusted compiler and exact
+   source map when that load fails so `eval-batch!` can replace or remove the
+   broken declaration through the same supervised child."
   [state invocation]
   (let [database (:seon.db/db invocation)
         acquired (await
@@ -662,12 +669,17 @@
         program (program-from-results (subvec results 0 6))
         configuration (db/decode-edn-values (pull-result (nth results 6)))
         symbols (vec (keys (::source-by-symbol program)))
-        _ (await (install-program! state invocation program symbols false))]
-    {::compile-state (::compile-state @state)
-     ::program program
-     ::configuration configuration}))
-
-(declare exception-value)
+        compile-state (await (ensure-compile-state! state))
+        load-error
+        (try
+          (await (install-program! state invocation program symbols false))
+          nil
+          (catch :default exception
+            (exception-value exception)))]
+    (cond-> {::compile-state (or (::compile-state @state) compile-state)
+             ::program program
+             ::configuration configuration}
+      load-error (assoc ::program-load-error load-error))))
 
 (defn- selected-call-error
   [exception]
