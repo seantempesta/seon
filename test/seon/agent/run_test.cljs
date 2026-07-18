@@ -405,6 +405,7 @@
         [#(set! run/close-run! %) original-close]
         [#(set! error/record! %) original-record]]
        (fn ^:async test-watchdog []
+         (is (= [] (run/stale-run-ids #{} now 1000)))
          (is (= ["run-a" "run-b"] (run/stale-run-ids rows now 1000)))
          (let [result
                (await

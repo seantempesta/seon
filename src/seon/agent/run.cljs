@@ -1005,7 +1005,7 @@
                   (not [?r :seon.agent.run/last-beat-at _])))])
 
 (schema/register! ::stale-run-row [:tuple :string :string :inst :inst])
-(schema/register! ::stale-run-rows [:sequential ::stale-run-row])
+(schema/register! ::stale-run-rows [:set ::stale-run-row])
 
 (defn stale-run-ids
   "Open, non-paused run-ids whose heartbeat is stale at `now`.

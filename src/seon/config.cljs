@@ -1096,7 +1096,7 @@
    (the SHIPPED posture — pod never crashes, the
    CI-shaped wrappers fail runs that accumulated a new `:core`-fault datom).
    Read by `seon.error/record!` on every `:core` fault."
-  {:malli/schema [:=> [:cat :seon.config/singleton]
+  {:malli/schema [:=> [:cat [:or :nil :seon.config/singleton]]
                   :seon.config/on-core-error]}
   [configuration]
   (or (:seon.config/on-core-error configuration) :gate))

@@ -509,7 +509,8 @@
     (js/console.error
       (str (if expected? "SEON-EXPECTED-CORE-FAULT" "SEON-CORE-FAULT") " "
            (:seon.error/message projection)
-           (when-let [t (::t projection)] (str " @t=" t))))
+           (when-let [basis-t (::basis-t projection)]
+             (str " @basis-t=" basis-t))))
     (when (and (not expected?) (= :crash (config/on-core-error configuration)))
       (let [exit! (fn [& _]
                     (js/console.error
