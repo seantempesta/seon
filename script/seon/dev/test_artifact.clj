@@ -2,7 +2,8 @@
   "Publish immutable CLJS test artifacts from Shadow's successful flush state."
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
-            [clojure.string :as str])
+            [clojure.string :as str]
+            [seon.dev.program-artifact :as program-artifact])
   (:import [java.io File FileInputStream]
            [java.nio.charset StandardCharsets]
            [java.nio.file CopyOption Files StandardCopyOption]
@@ -128,9 +129,10 @@
        (sort-by :seon.dev.test.object/path)
        vec))
 
-(defn- bundle-digest [runner entries]
+(defn- bundle-digest [runner entries program-source-digest]
   (let [digest (MessageDigest/getInstance "SHA-256")]
     (update-text! digest runner)
+    (update-text! digest program-source-digest)
     (doseq [entry entries]
       (update-text! digest (:seon.dev.test.object/path entry))
       (update-text! digest "\u0000")
@@ -149,8 +151,9 @@
     (.mkdirs (.getParentFile link))
     (Files/createSymbolicLink link-path target (make-array FileAttribute 0))))
 
-(defn- publish-bundle! [^File directory runner entries]
-  (let [digest (bundle-digest runner entries)
+(defn- publish-bundle! [^File directory runner entries program-source-text
+                        program-source-digest]
+  (let [digest (bundle-digest runner entries program-source-digest)
         bundles (io/file directory "bundles")
         objects (io/file directory "objects")
         bundle (io/file bundles digest)
@@ -163,6 +166,7 @@
           (doseq [entry entries]
             (link-object! runtime (ensure-object! objects entry) entry))
           (spit (io/file temp "test.js") runner)
+          (spit (io/file temp "program-sources.edn") program-source-text)
           (.mkdirs bundles)
           (try
             (Files/move (.toPath temp) (.toPath bundle)
@@ -173,7 +177,9 @@
             (delete-tree! temp)
             (throw error)))))
     {:seon.dev.test.artifact/digest digest
-     :seon.dev.test.artifact/file target}))
+     :seon.dev.test.artifact/file target
+     :seon.dev.test.artifact/program-source-file
+     (io/file bundle "program-sources.edn")}))
 
 (defn- prune-bundles! [^File directory current-digest]
   (let [bundles (io/file directory "bundles")
@@ -204,10 +210,15 @@
 (defn ^{:shadow.build/stage :flush} publish!
   "Publish one immutable test bundle and atomically point at its manifest."
   [state]
-  (if (false? (get-in state
-                      [:shadow.build/config
-                       :seon.dev.test-artifact/publish?]
-                      true))
+  (let [authoritative?
+        (get-in state
+                [:shadow.build/config :seon.dev.test-artifact/publish?]
+                true)
+        execution-manifest
+        (get-in state
+                [:shadow.build/config
+                 :seon.dev.test-artifact/execution-manifest])]
+    (if (and (false? authoritative?) (nil? execution-manifest))
     state
     (let [root (canonical-file (io/file ".") (:project-dir state))
           output (canonical-file root
@@ -220,8 +231,13 @@
             runner (portable-runner runner-source)
             runtime (runner-runtime output runner-source)
             directory (io/file root "out/test/artifacts")
-            {:seon.dev.test.artifact/keys [digest file]}
-            (publish-bundle! directory runner (runtime-entries runtime))
+            program-source-text (program-artifact/artifact-text state)
+            program-source-digest
+            (program-artifact/digest program-source-text)
+            {:seon.dev.test.artifact/keys
+             [digest file program-source-file]}
+            (publish-bundle! directory runner (runtime-entries runtime)
+                             program-source-text program-source-digest)
             resources (->> (:sources state)
                            (keep #(resource-row state root %))
                            (sort-by :seon.dev.test.resource/path)
@@ -229,15 +245,22 @@
             manifest
             {:seon.dev.test.artifact/digest digest
              :seon.dev.test.artifact/path (relative-project-path root file)
+             :seon.dev.test.artifact/program-source-path
+             (relative-project-path root program-source-file)
+             :seon.dev.test.artifact/program-source-digest
+             program-source-digest
              :seon.dev.test.artifact/published-at (str (Instant/now))
              :seon.dev.test.artifact/test-namespaces
              (->> (:shadow.build.test-util/test-namespaces state)
                   (sort-by str)
                   vec)
              :seon.dev.test.artifact/resources resources}]
-        (atomic-edn! (io/file directory "current.edn") manifest)
+        (when authoritative?
+          (atomic-edn! (io/file directory "current.edn") manifest))
+        (when execution-manifest
+          (atomic-edn! (canonical-file root execution-manifest) manifest))
         (prune-bundles! directory digest)
-        state))))
+        state)))))
 
 (defn read-current
   "Read the current published test manifest under `root`."

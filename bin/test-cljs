@@ -40,6 +40,7 @@ LOCK_OWNED=0
 JAVASCRIPT_PID=""
 OUTPUT_PID=""
 OUTPUT_FIFO=""
+EXECUTION_MANIFEST="tmp/test-cljs-execution-$$.edn"
 
 terminate_tree() {
   local pid="$1"
@@ -78,6 +79,7 @@ cleanup() {
   if [ -n "$OUTPUT_FIFO" ]; then
     rm -f -- "$OUTPUT_FIFO"
   fi
+  rm -f -- "$EXECUTION_MANIFEST"
   if [ "$LOCK_OWNED" -eq 1 ]; then
     rm -rf -- "$TEST_LOCK"
   fi
@@ -324,13 +326,13 @@ if [ "$BUILD" = "1" ]; then
   # The long-running full-graph watcher is the sole publisher of changed-test
   # artifacts. One-shot focused compiles share the build definition but must
   # never replace that authoritative manifest with their partial graph.
-  CONFIG_MERGE="{:seon.dev.test-artifact/publish? false}"
+  CONFIG_MERGE="{:seon.dev.test-artifact/publish? false :seon.dev.test-artifact/execution-manifest \"$EXECUTION_MANIFEST\"}"
   if [ -n "$NAMESPACE_EDN" ] && [ -n "${SEON_EXTRA_SRC:-}" ] && [ -n "${SEON_EXTRA_PRELOAD:-}" ]; then
-    CONFIG_MERGE="{:seon.dev.test-artifact/publish? false :namespaces [$NAMESPACE_EDN] :devtools {:preloads [$SEON_EXTRA_PRELOAD]}}"
+    CONFIG_MERGE="{:seon.dev.test-artifact/publish? false :seon.dev.test-artifact/execution-manifest \"$EXECUTION_MANIFEST\" :namespaces [$NAMESPACE_EDN] :devtools {:preloads [$SEON_EXTRA_PRELOAD]}}"
   elif [ -n "$NAMESPACE_EDN" ]; then
-    CONFIG_MERGE="{:seon.dev.test-artifact/publish? false :namespaces [$NAMESPACE_EDN]}"
+    CONFIG_MERGE="{:seon.dev.test-artifact/publish? false :seon.dev.test-artifact/execution-manifest \"$EXECUTION_MANIFEST\" :namespaces [$NAMESPACE_EDN]}"
   elif [ -n "${SEON_EXTRA_SRC:-}" ] && [ -n "${SEON_EXTRA_PRELOAD:-}" ]; then
-    CONFIG_MERGE="{:seon.dev.test-artifact/publish? false :devtools {:preloads [$SEON_EXTRA_PRELOAD]}}"
+    CONFIG_MERGE="{:seon.dev.test-artifact/publish? false :seon.dev.test-artifact/execution-manifest \"$EXECUTION_MANIFEST\" :devtools {:preloads [$SEON_EXTRA_PRELOAD]}}"
   fi
   COMPILE_CMD+=(--config-merge "$CONFIG_MERGE")
   echo "== Preparing :cljs dependencies =="
@@ -367,7 +369,30 @@ if [ "$BUILD" = "1" ]; then
     echo "========================================"
     exit 2
   fi
-  printf '%s\n' "$EXPECTED_FINGERPRINT" > "$FINGERPRINT_FILE.tmp"
+  if [ ! -f "$EXECUTION_MANIFEST" ]; then
+    echo "The successful test build did not publish its execution manifest."
+    exit 2
+  fi
+  PROGRAM_SOURCE_IDENTITY="$(bb --config bb.edn --deps-root . -e \
+    '(require (quote [clojure.edn :as edn]))
+     (let [manifest (edn/read-string (slurp (first *command-line-args*)))
+           path (:seon.dev.test.artifact/program-source-path manifest)
+           digest (:seon.dev.test.artifact/program-source-digest manifest)]
+       (when-not (and (string? path)
+                      (string? digest)
+                      (re-matches #"[0-9a-f]{64}" digest))
+         (throw (ex-info "The test execution manifest has no program source identity."
+                         {:manifest (first *command-line-args*)})))
+       (println path)
+       (println digest))' -- "$EXECUTION_MANIFEST")"
+  PROGRAM_SOURCE_RELATIVE_PATH="$(printf '%s\n' "$PROGRAM_SOURCE_IDENTITY" | sed -n '1p')"
+  PROGRAM_SOURCE_DIGEST="$(printf '%s\n' "$PROGRAM_SOURCE_IDENTITY" | sed -n '2p')"
+  PROGRAM_SOURCE_PATH="$PWD/$PROGRAM_SOURCE_RELATIVE_PATH"
+  {
+    printf '%s\n' "$EXPECTED_FINGERPRINT"
+    printf '%s\n' "$PROGRAM_SOURCE_PATH"
+    printf '%s\n' "$PROGRAM_SOURCE_DIGEST"
+  } > "$FINGERPRINT_FILE.tmp"
   mv "$FINGERPRINT_FILE.tmp" "$FINGERPRINT_FILE"
   COMPILE_END=$(date +%s)
   COMPILE_ELAPSED=$((COMPILE_END - COMPILE_START))
@@ -384,7 +409,17 @@ else
     echo "Run the same command once without --no-build."
     exit 2
   fi
+  PROGRAM_SOURCE_PATH="$(sed -n '2p' "$FINGERPRINT_FILE")"
+  PROGRAM_SOURCE_DIGEST="$(sed -n '3p' "$FINGERPRINT_FILE")"
 fi
+
+if [ ! -f "$PROGRAM_SOURCE_PATH" ] || \
+   ! printf '%s\n' "$PROGRAM_SOURCE_DIGEST" | grep -Eq '^[0-9a-f]{64}$'; then
+  echo "The selected test bundle has no valid program-source artifact identity."
+  exit 2
+fi
+export SEON_PROGRAM_SOURCE_PATH="$PROGRAM_SOURCE_PATH"
+export SEON_PROGRAM_SOURCE_DIGEST="$PROGRAM_SOURCE_DIGEST"
 
 if [ ! -f "out/test/test.js" ]; then
   echo "out/test/test.js missing — build step skipped or failed"
