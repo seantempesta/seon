@@ -868,7 +868,7 @@
                       (database-error ids-response)
                       (acquisition-error (::db/results ids-response)))
         eval-ids (when-not ids-error
-                   (mapv (fn [[turn eval _at]] [turn eval])
+                   (mapv (fn [[turn eval-id _at]] [turn eval-id])
                          (or (query-result (first (::db/results ids-response))) [])))
         requests
         (mapv
