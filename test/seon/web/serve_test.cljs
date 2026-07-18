@@ -101,6 +101,33 @@
              (set! run/effective-deadline-ms original)
              (done)))))))
 
+(deftest agent-run-waits-for-terminal-turn-recording
+  (async done
+    (let [original db/query
+          requests (atom [])
+          responses (atom [[[:done] [:running]] [[:done] [:interrupted]]])]
+      (set! db/query
+            (fn [request]
+              (swap! requests conj request)
+              (js/Promise.resolve (ffirst (swap-vals! responses rest)))))
+      (-> (js/Promise.all
+           #js [((deref #'serve/task-turns-settled?)
+                 database "agent-1" 1000)
+                ((deref #'serve/task-turns-settled?)
+                 database "agent-1" 1000)])
+          (.then
+           (fn [settled]
+             (is (= [false true] (vec settled)))
+             (is (every? #(identical? database (::db/db %)) @requests))
+             (is (every? #(and (= "agent-1" (first (::db/args %)))
+                               (= 1000 (.getTime (second (::db/args %)))))
+                         @requests))))
+          (.catch (fn [error] (is false (str error))))
+          (.finally
+           (fn []
+             (set! db/query original)
+             (done)))))))
+
 (deftest eval-evidence-is-request-scoped-and-stably-ordered
   (let [first-at (js/Date. 1000)
         second-at (js/Date. 2000)

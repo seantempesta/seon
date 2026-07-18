@@ -475,6 +475,30 @@
            (map (fn [[^js started]] (.getTime started)))
            (reduce max 0)))))
 
+(def ^:private terminal-turn-statuses
+  #{:done :error :interrupted})
+
+(defn- ^:async task-turns-settled?
+  "True when every turn opened by this request has reached a terminal status."
+  [database agent-id injected-at]
+  (let [rows
+        (await
+         (db/query
+          {::db/db database
+           ::db/query '[:find ?status
+                        :in $ ?aid ?injected-at
+                        :where
+                        [?agent :seon.agent/id ?aid]
+                        [?run :seon.agent.run/agent ?agent]
+                        [?run :seon.agent.run/started-at ?started]
+                        [(>= ?started ?injected-at)]
+                        [?turn :seon.agent.turn/run ?run]
+                        [?turn :seon.agent.turn/status ?status]]
+           ::db/args [agent-id (js/Date. injected-at)]}))]
+    (if (:seon.error/message rows)
+      rows
+      (every? terminal-turn-statuses (map first rows)))))
+
 (defn- database-json
   "JSON-safe external projection of one ordinary database value."
   [database]
@@ -1067,16 +1091,21 @@
                           (await
                            (js/Promise.all
                             #js [(derive/derive-state database aid)
-                                 (latest-run-start-ms database aid)])))
-                        [state latest-start] (when observations
-                                               (array-seq observations))
+                                 (latest-run-start-ms database aid)
+                                 (task-turns-settled?
+                                  database aid injected-at)])))
+                        [state latest-start turns-settled?]
+                        (when observations (array-seq observations))
                         error (or (when (:seon.error/message database) database)
                                   (when (:seon.error/message state) state)
                                   (when (:seon.error/message latest-start)
-                                    latest-start))
+                                    latest-start)
+                                  (when (:seon.error/message turns-settled?)
+                                    turns-settled?))
                         elapsed (- (js/Date.now) start)
                         done? (and (= :idle state)
-                                   (>= latest-start injected-at))
+                                   (>= latest-start injected-at)
+                                   turns-settled?)
                         timeout? (> elapsed timeout-ms)]
                     (cond
                       error {:error (:seon.error/message error)}
