@@ -343,6 +343,28 @@
       (finally
         (fs/delete-tree directory)))))
 
+(deftest release-programs-reject-output-outside-the-build-root
+  (let [directory (fs/create-temp-dir {:prefix "seon-release-root-test-"})
+        outside (fs/create-temp-dir {:prefix "seon-release-outside-test-"})
+        config {:seon.dev.config/root (str directory)
+                :seon.dev.config/environment {}}
+        release
+        {:seon.dev.artifact/release-cache-root
+         (str (fs/path directory "cache"))
+         :seon.dev.artifact/release-client-output
+         (str (fs/path outside "pod.js"))
+         :seon.dev.artifact/release-execution-output
+         (str (fs/path directory "runtime/execution.js"))
+         :seon.dev.artifact/release-program-source-output
+         (str (fs/path directory "runtime/program-sources.edn"))}]
+    (try
+      (is (thrown-with-msg?
+           Exception #"must stay in the build root"
+           (artifact/build-release-programs! config release)))
+      (finally
+        (fs/delete-tree directory)
+        (fs/delete-tree outside)))))
+
 (deftest source-publication-orders-the-watcher-flush-before-one-manifest
   (let [events (atom [])
         manifest {:seon.dev.artifact/writer-digest "writer"

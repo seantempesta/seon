@@ -576,6 +576,16 @@
   ["clj" "-M:cljs" "release" build-id "--force-spawn"
    "--config-merge" (pr-str config-merge)])
 
+(defn- release-relative-path! [root field path]
+  (let [relative (str (fs/relativize root
+                                    (fs/absolutize (fs/path path))))]
+    (when (str/starts-with? relative "..")
+      (throw
+       (ex-info "A release build path must stay in the build root."
+                {:seon.dev.artifact/release-path-field field
+                 :seon.dev.artifact/release-path path})))
+    relative))
+
 (defn- run-step! [config label argv]
   (println (str "▶ " label))
   (let [started (System/nanoTime)
@@ -608,17 +618,19 @@
         (:seon.dev.artifact/release-execution-output release)
         program-source-output
         (:seon.dev.artifact/release-program-source-output release)
+        _ (doseq [[field path]
+                  [[:seon.dev.artifact/release-cache-root cache-root]
+                   [:seon.dev.artifact/release-client-output client-output]
+                   [:seon.dev.artifact/release-execution-output
+                    execution-output]]]
+            (release-relative-path! root field path))
         program-source-relative
-        (str (fs/relativize root
-                            (fs/absolutize (fs/path program-source-output))))
+        (release-relative-path!
+         root :seon.dev.artifact/release-program-source-output
+         program-source-output)
         release-config
         (update config :seon.dev.config/environment
                 assoc "SHADOW_CLJS" (pr-str {:cache-root cache-root}))]
-    (when (str/starts-with? program-source-relative "..")
-      (throw
-       (ex-info "The release program source must stay in the build root."
-                {:seon.dev.artifact/release-program-source-output
-                 program-source-output})))
     (doseq [path [client-output execution-output program-source-output]]
       (fs/create-dirs (fs/parent path)))
     (run-step!
