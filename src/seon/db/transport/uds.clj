@@ -7,7 +7,8 @@
    without forking `seon.db.protocol`."
   (:require [cognitect.transit :as transit]
             [seon.db.protocol :as protocol]
-            [seon.schema :as schema])
+            [seon.schema :as schema]
+            [taoensso.timbre :as log])
   (:import [java.io ByteArrayInputStream ByteArrayOutputStream
             DataInputStream DataOutputStream InputStream OutputStream]
            [java.net StandardProtocolFamily UnixDomainSocketAddress]
@@ -271,15 +272,29 @@
                     (bit-and (bit-or (.interestOps key) add)
                              (bit-not remove))))))
 
-(defn- release-input-reservation!
-  [reservation]
-  (when (and reservation
-             (.compareAndSet ^AtomicReference (::released? reservation)
-                             false true))
-    (let [authority-input-bytes (::authority-input-bytes reservation)]
-      (locking authority-input-bytes
-        (swap! authority-input-bytes - (::frame-bytes reservation)))))
+(declare resume-paused-reads!)
+
+(defn- wake-paused-reads!
+  [session]
+  (when-let [paused-sessions (::paused-read-sessions session)]
+    (enqueue-selector!
+     (::selector session) (::commands session)
+     #(resume-paused-reads! paused-sessions)))
   nil)
+
+(defn- release-input-reservation!
+  ([reservation]
+   (release-input-reservation! reservation true))
+  ([reservation wake?]
+   (when (and reservation
+              (.compareAndSet ^AtomicReference (::released? reservation)
+                              false true))
+     (let [authority-input-bytes (::authority-input-bytes reservation)]
+       (locking authority-input-bytes
+         (swap! authority-input-bytes - (::frame-bytes reservation))))
+     (when wake?
+       (wake-paused-reads! (::session reservation))))
+   nil))
 
 (defn- reserve-input!
   [session frame-bytes]
@@ -289,6 +304,7 @@
       (let [next-bytes (+ @authority-input-bytes frame-bytes)]
         (when (<= next-bytes maximum-input-bytes)
           (let [reservation {::frame-bytes frame-bytes
+                             ::session session
                              ::authority-input-bytes authority-input-bytes
                              ::released? (AtomicReference. false)}]
             (reset! authority-input-bytes next-bytes)
@@ -312,7 +328,8 @@
       (locking authority-count
         (swap! (::response-slots session) disj slot)
         (swap! authority-count dec)
-        (swap! (::outstanding session) dec))))
+        (swap! (::outstanding session) dec)))
+    (wake-paused-reads! session))
   nil)
 
 (defn- reserve-response-slot-result!
@@ -337,9 +354,46 @@
           (swap! (::outstanding session) inc)
           {::send-status send-accepted ::response-slot slot})))))
 
-(defn- reserve-response-slot!
+(defn- reserve-request-capacity!
+  [session length]
+  (let [frame-bytes (+ Integer/BYTES length)]
+    (if-let [input-reservation (reserve-input! session frame-bytes)]
+      (let [slot-result (reserve-response-slot-result! session)]
+        (if (= send-accepted (::send-status slot-result))
+          {::input-reservation input-reservation
+           ::response-slot (::response-slot slot-result)}
+          (do
+            (release-input-reservation! input-reservation false)
+            (reset! (::input-reservation session) nil)
+            slot-result)))
+      {::send-status ::input-full})))
+
+(defn- pause-session-read!
+  [session length]
+  (reset! (::paused-frame-length session) length)
+  (swap! (::paused-read-sessions session) conj session)
+  (key-interests! session 0 op-read)
+  nil)
+
+(defn- resume-paused-session!
   [session]
-  (::response-slot (reserve-response-slot-result! session)))
+  (when (and (not (.get ^AtomicReference (::closed? session)))
+             (not @(::shutting-down? session)))
+    (when-let [length @(::paused-frame-length session)]
+      (let [capacity (reserve-request-capacity! session length)]
+        (when-let [input-reservation (::input-reservation capacity)]
+          (reset! (::current-response-slot session)
+                  (::response-slot capacity))
+          (reset! (::payload session) (ByteBuffer/allocate length))
+          (reset! (::paused-frame-length session) nil)
+          (swap! (::paused-read-sessions session) disj session)
+          (key-interests! session op-read 0)))))
+  nil)
+
+(defn- resume-paused-reads!
+  [paused-sessions]
+  (run! resume-paused-session! (vec @paused-sessions))
+  nil)
 
 (defn- reserve-encoded-output-result!
   [session slot exact-bytes]
@@ -422,6 +476,8 @@
 (defn- close-session!
   [connections workers close-connection! session]
   (when (.compareAndSet ^AtomicReference (::closed? session) false true)
+    (swap! (::paused-read-sessions session) disj session)
+    (reset! (::paused-frame-length session) nil)
     (when-let [key @(::key session)]
       (.cancel key))
     (try (.close ^SocketChannel (::channel session)) (catch Throwable _))
@@ -627,7 +683,9 @@
                                     response-slot)))]
            (handler @(::owner session) request
                     (::frame-bytes input-reservation) complete!))
-         (catch Throwable _
+         (catch Throwable throwable
+           (log/error throwable
+                      "UDS request decode or handler admission failed")
            (enqueue-selector!
             (::selector session) (::commands session)
             #(close-session! connections workers close-connection! session)))
@@ -643,7 +701,9 @@
                 (key-interests! session op-read 0))))))))
     (catch Throwable throwable
       (if (rejected-execution? throwable)
-        (close-session! connections workers close-connection! session)
+        (do
+          (log/error throwable "UDS request worker rejected admission")
+          (close-session! connections workers close-connection! session))
         (throw throwable))))
   nil)
 
@@ -668,20 +728,14 @@
             (.clear target)
             (if (or (not (pos? length)) (> length maximum-frame-bytes))
               (close-session! connections workers close-connection! session)
-              (let [frame-bytes (+ Integer/BYTES length)
-                    input-reservation (reserve-input! session frame-bytes)
-                    response-slot (when input-reservation
-                                    (reserve-response-slot! session))]
-                (if (and input-reservation response-slot)
+              (let [capacity (reserve-request-capacity! session length)]
+                (if-let [input-reservation (::input-reservation capacity)]
                   (do
-                    (reset! (::current-response-slot session) response-slot)
+                    (reset! (::current-response-slot session)
+                            (::response-slot capacity))
                     (reset! (::payload session) (ByteBuffer/allocate length))
                     (recur))
-                  (do
-                    (release-input-reservation! input-reservation)
-                    (reset! (::input-reservation session) nil)
-                    (close-session! connections workers close-connection!
-                                    session))))))
+                  (pause-session-read! session length)))))
 
           :else
           (let [^ByteBuffer payload-buffer @(::payload session)
@@ -771,6 +825,8 @@
                ::key (atom nil)
                ::header (ByteBuffer/allocate Integer/BYTES)
                ::payload (atom nil)
+               ::paused-frame-length (atom nil)
+               ::paused-read-sessions (::paused-read-sessions server-capacity)
                ::input-reservation (atom nil)
                ::authority-input-bytes (::authority-input-bytes server-capacity)
                ::maximum-input-bytes (::maximum-input-bytes server-capacity)
@@ -789,6 +845,7 @@
                ::maximum-session-output-bytes
                (::maximum-session-output-bytes server-capacity)
                ::cleanup-workers (::cleanup-workers server-capacity)
+               ::shutting-down? shutting-down?
                ::pending-encodes (ArrayDeque.)
                ::encoding-active? (AtomicReference. false)
                ::outputs (ArrayDeque.)
@@ -914,6 +971,7 @@
         shutting-down? (atom false)
         server-capacity
         {::authority-input-bytes (atom 0)
+         ::paused-read-sessions (atom #{})
          ::maximum-input-bytes maximum-input-bytes
          ::authority-response-slot-count (atom 0)
          ::maximum-response-slots maximum-response-slots

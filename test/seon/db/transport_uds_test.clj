@@ -391,6 +391,7 @@
         (is (= frame-size (deref seen-frame-bytes 2000 ::missing-frame-size)))
         (is (= {::response :ok}
                (uds/read-frame (Channels/newInputStream first))))
+        (.close second)
         (wait-until! "input and response release"
                      #(and (zero? @(::uds/authority-input-bytes server))
                            (zero? @(::uds/authority-response-slot-count
@@ -500,6 +501,61 @@
           (is (every? #(identical? (first @owners) %) (rest @owners))
               "every request receives the exact owner returned at open")))
       (finally
+        (uds/close-request-server! server)
+        (.delete (File. path))))))
+
+(deftest request-session-pauses-reading-until-response-capacity-is-released
+  (let [path (socket-path "read-pressure")
+        capacity 2
+        entered (atom [])
+        completions (atom {})
+        closed (atom 0)
+        requests (mapv (fn [request-number]
+                         {::request request-number})
+                       (range (inc capacity)))
+        server
+        (uds/start-request-server!
+         {::uds/socket-path path
+          ::uds/maximum-response-slots capacity
+          ::uds/maximum-session-response-slots capacity
+          ::uds/open-connection! (fn [_control] (Object.))
+          ::uds/close-connection! (fn [_owner] (swap! closed inc))
+          ::uds/handler
+          (fn [_owner request _frame-bytes complete!]
+            (swap! entered conj (::request request))
+            (swap! completions assoc (::request request) complete!))})]
+    (try
+      (with-open [channel (uds/connect! path)]
+        (write-bytes! channel
+                      (apply joined-bytes (map frame-bytes requests))
+                      Integer/MAX_VALUE)
+        (wait-until! "requests admitted to the session capacity"
+                     #(= capacity (count @entered)))
+        (Thread/sleep 25)
+        (is (= [0 1] @entered))
+        (is (= 1 (count @(::uds/connections server)))
+            "temporary response pressure retains the physical session")
+        (is (zero? @closed))
+
+        ((get @completions 0) {::response 0})
+        (let [input (Channels/newInputStream channel)]
+          (is (= {::response 0} (uds/read-frame input)))
+          (wait-until! "paused request admitted after one response"
+                       #(= (inc capacity) (count @entered)))
+          (is (= [0 1 2] @entered)
+              "the retained frame header resumes in request order")
+          ((get @completions 1) {::response 1})
+          ((get @completions 2) {::response 2})
+          (is (= [{::response 1} {::response 2}]
+                 [(uds/read-frame input) (uds/read-frame input)])))
+        (wait-until! "request pressure reservations released"
+                     #(and (zero? @(::uds/authority-response-slot-count server))
+                           (zero? @(::uds/authority-input-bytes server))))
+        (is (zero? @closed)))
+      (finally
+        (run! (fn [[request-number complete!]]
+                (complete! {::response request-number}))
+              @completions)
         (uds/close-request-server! server)
         (.delete (File. path))))))
 
