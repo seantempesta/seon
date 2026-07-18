@@ -329,6 +329,9 @@
           {::instrument/changed-syms #{a-sym}
            ::instrument/targets []})))))
 
+(deftest coverage-accepts-a-native-datahike-relation
+  (is (= [] (instrument/coverage-gaps #{}))))
+
 (deftest schema-change-refreshes-only-transitive-function-dependents
   (let [a-form [:=> [:cat :instrumenttest.contract/root]
                 :instrumenttest.contract/root]
