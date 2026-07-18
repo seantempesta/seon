@@ -904,7 +904,10 @@
     (-> (db/open-session! (::database-selection startup))
         (.then
          (fn [{database :seon.db/db}]
-           (-> (admission/publish-committed!)
+           (-> (admission/prepare-committed!
+                {::admission/record-failures? false})
+               (.then
+                admission/admit-prepared!)
                (.then
                 (fn [{::admission/keys [published?] :as publication}]
                   (when-not published?

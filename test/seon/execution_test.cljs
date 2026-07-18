@@ -174,10 +174,16 @@
                     (fn [_]
                       (swap! events conj :session-opened)
                       (js/Promise.resolve {:seon.db/db database}))
-                    admission/publish-committed!
-                    (fn []
+                    admission/prepare-committed!
+                    (fn [request]
+                      (is (= {::admission/record-failures? false} request))
                       (swap! events conj :publication-started)
-                      (js/Promise.resolve publication))]
+                      (js/Promise.resolve
+                       {::admission/prepared? true
+                        ::admission/recovered? false
+                        ::admission/generation 42}))
+                    admission/admit-prepared!
+                    (fn [_] publication)]
         (-> (js/Promise.resolve
              (@#'execution/start-child!
               {} startup
