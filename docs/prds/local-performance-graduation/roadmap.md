@@ -68,6 +68,18 @@ healthy; the next ordered performance boundary is the complete Datastar
 invalidation/render/serialize/write/browser path, not database-hop
 micro-optimization.
 
+The first complete Datastar server-path measurement is retained in
+[[research/datastar-fanout-render-backpressure-2026-07-18]]. Sixteen equivalent
+root feeds shared one render, one 27,185-byte serialized event, and fanout 16.
+An unrelated database attribute caused no render; one learned dependency caused
+exactly one render. A warm complete render measured 27.879 ms, while cold
+rendering after the execution child's 30-second idle retirement measured
+roughly 1.35--1.45 seconds. A non-reading socket plus twenty one-megabyte events
+proved Bun backpressure retains only the newest pending value rather than a
+queue. The current material tradeoff is therefore execution-child retention
+versus cold UI latency. Real browser morph timing and visible-page retention
+policy evidence remain before changing the existing supervisor.
+
 The Bun source audit
 [[research/bun-production-runtime-integration-audit-2026-07-15]] establishes a
 candidate full JavaScript-runtime migration after exact-artifact parity: Shadow

@@ -4110,3 +4110,24 @@ selection, query reuse, Hiccup construction, serialization, compression,
 socket backpressure, and browser morph. The integrated proof must count actual
 rerenders and phase time under one and many identical feeds before changing
 render demand or cache policy.
+
+## 2026-07-18 Datastar fanout and cold-render checkpoint
+
+The retained Datastar mechanism now has direct server-path evidence. Sixteen
+equivalent root sockets normalized to one subscription, one complete render,
+one 27,185-byte serialized event, and fanout 16. A transaction carrying an
+unrelated attribute caused zero rendering. A learned dependency caused exactly
+one affected subscription and one render. Under a deliberately non-reading
+client, twenty one-megabyte events entered Bun backpressure while retaining
+only the newest pending value; 18 obsolete pending values were replaced rather
+than queued.
+
+Warm complete rendering measured 27.879 ms. Cold rendering after the existing
+30-second execution-child idle retirement repeatedly measured about 1.35--1.45
+seconds because the digest-verified child, database session, and current program
+must be reacquired. The feed, changed-attribute selection, shared serialization,
+and socket owner are therefore settled. The earliest unsettled Datastar
+contract is the measured process-retention tradeoff plus real browser morph
+time: compare the current timeout, an open-feed child lease, and a longer
+timeout using actual interaction latency and the existing physical-memory
+budgets before changing `seon.execution.host`.

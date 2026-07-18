@@ -21,9 +21,9 @@ datahike commit re-renders a whole element and morphs it in place.
 action-specific refresh path, no `refresh-all!`, and no second signal-diffing
 channel:
 
-1. One pure route view compiles into stable, ID-addressed render units. Its
-   initial paint is the complete `#app-view`; a structural change also falls
-   back to that complete element.
+1. One pure route view derives the complete, stable-ID `#app-view` element.
+   The current subscription boundary is that whole element; there is no
+   second per-unit feed or server-side tree diff.
 2. Each page is **two routes**: a tiny **shim page** (GET) and a **separate
    long-lived `/feed` GET** SSE stream. Loopback uses identity encoding;
    remote deployments explicitly set `SEON_FEED_COMPRESSION=gzip` and still
@@ -35,10 +35,11 @@ channel:
    retains the earliest `db-before`, latest `db`, effective datoms, and changed
    attributes. Ordinary work settles near a frame (16 ms), structural work at
    300 ms, with a hard 500 ms bound under continuous commits.
-4. Recorded database reads select the dirty units. Each read runs once against
-   the immutable before/after values; equal results and equal serialized output
-   are suppressed. Complete dirty elements are combined into one
-   `datastar-patch-elements` event and promptly flush through the selected
+4. The execution-child projection reports the database attributes read by the
+   complete view. The normalized subscription retains that attribute set, so
+   unrelated committed attributes skip rendering. An affected subscription
+   derives one complete element, suppresses identical serialized output, and
+   promptly flushes one `datastar-patch-elements` event through the selected
    response encoding.
 5. Datastar's client-side `idiomorph` morphs each complete pushed element into
    the live DOM. Default patch mode is `outer`, so the stable element ID is the
