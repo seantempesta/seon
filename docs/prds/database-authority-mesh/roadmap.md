@@ -2880,3 +2880,13 @@ The earliest unsettled live contract is now supervised child death and clean
 reconstruction, followed by writer crash recovery and independent cluster
 database proof. Measurements and Bun-native HTTP replacement remain later
 gates and do not displace that recovery order.
+
+Normal supervised retirement now has live reconstruction evidence. A root
+child returned a 3,051-byte compiled prompt, `stop-child!` requested its normal
+shutdown, and the first invocation after its exit started a new child and
+returned the same result at the same database value. The proof also exposed a
+short retirement interval in which an immediate invocation is still sent to
+the retiring child and rejected. That active recovery defect is recorded at
+[[../../seon/issues/execution-invocation-during-child-retirement-is-rejected]];
+closing it is the next dependency-ready implementation before unexpected-death
+and writer-crash proof.
