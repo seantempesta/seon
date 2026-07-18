@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, web, cljs]
 ---
@@ -36,3 +36,10 @@ renderer is required.
 - A focused test invokes the renderer through that two-argument interface.
 - The complete root page renders the plan surface without a Malli or render
   error in the browser, pod log, or child result.
+
+## Resolution
+
+Commit `90a7cb29` makes `my.plan.internal/plan-block-html` implement the common
+two-argument render interface. Focused plan proof passes 22 tests / 72
+assertions. The live root page renders `plan — no plan yet` with a clean browser
+console and no render fault in the pod log.

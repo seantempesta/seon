@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, web, cljs, agent]
 ---
@@ -35,3 +35,10 @@ canvas is required.
 - Focused canvas tests call the function through that interface.
 - A new ordinary agent's real gzip feed contains the welcome canvas and no
   Malli or render error.
+
+## Resolution
+
+Commit `5d914d15` makes `seon.render.canvas/welcome` implement the common
+two-argument render interface. Focused canvas and execution-runtime proof passes
+33 tests / 266 assertions. The real `solid-worms-punch` gzip feed contains the
+welcome canvas, plan, and empty transcript without a Malli or render error.

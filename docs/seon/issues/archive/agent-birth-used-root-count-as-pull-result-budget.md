@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, agent, database, web]
 ---
@@ -41,3 +41,11 @@ one-MiB shallow result-weight limit.
 - A real uncached `POST /agents` creates and resumes one agent, whose page and
   database facts are observable.
 - Fresh and converged initialization remain idempotent and race-free.
+
+## Resolution
+
+Commit `5473d66d` gives all three birth acquisitions one bounded Datahike pull
+result allowance while retaining their existing result-weight bound. Focused
+multiagent proof passes 5 tests / 38 assertions. A real uncached `POST /agents`
+created `solid-worms-punch` in 287 ms; its database-derived page and gzip feed
+rendered after the separately tracked renderer correction.
