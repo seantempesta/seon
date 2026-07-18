@@ -225,6 +225,27 @@
       (is (= :transport (:seon.dev.mcp/failure result)))
       (is (true? (#'mcp/stale-runtime? result))))))
 
+(deftest default-cljs-eval-retries-through-the-existing-session-owner
+  (let [retried (atom [])
+        session {:port 41001 :nrepl-session "replaced"}]
+    (with-redefs-fn {#'mcp/get-or-create-session!
+                     (constantly {:sid "default" :session-info session})
+                     #'mcp/nrepl-eval
+                     (constantly {:err "Connection refused"
+                                  :status ["error"]
+                                  :seon.dev.mcp/failure :transport})
+                     #'mcp/retry-with-fresh-session!
+                     (fn [session-id code timeout]
+                       (swap! retried conj [session-id code timeout])
+                       {:sid "default"
+                        :result {:value "42" :ns "cljs.user"
+                                 :out "" :err "" :status ["done"]}})}
+      (fn []
+        (let [response (#'mcp/execute-eval {:code "(+ 20 22)"})]
+          (is (not (:isError response)))
+          (is (str/includes? (get-in response [:content 0 :text]) "42"))
+          (is (= [[nil "(+ 20 22)" 30000]] @retried)))))))
+
 (deftest cljs-sentinel-results-are-tool-errors
   (doseq [sentinel [":repl/exception!" ":repl/print-error!"]]
     (let [response (#'mcp/render-eval-result
