@@ -3149,3 +3149,35 @@ must show isolated database values, writers, agents, feeds, and lifecycle
 operations can run concurrently without cross-cluster selection. Complete
 correctness, real-browser, multi-agent load, and measured CPU/memory/latency
 remain the graduation gates after it.
+
+### 2026-07-18 shared-writer multi-database checkpoint
+
+The existing branch runtime now proves the central multi-database invariant
+without introducing another supervisor or database path. The default database
+and `default-mesh-proof` ran concurrently through watcher PID `87159` and the
+same sole JVM writer PID `87446`; their Bun pods, database names, branches, and
+web ports remained distinct. Their ordinary database values carried the same
+Datahike store ID and basis transaction but different branches and connection
+IDs. A transaction setting root's purpose to `mesh proof branch only` appeared
+in the branch pull and remained absent from the default pull. Both gzip
+Datastar feeds returned complete healthy root views concurrently.
+
+The MCP boundary also rejected ambiguous bare `root` selection and accepted
+the explicit `default/root` and `default-mesh-proof/root` agent IDs. Closing
+the branch exposed incorrect operator assumptions about Datahike's remote
+three-part `:store-id`, a valid false release result after the pod had already
+closed its session, and deletion replay during retry. Commit `5f6f8ea0`
+corrects those boundaries in place. Focused writer proof passes 3 tests and 17
+assertions; focused branch operator proof passes 5 tests and 147 assertions.
+The branch lifecycle record and private process directory are gone, and the
+default cluster remains ready.
+
+This closes isolated multi-database assignment, reads, writes, routing, feeds,
+and lifecycle over one writer. It does not yet prove the user's stronger
+experimental-cluster requirement because branch pods are intentionally
+nonautonomous. The earliest unsettled contract is therefore two autonomous
+cluster pods using the same writer owner without cross-cluster selection or a
+second JVM. Its integrated proof must also show independent database work is
+admitted concurrently rather than merely multiplexed through one global
+request lane. Complete correctness, real-browser, multi-agent load, and
+measured CPU/memory/latency remain the later graduation gates.
