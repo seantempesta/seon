@@ -32,11 +32,8 @@
    ## Path configuration — single source of truth
 
    The log file path is held in [[!config]] under `:seon.log/file`
-   (default `\"logs/pod-events.log\"`). In the sidecar/WASI pod this
-   will move to `\"/logs/pod-events.log\"` — a dedicated WASI preopen,
-   separate from `/scratch/` so logs can be agent-RO and survive
-   session restarts (scratch is per-session, agent-RW). Override via
-   [[configure!]]. (Was a `^:dynamic` Var in Phase 1.5 but dynvars
+   (default `\"logs/pod-events.log\"`). Override via [[configure!]].
+   (Was a `^:dynamic` Var in Phase 1.5 but dynvars
    don't reliably survive `await` boundaries in CLJS over Promises;
    app-wide config belongs in the atom alongside `:seon.log/file-cap`
    and `:seon.log/keep`.)
@@ -63,7 +60,6 @@
     ["node:path" :as np]
     [cljs.reader :as edn]
     [clojure.string :as str]
-    [seon.platform :as platform]
     [seon.schema :as schema]
     [taoensso.trove :as trove]
     [taoensso.trove.console :as trove-console]))
@@ -326,15 +322,14 @@
   "Write one NDJSON-EDN line to the event file. Best-effort — failure
    degrades to stderr, never throws."
   [entry]
-  (when (= :node (platform/host))
-    (try
-      (let [path (event-file-path)]
-        (ensure-dir! path)
-        (rotate-if-needed! path)
-        (.appendFileSync fs path (str (pr-str entry) "\n") "utf-8"))
-      (catch :default e
-        (js/console.error "[seon.log] file write failed —"
-                          (or (.-message e) (str e)))))))
+  (try
+    (let [path (event-file-path)]
+      (ensure-dir! path)
+      (rotate-if-needed! path)
+      (.appendFileSync fs path (str (pr-str entry) "\n") "utf-8"))
+    (catch :default e
+      (js/console.error "[seon.log] file write failed —"
+                        (or (.-message e) (str e))))))
 
 ;; ============================================================
 ;; Internal — emit one entry to the two sinks (console + file).
@@ -409,13 +404,12 @@
   "Read the active log file as a string. Empty string if missing or
    unreadable. Never throws."
   []
-  (when (= :node (platform/host))
-    (let [path (event-file-path)]
-      (try
-        (if (.existsSync fs path)
-          (.readFileSync fs path "utf-8")
-          "")
-        (catch :default _ "")))))
+  (let [path (event-file-path)]
+    (try
+      (if (.existsSync fs path)
+        (.readFileSync fs path "utf-8")
+        "")
+      (catch :default _ ""))))
 
 (defn- parse-line
   "Read one NDJSON-EDN line into an entry map. Returns nil if the line

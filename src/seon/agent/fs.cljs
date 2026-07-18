@@ -42,7 +42,6 @@
     [seon.agent.fs.internal :as int]
     [seon.agent.fs.match :as match]
     [seon.code :as code]
-    [seon.platform :as platform]
     [seon.schema :as schema]))
 
 ;; ============================================================
@@ -385,19 +384,17 @@
    content and process it with code."
   {:malli/schema [:=> [:cat :seon.agent.fs/read-request] :seon.agent.fs/read-response]}
   [{:seon.agent.fs/keys [path encoding from-line max-lines] :or {encoding "utf-8"}}]
-  (case (platform/host)
-    :node (cond
-            (int/out-of-scope? path) (int/scope-denied path)
-            :else (try
-                    (let [content (.readFileSync fs path encoding)
-                          base    {:seon.agent.fs/ok?       true
-                                   :seon.agent.fs/path      path
-                                   :seon.agent.fs/file-sha  (int/file-sha content)}]
-                      (if (or from-line max-lines)
-                        (merge base (int/page-lines content from-line max-lines))
-                        (assoc base :seon.agent.fs/content content)))
-                    (catch :default e (int/->err path e))))
-    :wasi (int/wasi-pending path "read-file")))
+  (cond
+    (int/out-of-scope? path) (int/scope-denied path)
+    :else (try
+            (let [content (.readFileSync fs path encoding)
+                  base    {:seon.agent.fs/ok?       true
+                           :seon.agent.fs/path      path
+                           :seon.agent.fs/file-sha  (int/file-sha content)}]
+              (if (or from-line max-lines)
+                (merge base (int/page-lines content from-line max-lines))
+                (assoc base :seon.agent.fs/content content)))
+            (catch :default e (int/->err path e)))))
 
 (defn ^:seon.fn/agent-facing? write-file
   "Write `:seon.agent.fs/content` to `:seon.agent.fs/path` (sync).
@@ -406,16 +403,14 @@
      {:seon.agent.fs/ok? false :seon.agent.fs/path <p> :seon.agent.fs/error <s>}  ; fail"
   {:malli/schema [:=> [:cat :seon.agent.fs/write-request] :seon.agent.fs/write-response]}
   [{:seon.agent.fs/keys [path content encoding] :or {encoding "utf-8"}}]
-  (case (platform/host)
-    :node (cond
-            (int/read-only?)         (int/denied path "filesystem is read-only (:seon.agent.fs/read-only? true)")
-            (int/out-of-scope? path) (int/scope-denied path)
-            :else (try
-                    (.writeFileSync fs path (code/text content) encoding)
-                    {:seon.agent.fs/ok?  true
-                     :seon.agent.fs/path path}
-                    (catch :default e (int/->err path e))))
-    :wasi (int/wasi-pending path "write-file")))
+  (cond
+    (int/read-only?)         (int/denied path "filesystem is read-only (:seon.agent.fs/read-only? true)")
+    (int/out-of-scope? path) (int/scope-denied path)
+    :else (try
+            (.writeFileSync fs path (code/text content) encoding)
+            {:seon.agent.fs/ok?  true
+             :seon.agent.fs/path path}
+            (catch :default e (int/->err path e)))))
 
 (defn- apply-edit
   "Read `path`, run `edit-fn` (content → new-content facts or error
@@ -472,34 +467,32 @@
     :or {encoding "utf-8"}}]
   (let [line-mode?  (or (some? from-line) (some? to-line) (some? content))
         match-mode? (or (some? old-string) (some? new-string))]
-    (case (platform/host)
-      :node (cond
-              (int/read-only?)         (int/denied path "filesystem is read-only (:seon.agent.fs/read-only? true)")
-              (int/out-of-scope? path) (int/scope-denied path)
+    (cond
+      (int/read-only?)         (int/denied path "filesystem is read-only (:seon.agent.fs/read-only? true)")
+      (int/out-of-scope? path) (int/scope-denied path)
 
-              (and line-mode? match-mode?)
-              (int/denied path (str "pass ONE mode: from-line/to-line/content "
-                                    "(line range) OR old-string/new-string (exact match)"))
+      (and line-mode? match-mode?)
+      (int/denied path (str "pass ONE mode: from-line/to-line/content "
+                            "(line range) OR old-string/new-string (exact match)"))
 
-              (and line-mode? (not (and from-line to-line content)))
-              (int/denied path (str "line-range mode needs all of :seon.agent.fs/from-line, "
-                                    ":seon.agent.fs/to-line (1-based inclusive) and "
-                                    ":seon.agent.fs/content"))
+      (and line-mode? (not (and from-line to-line content)))
+      (int/denied path (str "line-range mode needs all of :seon.agent.fs/from-line, "
+                            ":seon.agent.fs/to-line (1-based inclusive) and "
+                            ":seon.agent.fs/content"))
 
-              (and match-mode? (not (and old-string new-string)))
-              (int/denied path (str "exact-match mode needs both :seon.agent.fs/old-string "
-                                    "and :seon.agent.fs/new-string"))
+      (and match-mode? (not (and old-string new-string)))
+      (int/denied path (str "exact-match mode needs both :seon.agent.fs/old-string "
+                            "and :seon.agent.fs/new-string"))
 
-              line-mode?
-              (apply-edit path encoding #(int/line-range-edit % from-line to-line (code/text content)))
+      line-mode?
+      (apply-edit path encoding #(int/line-range-edit % from-line to-line (code/text content)))
 
-              match-mode?
-              (apply-edit path encoding #(int/match-edit % old-string new-string))
+      match-mode?
+      (apply-edit path encoding #(int/match-edit % old-string new-string))
 
-              :else
-              (int/denied path (str "no edit given — pass from-line/to-line/content "
-                                    "(line range) or old-string/new-string (exact match)")))
-      :wasi (int/wasi-pending path "edit-file"))))
+      :else
+      (int/denied path (str "no edit given — pass from-line/to-line/content "
+                            "(line range) or old-string/new-string (exact match)")))))
 
 (defn ^:seon.fn/agent-facing? list-dir
   "List the filenames in one directory, without recursion.
@@ -507,16 +500,14 @@
    Sync; entries are names only, not full paths."
   {:malli/schema [:=> [:cat :seon.agent.fs/list-request] :seon.agent.fs/list-response]}
   [{:seon.agent.fs/keys [path]}]
-  (case (platform/host)
-    :node (cond
-            (int/out-of-scope? path) (int/scope-denied path)
-            :else (try
-                    (let [arr (.readdirSync fs path)]
-                      {:seon.agent.fs/ok?     true
-                       :seon.agent.fs/path    path
-                       :seon.agent.fs/entries (vec arr)})
-                    (catch :default e (int/->err path e))))
-    :wasi (int/wasi-pending path "list-dir")))
+  (cond
+    (int/out-of-scope? path) (int/scope-denied path)
+    :else (try
+            (let [arr (.readdirSync fs path)]
+              {:seon.agent.fs/ok?     true
+               :seon.agent.fs/path    path
+               :seon.agent.fs/entries (vec arr)})
+            (catch :default e (int/->err path e)))))
 
 (defn ^:seon.fn/agent-facing? stat
   "Check a path's type and mtime without reading it.
@@ -524,18 +515,16 @@
    Sync stat: returns `mtime` plus `dir?`/`file?` booleans."
   {:malli/schema [:=> [:cat :seon.agent.fs/stat-request] :seon.agent.fs/stat-response]}
   [{:seon.agent.fs/keys [path]}]
-  (case (platform/host)
-    :node (cond
-            (int/out-of-scope? path) (int/scope-denied path)
-            :else (try
-                    (let [s (.statSync fs path)]
-                      {:seon.agent.fs/ok?    true
-                       :seon.agent.fs/path   path
-                       :seon.agent.fs/dir?   (.isDirectory s)
-                       :seon.agent.fs/file?  (.isFile s)
-                       :seon.agent.fs/mtime  (.-mtime s)})
-                    (catch :default e (int/->err path e))))
-    :wasi (int/wasi-pending path "stat")))
+  (cond
+    (int/out-of-scope? path) (int/scope-denied path)
+    :else (try
+            (let [s (.statSync fs path)]
+              {:seon.agent.fs/ok?    true
+               :seon.agent.fs/path   path
+               :seon.agent.fs/dir?   (.isDirectory s)
+               :seon.agent.fs/file?  (.isFile s)
+               :seon.agent.fs/mtime  (.-mtime s)})
+            (catch :default e (int/->err path e)))))
 
 (defn ^:seon.fn/agent-facing? file-exists?
   "Check whether a path exists; false on any error.
@@ -548,18 +537,13 @@
 (defn ^:seon.fn/agent-facing? home-dir
   "The user's home directory as a string.
 
-   :node only; throws with a
-   legible message on :wasi or when neither HOME nor USERPROFILE is set
-   (absent = error, never nil)."
+   Throws when neither HOME nor USERPROFILE is set (absent = error, never nil)."
   {:malli/schema [:=> [:cat] :string]}
   []
-  (case (platform/host)
-    :node (or (.. js/process -env -HOME)
-              (.. js/process -env -USERPROFILE)
-              (throw (ex-info "home-dir: neither HOME nor USERPROFILE is set"
-                              {:seon.agent.fs/op :home-dir})))
-    :wasi (throw (ex-info "home-dir is :node only (no :wasi home concept yet)"
-                          {:seon.agent.fs/op :home-dir}))))
+  (or (.. js/process -env -HOME)
+      (.. js/process -env -USERPROFILE)
+      (throw (ex-info "home-dir: neither HOME nor USERPROFILE is set"
+                      {:seon.agent.fs/op :home-dir}))))
 
 (defn ^:seon.fn/agent-facing? walk-dir
   "Recursively walk `:seon.agent.fs/path` (sync), return matching files.
@@ -594,11 +578,10 @@
   {:malli/schema [:=> [:cat :seon.agent.fs/walk-request] :seon.agent.fs/walk-response]}
   [{:seon.agent.fs/keys [path match-ext glob skip-hidden sort max-results]
     :or {skip-hidden true max-results 5000}}]
-  (case (platform/host)
-    :node (cond
-            (int/out-of-scope? path) (int/scope-denied path)
-            :else (try
-                    (let [pred       (int/walk-pred path match-ext glob)
+  (cond
+    (int/out-of-scope? path) (int/scope-denied path)
+    :else (try
+            (let [pred       (int/walk-pred path match-ext glob)
                           !out       (atom [])
                           !truncated (atom false)]
                       (int/walk-dir-recursive! path pred skip-hidden max-results
@@ -620,8 +603,7 @@
                                       "match). Raise :seon.agent.fs/max-results, or narrow "
                                       "with :seon.agent.fs/glob / :seon.agent.fs/match-ext / a "
                                       "deeper :seon.agent.fs/path.")))))
-                    (catch :default e (int/->err path e))))
-    :wasi (int/wasi-pending path "walk-dir")))
+            (catch :default e (int/->err path e)))))
 
 ;; ============================================================
 ;; Line-numbered view — the read surface an anchored edit is aimed with.
@@ -648,11 +630,10 @@
   [{:seon.agent.fs/keys [path from-line max-lines encoding]}]
   (let [encoding  (or encoding "utf-8")
         max-lines (or max-lines default-view-lines)]
-    (case (platform/host)
-      :node (cond
-              (int/out-of-scope? path) (int/scope-denied path)
-              :else (try
-                      (let [content (.readFileSync fs path encoding)
+    (cond
+      (int/out-of-scope? path) (int/scope-denied path)
+      :else (try
+              (let [content (.readFileSync fs path encoding)
                             lines   (match/content-lines content)
                             total   (count lines)
                             from    (max 1 (or from-line 1))
@@ -674,8 +655,7 @@
                          :seon.agent.fs/lines-returned (- end start)
                          :seon.agent.fs/total-lines    total
                          :seon.agent.fs/content        (match/number-lines window from)})
-                      (catch :default e (int/->err path e))))
-      :wasi (int/wasi-pending path "view"))))
+              (catch :default e (int/->err path e))))))
 
 ;; ============================================================
 ;; Anchored edits — replace! / insert!. The mutation rule: the pure
@@ -774,15 +754,14 @@
   (let [encoding  (or encoding "utf-8")
         find-text (code/text find)
         repl-text (code/text replace)]
-    (case (platform/host)
-      :node (cond
-              (int/read-only?)         (->anchored-fail (int/denied path "filesystem is read-only (:seon.agent.fs/read-only? true)"))
-              (int/out-of-scope? path) (->anchored-fail (int/scope-denied path))
-              (= "" find-text)         (anchored-msg path (str ":seon.agent.fs/find must be non-empty — "
-                                                              "copy the EXACT anchor text from (seon.agent.fs/view …)."))
-              :else
-              (try
-                (let [content (.readFileSync fs path encoding)
+    (cond
+      (int/read-only?)         (->anchored-fail (int/denied path "filesystem is read-only (:seon.agent.fs/read-only? true)"))
+      (int/out-of-scope? path) (->anchored-fail (int/scope-denied path))
+      (= "" find-text)         (anchored-msg path (str ":seon.agent.fs/find must be non-empty — "
+                                                      "copy the EXACT anchor text from (seon.agent.fs/view …)."))
+      :else
+      (try
+        (let [content (.readFileSync fs path encoding)
                       actual  (int/file-sha content)]
                   (if (and file-sha (not= file-sha actual))
                     (stale-file path actual file-sha)
@@ -798,8 +777,7 @@
                           (.writeFileSync fs path new-content encoding)
                           (edit-success path new-content decision))
                         (cascade-fail path decision)))))
-                (catch :default e (->anchored-fail (int/->err path e)))))
-      :wasi (->anchored-fail (int/wasi-pending path "replace!")))))
+        (catch :default e (->anchored-fail (int/->err path e)))))))
 
 (defn ^:seon.fn/agent-facing? insert!
   "Insert `:seon.agent.fs/content` into a file at one line anchor.
@@ -817,17 +795,16 @@
         ins-text    (code/text content)
         has-after?  (some? after-line)
         has-before? (some? before-line)]
-    (case (platform/host)
-      :node (cond
-              (int/read-only?)         (->anchored-fail (int/denied path "filesystem is read-only (:seon.agent.fs/read-only? true)"))
-              (int/out-of-scope? path) (->anchored-fail (int/scope-denied path))
-              (= has-after? has-before?)
-              (anchored-msg path (str "pass EXACTLY ONE of :seon.agent.fs/after-line or "
-                                      ":seon.agent.fs/before-line (a 1-based line number); got "
-                                      (if has-after? "both" "neither") "."))
-              :else
-              (try
-                (let [content-str (.readFileSync fs path encoding)
+    (cond
+      (int/read-only?)         (->anchored-fail (int/denied path "filesystem is read-only (:seon.agent.fs/read-only? true)"))
+      (int/out-of-scope? path) (->anchored-fail (int/scope-denied path))
+      (= has-after? has-before?)
+      (anchored-msg path (str "pass EXACTLY ONE of :seon.agent.fs/after-line or "
+                              ":seon.agent.fs/before-line (a 1-based line number); got "
+                              (if has-after? "both" "neither") "."))
+      :else
+      (try
+        (let [content-str (.readFileSync fs path encoding)
                       lines       (match/content-lines content-str)
                       total       (count lines)
                       trailing?   (str/ends-with? content-str "\n")
@@ -854,5 +831,4 @@
                        :seon.agent.fs/lines-added   (count ins-lines)
                        :seon.agent.fs/lines-removed 0
                        :seon.agent.fs/excerpt       (match/preview new-lines range)})))
-                (catch :default e (->anchored-fail (int/->err path e)))))
-      :wasi (->anchored-fail (int/wasi-pending path "insert!")))))
+        (catch :default e (->anchored-fail (int/->err path e)))))))

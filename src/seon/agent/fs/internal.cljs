@@ -25,16 +25,14 @@
    seon.eval/maybe-await-value) fires on a form's outermost value, not
    inside let-bindings. A Promise-returning fs op would bind `r` to a
    Promise, so `(:seon.agent.fs/ok? r)` returns nil → wrong branch. Sync
-   ops hand the agent the resolved map. Local-file perf cost is
-   irrelevant; WASI fd reads are sync too, so this survives convergence."
+   ops hand the agent the resolved map."
   (:require
     ["node:crypto" :as crypto]
     ["node:fs" :as fs]
     ["node:path" :as np]
     [clojure.string :as str]
     [seon.ai.tokens :as tokens]
-    [seon.config :as config]
-    [seon.platform :as platform]))
+    [seon.config :as config]))
 
 ;; ============================================================
 ;; Content addressing — the sha guard's currency.
@@ -69,16 +67,6 @@
    :seon.agent.fs/path  path
    :seon.agent.fs/error reason})
 
-(defn wasi-pending
-  "Stub response for the :wasi branch until wasi:filesystem/preopens
-   lands."
-  [path op]
-  {:seon.agent.fs/ok?   false
-   :seon.agent.fs/path  path
-   :seon.agent.fs/error (str ":wasi backend not implemented — " op
-                             " requires wasi:filesystem/preopens. "
-                             "Run under :node.")})
-
 ;; ============================================================
 ;; Live config — seeded from env, replaced by configure!.
 ;; ============================================================
@@ -88,18 +76,13 @@
    splits on the platform path-list delimiter (\":\" POSIX, \";\" Windows),
    same as $PATH — one root stays a one-element vector."
   []
-  (let [host (platform/host)]
-    {:seon.agent.fs/allowed-roots
-     (case host
-       :node (when-let [r (config/env-string "SEON_FS_ROOT")]
-               (->> (str/split r (re-pattern (str "\\" np/delimiter)))
-                    (remove str/blank?)
-                    vec))
-       :wasi nil)
-     :seon.agent.fs/read-only?
-     (case host
-       :node (= "1" (config/env-string "SEON_FS_READ_ONLY"))
-       :wasi true)}))
+  {:seon.agent.fs/allowed-roots
+   (when-let [r (config/env-string "SEON_FS_ROOT")]
+     (->> (str/split r (re-pattern (str "\\" np/delimiter)))
+          (remove str/blank?)
+          vec))
+   :seon.agent.fs/read-only?
+   (= "1" (config/env-string "SEON_FS_READ_ONLY"))})
 
 (defonce !config (atom (or (env-bootstrap) {})))
 
@@ -108,10 +91,8 @@
    the env on every call — the host owns the knob; nothing inside the pod
    can flip it. Any non-blank value other than \"0\" locks."
   []
-  (case (platform/host)
-    :node (let [v (config/env-string "SEON_FS_LOCK")]
-            (boolean (and v (not= "0" v))))
-    :wasi false))
+  (let [v (config/env-string "SEON_FS_LOCK")]
+    (boolean (and v (not= "0" v)))))
 
 (defn read-only? []
   (boolean (:seon.agent.fs/read-only? @!config)))
@@ -124,12 +105,9 @@
 ;; ============================================================
 
 (defn resolve-abs
-  "Normalize `path` to an absolute, `..`-resolved string. nil on :wasi
-   (paths there are pre-opened and don't normalize through node:path)."
+  "Normalize `path` to an absolute, `..`-resolved string."
   [path]
-  (case (platform/host)
-    :node (try (.resolve np path) (catch :default _ nil))
-    :wasi nil))
+  (try (.resolve np path) (catch :default _ nil)))
 
 (defn under-root?
   "True iff `abs-path` is `root` itself or a descendant. Uses the path
@@ -144,16 +122,13 @@
 
 (defn out-of-scope?
   "True iff `path` is denied by the current allowlist — always true when
-   the allowlist is empty (default-deny) and on :wasi (defers to
-   [[wasi-pending]])."
+   the allowlist is empty (default-deny)."
   [path]
-  (case (platform/host)
-    :node (let [roots (allowed-roots)]
-            (or (empty? roots)
-                (let [abs (resolve-abs path)]
-                  (or (nil? abs)
-                      (not (some #(under-root? abs %) roots))))))
-    :wasi true))
+  (let [roots (allowed-roots)]
+    (or (empty? roots)
+        (let [abs (resolve-abs path)]
+          (or (nil? abs)
+              (not (some #(under-root? abs %) roots)))))))
 
 (defn scope-denied [path]
   (let [roots (allowed-roots)]

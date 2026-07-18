@@ -1,6 +1,5 @@
 (ns seon.platform-test
-  "Contract tests for `seon.platform` — host detection + the
-   SEON_RUNTIME_ROOT artifact-path resolution (downstream-consumer
+  "Contract tests for `seon.platform` artifact-path resolution (downstream-consumer
    extensibility, 2026-06-11): build/source artifact paths resolve
    against the env root when set, stay CWD-relative when unset; data
    paths never route through the helper (callers' contract, pinned by
@@ -8,12 +7,6 @@
   (:require
     [cljs.test :refer [deftest is]]
     [seon.platform :as platform]))
-
-(deftest host-detection
-  ;; The test build runs under Node.
-  (is (= :node (platform/host)))
-  (is (true? (platform/node?)))
-  (is (false? (platform/wasi?))))
 
 (deftest artifact-path-env-override
   (let [env  (.-env js/process)
