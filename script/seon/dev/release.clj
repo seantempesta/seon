@@ -39,6 +39,14 @@
    [:seon.dev.release/members [:vector release-member-schema]]
    [:seon.dev.release/application-sha-256 sha-256-schema]])
 
+(def ^:private required-member-identity-keys
+  [:seon.dev.release/bun-member
+   :seon.dev.release/writer-member
+   :seon.dev.release/pod-member
+   :seon.dev.release/execution-member
+   :seon.dev.release/runtime-assets-member
+   :seon.dev.release/program-source-member])
+
 (defn- bytes->hex [bytes]
   (apply str (map #(format "%02x" (bit-and 0xff %)) bytes)))
 
@@ -103,14 +111,7 @@
         paths (map :seon.dev.release/path members)
         identity (:seon.dev.release/identity manifest)
         declared-members (set names)
-        required-members
-        (map identity
-             [:seon.dev.release/bun-member
-              :seon.dev.release/writer-member
-              :seon.dev.release/pod-member
-              :seon.dev.release/execution-member
-              :seon.dev.release/runtime-assets-member
-              :seon.dev.release/program-source-member])]
+        required-members (map identity required-member-identity-keys)]
     (when-not (= members (canonical-members members))
       (manifest-error "Release members are not in canonical order." {}))
     (when-not (= (count names) (count (distinct names)))
@@ -206,6 +207,32 @@
                       {:seon.dev.release/path (str path)}))
     (bytes->hex (.digest digest))))
 
+(defn- verify-complete-inventory! [root members]
+  (let [member-paths (mapv :seon.dev.release/path members)
+        directory-paths
+        (into #{}
+              (filter #(fs/directory? (fs/path root %)))
+              member-paths)
+        declared-or-covered?
+        (fn [relative]
+          (or (= "release.edn" relative)
+              (some #(or (= relative %)
+                         (str/starts-with? relative (str % "/"))
+                         (str/starts-with? % (str relative "/")))
+                    directory-paths)
+              (some #(or (= relative %)
+                         (str/starts-with? % (str relative "/")))
+                    member-paths)))]
+    (doseq [path (rest (file-seq (io/file (str root))))
+            :let [relative (relative-entry root path)]]
+      (when (symbolic-link? path)
+        (manifest-error "A release package contains a symbolic link."
+                        {:seon.dev.release/path relative}))
+      (when-not (declared-or-covered? relative)
+        (manifest-error "A release package entry is not declared."
+                        {:seon.dev.release/path relative}))))
+  members)
+
 (defn create-manifest
   "Create a deterministic manifest from named package members."
   {:malli/schema
@@ -219,6 +246,9 @@
       (manifest-error "A release member declaration is invalid."
                       {:seon.dev.release/member member
                        :seon.dev.release/path path})))
+  (when-not (every? (set (keys members))
+                    (map identity required-member-identity-keys))
+    (manifest-error "A required runtime member is not declared." {}))
   (let [root (ensure-package-root! package-root)
         entries (canonical-members
                  (mapv (fn [[member path]]
@@ -227,6 +257,7 @@
                           :seon.dev.release/sha-256
                           (member-sha-256 (member-path! root path))})
                        members))]
+    (verify-complete-inventory! root entries)
     (validate-manifest!
      {:seon.dev.release/version current-version
       :seon.dev.release/identity identity
@@ -240,6 +271,7 @@
   [package-root manifest]
   (validate-manifest! manifest)
   (let [root (ensure-package-root! package-root)]
+    (verify-complete-inventory! root (:seon.dev.release/members manifest))
     (doseq [{:seon.dev.release/keys [path sha-256]}
             (:seon.dev.release/members manifest)]
       (when-not (= sha-256 (member-sha-256 (member-path! root path)))

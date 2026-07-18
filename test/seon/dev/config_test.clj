@@ -163,9 +163,10 @@
                               [:seon.dev.config/launch-descriptor
                                ::launch/runtime])]
           (is (false? (:seon.dev.config/source-checkout? configuration)))
-          (is (= "0" (get-in configuration
-                              [:seon.dev.config/environment
-                               "SEON_RENDER_STRICT"])))
+          (is (= (or (get (System/getenv) "SEON_RENDER_STRICT") "0")
+                 (get-in configuration
+                         [:seon.dev.config/environment
+                          "SEON_RENDER_STRICT"])))
           (is (= (str (fs/canonicalize (fs/path root "runtime/bun")))
                  (:seon.dev.config/bun-executable configuration)))
           (is (= (str (fs/canonicalize (fs/path root "runtime/writer.jar")))

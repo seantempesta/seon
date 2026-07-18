@@ -101,6 +101,16 @@
                               (release/verify-package! (str root) manifest))))
       (finally (fs/delete-tree root {:force true})))))
 
+(deftest package-verification-rejects-undeclared-entries
+  (let [root (fixture!)]
+    (try
+      (let [manifest
+            (release/create-manifest (str root) members runtime-identity)]
+        (spit (str (fs/path root "undeclared.txt")) "not in the release")
+        (is (thrown-with-msg? Exception #"entry is not declared"
+                              (release/verify-package! (str root) manifest))))
+      (finally (fs/delete-tree root {:force true})))))
+
 (deftest package-verification-rejects-symlinks-at-every-member-level
   (let [root (fixture!)
         outside (fs/create-temp-dir {:prefix "seon-release-outside-"})]
