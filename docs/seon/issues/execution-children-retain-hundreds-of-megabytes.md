@@ -56,6 +56,10 @@ even though process isolation and parallel execution work correctly.
   uses 208.6 MiB physical memory. A real child after three evals across two
   turns uses 212.3 MiB physical memory with a 421.3 MiB peak, down from 310.0
   MiB retained and 450.0 MiB peak before this ownership cut.
+- Four simultaneous real agents then retained 231.0--238.0 MiB physical memory
+  each with 422.6--424.1 MiB peaks. All returned distinct exact replies in one
+  turn, closed `:completed` in 13.95--15.30 seconds, and retired through the
+  ordinary idle owner with no IPC, session, or runtime-interest error.
 
 ## Owner
 
@@ -77,6 +81,6 @@ the process boundary.
 - A warm ready child should use at most 200 MiB physical memory and an active
   evaluated child at most 300 MiB. The current measured values are 208.6 and
   212.3 MiB. The active target is green; the issue remains open for the final
-  several-simultaneous-child modest-hardware proof and the 8.6 MiB ready gap.
+  8.6 MiB ready gap. The simultaneous-child modest-hardware proof is green.
   Bundle size by itself is not an acceptance measure, and the remaining gap
   does not justify weakening authored rendering or process isolation.

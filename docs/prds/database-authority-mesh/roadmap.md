@@ -3689,3 +3689,15 @@ returns the actual send exception, PID, and bounded stdout/stderr tails in its
 existing error value; focused host proof passes 15 tests/68 assertions. The
 failure must be repeated under concurrent load and is not silently classified
 as resolved.
+
+That repeat is now green under the intended parallel load. Four ordinary
+agents ran simultaneously in separate execution children, each executed two
+forms, returned its distinct exact reply, and closed `:completed` in one turn
+with zero invocation, session, or runtime-interest errors. Their end-to-end
+times were 13.95--15.30 seconds. While all four were live, physical footprints
+were 231.0, 232.7, 236.0, and 238.0 MiB; peaks were 422.6--424.1 MiB. Every
+child was below the 300 MiB active bound, versus the prior source-frozen load's
+roughly 336 MiB physical sample before both memory cuts. All four then left the
+host registry and OS process table through ordinary idle retirement. The
+previous IPC send failure did not recur, and the current pod log contains no
+core fault or runtime-interest error.
