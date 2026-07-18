@@ -16,7 +16,7 @@
   },
   "keywords": [],
   "author": "",
-  "license": "ISC",
+  "license": "AGPL-3.0-only",
   "type": "commonjs",
   "devDependencies": {
     "@tailwindcss/cli": "^4.1.18",
