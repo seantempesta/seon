@@ -17,7 +17,7 @@
    :seon.release.member/operator "runtime/operator.jar"
    :seon.release.member/detach-helper "runtime/detach.py"
    :seon.release.member/launcher "bin/seon"
-   :seon.release.member/config "config/system.edn"
+   :seon.release.member/config "config"
    :seon.release.member/babashka-license
    "THIRD_PARTY_LICENSES/babashka-EPL-1.0.txt"})
 
@@ -50,7 +50,8 @@
 
 (defn- package-fixture! []
   (let [root (fs/create-temp-dir {:prefix "seon-config-package-"})]
-    (doseq [directory ["runtime/web" "bin" "config" "THIRD_PARTY_LICENSES"]]
+    (doseq [directory ["runtime/web/resources/public" "bin" "config"
+                       "THIRD_PARTY_LICENSES"]]
       (fs/create-dirs (fs/path root directory)))
     (doseq [[path content]
             [["runtime/bun" "bun"]
@@ -59,11 +60,12 @@
              ["runtime/execution.js" "execution"]
              ["runtime/program-sources.edn" "{}"]
              ["runtime/web/style.css" "css"]
+             ["runtime/web/resources/public/seon-brand.css" ".brand {}"]
              ["runtime/bb" "bb"]
              ["runtime/operator.jar" "operator"]
              ["runtime/detach.py" "detach"]
              ["bin/seon" "launcher"]
-             ["config/system.edn" "{}"]
+             ["config/selected.edn" "{}"]
              ["THIRD_PARTY_LICENSES/babashka-EPL-1.0.txt" "EPL"]]]
       (spit (str (fs/path root path)) content))
     (spit (str (fs/path root "release.edn"))
@@ -208,6 +210,15 @@
                  (::launch/execution-output runtime)))
           (is (= (str (fs/canonicalize (fs/path root "runtime/web")))
                  (:seon.dev.config/runtime-assets configuration)))
+          (is (= (str (fs/canonicalize
+                       (fs/path root
+                                "runtime/web/resources/public/seon-brand.css")))
+                 (get-in configuration
+                         [:seon.dev.config/environment "SEON_BRAND_CSS"])))
+          (is (= (str (fs/canonicalize
+                       (fs/path root "config/selected.edn")))
+                 (get-in configuration
+                         [:seon.dev.config/environment "SEON_CONFIG"])))
           (is (= (str (fs/canonicalize
                        (fs/path root "runtime/program-sources.edn")))
                  (:seon.dev.config/program-source configuration)))

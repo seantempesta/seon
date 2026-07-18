@@ -22,9 +22,35 @@ digest `80054020…` and resolve the same maintained dependency SHAs. That close
 writer collision and parity inside this checkout; it does not publish a
 consumer contract.
 
-The complete consumer remains checkout-dependent: its operator, Shadow build,
-CLJS runtime, public SDK, bootstrap/source corpus, static assets, npm closure,
-base config, and dependency overrides all come from the Seon repository.
+The downstream build remains checkout-dependent: its operator, Shadow build,
+public SDK, bootstrap/source corpus, static assets, npm closure, base config,
+and dependency overrides all come from the Seon repository. The resulting
+production runtime itself is now source-free and independent.
+
+The production downstream overlay boundary is directly proven. Release
+application `8f8fb5da…` used ACME's source directory plus two ordinary Shadow
+entrypoints: `acme.pod/-main` for the Bun pod and
+`acme.execution/-main` for each isolated Bun execution child. The pod compiled
+334 source files and the execution child compiled 269; ACME functions remained
+reachable in both without pulling pod/web startup into the child. The selected
+Aero manifest ships beside its relative include graph as immutable
+`config/selected.edn`, and the packaged brand stylesheet is byte-identical to
+ACME's input.
+
+The recursively read-only package started from an external state directory,
+instrumented all 761 selected functions, and served gzip Datastar feeds whose
+canvas and supporting surfaces rendered `Acme dashboard` and
+`Acme context surface`. A real Anthropic-backed agent evaluated
+`acme.widget/set-location!` and `acme.brand/tagline`, completed, and retained
+both results across a clean writer-and-pod restart. The restarted gzip feed
+read both values back. The complete package file hash remained exactly
+`3e9775bd…` before and after execution and restart, and clean shutdown retired
+the Bun pod and JVM writer. Focused release/config/artifact proof passes 44
+tests/212 assertions.
+
+The earliest unsettled contract is therefore no longer the production runtime
+overlay. It is the separate version-matched downstream build SDK: ACME must be
+able to perform the same build while the producer checkout is inaccessible.
 
 The first production-entry boundary is now implemented and directly proven.
 The pod no longer requires `shadow.cljs.devtools.client.env`; its build identity
@@ -121,11 +147,11 @@ that compatibility set and must not copy it downstream.
 ## Ordered work
 
 1. Freeze a versioned compatibility manifest for source, database protocol,
-   config/SDK ABI, Java/Node requirements, artifact members and digests,
+   config/SDK ABI, Java/Bun requirements, artifact members and digests,
    maintained fork identities, npm lock, and license/SBOM metadata.
 2. Publish immutable maintained dependencies and the public CLJS source/macros
    required by a downstream build SDK.
-3. Produce a relocatable, devtools-free Node runtime with self-host bootstrap,
+3. Produce a relocatable, devtools-free Bun runtime with self-host bootstrap,
    bounded program-source corpus, static assets, and production npm closure.
 4. Make the one process graph project watcher + writer + pod for development
    and writer + pod for packaged operation.

@@ -572,9 +572,16 @@
    [:seon.dev.artifact/release-execution-output :string]
    [:seon.dev.artifact/release-program-source-output :string]])
 
-(defn- cljs-release-command [build-id config-merge]
-  ["clj" "-M:cljs" "release" build-id "--force-spawn"
-   "--config-merge" (pr-str config-merge)])
+(defn- cljs-release-command [config build-id config-merge]
+  (let [environment (:seon.dev.config/environment config)
+        source (get environment "SEON_EXTRA_SRC")]
+    (into ["clj"]
+          (concat
+           (when-not (str/blank? source)
+             ["-Sdeps" (pr-str {:deps {'seon.extra/src
+                                        {:local/root source}}})])
+           ["-M:cljs" "release" build-id "--force-spawn"
+            "--config-merge" (pr-str config-merge)]))))
 
 (defn- release-relative-path! [root field path]
   (let [relative (str (fs/relativize root
@@ -636,17 +643,39 @@
     (run-step!
      release-config "build release pod"
      (cljs-release-command
+      release-config
       "client"
-      {:output-to client-output
-       :build-hooks
-       [['seon.dev.program-artifact/publish! program-source-relative]]
-       :devtools {:enabled false :preloads [] :build-notify nil}}))
+      (cond->
+       {:output-to client-output
+        :build-hooks
+        [['seon.dev.program-artifact/publish! program-source-relative]]
+        :devtools {:enabled false :preloads [] :build-notify nil}}
+        (not (str/blank?
+              (get-in release-config
+                      [:seon.dev.config/environment "SEON_EXTRA_PRELOAD"])))
+        (assoc :main
+               (symbol
+                (str (get-in release-config
+                             [:seon.dev.config/environment
+                              "SEON_EXTRA_PRELOAD"])
+                     "/-main"))))))
     (run-step!
      release-config "build release execution child"
      (cljs-release-command
+      release-config
       "execution"
-      {:output-to execution-output
-       :devtools {:enabled false}}))
+      (cond->
+       {:output-to execution-output
+        :devtools {:enabled false}}
+        (not (str/blank?
+              (get-in release-config
+                      [:seon.dev.config/environment
+                       "SEON_EXTRA_EXECUTION_MAIN"])))
+        (assoc :main
+               (symbol
+                (get-in release-config
+                        [:seon.dev.config/environment
+                         "SEON_EXTRA_EXECUTION_MAIN"]))))))
     release))
 
 (defn- capture-command! [config argv]

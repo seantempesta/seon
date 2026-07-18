@@ -16,6 +16,13 @@ the place we iterate on the "consume Seon without forking it" story.
   `SEON_EXTRA_PRELOAD` entry ns) registers them via `(reset!
   seon.client/!extra-core-vars …)`. Omit that one call and the entire
   surface is silently invisible — that's the bug.
+  The same namespace exposes `-main` for an optimized package build; after its
+  load-time registration it delegates to `seon.client/-main`. Development uses
+  it as a preload, while production uses it as the real Shadow entrypoint, so
+  downstream code cannot be removed as unreachable.
+- **Execution entry** — `SEON_EXTRA_EXECUTION_MAIN=acme.execution/-main`
+  keeps the same downstream functions reachable in each optimized isolated
+  execution child without pulling the pod and web startup graph into it.
 - **Live canvas via SCI (BUG A)** — `acme.widget/dash` is a correctly
   `:require`-d renderer that calls `acme.helpers/format-count`, an UNSPECCED
   helper. It renders, but falls off the SCI-bounded path onto the unbounded

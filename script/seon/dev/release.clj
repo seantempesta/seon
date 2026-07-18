@@ -55,7 +55,7 @@
    :seon.release.member/operator "runtime/operator.jar"
    :seon.release.member/detach-helper "runtime/detach.py"
    :seon.release.member/launcher "bin/seon"
-   :seon.release.member/config "config/system.edn"
+   :seon.release.member/config "config"
    :seon.release.member/babashka-license
    "THIRD_PARTY_LICENSES/babashka-EPL-1.0.txt"
    :seon.release.member/node-modules "node_modules"
@@ -442,6 +442,7 @@
            [::detach-helper :string]
            [::launcher :string]
            [::config :string]
+           [::brand-css {:optional true} :string]
            [::babashka-license :string]
            [::node-modules :string]
            [::package-json :string]
@@ -451,7 +452,7 @@
   [{::keys [package-root bun bun-version writer pod execution bootstrap
             public-assets program-source babashka babashka-asset operator
             detach-helper
-            launcher config babashka-license node-modules package-json bun-lock
+            launcher config brand-css babashka-license node-modules package-json bun-lock
             license]}]
   (let [root (fs/path package-root)
         runtime (fs/path root "runtime")
@@ -472,12 +473,21 @@
     (copy-file! detach-helper (fs/path runtime "detach.py"))
     (copy-file! launcher (fs/path root "bin/seon"))
     (.setExecutable (io/file (str (fs/path root "bin/seon"))) true false)
-    (copy-file! config (fs/path root "config/system.edn"))
+    ;; Keep the selected Aero manifest beside its relative include graph. A
+    ;; downstream manifest such as config/acme.edn includes system.edn; copying
+    ;; only that file as system.edn turns the include into a self-reference.
+    ;; The package always starts from selected.edn, while the containing
+    ;; directory remains one content-addressed immutable release member.
+    (copy-directory! (fs/parent (fs/path config)) (fs/path root "config"))
+    (copy-file! config (fs/path root "config/selected.edn"))
     (copy-file! babashka-license
                 (fs/path root "THIRD_PARTY_LICENSES/babashka-EPL-1.0.txt"))
     (copy-directory! bootstrap (fs/path runtime-root "out/bootstrap"))
     (copy-directory! public-assets
                      (fs/path runtime-root "resources/public"))
+    (when brand-css
+      (copy-file! brand-css
+                  (fs/path runtime-root "resources/public/seon-brand.css")))
     (copy-directory! node-modules (fs/path root "node_modules"))
     (remove-symbolic-links! (fs/path root "node_modules"))
     (let [command-links (fs/path root "node_modules/.bin")]
@@ -656,7 +666,19 @@
          :seon.dev.artifact/release-program-source-output
          (str (fs/path build-root "program-sources.edn"))}
         config {:seon.dev.config/root (str root)
-                :seon.dev.config/environment environment}]
+                :seon.dev.config/environment environment}
+        selected-config (fs/path (or (get environment "SEON_CONFIG")
+                                     "config/system.edn"))
+        selected-config (str (fs/absolutize
+                              (if (fs/absolute? selected-config)
+                                selected-config
+                                (fs/path root selected-config))))
+        brand-css (some-> (get environment "SEON_BRAND_CSS") fs/path)
+        brand-css (when brand-css
+                    (str (fs/absolutize
+                          (if (fs/absolute? brand-css)
+                            brand-css
+                            (fs/path root brand-css)))))]
     (when (fs/exists? target)
       (manifest-error "The release target already exists."
                       {::package-root (str target)}))
@@ -700,7 +722,8 @@
         ::operator (str operator)
         ::detach-helper (str (fs/path root "script/seon/dev/detach.py"))
         ::launcher (str launcher)
-        ::config (str (fs/path root "config/system.edn"))
+        ::config selected-config
+        ::brand-css brand-css
         ::babashka-license
         (str (fs/path root "reference-code/babashka/LICENSE"))
         ::node-modules (str (fs/path closure "node_modules"))

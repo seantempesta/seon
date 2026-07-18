@@ -347,6 +347,9 @@
        (member-path :seon.dev.release/runtime-assets-member)
        :seon.dev.config/program-source
        (member-path :seon.dev.release/program-source-member)
+       :seon.dev.config/package-config
+       (str (fs/path (member-path :seon.dev.release/config-member)
+                     "selected.edn"))
        :seon.dev.config/detach-helper
        (member-path :seon.dev.release/detach-helper-member)
        :seon.dev.config/artifact-manifest manifest-path})))
@@ -358,6 +361,17 @@
         source-checkout? (source-checkout? root)
         package (when-not source-checkout? (package-configuration root))
         environment (child-environment root source-checkout?)
+        packaged-brand-css (when-not source-checkout?
+                             (fs/path (:seon.dev.config/runtime-assets package)
+                                      "resources/public/seon-brand.css"))
+        environment (cond-> environment
+                      (and packaged-brand-css
+                           (fs/regular-file? packaged-brand-css))
+                      (assoc "SEON_BRAND_CSS" (str packaged-brand-css))
+
+                      (not source-checkout?)
+                      (assoc "SEON_CONFIG"
+                             (:seon.dev.config/package-config package)))
         artifact (if source-checkout?
                    (artifact-configuration root environment)
                    (select-keys package

@@ -31,3 +31,9 @@
 ;; ctx scope via the seon override primitive `seon.agent.ctx/install!`. A
 ;; one-shot timer because the preload runs BEFORE agents start.
 (js/setTimeout #(context/install-all!) 12000)
+
+(defn -main
+  "Start the packaged ACME pod after this namespace registers its extensions."
+  {:malli/schema [:=> [:cat [:* :any]] :any]}
+  [& args]
+  (apply client/-main args))

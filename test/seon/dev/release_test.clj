@@ -185,7 +185,8 @@
         package (fs/path inputs "published")
         node-modules (fs/path inputs "production-node-modules")]
     (try
-      (doseq [directory ["bootstrap" "public" "production-node-modules/lib"
+      (doseq [directory ["bootstrap" "public" "config"
+                         "production-node-modules/lib"
                          "production-node-modules/.bin"]]
         (fs/create-dirs (fs/path inputs directory)))
       (doseq [[path content]
@@ -194,7 +195,8 @@
                ["program-sources.edn" "{}"]
                ["bb" "bb"] ["operator.jar" "operator"]
                ["detach.py" "detach"]
-               ["seon" "launcher"] ["system.edn" "{}"]
+               ["seon" "launcher"] ["config/system.edn" "{}"]
+               ["brand.css" ".brand {}"]
                ["babashka-license.txt" "EPL"]
                ["bootstrap/core.js" "bootstrap"]
                ["public/output.css" "css"]
@@ -225,7 +227,8 @@
               ::release/operator (str (fs/path inputs "operator.jar"))
               ::release/detach-helper (str (fs/path inputs "detach.py"))
               ::release/launcher (str (fs/path inputs "seon"))
-              ::release/config (str (fs/path inputs "system.edn"))
+              ::release/config (str (fs/path inputs "config/system.edn"))
+              ::release/brand-css (str (fs/path inputs "brand.css"))
               ::release/babashka-license
               (str (fs/path inputs "babashka-license.txt"))
               ::release/node-modules (str node-modules)
@@ -238,11 +241,14 @@
         (is (fs/executable? (fs/path package "runtime/bb")))
         (is (fs/executable? (fs/path package "bin/seon")))
         (is (fs/regular-file? (fs/path package "runtime/detach.py")))
-        (is (fs/regular-file? (fs/path package "config/system.edn")))
+        (is (fs/regular-file? (fs/path package "config/selected.edn")))
         (is (fs/regular-file?
              (fs/path package "runtime-root/out/bootstrap/core.js")))
         (is (fs/regular-file?
              (fs/path package "runtime-root/resources/public/output.css")))
+        (is (= ".brand {}"
+               (slurp (str (fs/path package
+                                    "runtime-root/resources/public/seon-brand.css")))))
         (is (fs/regular-file?
              (fs/path package "node_modules/lib/index.js")))
         (is (not (fs/exists? (fs/path package "node_modules/.bin/tool"))))

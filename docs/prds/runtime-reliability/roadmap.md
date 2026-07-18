@@ -237,6 +237,16 @@ is now the complete program audit across the already-recorded browser,
 reconnect, recovery, multi-cluster, ACME, resource, terminology, and package
 evidence.
 
+The downstream production overlay now passes the same immutable boundary.
+ACME supplies separate Shadow mains for the Bun pod and Bun execution child,
+so its source is compiled and dynamically reachable in both isolated runtime
+roles. Release application `8f8fb5da…` loaded its selected Aero manifest with
+the relative include graph intact, rendered its canvas and supporting surfaces
+over gzip, ran a real agent through two ACME functions, restarted, and read the
+committed results back. Its recursively read-only package hash remained exactly
+`3e9775bd…`. The remaining downstream gate is build independence through a
+separate version-matched SDK while this producer checkout is unavailable.
+
 The existing remote query surface now exposes its protocol-native historical
 view, closing the only facade gap needed by coordinate-pinned startup birth.
 LLM configuration and brand startup sync also use bounded coordinate-fenced

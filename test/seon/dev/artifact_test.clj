@@ -365,6 +365,45 @@
         (fs/delete-tree directory)
         (fs/delete-tree outside)))))
 
+(deftest release-programs-compile-a-downstream-source-and-preload
+  (let [directory (fs/create-temp-dir {:prefix "seon-release-overlay-test-"})
+        downstream (fs/create-temp-dir {:prefix "seon-downstream-test-"})
+        config {:seon.dev.config/root (str directory)
+                :seon.dev.config/environment
+                {"SEON_EXTRA_SRC" (str downstream)
+                 "SEON_EXTRA_PRELOAD" "acme.pod"
+                 "SEON_EXTRA_EXECUTION_MAIN" "acme.execution/-main"}}
+        release
+        {:seon.dev.artifact/release-cache-root
+         (str (fs/path directory "cache"))
+         :seon.dev.artifact/release-client-output
+         (str (fs/path directory "runtime/pod.js"))
+         :seon.dev.artifact/release-execution-output
+         (str (fs/path directory "runtime/execution.js"))
+         :seon.dev.artifact/release-program-source-output
+         (str (fs/path directory "runtime/program-sources.edn"))}
+        calls (atom [])]
+    (try
+      (with-redefs [artifact/run-step!
+                    (fn [_ label argv]
+                      (swap! calls conj [label argv]))]
+        (artifact/build-release-programs! config release))
+      (doseq [[_ argv] @calls]
+        (is (= ["clj" "-Sdeps"] (subvec argv 0 2)))
+        (is (= {'seon.extra/src {:local/root (str downstream)}}
+               (:deps (edn/read-string (nth argv 2))))))
+      (let [pod-argv (second (first @calls))
+            execution-argv (second (second @calls))
+            pod-merge (edn/read-string (last pod-argv))
+            execution-merge (edn/read-string (last execution-argv))]
+        (is (= 'acme.pod/-main (:main pod-merge)))
+        (is (= {:enabled false :preloads [] :build-notify nil}
+               (:devtools pod-merge)))
+        (is (= 'acme.execution/-main (:main execution-merge))))
+      (finally
+        (fs/delete-tree directory)
+        (fs/delete-tree downstream)))))
+
 (deftest source-publication-orders-the-watcher-flush-before-one-manifest
   (let [events (atom [])
         manifest {:seon.dev.artifact/writer-digest "writer"
