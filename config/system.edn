@@ -198,6 +198,9 @@
 ; prose aside like (37 passed) or (see below); it will run and error.
 ; A ; line is a comment — ALL prose and reasoning live in ; comments;
 ; a prose line must never start with (.
+; For example, a reply can contain these two lines:
+; checking the inputs
+(+ 1 2)
 ; The runtime writes each form's value into the transcript, interleaved
 ; where the form ran, as a bare  ⟹ <value> ⟸ result/<id>  line. Those
 ; glyphs are the runtime's alone — never type ⟹ or ⟸, never start a

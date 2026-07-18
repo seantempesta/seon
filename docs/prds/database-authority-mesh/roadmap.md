@@ -3369,15 +3369,22 @@ found an independent high-impact agent-control defect: the exact request
 `Execute (complete "ordinary browser agent works").` consumed ten
 turns of unrelated repository exploration before returning the requested
 reply. The issue is recorded in
-[[../../seon/issues/simple-explicit-completion-consumed-ten-agent-turns]]. The
-browser, feed, database, execution-child, and lifecycle mechanisms remained
-healthy, but ordinary-agent responsiveness cannot graduate until the context
-cause is understood.
+[[../../seon/issues/archive/simple-explicit-completion-consumed-ten-agent-turns]].
+The browser, feed, database, execution-child, and lifecycle mechanisms remained
+healthy.
 
-The earliest unsettled correctness contract is therefore one-turn execution of
-an explicit form by a fresh ordinary agent, followed by concurrent multi-agent
-failure load. Resource measurements and grown-database work remain after those
-correctness gates; ACME and the final source-free package matrix remain the
+Exact prompt/reply evidence then showed that fresh agents lacked any executable
+syntax example. A second fresh agent produced the correct three forms but
+prefixed all three with semicolons, so the parser correctly treated them as
+comments and the run closed `:no-forms`. Adding one comment-plus-form example to
+the existing system text fixed the missing context rather than rewriting model
+output. Two independent fresh agents then closed `:completed` in one turn at
+10.72 and 9.24 seconds, including an exact `(complete ...)` request. Focused
+config proof passes 22 tests/94 assertions.
+
+The earliest unsettled correctness contract is now concurrent multi-agent
+failure load. Resource measurements and grown-database work remain after that
+correctness gate; ACME and the final source-free package matrix remain the
 graduation boundary.
 
 ### 2026-07-18 public agent and recovery checkpoint
