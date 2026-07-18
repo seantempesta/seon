@@ -3062,3 +3062,19 @@ limit at one; 13 focused loop tests/55 assertions pass, and a clean restart no
 longer logs committed-work budget failures. Live completion of a message
 committed before restart remains the final acceptance check before archiving
 that issue.
+
+Writer replacement no longer requires the full restart command. Commits
+`8eb01131`, `3dbb8385`, and `850e476f` retain generic `ensure!` refusal and add
+containment-aware recovery before and after the build interval. An immediate
+writer `SIGKILL` followed by `bin/seon up` now records
+`recover: forced reason=unexpected-exit`, starts one replacement, and returns
+ready. A fresh public agent then sent `writer recovery works` and completed in
+one turn/10.7 seconds at basis transaction 536872775, proving database and
+agent behavior after recovery.
+
+The remaining writer-recovery delta is narrower: `up` still enters the general
+reader rebuild and replaces the healthy pod and watcher even when the current
+published artifacts can be reused. The active issue is therefore
+[[../../seon/issues/operator-up-cannot-recover-an-unexpected-writer-exit|preserve healthy readers during writer recovery]]. The next implementation
+must add a manifest-current fast path before quiescing readers, while retaining
+the existing frozen-source build path whenever source or outputs changed.
