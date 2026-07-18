@@ -110,6 +110,36 @@
              (set! db/pull original-pull)
              (done)))))))
 
+(deftest turn-reconstruction-preserves-a-database-read-error
+  (async done
+    (let [original-query db/query
+          original-pull db/pull
+          pulled? (atom false)
+          read-error {:seon.error/message "Database session has no request capacity."
+                      :seon.error/kind :core-bug}]
+      (set! db/query (fn [& _] (js/Promise.resolve read-error)))
+      (set! db/pull
+            (fn [& _]
+              (reset! pulled? true)
+              (js/Promise.resolve nil)))
+      (-> (debug/turn {:seon.agent.turn/id "turn-1"
+                       :seon.db/db database})
+          (.then
+           (fn [result]
+             (is (= {:seon.agent.debug/ok? false
+                     :seon.agent.turn/id "turn-1"
+                     :seon.agent.debug/error
+                     "Database session has no request capacity."}
+                    result))
+             (is (false? @pulled?)
+                 "an error value is not a Datahike entity id")))
+          (.catch (fn [error] (is false (str error))))
+          (.finally
+           (fn []
+             (set! db/query original-query)
+             (set! db/pull original-pull)
+             (done)))))))
+
 (deftest turn-diff-compares-basis-transactions-directly
   (async done
     (let [original debug/turn]

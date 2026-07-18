@@ -628,7 +628,7 @@
                            ::uds/message (request-message (str "timeout-" index))
                            ::uds/timeout-ms 1})
                          (.catch identity)))
-                   (range 16))]
+                   (range 256))]
               (-> (js/Promise.all (into-array requests))
                   (.then
                    (fn [errors]
@@ -636,7 +636,7 @@
                           #(= :seon.db.transport.uds.failure/timeout
                               (::uds/failure (ex-data %)))
                           (array-seq errors)))
-                     (is (= 16 ((::uds/pending-count session))))
+                     (is (= 256 ((::uds/pending-count session))))
                      (-> (uds/request!
                           {::uds/session session
                            ::uds/message (request-message "over-capacity")})

@@ -191,33 +191,51 @@
    `::error`; nothing throws."
   {:malli/schema [:=> [:cat ::turn-request] ::turn-response]}
   [{turn-id :seon.agent.turn/id database :seon.db/db}]
-  (let [database (or database (await (db/db)))]
-    (if-let [eid (await (turn-eid database turn-id))]
-      (let [pulled (await (db/pull {:seon.db/db database
-                      :seon.db/pull-pattern
-                      [:seon.agent.turn/id :seon.agent.turn/at
-                       :seon.agent.turn/status
-                       :seon.agent.turn/rendered-tx
-                       :seon.agent.turn/error
-                       {:seon.agent.turn/prompt-blob [:my.blob/hash]}
-                       {:seon.agent.turn/reply-blob  [:my.blob/hash]}]
-                      :seon.db/ref eid}))
-          t (update pulled :seon.agent.turn/rendered-tx
-                    #(if (map? %) (:db/id %) %))
-          p (blob-text t :seon.agent.turn/prompt-blob ::prompt ::prompt-tokens)
-          r (blob-text t :seon.agent.turn/reply-blob  ::reply  ::reply-tokens)
-          errs (vec (keep ::error [p r]))]
-      (cond-> (merge (select-keys t [:seon.agent.turn/id :seon.agent.turn/at
-                                     :seon.agent.turn/status
-                                     :seon.agent.turn/rendered-tx
-                                     :seon.agent.turn/error])
-                     (dissoc p ::error)
-                     (dissoc r ::error)
-                     {::ok? (empty? errs)})
-        (seq errs) (assoc ::error (str/join "; " errs))))
+  (let [database (or database (await (db/db)))
+        eid (if (:seon.error/message database)
+              database
+              (await (turn-eid database turn-id)))]
+    (cond
+      (:seon.error/message eid)
       {::ok? false
        :seon.agent.turn/id turn-id
-       ::error (str "no turn stored under " (pr-str turn-id))})))
+       ::error (:seon.error/message eid)}
+
+      (nil? eid)
+      {::ok? false
+       :seon.agent.turn/id turn-id
+       ::error (str "no turn stored under " (pr-str turn-id))}
+
+      :else
+      (let [pulled (await (db/pull {:seon.db/db database
+                                    :seon.db/pull-pattern
+                                    [:seon.agent.turn/id :seon.agent.turn/at
+                                     :seon.agent.turn/status
+                                     :seon.agent.turn/rendered-tx
+                                     :seon.agent.turn/error
+                                     {:seon.agent.turn/prompt-blob [:my.blob/hash]}
+                                     {:seon.agent.turn/reply-blob  [:my.blob/hash]}]
+                                    :seon.db/ref eid}))]
+        (if (:seon.error/message pulled)
+          {::ok? false
+           :seon.agent.turn/id turn-id
+           ::error (:seon.error/message pulled)}
+          (let [t (update pulled :seon.agent.turn/rendered-tx
+                          #(if (map? %) (:db/id %) %))
+                p (blob-text t :seon.agent.turn/prompt-blob
+                             ::prompt ::prompt-tokens)
+                r (blob-text t :seon.agent.turn/reply-blob
+                             ::reply ::reply-tokens)
+                errs (vec (keep ::error [p r]))]
+            (cond-> (merge (select-keys t [:seon.agent.turn/id
+                                           :seon.agent.turn/at
+                                           :seon.agent.turn/status
+                                           :seon.agent.turn/rendered-tx
+                                           :seon.agent.turn/error])
+                           (dissoc p ::error)
+                           (dissoc r ::error)
+                           {::ok? (empty? errs)})
+              (seq errs) (assoc ::error (str/join "; " errs)))))))))
 
 ;;; turn-diff — what changed between two turns, as a summary an agent can
 ;;; budget on: a lineage-safe t delta when both cuts share one containing

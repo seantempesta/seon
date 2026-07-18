@@ -17,7 +17,7 @@
   (atom (fn [options] (js-invoke js/Bun "connect" options))))
 
 (def ^:private maximum-frame-bytes protocol/maximum-frame-bytes)
-(def ^:private maximum-pending-requests 16)
+(def ^:private maximum-pending-requests 256)
 (def ^:private maximum-queued-bytes (* 2 protocol/maximum-frame-bytes))
 (def ^:private maximum-pending-events 64)
 (def ^:private maximum-queued-event-bytes
