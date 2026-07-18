@@ -274,6 +274,7 @@
           original-install agent-loop/install-ticker!
           original-heartbeat client/start-heartbeat!
           effects (atom [])
+          attached? (atom false)
           finish-resume (atom nil)
           rehost-started-resolve (atom nil)
           rehost-started
@@ -282,7 +283,7 @@
           finish (atom nil)
           finished (js/Promise. (fn [resolve _] (reset! finish resolve)))]
       (reset! client/!state (shadow-ready-state))
-      (set! db/attached? (constantly false))
+      (set! db/attached? #(deref attached?))
       (set! db/db
             (fn
               ([] (js/Promise.resolve {:db-name "default"}))
@@ -300,6 +301,7 @@
       (set! client/open-database-session!
             (fn [request]
               (swap! effects conj [::ensure-acquire request])
+              (reset! attached? true)
               (js/Promise.resolve {::db/db {:db-name "default"}})))
       (set! admission/publish-committed!
             (fn []
