@@ -419,6 +419,16 @@
 (schema/register! ::agent-max-tokens  [:or {:default :inherit} [:enum :inherit] ::max-tokens])  ; OUTPUT cap
 (schema/register! ::agent-thinking    [:or {:default :inherit} [:enum :inherit] ::thinking])
 (schema/register! ::agent-max-retries [:or {:default :inherit} [:enum :inherit] [:int {:min 0}]])
+(schema/register!
+ ::agent-config
+ [:map {:seon.db/entity true}
+  [:seon.agent/id :seon.agent/id]
+  [::agent-provider {:optional true} ::agent-provider]
+  [::agent-model {:optional true} ::agent-model]
+  [::agent-temperature {:optional true} ::agent-temperature]
+  [::agent-max-tokens {:optional true} ::agent-max-tokens]
+  [::agent-thinking {:optional true} ::agent-thinking]
+  [::agent-max-retries {:optional true} ::agent-max-retries]])
 ;; PARKED (decision 21): ::agent-context-window — a NEW input budget,
 ;; nothing enforces it today. Deferred to phase 2.
 

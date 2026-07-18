@@ -14,11 +14,20 @@
     [seon.agent.ctx :as ctx]
     [seon.ai :as ai]
     [seon.db :as db]
-    [seon.db.protocol :as protocol]))
+    [seon.db.protocol :as protocol]
+    [seon.schema :as schema]))
 
 ;; ============================================================
 ;; Pure — sync-tx-data (env/config SEEDS ONCE → the DB OWNS the row).
 ;; ============================================================
+
+(deftest agent-config-pull-pattern-uses-declared-agent-attributes
+  (let [entity-attributes
+        (into #{}
+              (map first)
+              (drop 2 (schema/schema-definition ::ai/agent-config)))]
+    (is (= (set (ai/agent-config-pull-pattern)) entity-attributes)
+        "every pulled agent configuration attribute is installed by the entity schema")))
 
 (deftest sync-tx-data-seeds-once-then-db-owns
   (is (= [] (ai/sync-tx-data {::ai/env {}}))

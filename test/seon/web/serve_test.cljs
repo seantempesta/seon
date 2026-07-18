@@ -18,6 +18,7 @@
     [seon.db.restore :as restore]
     [seon.eval :as seval]
     [seon.runtime.admission :as admission]
+    [seon.web.debug :as debug]
     [seon.web.router :as router]
     [seon.web.serve :as serve]))
 
@@ -28,6 +29,33 @@
    :since nil
    :history false
    :datahike/commit-id #uuid "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"})
+
+(deftest database-view-uses-the-public-index-page-fields
+  (async done
+    (let [original db/index-page
+          request (atom nil)]
+      (set! db/index-page
+            (fn index-page-stub
+              ([value]
+               (reset! request value)
+               (js/Promise.resolve {::db/datoms []}))
+              ([_database _options]
+               (js/Promise.reject
+                (js/Error. "database view must use the map request")))))
+      (-> (js/Promise.resolve nil)
+          (.then (fn [] ((deref #'debug/render-data!) database nil)))
+          (.then
+           (fn [_]
+             (is (= {::db/db database
+                     ::db/index :aevt
+                     ::db/direction :forward
+                     ::db/limit 50}
+                    @request))))
+          (.catch (fn [error] (is false (str error))))
+          (.finally
+           (fn []
+             (set! db/index-page original)
+             (done)))))))
 
 (deftest agent-run-timeout-uses-explicit-value-or-run-policy
   (async done

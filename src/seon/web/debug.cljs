@@ -164,7 +164,7 @@
        (cond-> {::db/db database
                 ::db/index :aevt
                 ::db/direction :forward
-                ::db/index-limit 50}
+                ::db/limit 50}
          attribute (assoc ::db/components [attribute])))
       (.then data-element)))
 
