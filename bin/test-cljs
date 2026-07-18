@@ -37,11 +37,46 @@ source bin/_java-home-resolver
 # and released by the same trap so compile and execution remain one bracket.
 TEST_LOCK="tmp/test-cljs.lock"
 LOCK_OWNED=0
+JAVASCRIPT_PID=""
+OUTPUT_PID=""
+OUTPUT_FIFO=""
+
+terminate_tree() {
+  local pid="$1"
+  local child
+  [ -n "$pid" ] || return 0
+  for child in $(pgrep -P "$pid" 2>/dev/null || true); do
+    terminate_tree "$child"
+  done
+  kill -TERM "$pid" 2>/dev/null || true
+}
+
+terminate_and_wait() {
+  local pid="$1"
+  local attempt
+  [ -n "$pid" ] || return 0
+  terminate_tree "$pid"
+  for attempt in 1 2 3 4 5 6 7 8 9 10; do
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 0.1
+  done
+  if kill -0 "$pid" 2>/dev/null; then
+    kill -KILL "$pid" 2>/dev/null || true
+  fi
+  wait "$pid" 2>/dev/null || true
+}
+
 cleanup() {
   local children
+  local child
+  terminate_and_wait "$JAVASCRIPT_PID"
+  terminate_and_wait "$OUTPUT_PID"
   children="$(pgrep -P $$ 2>/dev/null || true)"
-  if [ -n "$children" ]; then
-    kill $children 2>/dev/null || true
+  for child in $children; do
+    terminate_and_wait "$child"
+  done
+  if [ -n "$OUTPUT_FIFO" ]; then
+    rm -f -- "$OUTPUT_FIFO"
   fi
   if [ "$LOCK_OWNED" -eq 1 ]; then
     rm -rf -- "$TEST_LOCK"
@@ -68,6 +103,12 @@ export SEON_RENDER_STRICT="${SEON_RENDER_STRICT:-1}"
 # RUNTIME (seon.error/escalate! reads config/on-core-error) and the gate
 # below read this file, so they agree. An explicit SEON_CONFIG still wins.
 export SEON_CONFIG="${SEON_CONFIG:-config/test.edn}"
+# The test process monitors this owner as well as ordinary TERM/INT cleanup.
+# If this shell is uncatchably killed, Bun exits instead of becoming a retained
+# PID-1 orphan. The generous deadline catches a stalled async suite without
+# constraining normal work on modest hardware.
+export SEON_TEST_OWNER_PID="$$"
+export SEON_TEST_TIMEOUT_MS="${SEON_TEST_TIMEOUT_MS:-1800000}"
 
 BUILD=1
 VERBOSE=0
@@ -398,13 +439,24 @@ compact_javascript_output() {
   '
 }
 
+OUTPUT_FIFO="tmp/test-cljs-output-$$.fifo"
+rm -f -- "$OUTPUT_FIFO"
+mkfifo "$OUTPUT_FIFO"
 if [ "$VERBOSE" -eq 1 ]; then
-  "${JAVASCRIPT_CMD[@]}" 2>&1 | tee -a "$TMPOUT"
-  JAVASCRIPT_EXIT=${PIPESTATUS[0]}
+  tee -a "$TMPOUT" < "$OUTPUT_FIFO" &
 else
-  "${JAVASCRIPT_CMD[@]}" 2>&1 | tee -a "$TMPOUT" | compact_javascript_output
-  JAVASCRIPT_EXIT=${PIPESTATUS[0]}
+  tee -a "$TMPOUT" < "$OUTPUT_FIFO" | compact_javascript_output &
 fi
+OUTPUT_PID=$!
+"${JAVASCRIPT_CMD[@]}" > "$OUTPUT_FIFO" 2>&1 &
+JAVASCRIPT_PID=$!
+wait "$JAVASCRIPT_PID"
+JAVASCRIPT_EXIT=$?
+JAVASCRIPT_PID=""
+wait "$OUTPUT_PID"
+OUTPUT_PID=""
+rm -f -- "$OUTPUT_FIFO"
+OUTPUT_FIFO=""
 JAVASCRIPT_END=$(date +%s)
 JAVASCRIPT_ELAPSED=$((JAVASCRIPT_END - JAVASCRIPT_START))
 

@@ -96,6 +96,31 @@ seeds program facts from packaged `src/` and `test/`. The next implementation
 boundary is to publish and restart the exact manifest, then separate that
 program-source artifact contract from the Docker runtime cut rather than hiding
 source in the image.
+
+Manifest version 8 is live-proven on the default cluster with Bun 1.3.14,
+revision `0d9b296af33f2b851fcbf4df3e9ec89751734ba4`, and the recorded executable
+SHA-256. The first build also proved that ordinary `bun run` may honor a package
+binary's Node shebang; CSS now uses `bun run --bun`, and the identical build
+passes with Node absent from `PATH`.
+
+The first private-memory attribution changes the interpretation of the earlier
+RSS numbers without dismissing the real cost. A fresh Bun process uses about
+7.4 MB private physical memory. The pod measured 353–374 MB private physical
+against 0.9–1.4 GB RSS, and a loaded execution child measured about 219 MB
+private physical against 503 MB RSS; the remainder is largely clean or
+reclaimable mappings. Datastar feeds, database indexes, and Bun's base runtime
+are falsified as dominant owners. The pod cost is primarily the retained
+compiled ClojureScript/JSC object graph; the execution artifact additionally
+loads self-host bootstrap analyzer state.
+
+The same audit found an interrupted `bun out/test/test.js` orphan that had
+survived for over an hour: 3.61 GB RSS, 690 MB current private physical, and
+2.7 GB peak private physical. The test runner now owns explicit Bun/output PIDs
+and one FIFO, while the Shadow preload makes Bun monitor its owning shell and a
+generous overall deadline. A complete run passes 1,123 tests / 4,981 assertions;
+real INT cleanup leaves no Bun, output processor, FIFO, or lock; and a missing
+owner makes the test process exit 143. This closes the largest observed test
+memory/CPU spike mechanism before any compiler-topology experiment.
 Multi-cluster, no-source packaging, recovery/soak, and final percentile and
 resource measurements remain graduation gates.
 
