@@ -309,6 +309,36 @@
            (project-config {:seon.ai/provider :deepseek}))
         "absent optional fields remain absent")))
 
+(deftest model-transport-evidence-pulls-the-config-singleton-identity
+  (async done
+    (let [pull db/pull
+          request (atom nil)]
+      (set! db/pull
+            (fn
+              ([value]
+               (reset! request value)
+               (js/Promise.resolve
+                {:seon.config/id "cluster"
+                 :seon.config.render/database-edn-cap 16384}))
+              ([_pattern _ref]
+               (js/Promise.reject (js/Error. "unexpected positional pull")))
+              ([_database _pattern _ref]
+               (js/Promise.reject (js/Error. "unexpected legacy pull")))))
+      (-> (js/Promise.resolve
+           (@#'serve/project-model-transport-evidence
+            database "agent-a" []))
+          (.then
+           (fn [result]
+             (is (= {:status "absent"} result))
+             (is (= [:seon.config/id
+                     :seon.config.render/database-edn-cap]
+                    (::db/pull-pattern @request)))))
+          (.catch (fn [error] (is false (str error))))
+          (.finally
+           (fn []
+             (set! db/pull pull)
+             (done)))))))
+
 (defn- req-with-origin
   ([origin] (req-with-origin origin nil))
   ([origin host]

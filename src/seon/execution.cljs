@@ -301,7 +301,7 @@
    ::db.protocol/selector '[*]
    ::db.protocol/entity-id [:seon.config/id config/cluster-config-id]
    :datahike.resource/max-work 100000
-   :datahike.resource/max-results 1
+   :datahike.resource/max-results 256
    :datahike.resource/max-result-weight 65536})
 
 (defn- query-result [member]
@@ -338,13 +338,23 @@
 
 (defn canonical-program
   "Canonicalize unordered database rows before source identity hashing."
-  {:malli/schema [:=> [:cat [:coll :any]
-                       [:coll :any]
-                       [:coll :any]
-                       [:coll :any]
-                       [:coll :any]
-                       [:coll :any]
-                       [:coll :any]] :map]}
+  {:malli/schema
+   [:=>
+    [:cat
+     [:or [:set [:tuple :keyword :string]]
+      [:sequential [:tuple :keyword :string]]]
+     [:or [:set [:tuple :keyword :map]]
+      [:sequential [:tuple :keyword :map]]]
+     [:sequential [:tuple :keyword :string :map]]
+     [:or [:set [:tuple :string :string :keyword]]
+      [:sequential [:tuple :string :string :keyword]]]
+     [:or [:set [:tuple :string :string :keyword]]
+      [:sequential [:tuple :string :string :keyword]]]
+     [:or [:set [:tuple :keyword :string]]
+      [:sequential [:tuple :keyword :string]]]
+     [:or [:set [:tuple :string :string]]
+      [:sequential [:tuple :string :string]]]]
+    :map]}
   [namespace-source-rows require-edge-rows home-rows function-rows test-rows
    schema-rows contract-rows]
   (let [by-name

@@ -315,6 +315,12 @@
     (is (= (execution/source-digest first-value)
            (execution/source-digest second-value)))))
 
+(deftest execution-configuration-pull-budgets-retained-nodes
+  (let [member (@#'execution/config-member database)]
+    (is (= '[*] (::protocol/selector member)))
+    (is (= 256 (:datahike.resource/max-results member)))
+    (is (= 65536 (:datahike.resource/max-result-weight member)))))
+
 (deftest source-identity-hashes-exact-utf8-bytes
   (let [source "(defn view [_] :ok)\n"
         expected (-> (.createHash (js/require "node:crypto") "sha256")

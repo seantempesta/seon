@@ -773,7 +773,8 @@
   (let [cluster-row
         (await
          (db/pull {::db/db database
-                   ::db/pull-pattern [:seon.config.render/database-edn-cap]
+                   ::db/pull-pattern [:seon.config/id
+                                      :seon.config.render/database-edn-cap]
                    ::db/ref [:seon.config/id config/cluster-config-id]}))
         turn-eids (mapv first turn-rows)]
     (if (:seon.error/message cluster-row)

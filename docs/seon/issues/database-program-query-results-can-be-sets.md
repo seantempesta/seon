@@ -29,5 +29,7 @@ program rows before hashing and execution-child startup.
 ## Acceptance
 
 - The canonicalizer accepts Datahike set results and sequential test fixtures.
+- The shared row-collection schema remains pure data so hot-reload
+  instrumentation includes the function.
 - Equivalent input order and collection implementations produce one digest.
 - A real agent reaches child execution and completes its forms.
