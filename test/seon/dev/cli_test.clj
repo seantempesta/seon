@@ -268,6 +268,42 @@
                (:seon.dev.target/stop-results
                 (#'cli/reconcile-development! configuration [prior]))))))))
 
+(deftest reconcile-recovers-a-process-that-exits-during-build
+  (let [configuration {:seon.dev.config/cluster-dir "/cluster"}
+        recovery (stop-result :seon.dev.process.operation/recover
+                              #{process/writer-id})
+        checks (atom [nil recovery])
+        manifest {:seon.dev.artifact/client-digest (apply str (repeat 64 "a"))
+                  :seon.dev.artifact/application-digest
+                  (apply str (repeat 64 "b"))
+                  :seon.dev.artifact/changed #{}}]
+    (with-redefs-fn
+      {#'cli/assert-current-database-layout! identity
+       #'cli/recover-dead-processes!
+       (fn [_]
+         (let [[before after] (swap-vals! checks subvec 1)]
+           (first before)))
+       #'process/with-startup-ownership
+       (fn [_ transition]
+         (transition (fn [_ acquire!] (acquire!))))
+       #'process/clean-or-force!
+       (fn [{:seon.dev.process/keys [operation targets]}]
+         (stop-result operation targets))
+       #'artifact/build! (fn [_ _] manifest)
+       #'process/admit-watcher-artifact! (fn [& _] nil)
+       #'process/specs (fn [& _] {})
+       #'process/start-order (fn [_] [])
+       #'process/status
+       (fn [& _]
+         {:seon.dev.target/status :seon.dev.target.status/ready})}
+      (fn []
+        (is (= [:seon.dev.process.operation/rebuild-readers
+                :seon.dev.process.operation/recover]
+               (mapv :seon.dev.process/operation
+                     (:seon.dev.target/stop-results
+                      (#'cli/reconcile-development! configuration)))))))
+    (is (empty? @checks))))
+
 (deftest reconcile-after-reset-stops-only-the-unproven-watcher
   (let [configuration {:seon.dev.config/cluster-dir "/cluster"}
         reset-result (stop-result :seon.dev.process.operation/reset

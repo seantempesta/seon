@@ -138,6 +138,9 @@
                :seon.dev.process.operation/rebuild-writer
                #{process/writer-id}))
             stop-results (cond-> stop-results writer-stop (conj writer-stop))
+            late-recovery (recover-dead-processes! configuration)
+            stop-results (cond-> stop-results
+                           late-recovery (conj late-recovery))
             spec-map (process/specs configuration manifest)]
         (doseq [id (process/start-order spec-map)]
           (println (str "▶ reconcile " (name id)))
