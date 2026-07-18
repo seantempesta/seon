@@ -10,6 +10,7 @@
             [seon.dev.config :as config]
             [seon.dev.changed-test :as changed-test]
             [seon.dev.process :as process]
+            [seon.dev.release :as release]
             [seon.dev.restore :as restore]
             [seon.dev.restore-state :as restore-state]
             [seon.dev.skills :as skills]
@@ -32,8 +33,9 @@
         (map :seon.dev.process/id)
         (mapcat :seon.dev.process/results stop-results)))
 
-(defn- stop-development! [configuration operation]
-  (stop-processes! configuration operation (set process/target-processes)))
+(defn- stop-application! [configuration operation]
+  (stop-processes! configuration operation
+                   (set (process/target-process-ids configuration))))
 
 (defn- recover-dead-processes!
   [configuration]
@@ -45,7 +47,7 @@
                    (and record
                         (not= :seon.dev.process.status/alive
                               (process/reported-process-status record))))))
-              process/target-processes)]
+              (process/target-process-ids configuration))]
     (when (seq targets)
       (stop-processes!
        configuration :seon.dev.process.operation/recover targets))))
@@ -118,6 +120,12 @@
            (:seon.dev.artifact/application-digest manifest)
            :seon.dev.target/stop-results stop-results)))
 
+(defn- selected-manifest [configuration]
+  (if (not= false (:seon.dev.config/source-checkout? configuration))
+    (artifact/read-manifest configuration)
+    (release/read-manifest!
+     (:seon.dev.config/artifact-manifest configuration))))
+
 (defn- reconcile-development!
   ([configuration] (reconcile-development! configuration []))
   ([configuration prior-stop-results]
@@ -132,7 +140,11 @@
    (process/with-startup-ownership
     configuration
     (fn [start-owned!]
-      (if-let [manifest (when (live-managed-process?
+      (if (= false (:seon.dev.config/source-checkout? configuration))
+        (ensure-development-processes!
+         configuration (selected-manifest configuration) start-owned!
+         prior-stop-results)
+        (if-let [manifest (when (live-managed-process?
                               configuration process/watcher-id)
                           (artifact/current-manifest configuration))]
         (let [late-recovery (recover-dead-processes! configuration)
@@ -171,7 +183,7 @@
               stop-results (cond-> stop-results
                              late-recovery (conj late-recovery))]
           (ensure-development-processes!
-           configuration manifest start-owned! stop-results))))))))
+           configuration manifest start-owned! stop-results)))))))))
 
 (defn- ordinary-agent-url [base-url]
   ;; The feed's first patch is immediate and contains the database-derived
@@ -287,7 +299,7 @@
          configuration :stack 300000
          #(do
             (require-no-retained-restore! configuration :down)
-            (stop-development! configuration
+            (stop-application! configuration
                                :seon.dev.process.operation/down)))]
     (println "○ Seon is down")
     (print-stop-evidence! "  " result)))
@@ -304,7 +316,7 @@
                (resume-retained-restore! configuration)
                (reconcile-development! configuration))
              (let [stopped
-                   (stop-development!
+                   (stop-application!
                     configuration :seon.dev.process.operation/restart)]
                (reconcile-development! configuration [stopped]))))]
     (print-ready! target open?)))
@@ -312,7 +324,7 @@
 (defn- apply-live-config!
   "Send one explicit manifest operation to an already-ready compatible pod."
   [configuration]
-  (let [manifest (artifact/read-manifest configuration)
+  (let [manifest (selected-manifest configuration)
         target   (when manifest (process/status configuration manifest))
         path     (get-in configuration
                          [:seon.dev.config/environment "SEON_CONFIG"])]
@@ -383,7 +395,7 @@
          (str (fs/path (:seon.dev.config/cluster-dir configuration) "db"))
          :seon.dev.target/legacy-database-path legacy}
         (seq foreign) (assoc :seon.dev.target/foreign-processes foreign))
-    (if-let [manifest (artifact/read-manifest configuration)]
+    (if-let [manifest (selected-manifest configuration)]
       (process/status configuration manifest)
       (cond->
         {:seon.dev.target/name :seon.dev.target/development
@@ -565,7 +577,7 @@
                             {:seon.dev.cli/argument first-argument})))
         arguments (if id (rest arguments) arguments)
         {:seon.dev.logs/keys [follow? lines]} (parse-log-options arguments)
-        ids (if id [id] process/target-processes)]
+        ids (if id [id] (process/target-process-ids configuration))]
     (if follow?
       (do
         (when-not (= 1 (count ids))
@@ -586,7 +598,7 @@
   (boolean (fs/which command)))
 
 (defn- doctor-value [configuration]
-  (let [manifest (artifact/read-manifest configuration)
+  (let [manifest (selected-manifest configuration)
         checks {:seon.dev.doctor/babashka? (command-available? "bb")
                 :seon.dev.doctor/clj? (command-available? "clj")
                 :seon.dev.doctor/clojure? (command-available? "clojure")

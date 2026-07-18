@@ -188,7 +188,7 @@
 (defn target-process-ids
   "Return the processes owned by the selected runtime configuration."
   [config]
-  (let [source-checkout? (:seon.dev.config/source-checkout? config)
+  (let [source-checkout? (not= false (:seon.dev.config/source-checkout? config))
         owns-writer? (owns-writer-processes?
                       (:seon.dev.config/launch-descriptor config))]
     (cond
@@ -204,7 +204,7 @@
 
 (defn- process-artifact
   [config manifest]
-  (if (:seon.dev.config/source-checkout? config)
+  (if (not= false (:seon.dev.config/source-checkout? config))
     (assoc manifest
            :seon.dev.artifact/client-output
            (:seon.dev.config/client-output config)
@@ -371,7 +371,7 @@
 (defn specs
   "Derive the selected runtime process graph from one verified manifest."
   [config manifest]
-  (let [source-checkout? (:seon.dev.config/source-checkout? config)
+  (let [source-checkout? (not= false (:seon.dev.config/source-checkout? config))
         manifest (process-artifact config manifest)
         environment (:seon.dev.config/environment config)
         source-descriptor (:seon.dev.config/launch-descriptor config)

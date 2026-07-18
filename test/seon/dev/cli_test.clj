@@ -110,7 +110,7 @@
         {:seon.dev.target/url "http://127.0.0.1:7890"
          :seon.dev.target/stop-results
          [(stop-result :seon.dev.process.operation/restart
-                       (set process/target-processes)
+                       (set process/all-process-ids)
                        :seon.dev.process.classification/forced)]}]
     (with-redefs-fn
       {#'cli/ordinary-agent-url
@@ -328,7 +328,7 @@
 (deftest reconcile-consumes-prior-stop-evidence
   (let [configuration {:seon.dev.config/cluster-dir "/cluster"}
         prior (stop-result :seon.dev.process.operation/restart
-                           (set process/target-processes))
+                           (set process/all-process-ids))
         manifest {:seon.dev.artifact/client-digest (apply str (repeat 64 "a"))
                   :seon.dev.artifact/application-digest
                   (apply str (repeat 64 "b"))
@@ -464,7 +464,7 @@
   (let [configuration {:seon.dev.config/cluster-name "default"}
         request (atom nil)
         result (stop-result :seon.dev.process.operation/down
-                            (set process/target-processes)
+                            (set process/all-process-ids)
                             :seon.dev.process.classification/forced)]
     (with-redefs-fn
       {#'state/with-lock (fn [_ _ _ transition] (transition))
@@ -481,13 +481,13 @@
                (with-out-str (#'cli/down! configuration []))))))
     (is (= {:seon.dev.process/configuration configuration
             :seon.dev.process/operation :seon.dev.process.operation/down
-            :seon.dev.process/targets (set process/target-processes)}
+            :seon.dev.process/targets (set process/all-process-ids)}
            @request))))
 
 (deftest restart-coordinates-one-full-stop-before-reconcile
   (let [configuration {:seon.dev.config/cluster-name "default"}
         stopped (stop-result :seon.dev.process.operation/restart
-                             (set process/target-processes)
+                             (set process/all-process-ids)
                              :seon.dev.process.classification/absent)
         calls (atom [])]
     (with-redefs-fn
@@ -508,7 +508,7 @@
     (is (= [[:stop {:seon.dev.process/configuration configuration
                     :seon.dev.process/operation
                     :seon.dev.process.operation/restart
-                    :seon.dev.process/targets (set process/target-processes)}]
+                    :seon.dev.process/targets (set process/all-process-ids)}]
             [:reconcile configuration [stopped]]
             [:print {:seon.dev.target/status :seon.dev.target.status/ready}
              false]]
@@ -544,7 +544,7 @@
        #'cli/retained-restore-intent (constantly intent)
        #'cli/resume-retained-restore!
        (fn [selected] (swap! calls conj [:resume selected]))
-       #'cli/stop-development!
+       #'cli/stop-application!
        (fn [& _] (swap! calls conj :unexpected-stop))
        #'cli/reconcile-development!
        (fn [selected]
