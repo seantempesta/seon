@@ -22,13 +22,16 @@ scope. Publishing only `goog` advanced the failure into `cljs.core$macros`,
 where the global script could not see the module's existing `cljs.core`.
 Publishing `cljs` then advanced into `malli.core$macros`, proving that exporting
 dependency roots individually would merely chase the complete bootstrap graph.
+Replacing `goog.globalEval` around `boot/init` did not affect the eventual
+asynchronous load call; the production stack still identified Closure's
+original global evaluator.
 
 ## Owner and acceptance
 
 `seon.eval/init-bootstrap!` owns bootstrap initialization for the execution
 runtime. It must publish the bundle's exact `goog` and `cljs` namespace-owner
-objects for Shadow's bookkeeping and scope the loader's indirect global eval
-to direct artifact eval during initialization. A fresh relocated package must
-execute an agent-authored form, commit the reply, retire the child normally,
-restart, and read the committed result back without changing the package
-inventory.
+objects plus every other compiled root derived from Shadow's maintained
+`bootstrap.env/loaded-ref`. It must not maintain a second namespace list. A
+fresh relocated package must execute an agent-authored form, commit the reply,
+retire the child normally, restart, and read the committed result back without
+changing the package inventory.

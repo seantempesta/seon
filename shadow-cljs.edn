@@ -255,10 +255,10 @@
   ;; output is the analysis-cache + per-namespace compiled JS for
   ;; each namespace in :entries, suitable for runtime loading via
   ;; `shadow.cljs.bootstrap.node/init`. During initialization,
-  ;; `seon.eval/init-bootstrap!` scopes Shadow's loader to direct eval so the
-  ;; emitted files see the simple bundle's module-scoped dependencies; it also
-  ;; publishes the exact `goog`/`cljs` owners needed by Shadow's global
-  ;; bookkeeping. Loaded namespaces land on globalThis, which is what
+  ;; `seon.eval/init-bootstrap!` exposes the exact module-scoped root objects
+  ;; enumerated by Shadow's own `bootstrap.env/loaded-ref`, so globally
+  ;; evaluated bootstrap files see the already-compiled dependency graph.
+  ;; Loaded namespaces land on globalThis, which is what
   ;; cljs.core/find-ns-obj needs (`js/eval("cljs")` resolves
   ;; globally). That sidesteps the "TypeError: Cannot read
   ;; properties of null (reading 'findInternedVar')" mode the prior

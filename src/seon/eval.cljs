@@ -53,6 +53,7 @@
             [clojure.string :as str]
             [goog.object :as gobj]
             [malli.core :as m]
+            [shadow.cljs.bootstrap.env :as boot-env]
             [shadow.cljs.bootstrap.node :as boot]
             [seon.agent.home :as home]
             [seon.ai.tokens :as tokens]
@@ -410,6 +411,19 @@
       (set! *print-err-fn* (print-dispatch err)))
     (reset! !print-dispatcher-version init-version)))
 
+(defn- expose-loaded-namespace-roots!
+  "Expose Shadow's compiled namespace roots as their exact module objects."
+  []
+  (let [roots (into #{}
+                    (map #(first (str/split (str %) #"\.")))
+                    @boot-env/loaded-ref)]
+    (doseq [root roots
+            :let [root-sym (symbol root)
+                  ns-object (cljs.core/find-ns-obj root-sym)]
+            :when ns-object]
+      (gobj/set js/goog.global (munge root) ns-object))
+    roots))
+
 (defn ^:async init-bootstrap!
   "Initialize a fresh compile-state from out/bootstrap/.
 
@@ -435,28 +449,18 @@
         ;; own project root finds the bootstrap output in the seon
         ;; checkout; unset = "out/bootstrap" (CWD-relative) as before.
         bootstrap-path (platform/artifact-path "out/bootstrap")]
-    ;; Shadow's bootstrap loader evaluates emitted namespace files in the
-    ;; global scope. A simple-optimized Node bundle owns `goog` and the loaded
-    ;; `cljs` namespaces in module scope, so publish those exact objects before
-    ;; the loader evaluates `goog.provide` and cljs.core$macros. These are the
-    ;; existing namespace owners, not copied runtimes.
-    (set! (.-goog js/global) js/goog)
-    (set! (.-cljs js/global) (cljs.core/find-ns-obj 'cljs))
-    (let [global-eval (.-globalEval js/goog)]
-      ;; Shadow's Node bootstrap uses `goog.globalEval`, whose indirect eval
-      ;; cannot see dependencies kept in this simple bundle's lexical scope.
-      ;; During bootstrap only, make that call a direct eval in this artifact;
-      ;; restore Closure's owner before returning to the long-lived runtime.
-      (set! (.-globalEval js/goog) (fn [source] (js/eval source)))
-      (try
-        (await (js/Promise.
-                 (fn [resolve _reject]
-                   (boot/init state
-                              {:path bootstrap-path
-                               :load-on-init '#{cljs.core}}
-                              (fn [] (resolve nil))))))
-        (finally
-          (set! (.-globalEval js/goog) global-eval))))
+    ;; Shadow records the namespaces already compiled into this artifact in
+    ;; bootstrap.env/loaded-ref. Simple-optimized Node keeps their root objects
+    ;; in module scope, while Shadow evaluates bootstrap files globally. Expose
+    ;; those SAME roots once so emitted macro/runtime files resolve the host
+    ;; dependency graph without a copied registry or hand-maintained list.
+    (expose-loaded-namespace-roots!)
+    (await (js/Promise.
+             (fn [resolve _reject]
+               (boot/init state
+                          {:path bootstrap-path
+                           :load-on-init '#{cljs.core}}
+                          (fn [] (resolve nil))))))
     (bootstrap-cache/load-all! state bootstrap-path)
     (when-not (and (some? (.-cljs js/global))
                    (some? (.-core (.-cljs js/global))))
