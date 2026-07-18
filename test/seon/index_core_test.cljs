@@ -382,7 +382,11 @@
                 [:seon.agent.ctx/render-namespaces
                  :seon.agent.ctx/capabilities
                  :seon.agent.ctx/escape-clipping?
-                 :seon.agent.ctx/cache-breakpoint])
+                 :seon.agent.ctx/cache-breakpoint
+                 :seon.agent.ctx.namespaces/full-source
+                 :seon.agent.ctx.namespaces/with-tests
+                 :seon.agent.ctx.namespaces/current-full?
+                 :seon.agent.ctx.namespaces/current-tests?])
         "agent context settings are native Datahike attributes at initialization")))
 
 (deftest index-schemas-persists-generator-policy-as-data

@@ -31,6 +31,10 @@ existing unit gates:
   used `max-results 1` as though it counted top-level entities. Datahike charges
   pull work per retained result-tree node, so ordinary configuration maps
   exceeded that bound.
+- The now-complete prompt exposed the same declaration gap in the namespace
+  block's established per-agent and per-block display fields. Its pull selector
+  names `full-source`, `with-tests`, `current-full?`, and `current-tests?`, so
+  those attributes must also be installed before an absent value is queried.
 
 ## Acceptance
 
@@ -40,6 +44,8 @@ existing unit gates:
   agent configuration attributes are the same set.
 - The agent entity declares the established context configuration attributes
   consumed by prompt and transcript rendering.
+- The namespace block's agent/block configuration selector contains only
+  Datahike-installed attributes.
 - The data view consumes Datahike's `:datahike.index-page/datoms` result
   directly.
 - Prompt acquisition uses bounded but realistic Datahike result-tree and
