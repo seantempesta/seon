@@ -442,7 +442,8 @@
                                :continue true :cmd (vec command)})]
     (when-not (zero? (:exit result))
       (manifest-error "A release identity command failed."
-                      {::command (vec command) ::exit (:exit result)}))
+                      {::command (vec command) ::exit (:exit result)
+                       :seon.dev.release/stderr (:err result)}))
     (str/trim (:out result))))
 
 (defn- git-archive! [repository revision paths target]
@@ -498,7 +499,7 @@
       (manifest-error "The checked-out Babashka source differs from the SDK identity."
                       {:seon.dev.sdk/babashka-revision babashka-revision}))
     (try
-      (fs/create-dirs (fs/parent target))
+      (fs/create-dirs stage)
       (git-archive! root source-revision sdk-source-paths source)
       (git-archive! datahike-root datahike-revision datahike-sdk-paths
                     (fs/path source "reference-code/datahike"))
