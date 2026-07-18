@@ -279,7 +279,6 @@
           #(assoc
              (ctx/rendered-context-from-entity
                (cond-> {:seon.agent/entity entity
-                        :seon.config/configuration cluster-config-row
                         :seon.agent.ctx/selected-blocks resolved-blocks}
                  (seq profile) (assoc :seon.agent.ctx/profile (vec profile))
                  (some? whole-prompt)
