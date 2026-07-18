@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: closed
 severity: blocker
 tags: [issue, database, pod, flow]
 ---
@@ -34,6 +34,16 @@ Bun pod and watcher before it knows whether any reader artifact changed.
   user message and completed in one turn at basis transaction 536872775.
 - That successful recovery still reported `rebuild-readers`; the prior pod and
   watcher identities were replaced even though the writer artifact was reused.
+- Commit `1fc35fcc` adds a content-verified manifest fast path. It hashes the
+  selected source/build inputs and verifies every published output digest
+  before admitting an existing artifact without quiescing readers.
+- A live `SIGKILL` of writer workload `48898` followed by `bin/seon up`
+  reported only `recover: forced` and reconciliation. Watcher PID `48456` and
+  pod PID `48926` were unchanged; writer PID changed from `48796` to `50460`.
+- Commit `9975a4ec` makes ordinary database operations reopen the retained
+  database selection through the existing coalesced session owner. The first
+  post-recovery real agent completed one turn and four evals in 11.16 seconds
+  at basis transaction `536872797`.
 
 ## Owner
 
@@ -51,3 +61,10 @@ transition is now correct and remains the required writer safety authority.
   reconnects to the replacement writer without losing its database session.
 - Reconciliation never replaces a live or uncertain foreign process and
   remains idempotent when the writer is already healthy.
+
+## Resolution
+
+Closed by `1fc35fcc` and `9975a4ec`. Focused operator proof passes 110 tests
+and 449 assertions; focused database facade proof passes 16 tests and 79
+assertions. The live process and agent evidence above satisfies the remaining
+acceptance criteria.

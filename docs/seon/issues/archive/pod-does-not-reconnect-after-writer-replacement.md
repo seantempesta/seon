@@ -1,6 +1,6 @@
 ---
 type: issue
-status: active
+status: closed
 tags: [issue, database, pod, flow]
 ---
 
@@ -29,3 +29,16 @@ listener functions, but ordinary reads do not invoke the existing coalesced
 - A killed writer is replaced without changing the watcher or pod owner PID,
   and a subsequent real agent turn completes through the replacement.
 - Focused database facade and operator tests pass.
+
+## Resolution
+
+Commit `9975a4ec` makes ordinary requests reopen the retained database
+selection through the existing coalesced `open-session!` owner. The focused
+facade suite passes 16 tests and 79 assertions, including an ordinary read that
+owns exactly one reconnect. Existing session proof covers concurrent identical
+opening and listener restoration.
+
+Live, watcher PID `48456` and pod PID `48926` survived the writer replacement;
+writer PID changed from `48796` to `50460`. Agent `sharp-pigs-smell` then
+executed `seon.db/db`, sent its result, closed its plan, and completed in one
+turn/11.16 seconds at basis transaction `536872797`.

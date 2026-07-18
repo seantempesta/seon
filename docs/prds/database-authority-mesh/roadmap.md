@@ -3078,3 +3078,36 @@ published artifacts can be reused. The active issue is therefore
 [[../../seon/issues/operator-up-cannot-recover-an-unexpected-writer-exit|preserve healthy readers during writer recovery]]. The next implementation
 must add a manifest-current fast path before quiescing readers, while retaining
 the existing frozen-source build path whenever source or outputs changed.
+
+### 2026-07-18 writer-only recovery checkpoint
+
+Writer-only recovery is now complete. Commit `1fc35fcc` publishes the selected
+source/build-input digest with the artifact and admits the existing manifest
+only when that digest, flavor/build identities, and every output digest match.
+The verified path bypasses source build and reader quiescence while retaining
+the existing frozen-source rebuild whenever any input or output differs.
+Focused operator proof passes 110 tests and 449 assertions.
+
+The first live writer-only replacement correctly retained watcher PID `29240`
+and pod PID `30043`, but exposed that ordinary reads did not consume the
+retained database selection after physical session close. Commit `9975a4ec`
+routes ordinary requests through the existing coalesced `open-session!` owner,
+keeps explicit owner close terminal, restores listeners through the same path,
+and permits `seon.db/db` to return its established error value while the
+authority is unavailable. Focused facade proof passes 16 tests and 79
+assertions.
+
+The final live gate killed writer workload `48898`. `bin/seon up` reported only
+`recover: forced reason=unexpected-exit`; watcher PID `48456` and pod PID
+`48926` remained unchanged while writer PID changed from `48796` to `50460`.
+The first public agent then reopened the session, executed four evals including
+`seon.db/db`, and completed one turn in 11.16 seconds at basis transaction
+`536872797`. Both writer recovery issues are archived.
+
+The earliest unsettled contract is now committed work across a complete
+restart: a user message committed before pod shutdown must be selected and
+completed after restart exactly once. Feed reconnect and independent cluster
+database proof follow, then the complete correctness and measured
+CPU/memory/latency gates. Artifact verification itself took roughly 20 seconds
+in the live writer-only path and remains a measured operator-latency smell to
+attribute after the ordered recovery proofs.
