@@ -306,9 +306,10 @@ against the retracted pointer (a no-op, never a double-drive). **Root self-heals
 through the same path but does NOT auto-rewake** — the close unsticks it (idle +
 wakeable); it resumes on the next natural contact.
 
-**Schedule-wake circuit breaker.** With no auto-rewake, the one autonomous
-repeat-wake source is schedules — a deterministic wedge + a periodic schedule is a
-crash loop. The schedule wake-gate refuses to fire for an agent with ≥N `:crashed`
+**Schedule-wake circuit breaker.** Outside the one bounded self-healing recovery
+turn below, the autonomous repeat-wake source is schedules — a deterministic
+wedge + a periodic schedule is a crash loop. The schedule wake-gate refuses to
+fire for an agent with ≥N `:crashed`
 closes in a recent window (`derive/schedule-breaker-tripped?`, windowed over
 `closed-at`; dials `:seon.config/schedule-breaker`, default N=3 / 30 min) — **derived,
 no stored state**: the window sliding past re-enables it. Human/agent MESSAGES still

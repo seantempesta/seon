@@ -1172,7 +1172,7 @@ reaches at least one agent-visible AND one human-visible surface.
 
 | failure site | carrier | agent-visible | human-visible |
 |---|---|---|---|
-| **render** (block ai/html throws, missing symbol, SCI deadline) | transient `:seon/error` under the `:seon.render/error` key | warnings block (render-health check) | the in-place error card (siblings untouched) |
+| **render** (block ai/html throws, missing symbol, child deadline/exit) | transient `:seon/error` under the `:seon.render/error` key; an interrupted child invocation also has durable eval/turn/run recovery facts | warnings block (render-health check) and the next-turn recovery section | the in-place error card (siblings untouched) |
 | **eval** (a form throws) | PERSISTED `:seon.eval/error` + `:seon.eval/error-data` | the eval's render in the transcript + the failed-eval checks | the transcript activity/error row |
 | **transact** (a tx is rejected) | transient `:seon.db/error` under `::error` | the eval that called `transact!` records it | the transcript error row |
 | **capability denial** (fs / `/call` refuses) | the denial string in the eval result | the fs-denied check | the transcript error row |
