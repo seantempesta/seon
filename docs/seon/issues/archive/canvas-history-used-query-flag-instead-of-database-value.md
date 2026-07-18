@@ -21,6 +21,10 @@ The real `fresh-kiwis-lay` child returned Malli's `:malli.core/extra-key` at
 also carried Malli's host-owned schema object and was rejected by the execution
 child's ordinary-data boundary.
 
+The same live proof exposed a second part of the root cause: selection dropped
+the chosen renderer's existing `:seon.fn/read-attrs`, so the one Datastar feed
+could render the new value on demand but did not rerender for its transaction.
+
 ## Owner
 
 `seon.agent.ctx.canvas/acquire-canvas!` owns canvas renderer selection. It must
@@ -35,6 +39,8 @@ database protocol must not grow a second history mechanism.
 - Focused canvas tests prove the exact database values used by candidate and
   history acquisition.
 - The real cross-namespace canvas renders and submits through the browser.
+- The selected renderer's `:seon.fn/read-attrs` become the surface and feed
+  dependencies, so its transaction rerenders the already-open feed.
 
 ## Resolution
 

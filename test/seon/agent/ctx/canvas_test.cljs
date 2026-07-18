@@ -173,6 +173,43 @@
                       (set! db/execute-many original-execute-many)
                       (done)))))))
 
+(deftest derived-canvas-carries-the-selected-renderers-read-attributes
+  (async done
+    (let [original-execute-many db/execute-many
+          responses
+          (atom
+           [{::db/results
+             [{::protocol/success? true
+               :datahike.query/result
+               #{["my.canvas/view"
+                  "[:=> [:cat :map] [:map [:seon.render/hiccup [:vector :any]]]]"
+                  100 false
+                  {:seon.fn/read-attrs
+                   [:my.orders/status :my.orders/total]}]}}]}
+            {::db/results
+             [{::protocol/success? true
+               :datahike.query/result
+               #{[:my.orders/status 101]
+                 [:my.orders/total 102]}}]}])]
+      (set! db/execute-many
+            (fn [_]
+              (let [response (first @responses)]
+                (swap! responses subvec 1)
+                (js/Promise.resolve response))))
+      (-> (canvas-ctx/acquire-canvas!
+           agent-id {:seon.agent/id agent-id} database)
+          (.then
+           (fn [result]
+             (is (= 'my.canvas/view
+                    (get-in result [::canvas/wired ::canvas/value])))
+             (is (= #{:my.orders/status :my.orders/total}
+                    (:seon.fn/read-attrs result)))))
+          (.catch (fn [error] (is false (str error))))
+          (.finally
+           (fn []
+             (set! db/execute-many original-execute-many)
+             (done)))))))
+
 (deftest selected-execution-failures-use-ordinary-error-data
   (let [wired {::canvas/source ::canvas/derived
                ::canvas/value 'my.canvas/broken}

@@ -478,11 +478,13 @@
                              vec)
                         canvas-block
                         (cond->
-                         {:seon.render.surface/selection "canvas"
-                          :seon.render.surface/label "canvas"
-                          :seon.render/html canvas-value
-                          :seon.agent/entity
-                          (:seon.render/entity canvas-acquisition)}
+                        {:seon.render.surface/selection "canvas"
+                         :seon.render.surface/label "canvas"
+                         :seon.render/html canvas-value
+                         :seon.fn/read-attrs
+                         (:seon.fn/read-attrs canvas-acquisition)
+                         :seon.agent/entity
+                         (:seon.render/entity canvas-acquisition)}
                           (some? last-reply)
                           (assoc :seon.render.chat/last-reply last-reply))
                         all-blocks (conj blocks canvas-block)

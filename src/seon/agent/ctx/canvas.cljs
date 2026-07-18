@@ -117,10 +117,10 @@
   (->> rows
        (map (fn [{::keys [surface-sym source-tx attrs]}]
               {::surface-sym surface-sym
+               ::attrs attrs
                ::touch (reduce max source-tx (keep attr-txs attrs))}))
        (sort-by (juxt ::touch (comp str ::surface-sym)))
-       last
-       ::surface-sym))
+       last))
 
 (defn ^:async acquire-canvas!
   "Acquire canvas identity from ordinary discovery data at one database value."
@@ -166,12 +166,15 @@
                           (into {} (member-result history-member-result)))))]
                 (if (nil? attr-txs)
                   (acquisition-error "history acquisition" history-response)
-                  (let [derived (selected-surface rows attr-txs)
+                  (let [selected (selected-surface rows attr-txs)
+                        derived (::surface-sym selected)
                         wired (canvas/wired-content
                                 (cond-> state
                                   derived (assoc ::canvas/derived derived)))]
-                    {:seon.render/entity entity
-                     ::canvas/wired wired}))))))))))
+                    (cond-> {:seon.render/entity entity
+                             ::canvas/wired wired}
+                      selected
+                      (assoc :seon.fn/read-attrs (set (::attrs selected))))))))))))))
 
 (defn- clip-marker
   "A loud, token-denominated cut marker for one canvas-context value."
