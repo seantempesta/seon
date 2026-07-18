@@ -74,6 +74,7 @@
        (fn [result]
          (let [^js options @seen-options]
            (is (= ["tool" "arg"] (js->clj (.-cmd options))))
+           (is (true? (.-detached options)))
            (is (instance? js/Uint8Array (.-stdin options)))
            (is (= "input" (.decode (js/TextDecoder.) (.-stdin options)))))
          (is (= "hello world" (::subprocess/out result)))
@@ -147,6 +148,22 @@
          (is (false? (::subprocess/aborted? result)))
          (is (= ["SIGTERM" "SIGKILL"] @(:kills fake)))
          (is (= 137 (::subprocess/exit result))))))))
+
+(deftest timeout-terminates-descendants-that-inherit-the-streams
+  (async done
+    (let [started (.now js/Date)]
+      (settle!
+       done
+       (subprocess/run!
+        {::subprocess/cmd
+         ["sh" "-c" "printf before-descendant; sleep 3"]
+         ::subprocess/timeout-ms 30
+         ::subprocess/kill-grace-ms 30})
+       (fn [result]
+         (is (true? (::subprocess/timed-out? result)))
+         (is (= "before-descendant" (::subprocess/out result)))
+         (is (< (- (.now js/Date) started) 1000)
+             "group termination closes inherited pipes without waiting for sleep"))))))
 
 (deftest completion-waits-for-stream-drain-after-process-exit
   (async done

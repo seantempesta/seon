@@ -118,10 +118,12 @@
     :or {max-output-bytes js/Number.MAX_SAFE_INTEGER
          capture-output? true
          kill-grace-ms default-kill-grace-ms}}]
-  (let [spawn! (or spawn! native-spawn!)]
+  (let [injected-spawn? (some? spawn!)
+        spawn! (or spawn! native-spawn!)]
     (try
       (let [id (str (random-uuid))
             options #js {:cmd (clj->js cmd)
+                         :detached true
                          :stdin (if (string? stdin)
                                   (.encode text-encoder stdin)
                                   (or stdin "ignore"))
@@ -141,6 +143,17 @@
             output-limited? (atom false)
             escalation-timer (atom nil)
             timeout-timer (atom nil)
+            signal!
+            (fn [signal]
+              (try
+                (if injected-spawn?
+                  (.kill process signal)
+                  (js* "process.kill(~{}, ~{})" (- (.-pid process)) signal))
+                true
+                (catch :default _
+                  (try (.kill process signal)
+                       true
+                       (catch :default _ false)))))
             request-stop!
             (fn [reason]
               (case reason
@@ -149,13 +162,12 @@
                 :output-limit (reset! output-limited? true)
                 nil)
               (when (and (not @ended?) (compare-and-set! stopping? false true))
-                (try (.kill process "SIGTERM") (catch :default _ nil))
+                (signal! "SIGTERM")
                 (reset! escalation-timer
                         (js/setTimeout
                          (fn []
                            (when-not @ended?
-                             (try (.kill process "SIGKILL")
-                                  (catch :default _ nil))))
+                             (signal! "SIGKILL")))
                          kill-grace-ms))))
             abort! #(request-stop! :abort)
             _ (when (and timeout-ms (pos? timeout-ms))
@@ -195,10 +207,7 @@
         {::id id
          ::pid (.-pid process)
          ::exited exited
-         ::kill! (fn [signal]
-                   (try (.kill process (or signal "SIGTERM"))
-                        true
-                        (catch :default _ false)))
+         ::kill! #(signal! (or % "SIGTERM"))
          ::unref! (fn [] (try (.unref process) true (catch :default _ false)))
          ::send! (fn [message]
                    (try (.send process message) nil
