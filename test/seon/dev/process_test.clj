@@ -9,6 +9,7 @@
             [seon.dev.artifact :as artifact]
             [seon.dev.config :as dev-config]
             [seon.dev.process :as process]
+            [seon.dev.release :as release]
             [seon.dev.state :as state]
             [seon.launch :as launch])
   (:import [java.io BufferedReader InputStreamReader]
@@ -224,6 +225,60 @@
   (assoc target-manifest
          :seon.dev.artifact/execution-output
          (:seon.dev.config/execution-output configuration)))
+
+(def package-identity
+  {:seon.dev.release/bun-version "1.4.0"
+   :seon.dev.release/bun-revision
+   "d8ecf098572e2b8265b23e40c04efb4067e516cc"
+   :seon.dev.release/database-protocol-version 10
+   :seon.dev.release/execution-protocol-version 3
+   :seon.dev.release/bun-member :seon.release.member/bun
+   :seon.dev.release/writer-member :seon.release.member/writer
+   :seon.dev.release/pod-member :seon.release.member/pod
+   :seon.dev.release/execution-member :seon.release.member/execution
+   :seon.dev.release/runtime-assets-member :seon.release.member/runtime-assets
+   :seon.dev.release/program-source-member :seon.release.member/program-source})
+
+(def package-members
+  {:seon.release.member/bun "runtime/bun"
+   :seon.release.member/writer "runtime/writer.jar"
+   :seon.release.member/pod "runtime/pod.js"
+   :seon.release.member/execution "runtime/execution.js"
+   :seon.release.member/runtime-assets "runtime/web"
+   :seon.release.member/program-source "runtime/program-sources.edn"})
+
+(defn- package-process-fixture! [configuration directory]
+  (let [root (fs/path directory "package")
+        paths (into {} (map (fn [[member path]] [member (fs/path root path)]))
+                    package-members)]
+    (fs/create-dirs (get paths :seon.release.member/runtime-assets))
+    (doseq [[member path] paths
+            :when (not= member :seon.release.member/runtime-assets)]
+      (fs/create-dirs (fs/parent path))
+      (spit (str path) (name member)))
+    (spit (str (fs/path (get paths :seon.release.member/runtime-assets)
+                        "style.css"))
+          "css")
+    (let [manifest (release/create-manifest (str root) package-members
+                                             package-identity)
+          config
+          (-> (target-config configuration directory)
+              (assoc :seon.dev.config/root (str root)
+                     :seon.dev.config/source-checkout? false
+                     :seon.dev.config/client-output
+                     (str (get paths :seon.release.member/pod))
+                     :seon.dev.config/execution-output
+                     (str (get paths :seon.release.member/execution))
+                     :seon.dev.config/writer-output
+                     (str (get paths :seon.release.member/writer))
+                     :seon.dev.config/bun-executable
+                     (str (get paths :seon.release.member/bun))
+                     :seon.dev.config/runtime-assets
+                     (str (get paths :seon.release.member/runtime-assets))
+                     :seon.dev.config/program-source
+                     (str (get paths :seon.release.member/program-source))))]
+      {:seon.dev.test/config (with-default-launch-descriptor config)
+       :seon.dev.test/manifest manifest})))
 
 (defn- cleanup! [configuration ids]
   (doseq [id ids]
@@ -701,13 +756,13 @@
                            (str (.pid ^java.lang.Process (:proc owner)))]})
           (is (.waitFor ^java.lang.Process (:proc owner) 10 TimeUnit/SECONDS))
           (is (= 130 (:exit @owner)))
-          (doseq [id process/target-processes]
+          (doseq [id process/all-process-ids]
             (is (nil? (process/read-process configuration id))
                 (str (name cut) " unwind clears " (name id))))
           (is (not (state/process-identity-alive? cut-record))
               (str (name cut) " cannot survive under PID 1")))
         (finally
-          (doseq [id (reverse process/target-processes)]
+          (doseq [id (reverse process/all-process-ids)]
             (try (process/stop! configuration id) (catch Throwable _)))
           (fs/delete-tree directory {:force true}))))))
 
@@ -735,7 +790,7 @@
              (process/read-process configuration process/writer-id))
             "the invocation never claims or drains the converged writer"))
       (finally
-        (doseq [id (reverse process/target-processes)]
+        (doseq [id (reverse process/all-process-ids)]
           (try (process/stop! configuration id) (catch Throwable _)))
         (fs/delete-tree directory {:force true})))))
 
@@ -800,10 +855,10 @@
                (process/with-startup-ownership
                 configuration
                 (fn [start-owned!]
-                  (doseq [id process/target-processes]
+                  (doseq [id process/all-process-ids]
                     (start-owned! id (constantly id)))
                   (throw (ex-info "injected transition failure" {}))))))))
-      (is (= (reverse process/target-processes) @stopped))
+      (is (= (reverse process/all-process-ids) @stopped))
       (finally
         (fs/delete-tree (:seon.dev.test/directory configuration)
                         {:force true})))))
@@ -1550,7 +1605,7 @@
 (deftest stop-refuses-absence-when-an-unmanaged-door-is-accepting
   (with-redefs [process/read-process (constantly nil)
                 process/accepting-unmanaged? (constantly true)]
-    (doseq [id process/target-processes]
+    (doseq [id process/all-process-ids]
       (is (thrown-with-msg?
            clojure.lang.ExceptionInfo
            #"accepting without a managed record"
@@ -2424,7 +2479,7 @@
          (get-in pod [:seon.dev.process/environment
                       "SEON_LAUNCH_DESCRIPTOR"]))]
     (try
-      (is (= process/target-processes
+      (is (= process/all-process-ids
              (process/start-order ordinary-specs)))
       (is (= [process/pod-id] (process/start-order branch-specs)))
       (is (= #{process/pod-id} (set (keys branch-specs))))
@@ -2535,6 +2590,75 @@
                  str)))
       (finally
         (fs/delete-tree directory)))))
+
+(deftest selected-runtime-owns-only-its-required-processes
+  (let [configuration (test-config)
+        directory (:seon.dev.test/directory configuration)
+        source-config (target-config configuration directory)
+        source-manifest (target-manifest-for source-config)
+        {:seon.dev.test/keys [config manifest]}
+        (package-process-fixture! configuration directory)
+        package-descriptor (:seon.dev.config/launch-descriptor config)
+        external-descriptor
+        (launch/shared-writer-cluster-descriptor
+         {::launch/source-descriptor package-descriptor
+          ::launch/runtime-cluster "package-reader"
+          ::launch/target-database-name "package-reader"
+          :seon.db.protocol/database-path
+          (str (fs/path directory "package-reader-db"))
+          ::launch/process-dir
+          (str (fs/path directory "package-reader-process"))
+          ::launch/log-dir (str (fs/path directory "package-reader-logs"))
+          ::launch/http-port 0
+          ::launch/http-port-file
+          (str (fs/path directory "package-reader-http.port"))
+          ::launch/writable-blob-dir
+          (str (fs/path directory "package-reader-blobs"))})
+        external-package
+        (dev-config/select-launch-descriptor config external-descriptor)]
+    (try
+      (testing "a source checkout owns watcher, writer, and pod"
+        (let [specs (process/specs source-config source-manifest)]
+          (is (= process/all-process-ids
+                 (process/target-process-ids source-config)))
+          (is (= (set process/all-process-ids) (set (keys specs))))
+          (is (= [process/watcher-id process/writer-id]
+                 (get-in specs [process/pod-id
+                                :seon.dev.process/dependencies])))))
+      (testing "a package owns only writer and pod"
+        (let [specs (process/specs config manifest)
+              writer (get specs process/writer-id)
+              pod (get specs process/pod-id)]
+          (is (= [process/writer-id process/pod-id]
+                 (process/target-process-ids config)))
+          (is (= #{process/writer-id process/pod-id} (set (keys specs))))
+          (is (= [process/writer-id]
+                 (:seon.dev.process/dependencies pod)))
+          (is (= [(:seon.dev.config/bun-executable config)
+                  (:seon.dev.config/client-output config)]
+                 (:seon.dev.process/argv pod)))
+          (is (= (:seon.dev.config/writer-output config)
+                 (nth (:seon.dev.process/argv writer) 7)))
+          (is (= (:seon.dev.config/runtime-assets config)
+                 (get-in pod [:seon.dev.process/environment
+                              "SEON_RUNTIME_ROOT"])))
+          (is (= (:seon.dev.config/program-source config)
+                 (get-in pod [:seon.dev.process/environment
+                              "SEON_PROGRAM_SOURCE_PATH"])))
+          (is (= (:seon.dev.release/application-sha-256 manifest)
+                 (:seon.dev.process/release-manifest-digest pod)))))
+      (testing "an external-writer package owns pod and requires only writer"
+        (let [specs (process/specs external-package manifest)
+              pod (get specs process/pod-id)]
+          (is (= [process/pod-id]
+                 (process/target-process-ids external-package)))
+          (is (= #{process/pod-id} (set (keys specs))))
+          (is (= [] (:seon.dev.process/dependencies pod)))
+          (is (= [process/writer-id]
+                 (mapv :seon.dev.process/id
+                       (:seon.dev.process/external-dependencies pod))))))
+      (finally
+        (fs/delete-tree directory {:force true})))))
 
 (defn -main [& _]
   (let [{:keys [fail error]} (run-tests 'seon.dev.process-test)]

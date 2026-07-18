@@ -26,7 +26,7 @@
 (def writer-id :seon.dev.process/writer)
 (def pod-id :seon.dev.process/pod)
 (def restore-admin-id :seon.dev.process/restore-admin)
-(def target-processes [watcher-id writer-id pod-id])
+(def all-process-ids [watcher-id writer-id pod-id])
 
 (def ^:private legacy-containment-shutdown-grace-ms 2500)
 
@@ -60,6 +60,8 @@
    [:seon.dev.process/ready-timeout-ms [:int {:min 1}]]
    [:seon.dev.process/shutdown-grace-ms [:int {:min 1}]]
    [:seon.dev.process/bootstrap-digest {:optional true}
+    [:re #"[0-9a-f]{64}"]]
+   [:seon.dev.process/release-manifest-digest {:optional true}
     [:re #"[0-9a-f]{64}"]]
    [:seon.dev.process/client-digest {:optional true}
     [:re #"[0-9a-f]{64}"]]
@@ -183,6 +185,75 @@
      (get-in descriptor [::launch/writer-owner
                          ::launch/writer-process-dir])))
 
+(defn target-process-ids
+  "Return the processes owned by the selected runtime configuration."
+  [config]
+  (let [source-checkout? (:seon.dev.config/source-checkout? config)
+        owns-writer? (owns-writer-processes?
+                      (:seon.dev.config/launch-descriptor config))]
+    (cond
+      (and source-checkout? owns-writer?) all-process-ids
+      owns-writer? [writer-id pod-id]
+      :else [pod-id])))
+
+(defn- release-member
+  [manifest identity-key]
+  (let [member (get-in manifest [:seon.dev.release/identity identity-key])]
+    (some #(when (= member (:seon.dev.release/member %)) %)
+          (:seon.dev.release/members manifest))))
+
+(defn- process-artifact
+  [config manifest]
+  (if (:seon.dev.config/source-checkout? config)
+    (assoc manifest
+           :seon.dev.artifact/client-output
+           (:seon.dev.config/client-output config)
+           :seon.dev.artifact/writer-output
+           (:seon.dev.config/writer-output config))
+    (let [identity (:seon.dev.release/identity manifest)
+          member-sha #(get (release-member manifest %)
+                           :seon.dev.release/sha-256)]
+      ;; Config admission already verified every member against this manifest.
+      ;; Keep process derivation data-only: it neither rebuilds nor rehashes.
+      {:seon.dev.artifact/flavor
+       (:seon.dev.config/artifact-flavor config)
+       :seon.dev.artifact/client-build-id
+       (:seon.dev.config/client-build-id config)
+       :seon.dev.artifact/execution-build-id
+       (:seon.dev.config/execution-build-id config)
+       :seon.dev.artifact/bun-executable
+       (:seon.dev.config/bun-executable config)
+       :seon.dev.artifact/bun-executable-digest
+       (member-sha :seon.dev.release/bun-member)
+       :seon.dev.artifact/bun-version
+       (:seon.dev.release/bun-version identity)
+       :seon.dev.artifact/bun-revision
+       (:seon.dev.release/bun-revision identity)
+       :seon.dev.artifact/writer-digest
+       (member-sha :seon.dev.release/writer-member)
+       :seon.dev.artifact/client-digest
+       (member-sha :seon.dev.release/pod-member)
+       :seon.dev.artifact/client-output
+       (:seon.dev.config/client-output config)
+       :seon.dev.artifact/writer-output
+       (:seon.dev.config/writer-output config)
+       :seon.dev.artifact/execution-output
+       (:seon.dev.config/execution-output config)
+       :seon.dev.artifact/execution-digest
+       (member-sha :seon.dev.release/execution-member)
+       :seon.dev.artifact/runtime-root
+       (:seon.dev.config/runtime-assets config)
+       :seon.dev.artifact/bootstrap-digest
+       (member-sha :seon.dev.release/runtime-assets-member)
+       :seon.dev.artifact/program-source-path
+       (:seon.dev.config/program-source config)
+       :seon.dev.artifact/program-source-digest
+       (member-sha :seon.dev.release/program-source-member)
+       :seon.dev.artifact/application-digest
+       (:seon.dev.release/application-sha-256 manifest)
+       :seon.dev.artifact/release-manifest-digest
+       (:seon.dev.release/application-sha-256 manifest)})))
+
 (defn- state-file [config id]
   (let [descriptor (:seon.dev.config/launch-descriptor config)
         process-dir
@@ -298,9 +369,11 @@
            (:seon.dev.artifact/execution-runtime-digest manifest))))
 
 (defn specs
-  "Derive the complete development process graph from one manifest."
+  "Derive the selected runtime process graph from one verified manifest."
   [config manifest]
-  (let [environment (:seon.dev.config/environment config)
+  (let [source-checkout? (:seon.dev.config/source-checkout? config)
+        manifest (process-artifact config manifest)
+        environment (:seon.dev.config/environment config)
         source-descriptor (:seon.dev.config/launch-descriptor config)
         source-runtime (::launch/runtime source-descriptor)
         configured-artifact
@@ -343,7 +416,9 @@
         (:seon.dev.artifact/program-source-digest manifest)
         program-source-path
         (when (and runtime-root program-source-relative-path)
-          (str (fs/path runtime-root program-source-relative-path)))
+          (if source-checkout?
+            (str (fs/path runtime-root program-source-relative-path))
+            program-source-relative-path))
         _ (when-not (apply = (map some? [runtime-root
                                          program-source-relative-path
                                          program-source-digest]))
@@ -383,7 +458,8 @@
                       :seon.dev.artifact/bun-executable-digest
                       :seon.dev.artifact/bun-version
                       :seon.dev.artifact/bun-revision])
-        _ (when-not (artifact/bun-executable-current? bun-identity)
+        _ (when (and source-checkout?
+                     (not (artifact/bun-executable-current? bun-identity)))
             (throw
              (ex-info "The published Bun executable is missing or changed."
                       bun-identity)))
@@ -392,10 +468,16 @@
           {:seon.dev.process/id pod-id
            :seon.dev.process/argv
            [(:seon.dev.artifact/bun-executable manifest)
-            (:seon.dev.config/client-output config)]
+            (if source-checkout?
+              (:seon.dev.config/client-output config)
+              (:seon.dev.artifact/client-output manifest))]
            :seon.dev.process/environment pod-environment
            :seon.dev.process/dependencies
-           (if owns-writer-processes? [watcher-id writer-id] [])
+           (if owns-writer-processes?
+             (if source-checkout?
+               [watcher-id writer-id]
+               [writer-id])
+             [])
            :seon.dev.process/http-port-file
            (::launch/http-port-file descriptor-process)
            :seon.dev.process/readiness :seon.dev.process.readiness/pod
@@ -411,13 +493,19 @@
                  :seon.dev.process/execution-output
                  (:seon.dev.artifact/execution-output manifest))
 
+          (:seon.dev.artifact/release-manifest-digest manifest)
+          (assoc :seon.dev.process/release-manifest-digest
+                 (:seon.dev.artifact/release-manifest-digest manifest))
+
           (:seon.dev.artifact/execution-runtime-digest manifest)
           (assoc :seon.dev.process/execution-runtime-digest
                  (:seon.dev.artifact/execution-runtime-digest manifest))
 
           (not owns-writer-processes?)
           (assoc :seon.dev.process/external-dependencies
-                  [(cond->
+                  (cond-> []
+                    source-checkout?
+                    (conj (cond->
                     {:seon.dev.process/id watcher-id
                      :seon.dev.process/owner-process-dir
                      (::launch/writer-process-dir descriptor-writer)
@@ -432,14 +520,15 @@
                      (:seon.dev.artifact/execution-runtime-digest manifest)
                      (assoc :seon.dev.process/execution-runtime-digest
                             (:seon.dev.artifact/execution-runtime-digest
-                             manifest)))
-                  {:seon.dev.process/id writer-id
-                   :seon.dev.process/owner-process-dir
-                   (::launch/writer-process-dir descriptor-writer)
-                   :seon.dev.process/readiness
-                   :seon.dev.process.readiness/writer
-                   :seon.dev.process/artifact-digest
-                   (:seon.dev.artifact/writer-digest manifest)}]))
+                             manifest))))
+                    true
+                    (conj {:seon.dev.process/id writer-id
+                           :seon.dev.process/owner-process-dir
+                           (::launch/writer-process-dir descriptor-writer)
+                           :seon.dev.process/readiness
+                           :seon.dev.process.readiness/writer
+                           :seon.dev.process/artifact-digest
+                           (:seon.dev.artifact/writer-digest manifest)}))))
         spec-map
         {watcher-id
          (watcher-spec config
@@ -452,7 +541,7 @@
       [java "--add-modules" "jdk.incubator.vector"
        "--enable-native-access=ALL-UNNAMED" "-XX:+UseG1GC"
        (str "-Xmx" (config/writer-max-heap config))
-       "-jar" (:seon.dev.config/writer-output config)
+       "-jar" (:seon.dev.artifact/writer-output manifest)
        "--backend" "file"
        "--db-name" (:seon.dev.config/cluster-name config)
        "--path" (str (fs/path (:seon.dev.config/cluster-dir config) "db"))
@@ -468,7 +557,8 @@
       (:seon.dev.artifact/writer-digest manifest)}
 
      pod-id pod-spec}
-        spec-map (if owns-writer-processes? spec-map {pod-id pod-spec})]
+        selected-ids (set (target-process-ids config))
+        spec-map (select-keys spec-map selected-ids)]
     (doseq [spec (vals spec-map)]
       (validate! process-spec-schema spec
                  "The derived process specification is invalid."
@@ -619,20 +709,28 @@
   (if-let [expected (:seon.dev.process/bootstrap-digest spec)]
     (let [runtime-root (get-in spec [:seon.dev.process/environment
                                      "SEON_RUNTIME_ROOT"])
+          program-source (get-in spec [:seon.dev.process/environment
+                                       "SEON_PROGRAM_SOURCE_PATH"])
           execution-output (:seon.dev.process/execution-output spec)
           expected-execution (:seon.dev.process/execution-digest spec)]
-      (and runtime-root
-           (fs/directory? (fs/path runtime-root "out/bootstrap"))
-           execution-output
-           (fs/regular-file? execution-output)
-           (try
-             (and
-              (= expected
-                 (artifact/digest-paths runtime-root ["out/bootstrap"]))
-              (= expected-execution
-                 (artifact/current-execution-digest
-                  {:seon.dev.config/execution-output execution-output})))
-             (catch Throwable _ false))))
+      (if (:seon.dev.process/release-manifest-digest spec)
+        ;; Package admission verified these immutable members once. Readiness
+        ;; checks presence and never repeats package hashing on every probe.
+        (and runtime-root (fs/directory? runtime-root)
+             execution-output (fs/regular-file? execution-output)
+             program-source (fs/regular-file? program-source))
+        (and runtime-root
+             (fs/directory? (fs/path runtime-root "out/bootstrap"))
+             execution-output
+             (fs/regular-file? execution-output)
+             (try
+               (and
+                (= expected
+                   (artifact/digest-paths runtime-root ["out/bootstrap"]))
+                (= expected-execution
+                   (artifact/current-execution-digest
+                    {:seon.dev.config/execution-output execution-output})))
+               (catch Throwable _ false)))))
     true))
 
 (defn- pod-ready? [config spec record]
@@ -752,7 +850,7 @@
 
 (defn ownership-conflicts
   "Process doors held without a matching live operator record."
-  ([config] (ownership-conflicts config target-processes))
+  ([config] (ownership-conflicts config (target-process-ids config)))
   ([config owned-processes]
    (if-not (:seon.dev.config/process-dir config)
      []
@@ -1337,7 +1435,7 @@
    [:seon.dev.process/configuration config/configuration-schema]
    [:seon.dev.process/operation (into [:enum] operations)]
    [:seon.dev.process/targets
-    [:set {:min 1} (into [:enum] target-processes)]]])
+    [:set {:min 1} (into [:enum] all-process-ids)]]])
 
 (def ^:private containment-terminal-schema
   [:map {:closed true}
@@ -1418,7 +1516,7 @@
 
 (def ^:private stop-result-schema
   [:map {:closed true}
-   [:seon.dev.process/id (into [:enum] target-processes)]
+   [:seon.dev.process/id (into [:enum] all-process-ids)]
    [:seon.dev.process/classification
     [:enum :seon.dev.process.classification/clean
      :seon.dev.process.classification/forced
