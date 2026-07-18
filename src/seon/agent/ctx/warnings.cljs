@@ -351,9 +351,9 @@
                  (await (db/query
                          {::db/db database
                           :seon.db/query program-schema-query
-                          :datahike.resource/max-work 4000000
-                          :datahike.resource/max-results 65536
-                          :datahike.resource/max-result-weight 4194304})))
+                          ::db/max-work 4000000
+                          ::db/max-results 65536
+                          ::db/max-result-weight 4194304})))
         gaps (when-not (:seon.error/message result)
                (instrument/coverage-gaps result))]
     (cond

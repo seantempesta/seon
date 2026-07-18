@@ -310,6 +310,7 @@
                      (await
                        (invoke-selected!
                          [{:seon.execution/function-symbol value
+                           :seon.execution/invoke-selected? true
                            :seon.execution/arguments
                            [{:seon.agent/id id
                              :seon.render/entity
