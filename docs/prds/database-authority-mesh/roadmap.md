@@ -3345,6 +3345,41 @@ does not claim console, focus, morph, or interaction graduation. Once that
 boundary is green, measure startup, database calls and query reuse, render/feed
 work, event-loop delay, CPU, heap, and RSS before the Bun-native HTTP/SSE cut.
 
+## 2026-07-18 real browser and reconnect checkpoint
+
+The current in-app browser completed the previously missing interactive gate.
+The root page received a complete Datastar morph with one `#app-view`, posted
+an exact completion request, and displayed `browser reconnect complete`. The
+same tab remained open across `bin/seon restart`; after the watcher, JVM writer,
+and Bun pod received new clean generations, that unchanged tab posted another
+request and morphed to the committed reply `same tab reconnected` without a
+manual reload. The rendered page retained one `#app-view`, title
+`seon · agent root`, healthy agent counts and state, and the complete transcript.
+
+Fresh server-side requests to root, database, and debug feeds each returned
+HTTP 200, `text/event-stream`, and an immediate complete
+`datastar-patch-elements` frame. Native Bun loopback delivery is intentionally
+identity encoded; remote compression remains the explicit configurable policy,
+so absence of `Content-Encoding` in this development proof is expected rather
+than a regression.
+
+The browser also created `big-camels-change`, opened its ordinary agent page,
+posted a message, and observed live running and terminal states. That drive
+found an independent high-impact agent-control defect: the exact request
+`Execute (complete "ordinary browser agent works").` consumed ten
+turns of unrelated repository exploration before returning the requested
+reply. The issue is recorded in
+[[../../seon/issues/simple-explicit-completion-consumed-ten-agent-turns]]. The
+browser, feed, database, execution-child, and lifecycle mechanisms remained
+healthy, but ordinary-agent responsiveness cannot graduate until the context
+cause is understood.
+
+The earliest unsettled correctness contract is therefore one-turn execution of
+an explicit form by a fresh ordinary agent, followed by concurrent multi-agent
+failure load. Resource measurements and grown-database work remain after those
+correctness gates; ACME and the final source-free package matrix remain the
+graduation boundary.
+
 ### 2026-07-18 public agent and recovery checkpoint
 
 Public model execution is working through the complete database boundary.

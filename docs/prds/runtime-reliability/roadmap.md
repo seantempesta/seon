@@ -129,9 +129,19 @@ focused state/startup selection passes 21 tests/78 assertions, and two
 consecutive `bin/seon config apply config/system.edn` operations both returned
 unchanged with zero transactions. The drive also isolated an independent
 compiled `execute-many` predicate-query failure, recorded in the owning issue;
-the bounded indexed reconciliation path does not depend on it. Browser/feed
-transition and reconnect proof remains the earliest unsettled product
-contract, followed by multi-cluster load and resource measurement.
+the bounded indexed reconciliation path does not depend on it.
+
+The real browser gate now passes root interaction and reconnect. One tab posted
+and displayed `browser reconnect complete`, remained open across a complete
+supervised restart, then posted and displayed `same tab reconnected` without a
+reload. Root, database, and debug feeds each returned an immediate complete
+Datastar event over Bun's intentionally uncompressed loopback transport. A new
+ordinary browser agent also proved birth, page rendering, execution-child work,
+terminal reply, and root-driven termination, but exposed a new correctness
+boundary: its exact one-form completion request wandered through ten
+turns before complying. The recorded agent-context issue—not browser, database,
+or feed reconnect—is now the earliest unsettled contract before concurrent
+load and resource measurement.
 
 The existing remote query surface now exposes its protocol-native historical
 view, closing the only facade gap needed by coordinate-pinned startup birth.
