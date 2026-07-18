@@ -34,7 +34,6 @@
     ;; `:seon.fn/spec` string in index-core! (the runtime-introspection
     ;; core indexer — coherent-bootstrap-indexing Step 2).
     [malli.core :as m]
-    [shadow.cljs.devtools.client.env :as shadow-env]
     ;; Instrumentation publishes the validated database-derived projection
     ;; once at boot; accepted eval/hot-reload transitions publish exact deltas.
     [seon.instrument :as instrument]
@@ -2739,7 +2738,9 @@
                                         "auto-boot FAILED — exiting (no local fallback)"
                                         err)
                     (.exit js/process 1))))))
-  (log/info-console! "seon.client"
-                     (str "Shadow runtime connected to build :"
-                          shadow-env/build-id))
+  (log/info-console!
+   "seon.client" "runtime entry started"
+   {:seon.launch/client-build-id
+    (get-in launch/process-launch-descriptor
+            [::launch/runtime ::launch/client-build-id])})
   (start-heartbeat!))
