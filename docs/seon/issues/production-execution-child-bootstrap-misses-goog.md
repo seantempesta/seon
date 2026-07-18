@@ -16,13 +16,15 @@ execution child in about 80–85 ms. The child's first bootstrap file began with
 defined`.
 
 The execution artifact uses Shadow's simple optimization. Its Closure `goog`
-object is module-scoped, while `shadow.cljs.bootstrap.node/init` evaluates
-bootstrap namespace files in global scope.
+and loaded `cljs` namespace objects are module-scoped, while
+`shadow.cljs.bootstrap.node/init` evaluates bootstrap namespace files in global
+scope. Publishing only `goog` advanced the failure into `cljs.core$macros`,
+where the global script could not see the module's existing `cljs.core`.
 
 ## Owner and acceptance
 
 `seon.eval/init-bootstrap!` owns bootstrap initialization for the execution
-runtime. It must publish the bundle's exact `goog` object before the loader
-runs. A fresh relocated package must execute an agent-authored form, commit the
-reply, retire the child normally, restart, and read the committed result back
-without changing the package inventory.
+runtime. It must publish the bundle's exact `goog` and `cljs` namespace-owner
+objects before the loader runs. A fresh relocated package must execute an
+agent-authored form, commit the reply, retire the child normally, restart, and
+read the committed result back without changing the package inventory.

@@ -436,10 +436,12 @@
         ;; checkout; unset = "out/bootstrap" (CWD-relative) as before.
         bootstrap-path (platform/artifact-path "out/bootstrap")]
     ;; Shadow's bootstrap loader evaluates emitted namespace files in the
-    ;; global scope. A simple-optimized Node bundle owns `goog` in module
-    ;; scope, so publish that exact object before the loader evaluates its
-    ;; first `goog.provide`. This is one object, not a copied runtime.
+    ;; global scope. A simple-optimized Node bundle owns `goog` and the loaded
+    ;; `cljs` namespaces in module scope, so publish those exact objects before
+    ;; the loader evaluates `goog.provide` and cljs.core$macros. These are the
+    ;; existing namespace owners, not copied runtimes.
     (set! (.-goog js/global) js/goog)
+    (set! (.-cljs js/global) (cljs.core/find-ns-obj 'cljs))
     (await (js/Promise.
              (fn [resolve _reject]
                (boot/init state
