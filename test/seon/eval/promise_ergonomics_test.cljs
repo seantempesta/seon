@@ -10,6 +10,8 @@
 
 (def ^:private maybe-await-value (deref #'eval/maybe-await-value))
 (def ^:private valid-ending-ns? (deref #'eval/valid-ending-ns?))
+(def ^:private namespace-declaration?
+  (deref #'eval/namespace-declaration?))
 
 (deftest only-real-analyzer-namespaces-can-advance-the-eval-fold
   (let [compile-state
@@ -17,7 +19,13 @@
                {'my.agent.promise {:name 'my.agent.promise}}})]
     (is (valid-ending-ns? compile-state 'my.agent.promise))
     (is (not (valid-ending-ns? compile-state (symbol ""))))
+    (is (not (valid-ending-ns? compile-state (symbol ":"))))
     (is (not (valid-ending-ns? compile-state 'invented.namespace)))))
+
+(deftest only-an-ns-declaration-can-move-the-per-form-fold
+  (is (namespace-declaration? "(ns my.agent.next)"))
+  (is (not (namespace-declaration? "(js/Promise.resolve 323)")))
+  (is (not (namespace-declaration? "(message/user \"done\")"))))
 
 (deftest defer-wraps-promises-and-passes-ordinary-values
   (is (instance? eval/Deferred (eval/defer (js/Promise.resolve 1))))

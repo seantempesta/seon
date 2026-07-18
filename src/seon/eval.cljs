@@ -1331,6 +1331,7 @@
   [compile-state ns-sym]
   (and (symbol? ns-sym)
        (seq (str ns-sym))
+       (not (str/starts-with? (str ns-sym) ":"))
        (or (= user-ns-sym ns-sym)
            (some? (:name (get-in @compile-state
                                  [:cljs.analyzer/namespaces ns-sym]))))))
@@ -3480,6 +3481,13 @@
    functions implemented at the eval boundary rather than by the compiler."
   '#{in-ns alias ns-unmap ns-unalias})
 
+(defn- namespace-declaration?
+  "True only for a single top-level `(ns ...)` source form."
+  [source]
+  (let [forms (try (read-all-forms source) (catch :default _ nil))
+        form (when (= 1 (count forms)) (first forms))]
+    (and (seq? form) (= 'ns (first form)))))
+
 (defn repl-form-of
   "The parsed REPL form of `source` when it is a single top-level list
    whose head is one of [[repl-form-heads]]; nil otherwise (the caller
@@ -4512,11 +4520,13 @@
           ;; reverses failed redefinitions; key-set rollback could not restore
           ;; a previous form and left the runtime ahead of the database.
           (schema/restore! schemas-before))
-        ;; Advance the accumulator on successful ns switch.
-        ;; Failed evals leave the accumulator untouched —
-        ;; the form ran in @current-ns and we record that
-        ;; value as the form's :seon.eval/ns.
-        (when (and (::ok? result) (::ending-ns raw-result))
+        ;; Ordinary forms cannot move the REPL namespace. cljs.js can report
+        ;; a synthetic namespace after an emitted async host call, so only an
+        ;; explicit `(ns ...)` declaration may advance this fold. `in-ns` is
+        ;; owned separately by dispatch-repl-form!.
+        (when (and (::ok? result)
+                   (namespace-declaration? source)
+                   (::ending-ns raw-result))
           (vreset! current-ns (::ending-ns raw-result)))
         ;; A.4: a DEFINING form whose eval failed registers its target
         ;; symbol so a later reference escalates (see references-failed-def);
