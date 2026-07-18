@@ -97,7 +97,8 @@
       (-> (with-authority-stubs
            (acquisition #{["alpha" "n12345678901" :open]}
                         #{["n12345678901" "turn-a"]}
-                        #{["n12345678901" "turn-a" "eval-a"]})
+                        #{["n12345678901" "turn-a" "eval-a"
+                           "(js/process.exit 17)"]})
            allocate
            (fn []
              (let [original db/execute-many]
@@ -112,6 +113,8 @@
                  "execution child deadline"
                  :seon.runtime.recovery/evidence
                  {:seon.execution.host/pid 812
+                  :seon.execution.host/artifact-digest
+                  (apply str (repeat 64 "d"))
                   :seon.execution.host/elapsed-ms 10001
                   :seon.execution.host/stdout-tail "before timeout"
                   :seon.execution.host/resource-usage
@@ -139,6 +142,10 @@
                (is (= 4096 (:seon.runtime.recovery/rss-bytes anchor)))
                (is (= 1000
                       (:seon.runtime.recovery/cpu-total-microseconds anchor)))
+               (is (= [:seon.eval/id "eval-a"]
+                      (:seon.runtime.recovery/eval anchor)))
+               (is (= (apply str (repeat 64 "d"))
+                      (:seon.runtime.recovery/execution-digest anchor)))
                (is (= [:my.blob/hash (apply str (repeat 64 "a"))]
                       (:seon.runtime.recovery/diagnostic-blob anchor)))
                (is (some #{(db/cas-assert
@@ -150,22 +157,28 @@
                       (set! blob/put! original-put)
                       (done)))))))
 
-(deftest automatic-run-policy-requires-a-completed-turn-after-prior-recovery
+(deftest automatic-run-policy-breaks-the-same-crash-until-new-contact
   (async done
     (let [policy (deref #'recovery/automatic-run-after-recovery?)
           original-query db/query
-          completed? (atom false)]
+          prior? (atom false)
+          contacted? (atom false)
+          digest (apply str (repeat 64 "d"))]
       (set! db/query
             (fn [request]
               (js/Promise.resolve
-               (if (= 1 (count (:seon.db/args request)))
-                 [70]
-                 (when @completed? 900)))))
-      (-> (policy database "alpha")
+               (if (= 3 (count (:seon.db/args request)))
+                 (when @prior? 70)
+                 (when @contacted? 900)))))
+      (-> (policy database "alpha" "(js/process.exit 17)" digest)
+          (.then (fn [automatic?]
+                   (is (true? automatic?))
+                   (reset! prior? true)
+                   (policy database "alpha" "(js/process.exit 17)" digest)))
           (.then (fn [automatic?]
                    (is (false? automatic?))
-                   (reset! completed? true)
-                   (policy database "alpha")))
+                   (reset! contacted? true)
+                   (policy database "alpha" "(js/process.exit 17)" digest)))
           (.then (fn [automatic?]
                    (is (true? automatic?))))
           (.catch (fn [error] (is false (str "policy threw — " error))))

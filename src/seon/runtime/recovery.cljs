@@ -44,6 +44,9 @@
 (schema/register! :seon.runtime.recovery/elapsed-ms :int)
 (schema/register! :seon.runtime.recovery/stdout-tail [:string {:max 2048}])
 (schema/register! :seon.runtime.recovery/stderr-tail [:string {:max 2048}])
+(schema/register! :seon.runtime.recovery/eval :seon.db/ref)
+(schema/register! :seon.runtime.recovery/execution-digest
+                  [:string {:min 64 :max 64}])
 
 (schema/register! :seon.runtime.recovery
   [:map {:seon.db/entity true}
@@ -72,7 +75,11 @@
    [:seon.runtime.recovery/stdout-tail
     {:optional true} :seon.runtime.recovery/stdout-tail]
    [:seon.runtime.recovery/stderr-tail
-    {:optional true} :seon.runtime.recovery/stderr-tail]])
+    {:optional true} :seon.runtime.recovery/stderr-tail]
+   [:seon.runtime.recovery/eval
+    {:optional true} :seon.runtime.recovery/eval]
+   [:seon.runtime.recovery/execution-digest
+    {:optional true} :seon.runtime.recovery/execution-digest]])
 
 ;; ---------------------------------------------------------------------------
 ;; Recovery operation contract.
@@ -174,7 +181,7 @@
     [?turn :seon.agent.turn/status :running]])
 
 (def ^:private scoped-running-evals-query
-  '[:find ?run-id ?turn-id ?eval-id
+  '[:find ?run-id ?turn-id ?eval-id ?source
     :in $ ?agent-id ?run-id
     :where
     [?agent :seon.agent/id ?agent-id]
@@ -184,6 +191,7 @@
     [?turn :seon.agent.turn/id ?turn-id]
     [?turn :seon.agent.turn/evals ?eval]
     [?eval :seon.eval/id ?eval-id]
+    [?eval :seon.eval/source ?source]
     [?eval :seon.eval/status :running]])
 
 (defn- query-member
@@ -293,44 +301,44 @@
 
 (declare error-value?)
 
-(def ^:private agent-recovery-transactions-query
-  '[:find [?recovery-transaction ...]
-    :in $ ?agent-id
+(def ^:private matching-recovery-transaction-query
+  '[:find (max ?recovery-transaction) .
+    :in $ ?agent-id ?source ?execution-digest
     :where
-    [?anchor :seon.runtime.recovery/id _ ?recovery-transaction true]
+    [?anchor :seon.runtime.recovery/eval ?eval ?recovery-transaction true]
+    [?anchor :seon.runtime.recovery/execution-digest ?execution-digest
+     ?recovery-transaction true]
+    [?eval :seon.eval/source ?source]
     [?agent :seon.agent/run ?run ?recovery-transaction false]
     [?agent :seon.agent/id ?agent-id _ true]])
 
-(def ^:private completed-turn-after-query
-  '[:find ?turn .
+(def ^:private inbound-message-after-query
+  '[:find ?message .
     :in $ ?agent-id ?recovery-transaction
     :where
     [?agent :seon.agent/id ?agent-id _ true]
-    [?run :seon.agent.run/agent ?agent _ true]
-    [?turn :seon.agent.turn/run ?run _ true]
-    [?turn :seon.agent.turn/status :done ?turn-transaction true]
-    [(> ?turn-transaction ?recovery-transaction)]
-    (not [?turn :seon.agent.turn/scheduled? true _ true])])
+    [?message :seon.agent.message/to ?agent ?message-transaction true]
+    [(> ?message-transaction ?recovery-transaction)]])
 
 (defn- ^:async automatic-run-after-recovery?
-  [database agent-id]
-  (if-not agent-id
+  [database agent-id source execution-digest]
+  (if-not (and agent-id source execution-digest)
     false
     (let [history (db/history database)
-          transactions
+          prior
           (await (db/query {:seon.db/db history
-                            :seon.db/query agent-recovery-transactions-query
-                            :seon.db/args [agent-id]}))]
-      (if (error-value? transactions)
-        transactions
-        (if-let [latest (first (sort > transactions))]
-          (let [completed
+                            :seon.db/query matching-recovery-transaction-query
+                            :seon.db/args [agent-id source execution-digest]}))]
+      (if (error-value? prior)
+        prior
+        (if prior
+          (let [contact
                 (await (db/query {:seon.db/db history
-                                  :seon.db/query completed-turn-after-query
-                                  :seon.db/args [agent-id latest]}))]
-            (if (error-value? completed)
-              completed
-              (boolean completed)))
+                                  :seon.db/query inbound-message-after-query
+                                  :seon.db/args [agent-id prior]}))]
+            (if (error-value? contact)
+              contact
+              (boolean contact)))
           true)))))
 
 (defn- compile-recovery
@@ -345,6 +353,7 @@
                           vec)
         turn-ids (->> turns (map second) sort vec)
         eval-ids (->> evals (map #(nth % 2)) sort vec)
+        interrupted-eval-id (first eval-ids)
         fences (mapv (fn [[agent-id run-id _]]
                        (db/cas-assert
                         [:seon.agent/id agent-id]
@@ -380,6 +389,9 @@
         anchor (cond->
                  {:seon.runtime.recovery/id recovery-id
                   :seon.runtime.recovery/reason :unexpected-exit}
+                 interrupted-eval-id
+                 (assoc :seon.runtime.recovery/eval
+                        [:seon.eval/id interrupted-eval-id])
                  detail
                  (assoc :seon.runtime.recovery/detail detail)
                  (seq projection)
@@ -443,8 +455,18 @@
              ::eval-ids []}
 
             :else
-            (let [automatic-run?
-                  (await (automatic-run-after-recovery? database agent-id))
+            (let [current-eval (first (::evals acquired))
+                  current-source (nth current-eval 3 nil)
+                  execution-digest
+                  (:seon.execution.host/artifact-digest evidence)
+                  recovery-projection
+                  (cond-> projection
+                    execution-digest
+                    (assoc :seon.runtime.recovery/execution-digest
+                           execution-digest))
+                  automatic-run?
+                  (await (automatic-run-after-recovery?
+                          database agent-id current-source execution-digest))
                   _ (when (error-value? automatic-run?)
                       (throw (ex-info
                               "Recovery policy acquisition failed."
@@ -467,14 +489,14 @@
                          (get ids :seon.runtime.recovery/id)
                          closed-at
                          detail
-                         projection)
+                         recovery-projection)
                         [::db/expected-db ::db/tx-data]))}))
                   recovery-id
                   (get-in result [::db.id/ids :seon.runtime.recovery/id])
                   compiled
                   (when (transaction-report? result)
                     (compile-recovery acquired recovery-id closed-at detail
-                                      projection))]
+                                      recovery-projection))]
               (cond
                 (error-value? result)
                 result
