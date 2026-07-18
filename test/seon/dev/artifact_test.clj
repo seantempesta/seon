@@ -29,6 +29,66 @@
         (is (not= digest (artifact/digest-paths directory [directory]))))
       (finally (fs/delete-tree directory)))))
 
+(deftest source-input-digest-follows-the-selected-build-inputs
+  (let [directory (fs/create-temp-dir {:prefix "seon-source-input-test-"})
+        config {:seon.dev.config/root (str directory)
+                :seon.dev.config/artifact-flavor
+                :seon.dev.artifact.flavor/default
+                :seon.dev.config/client-build-id "client"
+                :seon.dev.config/execution-build-id "execution"}]
+    (try
+      (fs/create-dirs (fs/path directory "src"))
+      (fs/create-dirs (fs/path directory "docs"))
+      (spit (str (fs/path directory "src/example.cljs")) "(ns example)")
+      (spit (str (fs/path directory "docs/note.md")) "outside the build")
+      (let [digest (artifact/source-input-digest config)]
+        (spit (str (fs/path directory "docs/note.md")) "changed documentation")
+        (is (= digest (artifact/source-input-digest config))
+            "unselected checkout files do not force a rebuild")
+        (spit (str (fs/path directory "src/example.cljs"))
+              "(ns example)\n(def changed true)")
+        (is (not= digest (artifact/source-input-digest config))))
+      (finally (fs/delete-tree directory)))))
+
+(deftest current-manifest-requires-matching-inputs-and-outputs
+  (let [digest-a (apply str (repeat 64 "a"))
+        digest-b (apply str (repeat 64 "b"))
+        output-digests
+        {:seon.dev.artifact/writer-digest digest-a
+         :seon.dev.artifact/client-digest digest-a
+         :seon.dev.artifact/execution-digest digest-a
+         :seon.dev.artifact/execution-runtime-digest digest-a
+         :seon.dev.artifact/bootstrap-digest digest-a
+         :seon.dev.artifact/css-digest digest-a
+         :seon.dev.artifact/application-digest digest-a}
+        config {:seon.dev.config/artifact-flavor
+                :seon.dev.artifact.flavor/default
+                :seon.dev.config/client-build-id "client"
+                :seon.dev.config/execution-build-id "execution"
+                :seon.dev.config/shadow-cache-root "/repo/.shadow-cljs"
+                :seon.dev.config/client-output "/repo/out/client/main.js"}
+        manifest (merge output-digests
+                        {:seon.dev.artifact/flavor
+                         :seon.dev.artifact.flavor/default
+                         :seon.dev.artifact/client-build-id "client"
+                         :seon.dev.artifact/execution-build-id "execution"
+                         :seon.dev.artifact/shadow-cache-root
+                         "/repo/.shadow-cljs"
+                         :seon.dev.artifact/client-output
+                         "/repo/out/client/main.js"
+                         :seon.dev.artifact/source-input-digest digest-a})
+        input-digest (atom digest-a)
+        observed-outputs (atom output-digests)]
+    (with-redefs [artifact/read-manifest (constantly manifest)
+                  artifact/source-input-digest (fn [_] @input-digest)
+                  artifact/current-output-digests (fn [_] @observed-outputs)]
+      (is (= manifest (artifact/current-manifest config)))
+      (reset! input-digest digest-b)
+      (is (nil? (artifact/current-manifest config)))
+      (reset! input-digest digest-a)
+      (swap! observed-outputs assoc :seon.dev.artifact/client-digest digest-b)
+      (is (nil? (artifact/current-manifest config))))))
+
 (deftest current-client-digest-owns-output-and-runtime-closure
   (let [directory (fs/create-temp-dir {:prefix "seon-client-digest-test-"})
         output (fs/path directory "out-acme/client/main.js")
@@ -584,6 +644,7 @@
          :seon.dev.artifact/client-output "/checkout/out/client/main.js"
          :seon.dev.artifact/execution-output "/checkout/out/execution/main.js"
          :seon.dev.artifact/runtime-root "/checkout/runtime/content"
+         :seon.dev.artifact/source-input-digest digest
          :seon.dev.artifact/maintained-dependencies
          (#'artifact/maintained-dependencies-from (maintained-deps))
          :seon.dev.artifact/writer-digest digest

@@ -13,7 +13,7 @@
            [java.time Instant]
            [java.util.jar JarFile]))
 
-(def current-version 6)
+(def current-version 7)
 
 (def ^:private maintained-dependency-schema
   [:map
@@ -35,6 +35,7 @@
    [:seon.dev.artifact/client-output :string]
    [:seon.dev.artifact/execution-output :string]
    [:seon.dev.artifact/runtime-root :string]
+   [:seon.dev.artifact/source-input-digest [:re #"[0-9a-f]{64}"]]
    [:seon.dev.artifact/maintained-dependencies
     [:vector {:min 6 :max 6} maintained-dependency-schema]]
    [:seon.dev.artifact/writer-digest [:re #"[0-9a-f]{64}"]]
@@ -230,6 +231,39 @@
         (update-stream! digest stream)))
     (bytes->hex (.digest digest))))
 
+(def ^:private common-source-input-paths
+  ["build.clj"
+   "deps.edn"
+   "shadow-cljs.edn"
+   "package.json"
+   "package-lock.json"
+   "bin/fix-bootstrap-macros"
+   "config"
+   "externs"
+   "guest-cljs"
+   "java"
+   "resources"
+   "src"])
+
+(defn source-input-digest
+  "Hash the source and build inputs selected by an artifact flavor."
+  [config]
+  (let [environment (:seon.dev.config/environment config)
+        extra-source (get environment "SEON_EXTRA_SRC")
+        paths (cond-> common-source-input-paths
+                (= :seon.dev.artifact.flavor/acme
+                   (:seon.dev.config/artifact-flavor config))
+                (conj "acme")
+
+                (not (str/blank? extra-source))
+                (conj extra-source))]
+    (digest-values
+     ["flavor" (:seon.dev.config/artifact-flavor config)
+      "client-build-id" (:seon.dev.config/client-build-id config)
+      "execution-build-id" (:seon.dev.config/execution-build-id config)
+      "extra-preload" (get environment "SEON_EXTRA_PRELOAD")
+      "source" (digest-paths (:seon.dev.config/root config) paths)])))
+
 (defn current-client-digest
   "Hash the complete client closure at its flavor-owned coordinates."
   [config]
@@ -344,6 +378,34 @@
   (let [path (:seon.dev.config/artifact-manifest config)]
     (when (fs/regular-file? path)
       (validate-manifest! (edn/read-string (slurp path))))))
+
+(defn current-manifest
+  "Return the published manifest when its inputs and outputs still match."
+  [config]
+  (try
+    (let [manifest (read-manifest config)
+          output-digests (current-output-digests config)
+          expected-identity
+          {:seon.dev.artifact/flavor
+           (:seon.dev.config/artifact-flavor config)
+           :seon.dev.artifact/client-build-id
+           (:seon.dev.config/client-build-id config)
+           :seon.dev.artifact/execution-build-id
+           (:seon.dev.config/execution-build-id config)
+           :seon.dev.artifact/shadow-cache-root
+           (:seon.dev.config/shadow-cache-root config)
+           :seon.dev.artifact/client-output
+           (:seon.dev.config/client-output config)}]
+      (when (and manifest
+                 (= expected-identity
+                    (select-keys manifest (keys expected-identity)))
+                 (= (:seon.dev.artifact/source-input-digest manifest)
+                    (source-input-digest config))
+                 (= output-digests
+                    (select-keys manifest
+                                 (keys output-digests))))
+        manifest))
+    (catch Throwable _ nil)))
 
 (defn- atomic-spit! [path value]
   (let [path (fs/path path)
@@ -652,6 +714,7 @@
          :seon.dev.artifact/execution-output
          execution-output
          :seon.dev.artifact/runtime-root runtime-root
+         :seon.dev.artifact/source-input-digest (source-input-digest config)
          :seon.dev.artifact/maintained-dependencies maintained-dependencies
          :seon.dev.artifact/writer-digest writer-digest
          :seon.dev.artifact/client-digest client-digest

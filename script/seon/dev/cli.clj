@@ -99,6 +99,18 @@
                     (:seon.dev.restore/intent-id intent)))
       (restore-state/resume! request))))
 
+(defn- ensure-development-processes!
+  [configuration manifest start-owned! stop-results]
+  (let [spec-map (process/specs configuration manifest)]
+    (doseq [id (process/start-order spec-map)]
+      (println (str "▶ reconcile " (name id)))
+      (process/ensure! configuration (get spec-map id) start-owned!)
+      (println (str "  ● " (name id) " ready")))
+    (assoc (process/status configuration manifest)
+           :seon.dev.target/artifact-digest
+           (:seon.dev.artifact/application-digest manifest)
+           :seon.dev.target/stop-results stop-results)))
+
 (defn- reconcile-development!
   ([configuration] (reconcile-development! configuration []))
   ([configuration prior-stop-results]
@@ -113,44 +125,44 @@
    (process/with-startup-ownership
     configuration
     (fn [start-owned!]
-      (let [readers #{process/pod-id process/watcher-id}
-            already-stopped (stopped-targets prior-stop-results)
-            readers-to-stop (set (remove already-stopped readers))
-            reader-stop
-            (when (seq readers-to-stop)
-              (stop-processes!
-               configuration
-               :seon.dev.process.operation/rebuild-readers
-               readers-to-stop))
-            stop-results (cond-> (vec prior-stop-results)
-                           reader-stop (conj reader-stop))
-            manifest (artifact/build!
-                      configuration
-                      #(process/prepare-watcher! configuration start-owned!))
-            _ (process/admit-watcher-artifact!
-               configuration manifest)
-            changed (:seon.dev.artifact/changed manifest)
-            stopped-after-readers (stopped-targets stop-results)
-            writer-stop
-            (when (and (contains? changed :seon.dev.artifact/writer)
-                       (not (contains? stopped-after-readers process/writer-id)))
-              (stop-processes!
-               configuration
-               :seon.dev.process.operation/rebuild-writer
-               #{process/writer-id}))
-            stop-results (cond-> stop-results writer-stop (conj writer-stop))
-            late-recovery (recover-dead-processes! configuration)
-            stop-results (cond-> stop-results
-                           late-recovery (conj late-recovery))
-            spec-map (process/specs configuration manifest)]
-        (doseq [id (process/start-order spec-map)]
-          (println (str "▶ reconcile " (name id)))
-          (process/ensure! configuration (get spec-map id) start-owned!)
-          (println (str "  ● " (name id) " ready")))
-        (assoc (process/status configuration manifest)
-               :seon.dev.target/artifact-digest
-               (:seon.dev.artifact/application-digest manifest)
-               :seon.dev.target/stop-results stop-results)))))))
+      (if-let [manifest (artifact/current-manifest configuration)]
+        (let [late-recovery (recover-dead-processes! configuration)
+              stop-results (cond-> prior-stop-results
+                             late-recovery (conj late-recovery))]
+          (ensure-development-processes!
+           configuration manifest start-owned! stop-results))
+        (let [readers #{process/pod-id process/watcher-id}
+              already-stopped (stopped-targets prior-stop-results)
+              readers-to-stop (set (remove already-stopped readers))
+              reader-stop
+              (when (seq readers-to-stop)
+                (stop-processes!
+                 configuration
+                 :seon.dev.process.operation/rebuild-readers
+                 readers-to-stop))
+              stop-results (cond-> prior-stop-results
+                             reader-stop (conj reader-stop))
+              manifest (artifact/build!
+                        configuration
+                        #(process/prepare-watcher! configuration start-owned!))
+              _ (process/admit-watcher-artifact! configuration manifest)
+              changed (:seon.dev.artifact/changed manifest)
+              stopped-after-readers (stopped-targets stop-results)
+              writer-stop
+              (when (and
+                     (contains? changed :seon.dev.artifact/writer)
+                     (not (contains? stopped-after-readers process/writer-id)))
+                (stop-processes!
+                 configuration
+                 :seon.dev.process.operation/rebuild-writer
+                 #{process/writer-id}))
+              stop-results (cond-> stop-results
+                             writer-stop (conj writer-stop))
+              late-recovery (recover-dead-processes! configuration)
+              stop-results (cond-> stop-results
+                             late-recovery (conj late-recovery))]
+          (ensure-development-processes!
+           configuration manifest start-owned! stop-results))))))))
 
 (defn- ordinary-agent-url [base-url]
   ;; The feed's first patch is immediate and contains the database-derived

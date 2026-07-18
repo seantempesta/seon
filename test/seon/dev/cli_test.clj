@@ -212,6 +212,40 @@
                        :seon.dev.process/targets)
                  @requests)))))
 
+(deftest reconcile-reuses-current-artifacts-without-stopping-healthy-processes
+  (let [configuration {:seon.dev.config/cluster-dir "/cluster"}
+        manifest {:seon.dev.artifact/application-digest
+                  (apply str (repeat 64 "a"))}
+        spec-map {process/writer-id {:seon.dev.process/id process/writer-id}
+                  process/watcher-id {:seon.dev.process/id process/watcher-id}
+                  process/pod-id {:seon.dev.process/id process/pod-id}}
+        ensured (atom [])]
+    (with-redefs-fn
+      {#'cli/assert-current-database-layout! identity
+       #'cli/recover-dead-processes! (constantly nil)
+       #'process/with-startup-ownership
+       (fn [_ transition]
+         (transition (fn [_ acquire!] (acquire!))))
+       #'artifact/current-manifest (constantly manifest)
+       #'artifact/build!
+       (fn [& _] (throw (ex-info "current artifacts were rebuilt" {})))
+       #'process/clean-or-force!
+       (fn [& _] (throw (ex-info "healthy processes were stopped" {})))
+       #'process/specs (fn [& _] spec-map)
+       #'process/start-order
+       (fn [_] [process/writer-id process/watcher-id process/pod-id])
+       #'process/ensure!
+       (fn [_ spec _] (swap! ensured conj (:seon.dev.process/id spec)))
+       #'process/status
+       (fn [& _]
+         {:seon.dev.target/status :seon.dev.target.status/ready})}
+      (fn []
+        (let [target (#'cli/reconcile-development! configuration)]
+          (is (= :seon.dev.target.status/ready
+                 (:seon.dev.target/status target)))
+          (is (= [] (:seon.dev.target/stop-results target))))))
+    (is (= [process/writer-id process/watcher-id process/pod-id] @ensured))))
+
 (deftest reconcile-recovers-only-definitely-dead-managed-processes
   (let [configuration {:seon.dev.config/cluster-dir "/cluster"}
         records {process/writer-id {:seon.dev.process/id process/writer-id
