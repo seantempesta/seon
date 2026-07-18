@@ -2434,6 +2434,54 @@
       (finally
         (fs/delete-tree directory)))))
 
+(deftest autonomous-cluster-can-use-the-existing-writer-owner
+  (let [configuration (test-config)
+        directory (:seon.dev.test/directory configuration)
+        source-config (target-config configuration directory)
+        source-descriptor (:seon.dev.config/launch-descriptor source-config)
+        descriptor
+        (launch/shared-writer-cluster-descriptor
+         {::launch/source-descriptor source-descriptor
+          ::launch/runtime-cluster "experiment"
+          ::launch/target-database-name "experiment"
+          :seon.db.protocol/database-path
+          (str (fs/path directory "experiment-db"))
+          ::launch/process-dir (str (fs/path directory "experiment-process"))
+          ::launch/log-dir (str (fs/path directory "experiment-logs"))
+          ::launch/http-port 0
+          ::launch/http-port-file
+          (str (fs/path directory "experiment-http.port"))
+          ::launch/writable-blob-dir
+          (str (fs/path directory "experiment-blobs"))})
+        selected (dev-config/select-launch-descriptor source-config descriptor)
+        manifest (target-manifest-for source-config)
+        specs (process/specs selected manifest)
+        pod (get specs process/pod-id)
+        published
+        (edn/read-string
+         (get-in pod [:seon.dev.process/environment
+                      "SEON_LAUNCH_DESCRIPTOR"]))]
+    (try
+      (is (= #{process/pod-id} (set (keys specs))))
+      (is (= [process/pod-id] (process/start-order specs)))
+      (is (= [] (:seon.dev.process/dependencies pod)))
+      (is (= [process/watcher-id process/writer-id]
+             (mapv :seon.dev.process/id
+                   (:seon.dev.process/external-dependencies pod))))
+      (is (= {:seon.client/autonomous? true}
+             (get-in published
+                     [::launch/runtime :seon.client/launch-capability])))
+      (is (= (::launch/writer-owner source-descriptor)
+             (::launch/writer-owner published)))
+      (is (= (get-in descriptor [::launch/process ::launch/process-dir])
+             (-> (#'process/state-file selected process/pod-id)
+                 fs/path
+                 fs/parent
+                 fs/parent
+                 str)))
+      (finally
+        (fs/delete-tree directory)))))
+
 (defn -main [& _]
   (let [{:keys [fail error]} (run-tests 'seon.dev.process-test)]
     (when (pos? (+ fail error)) (System/exit 1))))

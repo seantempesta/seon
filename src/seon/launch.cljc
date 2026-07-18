@@ -141,6 +141,18 @@
   [::http-port ::http-port]
   [::http-port-file ::http-port-file]
   [::writable-blob-dir ::writable-blob-dir]])
+(schema/register!
+ ::shared-writer-cluster-descriptor-request
+ [:map {:closed true}
+  [::source-descriptor ::source-descriptor]
+  [::runtime-cluster ::runtime-cluster]
+  [::target-database-name ::target-database-name]
+  [::protocol/database-path ::protocol/database-path]
+  [::process-dir ::process-dir]
+  [::log-dir ::log-dir]
+  [::http-port ::http-port]
+  [::http-port-file ::http-port-file]
+  [::writable-blob-dir ::writable-blob-dir]])
 
 (defn- basename
   [path]
@@ -383,6 +395,65 @@
       ::blob-storage-view
       {:my.blob/writable-dir (normalize-path writable-blob-dir)
        :my.blob/read-only-dirs read-only-dirs}})))
+
+(defn shared-writer-cluster-descriptor
+  "Derive one autonomous cluster descriptor using the source writer owner."
+  {:malli/schema
+   [:=> [:cat ::shared-writer-cluster-descriptor-request] ::descriptor]}
+  [{::keys [source-descriptor runtime-cluster target-database-name
+            process-dir log-dir http-port http-port-file writable-blob-dir]
+    database-path ::protocol/database-path}]
+  (let [source-runtime (::runtime source-descriptor)
+        source-database (::database source-descriptor)
+        source-blobs (::blob-storage-view source-descriptor)
+        source-process (::process source-descriptor)
+        source-private
+        (mapv normalize-path
+              [(::protocol/database-path source-database)
+               (:my.blob/writable-dir source-blobs)
+               (::process-dir source-process)
+               (::log-dir source-process)
+               (::http-port-file source-process)])
+        target-private
+        (mapv normalize-path
+              [database-path process-dir log-dir http-port-file
+               writable-blob-dir])]
+    (invariant! (not= (::protocol/database-name source-database)
+                      target-database-name)
+                "A shared-writer cluster requires a distinct database name."
+                {::target-database-name target-database-name
+                 ::source-descriptor source-descriptor})
+    (invariant! (not-any? true?
+                          (for [target target-private
+                                source source-private]
+                            (paths-overlap? target source)))
+                "Cluster-private paths must not overlap source-owned paths."
+                {::target-private-paths target-private
+                 ::source-paths source-private})
+    (validate-descriptor
+     {::runtime
+      (cond->
+       {::runtime-cluster runtime-cluster
+        ::artifact-flavor (::artifact-flavor source-runtime)
+        ::client-build-id (::client-build-id source-runtime)
+        :seon.client/launch-capability {:seon.client/autonomous? true}}
+        (::execution-build-id source-runtime)
+        (assoc ::execution-build-id (::execution-build-id source-runtime))
+        (::execution-output source-runtime)
+        (assoc ::execution-output (::execution-output source-runtime)))
+      ::database
+      {::protocol/database-name target-database-name
+       ::protocol/backend (::protocol/backend source-database)
+       ::protocol/database-path (normalize-path database-path)}
+      ::writer-owner (::writer-owner source-descriptor)
+      ::process
+      {::process-dir (normalize-path process-dir)
+       ::log-dir (normalize-path log-dir)
+       ::http-port http-port
+       ::http-port-file (normalize-path http-port-file)}
+      ::blob-storage-view
+      {:my.blob/writable-dir (normalize-path writable-blob-dir)
+       :my.blob/read-only-dirs []}})))
 
 #?(:cljs
    (do

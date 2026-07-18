@@ -151,6 +151,57 @@
             :my.blob/read-only-dirs ["data/clusters/acme/blobs"]}
            (::launch/blob-storage-view branch)))))
 
+(deftest shared-writer-cluster-is-autonomous-with-private-database-and-processes
+  (let [source (ordinary "data/clusters/default"
+                         :seon.dev.artifact.flavor/default "client")
+        cluster
+        (launch/shared-writer-cluster-descriptor
+         {::launch/source-descriptor source
+          ::launch/runtime-cluster "experiment"
+          ::launch/target-database-name "experiment"
+          ::protocol/database-path "data/clusters/experiment/db"
+          ::launch/process-dir "tmp/seon-experiment"
+          ::launch/log-dir "logs/experiment"
+          ::launch/http-port 0
+          ::launch/http-port-file "tmp/seon-experiment/http.port"
+          ::launch/writable-blob-dir "data/clusters/experiment/blobs"})]
+    (is (= {:seon.client/autonomous? true}
+           (get-in cluster
+                   [::launch/runtime :seon.client/launch-capability])))
+    (is (= (::launch/writer-owner source) (::launch/writer-owner cluster)))
+    (is (= {::protocol/database-name "experiment"
+            ::protocol/backend :file
+            ::protocol/database-path "data/clusters/experiment/db"}
+           (::launch/database cluster)))
+    (is (= {:my.blob/writable-dir "data/clusters/experiment/blobs"
+            :my.blob/read-only-dirs []}
+           (::launch/blob-storage-view cluster)))))
+
+(deftest shared-writer-cluster-rejects-source-name-and-path-overlap
+  (let [source (ordinary "data/clusters/default"
+                         :seon.dev.artifact.flavor/default "client")
+        request
+        {::launch/source-descriptor source
+         ::launch/runtime-cluster "experiment"
+         ::launch/target-database-name "experiment"
+         ::protocol/database-path "data/clusters/experiment/db"
+         ::launch/process-dir "tmp/seon-experiment"
+         ::launch/log-dir "logs/experiment"
+         ::launch/http-port 0
+         ::launch/http-port-file "tmp/seon-experiment/http.port"
+         ::launch/writable-blob-dir "data/clusters/experiment/blobs"}]
+    (is (thrown? js/Error
+                 (launch/shared-writer-cluster-descriptor
+                  (assoc request ::launch/target-database-name "default"))))
+    (doseq [overlap
+            [(assoc request ::protocol/database-path
+                    "data/clusters/default/db/experiment")
+             (assoc request ::launch/process-dir "tmp/source-process/child")
+             (assoc request ::launch/writable-blob-dir
+                    "data/clusters/default/blobs/experiment")]]
+      (is (thrown? js/Error
+                   (launch/shared-writer-cluster-descriptor overlap))))))
+
 (deftest branch-descriptor-rejects-protected-or-overlapping-targets
   (let [database-id #uuid "9dcfa740-5f7f-4ff5-ac08-a9c8b605a8aa"
         source (assoc-in

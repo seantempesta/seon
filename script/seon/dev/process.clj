@@ -177,14 +177,16 @@
 (defn- environment-digest [environment argv]
   (sha256-text (managed-environment environment argv)))
 
+(defn- owns-writer-processes?
+  [descriptor]
+  (= (get-in descriptor [::launch/process ::launch/process-dir])
+     (get-in descriptor [::launch/writer-owner
+                         ::launch/writer-process-dir])))
+
 (defn- state-file [config id]
   (let [descriptor (:seon.dev.config/launch-descriptor config)
-        autonomous?
-        (true? (get-in descriptor
-                       [::launch/runtime :seon.client/launch-capability
-                        :seon.client/autonomous?]))
         process-dir
-        (if (and (= pod-id id) (not autonomous?))
+        (if (and (= pod-id id) (not (owns-writer-processes? descriptor)))
           (get-in descriptor [::launch/process ::launch/process-dir])
           (:seon.dev.config/process-dir config))]
     (str (fs/path process-dir
@@ -333,6 +335,7 @@
         (true? (get-in descriptor
                        [::launch/runtime :seon.client/launch-capability
                         :seon.client/autonomous?]))
+        owns-writer-processes? (owns-writer-processes? descriptor)
         runtime-root (:seon.dev.artifact/runtime-root manifest)
         pod-environment (cond->
                           (assoc
@@ -360,7 +363,7 @@
            [javascript-runtime (:seon.dev.config/client-output config)]
            :seon.dev.process/environment pod-environment
            :seon.dev.process/dependencies
-           (if autonomous? [watcher-id writer-id] [])
+           (if owns-writer-processes? [watcher-id writer-id] [])
            :seon.dev.process/http-port-file
            (::launch/http-port-file descriptor-process)
            :seon.dev.process/readiness :seon.dev.process.readiness/pod
@@ -380,7 +383,7 @@
           (assoc :seon.dev.process/execution-runtime-digest
                  (:seon.dev.artifact/execution-runtime-digest manifest))
 
-          (not autonomous?)
+          (not owns-writer-processes?)
           (assoc :seon.dev.process/external-dependencies
                   [(cond->
                     {:seon.dev.process/id watcher-id
@@ -432,7 +435,7 @@
       (:seon.dev.artifact/writer-digest manifest)}
 
      pod-id pod-spec}
-        spec-map (if autonomous? spec-map {pod-id pod-spec})]
+        spec-map (if owns-writer-processes? spec-map {pod-id pod-spec})]
     (doseq [spec (vals spec-map)]
       (validate! process-spec-schema spec
                  "The derived process specification is invalid."
