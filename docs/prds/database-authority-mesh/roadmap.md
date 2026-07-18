@@ -29,8 +29,8 @@ the authority. Headless and dormant clusters retain no pod, replica, listener,
 or hot authority connection merely because their durable database exists.
 
 Datahike remains transport-free. Its API specification describes capabilities;
-ordinary Datahike functions execute them. Seon owns sessions, coordinates,
-authorization, fair admission, request identity, framing, paging,
+ordinary Datahike functions execute them. Seon owns sessions, database
+selection, authorization, fair admission, request identity, framing, paging,
 backpressure, provenance, fencing, and errors-as-values. Future JVM, native,
 Rust, cloud, Tauri, and mobile hosts conform to the same data fixtures.
 
@@ -4028,3 +4028,30 @@ read-back, and clean `down`. Only after that proof count package memory or
 advance the grown-transcript/browser and 1/2/4-child load gates. A restarted
 Codex task must also perform the pending bare default MCP reconnect proof using
 the newly loaded stdio server.
+
+## 2026-07-18 configurable Datastar compression checkpoint
+
+The one Datastar feed now keeps identity encoding as the observable,
+low-latency loopback default and optionally negotiates gzip when the deployment
+sets `SEON_FEED_COMPRESSION=gzip`. The implementation uses Bun's native Rust
+zlib through its standard `node:zlib` compatibility namespace, with one gzip
+stream per connection and `Z_SYNC_FLUSH` after each event. The existing Bun
+direct-stream controller remains the sole socket and backpressure owner.
+
+Two tempting alternatives failed direct experiments. Bun's
+`CompressionStream("gzip")` emitted only its header for a live event and
+buffered the payload until closure. Independently compressing each event formed
+concatenated gzip members that Bun decoded but curl's HTTP decoder stopped
+after the first member. The retained stream delivered a complete 27,185-byte
+root patch as 2,535 compressed bytes, then delivered a later heartbeat through
+the same connection. Chrome consumed and morphed the compressed root feed.
+Identity clients still receive the same complete 27,185-byte event; an explicit
+`gzip;q=0` is honored, wildcard acceptance is supported, and every response
+varies on `Accept-Encoding`.
+
+The focused Datastar gate passes 15 tests/58 assertions. A clean managed
+restart without the compression setting restored the expected identity default
+and a gzip-capable request received no `Content-Encoding` while immediately
+receiving the complete patch. The remaining ordered boundary is a final
+source-free package rebuilt from this exact transport source, followed by the
+complete immutable package and maintained-test graduation audit.

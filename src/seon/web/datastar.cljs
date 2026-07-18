@@ -24,6 +24,7 @@
    are accepted but backpressured, so the feed awaits `flush(true)` and retains
    only the newest pending application event until the socket drains."
   (:require
+    ["node:zlib" :as zlib]
     [clojure.set :as set]
     [clojure.string :as str]
     [seon.db :as db]
@@ -215,6 +216,73 @@
 
 (declare push-event!)
 
+(defn- selected-feed-encoding
+  "Negotiate the explicitly configured SSE response encoding."
+  [configured accept-encoding]
+  (case configured
+    (nil "" "identity") :identity
+    "gzip" (if (some (fn [entry]
+                       (let [[coding & params]
+                             (map str/trim (str/split entry #";"))
+                             quality
+                             (some (fn [param]
+                                     (when-let [[_ value]
+                                                (re-matches #"(?i)q\s*=\s*([0-9.]+)"
+                                                            param)]
+                                       (js/parseFloat value)))
+                                   params)]
+                         (and (#{"gzip" "*"} coding)
+                              (or (nil? quality) (pos? quality)))))
+                     (str/split (str/lower-case (or accept-encoding "")) #","))
+             :gzip
+             :identity)
+    (throw (ex-info "Unknown Datastar feed compression policy."
+                    {:seon.web.feed/configured-compression configured
+                     :seon.web.feed/allowed-compression ["identity" "gzip"]}))))
+
+(defn- requested-feed-encoding
+  [r]
+  (let [request (:seon.http/request r)]
+    (selected-feed-encoding
+     (.. js/process -env -SEON_FEED_COMPRESSION)
+     (when request (.get (.-headers request) "Accept-Encoding")))))
+
+(defn- direct-write!
+  [controller value]
+  (.write ^js controller value))
+
+(defn- gzip-writer
+  "One native Bun zlib stream with prompt SSE-member flushing."
+  [controller close!]
+  (let [gzip (.createGzip zlib)
+        backpressured? (atom false)
+        sync-flush (.-Z_SYNC_FLUSH (.-constants zlib))]
+    (.on gzip "data"
+         (fn [chunk]
+           (when (neg? (.write ^js controller chunk))
+             (reset! backpressured? true))))
+    (.on gzip "error" close!)
+    {:seon.web.feed/write!
+     (fn [event]
+       (js/Promise.
+        (fn [resolve reject]
+          (try
+            (.write gzip event)
+            (.flush
+             gzip sync-flush
+             (fn []
+               (if @backpressured?
+                 (do
+                   (reset! backpressured? false)
+                   (-> (js/Promise.resolve (.flush ^js controller true))
+                       (.then resolve reject)))
+                 (resolve nil))))
+            (catch :default error
+              (reject error))))))
+     :seon.web.feed/close-writer!
+     (fn []
+       (try (.destroy gzip) (catch :default _ nil)))}))
+
 (defn- drain-feed!
   "Resume one backpressured feed with only its newest pending event."
   [{pending :seon.web.feed/pending-event
@@ -233,6 +301,7 @@
 (defn- push-event!
   "Write one rendered event, retaining only the newest event under pressure."
   [{controller :seon.web.feed/controller
+    write! :seon.web.feed/write!
     closed? :seon.web.feed/closed?
     pending :seon.web.feed/pending-event
     draining? :seon.web.feed/draining?
@@ -251,8 +320,11 @@
         (reset! pending event))
 
       :else
-      (let [written (.write ^js controller event)
-            backpressured? (and (number? written) (neg? written))]
+      (let [write! (or write! #(direct-write! controller %))
+            written (write! event)
+            async-write? (promise-like? written)
+            backpressured? (or async-write?
+                               (and (number? written) (neg? written)))]
         (record-count! (if backpressured?
                          ::write-backpressured
                          ::write-accepted) 1)
@@ -260,7 +332,9 @@
           (when backpressured-at
             (reset! backpressured-at (.now js/performance)))
           (reset! draining? true)
-          (-> (js/Promise.resolve (.flush ^js controller true))
+          (-> (if async-write?
+                written
+                (js/Promise.resolve (.flush ^js controller true)))
               (.then #(drain-feed! conn))
               (.catch (fn [error]
                         ((:seon.web.feed/close! conn) error)))))))
@@ -283,20 +357,26 @@
 (defn- push-heartbeat!
   "Flush one inert SSE comment without displacing pending application state."
   [{controller :seon.web.feed/controller
+    write! :seon.web.feed/write!
     closed? :seon.web.feed/closed?
     draining? :seon.web.feed/draining?
     :as conn}]
   (try
     (when (and (not @closed?)
                (not @draining?))
-      (let [written (.write ^js controller ": keep-alive\n\n")
-            backpressured? (and (number? written) (neg? written))]
+      (let [write! (or write! #(direct-write! controller %))
+            written (write! ": keep-alive\n\n")
+            async-write? (promise-like? written)
+            backpressured? (or async-write?
+                               (and (number? written) (neg? written)))]
         (when backpressured?
           (when-let [backpressured-at
                      (:seon.web.feed/backpressured-at conn)]
             (reset! backpressured-at (.now js/performance)))
           (reset! draining? true)
-          (-> (js/Promise.resolve (.flush ^js controller true))
+          (-> (if async-write?
+                written
+                (js/Promise.resolve (.flush ^js controller true)))
               (.then #(drain-feed! conn))
               (.catch (fn [error]
                         ((:seon.web.feed/close! conn) error)))))))
@@ -1028,16 +1108,21 @@
 (defn- prepare-feed
   "Attach one fresh socket to a feed descriptor."
   [feed view-id feed-id controller closed? close!]
-  (assoc feed
-         ::view-id view-id
-         :seon.web.feed/id feed-id
-         :seon.web.feed/controller controller
-         :seon.web.feed/closed? closed?
-         :seon.web.feed/close! close!
-         :seon.web.feed/pending-event (atom nil)
-         :seon.web.feed/draining? (atom false)
-         :seon.web.feed/backpressured-at (atom nil)
-         :seon.web.feed/opened-at (js/Date.)))
+  (let [encoding (::encoding feed)
+        writer (if (= :gzip encoding)
+                 (gzip-writer controller close!)
+                 {:seon.web.feed/write!
+                  (fn [event] (direct-write! controller event))})]
+    (merge feed writer
+           {::view-id view-id
+            :seon.web.feed/id feed-id
+            :seon.web.feed/controller controller
+            :seon.web.feed/closed? closed?
+            :seon.web.feed/close! close!
+            :seon.web.feed/pending-event (atom nil)
+            :seon.web.feed/draining? (atom false)
+            :seon.web.feed/backpressured-at (atom nil)
+            :seon.web.feed/opened-at (js/Date.)})))
 
 (defn- replace-feed!
   "Make `conn` the sole socket owner for its view and return the prior owner."
@@ -1100,6 +1185,9 @@
           (when (compare-and-set! closed? false true)
             (let [released? (release-feed! view-id feed-id)]
               (when-let [controller (:seon.web.feed/controller @!conn)]
+                (when-let [close-writer!
+                           (:seon.web.feed/close-writer! @!conn)]
+                  (close-writer!))
                 (try (.close ^js controller error) (catch :default _ nil)))
               (when-let [finish @!finish-stream]
                 (finish nil))
@@ -1138,7 +1226,11 @@
           (cond-> {"Content-Type" "text/event-stream; charset=utf-8"
                    "Cache-Control" "no-store"
                    "Connection" "keep-alive"
-                   "X-Accel-Buffering" "no"}
+                   "X-Accel-Buffering" "no"
+                   "Vary" "Accept-Encoding"}
+            (= :gzip (::encoding feed))
+            (assoc "Content-Encoding" "gzip")
+
             (:seon.web.feed/branch-head feed)
             (assoc "Seon-Database-Branch-Head"
                    (pr-str (:seon.web.feed/branch-head feed))))]
@@ -1171,7 +1263,7 @@
                              [::feed-definition ::feed-definition]]
                   :any]}
   [r feed]
-  (open-feed! feed))
+  (open-feed! (assoc feed ::encoding (requested-feed-encoding r))))
 
 ;; ============================================================
 ;; Per-agent view (/agent/{id}) — the shim page + the feed bound to
@@ -1416,7 +1508,8 @@
                        (<= (::db.branch/basis-t selector) (:t database)))
                 (let [historical
                       (db/as-of database (::db.branch/basis-t selector))]
-                  (open-feed!
+                  (open-view-feed!
+                   r
                    (cond->
                     {:seon.web.feed/key [:seon.web.feed/agent id
                                          :seon.web.feed/at selector]
@@ -1432,7 +1525,7 @@
                   selector)))
 
               :else
-              (open-feed! (live-agent-feed-definition id view-id))))
+              (open-view-feed! r (live-agent-feed-definition id view-id))))
 
           :else
           (response "unknown agent id" 404

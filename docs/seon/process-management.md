@@ -85,9 +85,11 @@ files while the writer is running.
 |---|---|
 | `SEON_CLUSTER_DIR` | managed cluster directory; database is `<dir>/db` |
 | `SEON_PROC_DIR` / `SEON_LOG_DIR` | isolated operator records and lifetime logs |
-| `SEON_REQ_SOCK` / `SEON_PUB_SOCK` | request and committed-transaction sockets |
+| `SEON_REQ_SOCK` | persistent database-session request socket |
 | `SEON_WRITER_REPL_PORT` / `SEON_WRITER_REPL_PORT_FILE` | loopback diagnostic port selection and record |
-| `SEON_PORT` / `SEON_PORT_FILE` | pod HTTP selection and bound-port record |
+| `SEON_PORT` / `SEON_PORT_FILE` / `SEON_BIND` | Bun pod HTTP selection, bound-port record, and bind address |
+| `SEON_FEED_COMPRESSION` | Datastar response encoding: identity by default, explicit `gzip` for remote clients |
+| `SEON_WRITER_PROC_DIR` | process directory owning the one JVM writer when this Bun runtime does not |
 | `SEON_CONFIG` | optional runtime manifest selected by the pod |
 | `SEON_EXTRA_SRC` / `SEON_EXTRA_PRELOAD` | downstream CLJS overlay inputs |
 | `SEON_SHELL` / `SEON_WEB` / `SEON_EMBED` | host-owned capability and feature gates |

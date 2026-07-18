@@ -436,6 +436,13 @@ implements the `view = f(db)` model through `seon.web.datastar`.
   `ReadableStream` response whose controller owns browser backpressure and
   disconnect. Loopback development uses identity encoding for observability and
   latency; remote deployments enable measured compression by configuration.
+  `SEON_FEED_COMPRESSION=gzip` selects Bun's native Rust zlib stream through
+  its standard `node:zlib` namespace; each SSE event uses `Z_SYNC_FLUSH` so it
+  reaches the browser immediately. `Accept-Encoding` remains authoritative and
+  an identity client is never compressed. A standard `CompressionStream` is
+  not used because it buffers event payload until stream closure, and separate
+  per-event gzip members are not used because common HTTP decoders stop after
+  the first member.
   Compression changes only response bytes, never event or database semantics.
   One shared heartbeat timer emits inert SSE
   comments for every writable feed, so reverse proxies can keep otherwise-idle

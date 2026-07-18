@@ -213,8 +213,14 @@ external dependency followed the replacement writer PID and both Datastar
 feeds served complete patches. `bin/acme down` then retired only ACME's watcher
 and Bun pod while default remained ready. Complete proof on the final source
 passes 1,136 CLJS tests/5,053 assertions, 219 writer tests/1,821 assertions,
-and 272 operator tests/1,537 assertions. The remaining ordered gate is remote
-configurable compression and the complete final package matrix.
+and 272 operator tests/1,537 assertions. Remote configurable compression is
+now also implemented and live-proven: the one feed retains identity as its
+default and selects a single Bun-native gzip stream only when configured and
+accepted. A 27,185-byte root event used 2,535 compressed bytes, the same
+connection promptly delivered its later heartbeat, and Chrome morphed the
+compressed feed. Focused proof passes 15 tests/58 assertions, including
+explicit `gzip;q=0` refusal. The remaining ordered gate is the complete final
+source-free package matrix on this exact transport source.
 
 The existing remote query surface now exposes its protocol-native historical
 view, closing the only facade gap needed by coordinate-pinned startup birth.

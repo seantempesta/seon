@@ -84,6 +84,16 @@
 (deftest native-javascript-promises-are-recognized
   (is (@#'datastar/promise-like? (js/Promise.resolve :ready))))
 
+(deftest feed-compression-is-explicit-and-negotiated
+  (let [select @#'datastar/selected-feed-encoding]
+    (is (= :identity (select nil "gzip, deflate")))
+    (is (= :identity (select "identity" "gzip")))
+    (is (= :gzip (select "gzip" "br, gzip")))
+    (is (= :gzip (select "gzip" "br, *;q=0.5")))
+    (is (= :identity (select "gzip" "br")))
+    (is (= :identity (select "gzip" "gzip;q=0, br")))
+    (is (thrown? js/Error (select "invented" "gzip")))))
+
 (deftest child-database-errors-remain-the-visible-render-error
   (let [result (@#'datastar/agent-view-result
                 {::execution/message execution/result-message

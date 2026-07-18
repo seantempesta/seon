@@ -5,7 +5,7 @@ routing + page tree), `observability.md` (cluster lifecycle, the
 `/agents/run` door + debug surfaces),
 `docs/prds/namespace-ui/design-system.md` (Phosphor Terminal theme). Skills:
 `datastar-web-ui` (SSE/morph/signals), `browser-automation` (verification —
-note the browser 503s long-lived SSE; verify feeds with a node gunzip client).
+note the browser 503s long-lived SSE; verify feeds with a server-side client).
 
 ## Systems at play
 
@@ -34,6 +34,9 @@ note the browser 503s long-lived SSE; verify feeds with a node gunzip client).
   per-unit route, local replica, or global transaction broadcast. Historical
   agent feeds validate the complete external database identity and use
   `db/as-of`; they remain frozen outside the live interest.
+  Loopback responses use identity encoding. Remote deployments opt into
+  `SEON_FEED_COMPRESSION=gzip`; the same feed negotiates `Accept-Encoding` and
+  uses Bun's native zlib `Z_SYNC_FLUSH` stream without changing render work.
 - **`view_unit.cljs`** — stable opaque presentation identity only. It does not
   own rendering, caching, invalidation, database access, or a feed. Do not grow
   it into a second renderer or dependency graph.
