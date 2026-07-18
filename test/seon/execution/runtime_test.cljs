@@ -424,9 +424,11 @@
 (deftest eval-owner-receives-the-invocation-database-and-program
   (async done
     (let [original-eval eval/eval-batch!
+          original-setup eval/setup-agent-ns!
           original-agent db/current-agent-id
           compile-state (atom {})
           observed (atom nil)
+          setup (atom nil)
           program
           {::execution/namespace-rows
            [{:seon.ns/name :my.agent.agent-1
@@ -441,6 +443,10 @@
            :seon.agent.turn/id-of-turn "turn-1"
            :seon.agent.run/id-of-run "run-1"}]
       (set! db/current-agent-id (fn [] "agent-1"))
+      (set! eval/setup-agent-ns!
+            (fn [& arguments]
+              (reset! setup arguments)
+              (js/Promise.resolve 'my.agent.agent-1)))
       (set! eval/eval-batch!
             (fn [& arguments]
               (reset! observed
@@ -465,6 +471,10 @@
                      :seon.eval/n-fail 0
                      :seon.eval/ids ["eval-1"]}
                     result))
+             (is (= [configuration compile-state
+                     'my.agent.agent-1 "agent-1"]
+                    @setup)
+                 "the child installs the promised home requires before eval")
              (is (= [compile-state
                      (:seon.eval/parsed request)
                      'my.agent.agent-1
@@ -488,6 +498,7 @@
           (.finally
            (fn []
              (set! eval/eval-batch! original-eval)
+             (set! eval/setup-agent-ns! original-setup)
              (set! db/current-agent-id original-agent)
              (done)))))))
 

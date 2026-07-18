@@ -534,7 +534,9 @@
   (let [database (::db/db (db/current-tx-context))
         {::execution/keys [compile-state program configuration]}
         (await (prepare-program!))
-        agent-id (db/current-agent-id)]
+        agent-id (db/current-agent-id)
+        _ (await (eval/setup-agent-ns! configuration compile-state
+                                       starting-ns agent-id))]
     (error/with-configuration
       configuration
       #(db/with-tx-context

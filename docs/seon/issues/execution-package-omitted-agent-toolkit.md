@@ -34,6 +34,8 @@ home namespace functions it promises.
 
 - Every default home namespace function is compiled into the execution
   artifact.
+- Each retained child installs the selected agent's configured home requires
+  into its own compiler state before evaluating a batch.
 - A clean child resolves plan, message, lifecycle, database, and toolkit
   functions without replaying boot source.
 - A fresh real agent sends its answer, closes its plan step, and completes
