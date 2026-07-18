@@ -216,6 +216,31 @@
                   (is false (str "database-value contract rejected: " error))
                   (done))))))
 
+(deftest ordinary-read-reopens-the-retained-database-selection
+  (async done
+    (-> (with-recording-authority
+          {}
+          (fn [{::keys [connection-options connect-count connected?]}]
+            (-> (open!)
+                (.then
+                 (fn [_]
+                   (let [closed-options @connection-options]
+                     (reset! connected? false)
+                     ((::uds/on-close! closed-options)
+                      (ex-info "physical session closed" {}))
+                     (db/db))))
+                (.then
+                 (fn [current]
+                   (is (= database current))
+                   (is (= 2 @connect-count)
+                       "the ordinary read owns one on-demand reconnect"))))))
+        (.then (fn [_] (done)))
+        (.catch
+         (fn [error]
+           (is false (str "ordinary read reconnect rejected: " error
+                          "\n" (.-stack error)))
+           (done))))))
+
 (deftest initialization-is-forwarded-only-by-the-opening-host
   (async done
     (-> (with-recording-authority

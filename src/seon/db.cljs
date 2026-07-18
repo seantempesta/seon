@@ -556,12 +556,28 @@
   []
   (some? (active-session)))
 
-(defn- send-request! [request timeout-ms]
+(defn- ^:async active-or-reconnect! []
   (if-let [state (active-session)]
-    (request-on-session! (::session state) request timeout-ms)
-    (js/Promise.resolve
-     (session-error "This process has no open database session."
-                    {::protocol/request-id (::protocol/request-id request)}))))
+    state
+    (if-let [selection (::selection @!session)]
+      (try
+        (await (open-session! selection))
+        (or (active-session)
+            (session-error "The database session did not reopen." {}))
+        (catch :default exception
+          (session-error
+           (or (.-message exception) "The database session failed to reopen.")
+           (cond-> {}
+             (ex-data exception)
+             (assoc :seon.error/ex-data (ex-data exception))))))
+      (session-error "This process has no open database session." {}))))
+
+(defn- ^:async send-request! [request timeout-ms]
+  (let [state (await (active-or-reconnect!))]
+    (if (error-value? state)
+      (update state :seon.error/data assoc
+              ::protocol/request-id (::protocol/request-id request))
+      (await (request-on-session! (::session state) request timeout-ms)))))
 
 (defn- resolve-head-response! []
   (if-let [{::keys [database-name]} (active-session)]
@@ -602,28 +618,29 @@
   (internal/run-with-tx-context tx-context thunk))
 
 (defn- ^:async resolve-db! [database-name acquire?]
-  (if-let [{current-name ::database-name databases ::databases}
-           (active-session)]
-    (let [name (or database-name current-name)]
-      (if-let [database (get databases name)]
-        database
-        (let [request-id (str (random-uuid))
-              request (if acquire?
-                        (protocol/acquire-database-request
-                         {::protocol/request-id request-id
-                          ::protocol/database-name name})
-                        (protocol/resolve-head-request
-                         {::protocol/request-id request-id
-                          ::protocol/database-name name}))
-              response (await (send-request! request 15000))]
-          (cond
-            (error-value? response) response
-            (not (::protocol/success? response)) (response-error response)
-            :else
-            (let [database (::db response)]
-              (swap! !session cache-database database)
-              database)))))
-    (session-error "This process has no open database session." {})))
+  (let [state (await (active-or-reconnect!))]
+    (if (error-value? state)
+      state
+      (let [{current-name ::database-name databases ::databases} state
+            name (or database-name current-name)]
+        (if-let [database (get databases name)]
+          database
+          (let [request-id (str (random-uuid))
+                request (if acquire?
+                          (protocol/acquire-database-request
+                           {::protocol/request-id request-id
+                            ::protocol/database-name name})
+                          (protocol/resolve-head-request
+                           {::protocol/request-id request-id
+                            ::protocol/database-name name}))
+                response (await (send-request! request 15000))]
+            (cond
+              (error-value? response) response
+              (not (::protocol/success? response)) (response-error response)
+              :else
+              (let [database (::db response)]
+                (swap! !session cache-database database)
+                database))))))))
 
 (defn- ^:async read-db! [request]
   (if-let [database (or (::db request) (::db (current-tx-context)))]
@@ -650,9 +667,10 @@
   "Return the latest immutable database value for this process's session."
   {:malli/schema
    [:function
-    [:=> [:cat] :seon.db/db]
+    [:=> [:cat] [:or :seon.db/db ::error]]
     [:=> [:cat [:map {:closed true}
-                 [::database-name ::database-name]]] :seon.db/db]]}
+                 [::database-name ::database-name]]]
+     [:or :seon.db/db ::error]]]}
   ([] (await (resolve-db! nil false)))
   ([request]
    (await (resolve-db! (::database-name request) true))))
