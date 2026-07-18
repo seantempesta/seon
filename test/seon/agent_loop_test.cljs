@@ -599,7 +599,8 @@
 
 (deftest restored-wake-listener-drives-committed-work
   (async done
-    (let [listen! db/listen!
+    (let [query db/query
+          listen! db/listen!
           drive! loop/drive-run!
           request (atom nil)
           driven (atom [])
@@ -608,6 +609,7 @@
             (reset! request value)
             (js/Promise.resolve (:seon.db/key value)))]
       (set! (.-cljs$core$IFn$_invoke$arity$1 listen-stub) listen-stub)
+      (set! db/query (fn [_] (js/Promise.resolve 42)))
       (set! db/listen! listen-stub)
       (set! loop/drive-run! #(swap! driven conj %))
       (-> (loop/install-wake-trigger!
@@ -616,6 +618,10 @@
            (fn [_]
              ((:seon.db/handler @request)
               {::db.protocol/event db.protocol/resynchronization-event})
+             (is (= [{:seon.db/a :seon.agent.message/to
+                      :seon.db/v 42
+                      :seon.db/added? true}]
+                    (:seon.db/datom-patterns @request)))
              (is (= [{:seon.agent/id "agent-a"
                       :seon.agent/llm-fn identity}]
                     @driven))))
@@ -625,6 +631,7 @@
           (.finally
            (fn []
              (swap! @#'loop/!loop-input dissoc "agent-a")
+             (set! db/query query)
              (set! db/listen! listen!)
              (set! loop/drive-run! drive!)
              (done)))))))

@@ -953,7 +953,7 @@
                        id database-value (repl-internal/parse-forms source)
                        (home/home-ns id) turn-id run-id))))))))))))))))
 
-(defn install-wake-trigger!
+(defn ^:async install-wake-trigger!
   "Register the inbound-message wake trigger for this agent.
 
    Wakes a run via
@@ -974,17 +974,28 @@
   ;; listener (a hot reload must not leave two listeners firing for one
   ;; agent).
   (let [k [:seon.agent/user-message-trigger id]
-        handle-datoms! (wake-handler input)]
-    (db/listen!
-      {:seon.db/key     k
-       :seon.db/datom-patterns
-       [{:seon.db/a :seon.agent.message/to :seon.db/added? true}]
-       :seon.db/handler
-       (fn [event]
-         (if (= db.protocol/resynchronization-event
-                (::db.protocol/event event))
-           (drive-run! input)
-           (handle-datoms! event)))})))
+        handle-datoms! (wake-handler input)
+        agent-eid
+        (await
+         (db/query
+          {::db/query '[:find ?agent . :in $ ?id :where
+                        [?agent :seon.agent/id ?id]]
+           ::db/args [id]}))]
+    (if (:seon.error/message agent-eid)
+      agent-eid
+      (await
+       (db/listen!
+        {:seon.db/key k
+         :seon.db/datom-patterns
+         [{:seon.db/a :seon.agent.message/to
+           :seon.db/v agent-eid
+           :seon.db/added? true}]
+         :seon.db/handler
+         (fn [event]
+           (if (= db.protocol/resynchronization-event
+                  (::db.protocol/event event))
+             (drive-run! input)
+             (handle-datoms! event)))})))))
 
 (defn uninstall-wake-trigger!
   "Remove one agent's wake listener and process-local loop input.
