@@ -3780,3 +3780,37 @@ post-exit usage still worked. Seon's running release binary remains Bun 1.3.14,
 so its demanded `processes` view correctly omits the unsupported live fields
 rather than fabricating them. A packaged-runtime switch to the patched Bun is
 still required before Seon-level live resource assertions count as graduation.
+
+The automatic recovery policy now also has live process and database proof.
+An ordinary `/agents/run` request instructed `new-turkeys-worry` to evaluate a
+non-terminating `(loop [] (recur))`. The demanded parent process view exposed
+active invocation `ee4ea002-03be-4a30-a7bd-5ed33cd84cfb`; parent-owned
+`cancel!` retired PID 72517 and the loop committed unexpected-exit recovery
+`lnpbodcoz2wq` with a 71-token content-addressed EDN diagnostic blob. A fresh
+child started as PID 72766. The runtime did not replay the interrupted eval;
+the replacement agent saw the interrupted turn and independently emitted the
+same requested form in a new turn and eval. Retiring that invocation committed
+recovery `b9gnh3got5dy` with its own EDN blob and stopped automatic execution.
+No third child appeared, the public request closed `:crashed`, and root received
+one ordinary inbound message naming recovery `b9gnh3got5dy` and exact evidence
+blob `56167cfdb91be592bdb4970af24be0542d64181ef160dff80ad170b829e06d04`.
+This closes the one-retry breaker with real non-cooperating JavaScript, new
+process identity, durable failure evidence, and database-history policy rather
+than a mutable restart counter.
+
+The source-grounded private-memory audit at
+[[research/2026-07-18-private-memory]] corrects the earlier additive-RSS model.
+Current execution children retain about 201--238 MiB of macOS physical
+footprint, not their misleading 400--900 MiB RSS, and four active children stay
+near 0.9 GiB incremental steady memory. The dominant modest-hardware boundary
+is the fixed writer plus pod: 548 MiB plus 316 MiB after collection, with the
+writer reaching 1.19 GiB under the current `-Xmx2g` despite retaining only
+71--83 MiB of Java heap. Exact ClojureScript semantics and isolated children
+remain selected. The earliest unsettled contract is now choosing the smallest
+measured writer heap policy across 512, 768, and 1,024 MiB that preserves
+initialization, heavy queries, cache reuse, four-agent load, and GC latency.
+The integrated proof must measure physical footprint, allocation/collection
+behavior, pauses, query latency, and complete writer correctness before the
+launch descriptor changes. Production packaging without the development-only
+Shadow watcher, full browser/load/multi-cluster graduation, and the patched
+Bun runtime/transport switch remain downstream gates.
