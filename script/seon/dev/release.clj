@@ -450,6 +450,7 @@
   (let [archive (fs/path (fs/parent target)
                          (str (random-uuid) ".tar"))]
     (try
+      (fs/create-dirs (fs/parent target))
       (apply command-output! repository
              "git" "archive" "--format=tar" "--output" (str archive)
              revision paths)
