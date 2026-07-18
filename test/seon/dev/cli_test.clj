@@ -63,6 +63,7 @@
         configuration {:seon.dev.config/root (str root)
                        :seon.dev.config/environment {"PATH" "/maintained"}}
         digest (apply str (repeat 64 "a"))
+        source-digest (apply str (repeat 64 "b"))
         calls (atom [])]
     (try
       (with-redefs-fn
@@ -70,19 +71,30 @@
          (fn [request]
            (swap! calls conj request)
            (fs/create-dirs (::release/package-root request))
-           {:seon.dev.release/application-sha-256 digest})}
+           {:seon.dev.release/application-sha-256 digest})
+         #'release/build-sdk!
+         (fn [request]
+           (swap! calls conj request)
+           (fs/create-dirs (::release/package-root request))
+           {:seon.dev.sdk/source-sha-256 source-digest})}
         (fn []
-          (let [output (with-out-str (#'cli/release! configuration ["dist"]))]
+          (let [output (with-out-str
+                         (#'cli/release! configuration
+                          ["dist" "--sdk" "sdk"]))]
             (is (str/includes?
                  output
                  (str "release " (fs/canonicalize (fs/path root "dist")))))
-            (is (str/includes? output digest)))))
+            (is (str/includes? output digest))
+            (is (str/includes? output source-digest)))))
       (is (= [{::release/root (str root)
                ::release/package-root (str (fs/path root "dist"))
+               ::release/environment {"PATH" "/maintained"}}
+              {::release/root (str root)
+               ::release/package-root (str (fs/path root "sdk"))
                ::release/environment {"PATH" "/maintained"}}]
              @calls))
-      (doseq [arguments [[] ["one" "two"]]]
-        (is (thrown-with-msg? Exception #"exactly one output directory"
+      (doseq [arguments [[] ["one" "two"] ["one" "--wrong" "two"]]]
+        (is (thrown-with-msg? Exception #"runtime directory"
                               (#'cli/release! configuration arguments))))
       (finally (fs/delete-tree root {:force true})))))
 

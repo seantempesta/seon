@@ -256,3 +256,25 @@
                            (java.util.regex.Pattern/quote (str inputs)))
                           (slurp (str (fs/path package "release.edn")))))))
       (finally (fs/delete-tree inputs {:force true})))))
+
+(deftest sdk-manifest-closes-and-verifies-the-source-inventory
+  (let [root (fs/create-temp-dir {:prefix "seon-sdk-manifest-"})
+        source (fs/path root "source")
+        revision (apply str (repeat 40 "a"))]
+    (try
+      (fs/create-dirs source)
+      (spit (str (fs/path source "deps.edn")) "{}\n")
+      (let [manifest {:seon.dev.sdk/version release/sdk-version
+                      :seon.dev.sdk/source-revision revision
+                      :seon.dev.sdk/datahike-revision revision
+                      :seon.dev.sdk/bun-revision revision
+                      :seon.dev.sdk/babashka-revision revision
+                      :seon.dev.sdk/source-sha-256
+                      (#'release/member-sha-256 source)}]
+        (spit (str (fs/path root "sdk.edn")) (pr-str manifest))
+        (is (= manifest (release/read-sdk-manifest!
+                         (str (fs/path root "sdk.edn")))))
+        (spit (str (fs/path source "deps.edn")) "{:changed true}\n")
+        (is (thrown-with-msg? Exception #"source digest does not match"
+                              (release/verify-sdk! (str root) manifest))))
+      (finally (fs/delete-tree root {:force true})))))

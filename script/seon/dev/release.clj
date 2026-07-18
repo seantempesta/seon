@@ -14,6 +14,8 @@
 
 (def current-version 1)
 
+(def sdk-version 1)
+
 (def ^:private patched-bun-revision
   "d8ecf098572e2b8265b23e40c04efb4067e516cc")
 
@@ -372,6 +374,44 @@
     (validate-manifest! manifest)
     (verify-package! (str (fs/parent (fs/absolutize manifest-path))) manifest)))
 
+(def sdk-manifest-schema
+  [:map {:closed true}
+   [:seon.dev.sdk/version [:= sdk-version]]
+   [:seon.dev.sdk/source-revision [:re #"[0-9a-f]{40}"]]
+   [:seon.dev.sdk/datahike-revision [:re #"[0-9a-f]{40}"]]
+   [:seon.dev.sdk/bun-revision [:re #"[0-9a-f]{40}"]]
+   [:seon.dev.sdk/babashka-revision [:re #"[0-9a-f]{40}"]]
+   [:seon.dev.sdk/source-sha-256 sha-256-schema]])
+
+(defn verify-sdk!
+  "Verify one immutable downstream build SDK directory."
+  {:malli/schema [:=> [:cat :string sdk-manifest-schema]
+                   sdk-manifest-schema]}
+  [sdk-root manifest]
+  (when-not (m/validate sdk-manifest-schema manifest)
+    (manifest-error "The Seon SDK manifest is invalid."
+                    {:seon.dev.release/explain
+                     (m/explain sdk-manifest-schema manifest)}))
+  (let [root (ensure-package-root! sdk-root)
+        entries (->> (fs/list-dir root)
+                     (map #(str (fs/file-name %)))
+                     set)]
+    (when-not (= #{"source" "sdk.edn"} entries)
+      (manifest-error "The Seon SDK inventory is not closed."
+                      {:seon.dev.sdk/entries entries}))
+    (when-not (= (:seon.dev.sdk/source-sha-256 manifest)
+                 (member-sha-256 (fs/path root "source")))
+      (manifest-error "The Seon SDK source digest does not match." {})))
+  manifest)
+
+(defn read-sdk-manifest!
+  "Read and verify an SDK manifest relative to its containing directory."
+  {:malli/schema [:=> [:cat :string] sdk-manifest-schema]}
+  [manifest-path]
+  (let [path (fs/absolutize manifest-path)
+        manifest (edn/read-string (slurp (str path)))]
+    (verify-sdk! (str (fs/parent path)) manifest)))
+
 (defn- copy-file! [source target]
   (when-not (fs/regular-file? source)
     (manifest-error "A release input file is missing."
@@ -387,6 +427,102 @@
   (fs/create-dirs (fs/parent target))
   (fs/copy-tree source target {:replace-existing true})
   target)
+
+(def ^:private sdk-source-paths
+  ["bin" "src" "resources" "script" "test" "java" "externs" "config"
+   "seon-skills" "build.clj" "bb.edn" "deps.edn" "shadow-cljs.edn"
+   "package.json" "bun.lock" "LICENSE"])
+
+(def ^:private datahike-sdk-paths
+  ["src" "src-secondary" "resources" "java" "build.clj" "deps.edn"
+   "LICENSE"])
+
+(defn- command-output! [root & command]
+  (let [result (process/shell {:dir (str root) :out :string :err :string
+                               :continue true :cmd (vec command)})]
+    (when-not (zero? (:exit result))
+      (manifest-error "A release identity command failed."
+                      {::command (vec command) ::exit (:exit result)}))
+    (str/trim (:out result))))
+
+(defn- git-archive! [repository revision paths target]
+  (let [archive (fs/path (fs/parent target)
+                         (str (random-uuid) ".tar"))]
+    (try
+      (apply command-output! repository
+             "git" "archive" "--format=tar" "--output" (str archive)
+             revision paths)
+      (fs/create-dirs target)
+      (command-output! repository "tar" "-xf" (str archive)
+                       "-C" (str target))
+      (finally
+        (when (fs/exists? archive) (fs/delete archive))))))
+
+(declare inspect-bun! remove-symbolic-links!)
+
+(defn build-sdk!
+  "Publish one immutable downstream build SDK from committed source."
+  {:malli/schema
+   [:=>
+    [:cat [:map {:closed true}
+           [::root :string]
+           [::package-root :string]
+           [::environment {:optional true} [:map-of :string :string]]]]
+    sdk-manifest-schema]}
+  [{::keys [root package-root environment]}]
+  (let [root (fs/canonicalize (fs/path root))
+        target (fs/absolutize (fs/path package-root))
+        environment (or environment (into {} (System/getenv)))
+        stage (fs/path (fs/parent target)
+                       (str "." (fs/file-name target) "."
+                            (random-uuid) ".tmp"))
+        source (fs/path stage "source")
+        source-revision (command-output! root "git" "rev-parse" "HEAD")
+        datahike-root (fs/path root "reference-code/datahike")
+        datahike-revision
+        (command-output! datahike-root "git" "rev-parse" "HEAD")
+        bun (fs/path root "reference-code/bun/build/release/bun")
+        _ (inspect-bun! root environment (str bun))
+        babashka-root (fs/path root "reference-code/babashka")
+        babashka-revision
+        (command-output! babashka-root "git" "rev-parse" "HEAD")]
+    (when (fs/exists? target)
+      (manifest-error "The SDK target already exists."
+                      {:seon.dev.sdk/package-root (str target)}))
+    (when-not (= datahike-revision
+                 (command-output! root "git" "rev-parse"
+                                  "HEAD:reference-code/datahike"))
+      (manifest-error "The checked-out Datahike source differs from Git HEAD."
+                      {:seon.dev.sdk/datahike-revision datahike-revision}))
+    (when-not (= babashka-revision babashka-source-revision)
+      (manifest-error "The checked-out Babashka source differs from the SDK identity."
+                      {:seon.dev.sdk/babashka-revision babashka-revision}))
+    (try
+      (fs/create-dirs (fs/parent target))
+      (git-archive! root source-revision sdk-source-paths source)
+      (git-archive! datahike-root datahike-revision datahike-sdk-paths
+                    (fs/path source "reference-code/datahike"))
+      (copy-file! bun (fs/path source "reference-code/bun/build/release/bun"))
+      (.setExecutable
+       (io/file (str (fs/path source "reference-code/bun/build/release/bun")))
+       true false)
+      (copy-file! (fs/path babashka-root "LICENSE")
+                  (fs/path source "reference-code/babashka/LICENSE"))
+      (remove-symbolic-links! source)
+      (let [manifest {:seon.dev.sdk/version sdk-version
+                      :seon.dev.sdk/source-revision source-revision
+                      :seon.dev.sdk/datahike-revision datahike-revision
+                      :seon.dev.sdk/bun-revision patched-bun-revision
+                      :seon.dev.sdk/babashka-revision babashka-revision
+                      :seon.dev.sdk/source-sha-256
+                      (member-sha-256 source)}]
+        (spit (str (fs/path stage "sdk.edn"))
+              (str (pr-str manifest) "\n"))
+        (verify-sdk! (str stage) manifest))
+      (fs/move stage target {:atomic-move true})
+      (read-sdk-manifest! (str (fs/path target "sdk.edn")))
+      (finally
+        (when (fs/exists? stage) (fs/delete-tree stage {:force true}))))))
 
 (defn- remove-symbolic-links! [root]
   (doseq [file (reverse (file-seq (io/file (str root))))

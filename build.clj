@@ -2,7 +2,14 @@
   (:require [clojure.tools.build.api :as b]))
 
 (def lib 'seon/seon)
-(def version (format "0.1.%s" (b/git-count-revs nil)))
+(def version
+  ;; A released build SDK intentionally has no .git directory. Runtime
+  ;; compatibility is carried by sdk.edn/release.edn, so the ordinary jar's
+  ;; display version may fall back without making Git a consumer dependency.
+  (format "0.1.%s"
+          (or (System/getenv "SEON_BUILD_REVISION_COUNT")
+              (try (b/git-count-revs nil)
+                   (catch Throwable _ 0)))))
 (def class-dir "target/classes")
 (def basis (b/create-basis {:project "deps.edn"}))
 (def jar-file (format "target/%s-%s.jar" (name lib) version))

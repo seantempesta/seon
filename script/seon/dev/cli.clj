@@ -642,8 +642,10 @@
                         (name (:seon.dev.doctor/artifact-status result)))))))))
 
 (defn- release! [configuration arguments]
-  (when-not (= 1 (count arguments))
-    (throw (ex-info "`release` requires exactly one output directory."
+  (when-not (or (= 1 (count arguments))
+                (and (= 3 (count arguments))
+                     (= "--sdk" (second arguments))))
+    (throw (ex-info "`release` requires a runtime directory and optional `--sdk` directory."
                     {:seon.dev.cli/arguments (vec arguments)})))
   (let [root (:seon.dev.config/root configuration)
         requested (fs/path (first arguments))
@@ -658,6 +660,20 @@
     (println (str "● release " (fs/canonicalize package-root)))
     (println (str "  application sha256: "
                   (:seon.dev.release/application-sha-256 manifest)))
+    (when-let [sdk-argument (nth arguments 2 nil)]
+      (let [requested-sdk (fs/path sdk-argument)
+            sdk-root (if (fs/relative? requested-sdk)
+                       (fs/path root requested-sdk)
+                       requested-sdk)
+            sdk-manifest
+            (release/build-sdk!
+             {::release/root root
+              ::release/package-root (str sdk-root)
+              ::release/environment
+              (:seon.dev.config/environment configuration)})]
+        (println (str "● build SDK " (fs/canonicalize sdk-root)))
+        (println (str "  source sha256: "
+                      (:seon.dev.sdk/source-sha-256 sdk-manifest)))))
     manifest))
 
 (defn- reset-cluster! [configuration arguments]
@@ -1080,7 +1096,8 @@
          "  branch open|restart|close|status NAME [--edn]\n"
          "  logs [writer|watcher|pod] [--lines N] [--follow]\n"
          "  doctor [--edn]           check host prerequisites\n"
-         "  release <directory>      build one source-free release package\n"
+         "  release <directory> [--sdk <directory>]\n"
+         "                            build runtime and optional downstream SDK\n"
          "  test changed --path PATH...  run affected tests from the warm graph\n"
          "  test pod|database|operator|all [selector]\n"
          "  skills sync|check        generate or verify tool-facing skill adapters\n"
