@@ -3526,14 +3526,17 @@ the complete maintained tests plus recovery, browser/agent, multi-cluster,
 load/resource, and Bun-native transport evidence.
 
 The later memory sample found a development reload slope rather than retained
-idle children. After two more Shadow hot reloads, the pod reached 353 MiB live
-JSC heap and 1.90 GiB RSS after full collection, with 95 wake inputs, 97
-database interests, zero execution children, and zero running loops. An
-explicit additional rehost of all 95 agents changed live heap by only 0.18 MiB,
-so re-registration itself is not the retained owner. The clean-start and
-heap-snapshot falsifier is tracked at
-[[../../seon/issues/pod-hot-reload-retains-cljs-heap]]; it must distinguish
-development code-generation retention from production steady state.
+idle children. Native heap inspection traced it to an eight-generation Malli
+wrapper chain on `seon.db/query`'s variadic CLJS accessor. Malli restored only
+the immediately prior accessor, retaining about 50 MiB and 820 thousand objects
+per complete program publication even when its result was discarded. The one
+instrumentation owner now collapses accessor links to the original callable
+before installing the next generation. Live full collection fell from
+710,303,457 to 511,623,118 bytes when the accumulated chain was removed; the
+next complete publication remained flat at 511,927,139 bytes and accessor
+depth one. Focused proof passes 11 tests and 129 assertions. The resolved root
+and production-memory distinction are recorded at
+[[../../seon/issues/archive/pod-hot-reload-retains-cljs-heap]].
 
 The accepted-response-loss boundary is now proven against the live initialized
 default database without a test-only initializer. A process-local probe let one
@@ -3555,8 +3558,8 @@ coordinated rebuild is required before using this runtime as a source-frozen
 checkpoint, but it must not run while the shared checkout contains another
 owner's uncommitted build input.
 
-The ordered spine now moves to source-frozen restart/startup and concurrent
-failure/load measurement, followed by memory growth and the measured
-`Bun.serve` transport cut. The retained render investigation can proceed only
+The ordered spine now moves to concurrent agent/feed failure and resource
+measurement, followed by a source-frozen restart/startup checkpoint and the
+measured `Bun.serve` transport cut. The retained render investigation can proceed only
 where it simplifies the measured debug or root owner; it does not displace
 those graduation gates.

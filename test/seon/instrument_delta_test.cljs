@@ -22,6 +22,9 @@
 (defn probe-pure-variadic
   [& args]
   (if (= 1 (count args)) (first args) (vec args)))
+(defn stableMulti
+  ([x] x)
+  ([x y] [x y]))
 
 (def ^:private a-sym 'seon.instrument-delta-test/probe-a)
 (def ^:private b-sym 'seon.instrument-delta-test/probe-b)
@@ -29,6 +32,8 @@
 (def ^:private variadic-sym 'seon.instrument-delta-test/probe-variadic)
 (def ^:private pure-variadic-sym
   'seon.instrument-delta-test/probe-pure-variadic)
+(def ^:private stable-multi-sym
+  'seon.instrument-delta-test/stableMulti)
 (def ^:private target-syms #{a-sym b-sym})
 (def ^:private multi-target-syms #{multi-sym variadic-sym})
 
@@ -268,7 +273,10 @@
 
 (deftest complete-fixed-and-variadic-contracts-survive-reinstrumentation
   (when (instrument/enabled?)
-    (let [initial
+    (let [multi-original (live-fn multi-sym)
+          variadic-original (live-fn variadic-sym)
+          variadic-accessor-original (variadic-accessor variadic-sym)
+          initial
           (instrument/instrument-targets!
             [(target multi-sym multi-form)
              (target variadic-sym variadic-form)])]
@@ -289,6 +297,11 @@
               (is (fn? (fixed-accessor multi-sym 2)))
               (is (fn? (fixed-accessor variadic-sym 1)))
               (is (fn? (variadic-accessor variadic-sym)))
+              (is (identical?
+                    variadic-accessor-original
+                    (gobj/get (variadic-accessor variadic-sym)
+                              "malli$instrument$original"))
+                  "the variadic wrapper points directly to its original")
               (is (= 1 (probe-multi 1)))
               (is (= [1 2] (probe-multi 1 2)))
               (is (= [1] (probe-variadic 1)))
@@ -298,7 +311,34 @@
           (finally
             (instrument/instrument-delta!
               {::instrument/changed-syms multi-target-syms
-               ::instrument/targets []})))))))
+               ::instrument/targets []})
+            (is (identical? multi-original (live-fn multi-sym)))
+            (is (identical? variadic-original (live-fn variadic-sym)))))))))
+
+(deftest multi-arity-publications-restore-one-outer-callable
+  (when (instrument/enabled?)
+    (let [original (live-fn stable-multi-sym)
+          target* (target stable-multi-sym multi-form)]
+      (try
+        (is (true? (::instrument/ok?
+                    (instrument/instrument-targets! [target*]))))
+        (dotimes [_ 3]
+          (is (true? (::instrument/ok?
+                      (instrument/instrument-delta!
+                       {::instrument/changed-syms #{stable-multi-sym}
+                        ::instrument/targets [target*]}))))
+          (is (identical?
+               original
+               (gobj/get (live-fn stable-multi-sym)
+                         "seon$instrument$originalMultiWrapper"))
+              "each wrapper points directly to the one original callable")
+          (is (= [1 2] (stableMulti 1 2)))
+          (is (trapped? #(stableMulti "wrong"))))
+        (finally
+          (instrument/instrument-delta!
+           {::instrument/changed-syms #{stable-multi-sym}
+            ::instrument/targets []})
+          (is (identical? original (live-fn stable-multi-sym))))))))
 
 (deftest pure-variadic-implementation-may-have-a-stricter-public-contract
   (when (instrument/enabled?)

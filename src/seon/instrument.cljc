@@ -57,6 +57,17 @@
        (catch :default _ nil))))
 
 #?(:cljs
+   (defn- set-js-var!
+     "Replace one live namespace var at the same JS path as `find-js-var`."
+     [ns-sym fn-sym f]
+     (when-let [ns-object
+                (gobj/getValueByKeys
+                 js/goog.global
+                 (into-array (map munge (str/split (str ns-sym) #"\."))))]
+       (gobj/set ns-object (munge (name fn-sym)) f)
+       f)))
+
+#?(:cljs
    (defn- -original-fn
      "See through malli's per-var instrumentation record: a wrapped var's
       live fn carries the ORIGINAL under `malli$instrument$original`
@@ -665,6 +676,64 @@
          (gobj/set f fixed-key bridge)))))
 
 #?(:cljs
+   (def ^:private original-multi-wrapper-property
+     "seon$instrument$originalMultiWrapper"))
+
+#?(:cljs
+   (defn- restore-multi-wrapper-vars!
+     "Restore multi/variadic vars before Malli walks the remaining wrappers.
+
+      Malli's CLJS `meta-fn` binds a new outer function on every instrumentation
+      pass, but its multi-arity unstrument path restores only copied accessors;
+      it leaves that bound outer function installed. Retaining one outer
+      function per publication also retains the complete compiled schema graph.
+      The marker is carried by the live Malli wrapper itself, not a second
+      registry, and points at the one prior callable that must be restored."
+     [syms]
+     (doseq [sym syms
+             :let [[ns-sym fn-sym] (qualified-target-parts sym)
+                   live (when ns-sym (find-js-var ns-sym fn-sym))
+                   original (when live
+                              (gobj/get live
+                                        original-multi-wrapper-property))]
+             :when original]
+       (gobj/remove live original-multi-wrapper-property)
+       (gobj/remove original "malli$instrument$instrumented?")
+       (set-js-var! ns-sym fn-sym original))))
+
+#?(:cljs
+   (defn- original-accessor
+     "Follow Malli's accessor links to the one uninstrumented callable."
+     [f]
+     (loop [current f
+            seen #{}]
+       (let [original (when current
+                        (gobj/get current "malli$instrument$original"))]
+         (if (and original (not (contains? seen original)))
+           (recur original (conj seen original))
+           current)))))
+
+#?(:cljs
+   (defn- restore-original-accessors!
+     "Collapse multi/variadic accessors after Malli removes its wrappers.
+
+      Malli restores only the immediately preceding variadic wrapper. Repeated
+      publications otherwise retain one compiled schema generation per link."
+     [syms]
+     (doseq [sym syms
+             :let [[ns-sym fn-sym] (qualified-target-parts sym)
+                   f (when ns-sym (find-js-var ns-sym fn-sym))]
+             :when f
+             property (js->clj (js/Object.keys f))
+             :when (str/starts-with?
+                     property "cljs$core$IFn$_invoke$arity$")
+             :let [accessor (gobj/get f property)
+                   original (when (fn? accessor)
+                              (original-accessor accessor))]
+             :when (and original (not (identical? accessor original)))]
+       (gobj/set f property original))))
+
+#?(:cljs
    (defn- clear-instrumentation-markers!
      "Clear Malli's stale in-place marker and any Seon variadic bridge."
      [syms]
@@ -689,7 +758,9 @@
      "Remove Malli data and complete its exact unwrapped callable state."
      [data syms]
      (when (seq data)
+       (restore-multi-wrapper-vars! syms)
        (mi/unstrument! {:data data})
+       (restore-original-accessors! syms)
        (clear-instrumentation-markers! syms))))
 
 #?(:cljs
@@ -697,7 +768,23 @@
      "Apply Malli data and complete its exact variadic callable shape."
      [data accepted-syms]
      (when (seq data)
-       (mi/instrument! {:data data :report ei/report-fn})
+       (let [originals
+             (into {}
+                   (keep (fn [sym]
+                           (let [[ns-sym fn-sym]
+                                 (qualified-target-parts sym)]
+                             (when-let [f (and ns-sym
+                                               (find-js-var ns-sym fn-sym))]
+                               [sym f]))))
+                   accepted-syms)]
+         (mi/instrument! {:data data :report ei/report-fn})
+         (doseq [[sym original] originals
+                 :when (some? (gobj/get original
+                                         "cljs$lang$maxFixedArity"))
+                 :let [[ns-sym fn-sym] (qualified-target-parts sym)
+                       live (find-js-var ns-sym fn-sym)]
+                 :when (and live (not (identical? live original)))]
+           (gobj/set live original-multi-wrapper-property original)))
        (install-variadic-max-bridges! accepted-syms))))
 
 #?(:cljs
