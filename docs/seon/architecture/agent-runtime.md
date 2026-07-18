@@ -199,6 +199,15 @@ depends on a failed earlier form may therefore fail too, which is honest and
 cheap compared with another model round trip. The next turn's transcript shows
 all successes and failures in their original positions. A worker/process crash
 is different: forms not actually attempted receive no fabricated eval/result.
+Only a successfully compiled and evaluated declaration contributes namespace,
+function, schema, test, or require-edge data to the program transaction. A read
+or compile failure records its exact source and error as eval evidence but
+contributes no program data; a runtime failure also restores the prior analyzer
+definitions and schema registry before recording. The program transaction and
+eval outcome are one atomic authority write, so rejection cannot leave a
+partially published declaration. Recovery from malformed persisted source is
+therefore defense against corruption, old releases, or a core defect—not the
+normal edit path.
 One catch at the existing per-entry record boundary handles an unexpected but
 recordable exception: it persists the core-fault eval and continues. If that
 recording transaction itself fails, the batch stops loudly; it never claims the

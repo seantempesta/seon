@@ -408,3 +408,39 @@
              (set! seval/record-eval! original-record)
              (set! admission/available? original-available)
              (done)))))))
+
+(deftest unreadable-source-records-the-error-without-program-data
+  (async done
+    (let [original-record seval/record-eval!
+          original-available admission/available?
+          recorded-request (atom nil)]
+      (set! admission/available? (constantly true))
+      (set! seval/record-eval!
+            (fn [request]
+              (reset! recorded-request request)
+              (js/Promise.resolve {:seon.eval/id "EVLreceipt0001"})))
+      (-> (seval/eval-batch!
+           nil
+           [{:seon.repl/kind :read
+             :seon.repl/ok? false
+             :seon.repl/source "(defn broken [)"
+             :seon/error {:seon.error/message "unmatched delimiter"}}]
+           'my.agent.receipt "AGTreceipt0001" "TRNreceipt0001" nil
+           {:seon.config/configuration
+            (assoc configuration :seon.config.repair/level :off)
+            ::seval/authored-sources {}
+            ::db/db database})
+          (.then
+           (fn [result]
+             (is (= 1 (:seon.eval/n-fail result)))
+             (is (false? (get-in @recorded-request
+                                 [::seval/result ::seval/ok?])))
+             (is (= "(defn broken [)" (::seval/source @recorded-request)))
+             (is (not (contains? @recorded-request ::seval/tee))
+                 "syntax errors persist only their eval evidence, never program rows")))
+          (.catch (fn [error] (is false (str error))))
+          (.finally
+           (fn []
+             (set! seval/record-eval! original-record)
+             (set! admission/available? original-available)
+             (done)))))))
