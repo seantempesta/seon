@@ -956,7 +956,7 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- initial-data
-  "Return the user entity and empty system-wide instruction singleton.
+  "Return config, user, and the empty system-wide instruction singleton.
 
    The database authority admits these identities with the compiled program
    before publishing the first usable database value.
@@ -974,8 +974,8 @@
    clobbers runtime appends.
 
    Reopening the database never clobbers runtime appends."
-  []
-  (into [{:seon.user/id "user"}]
+  [configuration]
+  (into [configuration {:seon.user/id "user"}]
         (my.kb.shared/seed-tx-data)))
 
 ;; ---------------------------------------------------------------------------
@@ -1768,7 +1768,7 @@
     {:seon.execution/artifact-digest artifact-digest
      :seon.db/attributes agent-bootstrap-attrs
      :seon.db/program program
-     :seon.db/initial-data (vec (initial-data))}))
+     :seon.db/initial-data (vec (initial-data configuration))}))
 
 (schema/register! ::llm-fn        'fn?)
 (defn- rehost-agent-runtimes!

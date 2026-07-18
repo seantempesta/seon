@@ -72,7 +72,8 @@
     (is (not-any? #(or (contains? % :seon.fn/created-at)
                        (contains? % :seon.schema/created-at))
                   (:seon.db/program forward)))
-    (is (= [{:seon.user/id "user"}
+    (is (= [configuration
+            {:seon.user/id "user"}
             {:my.kb.shared/id "shared"}]
            (:seon.db/initial-data forward)))))
 
