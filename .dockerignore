@@ -8,7 +8,7 @@
 !deps.edn
 !shadow-cljs.edn
 !package.json
-!package-lock.json
+!bun.lock
 
 # Sources + artifacts the pod reads at boot (src indexing, skills corpus)
 !src/
@@ -20,6 +20,12 @@
 
 # Writer-classpath preparation inputs
 !dev-resources/
+
+# Maintained local Datahike dependency selected by both :writer and :cljs.
+!reference-code/
+!reference-code/datahike/
+!reference-code/datahike/**
+reference-code/datahike/.git
 
 # Bootstrap-bundle post-build fix (babashka script)
 !bin/fix-bootstrap-macros

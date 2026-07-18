@@ -135,11 +135,19 @@ PATH, npm install, package lock, readiness probe, and pod launcher. Both Linux
 architectures use pinned Bun 1.3.14 assets (the x64 baseline build on amd64),
 frozen `bun install`, forced-Bun CSS, `Bun.connect` writer readiness, and an
 absolute `bun --use-system-ca` pod launch. Shell syntax, diff checks, and a real
-isolated Unix-socket acceptance probe pass. Cross-architecture image builds and
-container browser/recovery proof remain required; the image still packages
-`src` and `test` honestly until the program-source artifact replaces filesystem
-source acquisition. The exact existing-seam design and falsifiers are durable
-at [[research/no-source-program-artifact-audit-2026-07-18]].
+isolated Unix-socket acceptance probe pass. The first Linux arm64 image now
+builds from the maintained local Datahike source, contains no Node executable,
+reports Bun 1.3.14 revision `0d9b296af`, and weighs 310,579,775 bytes. Its first
+clean runtime proof reached writer readiness in eight seconds, then correctly
+failed closed because the production entrypoint had not supplied the packaged
+execution build ID, output, and digest. That admission gap is recorded at
+[[../../seon/issues/container-launch-omits-execution-artifact]]; it must be
+closed through the existing immutable launch descriptor, not a fallback.
+Cross-architecture image builds and container browser/recovery proof remain
+required; the image still packages `src` and `test` honestly until the
+program-source artifact replaces filesystem source acquisition. The exact
+existing-seam design and falsifiers are durable at
+[[research/no-source-program-artifact-audit-2026-07-18]].
 Multi-cluster, no-source packaging, recovery/soak, and final percentile and
 resource measurements remain graduation gates.
 

@@ -109,6 +109,7 @@ RUN bun install --frozen-lockfile
 # gitlibs and compiles the datahike fork's Java sources (:deps/prep-lib).
 COPY deps.edn shadow-cljs.edn ./
 COPY dev-resources dev-resources
+COPY reference-code/datahike reference-code/datahike
 RUN clojure -X:deps prep :aliases '[:writer]' \
  && clojure -P -M:writer \
  && clojure -X:deps prep :aliases '[:cljs]' \
