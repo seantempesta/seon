@@ -35,21 +35,47 @@
 ;; Exit 0 if everything succeeds. Non-zero on filesystem errors.
 
 (require '[babashka.fs :as fs]
+         '[clojure.walk :as walk]
          '[clojure.string :as str]
          '[cognitect.transit :as t])
 
-(import '[java.io ByteArrayInputStream])
+(import '[java.io ByteArrayInputStream ByteArrayOutputStream])
 
 (def project-root
   (-> *file* fs/canonicalize fs/parent fs/parent str))
 
 (def bootstrap-js  (str project-root "/out/bootstrap/js"))
 (def bootstrap-ana (str project-root "/out/bootstrap/ana"))
+(def bootstrap-index (str project-root "/out/bootstrap/index.transit.json"))
 
 (defn transit-read [^String txt]
   (let [in (ByteArrayInputStream. (.getBytes txt "UTF-8"))
         r  (t/reader in :json)]
     (t/read r)))
+
+(defn transit-write [value]
+  (let [out (ByteArrayOutputStream.)
+        writer (t/writer out :json)]
+    (t/write writer value)
+    (.toString out "UTF-8")))
+
+(defn normalize-bootstrap-index!
+  "Replace Shadow's compile-time source timestamps with its supported zero
+   value. Bootstrap output is immutable after packaging, and Shadow's own
+   freshness checks treat zero as requiring materialization, so wall-clock
+   compile time need not make otherwise identical release artifacts differ."
+  []
+  (when-not (fs/exists? bootstrap-index)
+    (throw (ex-info "bootstrap index not found"
+                    {:seon.bootstrap/index bootstrap-index})))
+  (let [index (transit-read (slurp bootstrap-index))
+        normalized (walk/postwalk
+                     (fn [value]
+                       (if (and (map? value) (contains? value :timestamp))
+                         (assoc value :timestamp 0)
+                         value))
+                     index)]
+    (spit bootstrap-index (transit-write normalized))))
 
 (defn read-ana-defs
   "Return the set of def-name strings declared in `<ns>` according to
@@ -125,4 +151,6 @@
                    (vec (take 5 warnings)))))
       (swap! total-fixed + fixed)))
   (when (zero? @total-fixed)
-    (println "✓ no broken symbols found (already fixed or unaffected build)")))
+    (println "✓ no broken symbols found (already fixed or unaffected build)"))
+  (normalize-bootstrap-index!)
+  (println "✓ normalized bootstrap index timestamps"))
