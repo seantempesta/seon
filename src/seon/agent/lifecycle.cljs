@@ -247,6 +247,15 @@
                            (js/Date.))}))))))))))))
     (internal/no-agent-error "complete")))
 
+(defn ^:async ^:private complete*
+  [result result-ref]
+  (let [first-result (await (complete-once result result-ref))
+        final-result
+        (if (stale-database-error? first-result)
+          (await (complete-once result result-ref))
+          first-result)]
+    (if (error-value? final-result) final-result :idle)))
+
 (defn ^{:async true :seon.fn/agent-facing? true} complete
   "Complete the current run atomically with its result and optional message."
   {:malli/schema
@@ -254,14 +263,8 @@
     [:=> [:catn [::result :string]] ::lifecycle-result]
     [:=> [:catn [::result :string] [::result-ref :seon.db/ref]]
      ::lifecycle-result]]}
-  ([result] (await (complete result nil)))
-  ([result result-ref]
-   (let [first-result (await (complete-once result result-ref))
-         final-result
-         (if (stale-database-error? first-result)
-           (await (complete-once result result-ref))
-           first-result)]
-     (if (error-value? final-result) final-result :idle))))
+  ([result] (await (complete* result nil)))
+  ([result result-ref] (await (complete* result result-ref))))
 
 (defn ^{:async true :seon.fn/agent-facing? true} pause
   "Pause the current run of a managed agent."
