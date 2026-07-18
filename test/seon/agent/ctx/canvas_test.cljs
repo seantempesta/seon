@@ -85,7 +85,7 @@
                 (tree-seq coll? seq (::protocol/query-form candidate)))))
     (testing "all watched attrs share one history query"
       (is (= protocol/query-operation (::protocol/operation history)))
-      (is (true? (::protocol/history? history)))
+      (is (not (contains? history ::protocol/history?)))
       (is (= [agent-id [:seon.agent/purpose]]
              (::protocol/arguments history)))
       (is (some #{'(max ?tx)}
@@ -163,7 +163,10 @@
             (fn [result]
               (is (= "Canvas candidate member failed."
                      (:seon.error/message result)))
-              (is (every? #(identical? database (::db/db %)) @requests))))
+              (is (= [database
+                      (assoc database :history true)
+                      database]
+                     (mapv ::db/db @requests)))))
           (.catch (fn [error]
                     (is false (str "error-path probe threw: " (.-message error)))))
           (.finally (fn []

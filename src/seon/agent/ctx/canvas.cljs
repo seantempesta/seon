@@ -66,7 +66,6 @@
   {::protocol/operation protocol/query-operation
    ::protocol/query-form history-query
    ::protocol/arguments [id (vec attrs)]
-   ::protocol/history? true
    :datahike.resource/max-work 4000000
    :datahike.resource/max-results 65536
    :datahike.resource/max-result-weight 1048576})
@@ -152,7 +151,7 @@
                     history-response
                     (when (seq attrs)
                       (await (db/execute-many
-                               {::db/db database
+                               {::db/db (assoc database :history true)
                                 ::db/members [(history-member id attrs)]
                                 ::db/max-result-weight 1179648})))
                     attr-txs
