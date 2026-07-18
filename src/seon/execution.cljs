@@ -665,11 +665,16 @@
 ;;; Child owner
 
 (defn- exception-value [exception]
-  (let [data (ex-data exception)]
+  (let [data (ex-data exception)
+        wire-data
+        (when (map? data)
+          (into {}
+                (filter (fn [[_ value]]
+                          (db.protocol/ordinary-wire-value? value)))
+                data))]
     (cond-> {:seon.error/message (error/->message exception)
              :seon.error/kind (or (:seon.error/kind data) :agent)}
-      (and (map? data) (db.protocol/ordinary-wire-value? data))
-      (assoc :seon.error/data data))))
+      (seq wire-data) (assoc :seon.error/data wire-data))))
 
 (defn- terminal-message [invocation bounded]
   (if (::ok? bounded)

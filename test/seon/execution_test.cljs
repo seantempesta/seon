@@ -277,6 +277,22 @@
       (is (< 16 (get-in result [::execution/error :seon.error/data
                                 ::execution/result-bytes]))))))
 
+(deftest child-errors-preserve-each-ordinary-ex-data-entry
+  (let [value
+        (@#'execution/exception-value
+         (ex-info "bad call"
+                  {:seon.error/kind :core-bug
+                   :seon.error.malli/fn-sym 'my.example/call
+                   :seon.error.malli/got-edn "{:bad true}"
+                   :seon.error.malli/raw (js-obj "not" "wire data")}))]
+    (is (= {:seon.error/message "bad call"
+            :seon.error/kind :core-bug
+            :seon.error/data
+            {:seon.error/kind :core-bug
+             :seon.error.malli/fn-sym 'my.example/call
+             :seon.error.malli/got-edn "{:bad true}"}}
+           value))))
+
 (deftest authored-program-identity-is-order-independent
   (let [edge-a {:db/id 1
                 :seon.ns.require/target :my.dep
