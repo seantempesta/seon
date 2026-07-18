@@ -157,7 +157,7 @@
    (if-let [message (:seon.error/message page)]
      [:div {:class "text-error"} message]
      [:pre {:class "whitespace-pre-wrap text-xs"}
-      (pr-str (::db/datoms page))])])
+      (pr-str (:datahike.index-page/datoms page))])])
 
 (defn- render-data! [database attribute]
   (-> (db/index-page

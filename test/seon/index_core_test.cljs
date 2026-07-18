@@ -373,6 +373,18 @@
                 rows)
         "namespaced keys carry the owning-ns nested ref; bare kinds don't")))
 
+(deftest agent-entity-declares-its-context-configuration-attributes
+  (let [attributes
+        (into #{}
+              (map first)
+              (drop 2 (schema/schema-definition :seon.agent)))]
+    (is (every? attributes
+                [:seon.agent.ctx/render-namespaces
+                 :seon.agent.ctx/capabilities
+                 :seon.agent.ctx/escape-clipping?
+                 :seon.agent.ctx/cache-breakpoint])
+        "agent context settings are native Datahike attributes at initialization")))
+
 (deftest index-schemas-persists-generator-policy-as-data
   (let [rows      @schemas-tx
         by-key    (into {} (map (juxt :seon.schema/key identity)) rows)

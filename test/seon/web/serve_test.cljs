@@ -9,6 +9,7 @@
   (:require
     [cljs.reader :as reader]
     [cljs.test :refer [async deftest is testing]]
+    [clojure.string :as str]
     [goog.object :as gobj]
     [seon.agent.debug :as agent-debug]
     [seon.agent.run :as run]
@@ -38,19 +39,23 @@
             (fn index-page-stub
               ([value]
                (reset! request value)
-               (js/Promise.resolve {::db/datoms []}))
+               (js/Promise.resolve
+                {:datahike.index-page/datoms
+                 [[1 :seon.agent/id "root" 2 true]]}))
               ([_database _options]
                (js/Promise.reject
                 (js/Error. "database view must use the map request")))))
       (-> (js/Promise.resolve nil)
           (.then (fn [] ((deref #'debug/render-data!) database nil)))
           (.then
-           (fn [_]
+           (fn [element]
              (is (= {::db/db database
                      ::db/index :aevt
                      ::db/direction :forward
                      ::db/limit 50}
-                    @request))))
+                    @request))
+             (is (str/includes? (pr-str element) ":seon.agent/id")
+                 "the view consumes Datahike's index-page datoms field")))
           (.catch (fn [error] (is false (str error))))
           (.finally
            (fn []
