@@ -290,7 +290,10 @@
 
 (defn- active-session []
   (let [state @!session]
-    (when (and (::session state) (uds/connected? (::session state))) state)))
+    (when (and (::session state)
+               (string? (::database-name state))
+               (uds/connected? (::session state)))
+      state)))
 
 (defn- session-result [state]
   {::database-name (::database-name state)

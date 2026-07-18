@@ -241,6 +241,58 @@
                           "\n" (.-stack error)))
            (done))))))
 
+(deftest concurrent-read-waits-for-complete-reconnect
+  (async done
+    (-> (with-recording-authority
+          {}
+          (fn [{::keys [connection-options connect-count connected?]}]
+            (-> (open!)
+                (.then
+                 (fn [_]
+                   (let [authority-request! uds/request!
+                         capability-started (atom nil)
+                         capability-response (atom nil)
+                         reconnecting
+                         (js/Promise.
+                          (fn [resolve _reject]
+                            (reset! capability-started resolve)))]
+                     (set! uds/request!
+                           (fn [{::uds/keys [message] :as request}]
+                             (if (and (= 2 @connect-count)
+                                      (= protocol/capabilities-operation
+                                         (::protocol/operation message)))
+                               (do
+                                 (@capability-started true)
+                                 (js/Promise.
+                                  (fn [resolve _reject]
+                                    (reset! capability-response
+                                            [resolve message]))))
+                               (authority-request! request))))
+                     (let [closed-options @connection-options]
+                       (reset! connected? false)
+                       ((::uds/on-close! closed-options)
+                        (ex-info "physical session closed" {})))
+                     (let [first-read (db/db)]
+                       (-> reconnecting
+                           (.then
+                            (fn [_]
+                              (let [second-read (db/db)
+                                    [resolve message] @capability-response]
+                                (resolve (response-for message {}))
+                                (js/Promise.all #js [first-read second-read]))))
+                           (.then
+                            (fn [values]
+                              (is (= [database database]
+                                     (vec (array-seq values))))
+                              (is (= 2 @connect-count)
+                                  "both reads share one complete reconnect")))))))))))
+        (.then (fn [_] (done)))
+        (.catch
+         (fn [error]
+           (is false (str "concurrent reconnect rejected: " error
+                          "\n" (.-stack error)))
+           (done))))))
+
 (deftest initialization-is-forwarded-only-by-the-opening-host
   (async done
     (-> (with-recording-authority
