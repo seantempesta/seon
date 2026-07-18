@@ -12,8 +12,8 @@ tags: [issue, component, cljs, flow]
 ACME now proves that a third party can build and run a customized source-free
 Seon production package without access to the producer checkout. The remaining
 blocker is completing the public distribution contract around that working
-runtime: clean downstream development MCP, a general downstream descriptor,
-and the complete selected-source/license/notice/SBOM inventory.
+runtime: a general downstream descriptor and the complete selected-source/
+license/notice/SBOM inventory.
 
 ## Evidence
 
@@ -31,6 +31,10 @@ and the complete selected-source/license/notice/SBOM inventory.
 - The production ACME package has rendered custom surfaces and CSS, run ACME
   functions in a real Bun execution child, restarted, read committed results
   back, and remained recursively immutable.
+- SDK revision `245e96f5…` includes the existing MCP launcher and project
+  registrations. Under producer-read denial it built and started a clean
+  development cluster, then returned `:sdk-writer/42` through `eval_clj` and
+  `:sdk-pod/42` through cluster-qualified `eval_cljs` before a clean shutdown.
 - Development artifact manifest version 4 still contains absolute
   client/cache paths and omits release/protocol/SDK/runtime/license
   compatibility data. It now binds the exact six maintained public-Git
@@ -45,9 +49,9 @@ and the complete selected-source/license/notice/SBOM inventory.
   [[shared-bootstrap-output-mutates-running-artifact]].
 - `seon.platform` and `seon.client` read bootstrap, source corpus, and web
   assets from checkout-shaped paths at runtime.
-- The current MCP adapter is still checkout-owned. CLJS eval requires a Shadow
-  nREPL and CLJ eval requires the development writer `io-prepl`, while the
-  production process boundary deliberately ships neither.
+- Development MCP remains intentionally backed by the SDK's Shadow nREPL and
+  writer `io-prepl`. The production process boundary deliberately ships
+  neither.
 - Root `LICENSE` is AGPL-3.0 while `package.json` declares ISC; the complete
   notice/SBOM and selected-source inventory is not yet shipped.
 - Selected ClojureScript is `1.12.145`, but the current

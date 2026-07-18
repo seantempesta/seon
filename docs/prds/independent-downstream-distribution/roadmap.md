@@ -63,10 +63,22 @@ normalizes JAR entry metadata, and replaces Shadow's bootstrap source
 timestamps with the zero value that Shadow's own freshness checks explicitly
 support. It does not normalize or ignore differing executable bytes.
 
-The earliest unsettled distribution contract is now the development-tooling
-and release-metadata remainder: prove cluster-qualified CLJ and CLJS MCP from a
-clean downstream SDK root, publish the complete selected-source/license/
-notice/SBOM inventory, and replace the remaining closed development flavor map
+Clean downstream development tooling now passes too. SDK revision `245e96f5…`
+with complete source digest `0bd8b2e9…` carries the existing MCP launcher plus
+Codex and generic MCP registrations. Under the same producer-read denial, a
+pristine SDK installed 80 frozen packages with patched Bun `d8ecf098…`, built,
+and started its own Shadow watcher, JVM writer, and Bun pod. The shipped MCP
+server discovered cluster `sdk-mcp` and returned `:sdk-writer/42` through
+`eval_clj` plus `:sdk-pod/42` through cluster-qualified `eval_cljs`; normal
+operator shutdown cleanly retired all three processes. The drive also removed
+two hidden clean-root assumptions: source builds now prefer the SDK's pinned
+Bun and install the frozen dependency set, while archived Datahike source uses
+the Git URL/SHA identity emitted by the SDK instead of requiring a `.git`
+directory.
+
+The earliest unsettled distribution contract is now the release-metadata and
+generalization remainder: publish the complete selected-source/license/
+notice/SBOM inventory and replace the remaining closed development flavor map
 with the validated downstream descriptor before final graduation.
 
 The first production-entry boundary is now implemented and directly proven.

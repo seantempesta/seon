@@ -250,10 +250,15 @@ patched Bun binary, and Babashka license with complete digest `cc1ebcdb…`.
 Two pristine SDK extractions, each denied all reads beneath the producer
 checkout by the host sandbox, produced byte-identical complete ACME packages
 with application digest `8d5877b9…` and release-manifest SHA-256 `3db8fe1a…`.
-The next distribution boundary is clean downstream development MCP plus the
-remaining selected-source/license/notice/SBOM inventory and general downstream
-descriptor; production runtime immutability and reproducibility no longer
-block it.
+Clean downstream development MCP is now closed as well. SDK revision
+`245e96f5…`, running under producer-read denial, installed its frozen packages
+with patched Bun, built and started its own watcher/JVM writer/Bun pod, then
+returned `:sdk-writer/42` through `eval_clj` and `:sdk-pod/42` through
+cluster-qualified `eval_cljs`. Normal operator shutdown retired all three
+processes cleanly. The next distribution boundary is the remaining
+selected-source/license/notice/SBOM inventory and general downstream
+descriptor; runtime immutability, reproducibility, clean build, and MCP no
+longer block it.
 
 The existing remote query surface now exposes its protocol-native historical
 view, closing the only facade gap needed by coordinate-pinned startup birth.
