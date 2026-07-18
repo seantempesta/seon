@@ -346,9 +346,12 @@
   ;; this exceptional drain path intentionally lets close-run! acquire head.
   (await (close-loop-run! nil run-id :quiesced state :quiesce)))
 
+(declare drive-run! schedule-recovery-run! schedule-recovery-notice!)
+
 (defn ^:async ^:private recover-retired-child!
-  [agent-id run-id state evidence]
-  (let [recovered
+  [input run-id state evidence]
+  (let [agent-id (:seon.agent/id input)
+        recovered
         (await
          (db/with-tx-context
           {:seon.db/user [:seon.agent/id agent-id]
@@ -365,6 +368,9 @@
     (if (::recovery/repaired? recovered)
       (do
         (log agent-id "halt" "execution child retired → run :crashed")
+        (if (::recovery/automatic-run? recovered)
+          (schedule-recovery-run! input)
+          (schedule-recovery-notice! agent-id recovered))
         (transition state :error))
       (let [latest (await (acquire-loop-state agent-id run-id))
             event (if (database-error? latest)
@@ -473,7 +479,7 @@
                   :available
                   (if errored?
                     (if child-retired?
-                      (recover-retired-child! id run-id state
+                      (recover-retired-child! input run-id state
                                               (:seon.error/data r))
                     ;; §8c — distinguish LOST AUTHORITY (the turn's leading
                     ;; CAS aborted) from a genuine turn error.
@@ -712,6 +718,61 @@
         {:seon.db/user [:seon.agent/id id]
          :seon.db/process [:seon.db.process/id :seon.db.process/repl]}
         f))))
+
+(defn ^:async ^:private open-recovery-run! [input]
+  (let [id (:seon.agent/id input)
+        opened (await (run/open-run! {:seon.agent/id id
+                                      :seon.agent.run/trigger :recovery}))]
+    ;; Reconcile either the recovery run or an external wake that won the
+    ;; absent-pointer CAS. The public driver derives the committed winner.
+    (drive-run! {:seon.agent/id id})
+    opened))
+
+(defn- schedule-recovery-run! [input]
+  (let [id (:seon.agent/id input)]
+    (js/setTimeout
+     (fn []
+       (-> (js/Promise.resolve
+            (with-agent-repl
+             id
+             (fn ^:async recover-run! []
+               (await (open-recovery-run! input)))))
+           (.catch
+            (fn [exception]
+              (js/console.error
+               (str "seon.agent.loop: recovery run failed for " id ": "
+                    (or (.-message exception) exception)))))))
+     0)))
+
+(defn- schedule-recovery-notice! [agent-id recovered]
+  (let [recovery-id (:seon.runtime.recovery/id recovered)
+        diagnostic-blob (::recovery/diagnostic-blob recovered)
+        recipient (if (= "root" agent-id)
+                    message/user-ref
+                    [:seon.agent/id "root"])
+        content
+        (str "Automatic recovery stopped for " agent-id
+             " because its replacement execution child failed before a "
+             "turn completed. Recovery " recovery-id
+             (when diagnostic-blob
+               (str "; evidence blob " (second diagnostic-blob))) ".")]
+    (js/setTimeout
+     (fn []
+       (-> (js/Promise.resolve
+            (with-agent-repl
+             agent-id
+             (fn ^:async notify-root! []
+               (await
+                (message/message!
+                 {:seon.agent.message/content content
+                  :seon.agent.message/from [:seon.agent/id agent-id]
+                  :seon.agent.message/to [recipient]})))))
+           (.catch
+            (fn [exception]
+              (js/console.error
+               (str "seon.agent.loop: recovery notice failed for " agent-id
+                    ": " (or (.-message exception) exception)))))))
+     0)))
 
 (defn- schedule-renew! [id run-id]
   (js/setTimeout

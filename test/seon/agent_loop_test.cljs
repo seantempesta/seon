@@ -4,6 +4,7 @@
     [cljs.test :refer [async deftest is testing]]
     [my.plan.internal :as plan-internal]
     [seon.agent.loop :as loop]
+    [seon.agent.message :as message]
     [seon.agent.run :as run]
     [seon.agent.runtime :as runtime]
     [seon.agent.turn :as turn]
@@ -195,6 +196,8 @@
           beat run/beat!
           run-turn turn/run-turn!
           recover recovery/recover!
+          open-run-fn run/open-run!
+          drive-run loop/drive-run!
           close-run run/close-run!
           database {:db-name "default" :t 9 :as-of nil :since nil
                     :history false
@@ -207,6 +210,8 @@
                     (js/Date. (+ (.now js/Date) 60000))}
           !recovery-request (atom nil)
           !ordinary-close-count (atom 0)
+          !recovery-run-request (atom nil)
+          !drive-count (atom 0)
           _ (set! admission/state
                   (fn [] {::admission/status :available}))
           _ (set! db/db
@@ -236,10 +241,18 @@
                     (reset! !recovery-request request)
                     (js/Promise.resolve
                      {::recovery/repaired? true
+                      ::recovery/automatic-run? true
                       ::recovery/agent-ids ["agent-a"]
                       ::recovery/run-ids ["run-a"]
                       ::recovery/turn-ids ["turn-a"]
                       ::recovery/eval-ids []})))
+          _ (set! run/open-run!
+                  (fn [request]
+                    (reset! !recovery-run-request request)
+                    (js/Promise.resolve
+                     {:seon.agent.run/id "run-recovery"})))
+          _ (set! loop/drive-run!
+                  (fn [_request] (swap! !drive-count inc)))
           _ (set! run/close-run!
                   (fn [_request]
                     (swap! !ordinary-close-count inc)
@@ -256,7 +269,15 @@
                      {:seon.execution.host/pid 444
                       ::execution/child-retired? true}}
                     @!recovery-request))
-             (is (zero? @!ordinary-close-count))))
+             (is (zero? @!ordinary-close-count))
+             (js/Promise.
+              (fn [resolve _] (js/setTimeout resolve 10)))))
+          (.then
+           (fn [_]
+             (is (= {:seon.agent/id "agent-a"
+                     :seon.agent.run/trigger :recovery}
+                    @!recovery-run-request))
+             (is (= 1 @!drive-count))))
           (.catch (fn [error]
                     (is false (str "run-loop! rejected: " error))))
           (.finally
@@ -266,9 +287,42 @@
              (set! run/beat! beat)
              (set! turn/run-turn! run-turn)
              (set! recovery/recover! recover)
+             (set! run/open-run! open-run-fn)
+             (set! loop/drive-run! drive-run)
              (set! run/close-run! close-run)
              (set! admission/state admission-state)
              (done)))))))
+
+(deftest repeated-child-failure-messages-root-with-durable-evidence
+  (async done
+    (let [notify! (deref #'loop/schedule-recovery-notice!)
+          original-message message/message!
+          !request (atom nil)
+          hash (apply str (repeat 64 "b"))]
+      (set! message/message!
+            (fn [request]
+              (reset! !request request)
+              (js/Promise.resolve {:seon.agent.message/id "message-1"
+                                   :seon.agent.message/hops 0})))
+      (notify! "agent-a"
+               {:seon.runtime.recovery/id "recovery-2"
+                ::recovery/diagnostic-blob [:my.blob/hash hash]})
+      (-> (js/Promise. (fn [resolve _] (js/setTimeout resolve 10)))
+          (.then
+           (fn [_]
+             (is (= [:seon.agent/id "agent-a"]
+                    (:seon.agent.message/from @!request)))
+             (is (= [[:seon.agent/id "root"]]
+                    (:seon.agent.message/to @!request)))
+             (is (re-find #"recovery-2"
+                          (:seon.agent.message/content @!request)))
+             (is (re-find (re-pattern hash)
+                          (:seon.agent.message/content @!request)))))
+          (.catch (fn [error]
+                    (is false (str "recovery notice rejected: " error))))
+          (.finally (fn []
+                      (set! message/message! original-message)
+                      (done)))))))
 
 (deftest run-loop-closes-a-bound-from-the-deciding-database-value
   (async done

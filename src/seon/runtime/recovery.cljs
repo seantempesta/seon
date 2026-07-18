@@ -87,6 +87,8 @@
 (schema/register! ::turn-ids [:vector ::db.id/compact-value])
 (schema/register! ::eval-ids [:vector ::db.id/compact-value])
 (schema/register! ::evidence :map)
+(schema/register! ::automatic-run? :boolean)
+(schema/register! ::diagnostic-blob :seon.db/ref)
 (schema/register!
  ::recover-request
  [:or
@@ -107,6 +109,8 @@
     [::run-ids ::run-ids]
     [::turn-ids ::turn-ids]
     [::eval-ids ::eval-ids]
+    [::automatic-run? {:optional true} ::automatic-run?]
+    [::diagnostic-blob {:optional true} ::diagnostic-blob]
     [:seon.runtime.recovery/id
      {:optional true} :seon.runtime.recovery/id]]
    ::db/error])
@@ -287,6 +291,48 @@
       (when (:my.blob/ok? result)
         [:my.blob/hash (:my.blob/hash result)]))))
 
+(declare error-value?)
+
+(def ^:private agent-recovery-transactions-query
+  '[:find [?recovery-transaction ...]
+    :in $ ?agent-id
+    :where
+    [?anchor :seon.runtime.recovery/id _ ?recovery-transaction true]
+    [?agent :seon.agent/run ?run ?recovery-transaction false]
+    [?agent :seon.agent/id ?agent-id _ true]])
+
+(def ^:private completed-turn-after-query
+  '[:find ?turn .
+    :in $ ?agent-id ?recovery-transaction
+    :where
+    [?agent :seon.agent/id ?agent-id _ true]
+    [?run :seon.agent.run/agent ?agent _ true]
+    [?turn :seon.agent.turn/run ?run _ true]
+    [?turn :seon.agent.turn/status :done ?turn-transaction true]
+    [(> ?turn-transaction ?recovery-transaction)]
+    (not [?turn :seon.agent.turn/scheduled? true _ true])])
+
+(defn- ^:async automatic-run-after-recovery?
+  [database agent-id]
+  (if-not agent-id
+    false
+    (let [history (db/history database)
+          transactions
+          (await (db/query {:seon.db/db history
+                            :seon.db/query agent-recovery-transactions-query
+                            :seon.db/args [agent-id]}))]
+      (if (error-value? transactions)
+        transactions
+        (if-let [latest (first (sort > transactions))]
+          (let [completed
+                (await (db/query {:seon.db/db history
+                                  :seon.db/query completed-turn-after-query
+                                  :seon.db/args [agent-id latest]}))]
+            (if (error-value? completed)
+              completed
+              (boolean completed)))
+          true)))))
+
 (defn- compile-recovery
   [{::keys [targets turns evals] ::db/keys [db]}
    recovery-id closed-at detail projection]
@@ -397,7 +443,13 @@
              ::eval-ids []}
 
             :else
-            (let [closed-at (js/Date.)
+            (let [automatic-run?
+                  (await (automatic-run-after-recovery? database agent-id))
+                  _ (when (error-value? automatic-run?)
+                      (throw (ex-info
+                              "Recovery policy acquisition failed."
+                              automatic-run?)))
+                  closed-at (js/Date.)
                   result
                   (await
                    (db.id/allocate!
@@ -434,12 +486,16 @@
                  :seon.error/data {:seon.runtime.recovery/result result}}
 
                 :else
-                {::repaired? true
-                 ::agent-ids (::agent-ids compiled)
-                 ::run-ids (::run-ids compiled)
-                 ::turn-ids (::turn-ids compiled)
-                 ::eval-ids (::eval-ids compiled)
-                 :seon.runtime.recovery/id recovery-id}))))))
+                (cond->
+                 {::repaired? true
+                  ::agent-ids (::agent-ids compiled)
+                  ::run-ids (::run-ids compiled)
+                  ::turn-ids (::turn-ids compiled)
+                  ::eval-ids (::eval-ids compiled)
+                  ::automatic-run? automatic-run?
+                  :seon.runtime.recovery/id recovery-id}
+                  diagnostic-blob
+                  (assoc ::diagnostic-blob diagnostic-blob))))))))
     (catch :default exception
       (let [value (error/->map exception)]
         (cond-> value

@@ -39,6 +39,7 @@
 (defn- with-authority-stubs
   [acquired allocate body]
   (let [original-db db/db
+        original-query db/query
         original-execute-many db/execute-many
         original-allocate db.id/allocate!]
     (set! db/db
@@ -47,11 +48,13 @@
             ([_] (js/Promise.reject
                   (js/Error. "unexpected named database selection")))))
     (set! db/execute-many (fn [_] (js/Promise.resolve acquired)))
+    (set! db/query (fn [_] (js/Promise.resolve [])))
     (set! db.id/allocate! allocate)
     (-> (js/Promise.resolve (body))
         (.finally
          (fn []
            (set! db/db original-db)
+           (set! db/query original-query)
            (set! db/execute-many original-execute-many)
            (set! db.id/allocate! original-allocate))))))
 
@@ -131,6 +134,7 @@
                       (mapv ::protocol/arguments members)))
                (is (= ["alpha"] (::recovery/agent-ids result)))
                (is (= ["n12345678901"] (::recovery/run-ids result)))
+               (is (true? (::recovery/automatic-run? result)))
                (is (= 812 (:seon.runtime.recovery/pid anchor)))
                (is (= 4096 (:seon.runtime.recovery/rss-bytes anchor)))
                (is (= 1000
@@ -144,6 +148,29 @@
           (.catch (fn [error] (is false (str "threw — " error))))
           (.finally (fn []
                       (set! blob/put! original-put)
+                      (done)))))))
+
+(deftest automatic-run-policy-requires-a-completed-turn-after-prior-recovery
+  (async done
+    (let [policy (deref #'recovery/automatic-run-after-recovery?)
+          original-query db/query
+          completed? (atom false)]
+      (set! db/query
+            (fn [request]
+              (js/Promise.resolve
+               (if (= 1 (count (:seon.db/args request)))
+                 [70]
+                 (when @completed? 900)))))
+      (-> (policy database "alpha")
+          (.then (fn [automatic?]
+                   (is (false? automatic?))
+                   (reset! completed? true)
+                   (policy database "alpha")))
+          (.then (fn [automatic?]
+                   (is (true? automatic?))))
+          (.catch (fn [error] (is false (str "policy threw — " error))))
+          (.finally (fn []
+                      (set! db/query original-query)
                       (done)))))))
 
 (deftest incomplete-runs-turns-and-evals-compile-one-fenced-transaction

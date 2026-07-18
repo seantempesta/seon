@@ -53,7 +53,8 @@
    ::db.id/compact-value]) ; the FENCING TOKEN
 (schema/register! :seon.agent.run/agent      :seon.db/ref)   ; back-ref → agent
 (schema/register! :seon.agent.run/started-at :inst)          ; the wake time
-(schema/register! :seon.agent.run/trigger    [:enum :message :schedule])
+(schema/register! :seon.agent.run/trigger
+                  [:enum :message :schedule :recovery])
 (schema/register! :seon.agent.run/cause      :seon.db/ref)   ; → the waking message (when :message)
 (schema/register! :seon.agent.run/turn-limit :int)           ; WORK-QUANTITY bound (bumpable)
 (schema/register! :seon.agent.run/deadline   :inst)          ; WALL-CLOCK bound (absolute)
