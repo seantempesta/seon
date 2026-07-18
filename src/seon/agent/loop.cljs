@@ -121,6 +121,12 @@
 
 (defonce ^:private !loop-input (atom {}))
 
+;; Wake delivery, committed-work replay, and hot-reload reconciliation may all
+;; discover the same open run. They share its one local driver; Datahike's CAS
+;; prevents duplicate runs, while this prevents duplicate turns within the
+;; winning run.
+(defonce ^:private !run-loop-promises (atom {}))
+
 ;; ============================================================
 ;; The loop — a fold of [[transition]] over run-derived events. Each
 ;; iteration re-reads the run; :turn-ok runs a turn, the bounds close the
@@ -507,6 +513,30 @@
           (do (log id "halt" (str "function — " (name event)))
               (transition state event))))))))
 
+(defn- drive-run-loop!
+  "Share one active run loop per agent, including replay and hot reload."
+  [input run-id]
+  (let [id (:seon.agent/id input)]
+    (if-let [{active-run-id ::run-id active-promise ::promise}
+             (get @!run-loop-promises id)]
+      (if (= run-id active-run-id)
+        active-promise
+        (.then active-promise (fn [] (drive-run-loop! input run-id))))
+      (let [promise (js/Promise.resolve (run-loop! input run-id))]
+        (swap! !run-loop-promises assoc id
+               {::run-id run-id ::promise promise})
+        (do
+          (.finally
+           promise
+           (fn []
+             (swap! !run-loop-promises
+                    (fn [active]
+                      (if (identical? promise
+                                      (get-in active [id ::promise]))
+                        (dissoc active id)
+                        active)))))
+          promise)))))
+
 (defn ^:async ^:private renew-current-run!
   "Renew the agent's CURRENT open run's lease — the new message extends both
    bounds (the sliding window). Shared by the :running wake branch and the
@@ -680,7 +710,7 @@
            :seon.agent.run/trigger :message
            :seon.agent.run/cause cause-eid}))]
     (if-not (database-error? opened)
-      (await (run-loop! input (:seon.agent.run/id opened)))
+      (await (drive-run-loop! input (:seon.agent.run/id opened)))
       (let [latest (await (acquire-agent-state id))]
         (if (database-error? latest)
           (js/console.error
@@ -831,7 +861,7 @@
                          id ": " (pr-str work)))
 
                    (= :running (::state work))
-                   (await (run-loop! input (::current-run-id work)))
+                   (await (drive-run-loop! input (::current-run-id work)))
 
                    (and (= :idle (::state work))
                         (::pending-inbound-eid work))

@@ -89,7 +89,7 @@
                (js/Promise.resolve
                 {:seon.agent.turn/id "turn-1"
                  :seon.agent.turn/status :done
-                 :seon.agent.turn/rendered-tx 40}))
+                 :seon.agent.turn/rendered-tx {:db/id 40}}))
               ([_selector _eid] (js/Promise.resolve nil))
               ([_database _selector _eid] (js/Promise.resolve nil))))
       (-> (debug/turn {:seon.agent.turn/id "turn-1"

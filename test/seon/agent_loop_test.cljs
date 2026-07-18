@@ -332,6 +332,31 @@
     (is (some #(and (seq? %) (= 'not-join (first %))) where)
         "a run close at or after the message transaction covers that message")))
 
+(deftest wake-and-replay-share-one-run-loop
+  (async done
+    (let [run-loop! loop/run-loop!
+          calls (atom 0)
+          finish (atom nil)]
+      (set! loop/run-loop!
+            (fn [_input _run-id]
+              (swap! calls inc)
+              (js/Promise. (fn [resolve _reject] (reset! finish resolve)))))
+      (let [drive @#'loop/drive-run-loop!
+            input {:seon.agent/id "agent-a"}
+            first-drive (drive input "run-a")
+            second-drive (drive input "run-a")]
+        (is (identical? first-drive second-drive))
+        (is (= 1 @calls))
+        (@finish :idle)
+        (-> (js/Promise.all #js [first-drive second-drive])
+            (.then (fn [] (is (= 1 @calls))))
+            (.catch (fn [error]
+                      (is false (str "shared run loop rejected: " error))))
+            (.finally
+             (fn []
+               (set! loop/run-loop! run-loop!)
+               (done))))))))
+
 (deftest drive-run-opens-committed-message-before-host-and-drives-it
   (async done
     (let [id "committed-child"

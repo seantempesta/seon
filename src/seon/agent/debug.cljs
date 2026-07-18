@@ -193,7 +193,7 @@
   [{turn-id :seon.agent.turn/id database :seon.db/db}]
   (let [database (or database (await (db/db)))]
     (if-let [eid (await (turn-eid database turn-id))]
-      (let [t (await (db/pull {:seon.db/db database
+      (let [pulled (await (db/pull {:seon.db/db database
                       :seon.db/pull-pattern
                       [:seon.agent.turn/id :seon.agent.turn/at
                        :seon.agent.turn/status
@@ -202,6 +202,8 @@
                        {:seon.agent.turn/prompt-blob [:my.blob/hash]}
                        {:seon.agent.turn/reply-blob  [:my.blob/hash]}]
                       :seon.db/ref eid}))
+          t (update pulled :seon.agent.turn/rendered-tx
+                    #(if (map? %) (:db/id %) %))
           p (blob-text t :seon.agent.turn/prompt-blob ::prompt ::prompt-tokens)
           r (blob-text t :seon.agent.turn/reply-blob  ::reply  ::reply-tokens)
           errs (vec (keep ::error [p r]))]

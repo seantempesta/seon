@@ -162,11 +162,16 @@
                      (get-in (first @requests)
                              [::db/members 0
                               :datahike.resource/max-results])))
+              (is (= 64
+                     (get-in (first @requests)
+                             [::db/members 1
+                              :datahike.resource/max-results]))
+                  "the scalar barrier query has retained-node headroom")
               (is (every? #(= database (::db/db %))
                           (::db/members (first @requests))))
               (is (= database (::db/db (second @requests)))
                   "the dependent hop query stays on the acquired value")
-              (is (= 1 (::db/max-results (second @requests))))))
+              (is (= 64 (::db/max-results (second @requests))))))
            (.finally
             (fn []
               (set! db/execute-many execute-many)

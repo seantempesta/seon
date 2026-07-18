@@ -338,13 +338,13 @@
 
 (defn canonical-program
   "Canonicalize unordered database rows before source identity hashing."
-  {:malli/schema [:=> [:cat [:sequential :any]
-                       [:sequential :any]
-                       [:sequential :any]
-                       [:sequential :any]
-                       [:sequential :any]
-                       [:sequential :any]
-                       [:sequential :any]] :map]}
+  {:malli/schema [:=> [:cat [:coll :any]
+                       [:coll :any]
+                       [:coll :any]
+                       [:coll :any]
+                       [:coll :any]
+                       [:coll :any]
+                       [:coll :any]] :map]}
   [namespace-source-rows require-edge-rows home-rows function-rows test-rows
    schema-rows contract-rows]
   (let [by-name

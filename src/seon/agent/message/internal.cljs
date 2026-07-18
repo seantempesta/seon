@@ -114,7 +114,7 @@
                [?message :seon.agent.message/from ?user]
                [?user :seon.user/id _]
                [?message :seon.agent.message/at ?at]]
-             [] 1)]
+             [] 64)]
            ::db/max-result-weight 131072}))]
     (if-not (and (= 2 (count (::db/results initial)))
                  (every? #(true? (::protocol/success? %))
@@ -172,7 +172,7 @@
                      [(> ?at ?barrier)]
                      [(get-else $ ?message :seon.agent.message/hops 0) ?h]]
                    ::db/args [sender-eid (vec peer-eids) barrier]
-                   ::db/max-results 1
+                   ::db/max-results 64
                    ::db/max-result-weight 65536}))]
             (if (and (map? hops) (:seon.error/message hops))
               (failure "Message hop query failed." hops)

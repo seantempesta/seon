@@ -304,7 +304,7 @@
         row-a ["my.render/view" "(defn view [_] :ok)" :my.render]
         row-b ["my.render/helper" "(defn helper [] 1)" :my.render]
         first-value (execution/canonical-program
-                     namespace-rows edge-rows [] [row-a row-b] []
+                     (set namespace-rows) edge-rows [] [row-a row-b] []
                      [[:z/schema ":string"] [:a/schema ":int"]]
                      [["my.render/view" "[:=> [:cat :map] :any]"]])
         second-value (execution/canonical-program
