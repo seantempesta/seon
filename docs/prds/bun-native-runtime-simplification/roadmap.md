@@ -121,6 +121,23 @@ are falsified as dominant owners. The pod cost is primarily the retained
 compiled ClojureScript/JSC object graph; the execution artifact additionally
 loads self-host bootstrap analyzer state.
 
+The isolated evaluator audit at
+[[research/cljs-evaluator-footprint-audit-2026-07-18]] now reproduces that child
+cost outside Seon. Official self-hosted ClojureScript with Seon's bootstrap
+caches uses 205–206 MB private physical memory, within 14 MB of the measured
+Seon child. SCI 0.15.56 at release commit
+`9e9c78f4f358ede939b94352ff4edc03b0186c7a` uses 112–114 MB for the simple
+parity workload and 117 MB for persistent namespaces, host calls, schema
+registration, protocols, records, metadata discovery, and async evaluation.
+The high-impact candidate is therefore one SCI context per execution child,
+with an expected saving around 90 MB private memory. Build-time indexing can
+publish compiled program facts, but mutable agent-authored definitions still
+need one runtime evaluator. The next gate is a bounded public-envelope and
+database-row parity corpus covering namespaces, functions, schemas, tests,
+errors, instrumentation, and host calls. If it passes, replace `cljs.js` and
+its bootstrap/analyzer adapters in one cut; do not retain a hybrid evaluator or
+fork the official compiler.
+
 The same audit found an interrupted `bun out/test/test.js` orphan that had
 survived for over an hour: 3.61 GB RSS, 690 MB current private physical, and
 2.7 GB peak private physical. The test runner now owns explicit Bun/output PIDs
