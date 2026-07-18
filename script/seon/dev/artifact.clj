@@ -649,7 +649,8 @@
              [(str (fs/path (:seon.dev.config/root config)
                             "bin/fix-bootstrap-macros"))])
   (run-step! config "build web CSS"
-             [(:seon.dev.artifact/bun-executable bun) "run" "css:build"]))
+             [(:seon.dev.artifact/bun-executable bun)
+              "run" "--bun" "css:build"]))
 
 (defn- build-lock-configuration [config]
   ;; Default and downstream targets intentionally own different lifecycle

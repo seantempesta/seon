@@ -37,7 +37,8 @@
                   artifact/run-step!
                   (fn [_ label argv] (swap! commands conj [label argv]))]
       (#'artifact/build-source! config bun))
-    (is (= ["build web CSS" ["/selected/bun" "run" "css:build"]]
+    (is (= ["build web CSS"
+            ["/selected/bun" "run" "--bun" "css:build"]]
            (last @commands)))))
 
 (deftest application-digest-includes-every-bun-identity-field
