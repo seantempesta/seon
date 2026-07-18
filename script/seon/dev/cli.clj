@@ -6,6 +6,7 @@
             [clojure.string :as str]
             [seon.dev.artifact :as artifact]
             [seon.dev.branch :as branch]
+            [seon.dev.cluster :as cluster]
             [seon.dev.config :as config]
             [seon.dev.changed-test :as changed-test]
             [seon.dev.process :as process]
@@ -919,8 +920,72 @@
     "reset" (reset-cluster! configuration (rest arguments))
     "restore" (restore-cluster! configuration (rest arguments))
     "undo" (undo-cluster! configuration (rest arguments))
-    (throw (ex-info "Choose `cluster reset <name>`, `cluster restore <retained-branch>`, or `cluster undo <completion-id>`."
-                    {:seon.dev.cli/arguments (vec arguments)}))))
+    (let [[operation cluster-name & options] arguments
+          edn? (= ["--edn"] (vec options))]
+      (when (str/blank? cluster-name)
+        (throw
+         (ex-info
+          "Use `cluster open|restart|close|status <name>`."
+          {:seon.dev.cli/arguments (vec arguments)})))
+      (when (and (seq options) (or (not= "status" operation) (not edn?)))
+        (throw
+         (ex-info "Only `cluster status` accepts `--edn`."
+                  {:seon.dev.cli/arguments (vec arguments)})))
+      (let [request (cluster/request
+                     {::cluster/configuration configuration
+                      ::cluster/name cluster-name})]
+        (case operation
+          "open"
+          (let [status
+                (state/with-lock
+                 configuration :stack 1800000
+                 #(do
+                    (require-no-retained-restore! configuration :cluster-open)
+                    (cluster/open! request)))]
+            (println (str "● cluster " cluster-name " ready"))
+            (println (str "  database: "
+                          (:seon.dev.target/database-path status)))
+            (when-let [url (:seon.dev.target/url status)]
+              (println (str "  web: " url))))
+
+          "restart"
+          (let [status
+                (state/with-lock
+                 configuration :stack 1800000
+                 #(do
+                    (require-no-retained-restore! configuration
+                                                  :cluster-restart)
+                    (cluster/restart! request)))]
+            (println (str "● cluster " cluster-name " restarted"))
+            (when-let [url (:seon.dev.target/url status)]
+              (println (str "  web: " url))))
+
+          "close"
+          (let [result
+                (state/with-lock
+                 configuration :stack 1800000
+                 #(do
+                    (require-no-retained-restore! configuration :cluster-close)
+                    (cluster/close! request)))]
+            (println (str "● cluster " cluster-name " closed"))
+            (print-stop-evidence! "  " result))
+
+          "status"
+          (let [status (cluster/status request)]
+            (if edn?
+              (prn status)
+              (do
+                (println (str "● cluster " cluster-name " "
+                              (name (:seon.dev.target/status status))))
+                (println (str "  database: "
+                              (:seon.dev.target/database-path status)))
+                (when-let [url (:seon.dev.target/url status)]
+                  (println (str "  web: " url))))))
+
+          (throw
+           (ex-info
+            "Choose `cluster open`, `cluster restart`, `cluster close`, `cluster status`, `cluster reset`, `cluster restore`, or `cluster undo`."
+            {:seon.dev.cli/arguments (vec arguments)})))))))
 
 (defn- pod-test-arguments [arguments]
   (mapv #(if (str/starts-with? % "--") % (str "--test=" %)) arguments))
@@ -1002,6 +1067,7 @@
          "  test changed --path PATH...  run affected tests from the warm graph\n"
          "  test pod|database|operator|all [selector]\n"
          "  skills sync|check        generate or verify tool-facing skill adapters\n"
+         "  cluster open|restart|close|status NAME [--edn]\n"
          "  cluster reset <name>     drain and reset one named database\n"
          "  cluster restore <branch> restore one exact retained branch head\n"
          "  cluster undo <completion-id> restore its exact retained undo head\n"

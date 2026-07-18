@@ -6,6 +6,7 @@
             [seon.dev.artifact :as artifact]
             [seon.dev.branch :as branch]
             [seon.dev.cli :as cli]
+            [seon.dev.cluster :as cluster]
             [seon.dev.process :as process]
             [seon.dev.restore :as restore]
             [seon.dev.restore-state :as restore-state]
@@ -1083,3 +1084,40 @@
          #'branch/open! (fn [_] (reset! called? true))}
         #(#'cli/branch! configuration ["open" "proof"]))))
     (is (false? @called?))))
+
+(deftest shared-writer-cluster-commands-stop-and-start-only-the-selected-pod
+  (let [configuration {:cluster :default}
+        request {::cluster/name "experiment"}
+        ready {:seon.dev.target/status :seon.dev.target.status/ready
+               :seon.dev.target/database-path "/experiment/db"
+               :seon.dev.target/url "http://127.0.0.1:4567"}
+        calls (atom [])]
+    (with-redefs-fn
+      {#'cluster/request (fn [_] request)
+       #'state/with-lock (fn [selected owner timeout transition]
+                           (swap! calls conj [:lock selected owner timeout])
+                           (transition))
+       #'cli/require-no-retained-restore! (fn [_ operation]
+                                           (swap! calls conj operation))
+       #'cluster/open! (fn [selected]
+                         (swap! calls conj [:open selected])
+                         ready)
+       #'cluster/restart! (fn [selected]
+                            (swap! calls conj [:restart selected])
+                            ready)
+       #'cluster/close! (fn [selected]
+                          (swap! calls conj [:close selected])
+                          (stop-result :seon.dev.process.operation/down
+                                       #{process/pod-id}))}
+      (fn []
+        (with-out-str (#'cli/cluster! configuration ["open" "experiment"]))
+        (with-out-str (#'cli/cluster! configuration
+                                      ["restart" "experiment"]))
+        (with-out-str (#'cli/cluster! configuration ["close" "experiment"]))))
+    (is (= [[:lock configuration :stack 1800000]
+            :cluster-open [:open request]
+            [:lock configuration :stack 1800000]
+            :cluster-restart [:restart request]
+            [:lock configuration :stack 1800000]
+            :cluster-close [:close request]]
+           @calls))))
