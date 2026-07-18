@@ -335,26 +335,30 @@
   '[:find ?e (pull ?e [*])
     :in $ [?identity-attr ...]
     :where
-    [?e ?identity-attr _]])
+    [?attribute :db/ident ?identity-attr]
+    [?e ?attribute _]])
 
 (def ^:private reconcile-lookup-ref-query
   '[:find ?e (pull ?e [*])
     :in $ [[?identity-attr ?identity-value] ...]
     :where
-    [?e ?identity-attr ?identity-value]])
+    [?attribute :db/ident ?identity-attr]
+    [?e ?attribute ?identity-value]])
 
 (def ^:private reconcile-provenance-query
   '[:find ?e ?tx
     :in $ [?identity-attr ...]
     :where
-    [?e ?identity-attr _]
+    [?attribute :db/ident ?identity-attr]
+    [?e ?attribute _]
     [?e _ _ ?tx]])
 
 (def ^:private reconcile-transaction-process-query
   '[:find ?tx ?process-id
     :in $ [?identity-attr ...]
     :where
-    [?e ?identity-attr _]
+    [?attribute :db/ident ?identity-attr]
+    [?e ?attribute _]
     [?e _ _ ?tx]
     [?tx :seon.db/process ?process]
     [?process :seon.db.process/id ?process-id]])
