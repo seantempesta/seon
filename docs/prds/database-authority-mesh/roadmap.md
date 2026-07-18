@@ -3344,3 +3344,40 @@ The current browser connector remains unavailable, so server-side feed proof
 does not claim console, focus, morph, or interaction graduation. Once that
 boundary is green, measure startup, database calls and query reuse, render/feed
 work, event-loop delay, CPU, heap, and RSS before the Bun-native HTTP/SSE cut.
+
+### 2026-07-18 public agent and recovery checkpoint
+
+Public model execution is working through the complete database boundary.
+Commits `55ed8573` and `7a9b85d8` prevent consumers from observing a partially
+reconnected session and redrive committed message work after listener
+resynchronization. Commit `f5a80985` raises the finite query result-node budget
+to 16,384 after six measured authored-program queries retained 270, 4,919, 984,
+0, 1,831, and 759 result nodes; the 3 MiB result-weight bound remains unchanged.
+Commit `3543c8b8` makes `/agents/run` wait for its request-owned turns to reach
+`:done`, `:error`, or `:interrupted`, rather than returning at an earlier idle
+transition.
+
+The final model evidence defect was a Datahike pull-shape mismatch, not temporal
+cache drift. `:seon.agent.turn/rendered-tx` is a ref, so `pull-many` returns
+`{:db/id <basis transaction>}`. The response path passed that map to
+`seon.db/as-of` as though it were the basis transaction integer. Commit
+`177eb7bf` extracts the ref's `:db/id`; commit `db82d43a` also preserves real
+historical database errors instead of misclassifying them as malformed model
+evidence. A fresh public agent then completed in one turn and two evals in
+10.97 seconds with the exact reply, `:completed` closure, inline provider
+evidence, and `historical_config_valid: true`. The complete ClojureScript gate
+passes 1,105 tests and 4,901 assertions.
+
+A malformed watched edit also reproduced the open atomic-generation issue: the
+first corrected build completed but committed nil publication and required a
+supervisor restart. The evidence is retained in
+`docs/seon/issues/hot-reload-schema-import-can-partially-fail.md`; it remains a
+resilience gate, not a reason to weaken source validation.
+
+The earliest unsettled contract is the real browser journey and controlled
+failure injection under concurrent public agent work. Browser tooling remains
+unavailable, so the next dependency-ready work is server-side agent/load and
+writer/session failure injection, followed by the honest startup, database-hop,
+query-reuse, render/feed, event-loop, CPU, heap, and RSS baseline. Bun-native
+HTTP/SSE and packaging remain the final transport cut after those behavioral
+and resource measurements.

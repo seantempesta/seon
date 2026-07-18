@@ -49,6 +49,14 @@ watcher, writer, and pod; the identical request then completed normally. Keep
 the crash policy: the missing mechanism is atomic generation admission and
 readiness invalidation, not error suppression.
 
+The default cluster reproduced the recovery half on 2026-07-18 without a
+schema change. A transient unmatched-delimiter build correctly closed runtime
+publication. The immediately following valid client and test builds completed,
+but the pod logged `reload: committed publication nil` and both watcher and pod
+remained not ready until `bin/seon restart`. Later valid-only reloads committed
+publication and rehosted runtimes normally. The first complete generation after
+a rejected generation must recover without another edit or process restart.
+
 ## Owner
 
 The one core program/schema publication generation and
