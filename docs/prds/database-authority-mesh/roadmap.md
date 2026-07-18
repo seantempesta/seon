@@ -3453,3 +3453,14 @@ real-process recovery proof must therefore launch the ordinary initialized
 package and place the response-dropping cut around that session. Existing
 focused tests continue to prove exact frozen-request redelivery, durable
 receipt recovery, reconnect coalescing, and listener restoration separately.
+
+Finite HTTP shims are not the current web bottleneck: five warm samples were
+0.47–1.41 ms for root, 0.40–0.84 ms for data, and 2.04–2.79 ms for root debug.
+The first decoded gzip feed output differed materially. Data began in 15.9 ms,
+root debug in 387.5 ms, and the first root sample in 1.59 seconds. Three
+immediately repeated root feeds began in 107.5–125.4 ms with the same 5,994
+compressed bytes and 94,618 decoded bytes. This shows substantial cold reuse
+but leaves roughly 0.1 second of warm root feed work. The next implementation
+boundary is bounded phase and rerender evidence inside the one existing
+Datastar feed registry, separating render, serialization, gzip/write,
+backpressure, and fanout before changing the renderer or `Bun.serve` transport.
