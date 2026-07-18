@@ -3524,3 +3524,29 @@ database initializer. After that, concurrent failure/load and startup/resource
 growth measurements are dependency-ready. The final admission gate remains
 the complete maintained tests plus recovery, browser/agent, multi-cluster,
 load/resource, and Bun-native transport evidence.
+
+The accepted-response-loss boundary is now proven against the live initialized
+default database without a test-only initializer. A process-local probe let one
+ordinary `seon.db/transact!` request reach the real JVM writer, discarded its
+successful response, returned the transport's closed-delivery failure, and let
+the existing client resend the exact frozen request. The returned transaction
+report carried `:seon.db.id/recovered-commit? true`; the database advanced to
+basis transaction `536873664` and contained exactly one matching marker fact.
+This composes with the earlier live writer-replacement proof, where the retained
+pod reopened its session, restored listeners, and completed public work, plus
+the maintained receipt, reconnect-coalescing, and listener-restoration tests.
+No second schema, seed, database initializer, or retry owner was added.
+
+The live writer and pod remain ready and continue serving requests. Overall
+operator status currently reports `degraded` only because the watcher record's
+artifact digest predates the subsequently hot-reloaded source; its log shows
+successful warning-free client and test builds and committed publication. A
+coordinated rebuild is required before using this runtime as a source-frozen
+checkpoint, but it must not run while the shared checkout contains another
+owner's uncommitted build input.
+
+The ordered spine now moves to source-frozen restart/startup and concurrent
+failure/load measurement, followed by memory growth and the measured
+`Bun.serve` transport cut. The retained render investigation can proceed only
+where it simplifies the measured debug or root owner; it does not displace
+those graduation gates.
