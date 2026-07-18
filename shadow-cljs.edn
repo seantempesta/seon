@@ -58,6 +58,8 @@
   {:target           :node-script
    :output-to        "out/client/main.js"
    :main             seon.client/-main
+   :build-hooks      [[seon.dev.program-artifact/publish!
+                       "out/client/program-sources.edn"]]
    ;; Normal pods ship runtime code, not the platform test graph. Agent-authored
    ;; tests still run through seon.test.runner once their vars are defined.
    :devtools         {:enabled      true
@@ -89,6 +91,8 @@
   {:target           :node-script
    :output-to        "out-acme/client/main.js"
    :main             seon.client/-main
+   :build-hooks      [[seon.dev.program-artifact/publish!
+                       "out-acme/client/program-sources.edn"]]
    ;; `acme.pod` is listed DIRECTLY in :preloads (not only via bin/acme's
    ;; --config-merge) so acme's registration ALWAYS runs at boot — no
    ;; doubt about whether deep-merge concats vs replaces the preload
