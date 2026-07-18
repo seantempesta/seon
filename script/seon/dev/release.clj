@@ -439,7 +439,7 @@
     identity))
 
 (defn- production-package-json! [source target]
-  (let [value (json/parse-string (slurp source) true)
+  (let [value (json/parse-string (slurp (str source)) true)
         release-value (-> value
                           (assoc :license "AGPL-3.0-only")
                           (dissoc :devDependencies :scripts :directories
