@@ -170,6 +170,13 @@ reload was isolated as an independent Datastar invalidation issue; it does not
 change the now-green cold/restart grown-database boundary. Exact 1/2/4-child
 resource measurement is next.
 
+The complete maintained checkpoint on that exact source is green:
+ClojureScript passes 1,135 tests/5,047 assertions, the JVM writer passes 219
+tests/1,821 assertions, and the operator passes 271 tests/1,532 assertions,
+all with zero failures or errors. The current artifact therefore enters
+resource measurement with both the real grown feed and every maintained code
+gate proven.
+
 The existing remote query surface now exposes its protocol-native historical
 view, closing the only facade gap needed by coordinate-pinned startup birth.
 LLM configuration and brand startup sync also use bounded coordinate-fenced
