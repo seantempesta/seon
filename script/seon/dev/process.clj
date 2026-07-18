@@ -911,8 +911,11 @@
                  (id-name id) (str generation))
         descriptor-path (str (fs/path containment-dir "descriptor.json"))
         control-socket
-        (str (fs/path (:seon.dev.config/root config) "tmp" "seon-containment"
-                      (str generation ".sock")))
+        (str (fs/path
+              (or (:seon.dev.config/containment-socket-dir config)
+                  (fs/path (:seon.dev.config/root config)
+                           "tmp" "seon-containment"))
+              (str generation ".sock")))
         result-path (str (fs/path containment-dir "result.json"))
         application-result-path
         (or application-result-path
@@ -923,8 +926,9 @@
                        "SEON_PROCESS_GENERATION" (str generation))
           application-result-path
           (assoc "SEON_APPLICATION_RESULT_PATH" application-result-path))
-        helper (str (fs/path (:seon.dev.config/root config)
-                             "script/seon/dev/detach.py"))
+        helper (or (:seon.dev.config/detach-helper config)
+                   (str (fs/path (:seon.dev.config/root config)
+                                 "script/seon/dev/detach.py")))
         _ (do (fs/create-dirs containment-dir)
               (fs/create-dirs (fs/parent control-socket)))
         argv (into ["python3" helper (if gated? "launch-gated" "launch")

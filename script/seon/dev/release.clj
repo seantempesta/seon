@@ -53,6 +53,7 @@
    :seon.release.member/program-source "runtime/program-sources.edn"
    :seon.release.member/babashka "runtime/bb"
    :seon.release.member/operator "runtime/operator.jar"
+   :seon.release.member/detach-helper "runtime/detach.py"
    :seon.release.member/launcher "bin/seon"
    :seon.release.member/config "config/system.edn"
    :seon.release.member/babashka-license
@@ -88,6 +89,7 @@
    [:seon.dev.release/program-source-member :qualified-keyword]
    [:seon.dev.release/babashka-member :qualified-keyword]
    [:seon.dev.release/operator-member :qualified-keyword]
+   [:seon.dev.release/detach-helper-member :qualified-keyword]
    [:seon.dev.release/launcher-member :qualified-keyword]
    [:seon.dev.release/config-member :qualified-keyword]
    [:seon.dev.release/babashka-license-member :qualified-keyword]])
@@ -108,6 +110,7 @@
    :seon.dev.release/program-source-member
    :seon.dev.release/babashka-member
    :seon.dev.release/operator-member
+   :seon.dev.release/detach-helper-member
    :seon.dev.release/launcher-member
    :seon.dev.release/config-member
    :seon.dev.release/babashka-license-member])
@@ -412,6 +415,8 @@
    :seon.release.member/program-source
    :seon.dev.release/babashka-member :seon.release.member/babashka
    :seon.dev.release/operator-member :seon.release.member/operator
+   :seon.dev.release/detach-helper-member
+   :seon.release.member/detach-helper
    :seon.dev.release/launcher-member :seon.release.member/launcher
    :seon.dev.release/config-member :seon.release.member/config
    :seon.dev.release/babashka-license-member
@@ -434,6 +439,7 @@
            [::babashka :string]
            [::babashka-asset :map]
            [::operator :string]
+           [::detach-helper :string]
            [::launcher :string]
            [::config :string]
            [::babashka-license :string]
@@ -444,6 +450,7 @@
     release-manifest-schema]}
   [{::keys [package-root bun bun-version writer pod execution bootstrap
             public-assets program-source babashka babashka-asset operator
+            detach-helper
             launcher config babashka-license node-modules package-json bun-lock
             license]}]
   (let [root (fs/path package-root)
@@ -462,6 +469,7 @@
     (copy-file! babashka (fs/path runtime "bb"))
     (.setExecutable (io/file (str (fs/path runtime "bb"))) true false)
     (copy-file! operator (fs/path runtime "operator.jar"))
+    (copy-file! detach-helper (fs/path runtime "detach.py"))
     (copy-file! launcher (fs/path root "bin/seon"))
     (.setExecutable (io/file (str (fs/path root "bin/seon"))) true false)
     (copy-file! config (fs/path root "config/system.edn"))
@@ -690,6 +698,7 @@
         ::babashka executable
         ::babashka-asset identity
         ::operator (str operator)
+        ::detach-helper (str (fs/path root "script/seon/dev/detach.py"))
         ::launcher (str launcher)
         ::config (str (fs/path root "config/system.edn"))
         ::babashka-license

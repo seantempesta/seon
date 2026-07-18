@@ -13,6 +13,7 @@
     (spit (str (fs/path root "program-sources.edn")) "{}")
     (spit (str (fs/path root "bb")) "bb")
     (spit (str (fs/path root "operator.jar")) "operator")
+    (spit (str (fs/path root "detach.py")) "detach")
     (spit (str (fs/path root "seon")) "launcher")
     (spit (str (fs/path root "system.edn")) "{}")
     (spit (str (fs/path root "babashka-license.txt")) "EPL")
@@ -28,6 +29,7 @@
    :seon.release.member/program-source "program-sources.edn"
    :seon.release.member/babashka "bb"
    :seon.release.member/operator "operator.jar"
+   :seon.release.member/detach-helper "detach.py"
    :seon.release.member/launcher "seon"
    :seon.release.member/config "system.edn"
    :seon.release.member/babashka-license "babashka-license.txt"})
@@ -53,6 +55,7 @@
    :seon.dev.release/program-source-member :seon.release.member/program-source
    :seon.dev.release/babashka-member :seon.release.member/babashka
    :seon.dev.release/operator-member :seon.release.member/operator
+   :seon.dev.release/detach-helper-member :seon.release.member/detach-helper
    :seon.dev.release/launcher-member :seon.release.member/launcher
    :seon.dev.release/config-member :seon.release.member/config
    :seon.dev.release/babashka-license-member
@@ -190,6 +193,7 @@
                ["execution.js" "execution"]
                ["program-sources.edn" "{}"]
                ["bb" "bb"] ["operator.jar" "operator"]
+               ["detach.py" "detach"]
                ["seon" "launcher"] ["system.edn" "{}"]
                ["babashka-license.txt" "EPL"]
                ["bootstrap/core.js" "bootstrap"]
@@ -219,6 +223,7 @@
                :seon.dev.release/sha-256
                "5bc992f39692b707403fc322e860fc82017da7de4a84a32267abb4d50a0c5f9d"}
               ::release/operator (str (fs/path inputs "operator.jar"))
+              ::release/detach-helper (str (fs/path inputs "detach.py"))
               ::release/launcher (str (fs/path inputs "seon"))
               ::release/config (str (fs/path inputs "system.edn"))
               ::release/babashka-license
@@ -232,6 +237,7 @@
         (is (fs/executable? (fs/path package "runtime/bun")))
         (is (fs/executable? (fs/path package "runtime/bb")))
         (is (fs/executable? (fs/path package "bin/seon")))
+        (is (fs/regular-file? (fs/path package "runtime/detach.py")))
         (is (fs/regular-file? (fs/path package "config/system.edn")))
         (is (fs/regular-file?
              (fs/path package "runtime-root/out/bootstrap/core.js")))

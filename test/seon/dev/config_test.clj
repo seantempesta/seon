@@ -1,5 +1,6 @@
 (ns seon.dev.config-test
   (:require [babashka.fs :as fs]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [seon.dev.config :as config]
             [seon.dev.release :as release]
@@ -14,6 +15,7 @@
    :seon.release.member/program-source "runtime/program-sources.edn"
    :seon.release.member/babashka "runtime/bb"
    :seon.release.member/operator "runtime/operator.jar"
+   :seon.release.member/detach-helper "runtime/detach.py"
    :seon.release.member/launcher "bin/seon"
    :seon.release.member/config "config/system.edn"
    :seon.release.member/babashka-license
@@ -40,6 +42,7 @@
    :seon.dev.release/program-source-member :seon.release.member/program-source
    :seon.dev.release/babashka-member :seon.release.member/babashka
    :seon.dev.release/operator-member :seon.release.member/operator
+   :seon.dev.release/detach-helper-member :seon.release.member/detach-helper
    :seon.dev.release/launcher-member :seon.release.member/launcher
    :seon.dev.release/config-member :seon.release.member/config
    :seon.dev.release/babashka-license-member
@@ -58,6 +61,7 @@
              ["runtime/web/style.css" "css"]
              ["runtime/bb" "bb"]
              ["runtime/operator.jar" "operator"]
+             ["runtime/detach.py" "detach"]
              ["bin/seon" "launcher"]
              ["config/system.edn" "{}"]
              ["THIRD_PARTY_LICENSES/babashka-EPL-1.0.txt" "EPL"]]]
@@ -207,6 +211,12 @@
           (is (= (str (fs/canonicalize
                        (fs/path root "runtime/program-sources.edn")))
                  (:seon.dev.config/program-source configuration)))
+          (is (= (str (fs/canonicalize (fs/path root "runtime/detach.py")))
+                 (:seon.dev.config/detach-helper configuration)))
+          (is (not (str/starts-with?
+                    (:seon.dev.config/process-dir configuration)
+                    (str (fs/canonicalize root))))
+              "mutable package process state stays outside immutable bytes")
           (is (= (str (fs/path root "release.edn"))
                  (:seon.dev.config/artifact-manifest configuration)))))
       (finally (fs/delete-tree root {:force true})))))

@@ -36,6 +36,8 @@
    [:seon.dev.config/bun-executable {:optional true} :string]
    [:seon.dev.config/runtime-assets {:optional true} :string]
    [:seon.dev.config/program-source {:optional true} :string]
+   [:seon.dev.config/detach-helper {:optional true} :string]
+   [:seon.dev.config/containment-socket-dir {:optional true} :string]
    [:seon.dev.config/artifact-manifest :string]
    [:seon.dev.config/launch-descriptor :seon.launch/descriptor]])
 
@@ -345,6 +347,8 @@
        (member-path :seon.dev.release/runtime-assets-member)
        :seon.dev.config/program-source
        (member-path :seon.dev.release/program-source-member)
+       :seon.dev.config/detach-helper
+       (member-path :seon.dev.release/detach-helper-member)
        :seon.dev.config/artifact-manifest manifest-path})))
 
 (defn load!
@@ -366,20 +370,25 @@
         environment (if source-checkout?
                       (shadow-environment environment artifact)
                       environment)
+        state-dir (if source-checkout?
+                    root
+                    (get environment "SEON_STATE_DIR"
+                         (str (fs/path (System/getProperty "user.home") ".seon"))))
         cluster-dir (get environment "SEON_CLUSTER_DIR"
-                         (str (fs/path root "data/clusters/default")))
+                         (str (fs/path state-dir "data/clusters/default")))
         cluster-name (str (fs/file-name cluster-dir))
         proc-dir (get environment "SEON_PROC_DIR"
-                      (str (fs/path root "tmp/seon-operator")))
+                      (str (fs/path state-dir "tmp/seon-operator")))
         log-dir (get environment "SEON_LOG_DIR"
-                     (str (fs/path root "logs/operator")))
+                     (str (fs/path state-dir "logs/operator")))
         req-sock (get environment "SEON_REQ_SOCK"
-                      (str (fs/path root "tmp/seon-cluster-default-req.sock")))
+                      (str (fs/path state-dir "tmp/seon-cluster-default-req.sock")))
         port-file (get environment "SEON_PORT_FILE"
-                       (str (fs/path root "tmp/seon-port")))
+                       (str (fs/path state-dir "tmp/seon-port")))
         writer-port-file
         (get environment "SEON_WRITER_REPL_PORT_FILE"
-             (str (fs/path root (str "tmp/seon-writer-repl-port-" cluster-name))))
+             (str (fs/path state-dir
+                           (str "tmp/seon-writer-repl-port-" cluster-name))))
         environment (assoc environment
                       "SEON_CLUSTER_DIR" cluster-dir
                       "SEON_REQ_SOCK" req-sock
@@ -414,6 +423,8 @@
          :seon.dev.config/environment environment
          :seon.dev.config/process-dir proc-dir
          :seon.dev.config/log-dir log-dir
+         :seon.dev.config/containment-socket-dir
+         (str (fs/path state-dir "tmp/seon-containment"))
          :seon.dev.config/cluster-dir cluster-dir
          :seon.dev.config/cluster-name cluster-name
          :seon.dev.config/request-socket req-sock
