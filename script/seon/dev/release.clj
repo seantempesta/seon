@@ -19,6 +19,31 @@
 
 (def ^:private execution-protocol-version 3)
 
+(def ^:private babashka-version "1.12.218")
+
+(def ^:private babashka-source-revision
+  "0fb349c414e717800be775ba9cb77c95a9eb700d")
+
+(def ^:private babashka-assets
+  {["linux" "aarch64"]
+   {:seon.dev.release/asset
+    "babashka-1.12.218-linux-aarch64-static.tar.gz"
+    :seon.dev.release/sha-256
+    "e9e9190afb0dd33abbcd3aa6c1382184a88a5498800324719be3be6e1aa68302"}
+   ["linux" "amd64"]
+   {:seon.dev.release/asset
+    "babashka-1.12.218-linux-amd64-static.tar.gz"
+    :seon.dev.release/sha-256
+    "7bd028cc794732ffde3da31ce4379840893c8e54f1046f92a8dfc4f4b3cddaf8"}
+   ["macos" "aarch64"]
+   {:seon.dev.release/asset "babashka-1.12.218-macos-aarch64.tar.gz"
+    :seon.dev.release/sha-256
+    "5bc992f39692b707403fc322e860fc82017da7de4a84a32267abb4d50a0c5f9d"}
+   ["macos" "amd64"]
+   {:seon.dev.release/asset "babashka-1.12.218-macos-amd64.tar.gz"
+    :seon.dev.release/sha-256
+    "2b7640a919b79406142b12c488ee83f7ba070c04b82bee8f74ad4eab074ddaeb"}})
+
 (def ^:private package-members
   {:seon.release.member/bun "runtime/bun"
    :seon.release.member/writer "runtime/writer.jar"
@@ -26,6 +51,12 @@
    :seon.release.member/execution "runtime/execution.js"
    :seon.release.member/runtime-assets "runtime-root"
    :seon.release.member/program-source "runtime/program-sources.edn"
+   :seon.release.member/babashka "runtime/bb"
+   :seon.release.member/operator "runtime/operator.jar"
+   :seon.release.member/launcher "bin/seon"
+   :seon.release.member/config "config/system.edn"
+   :seon.release.member/babashka-license
+   "THIRD_PARTY_LICENSES/babashka-EPL-1.0.txt"
    :seon.release.member/node-modules "node_modules"
    :seon.release.member/package-json "package.json"
    :seon.release.member/bun-lock "bun.lock"
@@ -43,6 +74,10 @@
   [:map {:closed true}
    [:seon.dev.release/bun-version :string]
    [:seon.dev.release/bun-revision [:re #"[0-9a-f]{40}"]]
+   [:seon.dev.release/babashka-version :string]
+   [:seon.dev.release/babashka-source-revision [:re #"[0-9a-f]{40}"]]
+   [:seon.dev.release/babashka-asset :string]
+   [:seon.dev.release/babashka-asset-sha-256 sha-256-schema]
    [:seon.dev.release/database-protocol-version :int]
    [:seon.dev.release/execution-protocol-version :int]
    [:seon.dev.release/bun-member :qualified-keyword]
@@ -50,7 +85,12 @@
    [:seon.dev.release/pod-member :qualified-keyword]
    [:seon.dev.release/execution-member :qualified-keyword]
    [:seon.dev.release/runtime-assets-member :qualified-keyword]
-   [:seon.dev.release/program-source-member :qualified-keyword]])
+   [:seon.dev.release/program-source-member :qualified-keyword]
+   [:seon.dev.release/babashka-member :qualified-keyword]
+   [:seon.dev.release/operator-member :qualified-keyword]
+   [:seon.dev.release/launcher-member :qualified-keyword]
+   [:seon.dev.release/config-member :qualified-keyword]
+   [:seon.dev.release/babashka-license-member :qualified-keyword]])
 
 (def release-manifest-schema
   [:map {:closed true}
@@ -65,7 +105,12 @@
    :seon.dev.release/pod-member
    :seon.dev.release/execution-member
    :seon.dev.release/runtime-assets-member
-   :seon.dev.release/program-source-member])
+   :seon.dev.release/program-source-member
+   :seon.dev.release/babashka-member
+   :seon.dev.release/operator-member
+   :seon.dev.release/launcher-member
+   :seon.dev.release/config-member
+   :seon.dev.release/babashka-license-member])
 
 (defn- bytes->hex [bytes]
   (apply str (map #(format "%02x" (bit-and 0xff %)) bytes)))
@@ -346,9 +391,15 @@
     (fs/delete file))
   root)
 
-(defn- runtime-identity [bun-version]
+(defn- runtime-identity [bun-version babashka-asset]
   {:seon.dev.release/bun-version bun-version
    :seon.dev.release/bun-revision patched-bun-revision
+   :seon.dev.release/babashka-version babashka-version
+   :seon.dev.release/babashka-source-revision babashka-source-revision
+   :seon.dev.release/babashka-asset
+   (:seon.dev.release/asset babashka-asset)
+   :seon.dev.release/babashka-asset-sha-256
+   (:seon.dev.release/sha-256 babashka-asset)
    :seon.dev.release/database-protocol-version database-protocol/current-version
    :seon.dev.release/execution-protocol-version execution-protocol-version
    :seon.dev.release/bun-member :seon.release.member/bun
@@ -358,7 +409,13 @@
    :seon.dev.release/runtime-assets-member
    :seon.release.member/runtime-assets
    :seon.dev.release/program-source-member
-   :seon.release.member/program-source})
+   :seon.release.member/program-source
+   :seon.dev.release/babashka-member :seon.release.member/babashka
+   :seon.dev.release/operator-member :seon.release.member/operator
+   :seon.dev.release/launcher-member :seon.release.member/launcher
+   :seon.dev.release/config-member :seon.release.member/config
+   :seon.dev.release/babashka-license-member
+   :seon.release.member/babashka-license})
 
 (defn assemble-package!
   "Assemble and verify one source-free release from built runtime inputs."
@@ -374,13 +431,20 @@
            [::bootstrap :string]
            [::public-assets :string]
            [::program-source :string]
+           [::babashka :string]
+           [::babashka-asset :map]
+           [::operator :string]
+           [::launcher :string]
+           [::config :string]
+           [::babashka-license :string]
            [::node-modules :string]
            [::package-json :string]
            [::bun-lock :string]
            [::license :string]]]
     release-manifest-schema]}
   [{::keys [package-root bun bun-version writer pod execution bootstrap
-            public-assets program-source node-modules package-json bun-lock
+            public-assets program-source babashka babashka-asset operator
+            launcher config babashka-license node-modules package-json bun-lock
             license]}]
   (let [root (fs/path package-root)
         runtime (fs/path root "runtime")
@@ -395,6 +459,14 @@
     (copy-file! pod (fs/path runtime "pod.js"))
     (copy-file! execution (fs/path runtime "execution.js"))
     (copy-file! program-source (fs/path runtime "program-sources.edn"))
+    (copy-file! babashka (fs/path runtime "bb"))
+    (.setExecutable (io/file (str (fs/path runtime "bb"))) true false)
+    (copy-file! operator (fs/path runtime "operator.jar"))
+    (copy-file! launcher (fs/path root "bin/seon"))
+    (.setExecutable (io/file (str (fs/path root "bin/seon"))) true false)
+    (copy-file! config (fs/path root "config/system.edn"))
+    (copy-file! babashka-license
+                (fs/path root "THIRD_PARTY_LICENSES/babashka-EPL-1.0.txt"))
     (copy-directory! bootstrap (fs/path runtime-root "out/bootstrap"))
     (copy-directory! public-assets
                      (fs/path runtime-root "resources/public"))
@@ -407,7 +479,8 @@
     (copy-file! bun-lock (fs/path root "bun.lock"))
     (copy-file! license (fs/path root "LICENSE"))
     (let [manifest (create-manifest (str root) package-members
-                                    (runtime-identity bun-version))
+                                    (runtime-identity bun-version
+                                                      babashka-asset))
           manifest-path (fs/path root "release.edn")]
       (spit (str manifest-path) (str (pr-str manifest) "\n"))
       (read-manifest! (str manifest-path)))))
@@ -447,6 +520,105 @@
     (spit (str target) (str (json/generate-string release-value {:pretty true})
                             "\n"))))
 
+(defn- raw-file-sha-256 [path]
+  (let [digest (MessageDigest/getInstance "SHA-256")]
+    (update-file! digest path)
+    (bytes->hex (.digest digest))))
+
+(defn- host-platform []
+  (let [os-name (str/lower-case (System/getProperty "os.name"))
+        architecture (str/lower-case (System/getProperty "os.arch"))
+        os (cond
+             (str/includes? os-name "mac") "macos"
+             (str/includes? os-name "linux") "linux"
+             :else nil)
+        architecture (cond
+                       (contains? #{"aarch64" "arm64"} architecture)
+                       "aarch64"
+                       (contains? #{"amd64" "x86_64"} architecture)
+                       "amd64"
+                       :else nil)]
+    (or (get babashka-assets [os architecture])
+        (manifest-error
+         "This host has no maintained Babashka release asset."
+         {:seon.dev.release/os os-name
+          :seon.dev.release/architecture
+          (System/getProperty "os.arch")}))))
+
+(defn- download-babashka! [build-root environment]
+  (let [{:seon.dev.release/keys [asset sha-256] :as identity}
+        (host-platform)
+        archive (fs/path build-root asset)
+        extracted (fs/path build-root "babashka")
+        url (str "https://github.com/babashka/babashka/releases/download/v"
+                 babashka-version "/" asset)]
+    (with-open [input (io/input-stream url)
+                output (io/output-stream (str archive))]
+      (io/copy input output))
+    (when-not (= sha-256 (raw-file-sha-256 archive))
+      (manifest-error "The Babashka release asset digest does not match."
+                      {:seon.dev.release/asset asset
+                       :seon.dev.release/required-sha-256 sha-256
+                       :seon.dev.release/actual-sha-256
+                       (raw-file-sha-256 archive)}))
+    (fs/create-dirs extracted)
+    (run! build-root environment "tar" "-xzf" (str archive)
+          "-C" (str extracted))
+    (let [executable (fs/path extracted "bb")
+          result (process/shell {:continue true :out :string :err :string
+                                 :cmd [(str executable) "--version"]})]
+      (when-not (and (zero? (:exit result))
+                     (= (str "babashka v" babashka-version)
+                        (str/trim (:out result))))
+        (manifest-error "The extracted Babashka identity does not match."
+                        {:seon.dev.release/asset asset
+                         :seon.dev.release/reported-version
+                         (str/trim (str (:out result) (:err result)))}))
+      {:seon.dev.release/executable (str executable)
+       :seon.dev.release/identity identity})))
+
+(defn- operator-source? [path]
+  (let [name (str (fs/file-name path))]
+    (and (fs/regular-file? path)
+         (not= "mcp.clj" name)
+         (or (str/ends-with? name ".clj")
+             (str/ends-with? name ".cljc")))))
+
+(defn- stage-operator-source! [root target]
+  (doseq [source-root [(fs/path root "script") (fs/path root "src")]
+          source (file-seq (io/file (str source-root)))
+          :when (operator-source? source)]
+    (let [relative (.relativize (.toPath (io/file (str source-root)))
+                                (.toPath (io/file (str source))))]
+      (copy-file! source (fs/path target (str relative)))))
+  target)
+
+(defn- build-operator! [root build-root environment babashka]
+  (let [source-root (fs/path build-root "operator-source")
+        config-path (fs/path build-root "operator-bb.edn")
+        output (fs/path build-root "operator.jar")
+        dependency-config (edn/read-string (slurp (str (fs/path root "bb.edn"))))]
+    (stage-operator-source! root source-root)
+    (spit (str config-path)
+          (str (pr-str {:paths ["operator-source"]
+                        :deps (dissoc (:deps dependency-config)
+                                      'nrepl/bencode)}) "\n"))
+    (run! root environment babashka "--config" (str config-path)
+          "uberjar" (str output) "-m" "seon.dev.cli")
+    output))
+
+(defn- write-launcher! [path]
+  (fs/create-dirs (fs/parent path))
+  (spit (str path)
+        (str "#!/bin/sh\n"
+             "set -eu\n"
+             "SEON_ROOT=$(CDPATH= cd \"$(dirname \"$0\")/..\" && pwd)\n"
+             "exec \"$SEON_ROOT/runtime/bb\" --jar "
+             "\"$SEON_ROOT/runtime/operator.jar\" --seon-root "
+             "\"$SEON_ROOT\" \"$@\"\n"))
+  (.setExecutable (io/file (str path)) true false)
+  path)
+
 (defn build-package!
   "Build and atomically publish one relocatable source-free release."
   {:malli/schema
@@ -483,22 +655,27 @@
     (try
       (doseq [directory [build-root closure (fs/parent target)]]
         (fs/create-dirs directory))
-      (run! root environment "clojure" "-X:deps" "prep" ":aliases"
-            "[:writer :cljs]")
-      (run! root environment "clojure" "-T:build" "writer-uber")
-      (run! root environment "clojure" "-M:cljs" "compile" "bootstrap")
-      (run! root environment (str (fs/path root "bin/fix-bootstrap-macros")))
-      (run! root environment bun "run" "--bun" "css:build")
-      ((requiring-resolve 'seon.dev.artifact/build-release-programs!)
-       config release-programs)
-      (copy-file! (fs/path root "package.json")
-                  (fs/path closure "package.json"))
-      (copy-file! (fs/path root "bun.lock") (fs/path closure "bun.lock"))
-      (run! closure environment bun "install" "--production" "--frozen-lockfile")
-      (production-package-json! (fs/path root "package.json")
-                                (fs/path closure "package.json"))
-      (assemble-package!
-       {::package-root (str stage)
+      (let [{:seon.dev.release/keys [executable identity]}
+            (download-babashka! build-root environment)
+            operator (build-operator! root build-root environment executable)
+            launcher (write-launcher! (fs/path build-root "bin/seon"))]
+        (run! root environment "clojure" "-X:deps" "prep" ":aliases"
+              "[:writer :cljs]")
+        (run! root environment "clojure" "-T:build" "writer-uber")
+        (run! root environment "clojure" "-M:cljs" "compile" "bootstrap")
+        (run! root environment (str (fs/path root "bin/fix-bootstrap-macros")))
+        (run! root environment bun "run" "--bun" "css:build")
+        ((requiring-resolve 'seon.dev.artifact/build-release-programs!)
+         config release-programs)
+        (copy-file! (fs/path root "package.json")
+                    (fs/path closure "package.json"))
+        (copy-file! (fs/path root "bun.lock") (fs/path closure "bun.lock"))
+        (run! closure environment bun "install" "--production"
+              "--frozen-lockfile")
+        (production-package-json! (fs/path root "package.json")
+                                  (fs/path closure "package.json"))
+        (assemble-package!
+         {::package-root (str stage)
         ::bun bun
         ::bun-version version
         ::writer (str (fs/path root
@@ -510,10 +687,17 @@
         ::public-assets (str (fs/path root "resources/public"))
         ::program-source
         (:seon.dev.artifact/release-program-source-output release-programs)
+        ::babashka executable
+        ::babashka-asset identity
+        ::operator (str operator)
+        ::launcher (str launcher)
+        ::config (str (fs/path root "config/system.edn"))
+        ::babashka-license
+        (str (fs/path root "reference-code/babashka/LICENSE"))
         ::node-modules (str (fs/path closure "node_modules"))
         ::package-json (str (fs/path closure "package.json"))
         ::bun-lock (str (fs/path closure "bun.lock"))
-        ::license (str (fs/path root "LICENSE"))})
+          ::license (str (fs/path root "LICENSE"))}))
       (fs/move stage target {:atomic-move true})
       (read-manifest! (str (fs/path target "release.edn")))
       (finally

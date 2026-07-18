@@ -230,6 +230,13 @@
   {:seon.dev.release/bun-version "1.4.0"
    :seon.dev.release/bun-revision
    "d8ecf098572e2b8265b23e40c04efb4067e516cc"
+   :seon.dev.release/babashka-version "1.12.218"
+   :seon.dev.release/babashka-source-revision
+   "0fb349c414e717800be775ba9cb77c95a9eb700d"
+   :seon.dev.release/babashka-asset
+   "babashka-1.12.218-macos-aarch64.tar.gz"
+   :seon.dev.release/babashka-asset-sha-256
+   "5bc992f39692b707403fc322e860fc82017da7de4a84a32267abb4d50a0c5f9d"
    :seon.dev.release/database-protocol-version 10
    :seon.dev.release/execution-protocol-version 3
    :seon.dev.release/bun-member :seon.release.member/bun
@@ -237,7 +244,13 @@
    :seon.dev.release/pod-member :seon.release.member/pod
    :seon.dev.release/execution-member :seon.release.member/execution
    :seon.dev.release/runtime-assets-member :seon.release.member/runtime-assets
-   :seon.dev.release/program-source-member :seon.release.member/program-source})
+   :seon.dev.release/program-source-member :seon.release.member/program-source
+   :seon.dev.release/babashka-member :seon.release.member/babashka
+   :seon.dev.release/operator-member :seon.release.member/operator
+   :seon.dev.release/launcher-member :seon.release.member/launcher
+   :seon.dev.release/config-member :seon.release.member/config
+   :seon.dev.release/babashka-license-member
+   :seon.release.member/babashka-license})
 
 (def package-members
   {:seon.release.member/bun "runtime/bun"
@@ -245,7 +258,13 @@
    :seon.release.member/pod "runtime/pod.js"
    :seon.release.member/execution "runtime/execution.js"
    :seon.release.member/runtime-assets "runtime/web"
-   :seon.release.member/program-source "runtime/program-sources.edn"})
+   :seon.release.member/program-source "runtime/program-sources.edn"
+   :seon.release.member/babashka "runtime/bb"
+   :seon.release.member/operator "runtime/operator.jar"
+   :seon.release.member/launcher "bin/seon"
+   :seon.release.member/config "config/system.edn"
+   :seon.release.member/babashka-license
+   "THIRD_PARTY_LICENSES/babashka-EPL-1.0.txt"})
 
 (defn- package-process-fixture! [configuration directory]
   (let [root (fs/path directory "package")
