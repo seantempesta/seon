@@ -168,6 +168,36 @@
              (is false (str "unexpected host failure: " error))
              (done)))))))
 
+(deftest failed-ipc-send-preserves-the-cause-and-child-evidence
+  (async done
+    (let [options (atom nil)
+          child (fake-process 111)
+          _ (aset (:process child) "send"
+                  (fn [_] (throw (js/Error. "broken IPC"))))
+          _ (configure (fn [value]
+                         (reset! options value)
+                         (:process child)))
+          completion (host/invoke! (invocation "send-failure"))]
+      (feed! @options (:process child) (ready-message))
+      (-> completion
+          (.then
+           (fn [result]
+             (is (= "The execution invocation could not be sent."
+                    (get-in result [::execution/error :seon.error/message])))
+             (is (= "broken IPC"
+                    (get-in result [::execution/error :seon.error/data
+                                    :seon.error/cause])))
+             (is (= 111
+                    (get-in result [::execution/error :seon.error/data
+                                    ::host/pid])))
+             (is (= ["SIGKILL"] @(:kills child)))
+             ((:resolve-exit! child) 1)
+             (done)))
+          (.catch
+           (fn [error]
+             (is false (str "send failure evidence rejected: " error))
+             (done)))))))
+
 (deftest same-agent-invocations-share-one-ordered-child-queue
   (async done
     (let [options (atom nil)

@@ -49,6 +49,13 @@ even though process isolation and parallel execution work correctly.
   agent fell to 310.0 MiB physical, 270.6 MiB dirty WebKit/JSC, and 130.0 MiB
   JSC heap; it returned the exact requested terminal result in 10.8 seconds.
   Focused proof passes 67 tests and 321 assertions.
+- Commit `03d98a58` removes pod-only loop, hosting, turn, execution-supervisor,
+  provider, SDK, retry, and launch dependencies from the execution artifact.
+  Child-side creation and lifecycle functions now commit database facts only;
+  the pod reacts through its existing database interest. A ready-only child
+  uses 208.6 MiB physical memory. A real child after three evals across two
+  turns uses 212.3 MiB physical memory with a 421.3 MiB peak, down from 310.0
+  MiB retained and 450.0 MiB peak before this ownership cut.
 
 ## Owner
 
@@ -68,6 +75,8 @@ the process boundary.
 - Several simultaneous children fit the modest-hardware graduation profile
   without losing process isolation, hot code application, or first-turn tools.
 - A warm ready child should use at most 200 MiB physical memory and an active
-  evaluated child at most 300 MiB. The current measured values are 218.8 and
-  310.0 MiB, so this issue remains open while the eager execution dependency
-  graph is tested. Bundle size by itself is not an acceptance measure.
+  evaluated child at most 300 MiB. The current measured values are 208.6 and
+  212.3 MiB. The active target is green; the issue remains open for the final
+  several-simultaneous-child modest-hardware proof and the 8.6 MiB ready gap.
+  Bundle size by itself is not an acceptance measure, and the remaining gap
+  does not justify weakening authored rendering or process isolation.

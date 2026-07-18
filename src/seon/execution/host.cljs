@@ -92,8 +92,10 @@
 (defn- send-message! [^js process message]
   (try
     (.send process (execution/encode-message message))
-    true
-    (catch :default _ false)))
+    nil
+    (catch :default exception
+      {:seon.error/message "The execution IPC send failed."
+       :seon.error/data {:seon.error/cause (ex-message exception)}})))
 
 (defn- kill-process! [^js process]
   (try
@@ -341,7 +343,7 @@
       ((::resolve! active)
        (host-error (::invocation active)
                    "The execution host configuration changed.")))
-    (when-not
+    (when
      (send-message!
       process
       {::execution/message execution/shutdown-message
@@ -435,16 +437,25 @@
                             host))))
                (case @decision
                  :claimed
-                 (let [current @claimed]
-                   (if (send-message! (::process current) invocation)
-                     (::promise completion)
+                 (let [current @claimed
+                       ^js process (::process current)]
+                   (if-let [send-error
+                            (send-message! process invocation)]
                      (let [message
-                           (host-error invocation
-                                       "The execution invocation could not be sent.")]
+                           (host-error
+                            invocation
+                            "The execution invocation could not be sent."
+                            {:seon.error/cause
+                             (get-in send-error
+                                     [:seon.error/data :seon.error/cause])
+                             ::pid (.-pid process)
+                             ::stdout-tail (::stdout-tail current)
+                             ::stderr-tail (::stderr-tail current)})]
                        (settle-active! agent-id (::generation current)
-                                       (::process current) message)
-                       (kill-process! (::process current))
-                       (::promise completion))))
+                                       process message)
+                       (kill-process! process)
+                       (::promise completion))
+                     (::promise completion)))
 
                  :busy
                  (host-error invocation
@@ -607,7 +618,7 @@
         (settle-active! agent-id generation process
                         (canceled-error
                          (get-in current [::active ::invocation])))
-        (when-not
+        (when
          (send-message!
           process
           {::execution/message execution/cancel-message
@@ -626,7 +637,7 @@
     (let [process (::process current)
           generation (::generation current)]
       (swap! !host assoc-in [::children agent-id ::retiring?] true)
-      (when-not
+      (when
        (send-message!
         process
         {::execution/message execution/shutdown-message

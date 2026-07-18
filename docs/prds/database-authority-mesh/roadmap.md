@@ -3661,3 +3661,31 @@ failures or errors. The first focused implementation proof passes 41 tests and
 reaction, initialization/reload, and admission. Live delegation, termination,
 pod restart, and physical-memory evidence are still required before this cut is
 settled.
+
+The first clean restart and live drive now prove the committed-event path.
+Root atomically delegated `curvy-snails-wonder`; the pod's existing database
+interest hosted it without a child-to-parent command, it completed one turn
+with the exact requested reply, and both its child and root's follow-up child
+retired normally. A second ordinary `/agents/run` agent executed three forms
+over two turns and closed `:completed`. The execution artifact imports 314
+modules rather than 330; the removed set includes the pod loop, runtime host,
+turn driver, execution supervisor, provider dispatchers/SDKs, retry, launch,
+and their schema-only support.
+
+The same physical-memory method shows the architecture gain is much larger
+after evaluation than its module count suggests. A ready-only child fell from
+218.8 to 208.6 MiB physical memory. The real evaluated child retained 212.3
+MiB physical memory with a 421.3 MiB peak after three evals across two turns,
+versus 310.0 MiB retained and 450.0 MiB peak before the pod-only ownership cut.
+The active child is therefore 97.7 MiB lower and comfortably below the 300 MiB
+bound; the ready child remains 8.6 MiB above the provisional 200 MiB target.
+This result does not justify removing SCI or weakening authored rendering for a
+single-digit ready-memory gain.
+
+One intervening live drive exposed an IPC send failure whose cause and child
+tails were previously discarded. The same drive passed after a clean rebuild,
+so no missing execution dependency was demonstrated. The one host owner now
+returns the actual send exception, PID, and bounded stdout/stderr tails in its
+existing error value; focused host proof passes 15 tests/68 assertions. The
+failure must be repeated under concurrent load and is not silently classified
+as resolved.
