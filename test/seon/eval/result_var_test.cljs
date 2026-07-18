@@ -25,6 +25,22 @@
   (is (false? (eval/result-var-ref? "my.kb/something")))
   (is (false? (eval/result-var-ref? "result/a result/b"))))
 
+(deftest ordinary-form-evaluation-returns-its-value
+  (async done
+    (-> (repl/ensure-bootstrap!)
+        (.then
+         (fn [compile-state]
+           (eval/eval compile-state "(+ 20 22)"
+                      {:seon.config/configuration configuration
+                       :seon.eval/starting-ns 'cljs.user
+                       :seon.eval/analyze-deps? false})))
+        (.then
+         (fn [result]
+           (is (:seon.eval/ok? result))
+           (is (= 42 (:seon.eval/value result)))))
+        (.catch (fn [error] (is false (str error))))
+        (.finally done))))
+
 (deftest unknown-result-id-is-a-graceful-value
   (async done
     (-> (repl/ensure-bootstrap!)

@@ -8,7 +8,7 @@ description: "ClojureScript semantics for the Seon CLJS pod. Use when writing or
 > Full grounded write-up (file:line + live proofs): `docs/prds/agent-fsm/research/cljs-async-await-2026-06-28.md`
 > Library source (authoritative -- read it, don't guess): `reference-code/clojurescript/`
 
-The pod is a long-running Node CLJS process. It compiles itself two ways, and
+The pod is a long-running Bun CLJS process. It compiles itself two ways, and
 the difference is the source of almost every surprise:
 
 - **The shadow build** (`.cljs` files in `src/seon/`) is compiled ahead-of-time

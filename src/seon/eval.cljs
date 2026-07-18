@@ -1386,14 +1386,7 @@
   ;; into a never-set-up ns can't trip `var-ast`→nil→`(ana/ast? sym)`.
   (await (ensure-analyzer-ns! compile-state ns-sym))
   (let [warnings   (atom [])
-        result-ref? (result-var-ref? form-str)
-        ;; transcript-redesign-2026-06-18: a bare top-level `result/<id>`
-        ;; read emits NOTHING in `:statement` context (a bare var read is
-        ;; a no-op statement — the file's REPL-semantics gotcha), so the
-        ;; value would never return. `:expr` context emits + returns the
-        ;; value (def/ns/defn all still work under `:expr`, live-proven).
-        ;; Scoped strictly to the `result/<id>` var read.
-        context    (if result-ref? :expr :statement)]
+        result-ref? (result-var-ref? form-str)]
     (js/Promise.
       (fn [resolve reject]
         (.run warnings-als warnings
@@ -1403,7 +1396,12 @@
                :load          (partial guarded-load* compile-state
                                        authored-sources)
                :ns            ns-sym
-               :context       context
+               ;; `cljs.js` defaults to `:statement`, whose callback value is
+               ;; explicitly not meaningful. Seon's evaluator is a REPL: every
+               ;; successful form must return its value, not only a later
+               ;; `result/<id>` read. ClojureScript's `:expr` context preserves
+               ;; that value and also supports def/ns/defn forms.
+               :context       :expr
                :def-emits-var true
                :analyze-deps  analyze-deps?}
               (fn [{:keys [error value ns]}]
