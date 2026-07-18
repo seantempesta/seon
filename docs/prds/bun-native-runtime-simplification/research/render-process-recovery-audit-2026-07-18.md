@@ -445,3 +445,40 @@ facts and current program source are the durable authority. The correct user
 experience is an explicit interrupted/crashed receipt followed by a clean child
 rehydrated from current database state—not an attempted heap resurrection and
 not a historical rollback.
+
+## Bun-native liveness boundary
+
+The maintained Bun source narrows this further. `Bun.spawn` already exposes the
+process-lifecycle facts Seon needs: `exited`, `onExit`, `exitCode`,
+`signalCode`, `kill`, an `AbortSignal`, a process-lifetime `timeout`, bounded
+output, and Bun-to-Bun structured IPC. `resourceUsage()` is deliberately
+unavailable until the child exits. Bun's Node-compatible
+`performance.eventLoopUtilization()` and worker equivalent currently return
+zero-filled compatibility values, so neither is a valid live-health signal.
+
+Do not add a recurring execution-child heartbeat. During a synchronous loop or
+native stall, the child cannot run the heartbeat timer; only the parent can
+make progress. The stronger and simpler contract is:
+
+- `exited` detects a crash or ordinary exit immediately;
+- the parent starts one deadline for each accepted invocation;
+- a result with the matching invocation ID completes it;
+- no result by the deadline retires that child generation and kills the process;
+- the next invocation lazily starts a clean child; and
+- post-exit `resourceUsage()`, stdout, stderr, signal, and artifact digest are
+  retained as failure evidence.
+
+The `Bun.spawn` `timeout` and `AbortSignal` apply to the lifetime of the whole
+subprocess, so they are not the right active-call clock for a long-lived child.
+Seon's existing parent-owned invocation timer is the correct boundary. For a
+genuinely long asynchronous operation, an explicit progress result may renew a
+bounded operation lease in the future, but arbitrary progress must not keep a
+runaway invocation alive. Idle children need no polling: exit is observable,
+and an idle child that wedges without exiting is discarded when its next
+invocation misses its deadline.
+
+Source: `reference-code/bun/packages/bun-types/bun.d.ts` (`BaseOptions`,
+`SpawnOptions`, and `Subprocess`),
+`reference-code/bun/src/js/node/perf_hooks.ts`, and
+`reference-code/bun/src/js/node/worker_threads.ts` at Bun revision
+`be77b652884b16a103cfaa4af3c1102f72f2dcd3`.

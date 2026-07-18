@@ -9,10 +9,12 @@ tags: [decision, architecture, archive, agent]
 
 This decision is superseded. Seon does not run one JVM, nREPL, Malli registry,
 or database connection per agent. The local system is one JVM database server
-plus one CLJS pod. Agent code uses the pod's one SCI execution-service contract.
+plus one CLJS pod. Authored code runs in one disposable Bun execution child per
+agent through the pod's data-only execution contract.
 
-Stronger fault/resource isolation remains a separate execution-isolation PRD.
-A future worker or microVM backend must preserve the same data-only execution
-contract and cannot create another database or function surface. Historical
-details remain recoverable from Git at
+The parent execution host observes process exit and enforces each invocation's
+deadline; replacement reconstructs the current database program in a fresh
+child. A future container or microVM backend must preserve that same data-only
+execution contract and cannot create another database or function surface.
+Historical details remain recoverable from Git at
 `runtime-reliability-pre-refactor-2026-07-13`.

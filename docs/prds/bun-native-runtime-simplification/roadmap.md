@@ -129,7 +129,7 @@ Seon child. SCI 0.15.56 at release commit
 `9e9c78f4f358ede939b94352ff4edc03b0186c7a` uses 112–114 MB for the simple
 parity workload and 117 MB for persistent namespaces, host calls, schema
 registration, protocols, records, metadata discovery, and async evaluation.
-The high-impact candidate is therefore one SCI context per execution child,
+The initially high-impact candidate was one SCI context per execution child,
 with an expected saving around 90 MB private memory. A bounded parity probe then
 falsified the required drop-in seam: SCI interns a new var before a failed
 definition finishes, while Seon's official-analyzer path removes phantom
@@ -137,9 +137,12 @@ definitions after failure. Matching the existing contract therefore begins
 with explicit rollback and expands into replacements for analyzer-backed
 namespace, warning, test, instrumentation, and introspection semantics. That is
 a new compatibility layer, not a dependency swap. Seon retains official
-`cljs.js` for agent-authored evaluation and exact ClojureScript semantics; SCI
-remains only in its existing renderer cage. Build-time indexing still publishes
-compiled program facts and removes startup filesystem work independently.
+`cljs.js` for agent-authored evaluation and exact ClojureScript semantics.
+Commit `436596c6` then removed the redundant renderer cage and the SCI
+dependency: production authored rendering was already inside the same
+disposable execution child, so the second evaluator added semantics and memory
+without adding containment. Build-time indexing still publishes compiled
+program facts and removes startup filesystem work independently.
 Revisit the evaluator only if measured active-child capacity becomes a real
 graduation blocker; do not retain a hybrid evaluator or fork the official
 compiler.
