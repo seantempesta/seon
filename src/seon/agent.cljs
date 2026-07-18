@@ -407,6 +407,9 @@
 (def ^:private configuration-ref
   [:seon.config/id config/cluster-config-id])
 
+(def ^:private agent-creation-max-results
+  4096)
+
 (defn- configuration-from-entity
   [entity]
   (if entity
@@ -481,7 +484,7 @@
                [[:seon.agent/id id]
                 [:seon.ns/name (keyword (str (home/home-ns id)))]
                 configuration-ref]
-               ::db/max-results 3
+               ::db/max-results agent-creation-max-results
                ::db/max-result-weight 1048576}))]
         (if (error-value? entities)
           (acquisition-failure "Agent creation acquisition failed." entities)
@@ -605,7 +608,7 @@
                ::db/refs [[:seon.agent/id "root"]
                           [:seon.ns/name :my.agent.root]
                           configuration-ref]
-               ::db/max-results 3
+               ::db/max-results agent-creation-max-results
                ::db/max-result-weight 1048576}))
             ordinary-born
             (when-not (error-value? root-data)
@@ -776,7 +779,7 @@
               {::db/db database
                ::db/pull-pattern (into '[*] internal/managed-agent-selector)
                ::db/refs refs
-               ::db/max-results (count refs)
+               ::db/max-results agent-creation-max-results
                ::db/max-result-weight 1048576}))]
         (if (error-value? entities)
           entities
