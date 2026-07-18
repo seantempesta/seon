@@ -176,7 +176,10 @@
                       (js/Promise.resolve {:seon.db/db database}))
                     admission/prepare-committed!
                     (fn [request]
-                      (is (= {::admission/record-failures? false} request))
+                      (is (= {::admission/record-failures? false
+                              ::admission/instrument? false}
+                             request)
+                          "the isolated child activates the projection without pod-wide wrappers")
                       (swap! events conj :publication-started)
                       (js/Promise.resolve
                        {::admission/prepared? true

@@ -23,9 +23,11 @@
 (schema/register! ::recovered? :boolean)
 (schema/register! ::detached? :boolean)
 (schema/register! ::record-failures? :boolean)
+(schema/register! ::instrument? :boolean)
 (schema/register! ::prepare-request
                   [:map {:closed true}
-                   [::record-failures? {:optional true} ::record-failures?]])
+                   [::record-failures? {:optional true} ::record-failures?]
+                   [::instrument? {:optional true} ::instrument?]])
 (schema/register! ::state
   [:map
    [::status ::status]
@@ -115,6 +117,9 @@
               (cond->
                 {::status :publishing
                  ::previous-projection (schema/current-projection)}
+                (contains? current ::instrument?)
+                (assoc ::instrument? (::instrument? current))
+
                 (some? (::generation current))
                 (assoc ::generation (::generation current)))
               current)))]
@@ -129,6 +134,9 @@
           (fn [{::keys [status] :as current}]
             (if (= :publishing status)
               (cond-> {::status :unavailable ::reason reason}
+                (contains? current ::instrument?)
+                (assoc ::instrument? (::instrument? current))
+
                 generation (assoc ::generation generation))
               current)))]
     (and (= :publishing (::status before))
@@ -162,7 +170,9 @@
           (fn [{::keys [status] :as current}]
             (if (and (= :publishing status)
                      (= generation (::prepared-generation current)))
-              {::status :available ::generation generation}
+              (cond-> {::status :available ::generation generation}
+                (contains? current ::instrument?)
+                (assoc ::instrument? (::instrument? current)))
               current)))]
     (and (= :publishing (::status before))
          (= :available (::status after)))))
@@ -231,13 +241,19 @@
      ::function-contract-rows (query-result contracts)}))
 
 (defn- ^:async reconcile-committed!
-  [old-projection]
+  [old-projection instrument?]
   (let [acquired (await (acquire-committed-projection!))
         projection (committed-projection acquired)
         stats
-        (instrument/reconcile-projection!
-          {::instrument/old-projection old-projection
-           ::instrument/new-projection projection})]
+        (if instrument?
+          (instrument/reconcile-projection!
+            {::instrument/old-projection old-projection
+             ::instrument/new-projection projection})
+          {::instrument/enabled? false
+           ::instrument/ok? true
+           ::instrument/n-unstrumented 0
+           ::instrument/n-instrumented 0
+           ::instrument/verification-gaps []})]
     (when (false? (::instrument/ok? stats))
       (let [failure
             (select-keys stats [::instrument/rejected
@@ -286,17 +302,21 @@
      [::generation {:optional true} ::generation]
      [::instrumentation {:optional true} :map]
      [:seon/error {:optional true} :map]]]}
-  [{::keys [record-failures?] :or {record-failures? true}}]
+  [{::keys [record-failures?] :or {record-failures? true} :as request}]
   (let [current @!state
+        instrument? (if (contains? request ::instrument?)
+                      (::instrument? request)
+                      (get current ::instrument? true))
         owned? (or (and (= :publishing (::status current))
                         (not (contains? current ::prepared-generation)))
                    (begin-publication!))]
     (if-not owned?
       (assoc (unavailable) ::prepared? false ::recovered? false)
-      (let [old-projection (::previous-projection @!state)]
+      (let [_ (swap! !state assoc ::instrument? instrument?)
+            old-projection (::previous-projection @!state)]
         (try
           (let [{::keys [generation instrumentation]}
-                (await (reconcile-committed! old-projection))]
+                (await (reconcile-committed! old-projection instrument?))]
             (when-not (retain-prepared-generation! generation)
               (throw
                 (ex-info
@@ -316,7 +336,7 @@
                 {:seon.error/raw original :seon.error/fault :core}))
             (try
               (let [{::keys [generation instrumentation]}
-                    (await (reconcile-committed! old-projection))]
+                    (await (reconcile-committed! old-projection instrument?))]
                 (when-not (retain-prepared-generation! generation)
                   (throw
                     (ex-info
@@ -411,8 +431,11 @@
           (fn [{::keys [status] :as current}]
             (if (= :publishing status)
               current
-              {::status :publishing
-               ::previous-projection (schema/current-projection)})))
+              (cond->
+                {::status :publishing
+                 ::previous-projection (schema/current-projection)}
+                (contains? current ::instrument?)
+                (assoc ::instrument? (::instrument? current))))))
         acquired? (and (not= before after)
                        (= :publishing (::status after)))]
     (if-not acquired?
@@ -422,19 +445,26 @@
          (ex-info "Runtime publication is already in progress."
                   {::status (::status before)}))}
       (let [old-projection (::previous-projection after)
-            empty-projection (schema/build-projection {})]
+            empty-projection (schema/build-projection {})
+            instrument? (get after ::instrument? true)]
         (try
           (let [instrumentation
-                (instrument/reconcile-projection!
-                  {::instrument/old-projection old-projection
-                   ::instrument/new-projection empty-projection})]
+                (if instrument?
+                  (instrument/reconcile-projection!
+                    {::instrument/old-projection old-projection
+                     ::instrument/new-projection empty-projection})
+                  {::instrument/enabled? false
+                   ::instrument/ok? true
+                   ::instrument/n-unstrumented 0
+                   ::instrument/n-instrumented 0
+                   ::instrument/verification-gaps []})]
             (when (false? (::instrument/ok? instrumentation))
               (throw
                 (ex-info
                   "Detached projection failed complete wrapper removal"
                   {:seon.instrument/stats instrumentation})))
             (schema/activate-projection! empty-projection)
-            (reset! !state {::status :starting})
+            (reset! !state {::status :starting ::instrument? instrument?})
             {::detached? true
              ::instrumentation instrumentation})
           (catch :default detach-error

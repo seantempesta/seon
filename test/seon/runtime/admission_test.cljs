@@ -139,6 +139,39 @@
                       (is false (str "publication threw — " error))
                       (done)))))))
 
+(deftest committed-publication-can-activate-without-process-wide-wrappers
+  (async done
+    (let [!activated (atom [])
+          !reconciled (atom 0)]
+      (-> (with-publication-seams
+            {::activate-projection! #(swap! !activated conj %)
+             ::reconcile-projection!
+             (fn [_]
+               (swap! !reconciled inc)
+               {::instrument/ok? true})
+             ::record! (constantly nil)}
+            (fn []
+              (-> (admission/prepare-committed!
+                    {::admission/instrument? false})
+                  (.then admission/admit-prepared!)
+                  (.then (fn [_] (admission/publish-committed!))))))
+          (.then
+            (fn [result]
+              (is (true? (::admission/published? result)))
+              (is (admission/available?))
+              (is (= 0 @!reconciled)
+                  "the process selection persists across publications")
+              (is (= 2 (count @!activated))
+                  "both exact committed projections still activate")
+              (is (false?
+                    (get-in result
+                            [::admission/instrumentation
+                             ::instrument/enabled?])))
+              (done)))
+          (.catch (fn [error]
+                    (is false (str "publication threw — " error))
+                    (done)))))))
+
 (deftest prepared-publication-stays-closed-through-an-injected-completion
   (async done
     (let [!effects (atom [])]

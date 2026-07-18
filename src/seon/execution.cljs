@@ -922,7 +922,8 @@
            (-> (error/with-configuration
                 {:seon.config/on-core-error :gate}
                 #(admission/prepare-committed!
-                  {::admission/record-failures? false}))
+                  {::admission/record-failures? false
+                   ::admission/instrument? false}))
                (.then
                 admission/admit-prepared!)
                (.then
