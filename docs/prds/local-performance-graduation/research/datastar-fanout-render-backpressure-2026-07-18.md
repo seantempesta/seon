@@ -14,10 +14,12 @@ retains only the newest event under socket pressure. Client count is not the
 current rendering bottleneck.
 
 The material latency is cold acquisition of the agent's Bun execution child.
-A root render after the 30-second child idle retirement takes about 1.35--1.45
-seconds. The same complete render through a warm child takes about 28 ms. This
-is an intentional memory/latency tradeoff, not evidence for a second renderer
-or feed.
+A root render after the former 30-second child idle retirement took about
+1.35--1.45 seconds. The same complete render through a warm child takes about
+20--31 ms. The selected five-minute retirement default is active and a real
+feed-triggered render remained warm after the former cutoff. This is an
+intentional memory/latency tradeoff, not evidence for a second renderer or
+feed.
 
 ## Dependency and mechanism ledger
 
@@ -27,7 +29,7 @@ or feed.
 - Complete agent projection:
   `seon.execution.runtime/render-agent-view!` in
   `src/seon/execution/runtime.cljs`.
-- Execution-child supervision and 30-second idle retirement:
+- Execution-child supervision and five-minute idle retirement:
   `src/seon/execution/host.cljs`.
 - Pure Hiccup assembly: `src/seon/ui/agent_view.cljs`.
 - Datahike interest and changed-attribute filtering:
@@ -153,3 +155,31 @@ must report retained child count and physical footprint during realistic
 one-off and specialist work. A small configurable pool of ordinary generated
 agents, proactively current with the shared program, remains a separate
 measured design candidate for instant assignment.
+
+## Coordinated live retention proof
+
+Commit `4aa2f409` changed the existing execution-host default from 30,000 to
+300,000 milliseconds and preserved the same lazy child, timer, explicit
+retirement, and shutdown mechanism. Its focused host gate passes 17 tests and
+77 assertions.
+
+After a coordinated supervised restart, the live pod reported:
+
+```clojure
+{:idle-timeout-ms 300000
+ :children {"root" {:seon.execution.host/ready? true}}}
+```
+
+A real `curl --no-buffer` client then held the root Datastar feed for 55
+seconds, beyond the former retirement point. Without persisting artificial
+database data, the existing transaction callback received a changed datom for
+the learned dependency `:seon.render.surface/touch`. The resulting performance
+snapshot recorded exactly one requested, started, and completed render, one
+affected subscription, one accepted write, a 28,129-byte event, and 31.2705 ms
+rendering. The client received 56,300 bytes before its deliberate 55-second
+timeout.
+
+This closes the narrow policy falsifier: the configured runtime actually keeps
+the demanded root child warm across the old cutoff, and the complete existing
+renderer/feed remains in the warm latency class. It does not by itself prove a
+warm-agent pool or justify tying process lifetime to socket lifetime.

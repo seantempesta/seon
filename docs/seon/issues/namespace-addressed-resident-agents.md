@@ -33,6 +33,56 @@ agent namespace symbol per invocation. The supervisor may key its process-local
 child state by the stable agent eid so adopting another namespace does not
 discard a warm compiler process.
 
+## Existing namespace bootstrap to retain
+
+Agent creation already commits the agent and a complete namespace declaration
+in one transaction. `seon.agent.home/home-ns-require-specs` is the canonical
+structured require vector:
+
+```clojure
+[[seon.agent.message :as message]
+ [seon.agent.lifecycle :refer [wait complete pause resume terminate]]
+ [seon.schema :as schema]
+ [seon.db :as db]
+ [my.plan :as plan]]
+```
+
+`home-ns-form` renders that data as the real `(ns ... (:require ...))` source,
+and `require-edges` stores the corresponding program-graph connections. A
+per-agent `:seon.eval/home-requires` datom may select a different vector.
+Immediately before an eval batch, `seon.eval/setup-agent-ns!` seeds the exact
+toolkit refers into the retained self-host compiler state and evaluates this
+one namespace form with dependency analysis enabled. The batch then runs with
+that namespace as its starting `*ns*`.
+
+Namespace adoption must strengthen this owner rather than bypass it. Moving to
+an already existing namespace selects that namespace's declaration on the next
+invocation. Renaming a generated namespace to a new deliberate symbol must
+atomically keep `:seon.ns/name`, generated namespace source, require edges, and
+the agent's namespace ref consistent. The declaration is regenerated from the
+structured require data; prior eval forms are not replayed and the shared
+compiled program is not rebuilt merely to change the invocation identity.
+
+## Bun invocation context
+
+The selected Bun source implements `node:async_hooks` `AsyncLocalStorage`
+directly on JavaScriptCore's async context. Promise reactions snapshot and
+restore an immutable context array; native callbacks use Bun's internal async
+context frame. Bun deliberately implements this low-impact primitive while
+leaving most of the more expensive legacy `async_hooks` surface as partial
+stubs. There is no stronger public Bun-specific replacement for invocation-
+local identity.
+
+Seon's use of `AsyncLocalStorage.run` is therefore the correct seam, but it is
+not durable identity. The database owns the resident namespace; one invocation
+reads that current fact, enters the ALS scope, and establishes the matching
+ClojureScript namespace. Promise and `await` work inherit it without leaking
+between simultaneous agents. The current code has separate ALS instances for
+agent identity, transaction context, error configuration, warnings, and print
+capture. Consolidation is only a measured simplification candidate: do not
+change these correct isolation boundaries without proving lower allocation or
+clearer ownership under concurrent async work.
+
 ## Discovery and messaging
 
 Namespace facts are the resident-agent directory. Root and ordinary agents can

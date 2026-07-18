@@ -4141,3 +4141,13 @@ owner change: retain idle execution children for five minutes instead of 30
 seconds, then use explicit stop/destroy for one-off work. A coordinated restart
 and realistic child-count/physical-memory proof must confirm the new default;
 no feed-coupled lease or warm-pool mechanism is added by this cut.
+
+The coordinated live retention proof now passes. The restarted host exposed
+the selected 300,000 ms value and retained root's ready child beyond the former
+30-second cutoff. After a real feed had remained connected for 55 seconds, one
+learned relevant attribute selected exactly one subscription and produced one
+28,129-byte event in 31.2705 ms with one accepted write. This closes the
+process-retention falsifier without adding socket-owned child lifetime. The
+remaining program boundary is the explicit requirement-by-requirement
+graduation audit, with any contradicted or missing product journey returned to
+its existing owner before final completion is claimed.

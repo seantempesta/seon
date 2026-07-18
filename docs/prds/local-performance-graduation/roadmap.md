@@ -86,10 +86,14 @@ console errors. Agent birth, which also adds a program namespace, morphed at
 execution child. An immediate data-only follow-up rendered server-side in
 19.228 ms; Chrome's first mutation was a conservative 709.3 ms end-to-end upper
 bound including the external transaction call and 300 ms structural settle.
-The first simple policy cut therefore changes the one child idle default from
-30 seconds to five minutes. Focused host proof must pass before a coordinated
-restart confirms the live configuration; realistic retained-child/load evidence
-will determine whether that remains the default.
+The first simple policy cut changes the one child idle default from 30 seconds
+to five minutes. Focused host proof passes 17 tests/77 assertions. After a
+coordinated restart, the live host reported 300,000 ms; a real root feed stayed
+open for 55 seconds and its affected complete render took 31.2705 ms, with one
+render and one accepted write. The selected value therefore closes the former
+30-second interaction-latency cliff without a feed-coupled lease or second
+worker mechanism. Realistic retained-child/load evidence will determine
+whether it remains the default as resident-agent behavior grows.
 
 The Bun source audit
 [[research/bun-production-runtime-integration-audit-2026-07-15]] establishes a
