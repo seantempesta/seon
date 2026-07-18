@@ -467,7 +467,8 @@
               {::db/db database
                ::db/members
                [(pull-member database
-                             [:seon.agent/default-turn-limit
+                             [:db/id
+                              :seon.agent/default-turn-limit
                               :seon.agent/default-deadline-ms]
                              [:seon.agent/id id])
                 (pull-member database config-selector

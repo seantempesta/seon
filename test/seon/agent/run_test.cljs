@@ -121,7 +121,7 @@
               (reset! acquisition-request request)
               (js/Promise.resolve
                {::db/results
-                [(pull-result {:seon.agent/default-turn-limit 4})
+                [(pull-result {:db/id 7})
                  (pull-result {:seon.config/repl-mode :batch
                                :seon.config.run/batch-turn-limit 100
                                :seon.config.run/stream-form-limit 300
@@ -145,8 +145,9 @@
                                :seon.agent.run/trigger :message}))
                cas (second (:seon.db/tx-data @built))]
            (is (= "run-a" (:seon.agent.run/id result)))
-           (is (= 4 (:seon.agent.run/turn-limit result)))
-           (is (= [:seon.agent/default-turn-limit
+           (is (= 100 (:seon.agent.run/turn-limit result)))
+           (is (= [:db/id
+                   :seon.agent/default-turn-limit
                    :seon.agent/default-deadline-ms]
                   (get-in @acquisition-request
                           [::db/members 0 ::db.protocol/selector])))

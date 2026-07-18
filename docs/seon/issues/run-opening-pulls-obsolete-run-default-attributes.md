@@ -24,6 +24,13 @@ agent attributes. `seon.agent.run` registers duplicate run-namespaced schema
 keys, selects both spellings, and reads either spelling despite its own comment
 that cluster defaults have no duplicate storage.
 
+After those obsolete attributes were removed, the real restart drive exposed
+the other half of the selector contract: an existing agent without either
+optional override pulls as nil when the selector contains no identifying
+attribute. The committed-work read had just found that same entity. The policy
+read must include `:db/id` so entity existence is independent of optional
+configuration.
+
 ## Owner
 
 `seon.agent.run/open-run!` and `effective-deadline-ms` own the two agent/config
@@ -33,6 +40,8 @@ pulls and policy fallback.
 
 - Run policy reads only the existing `:seon.agent/default-*` overrides and the
   config singleton's run policy.
+- The agent pull includes `:db/id`, and an agent with no overrides uses the
+  cluster policy rather than being reported missing.
 - Duplicate run-namespaced default schema keys and branches are deleted.
 - Focused run tests assert the exact pull selector, and a real inbound message
   opens a run.

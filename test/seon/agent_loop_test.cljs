@@ -378,6 +378,8 @@
              (let [query-request (second (::db/members (first @requests)))]
                (is (= 1 (get-in query-request
                                 [::db.protocol/query-form :limit])))
+               (is (= 64 (:datahike.resource/max-results query-request))
+                   "the semantic limit stays one while Datahike may retain query nodes")
                (is (= id (first (::db.protocol/arguments query-request)))))
              (is (= {:seon.agent/id id
                      :seon.agent.run/trigger :message
