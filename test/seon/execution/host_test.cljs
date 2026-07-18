@@ -291,20 +291,34 @@
 
 (deftest cancellation-retires-the-child-after-a-terminal-message
   (async done
-    (let [options (atom nil)
-          child (fake-process 105)
-          _ (configure (fn [value]
-                         (reset! options value)
-                         (:process child)))
+    (let [options (atom [])
+          first-child (fake-process 105)
+          replacement-child (fake-process 106)
+          children (atom [first-child replacement-child])
+          _ (configure
+             (fn [value]
+               (swap! options conj value)
+               (let [[before _] (swap-vals! children subvec 1)]
+                 (when (identical? replacement-child (first before))
+                   (js/setTimeout
+                    #(feed! value (:process replacement-child)
+                            (ready-message))
+                    0)
+                   (js/setTimeout
+                    #(feed! value (:process replacement-child)
+                            (result-message "after-cancel"
+                                            {:my.render/value :fresh}))
+                    5))
+                 (:process (first before)))))
           completion (host/invoke! (invocation "cancelled"))]
-      (feed! @options (:process child) (ready-message))
+      (feed! (first @options) (:process first-child) (ready-message))
       (-> (js/Promise.resolve nil)
           (.then
            (fn [_]
              (is (host/cancel! "agent-1" "cancelled"))
              ;; Even a cooperative terminal reply cannot make this process
              ;; reusable: the canceled function may still be running.
-             (feed! @options (:process child)
+             (feed! (first @options) (:process first-child)
                     (result-message "cancelled" {:my.render/value 5}))
              completion))
           (.then
@@ -315,21 +329,23 @@
                                     :seon.error/message])))
              (is (nil? (::execution/result result))
                  "the late success was discarded")
-             (host/invoke! (invocation "after-cancel"))))
+             (let [after-cancel (host/invoke! (invocation "after-cancel"))]
+               (is (= 1 (count @children))
+                   "retirement does not spawn before the old child exits")
+               ((:resolve-exit! first-child) 0)
+               after-cancel)))
           (.then
            (fn [result]
-             (is (= execution/error-message (::execution/message result)))
-             (js/Promise.
-              (fn [resolve-promise _]
-                (js/setTimeout resolve-promise 15)))))
-          (.then
-           (fn [_]
-             (is (= ["SIGKILL"] @(:kills child)))
-             ((:resolve-exit! child) 0)
+             (is (= {:my.render/value :fresh}
+                    (::execution/result result)))
+             (is (= [execution/invoke-message]
+                    (mapv ::execution/message @(:sent replacement-child))))
+             ((:resolve-exit! replacement-child) 0)
              (done)))
           (.catch
            (fn [error]
-             (is false (str "hard cancellation rejected: " error))
+             (is false (str "hard cancellation rejected: " error "\n"
+                            (.-stack error)))
              (done)))))))
 
 (deftest synchronous-spawn-failure-is-an-ordinary-error

@@ -123,7 +123,8 @@
   [agent-id generation ^js process exit-code]
   (when (same-child? agent-id generation process)
     (let [current (child agent-id)
-          active (::active current)]
+          active (::active current)
+          exit (::exit current)]
       (when-let [timer (::ready-timer current)] (js/clearTimeout timer))
       (when-let [timer (::idle-timer current)] (js/clearTimeout timer))
       (when-let [timer (::kill-timer current)] (js/clearTimeout timer))
@@ -149,7 +150,8 @@
            ::artifact-digest (::artifact-digest current)
            :seon.db/db
            (get-in active [::invocation :seon.db/db])})))
-      (remove-child! agent-id generation process))))
+      (remove-child! agent-id generation process)
+      ((::resolve! exit) exit-code))))
 
 (defn- schedule-idle-stop!
   [agent-id generation process]
@@ -296,8 +298,10 @@
                             "The execution child did not become ready."))
                (kill-process! process)))
            (::ready-timeout-ms config))
+          exit (deferred)
           state {::generation generation
                  ::process process
+                 ::exit exit
                  ::artifact-digest (::launch/execution-digest runtime)
                  ::ready ready
                  ::ready-timer timeout
@@ -347,8 +351,15 @@
 (defn- ensure-child!
   [agent-id]
   (if-let [current (child agent-id)]
-    (if (::ready? current)
+    (cond
+      (::retiring? current)
+      (-> (::promise (::exit current))
+          (.then (fn [_] (ensure-child! agent-id))))
+
+      (::ready? current)
       (js/Promise.resolve current)
+
+      :else
       (::promise (::ready current)))
     (spawn-child! agent-id)))
 
