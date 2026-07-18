@@ -5,6 +5,7 @@
             [clojure.edn :as edn]
             [clojure.string :as str]
             [malli.core :as m]
+            [seon.dev.release :as release]
             [seon.launch :as launch]))
 
 (def configuration-schema
@@ -32,6 +33,9 @@
    [:seon.dev.config/client-output :string]
    [:seon.dev.config/execution-output :string]
    [:seon.dev.config/writer-output :string]
+   [:seon.dev.config/bun-executable {:optional true} :string]
+   [:seon.dev.config/runtime-assets {:optional true} :string]
+   [:seon.dev.config/program-source {:optional true} :string]
    [:seon.dev.config/artifact-manifest :string]
    [:seon.dev.config/launch-descriptor :seon.launch/descriptor]])
 
@@ -279,7 +283,7 @@
     (throw (ex-info "Seon requires JDK 26; install it before starting."
                     {:seon.dev.config/required-java-major 26}))))
 
-(defn- child-environment [root]
+(defn- child-environment [root source-checkout?]
   ;; The invoking environment wins over .env. The file is parsed as data and
   ;; is never executed as shell code.
   (let [environment (merge (dotenv root) (into {} (System/getenv)))
@@ -295,24 +299,73 @@
                       true
                       (assoc "SEON_SHELL" (get environment "SEON_SHELL" "1")
                              "SEON_WEB" (get environment "SEON_WEB" "1")
-                             ;; `bin/seon` is the source-checkout development
-                             ;; operator. Render failures must surface at their
-                             ;; first boundary here; a future packaged runtime
-                             ;; can explicitly set this to 0 for graceful mode.
                              "SEON_RENDER_STRICT"
-                             (get environment "SEON_RENDER_STRICT" "1")))
+                             (get environment "SEON_RENDER_STRICT"
+                                  (if source-checkout? "1" "0"))))
         embed (get environment "SEON_EMBED")]
     (cond-> environment
       (or (nil? embed) (str/blank? embed) (= "0" embed))
       (dissoc "SEON_EMBED"))))
 
+(defn- source-checkout? [root]
+  (and (fs/regular-file? (fs/path root "deps.edn"))
+       (fs/regular-file? (fs/path root "shadow-cljs.edn"))))
+
+(defn- package-configuration [root]
+  (let [manifest-path (str (fs/path root "release.edn"))]
+    (when-not (fs/regular-file? manifest-path)
+      (throw (ex-info "The Seon release manifest does not exist."
+                      {:seon.dev.config/release-manifest manifest-path})))
+    (let [manifest (release/read-manifest! manifest-path)
+          package-root (fs/canonicalize root)
+          identity (:seon.dev.release/identity manifest)
+          member-paths
+          (into {}
+                (map (juxt :seon.dev.release/member
+                           :seon.dev.release/path))
+                (:seon.dev.release/members manifest))
+          member-path
+          (fn [identity-key]
+            (str (fs/path package-root
+                          (get member-paths (get identity identity-key)))))]
+      {:seon.dev.config/artifact-flavor
+       :seon.dev.artifact.flavor/default
+       :seon.dev.config/client-build-id "client"
+       :seon.dev.config/execution-build-id "execution"
+       :seon.dev.config/shadow-cache-root root
+       :seon.dev.config/client-output
+       (member-path :seon.dev.release/pod-member)
+       :seon.dev.config/execution-output
+       (member-path :seon.dev.release/execution-member)
+       :seon.dev.config/writer-output
+       (member-path :seon.dev.release/writer-member)
+       :seon.dev.config/bun-executable
+       (member-path :seon.dev.release/bun-member)
+       :seon.dev.config/runtime-assets
+       (member-path :seon.dev.release/runtime-assets-member)
+       :seon.dev.config/program-source
+       (member-path :seon.dev.release/program-source-member)
+       :seon.dev.config/artifact-manifest manifest-path})))
+
 (defn load!
   "Derive one immutable operator configuration from the host."
   [root]
   (let [root (str (fs/normalize (fs/absolutize root)))
-        environment (child-environment root)
-        artifact (artifact-configuration root environment)
-        environment (shadow-environment environment artifact)
+        source-checkout? (source-checkout? root)
+        package (when-not source-checkout? (package-configuration root))
+        environment (child-environment root source-checkout?)
+        artifact (if source-checkout?
+                   (artifact-configuration root environment)
+                   (select-keys package
+                                [:seon.dev.config/artifact-flavor
+                                 :seon.dev.config/client-build-id
+                                 :seon.dev.config/execution-build-id
+                                 :seon.dev.config/shadow-cache-root
+                                 :seon.dev.config/client-output
+                                 :seon.dev.config/execution-output]))
+        environment (if source-checkout?
+                      (shadow-environment environment artifact)
+                      environment)
         cluster-dir (get environment "SEON_CLUSTER_DIR"
                          (str (fs/path root "data/clusters/default")))
         cluster-name (str (fs/file-name cluster-dir))
@@ -355,10 +408,9 @@
     (validate-configuration!
       (merge
         (dissoc artifact :seon.dev.config/artifact-manifest-name)
+        package
         {:seon.dev.config/root root
-         :seon.dev.config/source-checkout?
-         (and (fs/regular-file? (fs/path root "deps.edn"))
-              (fs/regular-file? (fs/path root "shadow-cljs.edn")))
+         :seon.dev.config/source-checkout? source-checkout?
          :seon.dev.config/environment environment
          :seon.dev.config/process-dir proc-dir
          :seon.dev.config/log-dir log-dir
@@ -373,8 +425,12 @@
          :seon.dev.config/writer-max-heap
          (get environment "SEON_WRITER_MAX_HEAP" default-writer-max-heap)
          :seon.dev.config/writer-output
-         (str (fs/path root "target/seon-database-server-standalone.jar"))
+         (or (:seon.dev.config/writer-output package)
+             (str (fs/path root
+                           "target/seon-database-server-standalone.jar")))
          :seon.dev.config/artifact-manifest
-         (str (fs/path proc-dir
-                       (:seon.dev.config/artifact-manifest-name artifact)))
+         (or (:seon.dev.config/artifact-manifest package)
+             (str (fs/path
+                   proc-dir
+                   (:seon.dev.config/artifact-manifest-name artifact))))
          :seon.dev.config/launch-descriptor launch-descriptor}))))
