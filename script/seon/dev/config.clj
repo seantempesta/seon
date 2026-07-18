@@ -73,6 +73,42 @@
     (validate-configuration!
      (assoc configuration :seon.dev.config/launch-descriptor descriptor))))
 
+(defn- database-born?
+  [configuration]
+  (let [database-path
+        (or (get-in configuration [:seon.dev.config/launch-descriptor
+                                   ::launch/database
+                                   :seon.db.protocol/database-path])
+            (some-> (:seon.dev.config/cluster-dir configuration)
+                    (fs/path "db")))]
+    (boolean
+     (and database-path
+          (fs/directory? database-path)
+          (some fs/regular-file? (fs/list-dir database-path))))))
+
+(defn select-manifest
+  "Select explicit config, or the shipped manifest only for a fresh database."
+  [configuration config-path]
+  (let [root (:seon.dev.config/root configuration)
+        explicit (when config-path
+                   (let [path (fs/path config-path)]
+                     (str (fs/normalize
+                           (if (fs/absolute? path)
+                             path
+                             (fs/path root path))))))
+        inherited
+        (get-in configuration [:seon.dev.config/environment "SEON_CONFIG"])
+        selected (or explicit inherited
+                     (when-not (database-born? configuration)
+                       (str (fs/path root "config/system.edn"))))]
+    (when (and selected (not (fs/regular-file? selected)))
+      (throw
+       (ex-info "The selected Seon config manifest does not exist."
+                {:seon.config/path selected})))
+    (cond-> configuration
+      selected
+      (assoc-in [:seon.dev.config/environment "SEON_CONFIG"] selected))))
+
 (defn- unquote-value [value]
   (let [value (str/trim value)]
     (if (and (<= 2 (count value))

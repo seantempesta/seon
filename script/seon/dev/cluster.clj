@@ -57,7 +57,9 @@
           ::launch/writable-blob-dir (str (fs/path cluster-dir "blobs"))})]
     {::configuration configuration
      ::target-configuration
-     (config/select-launch-descriptor configuration descriptor)
+     (-> configuration
+         (config/select-launch-descriptor descriptor)
+         (config/select-manifest nil))
      ::name name}))
 
 (defn- manifest!

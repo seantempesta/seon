@@ -263,27 +263,8 @@
                         {:seon.dev.cli/arguments (vec arguments)
                          :seon.dev.cli/option (first remaining)}))))))
 
-(defn- database-born? [configuration]
-  (let [directory (fs/path (:seon.dev.config/cluster-dir configuration) "db")]
-    (boolean
-      (and (fs/directory? directory)
-           (some fs/regular-file? (fs/list-dir directory))))))
-
 (defn- select-config [configuration config-path]
-  (let [root (:seon.dev.config/root configuration)
-        explicit (when config-path
-                   (let [path (fs/path config-path)]
-                     (str (fs/normalize
-                            (if (fs/absolute? path) path (fs/path root path))))))
-        inherited (get-in configuration [:seon.dev.config/environment "SEON_CONFIG"])
-        selected (or explicit inherited
-                     (when-not (database-born? configuration)
-                       (str (fs/path root "config/system.edn"))))]
-    (when (and selected (not (fs/regular-file? selected)))
-      (throw (ex-info "The selected Seon config manifest does not exist."
-                      {:seon.config/path selected})))
-    (cond-> configuration
-      selected (assoc-in [:seon.dev.config/environment "SEON_CONFIG"] selected))))
+  (config/select-manifest configuration config-path))
 
 (defn- up! [configuration arguments]
   (let [{:seon.dev.start/keys [open? config-path]}
