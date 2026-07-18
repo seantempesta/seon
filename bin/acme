@@ -80,7 +80,7 @@ export SEON_EXTRA_PRELOAD=acme.pod
 #     Shadow cache, :acme-client build, output closure, and artifact manifest
 #     together. SEON_CLIENT_OUT remains only as a checked compatibility value;
 #     it cannot substitute an output from a different flavor. ---
-export SEON_ARTIFACT_FLAVOR=acme
+export SEON_ARTIFACT_DESCRIPTOR="$SEON_ROOT/acme/artifact.edn"
 export SEON_CLIENT_OUT=out-acme/client/main.js
 
 # --- config seam: acme reads its OWN manifest (per-cluster loadout/routes/

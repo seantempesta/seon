@@ -419,23 +419,12 @@
      ;; bytes. Do not mislabel a source-path list as a dependency closure.
      "runtime_root_diff_sha256" (sha256 diff)}))
 
-(defn- runtime-artifact-path []
-  (let [flavor (or (config/env-string "SEON_ARTIFACT_FLAVOR") "default")
-        proc-dir (or (config/env-string "SEON_PROC_DIR") "tmp/seon-operator")
-        file (if (= flavor "acme") "artifact-acme.edn" "artifact.edn")]
-    (.resolve npath proc-dir file)))
-
 (defn- runtime-artifact-identity []
-  (let [path (runtime-artifact-path)]
-    (when-not (.existsSync nfs path)
-      (throw (ex-info "autocomplete export requires the canonical runtime artifact manifest"
-                      {:path path})))
-    (let [manifest (reader/read-string (.readFileSync nfs path "utf8"))
-          digest (:seon.dev.artifact/application-digest manifest)]
-      (when-not (and (string? digest) (re-matches #"[0-9a-f]{64}" digest))
-        (throw (ex-info "runtime artifact manifest has no valid application digest"
-                        {:path path})))
-      {"application_digest" digest})))
+  (let [digest (config/env-string "SEON_APPLICATION_DIGEST")]
+    (when-not (and (string? digest) (re-matches #"[0-9a-f]{64}" digest))
+      (throw (ex-info "runtime has no valid admitted application digest"
+                      {:seon.dev.artifact/application-digest digest})))
+    {"application_digest" digest}))
 
 (defn- ^:async config-identity [database]
   ;; Query attr presence rather than using a lookup ref: historical/test

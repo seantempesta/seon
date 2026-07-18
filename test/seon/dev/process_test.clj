@@ -185,6 +185,7 @@
     (merge configuration
                {:seon.dev.config/client-build-id "client"
                 :seon.dev.config/execution-build-id "execution"
+                :seon.dev.config/test-build? true
                 :seon.dev.config/artifact-flavor
                 :seon.dev.artifact.flavor/default
                 :seon.dev.config/source-checkout? true
@@ -251,7 +252,13 @@
    :seon.dev.release/launcher-member :seon.release.member/launcher
    :seon.dev.release/config-member :seon.release.member/config
    :seon.dev.release/babashka-license-member
-   :seon.release.member/babashka-license})
+   :seon.release.member/babashka-license
+   :seon.dev.release/bun-license-member :seon.release.member/bun-license
+   :seon.dev.release/datahike-license-member
+   :seon.release.member/datahike-license
+   :seon.dev.release/source-member :seon.release.member/source
+   :seon.dev.release/sbom-member :seon.release.member/sbom
+   :seon.dev.release/notices-member :seon.release.member/notices})
 
 (def package-members
   {:seon.release.member/bun "runtime/bun"
@@ -266,7 +273,13 @@
    :seon.release.member/launcher "bin/seon"
    :seon.release.member/config "config/system.edn"
    :seon.release.member/babashka-license
-   "THIRD_PARTY_LICENSES/babashka-EPL-1.0.txt"})
+   "THIRD_PARTY_LICENSES/babashka-EPL-1.0.txt"
+   :seon.release.member/bun-license "THIRD_PARTY_LICENSES/bun-MIT.txt"
+   :seon.release.member/datahike-license
+   "THIRD_PARTY_LICENSES/datahike-EPL-1.0.txt"
+   :seon.release.member/source "SOURCE.edn"
+   :seon.release.member/sbom "sbom.cdx.json"
+   :seon.release.member/notices "THIRD_PARTY_NOTICES.md"})
 
 (defn- package-process-fixture! [configuration directory]
   (let [root (fs/path directory "package")
@@ -1839,6 +1852,7 @@
         (assoc configuration
                :seon.dev.config/client-build-id "client"
                :seon.dev.config/execution-build-id "execution"
+               :seon.dev.config/test-build? true
                :seon.dev.config/artifact-flavor
                :seon.dev.artifact.flavor/default)
         log (fs/path (:seon.dev.test/directory configuration) "watcher.log")
@@ -1943,7 +1957,8 @@
                :seon.dev.config/client-build-id "acme-client"
                :seon.dev.config/execution-build-id "acme-execution"
                :seon.dev.config/artifact-flavor
-               :seon.dev.artifact.flavor/acme)
+               :seon.dev.artifact.flavor/acme
+               :seon.dev.config/test-build? false)
         log (fs/path (:seon.dev.test/directory configuration) "watcher.log")
         pid (.pid (java.lang.ProcessHandle/current))
         record (live-probe-record
@@ -1979,6 +1994,7 @@
                :seon.dev.config/execution-build-id "acme-execution"
                :seon.dev.config/artifact-flavor
                :seon.dev.artifact.flavor/acme
+               :seon.dev.config/test-build? false
                :seon.dev.config/client-output (str output)
                :seon.dev.config/execution-output (str execution-output)
                :seon.dev.config/shadow-cache-root
@@ -2229,6 +2245,7 @@
                         (str (fs/path directory "out-acme/execution/main.js"))
                         :seon.dev.config/artifact-flavor
                         :seon.dev.artifact.flavor/acme
+                        :seon.dev.config/test-build? false
                         :seon.dev.config/shadow-cache-root
                         (str (fs/path directory "shadow-acme")))
                  (assoc-in [:seon.dev.config/environment "SEON_EXTRA_SRC"]
@@ -2316,6 +2333,9 @@
         (is (= (apply str (repeat 64 "a"))
                (get-in pod [:seon.dev.process/environment
                             "SEON_PROGRAM_SOURCE_DIGEST"])))
+        (is (= (:seon.dev.artifact/application-digest manifest)
+               (get-in pod [:seon.dev.process/environment
+                            "SEON_APPLICATION_DIGEST"])))
         (is (= digest (:seon.dev.process/bootstrap-digest pod)))
         (is (= (str execution-file)
                (get-in descriptor [::launch/runtime

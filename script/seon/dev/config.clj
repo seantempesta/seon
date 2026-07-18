@@ -25,8 +25,8 @@
    [:seon.dev.config/writer-max-heap
     {:optional true} [:string {:min 2 :max 8}]]
    [:seon.dev.config/artifact-flavor
-    [:enum :seon.dev.artifact.flavor/default
-     :seon.dev.artifact.flavor/acme]]
+    :qualified-keyword]
+   [:seon.dev.config/test-build? :boolean]
    [:seon.dev.config/client-build-id :string]
    [:seon.dev.config/execution-build-id :string]
    [:seon.dev.config/shadow-cache-root :string]
@@ -155,10 +155,9 @@
       {})))
 
 (def artifact-configuration-schema
-  [:map
-   [:seon.dev.config/artifact-flavor
-    [:enum :seon.dev.artifact.flavor/default
-     :seon.dev.artifact.flavor/acme]]
+  [:map {:closed true}
+   [:seon.dev.config/artifact-flavor :qualified-keyword]
+   [:seon.dev.config/test-build? :boolean]
    [:seon.dev.config/client-build-id :string]
    [:seon.dev.config/execution-build-id :string]
    [:seon.dev.config/shadow-cache-root :string]
@@ -166,41 +165,48 @@
    [:seon.dev.config/execution-output :string]
    [:seon.dev.config/artifact-manifest-name :string]])
 
-(def ^:private artifact-flavors
-  {"default"
-   {:seon.dev.config/artifact-flavor :seon.dev.artifact.flavor/default
-    :seon.dev.config/client-build-id "client"
-    :seon.dev.config/execution-build-id "execution"
-    :seon.dev.config/shadow-cache-root ".shadow-cljs"
-    :seon.dev.config/client-output "out/client/main.js"
-    :seon.dev.config/execution-output "out/execution/main.js"
-    :seon.dev.config/artifact-manifest-name "artifact.edn"}
-   "acme"
-   {:seon.dev.config/artifact-flavor :seon.dev.artifact.flavor/acme
-    :seon.dev.config/client-build-id "acme-client"
-    :seon.dev.config/execution-build-id "acme-execution"
-    :seon.dev.config/shadow-cache-root "tmp/shadow/acme"
-    :seon.dev.config/client-output "out-acme/client/main.js"
-    :seon.dev.config/execution-output "out-acme/execution/main.js"
-    :seon.dev.config/artifact-manifest-name "artifact-acme.edn"}})
+(def ^:private default-artifact
+  {:seon.dev.config/artifact-flavor :seon.dev.artifact.flavor/default
+   :seon.dev.config/test-build? true
+   :seon.dev.config/client-build-id "client"
+   :seon.dev.config/execution-build-id "execution"
+   :seon.dev.config/shadow-cache-root ".shadow-cljs"
+   :seon.dev.config/client-output "out/client/main.js"
+   :seon.dev.config/execution-output "out/execution/main.js"
+   :seon.dev.config/artifact-manifest-name "artifact.edn"})
 
 (defn- root-path [root path]
   (let [path (fs/path path)]
     (str (fs/normalize (if (fs/absolute? path) path (fs/path root path))))))
 
 (defn artifact-configuration
-  "Artifact coordinates selected by an explicit flavor."
+  "Read one validated artifact descriptor for this operator."
   {:malli/schema
    [:=> [:cat :string [:map-of :string :string]]
     artifact-configuration-schema]}
   [root environment]
-  (let [flavor-name (get environment "SEON_ARTIFACT_FLAVOR" "default")
-        target (or (get artifact-flavors flavor-name)
-                   (throw
-                     (ex-info "Unknown Seon artifact flavor."
-                              {:seon.dev.config/artifact-flavor flavor-name
-                               :seon.dev.config/known-artifact-flavors
-                               (vec (sort (keys artifact-flavors)))})))
+  (let [descriptor (some-> (get environment "SEON_ARTIFACT_DESCRIPTOR")
+                           fs/path)
+        descriptor (when descriptor
+                     (if (fs/absolute? descriptor)
+                       descriptor
+                       (fs/path root descriptor)))
+        target (if descriptor
+                 (do
+                   (when-not (fs/regular-file? descriptor)
+                     (throw
+                      (ex-info "The artifact descriptor does not exist."
+                               {:seon.dev.config/artifact-descriptor
+                                (str descriptor)})))
+                   (edn/read-string (slurp (str descriptor))))
+                 default-artifact)
+        _ (when-not (m/validate artifact-configuration-schema target)
+            (throw
+             (ex-info "The artifact descriptor is invalid."
+                      {:seon.dev.config/artifact-descriptor
+                       (or (some-> descriptor str) :default)
+                       :seon.dev.config/explanation
+                       (m/explain artifact-configuration-schema target)})))
         expected-output (root-path root (:seon.dev.config/client-output target))
         expected-execution-output
         (root-path root (:seon.dev.config/execution-output target))
@@ -218,14 +224,6 @@
         (assoc :seon.dev.config/client-output expected-output
                :seon.dev.config/execution-output
                expected-execution-output))))
-
-(defn artifact-configurations
-  "Artifact coordinates for every supported development flavor."
-  {:malli/schema
-   [:=> [:cat :string] [:vector artifact-configuration-schema]]}
-  [root]
-  (mapv #(artifact-configuration root {"SEON_ARTIFACT_FLAVOR" %})
-        (sort (keys artifact-flavors))))
 
 (defn shadow-environment
   "Select the artifact flavor's Shadow server cache before JVM startup."
@@ -332,6 +330,7 @@
                           (get member-paths (get identity identity-key)))))]
       {:seon.dev.config/artifact-flavor
        :seon.dev.artifact.flavor/default
+       :seon.dev.config/test-build? false
        :seon.dev.config/client-build-id "client"
        :seon.dev.config/execution-build-id "execution"
        :seon.dev.config/shadow-cache-root root
@@ -376,6 +375,7 @@
                    (artifact-configuration root environment)
                    (select-keys package
                                 [:seon.dev.config/artifact-flavor
+                                 :seon.dev.config/test-build?
                                  :seon.dev.config/client-build-id
                                  :seon.dev.config/execution-build-id
                                  :seon.dev.config/shadow-cache-root

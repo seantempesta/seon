@@ -1,9 +1,11 @@
 (ns seon.dev.mcp-test
-  (:require [cheshire.core :as json]
+  (:require [babashka.fs :as fs]
+            [cheshire.core :as json]
             [clojure.core.server :as core-server]
             [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
+            [seon.dev.config :as config]
             [seon.dev.mcp :as mcp])
   (:import [java.net ServerSocket]))
 
@@ -40,17 +42,24 @@
                             (#'mcp/execute-tool "eval"
                                                 {"code" "(+ 1 2)"}))))))
 
-(deftest shadow-discovery-derives-every-artifact-flavor-port-file
-  (let [root "/tmp/seon-mcp-root"]
-    (with-redefs [mcp/project-root root]
-      (is (= #{[:seon.dev.artifact.flavor/default
-                "/tmp/seon-mcp-root/.shadow-cljs/nrepl.port"]
-               [:seon.dev.artifact.flavor/acme
-                "/tmp/seon-mcp-root/tmp/shadow/acme/nrepl.port"]}
-             (into #{}
-                   (map (juxt :seon.dev.mcp/artifact-flavor
-                              :seon.dev.mcp/port-file))
-                   (#'mcp/shadow-endpoints)))))))
+(deftest shadow-discovery-includes-own-and-live-downstream-port-files
+  (let [root (str (fs/create-temp-dir {:prefix "seon-mcp-root-"}))
+        own-cache (str (io/file root "consumer-shadow"))
+        downstream (io/file root "tmp/shadow/other/nrepl.port")]
+    (.mkdirs (.getParentFile downstream))
+    (spit downstream "41002")
+    (try
+      (with-redefs [mcp/project-root root
+                    config/artifact-configuration
+                    (fn [& _]
+                      {:seon.dev.config/shadow-cache-root own-cache})]
+        (is (= #{(str (io/file own-cache "nrepl.port"))
+                  (str (io/file root ".shadow-cljs/nrepl.port"))
+                  (.getPath downstream)}
+               (into #{} (map :seon.dev.mcp/port-file)
+                     (#'mcp/shadow-endpoints)))))
+      (finally
+        (fs/delete-tree root)))))
 
 (deftest agent-resolution-spans-isolated-shadow-servers
   (let [candidates

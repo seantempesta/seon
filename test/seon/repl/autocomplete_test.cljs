@@ -75,14 +75,10 @@
 (deftest export-uses-rendered-transaction-and-one-application-digest
   (async done
     (let [saved (saved-functions)
-          old-proc-dir (aget (.-env js/process) "SEON_PROC_DIR")
+          old-digest (aget (.-env js/process) "SEON_APPLICATION_DIGEST")
           artifact-digest (apply str (repeat 64 "a"))
-          manifest-path (.resolve npath fixture-dir "artifact.edn")
           output-path (.resolve npath fixture-dir "export.json")]
-      (aset (.-env js/process) "SEON_PROC_DIR" fixture-dir)
-      (.writeFileSync nfs manifest-path
-                      (pr-str {:seon.dev.artifact/application-digest
-                               artifact-digest}))
+      (aset (.-env js/process) "SEON_APPLICATION_DIGEST" artifact-digest)
       (set! db/db
             (fn
               ([] (js/Promise.resolve database))
@@ -155,9 +151,9 @@
           (.finally
             (fn []
               (restore! saved)
-              (if (nil? old-proc-dir)
-                (js-delete (.-env js/process) "SEON_PROC_DIR")
-                (aset (.-env js/process) "SEON_PROC_DIR" old-proc-dir))
+              (if (nil? old-digest)
+                (js-delete (.-env js/process) "SEON_APPLICATION_DIGEST")
+                (aset (.-env js/process) "SEON_APPLICATION_DIGEST" old-digest))
               (done)))))))
 
 (deftest rate-consumes-native-transaction-results

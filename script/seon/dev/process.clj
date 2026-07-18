@@ -328,15 +328,8 @@
         (keyword (:seon.dev.config/client-build-id config))
         execution-build-id
         (keyword (:seon.dev.config/execution-build-id config))]
-    (case (:seon.dev.config/artifact-flavor config)
-      :seon.dev.artifact.flavor/default
-      [client-build-id execution-build-id :test]
-      :seon.dev.artifact.flavor/acme
-      [client-build-id execution-build-id]
-      (throw
-        (ex-info "Unknown artifact flavor for the managed Shadow watcher."
-                 {:seon.dev.config/artifact-flavor
-                  (:seon.dev.config/artifact-flavor config)})))))
+    (cond-> [client-build-id execution-build-id]
+      (:seon.dev.config/test-build? config) (conj :test))))
 
 (defn- extra-cljs-watch-args [config]
   (let [environment (:seon.dev.config/environment config)
@@ -446,6 +439,8 @@
                           (assoc
                            environment
                            "SEON_LAUNCH_DESCRIPTOR" (pr-str descriptor)
+                           "SEON_APPLICATION_DIGEST"
+                           (:seon.dev.artifact/application-digest manifest)
                            "SEON_REQ_SOCK"
                            (::launch/request-socket-path descriptor-writer)
                            "SEON_WRITER_REPL_PORT_FILE"

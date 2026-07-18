@@ -19,7 +19,13 @@
    :seon.release.member/launcher "bin/seon"
    :seon.release.member/config "config"
    :seon.release.member/babashka-license
-   "THIRD_PARTY_LICENSES/babashka-EPL-1.0.txt"})
+   "THIRD_PARTY_LICENSES/babashka-EPL-1.0.txt"
+   :seon.release.member/bun-license "THIRD_PARTY_LICENSES/bun-MIT.txt"
+   :seon.release.member/datahike-license
+   "THIRD_PARTY_LICENSES/datahike-EPL-1.0.txt"
+   :seon.release.member/source "SOURCE.edn"
+   :seon.release.member/sbom "sbom.cdx.json"
+   :seon.release.member/notices "THIRD_PARTY_NOTICES.md"})
 
 (def package-identity
   {:seon.dev.release/bun-version "1.4.0"
@@ -46,7 +52,13 @@
    :seon.dev.release/launcher-member :seon.release.member/launcher
    :seon.dev.release/config-member :seon.release.member/config
    :seon.dev.release/babashka-license-member
-   :seon.release.member/babashka-license})
+   :seon.release.member/babashka-license
+   :seon.dev.release/bun-license-member :seon.release.member/bun-license
+   :seon.dev.release/datahike-license-member
+   :seon.release.member/datahike-license
+   :seon.dev.release/source-member :seon.release.member/source
+   :seon.dev.release/sbom-member :seon.release.member/sbom
+   :seon.dev.release/notices-member :seon.release.member/notices})
 
 (defn- package-fixture! []
   (let [root (fs/create-temp-dir {:prefix "seon-config-package-"})]
@@ -66,7 +78,12 @@
              ["runtime/detach.py" "detach"]
              ["bin/seon" "launcher"]
              ["config/selected.edn" "{}"]
-             ["THIRD_PARTY_LICENSES/babashka-EPL-1.0.txt" "EPL"]]]
+             ["THIRD_PARTY_LICENSES/babashka-EPL-1.0.txt" "EPL"]
+             ["THIRD_PARTY_LICENSES/bun-MIT.txt" "MIT"]
+             ["THIRD_PARTY_LICENSES/datahike-EPL-1.0.txt" "EPL"]
+             ["SOURCE.edn" "{}"]
+             ["sbom.cdx.json" "{}"]
+             ["THIRD_PARTY_NOTICES.md" "notices"]]]
       (spit (str (fs/path root path)) content))
     (spit (str (fs/path root "release.edn"))
           (pr-str (release/create-manifest (str root) package-members
@@ -103,11 +120,11 @@
           (assoc configuration :seon.dev.config/writer-max-heap "unbounded")
           descriptor)))))
 
-(deftest artifact-flavors-own-cache-build-output-and-manifest-identities
+(deftest artifact-descriptors-own-cache-build-output-and-manifest-identities
   (let [root (str (fs/normalize (fs/absolutize ".")))
         default (config/artifact-configuration root {})
         acme (config/artifact-configuration
-               root {"SEON_ARTIFACT_FLAVOR" "acme"
+               root {"SEON_ARTIFACT_DESCRIPTOR" "acme/artifact.edn"
                      "SEON_CLIENT_OUT" "out-acme/client/main.js"})]
     (is (= :seon.dev.artifact.flavor/default
            (:seon.dev.config/artifact-flavor default)))
@@ -121,7 +138,8 @@
            (:seon.dev.config/execution-output default)))
     (is (= "artifact.edn"
            (:seon.dev.config/artifact-manifest-name default)))
-    (is (= :seon.dev.artifact.flavor/acme
+    (is (true? (:seon.dev.config/test-build? default)))
+    (is (= :acme.artifact/runtime
            (:seon.dev.config/artifact-flavor acme)))
     (is (= "acme-client" (:seon.dev.config/client-build-id acme)))
     (is (= "acme-execution"
@@ -134,6 +152,7 @@
            (:seon.dev.config/execution-output acme)))
     (is (= "artifact-acme.edn"
            (:seon.dev.config/artifact-manifest-name acme)))
+    (is (false? (:seon.dev.config/test-build? acme)))
     (is (not= (select-keys default
                            [:seon.dev.config/client-build-id
                             :seon.dev.config/execution-build-id
@@ -149,25 +168,29 @@
                             :seon.dev.config/execution-output
                             :seon.dev.config/artifact-manifest-name])))))
 
-(deftest artifact-flavor-rejects-hybrid-or-unknown-coordinates
-  (let [root (str (fs/normalize (fs/absolutize ".")))]
+(deftest artifact-descriptor-rejects-hybrid-or-invalid-data
+  (let [root (str (fs/normalize (fs/absolutize ".")))
+        directory (fs/create-temp-dir {:prefix "seon-artifact-descriptor-"})
+        invalid (fs/path directory "invalid.edn")]
+    (spit (str invalid) "{:not/a :descriptor}")
     (testing "an output override cannot silently select another build"
       (is (thrown-with-msg?
             Exception #"does not match"
             (config/artifact-configuration
-              root {"SEON_ARTIFACT_FLAVOR" "default"
-                    "SEON_CLIENT_OUT" "out-acme/client/main.js"}))))
-    (testing "the flavor selector is closed data"
+              root {"SEON_ARTIFACT_DESCRIPTOR" "acme/artifact.edn"
+                    "SEON_CLIENT_OUT" "out/client/main.js"}))))
+    (testing "descriptor data is validated"
       (is (thrown-with-msg?
-            Exception #"Unknown Seon artifact flavor"
+            Exception #"artifact descriptor is invalid"
             (config/artifact-configuration
-              root {"SEON_ARTIFACT_FLAVOR" "invented"}))))))
+              root {"SEON_ARTIFACT_DESCRIPTOR" (str invalid)}))))
+    (fs/delete-tree directory)))
 
 (deftest acme-shadow-cache-is-selected-through-startup-environment
   (let [root (str (fs/normalize (fs/absolutize ".")))
         default (config/artifact-configuration root {})
         acme (config/artifact-configuration
-               root {"SEON_ARTIFACT_FLAVOR" "acme"})
+               root {"SEON_ARTIFACT_DESCRIPTOR" "acme/artifact.edn"})
         ambient {"SHADOW_CLJS" "{:log {:level :debug}}"}
         default-environment (config/shadow-environment ambient default)
         acme-environment (config/shadow-environment ambient acme)

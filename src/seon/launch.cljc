@@ -17,8 +17,7 @@
 (schema/register! ::writer-cluster [:string {:min 1}])
 (schema/register! ::writer-process-dir ::path)
 (schema/register! ::artifact-flavor
-                  [:enum :seon.dev.artifact.flavor/default
-                   :seon.dev.artifact.flavor/acme])
+                  :qualified-keyword)
 (schema/register! ::client-build-id [:string {:min 1}])
 (schema/register! ::execution-build-id [:string {:min 1}])
 (schema/register! ::execution-output ::path)
@@ -489,17 +488,14 @@
        (let [cluster-dir (or (platform/env-val "SEON_CLUSTER_DIR")
                              "data/clusters/default")
              cluster (basename cluster-dir)
-             artifact-name (or (platform/env-val "SEON_ARTIFACT_FLAVOR")
-                               "default")
-             artifact-flavor
-             (keyword "seon.dev.artifact.flavor" artifact-name)]
+             artifact-flavor :seon.dev.artifact.flavor/default]
          (default-descriptor
           {::cluster-dir cluster-dir
            ::artifact-flavor artifact-flavor
            ::client-build-id
-           (if (= :seon.dev.artifact.flavor/acme artifact-flavor)
-             "acme-client"
-             "client")
+           (or (platform/env-val "SEON_CLIENT_BUILD_ID") "client")
+           ::execution-build-id
+           (or (platform/env-val "SEON_EXECUTION_BUILD_ID") "execution")
            ::request-socket-path
            (or (platform/env-val "SEON_DB_SOCK")
                (platform/env-val "SEON_REQ_SOCK")

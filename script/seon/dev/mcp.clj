@@ -156,16 +156,25 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn- shadow-endpoints
-  "Current Shadow port-file coordinates for every artifact flavor."
+  "Current Shadow nREPL port files beneath this development root."
   []
-  (mapv (fn [artifact]
-          (let [port-file (io/file
-                           (:seon.dev.config/shadow-cache-root artifact)
-                           "nrepl.port")]
-            {:seon.dev.mcp/artifact-flavor
-             (:seon.dev.config/artifact-flavor artifact)
-             :seon.dev.mcp/port-file (.getPath port-file)}))
-        (config/artifact-configurations project-root)))
+  (let [environment (into {} (System/getenv))
+        own-artifact (config/artifact-configuration project-root environment)
+        own (io/file (:seon.dev.config/shadow-cache-root own-artifact)
+                     "nrepl.port")
+        default (io/file project-root ".shadow-cljs/nrepl.port")
+        downstream-root (io/file project-root "tmp/shadow")
+        downstream (when (.isDirectory downstream-root)
+                     (->> (file-seq downstream-root)
+                          (filter #(and (.isFile ^java.io.File %)
+                                        (= "nrepl.port"
+                                           (.getName ^java.io.File %))))))]
+    (->> (concat [own default] downstream)
+         (map #(.getPath ^java.io.File %))
+         distinct
+         sort
+         (mapv (fn [port-file]
+                 {:seon.dev.mcp/port-file port-file})))))
 
 (defn- read-shadow-endpoints
   "Readable Shadow endpoints, deduplicated by live port."
@@ -189,14 +198,18 @@
        (sort-by :seon.dev.mcp/port)
        vec))
 
-(defn- default-shadow-endpoint []
-  (some #(when (= :seon.dev.artifact.flavor/default
-                  (:seon.dev.mcp/artifact-flavor %))
+(defn- own-shadow-endpoint []
+  (let [artifact (config/artifact-configuration
+                  project-root (into {} (System/getenv)))
+        own-path (.getPath
+                  (io/file (:seon.dev.config/shadow-cache-root artifact)
+                           "nrepl.port"))]
+    (some #(when (= own-path (:seon.dev.mcp/port-file %))
            %)
-        (read-shadow-endpoints)))
+          (read-shadow-endpoints))))
 
 (defn- read-shadow-port []
-  (:seon.dev.mcp/port (default-shadow-endpoint)))
+  (:seon.dev.mcp/port (own-shadow-endpoint)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; nREPL bencode plumbing

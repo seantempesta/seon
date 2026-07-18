@@ -1,0 +1,8 @@
+{:seon.dev.config/artifact-flavor :acme.artifact/runtime
+ :seon.dev.config/test-build? false
+ :seon.dev.config/client-build-id "acme-client"
+ :seon.dev.config/execution-build-id "acme-execution"
+ :seon.dev.config/shadow-cache-root "tmp/shadow/acme"
+ :seon.dev.config/client-output "out-acme/client/main.js"
+ :seon.dev.config/execution-output "out-acme/execution/main.js"
+ :seon.dev.config/artifact-manifest-name "artifact-acme.edn"}

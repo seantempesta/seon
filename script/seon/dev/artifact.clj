@@ -35,8 +35,7 @@
    [:seon.dev.artifact/version [:= current-version]]
    [:seon.dev.artifact/published-at :string]
    [:seon.dev.artifact/flavor
-    [:enum :seon.dev.artifact.flavor/default
-     :seon.dev.artifact.flavor/acme]]
+    :qualified-keyword]
    [:seon.dev.artifact/client-build-id :string]
    [:seon.dev.artifact/execution-build-id :string]
    [:seon.dev.artifact/shadow-cache-root :string]
@@ -360,10 +359,6 @@
   (let [environment (:seon.dev.config/environment config)
         extra-source (get environment "SEON_EXTRA_SRC")
         paths (cond-> common-source-input-paths
-                (= :seon.dev.artifact.flavor/acme
-                   (:seon.dev.config/artifact-flavor config))
-                (conj "acme")
-
                 (not (str/blank? extra-source))
                 (conj extra-source))]
     (digest-values
