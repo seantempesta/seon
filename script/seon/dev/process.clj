@@ -337,6 +337,23 @@
                         :seon.client/autonomous?]))
         owns-writer-processes? (owns-writer-processes? descriptor)
         runtime-root (:seon.dev.artifact/runtime-root manifest)
+        program-source-relative-path
+        (:seon.dev.artifact/program-source-path manifest)
+        program-source-digest
+        (:seon.dev.artifact/program-source-digest manifest)
+        program-source-path
+        (when (and runtime-root program-source-relative-path)
+          (str (fs/path runtime-root program-source-relative-path)))
+        _ (when-not (apply = (map some? [runtime-root
+                                         program-source-relative-path
+                                         program-source-digest]))
+            (throw
+             (ex-info "The runtime root and program source must be admitted together."
+                      {:seon.dev.artifact/runtime-root runtime-root
+                       :seon.dev.artifact/program-source-path
+                       program-source-relative-path
+                       :seon.dev.artifact/program-source-digest
+                       program-source-digest})))
         pod-environment (cond->
                           (assoc
                            environment
@@ -353,7 +370,12 @@
                            (str (::launch/http-port descriptor-process))
                            "SEON_PORT_FILE"
                            (::launch/http-port-file descriptor-process))
-                          runtime-root (assoc "SEON_RUNTIME_ROOT" runtime-root))
+                          runtime-root (assoc "SEON_RUNTIME_ROOT" runtime-root)
+                          program-source-path
+                          (assoc "SEON_PROGRAM_SOURCE_PATH"
+                                 program-source-path
+                                 "SEON_PROGRAM_SOURCE_DIGEST"
+                                 program-source-digest))
         java (get environment "JAVA_CMD" "java")
         bun-identity
         (select-keys manifest

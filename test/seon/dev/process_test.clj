@@ -2023,6 +2023,39 @@
     (is (= (:seon.dev.config/client-output configuration)
            (second (:seon.dev.process/argv pod))))))
 
+(deftest pod-program-source-path-comes-from-each-admitted-manifest
+  (let [base (test-config)
+        directory (:seon.dev.test/directory base)]
+    (doseq [[flavor client-build execution-build relative-path]
+            [[:seon.dev.artifact.flavor/default
+              "client" "execution" "out/client/program-sources.edn"]
+             [:seon.dev.artifact.flavor/acme
+              "acme-client" "acme-execution"
+              "out-acme/client/program-sources.edn"]]]
+      (let [runtime-root (str (fs/path directory (name flavor)))
+            configuration
+            (-> (target-config base directory)
+                (assoc :seon.dev.config/artifact-flavor flavor
+                       :seon.dev.config/client-build-id client-build
+                       :seon.dev.config/execution-build-id execution-build)
+                with-default-launch-descriptor)
+            manifest
+            (assoc (target-manifest-for configuration)
+                   :seon.dev.artifact/flavor flavor
+                   :seon.dev.artifact/client-build-id client-build
+                   :seon.dev.artifact/execution-build-id execution-build
+                   :seon.dev.artifact/runtime-root runtime-root
+                   :seon.dev.artifact/bootstrap-digest
+                   (apply str (repeat 64 "b"))
+                   :seon.dev.artifact/program-source-path relative-path
+                   :seon.dev.artifact/program-source-digest
+                   (apply str (repeat 64 "a")))
+            pod (get (process/specs configuration manifest) process/pod-id)]
+        (is (= (str (fs/path runtime-root relative-path))
+               (get-in pod [:seon.dev.process/environment
+                            "SEON_PROGRAM_SOURCE_PATH"]))
+            (str (name flavor) " uses its admitted manifest path"))))))
+
 (deftest process-specs-reject-changed-bun-executable-bytes
   (let [base (test-config)
         configuration
@@ -2162,11 +2195,16 @@
         directory (:seon.dev.test/directory configuration)
         runtime-root (fs/path directory "runtime")
         bootstrap-file (fs/path runtime-root "out/bootstrap/example.txt")
+        program-source-relative-path "out/client/program-sources.edn"
+        program-source-file
+        (fs/path runtime-root program-source-relative-path)
         execution-file (fs/path runtime-root "execution/main.js")]
     (try
       (fs/create-dirs (fs/parent bootstrap-file))
+      (fs/create-dirs (fs/parent program-source-file))
       (fs/create-dirs (fs/parent execution-file))
       (spit (str bootstrap-file) "published")
+      (spit (str program-source-file) "published-program-source")
       (spit (str execution-file) "published-execution")
       (let [selected (target-config configuration directory)
             digest (artifact/digest-paths runtime-root ["out/bootstrap"])
@@ -2175,6 +2213,10 @@
              {:seon.dev.config/execution-output (str execution-file)})
             manifest (assoc (target-manifest-for selected)
                             :seon.dev.artifact/runtime-root (str runtime-root)
+                            :seon.dev.artifact/program-source-path
+                            program-source-relative-path
+                            :seon.dev.artifact/program-source-digest
+                            (apply str (repeat 64 "a"))
                             :seon.dev.artifact/bootstrap-digest digest
                             :seon.dev.artifact/execution-output
                             (str execution-file)
@@ -2192,6 +2234,12 @@
         (is (= (str runtime-root)
                (get-in pod [:seon.dev.process/environment
                             "SEON_RUNTIME_ROOT"])))
+        (is (= (str program-source-file)
+               (get-in pod [:seon.dev.process/environment
+                            "SEON_PROGRAM_SOURCE_PATH"])))
+        (is (= (apply str (repeat 64 "a"))
+               (get-in pod [:seon.dev.process/environment
+                            "SEON_PROGRAM_SOURCE_DIGEST"])))
         (is (= digest (:seon.dev.process/bootstrap-digest pod)))
         (is (= (str execution-file)
                (get-in descriptor [::launch/runtime

@@ -5,18 +5,18 @@
    index-core! replaced the old curated `core-fn-curated` /
    `synthesize-fn-source` / `seed-core-fns!` table. It builds `:seon.fn` rows
    from REAL runtime introspection: spec + doc from var meta, and source +
-   real arglists from a file-read at the var's `:file`/`:line` (paren-balance,
+   real arglists from artifact source at the var's `:file`/`:line` (paren-balance,
    the cljs.repl/source-fn mechanism). These tests pin the invariants that the
    old curated path got WRONG:
 
-     - source is REAL `(defn …)` text, never a `,,,` stub;
+     - source is REAL `(defn …)` text from the admitted program artifact,
+       never a `,,,` stub;
      - arglists come from that real source, not the mangled var meta;
      - `:seon.fn/spec` is the exact `m/form` string when the fn is specced,
        and ABSENT when it is not (honestly unspecced).
 
-   File-read needs Node `fs` + cwd = repo root; the `:node-test` build runs
-   under Node with cwd = repo root (bin/test-cljs cds there), so this is a
-   straight unit test — no live pod.
+   The test process receives the same program-source artifact path and digest
+   as a pod, so this remains a straight unit test — no live pod.
 
    Run interactively via MCP eval:
      (require 'seon.index-core-test :reload)
@@ -31,7 +31,7 @@
     [seon.schema :as schema]))
 
 ;; index-core! / index-schemas are PURE, DETERMINISTIC builders that do full
-;; runtime introspection (file-read + paren-parse over the whole build
+;; runtime introspection (program-source lookup + paren-parse over the build
 ;; closure — ~50+ fns). Re-running them once per deftest was the single
 ;; biggest suite-time cost (~14s of identical re-indexing). Compute ONCE and
 ;; share the result across every pure-read test via a `delay` (both are sync —
@@ -115,10 +115,10 @@
     ;; before the sweep; "spec what we can, :any where opaque").
     (is (some? (:seon.fn/spec register))
         "register! is specced (spec-everything) → :seon.fn/spec present")
-    ;; and it still gets real source (file-read, not stub).
+    ;; and it still gets real source (artifact lookup, not stub).
     (is (and (str/starts-with? (:seon.fn/source register) "(defn")
              (str/includes? (:seon.fn/source register) "register!"))
-        "register! gets REAL source (file-read, not stub)")
+        "register! gets REAL source (artifact lookup, not stub)")
     (is (true? (:seon.fn/agent-facing? query))
         "query carries the positive colocated capability fact")
     (is (true? (:seon.fn/agent-facing? register))

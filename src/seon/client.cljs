@@ -27,6 +27,7 @@
         :seon.agent.message/to      [[:seon.agent/id \"<agent-id>\"]]
         :seon.agent.message/content \"hello\"})"
   (:require
+    [cljs.reader :as reader]
     [clojure.set :as set]
     [clojure.string :as str]
     ;; malli.core/form round-trips a fn's `:malli/schema` to the stable
@@ -1162,31 +1163,45 @@
    a literal)."
   (into #{} (first-party-ns-strs)))
 
+(defn- load-program-sources
+  "Load and verify the admitted build's resource-name to source-string map."
+  []
+  (let [path (seon.platform/env-val "SEON_PROGRAM_SOURCE_PATH")
+        expected (seon.platform/env-val "SEON_PROGRAM_SOURCE_DIGEST")]
+    (when-not (and path expected (re-matches #"[0-9a-f]{64}" expected))
+      (throw
+       (ex-info "The admitted program-source artifact identity is absent."
+                {:seon.dev.artifact/program-source-path path
+                 :seon.dev.artifact/program-source-digest expected})))
+    (let [text (.readFileSync (js/require "fs") path "utf8")
+          actual (-> (js/require "crypto")
+                     (.createHash "sha256")
+                     (.update text "utf8")
+                     (.digest "hex"))
+          value (reader/read-string text)
+          sources (:seon.dev.artifact/program-sources value)]
+      (when-not (= expected actual)
+        (throw
+         (ex-info "The admitted program-source artifact digest changed."
+                  {:seon.dev.artifact/program-source-path path
+                   :seon.dev.artifact/expected-digest expected
+                   :seon.dev.artifact/actual-digest actual})))
+      (when-not (and (map? sources)
+                     (every? (fn [[resource-name source]]
+                               (and (string? resource-name) (string? source)))
+                             sources))
+        (throw
+         (ex-info "The admitted program-source artifact value is invalid."
+                  {:seon.dev.artifact/program-source-path path})))
+      sources)))
+
+(defonce ^:private program-sources
+  (delay (load-program-sources)))
+
 (defn- read-src-file
-  "Read a core source file given a var-meta `:file` (classpath-relative,
-   e.g. \"seon/db.cljs\" or \"seon/agent_context_test.cljs\"). Sources live
-   under the deps.edn `:cljs` source roots (src, test, guest-cljs/src —
-   probed in that order), resolved via `seon.platform/artifact-path`:
-   CWD-relative when the pod runs from the repo root (seon's own usage),
-   or under SEON_RUNTIME_ROOT when a downstream pod runs from its own
-   runtime root. When SEON_EXTRA_SRC is set (task #36 — a downstream's
-   compiled-in source root), `$SEON_EXTRA_SRC/src` and `/test` are probed
-   AFTER the artifact roots, RAW (not via artifact-path — the extra root
-   is not a seon-checkout artifact). Returns the file text, or nil if it
-   can't be read."
-  [file]
-  (let [fs    (js/require "fs")
-        extra (when-let [v (config/extra-src)]
-                [(str v "/src") (str v "/test")])]
-    (some (fn [root]
-            (try
-              (.readFileSync fs (str root "/" file) "utf8")
-              ;; probe: `some` over candidate roots — a miss at one root is
-              ;; the EXPECTED signal to try the next (the file lives under
-              ;; exactly one); nil drives the fallthrough, not a defect.
-              (catch :default _ nil)))
-          (concat (map seon.platform/artifact-path ["src" "test" "guest-cljs/src"])
-                  extra))))
+  "Return source by the compiler's classpath-relative resource name."
+  [resource-name]
+  (get @program-sources resource-name))
 
 (defn- extract-form-at-line
   "Return the exact text of the top-level form beginning at `line-1based` in
@@ -1229,10 +1244,8 @@
    [\"seon/agent/search.cljs\" \"seon/agent/search.cljc\"],
    `seon.agent.search-test` → [\"seon/agent/search_test.cljs\" …] (munged
    like the compiler: dots → dirs, dashes → underscores). Both `.cljs` and
-   `.cljc` are probed so portable `.cljc` nses (e.g. `seon.schema`) resolve
-   to their REAL source, not the stub. `read-src-file` probes the source
-   roots (src, test, guest-cljs/src) per candidate, so test siblings and
-   `.cljc` nses both resolve."
+   `.cljc` are checked so portable `.cljc` nses (e.g. `seon.schema`) resolve
+   to their real compiled resource, not the stub."
   [ns-sym-str]
   (let [base (-> ns-sym-str
                  (str/replace "." "/")
@@ -1240,9 +1253,7 @@
     [(str base ".cljs") (str base ".cljc")]))
 
 (defn- read-ns-source
-  "Read the REAL full source for a full-source ns name string, probing the
-   `.cljs` then `.cljc` candidate ([[ns-file-paths]]). Returns the file
-   text or nil if no candidate is readable under any source root."
+  "Return full source for the first compiled namespace resource candidate."
   [ns-sym-str]
   (some read-src-file (ns-file-paths ns-sym-str)))
 
@@ -1251,7 +1262,7 @@
 
    FULL-SOURCE nses (`seon.agent.ctx.namespaces/full-source-ns?` — all `my.*`, test
    siblings included) carry the REAL FULL FILE TEXT as
-   `:seon.ns/source`: the boot indexer is the ONE file-reader; the
+   `:seon.ns/source`: the boot indexer is the one program-source reader; the
    `:namespaces` context section (and anything else downstream) renders
    that attr from the graph, never re-reading files. A
    full-source ns whose file can't be read falls back to the stub and
@@ -1456,38 +1467,14 @@
 ;; (b) a downstream ns owning ZERO specced fns gets no `:seon.ns` row at all
 ;; (silently invisible to context + retrieval). A third party wants its WHOLE
 ;; surface readable by its agents, not just the specced slice. So when
-;; SEON_EXTRA_SRC is set we scan that root's `*.cljs` files, index every ns
+;; SEON_EXTRA_SRC is set we select its compiled `*.cljs` resources from the
+;; admitted program-source map, index every ns
 ;; (full-source row) and every public `(defn …)`/`(defn- …)` (a `:seon.fn`
 ;; row, specced AND unspecced). Scoped to the extra root ONLY — seon's own
 ;; core stays slim (var-derived, specced-only). The reserved-prefix guard
 ;; (`seon.*`/`my.*`) still applies via the registered-var path; scanned nses
 ;; that hit a reserved prefix are dropped here (a downstream root never owns
 ;; them, and a stray match must not forge a core row).
-
-(defn- list-cljs-files
-  "Recursively collect `*.cljs` file paths under `root` (a directory). Returns
-   a vector of absolute-ish paths (root-prefixed). `[]` when `root` is missing
-   or unreadable — never throws."
-  [root]
-  (let [fs   (js/require "fs")
-        path (js/require "path")]
-    (letfn [(walk [dir acc]
-              (let [ents (try (.readdirSync fs dir #js {:withFileTypes true})
-                              ;; probe: a missing / unreadable dir is expected
-                              ;; (SEON_EXTRA_SRC may be unset or partial) — an
-                              ;; empty listing is the answer, not a defect.
-                              (catch :default _ #js []))]
-                (reduce
-                  (fn [a ent]
-                    (let [full (.join path dir (.-name ent))]
-                      (cond
-                        (.isDirectory ent) (walk full a)
-                        (and (.isFile ent)
-                             (str/ends-with? (.-name ent) ".cljs")) (conj a full)
-                        :else a)))
-                  acc
-                  (array-seq ents))))]
-      (walk root []))))
 
 (defn- ns-name-from-source
   "The ns NAME string parsed from a `.cljs` file's `(ns <name> …)` form, or
@@ -1622,32 +1609,18 @@
             :else (recur (inc i) rows)))))))
 
 (defn- extra-src-ns->source
-  "Map of `{ns-name-string source-string}` for every `*.cljs` under the
-   SEON_EXTRA_SRC `/src` + `/test` roots whose `(ns …)` parses AND whose ns is
-   NOT reserved (`seon.*`/`my.*` — a downstream root never owns those, and a
-   stray match must not forge a core row). `{}` when SEON_EXTRA_SRC is unset.
-   THIS is the authoritative downstream ns set — independent of which fns are
-   specced, so an unspecced-only ns (`acme.notes`) is included."
+  "Map of downstream namespace names to admitted compiled source strings."
   []
-  (if-let [root (config/extra-src)]
-    (let [fs    (js/require "fs")
-          files (mapcat list-cljs-files [(str root "/src") (str root "/test")])]
-      (reduce
-        (fn [m file]
-          (let [txt (try (.readFileSync fs file "utf8")
-                         ;; the file was JUST enumerated by list-cljs-files —
-                         ;; a read failure now is anomalous (:core), and a
-                         ;; silent skip would hide a downstream ns from the
-                         ;; index; the reduce still degrades (nil txt skips).
-                         (catch :default e
-                           (error/record! {:seon.error/raw e :seon.error/fault :core})
-                           nil))
-                ns  (some-> txt ns-name-from-source)]
-            (if (and ns (empty? (reserved-extra-nses [ns])))
-              (assoc m ns txt)
-              m)))
-        {}
-        files))
+  (if (config/extra-src)
+    (reduce-kv
+     (fn [sources resource-name source]
+       (let [ns-name (when (str/ends-with? resource-name ".cljs")
+                       (ns-name-from-source source))]
+         (if (and ns-name (empty? (reserved-extra-nses [ns-name])))
+           (assoc sources ns-name source)
+           sources)))
+     {}
+     @program-sources)
     {}))
 
 (defn- extra-fn-rows
@@ -1700,7 +1673,8 @@
 
 (defn index-core!
   "Tx-data for core `:seon.ns` + `:seon.fn` rows, built by REAL runtime
-   introspection over `core-vars` (file-read at var-meta `:file`/`:line`
+   introspection over `core-vars` (program-source lookup at var-meta `:file`,
+   then extraction at `:line`
    + var meta for spec/doc). Replaces the old curated `seed-core-fns!`.
 
    Per owning ns, emits a `:seon.ns/name` + `:seon.ns/source` row (via
@@ -1709,7 +1683,7 @@
    REAL FULL FILE TEXT; all other core nses keep the minimal `(ns x)` stub.
 
    Always emits the FULL core row set — a function of `core-vars`
-   + the registered `!extra-core-vars` + the on-disk source,
+   + the registered `!extra-core-vars` + the admitted program sources,
    independent of any conn. Re-seeding the same rows on a
    later boot is idempotent at the DB layer: every row upserts on its identity
    attr (`:seon.ns/name` / `:seon.fn/sym`). The lookup-ref `[:seon.ns/name <kw>]`
