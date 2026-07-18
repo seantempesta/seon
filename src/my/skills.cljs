@@ -127,7 +127,8 @@
 (defn- list-skill-files
   "Repo-relative paths of every `SKILL.md` under `dir`: the directory form
    `<dir>/<name>/SKILL.md` plus any top-level `<dir>/<name>.md`. [] when `dir`
-   is absent/unreadable. Node `fs` (the pod is Node).
+   is absent/unreadable. Bun's compatible `node:fs` implementation supplies
+   the filesystem operations.
 
    Entry type is resolved with `statSync` (which FOLLOWS symlinks), not the
    `readdirSync` Dirent flags: the shipped corpus (`seon-skills/`) holds REAL

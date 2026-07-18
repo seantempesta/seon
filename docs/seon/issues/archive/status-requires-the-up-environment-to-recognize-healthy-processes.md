@@ -1,6 +1,6 @@
 ---
 type: issue
-status: active
+status: resolved
 tags: [issue, health, pod]
 ---
 
@@ -41,3 +41,23 @@ The one operator process-spec and status boundary in
   rule.
 - Focused operator tests cover an override at `up` followed by a plain status
   invocation.
+
+## Resolution
+
+Status now derives two separate facts for each admitted process generation:
+
+- `:seon.dev.process/ready?` is the observed containment and readiness result;
+- `:seon.dev.process/current-spec?` reports whether the current operator
+  invocation would select the identical argv, artifact, and managed environment.
+
+Strict spec equality remains part of `up` reconciliation, so changing the
+desired launch still requires an explicit lifecycle transition. It no longer
+turns an already admitted, responsive process into a false `not-ready` result.
+The structured status retains non-secret digest and `current-spec?` evidence
+without exposing environment values.
+
+Focused operator proof passes 61 tests/311 assertions. The original live
+counterexample now reports `:ready? true` and `:current-spec? false` for the
+watcher, writer, and pod, while the application reports ready at its actual
+dynamic endpoint. This proves both truthful health and visible launch-spec
+drift.

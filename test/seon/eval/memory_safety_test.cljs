@@ -4,7 +4,7 @@
    An agent eval once returned a 9.7M-char `pull [*]` result that was
    stored verbatim as `:seon.eval/result-edn`; a later whole-DB
    `[?e ?a ?v]` scan materialized every bloated datom at once and
-   OOM-killed the Node pod (losing the in-RAM `:memory` DB). These tests
+   OOM-killed the former JavaScript pod (losing the in-RAM `:memory` DB). These tests
    pin the store-time complement to the render cap:
 
    - `cap-edn` bounds any pr-str'd string persisted as a datom

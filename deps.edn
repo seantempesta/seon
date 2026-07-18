@@ -120,7 +120,7 @@
                          org.replikativ/persistent-sorted-set {:mvn/version "0.4.137"}
                          ;; Transit-JSON for protocol values
                          ;; (keywords, sets, instants, ratios) crossing the
-                         ;; CLJS replica <-> JVM database-server boundary. Mirrored by
+                         ;; Bun database client <-> JVM authority boundary. Mirrored by
                          ;; com.cognitect/transit-clj in seon.db.transport.uds.
                          com.cognitect/transit-cljs           {:mvn/version "0.8.280"}
                          ;; reitit — the pod's HTTP front door (seon.web.router).

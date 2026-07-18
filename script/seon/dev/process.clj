@@ -2241,6 +2241,9 @@
                      (let [record (read-process config id)
                            spec (get spec-map id)
                            recorded-state (process-status record)
+                           current-spec? (boolean
+                                          (and record
+                                               (same-process-spec? spec record)))
                            foreign? (and (not= :seon.dev.process.status/alive
                                                recorded-state)
                                          (accepting-unmanaged? config id))
@@ -2252,10 +2255,10 @@
                              {:seon.dev.process/status process-state
                               :seon.dev.process/ready?
                               (boolean (and record
-                                            (same-process-spec? spec record)
                                             (ready? config spec record)))}
                              record
                              (assoc
+                               :seon.dev.process/current-spec? current-spec?
                                :seon.dev.process/pid
                                (:seon.dev.process/pid record)
                                :seon.dev.process/start-instant

@@ -2161,7 +2161,7 @@
          #"Bun executable is missing or changed"
          (process/specs configuration manifest)))))
 
-(deftest process-specs-require-published-execution-coordinates
+(deftest process-specs-require-published-execution-artifact-fields
   (let [base (test-config)
         configuration (target-config base (:seon.dev.test/directory base))]
     (is (thrown? Exception
@@ -2228,8 +2228,69 @@
                (:seon.dev.process/environment-digest status)))
         (is (= (:seon.dev.process/artifact-digest spec)
                (:seon.dev.process/artifact-digest status)))
+        (is (true? (:seon.dev.process/current-spec? status)))
         (is (not (contains? status :seon.dev.process/environment))
             "status exposes only the digest, never environment values"))
+      (finally (fs/delete-tree directory)))))
+
+(deftest status-separates-live-readiness-from-current-environment-spec
+  (let [configuration (test-config)
+        directory (:seon.dev.test/directory configuration)
+        configuration (target-config configuration directory)
+        manifest (target-manifest-for configuration)
+        current-specs (process/specs configuration manifest)
+        launched-specs
+        (process/specs
+         (assoc-in configuration
+                   [:seon.dev.config/environment "SEON_FEED_COMPRESSION"]
+                   "gzip")
+         manifest)
+        pid (.pid (java.lang.ProcessHandle/current))
+        start-instant (state/process-start-instant pid)
+        records
+        (into {}
+              (map
+               (fn [[id spec]]
+                 [id
+                  (live-probe-record
+                   configuration
+                   {:seon.dev.process/id id
+                    :seon.dev.process/pid pid
+                    :seon.dev.process/start-instant start-instant
+                    :seon.dev.process/process-group pid
+                    :seon.dev.process/argv (:seon.dev.process/argv spec)
+                    :seon.dev.process/environment-digest
+                    (#'process/environment-digest
+                     (:seon.dev.process/environment spec)
+                     (:seon.dev.process/argv spec))
+                    :seon.dev.process/artifact-digest
+                    (:seon.dev.process/artifact-digest spec)
+                    :seon.dev.process/target :seon.dev.target/development
+                    :seon.dev.process/started-at "test"
+                    :seon.dev.process/log (str (fs/path directory
+                                                         (str (name id) ".log")))})]))
+              launched-specs)]
+    (try
+      (is (every? false?
+                  (map (fn [[id record]]
+                         (#'process/same-process-spec?
+                          (get current-specs id) record))
+                       records))
+          "the omitted launch override remains visible as current-spec drift")
+      (with-redefs-fn
+        {#'process/read-process (fn [_ id] (get records id))
+         #'process/ready? (fn [_ _ _] true)
+         #'process/ownership-conflicts (fn [_ _] [])}
+        (fn []
+          (let [status (process/status configuration manifest)
+                processes (:seon.dev.target/processes status)]
+            (is (= :seon.dev.target.status/ready
+                   (:seon.dev.target/status status)))
+            (is (every? :seon.dev.process/ready? (vals processes)))
+            (is (not-any? :seon.dev.process/current-spec? (vals processes)))
+            (is (every? #(= :seon.dev.process.status/alive
+                            (:seon.dev.process/status %))
+                        (vals processes))))))
       (finally (fs/delete-tree directory)))))
 
 (deftest artifact-flavor-owns-the-watcher-build-and-cache

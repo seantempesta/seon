@@ -229,7 +229,7 @@
           "only startup ownership directly unwinds the prepared watcher")
       (finally (fs/delete-tree root {:force true})))))
 
-(deftest reconcile-coordinates-readers-and-a-changed-writer-once
+(deftest reconcile-orders-readers-and-a-changed-writer-once
   (let [configuration {:seon.dev.config/cluster-dir "/cluster"}
         requests (atom [])
         manifest {:seon.dev.artifact/client-digest (apply str (repeat 64 "a"))
@@ -525,7 +525,7 @@
             :seon.dev.process/targets (set process/all-process-ids)}
            @request))))
 
-(deftest restart-coordinates-one-full-stop-before-reconcile
+(deftest restart-orders-one-full-stop-before-reconcile
   (let [configuration {:seon.dev.config/cluster-name "default"}
         stopped (stop-result :seon.dev.process.operation/restart
                              (set process/all-process-ids)

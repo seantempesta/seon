@@ -36,7 +36,6 @@
     "@vscode/ripgrep": "^1.18.0",
     "human-id": "^4.2.0",
     "linkedom": "^0.18.12",
-    "node-sqlite3-wasm": "^0.8.57",
     "openai": "^6.42.0"
   }
 }
