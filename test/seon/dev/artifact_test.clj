@@ -37,6 +37,9 @@
                   artifact/run-step!
                   (fn [_ label argv] (swap! commands conj [label argv]))]
       (#'artifact/build-source! config bun))
+    (is (some #{["install frozen Bun dependencies"
+                 ["/selected/bun" "install" "--frozen-lockfile"]]}
+              @commands))
     (is (= ["build web CSS"
             ["/selected/bun" "run" "--bun" "css:build"]]
            (last @commands)))))

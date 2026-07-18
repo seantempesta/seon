@@ -115,6 +115,15 @@
         (throw (ex-info "Bun is not resolvable from PATH."
                         {:seon.dev.artifact/executable executable-name})))))
 
+(defn- selected-bun-executable [config]
+  (if-let [configured (:seon.dev.config/bun-executable config)]
+    (str (fs/canonicalize configured))
+    (let [bundled (some-> (:seon.dev.config/root config)
+                          (fs/path "reference-code/bun/build/release/bun"))]
+      (if (and bundled (fs/regular-file? bundled) (fs/executable? bundled))
+        (str (fs/canonicalize bundled))
+        (path-executable (:seon.dev.config/environment config) "bun")))))
+
 (defn bun-identity!
   "Read Bun's exact executable, version, and full source revision."
   {:malli/schema
@@ -124,7 +133,7 @@
     bun-identity-schema]}
   [config]
   (let [environment (:seon.dev.config/environment config)
-        executable (path-executable environment "bun")
+        executable (selected-bun-executable config)
         result (process/shell
                 {:out :string :err :string :continue true
                  :env environment}
@@ -784,6 +793,9 @@
   (run-step! config "repair bootstrap macro metadata"
              [(str (fs/path (:seon.dev.config/root config)
                             "bin/fix-bootstrap-macros"))])
+  (run-step! config "install frozen Bun dependencies"
+             [(:seon.dev.artifact/bun-executable bun)
+              "install" "--frozen-lockfile"])
   (run-step! config "build web CSS"
              [(:seon.dev.artifact/bun-executable bun)
               "run" "--bun" "css:build"]))
