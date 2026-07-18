@@ -2251,9 +2251,9 @@
           (await
            (db/pull-many
             {::db/db database
-             ::db/selector
+             ::db/pull-pattern
              [:seon.agent.turn/id :seon.agent.turn/status]
-             ::db/eids
+             ::db/refs
              (mapv (fn [turn-id]
                      [:seon.agent.turn/id turn-id])
                    turn-ids)}))

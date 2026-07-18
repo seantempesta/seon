@@ -291,7 +291,7 @@
       (let [agent (await
                    (db/pull
                     {::db/db database
-                     ::db/selector
+                     ::db/pull-pattern
                      [{:seon.agent/run
                        [:seon.agent.run/id :seon.agent.run/status
                         :seon.agent.run/trigger :seon.agent.run/started-at
@@ -299,7 +299,7 @@
                         :seon.agent.run/last-beat-at
                         :seon.agent.run/paused-at
                         :seon.agent.run/closed-reason]}]
-                     ::db/eid [:seon.agent/id id]}))
+                     ::db/ref [:seon.agent/id id]}))
             run (:seon.agent/run agent)]
         (cond
           (error-value? agent) agent
@@ -710,8 +710,8 @@
       database
       (let [r (await
                (db/pull {::db/db database
-                         ::db/selector close-selector
-                         ::db/eid [:seon.agent.run/id run-id]}))]
+                         ::db/pull-pattern close-selector
+                         ::db/ref [:seon.agent.run/id run-id]}))]
         (cond
           (error-value? r) r
           (nil? r) (direct-error (str "close-run!: no run " (pr-str run-id) "."))
@@ -835,8 +835,8 @@
       database
       (let [run (await
                  (db/pull {::db/db database
-                           ::db/selector [:seon.agent.run/deadline]
-                           ::db/eid [:seon.agent.run/id run-id]}))
+                           ::db/pull-pattern [:seon.agent.run/deadline]
+                           ::db/ref [:seon.agent.run/id run-id]}))
             deadline (:seon.agent.run/deadline run)]
         (cond
           (error-value? run) run
@@ -878,9 +878,9 @@
       database
       (let [run (await
                  (db/pull {::db/db database
-                           ::db/selector [:seon.agent.run/paused-at
+                           ::db/pull-pattern [:seon.agent.run/paused-at
                                           :seon.agent.run/remaining-ms]
-                           ::db/eid [:seon.agent.run/id run-id]}))
+                           ::db/ref [:seon.agent.run/id run-id]}))
             paused-at (:seon.agent.run/paused-at run)
             remaining-ms (:seon.agent.run/remaining-ms run)]
         (cond

@@ -164,8 +164,8 @@
                   (await
                    (db/pull-many
                     {::db/db database
-                     ::db/selector recent-pull-pattern
-                     ::db/eids entity-ids
+                     ::db/pull-pattern recent-pull-pattern
+                     ::db/refs entity-ids
                      ::db/max-results limit
                      ::db/max-result-weight 524288}))
                   [])]
@@ -198,8 +198,8 @@
                   (await
                    (db/pull-many
                     {::db/db database
-                     ::db/selector recent-pull-pattern
-                     ::db/eids entity-ids
+                     ::db/pull-pattern recent-pull-pattern
+                     ::db/refs entity-ids
                      ::db/max-results limit
                      ::db/max-result-weight 524288}))
                   [])]

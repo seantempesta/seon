@@ -528,12 +528,12 @@
              (await
               (db/pull
                {::db/db database
-                ::db/selector
+                ::db/pull-pattern
                 [:db/id :seon.agent/terminated-at
                  {:seon.agent/run
                   [:seon.agent.run/id :seon.agent.run/status
                    :seon.agent.run/paused-at]}]
-                ::db/eid [:seon.agent/id id]}))]
+                ::db/ref [:seon.agent/id id]}))]
          (if (database-error? agent)
            agent
            (let [current-run (:seon.agent/run agent)

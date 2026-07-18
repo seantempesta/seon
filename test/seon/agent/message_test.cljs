@@ -220,7 +220,7 @@
                 (is (every? #(= [:seon.agent/id "sender"]
                                 (second (::protocol/prefix %)))
                             (::db/members index-request)))
-                (is (= [22 21] (::db/eids pull-request)))
+                (is (= [22 21] (::db/refs pull-request)))
                 (is (= database (::db/db pull-request))))))
            (.finally
             (fn []
@@ -265,7 +265,7 @@
               (let [[db-value options] (first @requests)]
                 (is (= database db-value))
                 (is (= :reverse (::db/direction options))))
-              (is (= [4 3] (::db/eids (second @requests))))))
+              (is (= [4 3] (::db/refs (second @requests))))))
            (.finally
             (fn []
               (set! db/index-page index-page)

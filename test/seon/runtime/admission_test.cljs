@@ -472,9 +472,9 @@
               ([_] (js/Promise.resolve ::database))))
       (set! db/pull
             (fn
-              ([{:seon.db/keys [eid]}]
+              ([{:seon.db/keys [ref]}]
                (js/Promise.resolve
-                 {:seon.agent/id (second eid)
+                 {:seon.agent/id (second ref)
                   :seon.agent/parent {:seon.agent/id "draining-agent"}}))
               ([_selector eid]
                (js/Promise.resolve {:seon.agent/id (second eid)}))

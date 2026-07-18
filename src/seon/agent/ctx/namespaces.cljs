@@ -356,10 +356,10 @@
           (let [cur-ns (keyword (name (or latest-ns (home/home-ns id))))
                 current-row
                 (await (db/pull {::db/db database
-                                 ::db/selector
+                                 ::db/pull-pattern
                                  [:seon.ns/name
                                   {:seon.ns/require-edges require-edge-selector}]
-                                 ::db/eid [:seon.ns/name cur-ns]
+                                 ::db/ref [:seon.ns/name cur-ns]
                                  ::db/max-work 100000
                                  ::db/max-results 512
                                  ::db/max-result-weight 65536}))]

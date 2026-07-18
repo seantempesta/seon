@@ -51,8 +51,8 @@
         (await
          (db/pull
           {::db/db database
-           ::db/selector internal/managed-agent-selector
-           ::db/eid [:seon.agent/id target-id]}))]
+           ::db/pull-pattern internal/managed-agent-selector
+           ::db/ref [:seon.agent/id target-id]}))]
     (cond
       (error-value? target) target
       (not (internal/manages? caller-id target))
@@ -122,8 +122,8 @@
         (await
          (db/pull
           {::db/db database
-           ::db/selector completion-agent-selector
-           ::db/eid [:seon.agent/id agent-id]}))]
+           ::db/pull-pattern completion-agent-selector
+           ::db/ref [:seon.agent/id agent-id]}))]
     (if (error-value? agent)
       agent
       (let [parent (:seon.agent/parent agent)
@@ -137,8 +137,8 @@
               (await
                (db/pull
                 {::db/db database
-                 ::db/selector [:db/id :seon.user/id]
-                 ::db/eid message/user-ref})))]
+                 ::db/pull-pattern [:db/id :seon.user/id]
+                 ::db/ref message/user-ref})))]
         (if (error-value? recipient)
           recipient
           (let [messages

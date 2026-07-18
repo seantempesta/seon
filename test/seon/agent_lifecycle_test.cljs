@@ -179,7 +179,7 @@
       (set! db/pull
             (fn
               ([request]
-               (if (= [:seon.agent/id "agent-a"] (::db/eid request))
+               (if (= [:seon.agent/id "agent-a"] (::db/ref request))
                  (js/Promise.resolve
                   {:db/id 10
                    :seon.agent/id "agent-a"
@@ -268,7 +268,7 @@
       (set! db/pull
             (fn
               ([request]
-               (if (= [:seon.agent/id "agent-a"] (::db/eid request))
+               (if (= [:seon.agent/id "agent-a"] (::db/ref request))
                  (js/Promise.resolve
                   {:db/id 10
                    :seon.agent/id "agent-a"

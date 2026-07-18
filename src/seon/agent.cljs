@@ -475,8 +475,8 @@
             (await
              (db/pull-many
               {::db/db database
-               ::db/selector '[*]
-               ::db/eids
+               ::db/pull-pattern '[*]
+               ::db/refs
                [[:seon.agent/id id]
                 [:seon.ns/name (keyword (str (home/home-ns id)))]
                 configuration-ref]
@@ -600,8 +600,8 @@
             (await
              (db/pull-many
               {::db/db database
-               ::db/selector '[*]
-               ::db/eids [[:seon.agent/id "root"]
+               ::db/pull-pattern '[*]
+               ::db/refs [[:seon.agent/id "root"]
                           [:seon.ns/name :my.agent.root]
                           configuration-ref]
                ::db/max-results 3
@@ -702,8 +702,8 @@
         (await
          (db/pull
           {::db/db database
-           ::db/selector internal/managed-agent-selector
-           ::db/eid [:seon.agent/id agent-id]}))]
+           ::db/pull-pattern internal/managed-agent-selector
+           ::db/ref [:seon.agent/id agent-id]}))]
     (if (error-value? agent)
       agent
       (spawn-depth-from agent))))
@@ -773,8 +773,8 @@
             (await
              (db/pull-many
               {::db/db database
-               ::db/selector (into '[*] internal/managed-agent-selector)
-               ::db/eids refs
+               ::db/pull-pattern (into '[*] internal/managed-agent-selector)
+               ::db/refs refs
                ::db/max-results (count refs)
                ::db/max-result-weight 1048576}))]
         (if (error-value? entities)
@@ -976,8 +976,8 @@
                 (await
                  (db/pull
                   {::db/db database
-                   ::db/selector internal/managed-agent-selector
-                   ::db/eid [:seon.agent/id id]}))]
+                   ::db/pull-pattern internal/managed-agent-selector
+                   ::db/ref [:seon.agent/id id]}))]
             (cond
               (error-value? target) target
               (not (internal/manages? caller-id target))

@@ -155,7 +155,7 @@
               (is (= [[:seon.agent/id "created"]
                       [:seon.ns/name :my.agent.created]
                       [:seon.config/id config/cluster-config-id]]
-                     (::db/eids @pull-request)))
+                     (::db/refs @pull-request)))
               (is (= configuration @received-configuration)
                   "creation receives the decoded ordinary singleton")
               (is (identical? database (::db/db @transaction)))
@@ -199,7 +199,7 @@
                (is (identical? database (::db/db request)))
                (is (= [[:seon.agent/id "parent"]
                        [:seon.config/id config/cluster-config-id]]
-                      (::db/eids request)))
+                      (::db/refs request)))
                (js/Promise.resolve
                 [{:seon.agent/id "parent"} stored-configuration]))
               ([_ _] (js/Promise.reject (js/Error. "unexpected pull-many arity")))

@@ -101,9 +101,9 @@
                      @close-request))
               (is (identical? final-database (::db/db @pull-request)))
               (is (= [:seon.agent.turn/id :seon.agent.turn/status]
-                     (::db/selector @pull-request)))
+                     (::db/pull-pattern @pull-request)))
               (is (= [[:seon.agent.turn/id "turn-b"]]
-                     (::db/eids @pull-request)))))
+                     (::db/refs @pull-request)))))
            (.catch
             (fn [error]
               (is false (str "unexpected drain rejection: " error)))))

@@ -35,6 +35,11 @@ existing unit gates:
   block's established per-agent and per-block display fields. Its pull selector
   names `full-source`, `with-tests`, `current-full?`, and `current-tests?`, so
   those attributes must also be installed before an absent value is queried.
+- Namespace acquisition then exposed the superseded pull request vocabulary
+  still present across agent, lifecycle, message, run, startup, and web
+  consumers. Those maps used `selector`/`eid`/`eids`; the one public
+  `seon.db` API and its Datomic-shaped call sites use
+  `pull-pattern`/`ref`/`refs`.
 
 ## Acceptance
 
@@ -46,6 +51,7 @@ existing unit gates:
   consumed by prompt and transcript rendering.
 - The namespace block's agent/block configuration selector contains only
   Datahike-installed attributes.
+- No maintained source or test uses the removed pull request keys.
 - The data view consumes Datahike's `:datahike.index-page/datoms` result
   directly.
 - Prompt acquisition uses bounded but realistic Datahike result-tree and

@@ -672,16 +672,16 @@
           (await
            (js/Promise.all
             #js [(db/pull {::db/db historical
-                           ::db/selector (ai/config-pull-pattern)
-                           ::db/eid [:seon.ai/id "config"]})
+                           ::db/pull-pattern (ai/config-pull-pattern)
+                           ::db/ref [:seon.ai/id "config"]})
                  (db/pull {::db/db historical
-                           ::db/selector (ai/agent-config-pull-pattern)
-                           ::db/eid [:seon.agent/id agent-id]})
+                           ::db/pull-pattern (ai/agent-config-pull-pattern)
+                           ::db/ref [:seon.agent/id agent-id]})
                  (db/pull {::db/db historical
-                           ::db/selector
+                           ::db/pull-pattern
                            (into [:seon.config/repl-mode]
                                  (ai/model-transport-pull-pattern))
-                           ::db/eid [:seon.config/id config/cluster-config-id]})]))
+                           ::db/ref [:seon.config/id config/cluster-config-id]})]))
           [config-row agent-row cluster-row] (array-seq values)]
       (if (some :seon.error/message [config-row agent-row cluster-row])
         false
@@ -773,8 +773,8 @@
   (let [cluster-row
         (await
          (db/pull {::db/db database
-                   ::db/selector [:seon.config.render/database-edn-cap]
-                   ::db/eid [:seon.config/id config/cluster-config-id]}))
+                   ::db/pull-pattern [:seon.config.render/database-edn-cap]
+                   ::db/ref [:seon.config/id config/cluster-config-id]}))
         turn-eids (mapv first turn-rows)]
     (if (:seon.error/message cluster-row)
       {:status "malformed"}
@@ -795,8 +795,8 @@
                 (if (seq attempt-eids)
                   (await
                    (db/pull-many {::db/db database
-                                  ::db/selector attempt-pull-pattern
-                                  ::db/eids attempt-eids}))
+                                  ::db/pull-pattern attempt-pull-pattern
+                                  ::db/refs attempt-eids}))
                   [])]
             (if (or (:seon.error/message pulled-attempts)
                     (some :seon.error/message pulled-attempts))
@@ -873,10 +873,10 @@
             (if (seq eval-eids)
               (await
                (db/pull-many {::db/db database
-                              ::db/selector
+                              ::db/pull-pattern
                               [:seon.eval/source :seon.eval/ok?
                                :seon.eval/narration]
-                              ::db/eids eval-eids}))
+                              ::db/refs eval-eids}))
               [])]
         (if (or (:seon.error/message pulled)
                 (some :seon.error/message pulled))
@@ -907,8 +907,8 @@
     (let [pulled
           (await
            (db/pull-many {::db/db database
-                          ::db/selector [:seon.agent.turn/rendered-tx]
-                          ::db/eids (mapv first turn-rows)}))]
+                          ::db/pull-pattern [:seon.agent.turn/rendered-tx]
+                          ::db/refs (mapv first turn-rows)}))]
       (cond
         (:seon.error/message pulled) pulled
         (not= (count pulled) (count turn-rows))
@@ -950,14 +950,14 @@
                                        [?message :seon.agent.message/content ?content]]
                           ::db/args [aid]})
                (db/pull {::db/db database
-                         ::db/selector (ai/config-pull-pattern)
-                         ::db/eid [:seon.ai/id "config"]})
+                         ::db/pull-pattern (ai/config-pull-pattern)
+                         ::db/ref [:seon.ai/id "config"]})
                (db/pull {::db/db database
-                         ::db/selector (ai/agent-config-pull-pattern)
-                         ::db/eid [:seon.agent/id aid]})
+                         ::db/pull-pattern (ai/agent-config-pull-pattern)
+                         ::db/ref [:seon.agent/id aid]})
                (db/pull {::db/db database
-                         ::db/selector (ai/model-transport-pull-pattern)
-                         ::db/eid [:seon.config/id config/cluster-config-id]})]))
+                         ::db/pull-pattern (ai/model-transport-pull-pattern)
+                         ::db/ref [:seon.config/id config/cluster-config-id]})]))
         [run-rows turn-identities reply-rows config-row agent-row cluster-row]
         (array-seq values)
         acquired-error
