@@ -14,7 +14,7 @@
 # It is deliberately NOT bin/seon: no nohup, no mkdir-mutex, no cljs-watch,
 # no retired application process — those are not production concerns.
 #
-# Layout: /opt/seon = the immutable runtime tree (jre/, node/, src/, out/,
+# Layout: /opt/seon = the immutable runtime tree (jre/, bun/, src/, out/,
 # node_modules/, cp.txt). /seon-data = the mutable data root (cwd for both
 # processes — database, sockets, port file, logs all land here, matching
 # seon.platform's artifact/data split).
@@ -27,7 +27,7 @@ CLUSTER="${SEON_CLUSTER_NAME:-default}"
 CLUSTER_DIR="$SEON_DATA/clusters/$CLUSTER"
 
 JAVA="$SEON_HOME/jre/bin/java"
-NODE="$SEON_HOME/node/bin/node"
+BUN="$SEON_HOME/bun/bin/bun"
 
 REQ_SOCK="${SEON_REQ_SOCK:-$SEON_DATA/tmp/seon-req.sock}"
 PORT_FILE="${SEON_PORT_FILE:-$SEON_DATA/tmp/seon-port}"
@@ -57,14 +57,26 @@ start_database() {
 
 # Readiness = the req socket ACCEPTING a real connect (bin/seon ready_check
 # semantics: the writer binds the socket only after its database is ready).
-# Probe with the bundled Node runtime — no nc dependency in the image.
+# Probe with the bundled Bun runtime — no nc dependency in the image.
 database_ready() {
   [ -S "$REQ_SOCK" ] || return 1
-  "$NODE" -e '
-    const s = require("net").connect(process.argv[1]);
-    s.on("connect", () => { s.end(); process.exit(0); });
-    s.on("error", () => process.exit(1));
-    setTimeout(() => process.exit(1), 1000);' "$REQ_SOCK" >/dev/null 2>&1
+  "$BUN" -e '
+    const deadline = setTimeout(() => process.exit(1), 1000);
+    Bun.connect({
+      unix: process.argv[1],
+      socket: {
+        data() {},
+        open(socket) {
+          clearTimeout(deadline);
+          socket.end();
+          process.exit(0);
+        },
+        error() {
+          clearTimeout(deadline);
+          process.exit(1);
+        }
+      }
+    }).catch(() => process.exit(1));' "$REQ_SOCK" >/dev/null 2>&1
 }
 
 wait_database_ready() {
@@ -86,7 +98,7 @@ wait_database_ready() {
   echo "[seon-entrypoint] database server ready (${waited}s)"
 }
 
-# ── pod (Node CLJS runtime — agent loop + HTTP door) ────────────────────
+# ── pod (Bun CLJS runtime — agent loop + HTTP door) ─────────────────────
 # Same env bin/seon's pod command sets, container-shaped: data CWD-relative
 # under /seon-data, artifacts under SEON_RUNTIME_ROOT, bind 0.0.0.0 so the
 # published port reaches the server. Capability grants follow bin/seon's
@@ -107,7 +119,7 @@ start_pod() {
     SEON_FS_READ_ONLY="${SEON_FS_READ_ONLY:-1}" \
     SEON_SHELL="${SEON_SHELL:-1}" \
     SEON_WEB="${SEON_WEB:-1}" \
-    "$NODE" "$SEON_HOME/out/client/main.js" \
+    "$BUN" --use-system-ca "$SEON_HOME/out/client/main.js" \
     > >(tee -a "$SEON_DATA/logs/pod.log") 2>&1 &
   POD_PID=$!
   echo "[seon-entrypoint] pod started (pid $POD_PID, port ${SEON_PORT:-7890})"

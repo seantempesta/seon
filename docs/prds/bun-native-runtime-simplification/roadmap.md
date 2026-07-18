@@ -124,6 +124,16 @@ generous overall deadline. A complete run passes 1,123 tests / 4,981 assertions;
 real INT cleanup leaves no Bun, output processor, FIFO, or lock; and a missing
 owner makes the test process exit 143. This closes the largest observed test
 memory/CPU spike mechanism before any compiler-topology experiment.
+
+The bounded Docker runtime cut now removes the Node archive, executable tree,
+PATH, npm install, package lock, readiness probe, and pod launcher. Both Linux
+architectures use pinned Bun 1.3.14 assets (the x64 baseline build on amd64),
+frozen `bun install`, forced-Bun CSS, `Bun.connect` writer readiness, and an
+absolute `bun --use-system-ca` pod launch. Shell syntax, diff checks, and a real
+isolated Unix-socket acceptance probe pass. Cross-architecture image builds and
+container browser/recovery proof remain required; the image still packages
+`src` and `test` honestly until the program-source artifact replaces filesystem
+source acquisition.
 Multi-cluster, no-source packaging, recovery/soak, and final percentile and
 resource measurements remain graduation gates.
 

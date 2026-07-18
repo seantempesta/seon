@@ -1,18 +1,18 @@
 # The canonical Seon image — one container running the full cluster:
-# database server (JVM Datahike writer) + pod (Node CLJS runtime), UDS between
+# database server (JVM Datahike writer) + pod (Bun CLJS runtime), UDS between
 # them, durable database on /seon-data (volume), pod HTTP published.
 #
 # Design: docs/prds/agent-ctx/research/result-driven-benchmark-suite-design-2026-07-05.md
 # §2a. This is the user-facing distribution artifact AND the bench substrate.
 #
-# The /opt/seon tree is fully SELF-CONTAINED (bundled JRE + Node — invoked by
+# The /opt/seon tree is fully SELF-CONTAINED (bundled JRE + Bun — invoked by
 # absolute path, never PATH): mounting it into any glibc container yields a
 # bootable cluster (the A-overlay bench composition, §2b).
 #
 # Multi-arch: builds BOTH linux/arm64 (native on Apple Silicon) and
 # linux/amd64 (emulated under Rosetta). The three arch-hardcoded downloads
-# (Node, Temurin JRE, babashka) are parameterized on buildx's TARGETARCH;
-# every other layer already adapts (multi-arch bases, in-stage `npm ci`,
+# (Bun, Temurin JRE, babashka) are parameterized on buildx's TARGETARCH;
+# every other layer already adapts (multi-arch bases, frozen `bun install`,
 # arch-independent CLJS/Clojure bytecode). Each download sha-verifies both
 # per-arch assets against the official checksums.
 #
@@ -34,25 +34,29 @@ FROM eclipse-temurin:26-jdk-noble AS build
 ARG TARGETARCH
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends curl ca-certificates git xz-utils \
+ && apt-get install -y --no-install-recommends curl ca-certificates git unzip \
  && rm -rf /var/lib/apt/lists/*
 
 # --- Bundled runtimes (they ship INSIDE /opt/seon — hard requirement of the
-# --- A-overlay composition: bench task images carry neither java nor node).
-# Node: asset arch arm64→arm64, amd64→x64.
-ARG NODE_VERSION=22.23.1
-ARG NODE_SHA256_ARM64=0294e8b915ab75f92c7513d2fcb830ae06e10684e6c603e99a87dbf8835389c1
-ARG NODE_SHA256_AMD64=9749e988f437343b7fa832c69ded82a312e41a03116d766797ac14f6f9eee578
+# --- A-overlay composition: bench task images carry neither Java nor Bun).
+# Bun: asset arch arm64→aarch64, amd64→x64-baseline for modest hardware.
+ARG BUN_VERSION=1.3.14
+ARG BUN_SHA256_ARM64=a27ffb63a8310375836e0d6f668ae17fa8d8d18b88c37c821c65331973a19a3b
+ARG BUN_SHA256_AMD64=a063908ae08b7852ca10939bbdc6ceed3ddabce8fb9402dce83d65d73b36e6c7
 RUN case "$TARGETARCH" in \
-      arm64) NARCH=arm64; NSHA="$NODE_SHA256_ARM64" ;; \
-      amd64) NARCH=x64;   NSHA="$NODE_SHA256_AMD64" ;; \
+      arm64) BARCH=aarch64;      BSHA="$BUN_SHA256_ARM64" ;; \
+      amd64) BARCH=x64-baseline; BSHA="$BUN_SHA256_AMD64" ;; \
       *) echo "unsupported TARGETARCH=$TARGETARCH" >&2; exit 1 ;; \
     esac \
- && curl -fL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${NARCH}.tar.xz" -o /tmp/node.tar.xz \
- && echo "${NSHA}  /tmp/node.tar.xz" | sha256sum -c - \
- && mkdir -p /opt/seon/node \
- && tar -xJf /tmp/node.tar.xz --strip-components=1 -C /opt/seon/node \
- && rm /tmp/node.tar.xz
+ && curl -fL "https://github.com/oven-sh/bun/releases/download/bun-v${BUN_VERSION}/bun-linux-${BARCH}.zip" -o /tmp/bun.zip \
+ && echo "${BSHA}  /tmp/bun.zip" | sha256sum -c - \
+ && unzip -q /tmp/bun.zip -d /tmp/bun \
+ && mkdir -p /opt/seon/bun/bin \
+ && mv "/tmp/bun/bun-linux-${BARCH}/bun" /opt/seon/bun/bin/bun \
+ && chmod +x /opt/seon/bun/bin/bun \
+ && test "$(/opt/seon/bun/bin/bun --version)" = "$BUN_VERSION" \
+ && test "$(/opt/seon/bun/bin/bun --revision)" = "${BUN_VERSION}+0d9b296af" \
+ && rm -rf /tmp/bun /tmp/bun.zip
 
 # Temurin JRE: asset arch arm64→aarch64, amd64→x64.
 ARG JRE_VERSION_TAG=jdk-26.0.1%2B8
@@ -87,7 +91,7 @@ RUN case "$TARGETARCH" in \
  && echo "${BSHA}  /tmp/bb.tar.gz" | sha256sum -c - \
  && tar -xzf /tmp/bb.tar.gz -C /usr/local/bin bb && rm /tmp/bb.tar.gz
 
-ENV PATH=/opt/seon/node/bin:$PATH
+ENV PATH=/opt/seon/bun/bin:$PATH
 # Maven cache + gitlibs land INSIDE the runtime tree — the baked classpath
 # (cp.txt below) points at them, so the runtime stage needs no clojure CLI.
 ENV GITLIBS=/opt/seon/gitlibs
@@ -98,8 +102,8 @@ WORKDIR /opt/seon
 
 # Linux-native node_modules (NEVER copy a mac tree — @vscode/ripgrep installs
 # a platform binary via postinstall).
-COPY package.json package-lock.json ./
-RUN npm ci
+COPY package.json bun.lock ./
+RUN bun install --frozen-lockfile
 
 # Dep prep + classpath warm (same steps as `bin/seon prep`): downloads m2 +
 # gitlibs and compiles the datahike fork's Java sources (:deps/prep-lib).
@@ -123,7 +127,7 @@ COPY bin/fix-bootstrap-macros bin/fix-bootstrap-macros
 # Compile the pod bundle + the self-host bootstrap bundle + CSS.
 RUN clojure -M:cljs compile client
 RUN clojure -M:cljs compile bootstrap && bb bin/fix-bootstrap-macros
-RUN npm run css:build
+RUN bun run --bun css:build
 
 # Prune .shadow-cljs to the one dir the compiled loader actually loads from
 # (out/client/main.js resolves __dirname/../../.shadow-cljs/builds/client/dev/out/cljs-runtime).
@@ -146,13 +150,13 @@ RUN chmod +x /opt/seon/seon-entrypoint
 
 # ============================================================
 # Runtime — debian-slim + the self-contained /opt/seon tree. No JDK, no
-# clojure CLI, no npm, no compile at boot.
+# clojure CLI, no package manager, no compile at boot.
 # ============================================================
 FROM debian:bookworm-slim
 
 # ca-certificates + curl: operator convenience (the exec-curl door in bench
-# composition) — the pod's own TLS (DeepSeek egress) uses Node's bundled CA
-# store, and the JRE ships its own cacerts.
+# composition) and the explicit system trust store selected by the Bun pod.
+# The JRE ships its own cacerts.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates curl \
  && rm -rf /var/lib/apt/lists/*
