@@ -56,6 +56,26 @@ advance it; every final sample records its own identities.
 | Babashka/operator | Babashka `1.12.212`; `reference-code/babashka-process` is tag `v0.6.25`, SHA `16a84e0a…`, but is not proven to be the binary's embedded revision; first-party authority is `bin/seon` plus `script/seon/dev/{cli,process,state,artifact,config}.clj` | `bin/seon` is the only lifecycle door. `bb.edn` does not pin the executable/embedded process library, so retain `bb --version`, bind the binary in unit 8's manifest, and resolve the embedded-library identity before claiming exact-source reproduction. Do not add a shell startup path. |
 | HTTP/JVM tools | curl `8.7.1`; OpenJDK `26.0.1`; writer `-Xmx2g`; compiler `-Xms256m -Xmx3g`; `jcmd`, `jstat`, `vmmap`, `ps` | curl measures finite requests/server first frames, not browser interaction. Sample JVM/process diagnostics only at explicit checkpoints; RSS alone is not a leak test. |
 
+### 2026-07-18 Bun measurement correction
+
+The active pod now runs Bun, so the old Node/V8 row is comparison history, not
+the current runtime recipe. Maintained Bun commit `be77b652` implements
+`performance.eventLoopUtilization()` as the constant zero tuple. It cannot be
+used as evidence. Bun's `monitorEventLoopDelay` is backed by its native
+histogram implementation and is the retained bounded-window event-loop signal;
+report p50, p95, p99, and maximum in milliseconds. Pair it with
+`process.memoryUsage`, process RSS/CPU, and optional `bun:jsc` heap detail.
+Keep RSS separate from the JavaScript heap because JSC, native sockets, gzip,
+compiled code, and allocator reservations are not all heap values.
+
+Maintained Datahike commit `4c55791b` already exposes bounded
+`datahike.api/query-cache-evidence`. Exact identical requests against one
+immutable database value can therefore report completed-cache hits and
+single-flight saved computations without a Seon cache or telemetry path. The
+CLJS wall duration measures encode, socket, JVM admission/computation, and
+decode together; the writer evidence distinguishes repeated computation from
+transport time.
+
 Captured root dependency hashes were `deps.edn` `85e63ca…`, `bb.edn`
 `646f672d…`, `shadow-cljs.edn` `ba5422e…`, and `package-lock.json`
 `2bbbbcf8…`. Final manifests retain full hashes.
