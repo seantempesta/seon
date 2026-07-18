@@ -319,7 +319,10 @@
 
 (deftest committed-work-query-is-one-ordered-exact-wake-rule
   (let [query @#'loop/pending-inbound-query
-        where (:where query)]
+        where (:where query)
+        coverage (some #(when (and (seq? %) (= 'not-join (first %)))
+                          (rest %))
+                       where)]
     (is (= '[?message-tx :asc ?message :asc] (:order-by query)))
     (is (= 1 (:limit query)))
     (is (some #{'[(not= ?sender ?agent)]} where))
@@ -329,8 +332,11 @@
     (is (some #{'[(get-else $ ?message :seon.agent.message/hops 0) ?hops]}
               where))
     (is (some #{'[(< ?hops ?hop-cap)]} where))
+    (is (some #{'[?run :seon.agent.run/closed-reason ?close-reason]} coverage))
+    (is (some #{'[(not= ?close-reason :quiesced)]} coverage)
+        "planned quiescence cannot claim that inbound work completed")
     (is (some #(and (seq? %) (= 'not-join (first %))) where)
-        "a run close at or after the message transaction covers that message")))
+        "an ordinary run close at or after the message covers that message")))
 
 (deftest wake-and-replay-share-one-run-loop
   (async done

@@ -596,6 +596,8 @@
      (not-join [?agent ?message-tx]
        [?run :seon.agent.run/agent ?agent]
        [?run :seon.agent.run/status :closed ?close-tx]
+       [?run :seon.agent.run/closed-reason ?close-reason]
+       [(not= ?close-reason :quiesced)]
        [(>= ?close-tx ?message-tx)])]
    :order-by '[?message-tx :asc ?message :asc]
    :limit 1})

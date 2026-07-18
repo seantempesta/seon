@@ -25,6 +25,13 @@ Raising the allowance from one to 64 only postponed the same failure: on the
 populated default database, a clean restart on 2026-07-18 logged this error for
 every resumed agent, including root, before any committed work could run.
 
+After the resource-budget repair, a live restart exposed the next part of the
+same selection contract. Message `ss2aycwqs99i` committed for
+`tricky-terms-shine`; planned quiescence closed its just-opened run as
+`:quiesced`. The replacement pod resumed the agent as idle, but the committed
+work query treated that infrastructure close as completed coverage. The agent
+retained only the original human message and produced no reply.
+
 ## Owner
 
 `seon.agent.loop/acquire-committed-work` owns the batched agent pull and
@@ -36,3 +43,5 @@ pending-inbound query.
 - Its bounded resource allowance is independent of that semantic limit.
 - A focused test asserts both constraints.
 - Restart recovery opens and completes the already-committed agent run.
+- A `:quiesced` infrastructure close does not claim that its inbound message
+  was completed; an ordinary terminal run close still covers prior messages.
