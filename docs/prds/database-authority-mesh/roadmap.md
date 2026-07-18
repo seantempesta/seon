@@ -3181,3 +3181,52 @@ second JVM. Its integrated proof must also show independent database work is
 admitted concurrently rather than merely multiplexed through one global
 request lane. Complete correctness, real-browser, multi-agent load, and
 measured CPU/memory/latency remain the later graduation gates.
+
+### 2026-07-18 autonomous shared-writer cluster implementation
+
+The stronger experimental-cluster contract is now implemented through the one
+operator rather than a parallel supervisor. Commit `f8a25f30` separates two
+facts that the prior launch path conflated: `:seon.client/autonomous?` controls
+whether a pod runs agent/ticker/recovery behavior, while the descriptor's
+existing writer-owner process directory determines whether that operator owns
+the watcher and writer. An autonomous pod can therefore treat the source
+watcher and sole JVM writer as external dependencies without launching another
+JVM.
+
+Commit `8243adc0` adds `cluster open|restart|close|status NAME` as thin
+operations over `process/ensure!`, `process/clean-or-force!`,
+`process/status`, and startup ownership. Cluster close preserves the database
+and blobs; it has no branch phase record because ordinary database ensure is
+idempotent and performs no operator-side branch mutation. Focused launch proof
+passes 10 tests/60 assertions, process proof passes 56/279, and combined
+cluster/CLI proof passes 39/120.
+
+The JVM concurrency claim is now integrated rather than inferred. Commit
+`25f926fa` drives real transactions through the complete writer and Datahike
+boundary: first mutations for databases A and B enter together, A's second
+mutation waits for A's first, and all three facts commit only to their selected
+database. The focused proof passes 1 test/8 assertions. Read concurrency,
+single-flight, delivery ordering, and fair database rotation retain their
+existing executor and writer-query proof.
+
+The first fresh autonomous launch exposed two initialization omissions. Commit
+`adfcda14` derives declarations from canonical
+`{:seon.db/entity true}` schema forms in addition to explicitly selected
+dataless attributes; writer initialization passes 4 tests/20 assertions.
+Commit `879e3497` moves fresh/config-free manifest selection into
+`seon.dev.config` so it evaluates the selected cluster database path; combined
+cluster, CLI, and config proof passes 43/143. Commit `ddf0b187` includes the
+already-resolved config singleton in the same atomic program and initial-data
+transaction, making every published initialized database capable of
+config-free recovery; focused client proof passes 7/22.
+
+The next fresh attempt reached config reconciliation and falsified a maintained
+Datahike executor edge: a fused indexed merge whose input-bound attribute is
+not installed resolves that attribute to nil and passes it to EAVT `lookupGE`,
+where `cmp-attr-quick` throws. The correct Datalog result is zero rows for that
+positive merge. This dependency defect is the earliest unsettled contract.
+Its integrated proof is a focused Datahike regression followed by a genuinely
+fresh autonomous cluster that becomes ready, runs an agent, isolates writes
+and feeds, restarts only its pod, reopens config-free, and closes without
+changing the default pod or sole writer generation. Complete correctness,
+real-browser, load, and measured resource gates remain ordered after it.
