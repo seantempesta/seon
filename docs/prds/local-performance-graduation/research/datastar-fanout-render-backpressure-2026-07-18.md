@@ -112,3 +112,44 @@ and root journeys while remaining inside the 1/2/4-child memory budgets.
 
 Browser morph timing remains a separate missing sample. It should use the same
 complete event and real page, not infer browser cost from server completion.
+
+## Real Chrome follow-up
+
+A headless installed Google Chrome loaded the actual root shim, Datastar
+JavaScript, and long-lived feed. The cold page reached a populated `#app-view`
+in 1,466.8 ms with no console errors, matching the server's cold-child sample.
+
+A real `POST /agents` changed both database data and the shared program by
+adding the new agent namespace. Chrome observed the updated 14-agent view at
+1,969.4 ms. The server recorded one 28,117-byte event and 1,388.6 ms rendering;
+the structural coalescer accounts for approximately 300 ms. Source inspection
+and the subsequent warm sample establish that this was current-program
+reacquisition, not browser morph cost or per-client rendering.
+
+Two root-canvas writes then isolated data-only behavior. The first arrived
+after idle retirement and recorded 1,262.3 ms server rendering. A second write
+issued immediately afterward recorded 19.228 ms server rendering, and Chrome's
+first DOM mutation occurred 709.3 ms after the external measurement was armed.
+That browser figure is a conservative end-to-end upper bound because it
+includes the cross-tool transaction request plus the 300 ms structural settle;
+the browser-specific morph is not separately instrumented.
+
+These samples strengthen the existing owner rather than suggesting another
+renderer: ordinary warm rendering is small, while idle retirement and program
+reacquisition dominate visible latency.
+
+## Selected retention experiment
+
+The first policy cut changes the one execution-host idle default from 30
+seconds to five minutes. This is long enough to cover ordinary reading,
+thinking, and interactive work without tying child lifetime to browser sockets.
+It still reclaims inactive process memory deterministically and retains the
+existing immediate explicit stop path. Focused host proof asserts the selected
+default and preserves lazy spawn, reuse, reconfiguration, cancellation, and
+shutdown behavior.
+
+The five-minute value is not a permanent universal constant. Final load proof
+must report retained child count and physical footprint during realistic
+one-off and specialist work. A small configurable pool of ordinary generated
+agents, proactively current with the shared program, remains a separate
+measured design candidate for instant assignment.

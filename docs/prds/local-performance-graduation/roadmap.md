@@ -80,6 +80,17 @@ queue. The current material tradeoff is therefore execution-child retention
 versus cold UI latency. Real browser morph timing and visible-page retention
 policy evidence remain before changing the existing supervisor.
 
+Real Chrome then reached the cold populated root view in 1,466.8 ms with no
+console errors. Agent birth, which also adds a program namespace, morphed at
+1,969.4 ms and spent 1,388.6 ms reacquiring/rendering through the current
+execution child. An immediate data-only follow-up rendered server-side in
+19.228 ms; Chrome's first mutation was a conservative 709.3 ms end-to-end upper
+bound including the external transaction call and 300 ms structural settle.
+The first simple policy cut therefore changes the one child idle default from
+30 seconds to five minutes. Focused host proof must pass before a coordinated
+restart confirms the live configuration; realistic retained-child/load evidence
+will determine whether that remains the default.
+
 The Bun source audit
 [[research/bun-production-runtime-integration-audit-2026-07-15]] establishes a
 candidate full JavaScript-runtime migration after exact-artifact parity: Shadow

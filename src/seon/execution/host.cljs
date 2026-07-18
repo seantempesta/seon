@@ -9,7 +9,7 @@
    [seon.subprocess :as subprocess]))
 
 (def ^:private default-ready-timeout-ms 10000)
-(def ^:private default-idle-timeout-ms 30000)
+(def ^:private default-idle-timeout-ms 300000)
 (def ^:private default-cancel-grace-ms 1000)
 (def ^:private maximum-tail-characters (* 16 1024))
 

@@ -16,6 +16,9 @@
    :history false
    :datahike/commit-id #uuid "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"})
 
+(deftest default-idle-retention-covers-ordinary-interactive-work
+  (is (= 300000 @#'host/default-idle-timeout-ms)))
+
 (defn descriptor []
   (launch/with-execution-artifact
    {::launch/descriptor

@@ -4131,3 +4131,13 @@ contract is the measured process-retention tradeoff plus real browser morph
 time: compare the current timeout, an open-feed child lease, and a longer
 timeout using actual interaction latency and the existing physical-memory
 budgets before changing `seon.execution.host`.
+
+Real Chrome confirms the same boundary. Cold root first paint completed in
+1,466.8 ms without console errors. A real agent birth changed the shared program
+and reached the browser at 1,969.4 ms, including 1,388.6 ms execution-child
+rendering and the structural settle. An immediately repeated data-only render
+took 19.228 ms server-side. The selected first cut is the simplest existing
+owner change: retain idle execution children for five minutes instead of 30
+seconds, then use explicit stop/destroy for one-off work. A coordinated restart
+and realistic child-count/physical-memory proof must confirm the new default;
+no feed-coupled lease or warm-pool mechanism is added by this cut.
