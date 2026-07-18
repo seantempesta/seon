@@ -33,6 +33,20 @@ than reopened as current findings. Unit 9 still lacks a retained operator
 measurement envelope for V8/JVM heap, event-loop delay, CPU/RSS, feed pressure,
 phase/payload/browser timings, and complete source/artifact/database identity.
 
+The first exact source-free 1/2/4-child matrix is green for release
+`4073c7fadf45c841c0dbf20622456509f1c762eb8a35c77bf4a334a6f8406b1e`.
+After explicit settled-heap collection, writer plus pod retained 827.3 MiB
+physical footprint; including containment helpers remained about 875 MiB.
+One- and two-child samples remained below 250 MiB retained and 450 MiB peak.
+Four simultaneous post-bootstrap children retained 174.1--222.3 MiB each and
+peaked at 310.5--375.0 MiB; the complete process tree remained about 1.66 GiB
+including containment. Four ordinary agents completed exact replies, all
+children retired, package restart read the committed result back through the
+Datastar feed, release verification remained green, and package shutdown was
+clean. Loopback is deliberately uncompressed under native `Bun.serve`; the
+remote configurable-compression journey remains pending rather than restoring
+the removed per-feed gzip machinery.
+
 The Bun source audit
 [[research/bun-production-runtime-integration-audit-2026-07-15]] establishes a
 candidate full JavaScript-runtime migration after exact-artifact parity: Shadow

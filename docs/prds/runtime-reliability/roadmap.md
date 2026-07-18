@@ -177,6 +177,34 @@ all with zero failures or errors. The current artifact therefore enters
 resource measurement with both the real grown feed and every maintained code
 gate proven.
 
+Source-free release
+`4073c7fadf45c841c0dbf20622456509f1c762eb8a35c77bf4a334a6f8406b1e`
+now passes the exact 1/2/4-child resource boundary from a relocated tree and an
+external state directory. Its process tree contained the 512 MiB JVM writer,
+Bun pod, and demanded Bun execution children, with no Shadow watcher, Clojure
+development process, or producer-checkout runtime path. After the same explicit
+settled-heap collection used by the baseline, writer plus pod retained 827.3
+MiB physical footprint, or about 875 MiB including containment helpers, below
+the 900 MiB hard limit. One child retained 231.5 MiB with a 310.7 MiB peak; two
+retained 216.2 and 233.0 MiB with 328.6 and 341.1 MiB peaks. Four simultaneous
+post-bootstrap children retained 174.1--222.3 MiB each with 310.5--375.0 MiB
+peaks. Fixed runtime plus those four was about 1.61 GiB, or 1.66 GiB including
+containment, below both the 1.8 GiB improvement target and 2.0 GiB hard limit.
+Four ordinary agents independently completed exact replies under the same
+package; a separate four-child delayed-work sample exercised the retained and
+peak measurements. One thousand four-way loopback requests observed 0.29 ms
+p50, 0.80 ms p95, 1.11 ms p99, and 1.80 ms maximum time to first byte.
+
+The relocated package then restarted cleanly and served the previously
+committed `four-b green` result through a complete Datastar patch. Its own
+operator reverified the release inventory after runtime use, every child had
+retired, and `down` drained the Bun pod and JVM writer cleanly. Generated state
+remained outside the immutable package. Native `Bun.serve` intentionally keeps
+loopback SSE uncompressed; remote configurable compression remains a separate
+transport graduation item and is not silently represented as a gzip result.
+The remaining ordered gate is downstream ACME against this settled release,
+then the remote compression/complete final matrix.
+
 The existing remote query surface now exposes its protocol-native historical
 view, closing the only facade gap needed by coordinate-pinned startup birth.
 LLM configuration and brand startup sync also use bounded coordinate-fenced
