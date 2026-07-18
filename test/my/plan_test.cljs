@@ -43,6 +43,21 @@
                  (:my.plan/_parent
                    (internal/subtree-from-rows rows "root")))))))
 
+(deftest html-renderer-matches-the-dynamic-render-interface
+  (async done
+    (let [original-query db/query]
+      (set! db/query (fn [_] (js/Promise.resolve rows)))
+      (-> (internal/plan-block-html
+           {:seon.db/db database :seon.agent/id agent-id}
+           (fn [_] (js/Promise.resolve [])))
+          (.then
+           (fn [hiccup]
+             (is (vector? hiccup))
+             (is (str/includes? (pr-str hiccup) "Ship"))))
+          (.finally (fn [] (set! db/query original-query)))
+          (.then (fn [_] (done)))
+          (.catch (fn [error] (is false (str error)) (done)))))))
+
 (deftest mutation-is-fenced-by-the-read-snapshot
   (async done
     (let [request (atom nil)

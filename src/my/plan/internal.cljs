@@ -1708,9 +1708,9 @@
    completed tail expands on click. No plan → a quiet one-liner (the
    teaching text in [[empty-plan-teaching]] is for the model, not the
    human)."
-  {:malli/schema [:=> [:cat :seon.render/section-request]
+  {:malli/schema [:=> [:cat :seon.render/section-request :any]
                   :seon.render.canvas/hiccup]}
-  [{database :seon.db/db agent-id :seon.agent/id}]
+  [{database :seon.db/db agent-id :seon.agent/id} _invoke-selected!]
   (let [database (or database (await (db/db)))
         rows (if (:seon.error/message database)
                database
