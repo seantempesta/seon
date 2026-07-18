@@ -899,6 +899,10 @@
                  pod-id]))
       (random-uuid)))
 
+(defn- control-socket-file [generation]
+  (let [value (str generation)]
+    (str (subs value 0 (min 16 (count value))) ".sock")))
+
 (defn- spawn-detached!
   ([config spec] (spawn-detached! config spec {}))
   ([config spec {:seon.dev.process/keys [gated? application-result-path]}]
@@ -915,7 +919,7 @@
               (or (:seon.dev.config/containment-socket-dir config)
                   (fs/path (:seon.dev.config/root config)
                            "tmp" "seon-containment"))
-              (str generation ".sock")))
+              (control-socket-file generation)))
         result-path (str (fs/path containment-dir "result.json"))
         application-result-path
         (or application-result-path
