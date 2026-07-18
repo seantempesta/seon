@@ -3709,3 +3709,43 @@ database interest removed its wake input without a direct child-side unhost
 call. A clean pod restart had already reconstructed every nonterminated agent
 through `seon.agent.runtime` directly. Durable lifecycle functions and
 process-local hosting are therefore separated in both directions.
+
+### 2026-07-18 execution-child evidence checkpoint
+
+The execution-child failure boundary now closes with parent-owned evidence
+instead of a cooperative heartbeat or always-on profiler. Vendored Bun commit
+`d8ecf098` adds `Subprocess.resourceUsage({live: true})`, which samples
+cumulative CPU time and current RSS from the retained process handle while a
+child is still running, including when its JavaScript event loop is blocked.
+The no-argument post-exit API remains unchanged. The outer source/report commit
+is `42de0721`; host macOS plus aarch64 Linux and Windows cargo checks pass. A
+native Bun debug execution remains gated by this host's missing LLVM 21.1 and
+is recorded in the owning Bun audit rather than treated as runtime proof.
+
+Commits `fb1acc24` and `eebac771` expose that primitive through the one
+`seon.subprocess` control value and the one `seon.execution.host` owner. A
+demanded `processes` call returns ordinary namespaced data for each live child:
+agent ID, PID, exact artifact digest, readiness/retirement state, active
+invocation identity and deadline, bounded output tails, CPU time, and RSS. It
+does no polling, caching, child IPC, or database write. Parent deadline
+retirement takes the same sample before cancellation, so a non-cooperating
+child cannot hide its resource evidence.
+
+Commit `80b0c96d` carries only terminal evidence through turn and loop error
+values into the existing atomic scoped recovery transaction. Queryable bounded
+fields live on the recovery entity; the full ordinary-data report is stored as
+content-addressed EDN through `my.blob` and referenced by
+`:seon.runtime.recovery/diagnostic-blob`. Healthy samples remain transient.
+The complete ClojureScript gate passes 1,128 tests and 5,006 assertions with no
+warnings, failures, or errors.
+
+The earliest unsettled contract is now the bounded automatic recovery policy:
+one fresh run after a child failure, followed by no further automatic run when
+the replacement child fails before completing useful work. Its stop condition
+must be derived from recovery, run, turn, and eval history; a second mutable
+counter or supervisor registry is forbidden. The integrated proof must show
+the first replacement uses a clean child without replaying the interrupted
+eval, and the second immediate failure wakes root through the existing inbound
+message path with the recorded recovery and blob refs. Source-free packaging,
+browser/load/multi-cluster proof, resource budgets, and the measured
+`Bun.serve` cut remain the final graduation gates.
