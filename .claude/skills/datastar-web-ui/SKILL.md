@@ -15,7 +15,7 @@ datahike commit re-renders a whole element and morphs it in place.
 > async) → **`clojurescript`**; data-oriented mindset → **`data-oriented-clojure`**;
 > verifying a page in a real browser → **`browser-automation`**.
 
-## The one live model: `view = f(db)`, gzip-morphed from database changes
+## The one live model: `view = f(db)`, morphed from database changes
 
 `seon.web.datastar` ports the hyperlith pattern into the pod. There is no
 action-specific refresh path, no `refresh-all!`, and no second signal-diffing
@@ -25,7 +25,9 @@ channel:
    initial paint is the complete `#app-view`; a structural change also falls
    back to that complete element.
 2. Each page is **two routes**: a tiny **shim page** (GET) and a **separate
-   long-lived `/feed` GET** that is a gzip-compressed SSE stream. Root `/`
+   long-lived `/feed` GET** SSE stream. Loopback uses identity encoding;
+   remote deployments explicitly set `SEON_FEED_COMPRESSION=gzip` and still
+   negotiate `Accept-Encoding`. Root `/`
    reuses the agent shim for `root`, whose external opener GETs
    `/agent/root/feed`; ordinary agents GET `/agent/{id}/feed`.
 3. `!feeds` normalizes equivalent views into one subscription. One stable
@@ -36,7 +38,8 @@ channel:
 4. Recorded database reads select the dirty units. Each read runs once against
    the immutable before/after values; equal results and equal serialized output
    are suppressed. Complete dirty elements are combined into one
-   `datastar-patch-elements` event and sync-flushed through gzip.
+   `datastar-patch-elements` event and promptly flush through the selected
+   response encoding.
 5. Datastar's client-side `idiomorph` morphs each complete pushed element into
    the live DOM. Default patch mode is `outer`, so the stable element ID is the
    unit boundary.
@@ -49,23 +52,23 @@ the morph engine must be crash-proof. Source: `src/seon/web/datastar.cljs`
 
 ### Historical feeds carry complete identity
 
-`view = f(db)` rendered against an exact immutable database point is naturally
-FROZEN. A historical `/agent/{id}/feed` request supplies all four canonical
-query fields: `database-id`, `branch`, `commit-id`, and `t`. The server resolves
-that point through `seon.db/at-coordinate`, keys the frozen subscription by the
-complete coordinate, and echoes it in `Seon-Database-Coordinate`. Supplying
-only `t`, a partial coordinate, or a malformed coordinate returns 422; it never
-silently opens the live feed. With none of the four fields, the feed is live.
+`view = f(db)` rendered against an exact immutable database value is naturally
+FROZEN. A historical `/agent/{id}/feed` request supplies all four Proximum
+branch-head fields: `store-id`, `branch`, `commit-id`, and `basis-t`. The server
+uses that branch head as the frozen subscription key and echoes it in
+`Seon-Database-Branch-Head`. A partial or malformed branch head returns 422; it
+never silently opens the live feed. With none of the fields, the feed is live.
 (`open-agent-feed!`.)
 
 ## CRITICAL: verify the stream SERVER-SIDE, not in the browser agent
 
 The in-tool Chrome agent's network layer **503s long-lived
 `text/event-stream`** connections, so you cannot confirm a feed morphs by
-watching it in the browser MCP. Verify the feed server-side: a tiny Node client
-that GETs `/agent/root/feed` or `/agent/{id}/feed`, gunzips the response stream, and prints the
+watching it in the browser MCP. Verify the feed server-side with a client that
+GETs `/agent/root/feed` or `/agent/{id}/feed`, negotiates the configured
+encoding, and prints the
 `datastar-patch-elements` frames — plus a human eyeball on the real page. Don't
-trust "the browser agent saw nothing"; trust the gunzip client + `logs/pod.log`
+trust "the browser agent saw nothing"; trust the server-side client + `logs/pod.log`
 (the `FEED OPEN` / `broadcast` lines). See **`browser-automation`** for the
 browser side and its limits.
 

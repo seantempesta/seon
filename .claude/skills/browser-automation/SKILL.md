@@ -16,8 +16,8 @@ via ToolSearch first (one batched `select:` call — see the MCP server note).
 
 ## The KEY limit: SSE streams DON'T verify in the browser agent
 
-The Datastar UI is `view = f(db)` morphed over a **long-lived gzip
-`text/event-stream`** (`/agent/root/feed`, `/agent/{id}/feed`, `/data/feed`,
+The Datastar UI is `view = f(db)` morphed over a long-lived
+`text/event-stream` (`/agent/root/feed`, `/agent/{id}/feed`, `/data/feed`,
 and `/agent/{id}/debug/feed`). The in-tool Chrome
 agent's network layer **503s long-lived event-streams**, so the page may load
 the shim but never receive a morph in the agent's view — that is a tooling
@@ -25,8 +25,9 @@ artifact, NOT a broken feed.
 
 So: confirm a feed actually pushes **server-side**, not in the browser.
 
-- A tiny Node client that GETs the `/feed` URL, gunzips the stream, and prints
-  the `datastar-patch-elements` frames (the feed is `Content-Encoding: gzip`).
+- A server-side client that GETs the `/feed` URL and prints the
+  `datastar-patch-elements` frames. Loopback defaults to identity encoding;
+  explicitly configured remote mode negotiates `Content-Encoding: gzip`.
 - `bin/seon logs pod --follow` — the `FEED OPEN` / `broadcast` lines prove the
   tx-listener fired and pushed.
 - A human eyeball on the real page.
