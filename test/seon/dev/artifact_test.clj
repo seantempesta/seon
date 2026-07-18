@@ -13,6 +13,61 @@
     (.write stream (.getBytes (str value) "UTF-8"))
     (.closeEntry stream)))
 
+(deftest bun-identity-binds-the-executable-bytes-and-full-revision
+  (let [identity (artifact/bun-identity! {})]
+    (is (fs/absolute? (:seon.dev.artifact/bun-executable identity)))
+    (is (re-matches #"[0-9a-f]{64}"
+                    (:seon.dev.artifact/bun-executable-digest identity)))
+    (is (re-matches #"[0-9]+\.[0-9]+\.[0-9]+.*"
+                    (:seon.dev.artifact/bun-version identity)))
+    (is (re-matches #"[0-9a-f]{40}"
+                    (:seon.dev.artifact/bun-revision identity)))
+    (is (artifact/bun-executable-current? identity))
+    (is (not (artifact/bun-executable-current?
+              (assoc identity :seon.dev.artifact/bun-executable-digest
+                     (apply str (repeat 64 "0"))))))))
+
+(deftest source-css-build-uses-the-selected-bun-executable
+  (let [commands (atom [])
+        bun {:seon.dev.artifact/bun-executable "/selected/bun"}
+        config {:seon.dev.config/root "/checkout"
+                :seon.dev.config/environment {}}]
+    (with-redefs [artifact/prepare-dependencies-unlocked! (fn [_ _])
+                  artifact/ensure-writer! (fn [_])
+                  artifact/run-step!
+                  (fn [_ label argv] (swap! commands conj [label argv]))]
+      (#'artifact/build-source! config bun))
+    (is (= ["build web CSS" ["/selected/bun" "run" "css:build"]]
+           (last @commands)))))
+
+(deftest application-digest-includes-every-bun-identity-field
+  (let [digest (apply str (repeat 64 "d"))
+        config {:seon.dev.config/artifact-flavor
+                :seon.dev.artifact.flavor/default
+                :seon.dev.config/client-build-id "client"
+                :seon.dev.config/client-output "out/client.js"
+                :seon.dev.config/shadow-cache-root ".shadow-cljs"
+                :seon.dev.config/execution-build-id "execution"
+                :seon.dev.config/execution-output "out/execution.js"}
+        bun {:seon.dev.artifact/bun-executable "/bun"
+             :seon.dev.artifact/bun-executable-digest digest
+             :seon.dev.artifact/bun-version "1.3.14"
+             :seon.dev.artifact/bun-revision (apply str (repeat 40 "a"))}
+        application-digest
+        (fn [identity]
+          (#'artifact/derive-application-digest
+           config identity [] digest digest digest digest digest digest))
+        initial (application-digest bun)]
+    (doseq [[field changed]
+            [[:seon.dev.artifact/bun-executable "/other-bun"]
+             [:seon.dev.artifact/bun-executable-digest
+              (apply str (repeat 64 "e"))]
+             [:seon.dev.artifact/bun-version "1.3.15"]
+             [:seon.dev.artifact/bun-revision
+              (apply str (repeat 40 "b"))]]]
+      (is (not= initial (application-digest (assoc bun field changed)))
+          (str field " contributes to application identity")))))
+
 (deftest artifact-digest-is-content-addressed
   (let [directory (fs/create-temp-dir {:prefix "seon-artifact-test-"})
         first-file (fs/path directory "a.txt")
@@ -231,12 +286,14 @@
     (with-redefs-fn
       {#'artifact/with-build-lock
        (fn [_ build] (build))
+       #'artifact/bun-identity! (constantly {})
+       #'artifact/bun-executable-current? (constantly true)
        #'artifact/build-source!
-       (fn [_] (swap! events conj :source))
+       (fn [_ _] (swap! events conj :source))
        #'artifact/read-manifest
        (constantly nil)
        #'artifact/output-manifest
-       (fn [_] (swap! events conj :manifest) manifest)
+       (fn [_ _] (swap! events conj :manifest) manifest)
        #'artifact/atomic-spit!
        (fn [_ value] (swap! events conj :publish) value)}
       #(let [result (artifact/build!
@@ -248,7 +305,8 @@
 (deftest source-publication-requires-the-managed-watcher
   (let [config {:seon.dev.config/source-checkout? true}]
     (with-redefs-fn
-      {#'artifact/with-build-lock (fn [_ build] (build))}
+      {#'artifact/with-build-lock (fn [_ build] (build))
+       #'artifact/bun-identity! (constantly {})}
       #(is (= :seon.dev.artifact.failure/missing-client-owner
               (try
                 (artifact/build! config)
@@ -263,10 +321,12 @@
                 :seon.dev.config/artifact-manifest "/unused/artifact.edn"}]
     (with-redefs-fn
       {#'artifact/with-build-lock (fn [_ build] (build))
-       #'artifact/build-source! (fn [_])
+       #'artifact/bun-identity! (constantly {})
+       #'artifact/bun-executable-current? (constantly true)
+       #'artifact/build-source! (fn [_ _])
        #'artifact/read-manifest
        (fn [_] (throw (ex-info "obsolete manifest" {})))
-       #'artifact/output-manifest (constantly published)
+       #'artifact/output-manifest (fn [_ _] published)
        #'artifact/atomic-spit! (fn [_ value] value)}
       #(is (= (assoc published
                      :seon.dev.artifact/changed
@@ -611,18 +671,19 @@
                     (fn [_ bootstrap-digest execution-digest runtime-digest]
                       (str "/runtime/" bootstrap-digest "-" execution-digest
                            "-" runtime-digest))]
-        (let [initial (#'artifact/output-manifest config)]
+        (let [bun (artifact/bun-identity! {})
+              initial (#'artifact/output-manifest config bun)]
           (swap! dependencies assoc-in
                  [0 :seon.dev.artifact/dependency-git-sha]
                  (apply str (repeat 40 "9")))
-          (let [dependency-change (#'artifact/output-manifest config)]
+          (let [dependency-change (#'artifact/output-manifest config bun)]
             (is (not= (:seon.dev.artifact/application-digest initial)
                       (:seon.dev.artifact/application-digest
                        dependency-change))))
           (reset! dependencies
                   (#'artifact/maintained-dependencies-from (maintained-deps)))
           (write-test-jar! writer "writer-b")
-          (let [writer-change (#'artifact/output-manifest config)]
+          (let [writer-change (#'artifact/output-manifest config bun)]
             (is (not= (:seon.dev.artifact/application-digest initial)
                       (:seon.dev.artifact/application-digest writer-change))))))
       (finally (fs/delete-tree directory)))))
@@ -635,6 +696,8 @@
                 :seon.dev.config/artifact-flavor
                 :seon.dev.artifact.flavor/default}
         manifest
+        (merge
+        (artifact/bun-identity! {})
         {:seon.dev.artifact/version artifact/current-version
          :seon.dev.artifact/published-at "2026-07-14T00:00:00Z"
          :seon.dev.artifact/flavor :seon.dev.artifact.flavor/default
@@ -653,7 +716,7 @@
          :seon.dev.artifact/execution-runtime-digest digest
          :seon.dev.artifact/bootstrap-digest digest
          :seon.dev.artifact/css-digest digest
-         :seon.dev.artifact/application-digest digest}]
+         :seon.dev.artifact/application-digest digest})]
     (try
       (spit path (pr-str manifest))
       (is (= manifest (artifact/read-manifest config)))

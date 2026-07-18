@@ -210,13 +210,15 @@
                 (str (fs/path directory "pod-port"))})))
 
 (def target-manifest
-  {:seon.dev.artifact/flavor :seon.dev.artifact.flavor/default
+  (merge
+   (artifact/bun-identity! {})
+   {:seon.dev.artifact/flavor :seon.dev.artifact.flavor/default
    :seon.dev.artifact/client-build-id "client"
    :seon.dev.artifact/execution-build-id "execution"
    :seon.dev.artifact/client-digest (apply str (repeat 64 "c"))
    :seon.dev.artifact/execution-digest (apply str (repeat 64 "e"))
    :seon.dev.artifact/writer-digest "writer"
-   :seon.dev.artifact/application-digest "application"})
+    :seon.dev.artifact/application-digest "application"}))
 
 (defn- target-manifest-for [configuration]
   (assoc target-manifest
@@ -2010,25 +2012,29 @@
              (process/admit-watcher-artifact! configuration manifest))))
       (finally (fs/delete-tree directory)))))
 
-(deftest pod-runtime-defaults-to-bun-and-remains-explicitly-selectable
+(deftest pod-runtime-is-bound-to-the-published-bun-executable
   (let [base (test-config)
         configuration
         (target-config base (:seon.dev.test/directory base))
-        bun-pod (get (process/specs configuration
-                                    (target-manifest-for configuration))
-                     process/pod-id)
-        node-configuration
-        (update configuration :seon.dev.config/environment
-                assoc "SEON_JS_RUNTIME" "node")
-        node-pod (get (process/specs node-configuration
-                                     (target-manifest-for node-configuration))
-                      process/pod-id)]
-    (is (= "bun" (first (:seon.dev.process/argv bun-pod))))
-    (is (= "node" (first (:seon.dev.process/argv node-pod))))
-    (is (= (rest (:seon.dev.process/argv node-pod))
-           (rest (:seon.dev.process/argv bun-pod))))
-    (is (= (:seon.dev.process/artifact-digest node-pod)
-           (:seon.dev.process/artifact-digest bun-pod)))))
+        manifest (target-manifest-for configuration)
+        pod (get (process/specs configuration manifest) process/pod-id)]
+    (is (= (:seon.dev.artifact/bun-executable manifest)
+           (first (:seon.dev.process/argv pod))))
+    (is (= (:seon.dev.config/client-output configuration)
+           (second (:seon.dev.process/argv pod))))))
+
+(deftest process-specs-reject-changed-bun-executable-bytes
+  (let [base (test-config)
+        configuration
+        (target-config base (:seon.dev.test/directory base))
+        manifest
+        (assoc (target-manifest-for configuration)
+               :seon.dev.artifact/bun-executable-digest
+               (apply str (repeat 64 "0")))]
+    (is (thrown-with-msg?
+         clojure.lang.ExceptionInfo
+         #"Bun executable is missing or changed"
+         (process/specs configuration manifest)))))
 
 (deftest process-specs-require-published-execution-coordinates
   (let [base (test-config)

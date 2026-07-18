@@ -10,7 +10,7 @@
 #                                 # reuse the current bundle for one test var
 #   bin/test-cljs --verbose       # stream the full transcript to the terminal
 #
-# Config seam (per-test manifest): the node test process inherits this shell's
+# Config seam (per-test manifest): the Bun test process inherits this shell's
 # env, so a run names its own manifest via SEON_CONFIG / SEON_PROFILE — the SAME
 # seam bin/seon + bin/acme expose (seon.config reads them):
 #   SEON_CONFIG=config/system.edn bin/test-cljs      # the dev-pod manifest
@@ -30,7 +30,7 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 source bin/_java-home-resolver
 
-# A Ctrl-C during the final `node | tee` pipeline used to leave the Node test
+# A Ctrl-C during the final `bun | tee` pipeline used to leave the Bun test
 # child reparented to launchd, where it kept a CPU core busy indefinitely.
 # Kill every direct child while this shell still owns them; normal completion
 # has no live children, so the EXIT arm is a no-op. The lock is acquired below
@@ -61,10 +61,10 @@ export SEON_RENDER_STRICT="${SEON_RENDER_STRICT:-1}"
 
 # Core-fault dial per surface (error-blame-strict-gate, RULED 2026-07-04):
 # the SUITE/CI runner MUST stay :gate (a mid-run :core fault must NOT .exit
-# the shared node-test runner), while the dev pod may run :crash. The
+# the shared Shadow test runner), while the dev pod may run :crash. The
 # sanctioned ONE-manifest path for a per-surface divergence is a SEPARATE
 # file (no #profile, env must not shadow config): config/test.edn leaves
-# :seon.config/on-core-error UNSET → the :gate default. Both the node-test
+# :seon.config/on-core-error UNSET → the :gate default. Both the Bun test
 # RUNTIME (seon.error/escalate! reads config/on-core-error) and the gate
 # below read this file, so they agree. An explicit SEON_CONFIG still wins.
 export SEON_CONFIG="${SEON_CONFIG:-config/test.edn}"
@@ -351,10 +351,17 @@ if [ ! -f "out/test/test.js" ]; then
 fi
 
 echo ""
-JS_RUNTIME="${SEON_JS_RUNTIME:-bun}"
-echo "== Running tests ($JS_RUNTIME out/test/test.js) =="
+BUN_EXECUTABLE="$(command -v bun 2>/dev/null || true)"
+if [ -z "$BUN_EXECUTABLE" ]; then
+  echo "bun is required to run the ClojureScript tests"
+  exit 2
+fi
+BUN_EXECUTABLE="$(cd "$(dirname "$BUN_EXECUTABLE")" && pwd -P)/$(basename "$BUN_EXECUTABLE")"
+echo "== Running tests ($BUN_EXECUTABLE out/test/test.js) =="
+echo "bun version: $("$BUN_EXECUTABLE" --version)"
+echo "bun revision: $("$BUN_EXECUTABLE" --revision)"
 JAVASCRIPT_START=$(date +%s)
-JAVASCRIPT_CMD=("$JS_RUNTIME" out/test/test.js)
+JAVASCRIPT_CMD=("$BUN_EXECUTABLE" out/test/test.js)
 if [ "${#TEST_ARGS[@]}" -gt 0 ]; then
   JAVASCRIPT_CMD+=("${TEST_ARGS[@]}")
 fi
@@ -409,7 +416,7 @@ JAVASCRIPT_ELAPSED=$((JAVASCRIPT_END - JAVASCRIPT_START))
 # as one async block (cljs.test/run-block). An async test that never calls its
 # `done` continuation breaks the chain — finish-test-run never runs, so the
 # :summary / :end-run-tests reports never fire, `js/process.exit` is never
-# called, node's event loop drains, and node exits 0. Every namespace sorted
+# called, Bun's event loop drains, and Bun exits 0. Every namespace sorted
 # after the staller is then silently skipped: a FALSE GREEN (this is exactly
 # how a /call RCE once shipped "green").
 #
@@ -528,7 +535,7 @@ ELAPSED=$((END - START))
 echo ""
 echo "========================================"
 echo "compile: ${COMPILE_STATUS}"
-echo "$JS_RUNTIME: ${JAVASCRIPT_ELAPSED}s; namespaces started: ${RAN}; exit: ${JAVASCRIPT_EXIT}"
+echo "$BUN_EXECUTABLE: ${JAVASCRIPT_ELAPSED}s; namespaces started: ${RAN}; exit: ${JAVASCRIPT_EXIT}"
 [ "$REQUESTED_EXACT_COUNT" -gt 0 ] && \
   echo "exact selectors: requested ${REQUESTED_EXACT_COUNT}; matched ${MATCHED_EXACT_COUNT}; executed ${EXECUTED_EXACT_COUNT}"
 [ -n "$SUMMARY_LINE" ] && echo "summary: ${SUMMARY_LINE}  ${COUNTS_LINE}"

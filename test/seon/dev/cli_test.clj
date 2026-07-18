@@ -39,7 +39,23 @@
            :seon.dev.process.containment.status/drained
            :seon.dev.process.containment/trigger
            :seon.dev.process.containment.trigger/requested
-           :seon.dev.process.containment/anchor-exit -9})))
+          :seon.dev.process.containment/anchor-exit -9})))
+
+(deftest doctor-requires-bun-identity-without-node-or-npm
+  (with-redefs-fn
+    {#'cli/command-available? (constantly true)
+     #'artifact/read-manifest (constantly nil)
+     #'artifact/bun-identity!
+     (constantly {:seon.dev.artifact/bun-executable "/exact/bun"})
+     #'shell/sh (constantly {:exit 0
+                             :out "openjdk version \"26\""
+                             :err ""})}
+    #(let [result (#'cli/doctor-value {})
+           checks (:seon.dev.doctor/checks result)]
+       (is (true? (:seon.dev.doctor/healthy? result)))
+       (is (true? (:seon.dev.doctor/bun? checks)))
+       (is (not (contains? checks :seon.dev.doctor/node?)))
+       (is (not (contains? checks :seon.dev.doctor/npm?))))))
 
 (deftest stop-evidence-selects-only-bounded-correlation-fields
   (let [generation #uuid "00000000-0000-0000-0000-000000000001"

@@ -355,12 +355,22 @@
                            (::launch/http-port-file descriptor-process))
                           runtime-root (assoc "SEON_RUNTIME_ROOT" runtime-root))
         java (get environment "JAVA_CMD" "java")
-        javascript-runtime (get environment "SEON_JS_RUNTIME" "bun")
+        bun-identity
+        (select-keys manifest
+                     [:seon.dev.artifact/bun-executable
+                      :seon.dev.artifact/bun-executable-digest
+                      :seon.dev.artifact/bun-version
+                      :seon.dev.artifact/bun-revision])
+        _ (when-not (artifact/bun-executable-current? bun-identity)
+            (throw
+             (ex-info "The published Bun executable is missing or changed."
+                      bun-identity)))
         pod-spec
         (cond->
           {:seon.dev.process/id pod-id
            :seon.dev.process/argv
-           [javascript-runtime (:seon.dev.config/client-output config)]
+           [(:seon.dev.artifact/bun-executable manifest)
+            (:seon.dev.config/client-output config)]
            :seon.dev.process/environment pod-environment
            :seon.dev.process/dependencies
            (if owns-writer-processes? [watcher-id writer-id] [])

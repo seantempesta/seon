@@ -2,6 +2,7 @@
   "Canonical build and content manifest for the Seon development runtime."
   (:require [babashka.fs :as fs]
             [babashka.process :as process]
+            [cheshire.core :as json]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]
@@ -13,7 +14,14 @@
            [java.time Instant]
            [java.util.jar JarFile]))
 
-(def current-version 7)
+(def current-version 8)
+
+(def bun-identity-schema
+  [:map {:closed true}
+   [:seon.dev.artifact/bun-executable :string]
+   [:seon.dev.artifact/bun-executable-digest [:re #"[0-9a-f]{64}"]]
+   [:seon.dev.artifact/bun-version [:re #"[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?"]]
+   [:seon.dev.artifact/bun-revision [:re #"[0-9a-f]{40}"]]])
 
 (def ^:private maintained-dependency-schema
   [:map
@@ -35,6 +43,10 @@
    [:seon.dev.artifact/client-output :string]
    [:seon.dev.artifact/execution-output :string]
    [:seon.dev.artifact/runtime-root :string]
+   [:seon.dev.artifact/bun-executable :string]
+   [:seon.dev.artifact/bun-executable-digest [:re #"[0-9a-f]{64}"]]
+   [:seon.dev.artifact/bun-version [:re #"[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?"]]
+   [:seon.dev.artifact/bun-revision [:re #"[0-9a-f]{40}"]]
    [:seon.dev.artifact/source-input-digest [:re #"[0-9a-f]{64}"]]
    [:seon.dev.artifact/maintained-dependencies
     [:vector {:min 6 :max 6} maintained-dependency-schema]]
@@ -79,6 +91,80 @@
         (when (pos? n-read)
           (.update digest buffer 0 n-read)
           (recur))))))
+
+(defn- file-digest [path]
+  (let [digest (MessageDigest/getInstance "SHA-256")]
+    (with-open [stream (io/input-stream (str path))]
+      (update-stream! digest stream))
+    (bytes->hex (.digest digest))))
+
+(defn- path-executable [environment executable-name]
+  (let [path (get environment "PATH" (System/getenv "PATH"))
+        directories (str/split (or path "") #":" -1)]
+    (or (some (fn [directory]
+                (let [candidate (fs/path (if (str/blank? directory)
+                                           (System/getProperty "user.dir")
+                                           directory)
+                                         executable-name)]
+                  (when (and (fs/regular-file? candidate)
+                             (fs/executable? candidate))
+                    (str (fs/canonicalize candidate)))))
+              directories)
+        (throw (ex-info "Bun is not resolvable from PATH."
+                        {:seon.dev.artifact/executable executable-name})))))
+
+(defn bun-identity!
+  "Read Bun's exact executable, version, and full source revision."
+  {:malli/schema
+   [:=> [:cat [:map
+               [:seon.dev.config/environment {:optional true}
+                [:map-of :string :string]]]]
+    bun-identity-schema]}
+  [config]
+  (let [environment (:seon.dev.config/environment config)
+        executable (path-executable environment "bun")
+        result (process/shell
+                {:out :string :err :string :continue true
+                 :env environment}
+                executable "-e"
+                (str "process.stdout.write(JSON.stringify({"
+                     "executable:process.execPath,"
+                     "version:Bun.version,revision:Bun.revision}))"))]
+    (when-not (zero? (:exit result))
+      (throw (ex-info "Bun identity inspection failed."
+                      {:seon.dev.artifact/bun-executable executable
+                       :seon.dev.artifact/exit (:exit result)
+                       :seon.dev.artifact/error (str/trim (:err result))})))
+    (let [{reported-executable "executable"
+           version "version"
+           revision "revision"} (json/parse-string (:out result))
+          reported-executable (some-> reported-executable fs/canonicalize str)
+          identity {:seon.dev.artifact/bun-executable executable
+                    :seon.dev.artifact/bun-executable-digest
+                    (file-digest executable)
+                    :seon.dev.artifact/bun-version version
+                    :seon.dev.artifact/bun-revision revision}]
+      (when-not (= executable reported-executable)
+        (throw (ex-info "Bun reported another executable identity."
+                        {:seon.dev.artifact/bun-executable executable
+                         :seon.dev.artifact/reported-executable
+                         reported-executable})))
+      (when-not (m/validate bun-identity-schema identity)
+        (throw (ex-info "Bun reported an invalid identity."
+                        {:seon.dev.artifact/explanation
+                         (m/explain bun-identity-schema identity)})))
+      identity)))
+
+(defn bun-executable-current?
+  "True when the manifest-bound Bun executable still has the published bytes."
+  {:malli/schema [:=> [:cat bun-identity-schema] :boolean]}
+  [identity]
+  (let [executable (:seon.dev.artifact/bun-executable identity)]
+    (and (string? executable)
+         (fs/regular-file? executable)
+         (fs/executable? executable)
+         (= (:seon.dev.artifact/bun-executable-digest identity)
+            (file-digest executable)))))
 
 (defn- digest-values [values]
   (let [digest (MessageDigest/getInstance "SHA-256")]
@@ -321,6 +407,10 @@
 
 (def current-output-digests-schema
   [:map {:closed true}
+   [:seon.dev.artifact/bun-executable :string]
+   [:seon.dev.artifact/bun-executable-digest [:re #"[0-9a-f]{64}"]]
+   [:seon.dev.artifact/bun-version :string]
+   [:seon.dev.artifact/bun-revision [:re #"[0-9a-f]{40}"]]
    [:seon.dev.artifact/writer-digest [:re #"[0-9a-f]{64}"]]
    [:seon.dev.artifact/client-digest [:re #"[0-9a-f]{64}"]]
    [:seon.dev.artifact/execution-digest [:re #"[0-9a-f]{64}"]]
@@ -330,9 +420,14 @@
    [:seon.dev.artifact/application-digest [:re #"[0-9a-f]{64}"]]])
 
 (defn- derive-application-digest
-  [config maintained-dependencies writer-digest client-digest execution-digest
+  [config bun maintained-dependencies writer-digest client-digest execution-digest
    execution-runtime-digest bootstrap-digest css-digest]
   (digest-values ["flavor" (:seon.dev.config/artifact-flavor config)
+                  "bun-executable" (:seon.dev.artifact/bun-executable bun)
+                  "bun-executable-digest"
+                  (:seon.dev.artifact/bun-executable-digest bun)
+                  "bun-version" (:seon.dev.artifact/bun-version bun)
+                  "bun-revision" (:seon.dev.artifact/bun-revision bun)
                   "client-build-id" (:seon.dev.config/client-build-id config)
                   "client-output" (:seon.dev.config/client-output config)
                   "shadow-cache-root" (:seon.dev.config/shadow-cache-root config)
@@ -353,6 +448,7 @@
    [:=> [:cat config/configuration-schema] current-output-digests-schema]}
   [config]
   (let [root (:seon.dev.config/root config)
+        bun (bun-identity! config)
         writer-digest (current-writer-digest config)
         maintained-dependencies (maintained-dependencies root)
         client-digest (current-client-digest config)
@@ -362,15 +458,16 @@
         css-digest (digest-paths root ["resources/public/css/output.css"])
         application-digest
         (derive-application-digest
-         config maintained-dependencies writer-digest client-digest
+         config bun maintained-dependencies writer-digest client-digest
          execution-digest execution-runtime-digest bootstrap-digest css-digest)]
-    {:seon.dev.artifact/writer-digest writer-digest
+    (merge bun
+     {:seon.dev.artifact/writer-digest writer-digest
      :seon.dev.artifact/client-digest client-digest
      :seon.dev.artifact/execution-digest execution-digest
      :seon.dev.artifact/execution-runtime-digest execution-runtime-digest
      :seon.dev.artifact/bootstrap-digest bootstrap-digest
      :seon.dev.artifact/css-digest css-digest
-     :seon.dev.artifact/application-digest application-digest}))
+      :seon.dev.artifact/application-digest application-digest})))
 
 (defn read-manifest
   "Read the last atomically published artifact manifest."
@@ -531,7 +628,7 @@
                               (pr-str aliases)])))
     {:seon.dev.artifact/prepared-aliases aliases}))
 
-(defn- build-source! [config]
+(defn- build-source! [config bun]
   ;; The caller already owns the checkout-wide artifact lock. Keep dependency
   ;; preparation inside that bracket without attempting to reacquire it.
   (prepare-dependencies-unlocked! config [:writer :cljs])
@@ -551,7 +648,8 @@
   (run-step! config "repair bootstrap macro metadata"
              [(str (fs/path (:seon.dev.config/root config)
                             "bin/fix-bootstrap-macros"))])
-  (run-step! config "build web CSS" ["npm" "run" "css:build"]))
+  (run-step! config "build web CSS"
+             [(:seon.dev.artifact/bun-executable bun) "run" "css:build"]))
 
 (defn- build-lock-configuration [config]
   ;; Default and downstream targets intentionally own different lifecycle
@@ -667,7 +765,7 @@
           (finally
             (when (fs/exists? temporary) (fs/delete-tree temporary))))))))
 
-(defn- output-manifest [config]
+(defn- output-manifest [config bun]
   (let [root (:seon.dev.config/root config)
         writer (:seon.dev.config/writer-output config)
         bootstrap (fs/path root "out/bootstrap")
@@ -695,10 +793,11 @@
           (str (runtime-execution-output config runtime-root))
           application-digest
           (derive-application-digest
-           config maintained-dependencies writer-digest client-digest
+           config bun maintained-dependencies writer-digest client-digest
            execution-digest execution-runtime-digest bootstrap-digest
            css-digest)]
       (validate-manifest!
+        (merge bun
         {:seon.dev.artifact/version current-version
          :seon.dev.artifact/published-at (str (Instant/now))
          :seon.dev.artifact/flavor
@@ -722,7 +821,7 @@
          :seon.dev.artifact/execution-runtime-digest execution-runtime-digest
          :seon.dev.artifact/bootstrap-digest bootstrap-digest
          :seon.dev.artifact/css-digest css-digest
-         :seon.dev.artifact/application-digest application-digest}))))
+         :seon.dev.artifact/application-digest application-digest})))))
 
 (defn build!
   "Build and atomically publish one canonical artifact manifest.
@@ -736,13 +835,13 @@
    (if (:seon.dev.config/source-checkout? config)
      (with-build-lock
        config
-       #(do
+       #(let [bun (bun-identity! config)]
           (when-not (fn? prepare-client!)
             (throw
              (ex-info "A source artifact build requires its managed watcher."
                       {:seon.dev.artifact/failure
                        :seon.dev.artifact.failure/missing-client-owner})))
-          (build-source! config)
+          (build-source! config bun)
           ;; The long-lived watcher is the one client-output owner. Its first
           ;; completed flush happens under the same checkout-wide lock as the
           ;; remaining outputs and the one final manifest publication.
@@ -750,7 +849,10 @@
           (let [previous (try
                            (read-manifest config)
                            (catch Exception _ nil))
-                manifest (output-manifest config)
+                _ (when-not (bun-executable-current? bun)
+                    (throw (ex-info "Bun changed during artifact publication."
+                                    bun)))
+                manifest (output-manifest config bun)
                 changed (cond-> #{}
                           (not= (:seon.dev.artifact/writer-digest previous)
                                 (:seon.dev.artifact/writer-digest manifest))

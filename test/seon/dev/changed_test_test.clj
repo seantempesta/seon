@@ -83,7 +83,7 @@
     (is (= (set (:seon.dev.test.artifact/test-namespaces manifest))
            (set (:seon.dev.changed-test/test-namespaces result))))))
 
-(deftest node-test-environment-matches-the-canonical-runner
+(deftest bun-test-environment-matches-the-canonical-runner
   (is (= {"SEON_CONFIG" "config/test.edn"
           "SEON_RENDER_STRICT" "1"}
          (changed/test-process-environment {})))
@@ -97,13 +97,12 @@
 
 (deftest full-javascript-command-does-not-filter-shadow-test-data
   (let [artifact {:seon.dev.test.artifact/path "out/test/artifact/test.js"}]
-    (is (= ["bun" "root/out/test/artifact/test.js"]
-           (changed/javascript-argv {} "root" artifact :all)))
-    (is (= ["node" "root/out/test/artifact/test.js"
+    (is (= ["/exact/bun" "root/out/test/artifact/test.js"]
+           (changed/javascript-argv "/exact/bun" "root" artifact :all)))
+    (is (= ["/exact/bun" "root/out/test/artifact/test.js"
             "--test=example.alpha-test"]
            (changed/javascript-argv
-            {:seon.dev.config/environment {"SEON_JS_RUNTIME" "node"}}
-            "root" artifact ['example.alpha-test])))))
+            "/exact/bun" "root" artifact ['example.alpha-test])))))
 
 (deftest shared-cljc-input-uses-the-shadow-graph-when-known
   (let [shared (assoc-in manifest

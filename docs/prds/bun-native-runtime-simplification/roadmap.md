@@ -8,8 +8,8 @@ tags: [prd, flow, web, agent]
 
 ## Current implementation state
 
-Package C and D are implemented in the shared checkout and are at live-runtime
-graduation. `Bun.serve` now owns HTTP lifecycle; reitit receives an ordinary
+Packages C and D are implemented and live-proven. `Bun.serve` now owns HTTP
+lifecycle; reitit receives an ordinary
 request map containing the WHATWG Request; handlers return `Response` values;
 and Datastar uses one Bun direct `ReadableStream` controller per connection.
 The Node raw-request/raw-response injection, hijack sentinel, `node:http`,
@@ -33,9 +33,71 @@ final feed. A 100-connection `/data/feed` load reached exactly 100 registered
 feeds, added about 272 KiB to the already-grown pod RSS, and returned to zero
 registered feeds after every client disconnected. A 5,000-request, concurrency
 50 readiness run completed without failure at 2,622.67 requests/second and
-0.381 ms mean server time per request. Browser interaction, complete suite,
-restart/recovery, multi-cluster, and final percentile/resource measurements
-remain graduation gates.
+0.381 ms mean server time per request. A source-clean reconciliation then
+stopped the previous Bun pod, watcher, and writer cleanly and brought the exact
+committed system back to ready. Real headless Chrome received and morphed the
+root feed into the complete system and agent layouts, with feed registration
+returning to zero and no application console error. The complete checkpoint
+passes 243 operator tests / 1,393 assertions, 219 writer tests / 1,821
+assertions, and 1,111 ClojureScript tests / 4,934 assertions.
+
+Package B now has one committed `seon.subprocess` owner around `Bun.spawn`.
+Its focused proof passes 10 tests / 44 assertions covering stdin EOF,
+stdout/stderr drain, exact byte caps, timeout classification, TERM-to-KILL
+escalation, synchronous spawn failure, split UTF-8, callback containment, IPC
+identity, drain-without-capture, descendant termination, and ordinary post-exit
+resource data. Autocomplete's blocking `execFileSync` Git probes, foreground
+and background shell, ripgrep, and the execution host now consume that owner.
+The combined consumer gate passes 76 tests / 325 assertions, and the
+source-affected gate passes 238 tests / 1,122 assertions. The cut deletes all
+remaining `node:child_process`, `execFile`, duplicate stream-pump, and direct
+`Bun.spawn` consumer paths.
+
+Live proof exercised nonzero foreground exit with both streams, real ripgrep,
+background output and completion, and a root execution child. Killing that
+execution child left the pod and writer ready; the next feed started a new
+child and returned the same complete 114,560-byte event. An initial shell
+timeout exposed that killing only the direct shell left its `sleep` descendant
+holding stdout and delayed completion for ten seconds. The shared owner now
+starts a detached Bun process group and signals that group. The identical live
+probe returns in 103 ms with exit 143, retained pre-timeout output, and
+`timed-out?` true; a three-second inherited-pipe regression completes in under
+one second.
+
+The outbound web capability now calls `Bun.dns.lookup` and `Bun.fetch`
+directly, preserving one manual-redirect, SSRF-policy, deadline, and bounded
+body mechanism. Its focused proof passes 13 tests / 45 assertions, including
+mixed public/private DNS refusal and split UTF-8 delivery. `node:dns`,
+`node:net`, stale host refusal branches, and the separate IP-literal path are
+removed from that owner.
+
+Package A now has one immutable Bun identity across the source artifact and
+maintained launch doors. Manifest version 8 records the canonical executable,
+its SHA-256, Bun version, and full 40-character source revision; all four enter
+the application digest. Publication detects executable replacement, pod launch
+fails closed when the published bytes changed, CSS and focused tests use the
+selected executable, execution children inherit `process.execPath`, and doctor
+no longer requires Node or npm. `SEON_JS_RUNTIME` is removed from every
+maintained selector. The integrated operator checkpoint passes 134 tests / 524
+assertions across artifact, process, changed-test, and CLI ownership.
+
+Package F's obsolete Node/WASI taxonomy and never-implemented WASI filesystem
+branches are also deleted. The focused platform/filesystem/log proof passes 46
+tests / 176 assertions and removes 99 net lines. Bun remains the sole concrete
+runtime while Node-named Shadow targets and Bun-supported `node:*` compatibility
+modules remain dependency vocabulary, not runtime choices.
+
+The earliest unsettled contract is now Package A's live artifact publication
+and cold launch under its recorded Bun identity, followed by Bun-only
+production packaging. The Docker audit is durable at
+[[research/bun-only-production-package-audit-2026-07-18]]: replacing the runtime
+is low risk, but an honest no-source image remains blocked because startup still
+seeds program facts from packaged `src/` and `test/`. The next implementation
+boundary is to publish and restart the exact manifest, then separate that
+program-source artifact contract from the Docker runtime cut rather than hiding
+source in the image.
+Multi-cluster, no-source packaging, recovery/soak, and final percentile and
+resource measurements remain graduation gates.
 
 ## Outcome
 

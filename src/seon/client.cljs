@@ -168,7 +168,7 @@
     ;; skills through `seon.state/reconcile!`, including stale retractions.
     [seon.state :as state]
     ;; Local-machine capability surface — A-9. Required so the agent
-    ;; can call (seon.agent.fs/read-file ...) + (seon.platform/host) from
+    ;; can call (seon.agent.fs/read-file ...) from
     ;; bootstrap-CLJS eval.
     [seon.agent.fs]
     ;; Content search over allowed files — the exemplar npm-package
@@ -176,7 +176,8 @@
     ;; (seon.agent.search/grep ...) from bootstrap-CLJS eval and so the
     ;; core-vars seed below can index it.
     [seon.agent.search]
-    ;; Run real commands / Python — argv `execFile` over the fs cwd gate,
+    ;; Run real commands / Python — argv through the shared Bun subprocess
+    ;; owner over the fs cwd gate,
     ;; default-deny behind the SEON_SHELL host grant. Required so the
     ;; agent can call (seon.agent.shell/run ...) / (seon.agent.shell/py-run
     ;; ...) from bootstrap-CLJS eval and so the core seed indexes it.
@@ -2053,8 +2054,7 @@
                      launch/process-launch-descriptor)
         _ (execution.host/configure!
            {::execution.host/launch-descriptor descriptor
-            ::execution.host/javascript-runtime
-            (or (seon.platform/env-val "SEON_JS_RUNTIME") "bun")})
+            ::execution.host/javascript-runtime js/process.execPath})
         attached? (db/attached?)
         restore-startup
         (validate-restore-launch! descriptor capability)

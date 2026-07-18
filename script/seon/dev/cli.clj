@@ -590,8 +590,11 @@
         checks {:seon.dev.doctor/babashka? (command-available? "bb")
                 :seon.dev.doctor/clj? (command-available? "clj")
                 :seon.dev.doctor/clojure? (command-available? "clojure")
-                :seon.dev.doctor/node? (command-available? "node")
-                :seon.dev.doctor/npm? (command-available? "npm")
+                :seon.dev.doctor/bun?
+                (try
+                  (artifact/bun-identity! configuration)
+                  true
+                  (catch Throwable _ false))
                 :seon.dev.doctor/python? (command-available? "python3")
                 :seon.dev.doctor/curl? (command-available? "curl")
                 :seon.dev.doctor/java-26?

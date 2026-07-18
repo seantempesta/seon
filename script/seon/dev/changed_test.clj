@@ -5,6 +5,7 @@
             [clojure.edn :as edn]
             [clojure.set :as set]
             [clojure.string :as str]
+            [seon.dev.artifact :as runtime-artifact]
             [seon.dev.state :as state]
             [seon.dev.test-artifact :as artifact]
             [seon.dev.test-roots :as test-roots])
@@ -513,7 +514,7 @@
         (recur (rest lines) excerpts)))))
 
 (defn test-process-environment
-  "Return the canonical Node test environment, preserving explicit overrides."
+  "Return the canonical Bun test environment, preserving explicit overrides."
   [configuration]
   (let [environment (:seon.dev.config/environment configuration)]
     {"SEON_CONFIG" (get environment "SEON_CONFIG" "config/test.edn")
@@ -583,18 +584,18 @@
 
 (defn javascript-argv
   "Return an unfiltered full command or an explicitly focused JavaScript command."
-  [configuration root manifest test-namespaces]
-  (cond-> [(get-in configuration
-                    [:seon.dev.config/environment "SEON_JS_RUNTIME"]
-                    "bun")
+  [bun-executable root manifest test-namespaces]
+  (cond-> [bun-executable
            (str (fs/path root (:seon.dev.test.artifact/path manifest)))]
     (not= :all test-namespaces)
     (into (map #(str "--test=" %) test-namespaces))))
 
 (defn- run-javascript! [configuration manifest test-namespaces]
-  (let [root (:seon.dev.config/root configuration)]
+  (let [root (:seon.dev.config/root configuration)
+        bun-executable (:seon.dev.artifact/bun-executable
+                        (runtime-artifact/bun-identity! configuration))]
     (assoc (run-command! root :pod
-                         (javascript-argv configuration root manifest
+                         (javascript-argv bun-executable root manifest
                                           test-namespaces)
                          (test-process-environment configuration))
            :seon.dev.changed-test/test-namespaces test-namespaces)))
