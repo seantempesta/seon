@@ -319,7 +319,53 @@
           (.catch
            (fn [error]
              (is false (str "pre-ready exit rejected: " error))
-             (done)))))))
+           (done)))))))
+
+(deftest active-child-exit-settles-once-and-next-call-reconstructs
+  (async done
+    (let [options (atom [])
+          first-child (fake-process 107)
+          replacement-child (fake-process 108)
+          remaining (atom [first-child replacement-child])
+          _ (configure
+             (fn [value]
+               (swap! options conj value)
+               (let [[before _] (swap-vals! remaining subvec 1)]
+                 (:process (first before)))))
+          interrupted (host/invoke! (invocation "interrupted"))]
+      (feed! (first @options) (:process first-child) (ready-message))
+      (-> (js/Promise.resolve nil)
+          (.then
+           (fn [_]
+             ((:resolve-exit! first-child) 137)
+             interrupted))
+          (.then
+           (fn [result]
+             (is (= execution/error-message (::execution/message result)))
+             (is (= "The execution child exited before returning a result."
+                    (get-in result [::execution/error :seon.error/message])))
+             (is (= 137
+                    (get-in result [::execution/error :seon.error/data
+                                    ::host/exit-code])))
+             (let [replacement (host/invoke! (invocation "replacement"))]
+               (feed! (second @options) (:process replacement-child)
+                      (ready-message))
+               (-> (js/Promise.resolve nil)
+                   (.then
+                    (fn [_]
+                      (feed! (second @options) (:process replacement-child)
+                             (result-message "replacement" :reconstructed))))
+                   (.then (fn [_] replacement))))))
+          (.then
+           (fn [result]
+             (is (= :reconstructed (::execution/result result)))
+             (is (empty? @remaining)
+                 "the next call starts exactly one replacement")
+             ((:resolve-exit! replacement-child) 0)))
+          (.catch
+           (fn [error]
+             (is false (str "unexpected-death recovery rejected: " error))))
+          (.finally (fn [] (done)))))))
 
 (deftest reconfiguration-between-ready-and-claim-cannot-create-a-child
   (async done
