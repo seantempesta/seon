@@ -481,7 +481,8 @@
       (manifest-error "The release target already exists."
                       {::package-root (str target)}))
     (try
-      (fs/create-dirs build-root closure (fs/parent target))
+      (doseq [directory [build-root closure (fs/parent target)]]
+        (fs/create-dirs directory))
       (run! root environment "clojure" "-X:deps" "prep" ":aliases"
             "[:writer :cljs]")
       (run! root environment "clojure" "-T:build" "writer-uber")
