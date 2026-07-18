@@ -97,16 +97,12 @@ Focused execution-package proof resolves seven representative public functions;
 runtime handoff and lifecycle suites pass 5 and 36 assertions respectively.
 A fresh real agent then activated and completed its plan, sent `323`, and
 closed `:completed` with no render error or timeout. A stricter alias-only
-replay still remains the immediate acceptance check for `fb557a24`.
+replay subsequently executed exactly `message/user` and one-argument
+`complete` on its first response. The complete maintained CLJS gate passes
+1,093 tests and 4,850 assertions.
 
-Earliest unsettled contract: prove a newly spawned child resolves the short
-home aliases and referred lifecycle functions on its first response, then run
-the complete maintained CLJS gate. After that, exercise concurrent agents,
-child death/reconstruction, gzip feed reconnect, and multiple cluster
-databases before measuring retained CPU, memory, and latency. The malformed
-model-transport evidence projection and occasional empty persisted eval
-namespace remain independent recorded defects; neither may displace the
-first-response child proof.
+The remaining live order is recorded in the newest checkpoint below; this
+historical checkpoint no longer names the active boundary.
 
 The turn contract is settled by `e5eccfec`: prompt acquisition, eval dispatch,
 child execution, turn creation, and debug reconstruction use one ordinary
@@ -2998,3 +2994,29 @@ the retiring child and rejected. That active recovery defect is recorded at
 [[../../seon/issues/execution-invocation-during-child-retirement-is-rejected]];
 closing it is the next dependency-ready implementation before unexpected-death
 and writer-crash proof.
+
+### 2026-07-17 concurrent-agent checkpoint
+
+Three simultaneous public `/agents/run` calls exposed three independent
+correctness limits in sequence. Commit `3780d0b1` makes `start!` and
+`delegate!` reacquire all database-derived birth input after the JVM correctly
+rejects a stale database value. Commit `d56816c3` gives completion and
+termination the same bounded retry behavior while preserving their semantic
+transaction compare-and-set fences. Commit `b004c137` gives the global latest
+human-message aggregate enough Datahike retained-result allowance for a
+populated database instead of confusing its scalar output with its internal
+work.
+
+Focused proof passes 6 multiagent tests/43 assertions, 6 lifecycle tests/43
+assertions, and the combined 19 message/lifecycle tests/110 assertions. After
+a clean rebuild, three simultaneous public agents all returned HTTP 200,
+committed distinct child identities, executed exactly `message/user` and
+`complete`, and closed `:completed` in one turn. Their end-to-end times were
+12.3, 13.9, and 13.9 seconds; model latency dominates this path.
+
+The earliest unsettled contract remains the already recorded invocation during
+normal execution-child retirement. Its integrated proof must show the caller
+waits for or starts the replacement without retry. Unexpected child death,
+writer crash recovery, gzip feed reconnect, independent cluster databases,
+the complete writer/operator gates, and measured CPU/memory/latency remain the
+ordered graduation gates after it.

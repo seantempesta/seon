@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, agent, database, flow]
 ---
@@ -39,3 +39,10 @@ bounded retry; no queue or second birth path belongs here.
   HTTP conflict response.
 - `delegate!` rebuilds its initial message transaction from the newly acquired
   database value on every retry, so child birth and first task remain atomic.
+
+## Resolution
+
+Commit `3780d0b1` added one bounded retry owner shared by `start!` and
+`delegate!`. The focused test forces two stale transactions before success.
+After a clean rebuild, three simultaneous public launches all returned HTTP
+200 and committed distinct children.

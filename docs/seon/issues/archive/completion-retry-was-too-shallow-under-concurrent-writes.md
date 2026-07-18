@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, agent, database, flow]
 ---
@@ -36,3 +36,11 @@ existing in-transaction compare-and-set operations.
 - Three concurrent public agents can each message and complete in one turn.
 - A genuinely lost run fence still returns its compare-and-set failure rather
   than being retried as an unrelated database-value conflict.
+
+## Resolution
+
+Commit `d56816c3` replaced the single retry with one bounded lifecycle retry
+function while retaining the existing transaction compare-and-set fences. The
+focused completion test passes after two forced stale database values. After
+the adjacent message query allowance was repaired, three simultaneous public
+agents each completed in one turn.

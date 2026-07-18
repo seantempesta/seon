@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, agent, database]
 ---
@@ -47,3 +47,11 @@ pull and human-message barrier query.
   database-value reuse.
 - A real user message opens and completes an agent run, with its transaction,
   turn, eval, and reply observable from one final database value.
+
+## Resolution
+
+The participant pull now has bounded retained-node headroom independent of its
+root count. Commit `b004c137` raises the global human-message aggregate's
+retained-result allowance for populated databases. Nineteen focused message
+and lifecycle tests pass with 110 assertions; three simultaneous public agents
+then each sent its user message and completed in one turn.
