@@ -69,6 +69,7 @@
     [seon.config :as config]
     [seon.db :as db]
     [seon.db.id :as db.id]
+    [seon.db.protocol :as protocol]
     [seon.derive :as derive]
     [seon.error :as error]
     [seon.runtime.admission :as admission]
@@ -796,6 +797,39 @@
                   {::db/db database
                    :seon.config/configuration configuration})))))))))
 
+(def ^:private maximum-spawn-attempts 32)
+
+(defn- stale-database-error?
+  [value]
+  (= protocol/stale-database-value-error
+     (get-in value [:seon.error/data ::protocol/error-kind])))
+
+(defn ^:async ^:private spawn-child-with-retry!
+  [function-name parent-id purpose default-turn-limit initial-message-content]
+  (loop [attempt 1]
+    (let [acquisition (await (acquire-spawn-database function-name parent-id))]
+      (if (error-value? acquisition)
+        acquisition
+        (let [database (::db/db acquisition)
+              configuration (:seon.config/configuration acquisition)
+              initial-message-transaction
+              (when initial-message-content
+                (await
+                 (msg/initial-agent-transaction
+                  database [:seon.agent/id parent-id]
+                  initial-message-content)))
+              result
+              (if (error-value? initial-message-transaction)
+                initial-message-transaction
+                (await
+                 (spawn-child!
+                  database configuration purpose default-turn-limit parent-id
+                  initial-message-transaction)))]
+          (if (and (stale-database-error? result)
+                   (< attempt maximum-spawn-attempts))
+            (recur (inc attempt))
+            result))))))
+
 (defn ^:async start!
   "Spawn a child agent — the capability-gated spawn lifecycle function.
 
@@ -814,14 +848,9 @@
   [{:seon.agent/keys [purpose default-turn-limit]}]
   (if-not (admission/available?)
     (unavailable-response)
-    (let [parent-id (db/current-agent-id)
-          acquisition (await (acquire-spawn-database "start!" parent-id))]
-      (if (error-value? acquisition)
-        acquisition
-        (await
-         (spawn-child!
-          (::db/db acquisition) (:seon.config/configuration acquisition)
-          purpose default-turn-limit parent-id nil))))))
+    (await
+     (spawn-child-with-retry!
+      "start!" (db/current-agent-id) purpose default-turn-limit nil))))
 
 ;; ============================================================
 ;; delegate! — the one atomic child-birth plus initial-task transition.
@@ -863,21 +892,9 @@
   (if-not (admission/available?)
     (unavailable-response)
     (if-let [parent-id (db/current-agent-id)]
-      (let [acquisition (await (acquire-spawn-database "delegate!" parent-id))]
-        (if (error-value? acquisition)
-          acquisition
-          (let [database (::db/db acquisition)
-                configuration (:seon.config/configuration acquisition)
-                message-transaction
-                (await
-                 (msg/initial-agent-transaction
-                  database [:seon.agent/id parent-id] content))]
-            (if (error-value? message-transaction)
-              message-transaction
-              (await
-               (spawn-child!
-                database configuration purpose default-turn-limit parent-id
-                message-transaction))))))
+      (await
+       (spawn-child-with-retry!
+        "delegate!" parent-id purpose default-turn-limit content))
       (internal/no-agent-error "delegate!"))))
 
 ;; ============================================================

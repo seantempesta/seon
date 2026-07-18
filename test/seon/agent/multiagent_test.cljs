@@ -10,6 +10,7 @@
    [seon.config :as config]
    [seon.db :as db]
    [seon.db.id :as db.id]
+   [seon.db.protocol :as protocol]
    [seon.derive :as derive]
    [seon.runtime.admission :as admission]))
 
@@ -25,6 +26,11 @@
   (assoc database :t 43
          :datahike/commit-id
          #uuid "cccccccc-cccc-4ccc-8ccc-cccccccccccc"))
+
+(def latest-database
+  (assoc database :t 44
+         :datahike/commit-id
+         #uuid "dddddddd-dddd-4ddd-8ddd-dddddddddddd"))
 
 (def configuration
   (config/resolve-config-singleton {}))
@@ -301,6 +307,74 @@
         [#(set! db.id/allocate! %) allocate!]
         [#(set! runtime/resume! %) resume!]
         [#(set! message/agent %) standalone-message]]))))
+
+(deftest start-reacquires-after-concurrent-births
+  (async done
+    (let [available? admission/available?
+          current-agent-id db/current-agent-id
+          db! db/db
+          pull-many db/pull-many
+          allocate! db.id/allocate!
+          resume! runtime/resume!
+          databases [database database-after latest-database]
+          db-calls (atom 0)
+          acquired (atom [])
+          allocations (atom 0)
+          hosted (atom 0)]
+      (set! admission/available? (constantly true))
+      (set! db/current-agent-id (constantly nil))
+      (set! db/db
+            (fn
+              ([]
+               (let [index (swap! db-calls inc)]
+                 (js/Promise.resolve (nth databases (dec index)))))
+              ([_] (js/Promise.reject (js/Error. "unexpected db request")))))
+      (set! db/pull-many
+            (fn
+              ([request]
+               (swap! acquired conj (::db/db request))
+               (js/Promise.resolve [stored-configuration]))
+              ([_ _] (js/Promise.reject (js/Error. "unexpected pull-many arity")))
+              ([_ _ _] (js/Promise.reject (js/Error. "unexpected pull-many arity")))))
+      (set! db.id/allocate!
+            (fn [request]
+              (let [attempt (swap! allocations inc)]
+                (if (< attempt 3)
+                  (js/Promise.resolve
+                   {:seon.error/message "The database changed before commit."
+                    :seon.error/data
+                    {::protocol/error-kind
+                     protocol/stale-database-value-error}})
+                  (js/Promise.resolve
+                   {:db-before latest-database
+                    :db-after (assoc latest-database :t 45)
+                    :tx-data []
+                    :tempids {}
+                    ::db.id/ids {:seon.agent/id "child"}})))))
+      (set! runtime/resume!
+            (fn [_]
+              (swap! hosted inc)
+              (js/Promise.resolve
+               {:seon.agent/id "child"
+                :seon.agent.runtime/resumed? true})))
+      (finish!
+       (-> (agent/start! {})
+           (.then
+            (fn [result]
+              (is (= {:seon.agent/id "child"} result))
+              (is (= databases @acquired)
+                  "each stale transaction reacquires all database-derived input")
+              (is (= 3 @db-calls))
+              (is (= 3 @allocations))
+              (is (= 1 @hosted)
+                  "only the committed child is hosted"))))
+       done
+       [[#(set! admission/available? %) available?]
+        [#(set! db/current-agent-id %) current-agent-id]
+        [#(set! db/db %) db!]
+        [#(set! db/pull-many %) pull-many]
+        [#(set! db.id/allocate! %) allocate!]
+        [#(set! runtime/resume! %) resume!]]))))
 
 (deftest set-purpose-authorizes-and-writes-at-one-database-value
   (async done
