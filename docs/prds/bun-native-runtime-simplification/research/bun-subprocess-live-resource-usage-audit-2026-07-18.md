@@ -52,8 +52,10 @@ child reports over Bun IPC because only the child knows them.
 
 ## Dependency ledger
 
-- Vendored Bun revision:
-  `be77b652884b16a103cfaa4af3c1102f72f2dcd3` in `reference-code/bun`.
+- Vendored Bun base revision:
+  `be77b652884b16a103cfaa4af3c1102f72f2dcd3` in `reference-code/bun`; the
+  measured live-resource implementation is commit
+  `d8ecf098572e2b8265b23e40c04efb4067e516cc`.
 - Installed runtime used for one behavioral probe: Bun 1.3.14, revision
   `0d9b296af33f2b851fcbf4df3e9ec89751734ba4`. This is evidence about the
   shipped runtime, not a substitute for the vendored source audit.
@@ -244,9 +246,43 @@ growth, invalid options, post-exit compatibility, and ten repeated samples
 through process exit. Bun 1.3.14 fails that test at the intended live-sample
 assertion because it returns `undefined`.
 
-This checkout cannot yet execute the changed native Bun binary: `bun bd`
-rejects the installed LLVM 22.1.8 and Apple clang 17 because this revision
-requires LLVM `>=21.1.0 <21.1.99`. A raw Cargo unit-test binary also cannot
-link through Bun's unsupported direct path because it injects Windows system
-libraries on macOS. The supported debug build plus focused JavaScript test
-remains the final execution gate on a host with Bun's pinned LLVM toolchain.
+Installing Bun's supported LLVM 21 and Ninja toolchain closed the native
+execution gate. The supported debug command
+`bun bd test test/js/bun/spawn/spawn_waiter_thread.test.ts` passes 3 tests and
+59 assertions at commit `d8ecf098572e2b8265b23e40c04efb4067e516cc`, including
+the synchronous busy child and ten exit-boundary samples.
+
+## Production-shaped release binary
+
+Bun's own `package.json` and `scripts/build.ts` define `build:release` as the
+supported optimized local build. With `/opt/homebrew/opt/llvm@21/bin` first on
+`PATH`, `bun run build:release` completed its `Release` profile and produced a
+stripped arm64 Mach-O binary at `reference-code/bun/build/release/bun`. The
+binary is an ignored build output; it does not change the vendored source
+revision.
+
+The exact candidate identity is:
+
+- source revision:
+  `d8ecf098572e2b8265b23e40c04efb4067e516cc`;
+- `--version`: `1.4.0`;
+- `--revision`: `1.4.0-canary.1+d8ecf0985`;
+- SHA-256:
+  `a98137b948c4f244cb2d7acbcd6a478965184a237751e42f8e643eb40587a581`;
+- size: 57,699,904 bytes; and
+- format: thin arm64 Mach-O, stripped and ad-hoc linker signed.
+
+The release binary dynamically links only macOS system libraries:
+`libicucore.A.dylib`, `libresolv.9.dylib`, `libc++.1.dylib`, and
+`libSystem.B.dylib`. It has no Homebrew LLVM or AddressSanitizer runtime
+dependency, unlike the debug binary.
+
+The supported build-and-execute command
+`bun run build:release test test/js/bun/spawn/spawn_waiter_thread.test.ts`
+then ran the focused suite through that exact release binary. It passed all 3
+tests and 59 assertions in 1.212 seconds: the historical issue fixture, live
+sampling of a non-cooperating synchronous child, and repeated sampling across
+process exit. This removes optimized-build practicality as a blocker. The
+remaining admission work is to publish this executable identity through
+Seon's existing immutable runtime manifest and run the broader Seon gates;
+this audit does not perform that lifecycle cut.
