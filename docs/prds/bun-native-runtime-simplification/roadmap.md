@@ -105,6 +105,11 @@ passes with Node absent from `PATH`. `bun.lock` is now the one frozen JavaScript
 dependency authority; artifact digests, changed-test widening, test reuse, edit
 hooks, and source identity all consume it, while `package-lock.json` and npm
 installation guidance are removed.
+The first complete `bun.lock` publication then rebuilt manifest version 8 and
+cleanly stopped and restarted watcher, writer, and pod. All three returned ready
+under application digest
+`c34e56e8ce646eced5d4afa2020119133d5933c82f957d0239e1ff80385ada94`;
+HTTP admission was available and the CSS build emitted no Node fallback.
 
 The first private-memory attribution changes the interpretation of the earlier
 RSS numbers without dismissing the real cost. A fresh Bun process uses about
