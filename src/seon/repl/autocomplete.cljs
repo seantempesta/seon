@@ -404,7 +404,7 @@
                    {::subprocess/cmd
                     ["git" "diff" "--binary" "HEAD" "--"
                      "src" "config" "deps.edn" "shadow-cljs.edn"
-                     "package.json" "package-lock.json"]
+                     "package.json" "bun.lock"]
                     ::subprocess/max-output-bytes (* 16 1024 1024)}))
         diff (if (and (nil? (::subprocess/spawn-error result))
                       (zero? (::subprocess/exit result))

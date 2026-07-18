@@ -322,7 +322,7 @@
    "deps.edn"
    "shadow-cljs.edn"
    "package.json"
-   "package-lock.json"
+   "bun.lock"
    "bin/fix-bootstrap-macros"
    "config"
    "externs"

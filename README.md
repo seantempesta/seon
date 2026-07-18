@@ -86,14 +86,14 @@ These licenses (EPL and MIT) are permissive; where Seon ports their code, the up
 | **Java (JDK)** | **26** | The writer, Shadow compiler, test runners, and packaged image use one supported JVM version. `bin/_java-home-resolver` selects an installed JDK 26 or exits with an installation hint; `JAVA_HOME` is honored when it already points to JDK 26. |
 | **Clojure CLI** | 1.12+ | Builds the CLJS pod and runs the database server. |
 | **Babashka** (`bb`) | 1.x | Dev hooks, MCP servers, and datahike's build tasks. |
-| **Node.js** + npm | 22+ (24 recommended) | The agent pod is a long-running Node process. |
+| **Bun** | **1.3.14** | Runs the agent pod, execution children, tests, and JavaScript build tools. |
 | **Git** | 2.x | Resolves the datahike fork by `:git/sha`. |
 | **An LLM API key** | — | The one required secret — e.g. `DEEPSEEK_API_KEY` (other providers configurable). |
 
 Optional: **Caddy** 2.x (HTTPS reverse proxy), and the JVM dev seat
 (`bin/run`, nREPL 7888 — for development/orchestration, not needed to run
 agents). Platform: **macOS, Linux, and Windows via WSL** — the stack is all
-cross-platform (JVM, Node, Clojure, Babashka) and `bin/seon` selects JDK 26 on
+cross-platform (JVM, Bun, Clojure, Babashka) and `bin/seon` selects JDK 26 on
 each. The `reference-code/*` git submodules are vendored dependency
 source for reading when stuck — not needed to run, so a plain `git clone` is
 fine.
@@ -104,7 +104,7 @@ Run the core, talk to an agent, watch it work:
 
 ```bash
 git clone https://github.com/seantempesta/seon && cd seon
-npm install
+bun install --frozen-lockfile
 cp .env.example .env      # the config surface — edit it for keys/provider/ports
 export DEEPSEEK_API_KEY=sk-...   # (env vars override .env; either works)
 bin/seon up               # full build → database server → agent pod
@@ -172,12 +172,12 @@ Per-milestone evidence (which commits and branches back which status) is in [`do
 
 ### Where the work has landed — the CLJS pod track (2026-06)
 
-The milestone table above frames the long arc on the original JVM runtime. Since it was written, the center of gravity moved to the **CLJS pod** — a long-running Node process that is the agent's actual home today — paired with the JVM database server over a Unix socket.
+The milestone table above frames the long arc on the original JVM runtime. Since it was written, the center of gravity moved to the **CLJS pod** — a long-running Bun process paired with supervised Bun execution children and the JVM database server over a Unix socket.
 
 **Working today.**
 
 - **A live ClojureScript REPL is the agent's entire surface — no fixed tool catalog.** The agent reads, computes, stores, and replies by evaluating Clojure forms against the shared database. Two properties make this tractable and are the newest load-bearing pieces: the agent's **whole context is a render of the database** (every message, eval, todo, namespace, and document is a *renderable* projected from datoms by its schema — one recursive walker, two views: text for the model, HTML for the human), and its **loop is a function of the database** (runnability is a single datom; a datahike tx-listener wakes the agent when a message lands; the stop policy is one `cond` over DB state). Context is *derived*, not accumulated — fix the underlying data and the surface heals itself, with nothing stored that needs clearing.
-- **One writer, local reads.** The JVM database server is the sole authoritative Datahike writer and carries a Proximum HNSW vector index; the pod is a local read replica that executes functions locally and forwards writes over the socket. Reads are lazy database values, so **pod memory scales with the working set, not the corpus**.
+- **One database authority, parallel clients.** The JVM database server owns durable Datahike resources and writes; Bun processes use the asynchronous `seon.db` protocol for database values, queries, pulls, and transactions. The pod and execution children do not retain local Datahike replicas or copied indexes.
 - **Measured scale.** On an isolated benchmark store, point lookups and ref-joins stay sub-millisecond and KNN vector search stays ~5 ms at **100k entities / ~28k vectors**, with the heap at ~**150 MB** after GC and storage at ~**9.5 KB/entity**. Reads scale on a `log(n)` / lazy-paging curve; the one real cost is *bulk write* throughput (HNSW insertion + file commits), a one-time, cache-mitigated batch cost that never touches the read path. Concrete evidence the foundation holds for a six-figure-entity personal corpus. Full numbers: [`docs/prds/embeddings/db-scalability-benchmark-2026-06-25.md`](docs/prds/embeddings/db-scalability-benchmark-2026-06-25.md).
 - **Inspect AI evaluations.** The `src-inspect-ai/` package drives the real
   agent boundary, restarts pods, scores durable facts and trajectories, and

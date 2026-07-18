@@ -101,7 +101,10 @@ Manifest version 8 is live-proven on the default cluster with Bun 1.3.14,
 revision `0d9b296af33f2b851fcbf4df3e9ec89751734ba4`, and the recorded executable
 SHA-256. The first build also proved that ordinary `bun run` may honor a package
 binary's Node shebang; CSS now uses `bun run --bun`, and the identical build
-passes with Node absent from `PATH`.
+passes with Node absent from `PATH`. `bun.lock` is now the one frozen JavaScript
+dependency authority; artifact digests, changed-test widening, test reuse, edit
+hooks, and source identity all consume it, while `package-lock.json` and npm
+installation guidance are removed.
 
 The first private-memory attribution changes the interpretation of the earlier
 RSS numbers without dismissing the real cost. A fresh Bun process uses about

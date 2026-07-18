@@ -217,11 +217,11 @@ fi
 # streaming digest implementation rather than launching a checksum process per
 # source file.
 build_fingerprint() {
-  local paths=(src test config deps.edn shadow-cljs.edn package.json package-lock.json bb.edn bin/test-cljs)
+  local paths=(src test config deps.edn shadow-cljs.edn package.json bun.lock bb.edn bin/test-cljs)
   if [ -n "${SEON_EXTRA_SRC:-}" ] && [ -d "$SEON_EXTRA_SRC" ]; then
     paths+=("$SEON_EXTRA_SRC/src" "$SEON_EXTRA_SRC/test"
             "$SEON_EXTRA_SRC/deps.edn" "$SEON_EXTRA_SRC/package.json"
-            "$SEON_EXTRA_SRC/package-lock.json")
+            "$SEON_EXTRA_SRC/bun.lock")
   fi
 
   local source_digest
@@ -598,13 +598,13 @@ else
   if [ "$INCOMPLETE" -ne 0 ]; then
     echo ""
     if [ "$LOAD_FAILED" -ne 0 ]; then
-      echo "INCOMPLETE: the single Node run failed while loading the cold bundle;"
+      echo "INCOMPLETE: the single Bun run failed while loading the cold bundle;"
       echo "no final cljs.test summary was emitted. Load error:"
       grep -aE 'is not a valid Malli schema|malli\.core/invalid-schema|SHADOW import error' "$TMPOUT" \
         | head -3 | cut -c1-400 | sed 's/^/  /' || true
     else
       LAST_STARTED=$(grep -aE '^Testing ' "$TMPOUT" | tail -1 | sed -E 's/^Testing *//' || true)
-      echo "INCOMPLETE: the single Node run emitted no final cljs.test summary."
+      echo "INCOMPLETE: the single Bun run emitted no final cljs.test summary."
       echo "An async test may have failed to call its done continuation; the run"
       echo "fails as observed and is not retried in a fresh process."
       [ -n "$LAST_STARTED" ] && echo "Last namespace started: ${LAST_STARTED}"

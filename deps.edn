@@ -135,7 +135,7 @@
                          ;; reitit — the pod's HTTP front door (seon.web.router).
                          ;; The published CLJS artifact is clean: reitit's trie
                          ;; compiler forks `#?(:cljs clojure-trie :clj java-trie)`,
-                         ;; so the Node pod always gets the pure-Clojure trie and
+                         ;; so the Bun pod always gets the pure-Clojure trie and
                          ;; the :clj-only JavaSegmentRouter is never loaded. NOT
                          ;; vendored on source-paths (that would drag the Java
                          ;; trie onto the classpath). reitit-core + meta-merge come
@@ -151,7 +151,7 @@
          :override-deps {org.replikativ/datahike
                          {:local/root "reference-code/datahike"}
                          ;; Konserve 0.9.359 plus the shared CLJ/CLJS legacy
-                         ;; header reader and idempotent Node filestore deletion.
+                         ;; header reader and idempotent JavaScript filestore deletion.
                          org.replikativ/konserve
                          {:git/url "https://github.com/seantempesta/konserve"
                           :git/sha "b5c99bc02a7175652a610324215288b78551801f"}

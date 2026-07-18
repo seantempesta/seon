@@ -40,7 +40,7 @@
  :source-paths ["src" "test"]
 
  :builds
- {;; The V0 pod entry. One long-running Node process; stays alive via
+ {;; The pod entry. One long-running Bun process; stays alive via
   ;; the agent loop's pending operations (or, in this skeleton, a
   ;; heartbeat setInterval). `:devtools {:enabled true}` is the default
   ;; for :node-script — listed here for visibility.
@@ -178,7 +178,7 @@
   ;; LEAN worker-side PARSE/SYNTACTIC oracle — CO-LOCATED on the diffusion
   ;; GPU worker (diffusion-dynamic-context). The eval-renoise loop
   ;; validates a partial canvas every checkpoint; co-located this is a
-  ;; ~0.4ms local Node call instead of a ~100ms internet round-trip.
+  ;; ~0.4ms local Bun call instead of a ~100ms internet round-trip.
   ;;
   ;; ONLY compiles seon.worker-validator + its minimal transitive deps
   ;; (seon.repl.internal → clojure.string + rewrite-clj — pure CLJC, NO
@@ -190,7 +190,7 @@
   ;; :devtools disabled — run-to-exit subprocess, never a shadow runtime.
   ;;
   ;; Build:  clj -M:cljs compile worker-validator
-  ;; Run:    echo -n '(def x [)' | node out/worker-validator/main.js
+  ;; Run:    echo -n '(def x [)' | bun out/worker-validator/main.js
   ;; Output: out/worker-validator/main.js
   ;;
   ;; The running :client watcher IGNORES unwatched builds, so adding this
@@ -218,7 +218,7 @@
   ;; seon.eval / pod state — leaf bundle (cljs.js + shadow bootstrap loader +
   ;; cljs.analyzer only).
   ;;
-  ;; Non-termination is BOUNDED via Node's vm.runInThisContext timeout (the
+  ;; Non-termination is BOUNDED via Bun's `node:vm` compatibility module (the
   ;; compiled JS is native, so SCI's interpreter interrupt cannot fence it).
   ;;
   ;; :simple (not :advanced) — keeps require(\"fs\"/\"vm\"/\"readline\")
@@ -227,7 +227,7 @@
   ;;
   ;; Needs out/bootstrap present (clj -M:cljs compile bootstrap).
   ;; Build:  clj -M:cljs compile worker-oracle-eval
-  ;; Run:    node out/worker-oracle-eval/main.js --serve   (or one-shot via stdin)
+  ;; Run:    bun out/worker-oracle-eval/main.js --serve   (or one-shot via stdin)
   ;; Output: out/worker-oracle-eval/main.js
   ;;
   ;; The running :client watcher IGNORES unwatched builds, so adding this
@@ -274,7 +274,7 @@
   ;; analysis-cache cljs.js consumes at eval time.
   ;; CLJS test runner — shadow's :node-test target. A full run compiles every
   ;; namespace matching `-test$`; bin/test-cljs supplies Shadow's explicit
-  ;; :namespaces vector for a focused run. Both produce one Node artifact at
+  ;; :namespaces vector for a focused run. Both produce one JavaScript artifact at
   ;; out/test/test.js under one compile+run lock.
   ;;
   ;; The V0 CLJS tests use plain `cljs.test/deftest`, so they're

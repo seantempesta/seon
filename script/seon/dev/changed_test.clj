@@ -181,7 +181,7 @@
 
 (defn- broad-input? [path]
   (or (str/starts-with? path "config/")
-      (#{"deps.edn" "shadow-cljs.edn" "package.json" "package-lock.json"
+      (#{"deps.edn" "shadow-cljs.edn" "package.json" "bun.lock"
          "bb.edn"} path)))
 
 (defn- manifest-published-after? [manifest path]
@@ -625,7 +625,7 @@
 
 (defn- shadow-build-input? [path]
   (or (str/starts-with? path "config/")
-      (#{"deps.edn" "shadow-cljs.edn" "package.json" "package-lock.json"}
+      (#{"deps.edn" "shadow-cljs.edn" "package.json" "bun.lock"}
        path)))
 
 (defn shadow-plan

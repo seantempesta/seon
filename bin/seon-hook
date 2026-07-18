@@ -300,7 +300,7 @@
         nil))))
 
 (def ^:private changed-test-build-inputs
-  #{"deps.edn" "shadow-cljs.edn" "package.json" "package-lock.json" "bb.edn"})
+  #{"deps.edn" "shadow-cljs.edn" "package.json" "bun.lock" "bb.edn"})
 
 (defn- changed-test-path? [file-path]
   (when file-path
