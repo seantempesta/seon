@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, database, pod, web]
 ---
@@ -37,3 +37,10 @@ transaction.
 - A clean restart installs the missing schema in an existing cluster.
 - A fresh real agent renders its transcript without the Datahike attribute
   error and completes an ordinary task.
+
+## Resolution
+
+Resolved by `68634002`. Focused writer and protocol gates prove populated
+upgrade and convergence. Clean restart installed the attribute into the live
+default database; subsequent fresh-agent transcripts rendered without the
+Datahike error and completed normally.

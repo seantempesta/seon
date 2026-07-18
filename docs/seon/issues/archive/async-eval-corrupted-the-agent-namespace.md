@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, agent, cljs]
 ---
@@ -33,3 +33,10 @@ result.
 - A real agent can send a message, update its plan, and complete in one turn.
 - Failed or malformed evaluator namespace output cannot become durable eval
   data or affect later forms.
+
+## Resolution
+
+Resolved by `e7886806` and `d1dba787`. Evaluator namespace output is validated,
+and only an explicit `ns` declaration can move the batch fold. The final fresh
+agent completed two asynchronous home-namespace functions in one turn with no
+failed eval or empty namespace row.

@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, agent, cljs, pod]
 ---
@@ -40,3 +40,10 @@ home namespace functions it promises.
   functions without replaying boot source.
 - A fresh real agent sends its answer, closes its plan step, and completes
   without a retry or timeout.
+
+## Resolution
+
+Resolved by `ead0ca81` and `fb557a24`. The execution artifact compiles the
+default toolkit and each child installs its configured home namespace before
+eval. Fresh agent `silent-grapes-grab` resolved `message/user` and `complete`
+on its first response and closed `:completed` in 9.2 seconds.

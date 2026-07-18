@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, agent, cljs]
 ---
@@ -32,3 +32,10 @@ implementation.
 - Both documented public arities delegate to one private implementation.
 - The one-argument form never calls the two-argument public contract with nil.
 - A fresh instrumented agent completes in its first response.
+
+## Resolution
+
+Resolved by `7a76959a`. Both public arities delegate to one private
+implementation. The focused lifecycle suite passes 6 tests/36 assertions, and
+the final fresh agent's one-argument `complete` call succeeded on its first
+response.
