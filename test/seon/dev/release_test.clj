@@ -292,6 +292,13 @@
                               (release/verify-sdk! (str root) manifest))))
       (finally (fs/delete-tree root {:force true})))))
 
+(deftest sdk-source-inventory-registers-the-existing-development-tools
+  (let [source-paths (set @#'release/sdk-source-paths)]
+    (is (contains? source-paths "AGENTS.md"))
+    (is (contains? source-paths ".mcp.json"))
+    (is (contains? source-paths ".codex/config.toml"))
+    (is (not (contains? source-paths ".shadow-cljs")))))
+
 (deftest jar-normalization-removes-packaging-time-from-executable-bytes
   (let [root (fs/create-temp-dir {:prefix "seon-normalized-jar-"})
         first-jar (write-jar! (fs/path root "first.jar") 1000000000000)

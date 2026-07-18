@@ -461,7 +461,8 @@
 (def ^:private sdk-source-paths
   ["bin" "src" "resources" "script" "test" "java" "externs" "config"
    "seon-skills" "build.clj" "bb.edn" "deps.edn" "shadow-cljs.edn"
-   "package.json" "bun.lock" "LICENSE"])
+   "package.json" "bun.lock" "LICENSE" "AGENTS.md" ".mcp.json"
+   ".codex/config.toml"])
 
 (def ^:private datahike-sdk-paths
   ["src" "src-secondary" "resources" "java" "build.clj" "deps.edn"
