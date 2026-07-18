@@ -3701,3 +3701,11 @@ roughly 336 MiB physical sample before both memory cuts. All four then left the
 host registry and OS process table through ordinary idle retirement. The
 previous IPC send failure did not recur, and the current pod log contains no
 core fault or runtime-interest error.
+
+The inverse lifecycle reaction is also live. Root committed a normal `start!`
+for `silent-things-judge`; the pod armed it from the committed identity fact.
+Root then committed `terminate`, which returned `:terminated`, and the same pod
+database interest removed its wake input without a direct child-side unhost
+call. A clean pod restart had already reconstructed every nonterminated agent
+through `seon.agent.runtime` directly. Durable lifecycle functions and
+process-local hosting are therefore separated in both directions.
