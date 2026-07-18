@@ -222,6 +222,21 @@ compressed feed. Focused proof passes 15 tests/58 assertions, including
 explicit `gzip;q=0` refusal. The remaining ordered gate is the complete final
 source-free package matrix on this exact transport source.
 
+Final release application
+`98e4a83d3b2005a54ada97b443a28d68f2807cc79e3e3e2091a12c9add9ce1cd`
+now closes that matrix. It ran from a second external, recursively read-only
+directory with every mutable path under external state and no watcher, Shadow,
+Clojure CLI, or producer-checkout runtime path. Identity and configured gzip
+feeds both passed, including prompt same-stream heartbeat delivery and
+`gzip;q=0`. A packaged Bun execution child completed `final immutable package
+green` in one turn/one eval/6.14 seconds; a clean second restart rendered the
+committed result back. Clean shutdown left writer and pod absent. The package
+tree hash stayed exactly `f42552b7…` throughout. Final maintained gates pass
+CLJS 1,137/5,060, writer 219/1,821, and operator 272/1,537. The active boundary
+is now the complete program audit across the already-recorded browser,
+reconnect, recovery, multi-cluster, ACME, resource, terminology, and package
+evidence.
+
 The existing remote query surface now exposes its protocol-native historical
 view, closing the only facade gap needed by coordinate-pinned startup birth.
 LLM configuration and brand startup sync also use bounded coordinate-fenced

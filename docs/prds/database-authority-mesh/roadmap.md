@@ -4055,3 +4055,38 @@ and a gzip-capable request received no `Content-Encoding` while immediately
 receiving the complete patch. The remaining ordered boundary is a final
 source-free package rebuilt from this exact transport source, followed by the
 complete immutable package and maintained-test graduation audit.
+
+## 2026-07-18 final source-free package checkpoint
+
+Release application
+`98e4a83d3b2005a54ada97b443a28d68f2807cc79e3e3e2091a12c9add9ce1cd`
+was built from the configurable-compression source with patched Bun
+`1.4.0-canary.1` at revision `d8ecf0985`, copied to a second external
+directory, and made recursively read-only. Mutable database, log, process,
+socket, port, and response evidence lived beneath a separate
+`SEON_STATE_DIR`. The package contained no symbolic links.
+
+The package opened its JVM writer and Bun pod without a watcher, Shadow,
+Clojure CLI, or producer-checkout runtime path. Root and `/data` returned 200.
+Default mode remained identity encoded even when the client advertised gzip.
+After a clean restart with compression enabled, one gzip feed delivered its
+complete morph and a later heartbeat; a `gzip;q=0` request remained identity
+encoded. A fresh agent then ran in the packaged Bun execution child and
+completed the exact reply `final immutable package green` in one turn, one
+eval, and 6.14 seconds. A second clean restart rendered that committed reply
+back through the agent's gzip feed.
+
+The package tree hash remained
+`f42552b7c88c1b4a5da80bd59da3c4a9754422e7b705c7615adb6ed5134946fe`
+before startup, after execution and restart, and after clean shutdown. Its
+writer and pod were then both absent. The maintained source gates pass 1,137
+ClojureScript tests/5,060 assertions, 219 writer tests/1,821 assertions, and
+272 operator tests/1,537 assertions. The only failed public-agent attempt in
+this drive was an honest DeepSeek HTTP 402; switching the already-supported
+configuration to the available Anthropic provider supplied the successful
+execution proof without changing package bytes.
+
+This closes the final package and transport boundary. Program completion now
+requires one explicit requirement-by-requirement audit against all accumulated
+browser, recovery, multi-cluster, ACME, resource, reconnect, and terminology
+evidence rather than inferring graduation from this last local gate alone.
