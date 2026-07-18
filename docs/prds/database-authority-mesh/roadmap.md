@@ -3104,10 +3104,25 @@ The first public agent then reopened the session, executed four evals including
 `seon.db/db`, and completed one turn in 11.16 seconds at basis transaction
 `536872797`. Both writer recovery issues are archived.
 
-The earliest unsettled contract is now committed work across a complete
-restart: a user message committed before pod shutdown must be selected and
-completed after restart exactly once. Feed reconnect and independent cluster
-database proof follow, then the complete correctness and measured
-CPU/memory/latency gates. Artifact verification itself took roughly 20 seconds
-in the live writer-only path and remains a measured operator-latency smell to
+The committed-work restart contract is now complete. The first live attempt
+exposed two independent recovery defects. Commit `ea663cae` requires a live
+watcher before reusing its published client output, so a complete restart uses
+the existing frozen-source build and publication path; focused operator proof
+passes 111 tests and 450 assertions. Commit `39238aa0` excludes runs closed as
+`:quiesced` from completed-message coverage while retaining ordinary terminal
+run closes; focused loop proof passes 13 tests and 57 assertions.
+
+The clean repeat committed message `pvr5ygzpaznu` for
+`floppy-monkeys-chew`, immediately ran `bin/seon restart`, and admitted clean
+new generations for watcher, writer, and pod. The replacement runtime selected
+that pre-restart message without intervention. The agent emitted exactly one
+reply, `clean restart proof complete`, and reached `:idle` with no current run.
+The database retained exactly the original human message and that one agent
+reply; no duplicate domain effect occurred. Both restart issues are archived.
+
+The earliest unsettled contract is gzip Datastar feed reconnect across runtime
+replacement, followed by independent cluster database proof and the complete
+correctness/browser/agent/load gates. Measured CPU, memory, and latency work
+follows correctness. Artifact verification itself took roughly 20 seconds in
+the live writer-only path and remains a measured operator-latency smell to
 attribute after the ordered recovery proofs.
