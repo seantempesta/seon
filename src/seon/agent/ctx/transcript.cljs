@@ -739,10 +739,10 @@
       (with-ns-markers sorted (or previous-ns ::none)))))
 
 (defn- query-member
-  [query arguments max-work max-results max-result-weight]
+  [database query arguments max-work max-results max-result-weight]
   {::protocol/operation protocol/query-operation
    ::protocol/query-form query
-   ::protocol/arguments arguments
+   ::protocol/arguments (into [database] arguments)
    :datahike.resource/max-work max-work
    :datahike.resource/max-results max-results
    :datahike.resource/max-result-weight max-result-weight})
@@ -903,13 +903,13 @@
           [;; Datahike charges intermediate relations to max-results and their
            ;; retained structure to max-result-weight. Both remain finite;
            ;; the grown-query fixture calibrates them independently.
-           (query-member turn-count-query [id] 1000000 1000000 4096)
-           (query-member (turns-query window-size) [id] 1000000 1000000 65536)
-           (query-member current-ns-query [id] 500000 500000 8192)
-           (query-member last-action-query [id] 500000 500000 8192)]
-          open? (conj (query-member run-turn-count-query [run-id]
+           (query-member database turn-count-query [id] 1000000 1000000 4096)
+           (query-member database (turns-query window-size) [id] 1000000 1000000 65536)
+           (query-member database current-ns-query [id] 500000 500000 8192)
+           (query-member database last-action-query [id] 500000 500000 8192)]
+          open? (conj (query-member database run-turn-count-query [run-id]
                                     500000 500000 4096)
-                      (query-member run-form-count-query [run-id]
+                      (query-member database run-form-count-query [run-id]
                                     500000 500000 4096)))
         stage-one (if (database-error database)
                     database
@@ -945,14 +945,14 @@
             stage-two-members
             (cond-> []
               (seq turns)
-              (conj (query-member eval-rows-query (mapv :db/id turns)
+              (conj (query-member database eval-rows-query (mapv :db/id turns)
                                   1000000 1000000 524288))
               true
-              (conj (query-member (messages-query cutoff-at)
+              (conj (query-member database (messages-query cutoff-at)
                                   (cond-> [id] cutoff-at (conj cutoff-at))
                                   1000000 1000000 262144))
               rotated?
-              (conj (query-member (previous-ns-query cutoff-at) [id cutoff-at]
+              (conj (query-member database (previous-ns-query cutoff-at) [id cutoff-at]
                                   500000 500000 8192)))
             stage-two (await (db/execute-many
                                {::db/db database

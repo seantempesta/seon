@@ -442,7 +442,7 @@
                          {:seon.render.surface/selection "canvas"
                           :seon.render.surface/label "canvas"
                           :seon.render/html canvas-value
-                          :seon.render/entity
+                          :seon.agent/entity
                           (:seon.render/entity canvas-acquisition)}
                           (some? last-reply)
                           (assoc :seon.render.chat/last-reply last-reply))
@@ -456,7 +456,7 @@
                                    :call
                                    (html-call
                                     id
-                                    (or (:seon.render/entity block) entity)
+                                    (or (:seon.agent/entity block) entity)
                                     configuration
                                     block
                                     (:seon.render/html block))})))

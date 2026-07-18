@@ -4,7 +4,8 @@
     [cljs.test :refer [deftest is async]]
     [clojure.string :as str]
     [seon.agent.ctx.transcript :as transcript]
-    [seon.db :as db]))
+    [seon.db :as db]
+    [seon.db.protocol :as protocol]))
 
 (def ^:private database {:datahike/commit-id "transcript" :max-tx 7})
 
@@ -68,7 +69,14 @@
       (-> (transcript/transcript-block
             {:seon.agent/id "agent" ::db/db database} nil)
           (.then (fn [_]
-                   (is (every? #(identical? database (::db/db %)) @requests))))
+                   (is (every? #(identical? database (::db/db %)) @requests))
+                   (is (every?
+                        (fn [request]
+                          (every? #(identical? database
+                                               (first (::protocol/arguments %)))
+                                  (::db/members request)))
+                        @requests)
+                       "every grouped member names its database source")))
           (.catch (fn [error] (is false (str error))))
           (.finally (fn []
                       (set! db/execute-many original-execute)

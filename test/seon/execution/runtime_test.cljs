@@ -627,6 +627,11 @@
                             [::execution/arguments 0
                              :seon.render.chat/last-reply]))
                  "welcome receives the newest agent-to-user reply as ordinary data")
+             (is (= "agent-1"
+                    (get-in (first @calls)
+                            [::execution/arguments 0
+                             :seon.agent/entity :seon.agent/id]))
+                 "welcome receives the agent entity under the system-input key")
              (is (= [:div "welcome"]
                     (->> (:seon.render.surface/surfaces projection)
                          (some #(when (= "canvas"

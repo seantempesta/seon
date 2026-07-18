@@ -3287,7 +3287,8 @@
               {::db/pull-pattern [:seon.eval/status]
                ::db/ref [:seon.eval/id eval-id]})))
         settled-status
-        (when-not (:seon.error/message settled-read)
+        (when (and settled-read
+                   (not (:seon.error/message settled-read)))
           (eval.internal/receipt-state settled-read))]
     (cond
       (not (database-error? primary))
