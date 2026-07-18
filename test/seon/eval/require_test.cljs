@@ -121,7 +121,7 @@
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
-(deftest coordinate-program-loads-transitive-authored-source-without-a-db
+(deftest supplied-program-loads-transitive-authored-source-without-a-db
   (async done
     (let [suffix (str (rand-int 1000000000))
           dep (symbol (str "my.authority.dep" suffix))

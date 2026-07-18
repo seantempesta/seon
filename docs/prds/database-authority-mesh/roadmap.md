@@ -426,6 +426,33 @@ nested tag vector. Focused execution, Datastar, and system-render proof passes
 with no child identity, import, query-budget, render, or core-fault entry in the
 fresh pod log.
 
+### 2026-07-17 database-value boundary checkpoint
+
+- **Earliest unsettled contract:** finish the one public database boundary by
+  carrying Datahike connection IDs, Proximum branch heads, ordinary database
+  values, and native transaction reports through restore, launch, rendering,
+  error capture, and operator consumers. Names at every interface come from
+  the producer and consumer source types; no generic database coordinate or
+  attachment remains as a third concept.
+- **Integrated proof that closes it:** the complete JVM database gate now
+  passes 214 tests/1,797 assertions. Focused UDS transport, remote contract,
+  server shutdown, and selective-interest proof passes 58 tests/348 assertions.
+  The migration deletes the obsolete pod-local database browser and old
+  coordinate namespace; the remaining CLJS and operator consumers are the
+  current breakage inventory, not compatibility obligations.
+- **Dependency-ready parallel portfolio:** no new parallel source lane owns
+  this shared database boundary. Independent provider/test-fixture lanes remain
+  outside these paths. The top-level lane owns the terminology and native-result
+  cut until the complete CLJS and operator gates are green.
+- **Next refill:** after the public boundary is coherent and committed, restore
+  the complete CLJS gate, then the operator gate; only then begin live cold
+  initialization, crash/restart, browser, and multiple-cluster proof.
+- **Final graduation gate:** unit 9 still requires the destructive acceptance
+  matrix, real-browser journey, explicit cold/warm latency, idle CPU,
+  event-loop, heap/RSS, feed/render, and grown-database budgets, followed by the
+  Bun-native transport and package cut. A green database suite is not program
+  graduation.
+
 - **Earliest unsettled contract:** finish real-authority proof of the public
   operation-specific plan consumer, then prove exact initialization and
   recovery. Web serving and

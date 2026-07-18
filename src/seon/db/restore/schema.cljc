@@ -1,6 +1,6 @@
 (ns seon.db.restore.schema
   "Portable schemas for durable completed-restore facts."
-  (:require [seon.db.coordinate :as coordinate]
+  (:require [seon.db.branch :as branch]
             [seon.db.id.schema]
             [seon.dev.restore.schema]
             [seon.schema :as schema]))
@@ -17,7 +17,7 @@
  :seon.db.restore/plan-digest
  [:string {:min 64 :max 64 :seon.db/identity true}])
 (schema/register! :seon.db.restore/db-name :keyword)
-(schema/register! :seon.db.restore/database-id ::coordinate/database-id)
+(schema/register! :seon.db.restore/database-id ::branch/store-id)
 (schema/register! :seon.db.restore/from-branch :keyword)
 (schema/register! :seon.db.restore/from-commit-id :uuid)
 (schema/register! :seon.db.restore/from-t :int)

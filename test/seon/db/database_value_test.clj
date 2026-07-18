@@ -1,8 +1,8 @@
-(ns seon.db.transaction-coordinate-test
-  "Writer-backed original transaction coordinate resolution tests."
+(ns seon.db.database-value-test
+  "Writer-backed transaction-to-Proximum-branch-head resolution tests."
   (:require [clojure.test :refer [deftest is use-fixtures]]
             [datahike.api :as d]
-            [seon.db.coordinate :as coordinate]
+            [seon.db.branch :as branch]
             [seon.db.protocol :as protocol]
             [seon.db.registry :as registry]
             [seon.db.writer :as writer]))
@@ -33,7 +33,7 @@
   (writer/handle-request
    runtime
    (protocol/ensure-database-request
-    {::protocol/request-id (str "coordinate/ensure/" database-name)
+    {::protocol/request-id (str "database-value/ensure/" database-name)
      ::protocol/database-name database-name
      ::protocol/backend :memory})))
 
@@ -53,121 +53,120 @@
    (registry/lookup-connection
     {::registry/database-name (keyword database-name)})))
 
-(defn- current-coordinate
+(defn- current-branch-head
   [database-name]
-  (coordinate/resolved (d/db (connection database-name))))
+  (branch/head (d/db (connection database-name))))
 
-(defn- resolve-coordinate
-  [runtime database-name head-coordinate transaction]
+(defn- resolve-branch-head
+  [runtime database-name containing-branch-head transaction]
   (writer/handle-request
    runtime
-   (protocol/resolve-transaction-coordinate-request
-    {::protocol/request-id (str "coordinate/resolve/" database-name "/" transaction)
+   (protocol/resolve-transaction-branch-head-request
+    {::protocol/request-id (str "database-value/resolve/" database-name "/" transaction)
      ::protocol/database-name database-name
-     ::protocol/head-coordinate head-coordinate
+     ::protocol/containing-branch-head containing-branch-head
      ::protocol/transaction-id transaction})))
 
 (deftest later-head-resolution-skips-a-force-commit-with-the-same-t
   (let [runtime (runtime)
-        database-name (str "transaction-coordinate-" (random-uuid))
+        database-name (str "branch-" (random-uuid))
         admitted (ensure-database! runtime database-name)
         completion-response
         (transact! runtime (:seon.db/db admitted) "completion" "completion")
-        completion-coordinate (current-coordinate database-name)
+        completion-branch-head (current-branch-head database-name)
         conn (connection database-name)
         completion-db (d/commit-as-db
-                       conn (::coordinate/commit-id completion-coordinate))
+                       conn (::branch/commit-id completion-branch-head))
         _ (d/force-branch!
-           completion-db :db #{(::coordinate/commit-id completion-coordinate)}
+           completion-db :db #{(::branch/commit-id completion-branch-head)}
            {:expected-current-commit
-            (::coordinate/commit-id completion-coordinate)})
+            (::branch/commit-id completion-branch-head)})
         _ (registry/release-database!
            {::registry/database-name (keyword database-name)})
         reopened (ensure-database! runtime database-name)
         later-response (transact! runtime (:seon.db/db reopened) "later" "later")
-        later-coordinate (current-coordinate database-name)
+        later-branch-head (current-branch-head database-name)
         resolved
-        (resolve-coordinate runtime database-name later-coordinate
-                            (::coordinate/t completion-coordinate))]
+        (resolve-branch-head runtime database-name later-branch-head
+                             (::branch/basis-t completion-branch-head))]
     (is (true? (::protocol/success? resolved)))
-    (is (= completion-coordinate (::protocol/coordinate resolved))
+    (is (= completion-branch-head (::protocol/branch-head resolved))
         "the force commit repeats t but did not originate its transaction")))
 
-(deftest wrong-attachment-and-non-ancestor-heads-fail-explicitly
+(deftest wrong-connection-and-non-ancestor-heads-fail-explicitly
   (let [runtime (runtime)
-        database-name (str "transaction-coordinate-failures-" (random-uuid))
+        database-name (str "branch-failures-" (random-uuid))
         admitted (ensure-database! runtime database-name)
         first-response (transact! runtime (:seon.db/db admitted) "first" "first")
-        first-coordinate (current-coordinate database-name)
+        first-branch-head (current-branch-head database-name)
         abandoned-response
         (transact! runtime (:db-after first-response) "abandoned" "abandoned")
-        abandoned-coordinate (current-coordinate database-name)
+        abandoned-branch-head (current-branch-head database-name)
         conn (connection database-name)
-        first-db (d/commit-as-db conn (::coordinate/commit-id first-coordinate))
+        first-db (d/commit-as-db conn (::branch/commit-id first-branch-head))
         _ (d/force-branch!
-           first-db :db #{(::coordinate/commit-id first-coordinate)}
+           first-db :db #{(::branch/commit-id first-branch-head)}
            {:expected-current-commit
-            (::coordinate/commit-id abandoned-coordinate)})
+            (::branch/commit-id abandoned-branch-head)})
         _ (registry/release-database!
            {::registry/database-name (keyword database-name)})
         reopened (ensure-database! runtime database-name)
         current-response (transact! runtime (:seon.db/db reopened) "current" "current")
-        current-coordinate (current-coordinate database-name)
-        wrong-attachment
-        (resolve-coordinate
+        current-branch-head (current-branch-head database-name)
+        wrong-connection
+        (resolve-branch-head
          runtime database-name
-         (assoc current-coordinate ::coordinate/database-id (random-uuid))
-         (::coordinate/t current-coordinate))
+         (assoc current-branch-head ::branch/store-id (random-uuid))
+         (::branch/basis-t current-branch-head))
         non-ancestor
-        (resolve-coordinate runtime database-name abandoned-coordinate
-                            (::coordinate/t abandoned-coordinate))]
-    (is (false? (::protocol/success? wrong-attachment)))
-    (is (= protocol/attachment-mismatch-error
-           (::protocol/error-kind wrong-attachment)))
+        (resolve-branch-head runtime database-name abandoned-branch-head
+                             (::branch/basis-t abandoned-branch-head))]
+    (is (false? (::protocol/success? wrong-connection)))
+    (is (= protocol/connection-id-mismatch-error
+           (::protocol/error-kind wrong-connection)))
     (is (false? (::protocol/success? non-ancestor)))
     (is (= protocol/non-ancestor-error
            (::protocol/error-kind non-ancestor)))))
 
 (deftest missing-transaction-does-not-substitute-the-frozen-head
   (let [runtime (runtime)
-        database-name (str "transaction-coordinate-missing-" (random-uuid))
+        database-name (str "branch-missing-" (random-uuid))
         admitted (ensure-database! runtime database-name)
         response (transact! runtime (:seon.db/db admitted) "only" "only")
-        head (current-coordinate database-name)
-        missing (resolve-coordinate runtime database-name head
-                                    (inc (::coordinate/t head)))]
+        head (current-branch-head database-name)
+        missing (resolve-branch-head runtime database-name head
+                                     (inc (::branch/basis-t head)))]
     (is (false? (::protocol/success? missing)))
     (is (= protocol/not-found-error (::protocol/error-kind missing)))))
 
-(deftest branch-head-alias-is-not-accepted-as-a-main-commit-coordinate
+(deftest branch-head-alias-is-not-accepted-as-a-main-commit
   (let [runtime (runtime)
-        database-name (str "transaction-coordinate-alias-" (random-uuid))
+        database-name (str "branch-alias-" (random-uuid))
         _ (ensure-database! runtime database-name)
         main-conn (connection database-name)
-        main-coordinate (coordinate/resolved (d/db main-conn))
-        branch :transaction-coordinate/alias
+        main-branch-head (branch/head (d/db main-conn))
+        branch :branch/alias
         _ (d/branch! main-conn :db branch)
         branch-name (str database-name "-alias")
         branch-open
         (writer/handle-request
          runtime
          (protocol/ensure-database-request
-          {::protocol/request-id "coordinate/ensure-branch"
+          {::protocol/request-id "database-value/ensure-branch"
            ::protocol/database-name branch-name
            ::protocol/backend :memory
-           ::coordinate/attachment
-           (assoc (coordinate/attachment main-coordinate)
-                  ::coordinate/branch branch)}))
-        branch-coordinate (current-coordinate branch-name)
+           ::branch/connection-id
+           (assoc (branch/connection-id main-branch-head) 1 branch)}))
+        branch-head (current-branch-head branch-name)
         request
         {::protocol/operation
-         protocol/resolve-transaction-coordinate-operation
+         protocol/resolve-transaction-branch-head-operation
          ::protocol/database-name branch-name
-         ::protocol/head-coordinate branch-coordinate
-         ::protocol/transaction-id (::coordinate/t branch-coordinate)}
+         ::protocol/containing-branch-head branch-head
+         ::protocol/transaction-id (::branch/basis-t branch-head)}
         response (writer/handle-request runtime request)]
     (is (true? (::protocol/success? branch-open)))
-    (is (= branch (::coordinate/branch branch-coordinate)))
+    (is (= branch (::branch/name branch-head)))
     (is (false? (protocol/valid-request? request))
         "the portable request schema names only the live :db lineage")
     (is (= protocol/protocol-error (::protocol/error-kind response)))))

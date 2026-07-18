@@ -4,9 +4,8 @@
             [clojure.string :as str]
             [clojure.test :refer [deftest is run-tests]]
             [malli.core :as m]
-            [seon.db.coordinate :as coordinate]
+            [seon.db.branch :as db.branch]
             [seon.db.protocol :as protocol]
-            [seon.db.transport.uds :as uds]
             [seon.dev.artifact :as artifact]
             [seon.dev.branch :as branch]
             [seon.dev.config :as config]
@@ -82,72 +81,106 @@
    :seon.dev.process/shutdown-grace-ms 100
    :seon.dev.process/artifact-digest "application"})
 
-(defn- signal-writer! [socket source-database]
-  (let [database-id #uuid "ebc09a32-5450-4181-bc88-f053dcaf301f"
-        source-head {::coordinate/database-id database-id
-                     ::coordinate/branch :db
-                     ::coordinate/commit-id
+(defn- signal-writer-path [directory]
+  (str (fs/path directory "writer-state.edn")))
+
+(defn- signal-writer! [directory]
+  (let [path (signal-writer-path directory)]
+    (state/write-edn! path {::branch-exists? false ::requests []})
+    path))
+
+(defn- database-value [database-name head]
+  {:db-name database-name
+   :store-id [(::db.branch/store-id head) (::db.branch/name head)]
+   :t (::db.branch/basis-t head)
+   :as-of nil
+   :since nil
+   :history false
+   :datahike/commit-id (::db.branch/commit-id head)})
+
+(defn- signal-writer-call! [directory descriptor message]
+  (let [path (signal-writer-path directory)
+        lock-config {:seon.dev.config/process-dir directory}
+        source-database (::launch/database descriptor)
+        source-head {::db.branch/store-id
+                     #uuid "ebc09a32-5450-4181-bc88-f053dcaf301f"
+                     ::db.branch/name :db
+                     ::db.branch/commit-id
                      #uuid "01c71e5a-ca4f-4d21-a45c-d24a07db0b84"
-                     ::coordinate/t 10}
-        fork-head (assoc source-head ::coordinate/branch :trial)
-        target-attachment (coordinate/attachment fork-head)
-        branch-exists? (atom false)
-        requests (atom [])
-        handler
-        (fn [message]
-          (swap! requests conj message)
-          (some->
-           (case (::protocol/operation message)
-            :seon.db.protocol.operation/ensure-database
-            (if (= "trial-route" (::protocol/database-name message))
-              (if @branch-exists?
+                     ::db.branch/basis-t 10}
+        fork-head (assoc source-head ::db.branch/name :trial)
+        target-connection-id [(::db.branch/store-id fork-head)
+                           (::db.branch/name fork-head)]]
+    (state/with-lock
+     lock-config :signal-writer 5000
+     (fn []
+       (let [writer-state (state/read-edn path)
+             branch-exists? (::branch-exists? writer-state)
+             [next-branch-exists? response]
+             (case (::protocol/operation message)
+               :seon.db.protocol.operation/ensure-database
+               [branch-exists?
+                (if (= "trial-route" (::protocol/database-name message))
+                  (if branch-exists?
+                    {::protocol/success? true
+                     ::protocol/database-name "trial-route"
+                     :seon.db/db (database-value "trial-route" fork-head)
+                     ::protocol/backend (::protocol/backend source-database)
+                     ::protocol/database-path
+                     (::protocol/database-path source-database)}
+                    {::protocol/success? false
+                     ::protocol/error-kind protocol/branch-missing-error
+                     ::protocol/error "branch absent"})
+                  {::protocol/success? true
+                   ::protocol/database-name
+                   (::protocol/database-name source-database)
+                   :seon.db/db
+                   (database-value (::protocol/database-name source-database)
+                                   source-head)
+                   ::protocol/backend (::protocol/backend source-database)
+                   ::protocol/database-path
+                   (::protocol/database-path source-database)})]
+
+               :seon.db.protocol.operation/create-branch
+               [true
                 {::protocol/success? true
-                 ::protocol/database-name "trial-route"
-                 ::coordinate/coordinate fork-head
+                 ::protocol/target-database-name "trial-route"
+                 ::protocol/target-connection-id target-connection-id
+                 ::protocol/branch-head fork-head
                  ::protocol/backend (::protocol/backend source-database)
-                 ::protocol/database-path (::protocol/database-path source-database)}
-                {::protocol/success? false
-                 ::protocol/error-kind protocol/branch-missing-error
-                 ::protocol/error "branch absent"})
-              {::protocol/success? true
-               ::protocol/database-name (::protocol/database-name source-database)
-               ::coordinate/coordinate source-head
-               ::protocol/backend (::protocol/backend source-database)
-               ::protocol/database-path (::protocol/database-path source-database)})
+                 ::protocol/database-path
+                 (::protocol/database-path source-database)
+                 ::protocol/created? (not branch-exists?)
+                 ::protocol/adopted? branch-exists?}]
 
-            :seon.db.protocol.operation/create-branch
-            (let [adopted? @branch-exists?]
-              (reset! branch-exists? true)
-              {::protocol/success? true
-               ::protocol/target-database-name "trial-route"
-               ::protocol/target-attachment target-attachment
-               ::protocol/coordinate fork-head
-               ::protocol/backend (::protocol/backend source-database)
-               ::protocol/database-path (::protocol/database-path source-database)
-               ::protocol/created? (not adopted?)
-               ::protocol/adopted? adopted?})
+               :seon.db.protocol.operation/release-database
+               [branch-exists?
+                {::protocol/success? true
+                 ::protocol/released? true}]
 
-            :seon.db.protocol.operation/release-database
-            {::protocol/success? true
-             ::protocol/target-database-name "trial-route"
-             ::protocol/target-attachment target-attachment
-             ::protocol/released? true}
+               :seon.db.protocol.operation/delete-branch
+               [false
+                {::protocol/success? true
+                 ::protocol/target-database-name "trial-route"
+                 ::protocol/target-connection-id target-connection-id
+                 ::protocol/source-head source-head
+                 ::protocol/released? false
+                 ::protocol/deleted? true}])
+             response (assoc response ::protocol/request-id
+                             (::protocol/request-id message))]
+         (state/write-edn!
+          path
+          {::branch-exists? next-branch-exists?
+           ::requests (conj (::requests writer-state) message)})
+         response)))))
 
-            :seon.db.protocol.operation/delete-branch
-            (do
-              (reset! branch-exists? false)
-              {::protocol/success? true
-               ::protocol/target-database-name "trial-route"
-               ::protocol/target-attachment target-attachment
-               ::protocol/source-head source-head
-               ::protocol/released? false
-               ::protocol/deleted? true}))
-           (assoc ::protocol/request-id (::protocol/request-id message))))
-        server (uds/start-request-server!
-                {::uds/socket-path socket ::uds/handler handler})]
-    {:seon.dev.branch-test/server server
-     :seon.dev.branch-test/branch-exists? branch-exists?
-     :seon.dev.branch-test/requests requests}))
+(defn- signal-writer-state [fixture]
+  (state/read-edn fixture))
+
+(defn- with-signal-writer [directory f]
+  (with-redefs-fn
+    {#'branch/writer-call! (partial signal-writer-call! directory)}
+    f))
 
 (defn run-branch-signal-fixture!
   "Open one real retained pod and hold at the selected signal cut."
@@ -164,6 +197,8 @@
         write-edn! state/write-edn!
         redefinitions
         (cond-> {#'branch/source-manifest! (constantly manifest)
+                 #'branch/writer-call!
+                 (partial signal-writer-call! directory)
                  #'process/specs (fn [_ _] {process/pod-id pod})}
           (= cut :seon.dev.branch-test.cut/spawn-publication)
           (assoc #'process/spawn-detached!
@@ -234,11 +269,7 @@
           _ (fs/create-dirs directory)
           socket (str (fs/path directory "writer.sock"))
           request (signal-request directory socket)
-          source-database
-          (get-in request [::branch/configuration
-                           :seon.dev.config/launch-descriptor
-                           ::launch/database])
-          fixture (signal-writer! socket source-database)
+          fixture (signal-writer! directory)
           expression
           (str "(require '[seon.dev.branch-test :as t]) "
                "(t/run-branch-signal-fixture! " (pr-str directory) " "
@@ -261,7 +292,7 @@
           (is (.waitFor ^java.lang.Process (:proc owner)
                         10 TimeUnit/SECONDS))
           (is (= 130 (:exit @owner)))
-          (is (false? @(::branch-exists? fixture))
+          (is (false? (::branch-exists? (signal-writer-state fixture)))
               "the exact invocation-owned native branch is deleted")
           (is (nil? (process/read-process target-config process/pod-id)))
           (is (not (fs/exists? (::branch/lifecycle-path request))))
@@ -273,11 +304,11 @@
                   protocol/ensure-database-operation
                   protocol/release-database-operation
                   protocol/delete-branch-operation]
-                 (mapv ::protocol/operation @(::requests fixture)))))
+                 (mapv ::protocol/operation
+                       (::requests (signal-writer-state fixture))))))
         (finally
           (when (.isAlive ^java.lang.Process (:proc owner))
             (.destroyForcibly ^java.lang.Process (:proc owner)))
-          (uds/close-request-server! (::server fixture))
           (fs/delete-tree directory {:force true}))))))
 
 (deftest real-sigint-does-not-claim-a-converged-branch-pod
@@ -287,10 +318,7 @@
         _ (fs/create-dirs directory)
         socket (str (fs/path directory "writer.sock"))
         request (signal-request directory socket)
-        source-database
-        (get-in request [::branch/configuration
-                         :seon.dev.config/launch-descriptor ::launch/database])
-        fixture (signal-writer! socket source-database)
+        fixture (signal-writer! directory)
         owner (atom nil)]
     (try
       (run-branch-signal-fixture!
@@ -312,19 +340,21 @@
         (is (= 130 (:exit @child)))
         (let [retained (state/read-edn (::branch/lifecycle-path request))
               current (process/read-process target-config process/pod-id)]
-          (is @(::branch-exists? fixture))
+          (is (::branch-exists? (signal-writer-state fixture)))
           (is (= :seon.dev.branch.state/open (::branch/desired-state retained)))
           (is (= (:seon.dev.process/pid original)
                  (:seon.dev.process/pid current)))
           (is (state/process-identity-alive? current)
               "a converged pod remains owned by its earlier invocation"))
-        (branch/close! {::branch/configuration (::branch/configuration request)
-                        ::branch/lifecycle-path (::branch/lifecycle-path request)}))
+        (with-signal-writer
+          directory
+          #(branch/close!
+            {::branch/configuration (::branch/configuration request)
+             ::branch/lifecycle-path (::branch/lifecycle-path request)})))
       (finally
         (when-let [child @owner]
           (when (.isAlive ^java.lang.Process (:proc child))
             (.destroyForcibly ^java.lang.Process (:proc child))))
-        (uds/close-request-server! (::server fixture))
         (fs/delete-tree directory {:force true})))))
 
 (deftest failed-pod-unwind-retains-the-exact-native-branch
@@ -334,10 +364,7 @@
         _ (fs/create-dirs directory)
         socket (str (fs/path directory "writer.sock"))
         request (signal-request directory socket)
-        source-database
-        (get-in request [::branch/configuration
-                         :seon.dev.config/launch-descriptor ::launch/database])
-        fixture (signal-writer! socket source-database)
+        fixture (signal-writer! directory)
         expression
         (str "(require '[seon.dev.branch-test :as t]) "
              "(t/run-branch-signal-fixture! " (pr-str directory) " "
@@ -358,18 +385,20 @@
           (is (= 130 (:exit result)))
           (is (str/includes? (:err result)
                              "Failed to unwind every startup resource"))
-          (is @(::branch-exists? fixture)
+          (is (::branch-exists? (signal-writer-state fixture))
               "an uncertain process inverse forbids branch deletion")
           (is (= :seon.dev.branch.state/open (::branch/desired-state retained)))
           (is (= (:seon.dev.process/pid pod)
                  (:seon.dev.process/pid current)))
           (is (state/process-identity-alive? current)))
-        (branch/close! {::branch/configuration (::branch/configuration request)
-                        ::branch/lifecycle-path (::branch/lifecycle-path request)}))
+        (with-signal-writer
+          directory
+          #(branch/close!
+            {::branch/configuration (::branch/configuration request)
+             ::branch/lifecycle-path (::branch/lifecycle-path request)})))
       (finally
         (when (.isAlive ^java.lang.Process (:proc owner))
           (.destroyForcibly ^java.lang.Process (:proc owner)))
-        (uds/close-request-server! (::server fixture))
         (fs/delete-tree directory {:force true})))))
 
 (deftest retained-open-retries-exact-create-and-close-uses-fresh-target-head
@@ -392,17 +421,17 @@
         (get-in source-config [:seon.dev.config/launch-descriptor
                                ::launch/database])
         database-id #uuid "ebc09a32-5450-4181-bc88-f053dcaf301f"
-        source-head {::coordinate/database-id database-id
-                     ::coordinate/branch :db
-                     ::coordinate/commit-id
+        source-head {::db.branch/store-id database-id
+                     ::db.branch/name :db
+                     ::db.branch/commit-id
                      #uuid "01c71e5a-ca4f-4d21-a45c-d24a07db0b84"
-                     ::coordinate/t 10}
-        fork-head (assoc source-head ::coordinate/branch :trial)
+                     ::db.branch/basis-t 10}
+        fork-head (assoc source-head ::db.branch/name :trial)
         advanced-head
         (assoc fork-head
-               ::coordinate/commit-id
+               ::db.branch/commit-id
                #uuid "0b1d206c-186b-44c8-801c-ab33d76e33ef"
-               ::coordinate/t 11)
+               ::db.branch/basis-t 11)
         target-head (atom fork-head)
         branch-exists? (atom false)
         create-attempts (atom 0)
@@ -415,7 +444,8 @@
         release-stop (promise)
         write-edn! state/write-edn!
         target-name "trial-route"
-        target-attachment (coordinate/attachment fork-head)
+        target-connection-id [(::db.branch/store-id fork-head)
+                           (::db.branch/name fork-head)]
         request
         {::branch/configuration source-config
          ::branch/lifecycle-path lifecycle-path
@@ -440,7 +470,7 @@
               (if @branch-exists?
                 {::protocol/success? true
                  ::protocol/database-name target-name
-                 ::coordinate/coordinate @target-head
+                 :seon.db/db (database-value target-name @target-head)
                  ::protocol/backend (::protocol/backend source-database)
                  ::protocol/database-path (::protocol/database-path
                                             source-database)}
@@ -449,7 +479,9 @@
                  ::protocol/error "branch absent"})
               {::protocol/success? true
                ::protocol/database-name (::protocol/database-name source-database)
-               ::coordinate/coordinate source-head
+               :seon.db/db
+               (database-value (::protocol/database-name source-database)
+                               source-head)
                ::protocol/backend (::protocol/backend source-database)
                ::protocol/database-path (::protocol/database-path source-database)})
 
@@ -464,8 +496,8 @@
                 :created-mismatch
                 {::protocol/success? true
                  ::protocol/target-database-name target-name
-                 ::protocol/target-attachment target-attachment
-                 ::protocol/coordinate advanced-head
+                 ::protocol/target-connection-id target-connection-id
+                 ::protocol/branch-head advanced-head
                  ::protocol/backend (::protocol/backend source-database)
                  ::protocol/database-path (::protocol/database-path
                                             source-database)
@@ -473,8 +505,8 @@
                  ::protocol/adopted? false}
                 {::protocol/success? true
                  ::protocol/target-database-name target-name
-                 ::protocol/target-attachment target-attachment
-                 ::protocol/coordinate @target-head
+                 ::protocol/target-connection-id target-connection-id
+                 ::protocol/branch-head @target-head
                  ::protocol/backend (::protocol/backend source-database)
                  ::protocol/database-path (::protocol/database-path
                                             source-database)
@@ -483,8 +515,6 @@
 
             :seon.db.protocol.operation/release-database
             {::protocol/success? true
-             ::protocol/target-database-name target-name
-             ::protocol/target-attachment target-attachment
              ::protocol/released? true}
 
             :seon.db.protocol.operation/delete-branch
@@ -494,16 +524,15 @@
               (reset! branch-exists? false)
               {::protocol/success? true
                ::protocol/target-database-name target-name
-               ::protocol/target-attachment target-attachment
+               ::protocol/target-connection-id target-connection-id
                ::protocol/source-head source-head
                ::protocol/released? false
                ::protocol/deleted? true}))
            (assoc ::protocol/request-id (::protocol/request-id message))))
-        server (uds/start-request-server!
-                {::uds/socket-path socket ::uds/handler handler})
         manifest {:seon.dev.artifact/application-digest "application"}]
     (try
       (with-redefs [artifact/read-manifest (fn [_] manifest)
+                    branch/writer-call! (fn [_ message] (handler message))
                     process/specs
                     (fn [configuration _]
                       (if (true? (get-in configuration
@@ -582,7 +611,7 @@
           (is (= fork-head
                  (get-in opened [::branch/launch-descriptor
                                  ::launch/database
-                                 ::coordinate/coordinate]))
+                                 ::db.branch/head]))
               "launch retains the immutable creation cut")
           (is (= 2 @create-attempts))
           (is (= [[:clean-or-force
@@ -594,20 +623,20 @@
         (let [current (branch/current-descriptor! stop-request)]
           (is (= advanced-head
                  (get-in current
-                         [::launch/database ::coordinate/coordinate])))
+                         [::launch/database ::db.branch/head])))
           (is (= fork-head
                  (get-in (state/read-edn lifecycle-path)
                          [::branch/launch-descriptor ::launch/database
-                          ::coordinate/coordinate]))
+                          ::db.branch/head]))
               "fresh observation does not rewrite the immutable launch cut"))
         (reset! branch-exists? false)
         (is (thrown-with-msg?
              Exception #"rejected a branch lifecycle request"
              (branch/current-descriptor! stop-request)))
         (reset! branch-exists? true)
-        (reset! target-head (assoc advanced-head ::coordinate/branch :stale))
+        (reset! target-head (assoc advanced-head ::db.branch/name :stale))
         (is (thrown-with-msg?
-             Exception #"different target attachment"
+             Exception #"different target connection-id"
              (branch/current-descriptor! stop-request)))
         (reset! target-head advanced-head)
 
@@ -754,7 +783,7 @@
                 status (first inventory)]
             (is (m/validate [:vector ::branch/status] inventory))
             (is (= "trial" (::branch/runtime-cluster status)))
-            (is (= fork-head (::branch/coordinate-at-launch status)))
+            (is (= fork-head (::branch/branch-head-at-launch status)))
             (is (= (::branch/launch-descriptor retained)
                    (::branch/launch-descriptor status)))
             (is (m/validate ::branch/status status))
@@ -884,7 +913,6 @@
                         ::branch/lifecycle-path lifecycle-path}))
       (finally
         (deliver release-stop true)
-        (uds/close-request-server! server)
         (fs/delete-tree directory)))))
 
 (defn -main [& _]

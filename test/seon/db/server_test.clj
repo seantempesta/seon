@@ -3,7 +3,7 @@
             [clojure.java.io :as io]
             [clojure.test :refer [deftest is]]
             [datahike.api :as d]
-            [seon.db.coordinate :as coordinate]
+            [seon.db.branch :as branch]
             [seon.db.protocol :as protocol]
             [seon.db.registry :as registry]
             [seon.db.server :as server]
@@ -26,14 +26,13 @@
 (defn- release-result [released?]
   (cond->
    {::registry/database-name :terminal-test
-    ::registry/attachment
-    {::coordinate/database-id #uuid "2965429e-ea9d-4262-b20c-30480f0b090b"
-     ::coordinate/branch :db}
-    ::registry/coordinate
-    {::coordinate/database-id #uuid "2965429e-ea9d-4262-b20c-30480f0b090b"
-     ::coordinate/branch :db
-     ::coordinate/commit-id #uuid "dd3a7cc2-0798-466a-b734-5fec95bb69e2"
-     ::coordinate/t 536870913}
+    ::registry/connection-id
+    [#uuid "2965429e-ea9d-4262-b20c-30480f0b090b" :db]
+    ::registry/branch-head
+    {::branch/store-id #uuid "2965429e-ea9d-4262-b20c-30480f0b090b"
+     ::branch/name :db
+     ::branch/commit-id #uuid "dd3a7cc2-0798-466a-b734-5fec95bb69e2"
+     ::branch/basis-t 536870913}
     ::registry/released? released?}
     (not released?)
     (assoc ::registry/release-error "injected release failure")))
@@ -239,10 +238,10 @@
         (is (schema/valid-candidate-value? ::server/stop-response result))
         (is (= (keyword database-name)
                (::registry/database-name failure)))
-        (is (= (::registry/attachment before)
-               (::registry/attachment failure)))
-        (is (= (::registry/coordinate before)
-               (::registry/coordinate failure)))
+        (is (= (::registry/connection-id before)
+               (::registry/connection-id failure)))
+        (is (= (::registry/branch-head before)
+               (::registry/branch-head failure)))
         (is (false? (::registry/released? failure)))
         (is (re-find #"server release failed"
                      (::registry/release-error failure))))

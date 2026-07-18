@@ -238,7 +238,7 @@
     :where
     [?e :seon.error/fault :core ?tx]
     [?e :seon.error/message ?msg]
-    [(get-else $ ?e :seon.error/t 0) ?t]
+    [(get-else $ ?e :seon.error/basis-t 0) ?t]
     [?tx :db/txInstant ?inst]])
 
 (def ^:private program-schema-query

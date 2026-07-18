@@ -1295,10 +1295,11 @@
 
 (deftest clean-or-force-orders-and-classifies-complete-evidence
   (let [database-id (random-uuid)
-        coordinate {:seon.db.coordinate/database-id database-id
-                    :seon.db.coordinate/branch :db
-                    :seon.db.coordinate/commit-id (random-uuid)
-                    :seon.db.coordinate/t 42}
+        connection-id [database-id :db]
+        branch-head {:seon.db.branch/store-id database-id
+                     :seon.db.branch/name :db
+                     :seon.db.branch/commit-id (random-uuid)
+                     :seon.db.branch/basis-t 42}
         configuration
         (assoc (operator-config) :seon.dev.config/environment
                {"SEON_TURN_TIMEOUT_MS" "10"})
@@ -1313,10 +1314,8 @@
                 {:seon.db.server/stopped? true
                  :seon.db.server/release-results
                  [{:seon.db.registry/database-name :db
-                   :seon.db.registry/attachment
-                   {:seon.db.coordinate/database-id database-id
-                    :seon.db.coordinate/branch :db}
-                   :seon.db.registry/coordinate coordinate
+                   :seon.db.registry/connection-id connection-id
+                   :seon.db.registry/branch-head branch-head
                    :seon.db.registry/released? true}]}})
         pod-result
         {:seon.client/quiesced? true
@@ -2333,20 +2332,19 @@
         database-id #uuid "9dcfa740-5f7f-4ff5-ac08-a9c8b605a8aa"
         source-descriptor
         (assoc-in (:seon.dev.config/launch-descriptor source-config)
-                  [::launch/database :seon.db.coordinate/attachment]
-                  {:seon.db.coordinate/database-id database-id
-                   :seon.db.coordinate/branch :db})
+                  [::launch/database :seon.db.branch/connection-id]
+                  [database-id :db])
         branch-descriptor
         (launch/branch-descriptor
          {::launch/source-descriptor source-descriptor
           ::launch/runtime-cluster "trial"
           ::launch/target-database-name "trial-route"
-          ::launch/target-coordinate
-          {:seon.db.coordinate/database-id database-id
-           :seon.db.coordinate/branch :trial
-           :seon.db.coordinate/commit-id
+          ::launch/target-branch-head
+          {:seon.db.branch/store-id database-id
+           :seon.db.branch/name :trial
+           :seon.db.branch/commit-id
            #uuid "a2bd215f-7ec6-47dc-a627-f8e4948df581"
-           :seon.db.coordinate/t 42}
+           :seon.db.branch/basis-t 42}
           ::launch/process-dir (str (fs/path directory "trial-process"))
           ::launch/log-dir (str (fs/path directory "trial-logs"))
           ::launch/http-port 0

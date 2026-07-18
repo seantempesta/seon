@@ -225,7 +225,7 @@
                   {::result-bytes byte-count
                    ::result-limit-bytes result-limit}}})))))
 
-;;; Coordinate-pinned authored program
+;;; Authored program read at one immutable database value
 
 (def ^:private maximum-program-rows 2048)
 (def ^:private maximum-program-bytes (* 3 1024 1024))

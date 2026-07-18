@@ -6,7 +6,7 @@
    request/response data and one multiplexed transport session."
   (:require
    [cljs.reader :as reader]
-   [seon.db.coordinate :as db.coordinate]
+   [seon.db.branch :as db.branch]
    [seon.db.id.schema]
    [seon.db.internal :as internal]
    [seon.db.protocol :as protocol]
@@ -20,7 +20,7 @@
 (schema/register! ::opts :map)
 (schema/register! ::tx-meta :map)
 (schema/register! ::error :map)
-(schema/register! ::coordinate :seon.db.coordinate/coordinate)
+(schema/register! ::branch-head :seon.db.branch/head)
 (schema/register! ::query-form [:or [:vector :any] :map :string])
 (schema/register! ::query :any)
 (schema/register! ::args [:vector :any])
@@ -151,7 +151,7 @@
   [::backend ::backend]
   [::database-path {:optional true} ::database-path]
   [::initialization {:optional true} ::initialization]
-  [::attachment {:optional true} :seon.db.coordinate/attachment]])
+  [::connection-id {:optional true} :seon.db.branch/connection-id]])
 (schema/register!
  ::open-session-response
   [:map {:closed true}
@@ -224,12 +224,6 @@
      (assoc :seon.db/expected-db (:seon.db/expected-db response))
      (:seon.db/current-db response)
      (assoc :seon.db/current-db (:seon.db/current-db response))
-     (::protocol/expected-coordinate response)
-     (assoc ::protocol/expected-coordinate
-            (::protocol/expected-coordinate response))
-     (::protocol/current-coordinate response)
-     (assoc ::protocol/current-coordinate
-            (::protocol/current-coordinate response))
      (::protocol/generated-candidate response)
      (assoc ::protocol/generated-candidate
             (::protocol/generated-candidate response))
@@ -302,7 +296,7 @@
 
 (defn- ^:async ensure-and-acquire!
   [session selection initialization]
-  (let [{::keys [database-name backend database-path attachment]} selection
+  (let [{::keys [database-name backend database-path connection-id]} selection
         ensure-response
         (await
          (request-on-session!
@@ -312,7 +306,7 @@
                     ::protocol/database-name database-name
                     ::protocol/backend backend}
              database-path (assoc ::protocol/database-path database-path)
-             attachment (assoc ::db.coordinate/attachment attachment)
+             connection-id (assoc ::db.branch/connection-id connection-id)
              initialization (assoc ::initialization initialization)))
           15000))
         _ (when-not (::protocol/success? ensure-response)
@@ -551,7 +545,7 @@
     (if-let [session (::session @closed)] (uds/close! session) false)))
 
 (defn attached?
-  "True when this process has one live database attachment."
+  "True when this process has one live database connection-id."
   {:malli/schema [:=> [:cat] :boolean]}
   []
   (some? (active-session)))
@@ -794,7 +788,7 @@
           (nil? (:seon.error/kind value))
           (assoc :seon.error/kind :core-bug))))))
 
-;;; Coordinate-pinned reads
+;;; Reads over one immutable database value
 
 (defn- explicit-query-source? [arguments]
   (some db-value? arguments))
@@ -1033,31 +1027,31 @@
           (not (::protocol/success? response)) (response-error response)
           :else (::protocol/hits response))))))
 
-(schema/register! ::head-coordinate ::coordinate)
+(schema/register! ::containing-branch-head ::branch-head)
 (schema/register! ::transaction-id :seon.db.protocol/transaction-id)
 (schema/register!
- ::resolve-transaction-coordinate-request
+ ::resolve-transaction-branch-head-request
  [:map {:closed true}
-  [::head-coordinate ::head-coordinate]
+  [::containing-branch-head ::containing-branch-head]
   [::transaction-id ::transaction-id]])
 
-(defn ^:async resolve-transaction-coordinate!
-  [{::keys [head-coordinate transaction-id]}]
+(defn ^:async resolve-transaction-branch-head!
+  [{::keys [containing-branch-head transaction-id]}]
   (try
     (if-let [{::keys [database-name]} (active-session)]
       (let [response
             (await
              (send-request!
-              (protocol/resolve-transaction-coordinate-request
+              (protocol/resolve-transaction-branch-head-request
                {::protocol/request-id (str (random-uuid))
                 ::protocol/database-name database-name
-                ::protocol/head-coordinate head-coordinate
+                ::protocol/containing-branch-head containing-branch-head
                 ::protocol/transaction-id transaction-id})
               30000))]
         (cond
           (error-value? response) response
           (not (::protocol/success? response)) (response-error response)
-          :else (::protocol/coordinate response)))
+          :else (::protocol/branch-head response)))
       (session-error "This process has no open database session." {}))
     (catch :default exception (error/->map exception))))
 

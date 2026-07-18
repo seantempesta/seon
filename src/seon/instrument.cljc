@@ -106,9 +106,9 @@
       here + fns declaring the key.
 
       The agent id and operation configuration come from the child fiber's
-      existing transaction context. Database values and time coordinates are
+      existing transaction context. Database values and basis transactions are
       deliberately not injectable: the authority owner acquires ordinary data
-      at an explicit coordinate and passes it in."
+      at an explicit database value and passes it in."
      {:seon.agent/id
       {::resolver (fn [_] (db/current-agent-id))
        ::caller-policy ::caller-provided}

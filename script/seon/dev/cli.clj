@@ -73,8 +73,8 @@
     (let [target-branch
           (get-in intent [:seon.dev.restore/selected-target-descriptor
                           :seon.launch/database
-                          :seon.db.coordinate/coordinate
-                          :seon.db.coordinate/branch])
+                          :seon.db.branch/head
+                          :seon.db.branch/name])
           request
           (cond-> {::restore-state/configuration configuration}
             (= :seon.dev.restore.operation/restore
@@ -658,8 +658,8 @@
 (defn- print-restore-result! [branch-name result]
   (println (str "● restored retained branch " branch-name))
   (println (str "  intent: " (:seon.dev.restore/intent-id result)))
-  (println (str "  coordinate: "
-                (pr-str (::restore-state/restored-coordinate result))))
+  (println (str "  branch head: "
+                (pr-str (::restore-state/restored-branch-head result))))
   (println (str "  admin: "
                 (name (::restore-state/admin-outcome result)))))
 

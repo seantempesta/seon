@@ -70,7 +70,7 @@
 (schema/register!
   ::materialization-request
   [:map {:closed true}
-   [::target-coordinate ::target-coordinate]
+   [::target-branch-head ::target-branch-head]
    [::retained-hashes ::retained-hashes]
    [::source-storage-view ::source-storage-view]
    [::destination-storage-view ::destination-storage-view]
@@ -80,7 +80,7 @@
   ::materialization-failure
   [:map {:closed true}
    [::ok? [:= false]]
-   [::target-coordinate ::target-coordinate]
+   [::target-branch-head ::target-branch-head]
    [::reachable-hash-digest ::reachable-hash-digest]
    [::hash-count ::hash-count]
    [::materialization-operation ::materialization-operation]
@@ -106,7 +106,7 @@
   [:map {:closed true}
    [::operator-operation
     [:= :my.blob.operator.operation/observe-retained]]
-   [::target-coordinate ::target-coordinate]])
+   [::target-branch-head ::target-branch-head]])
 
 (schema/register!
   ::operator-materialize-request
@@ -115,7 +115,7 @@
     [:= :my.blob.operator.operation/materialize-retained]]
    [:seon.dev.restore/startup-identity
     :seon.dev.restore/startup-identity]
-   [::target-coordinate ::target-coordinate]
+   [::target-branch-head ::target-branch-head]
    [::source-storage-view ::source-storage-view]
    [::destination-storage-view ::destination-storage-view]])
 
@@ -126,7 +126,7 @@
 (schema/register!
   ::retained-observation-request
   [:map {:closed true}
-   [::target-coordinate ::target-coordinate]
+   [::target-branch-head ::target-branch-head]
    [::retained-hashes ::retained-hashes]])
 
 (schema/register!
@@ -134,7 +134,7 @@
   [:map {:closed true}
    [:seon.dev.restore/startup-identity
     :seon.dev.restore/startup-identity]
-   [::target-coordinate ::target-coordinate]
+   [::target-branch-head ::target-branch-head]
    [::retained-hashes ::retained-hashes]
    [::source-storage-view ::source-storage-view]
    [::destination-storage-view ::destination-storage-view]])
@@ -436,10 +436,10 @@
           (.unlinkSync nfs tmp))))))
 
 (defn- materialization-failure
-  [target-coordinate frozen-digest hash-count operation error evidence]
+  [target-branch-head frozen-digest hash-count operation error evidence]
   (merge
     {::ok? false
-     ::target-coordinate target-coordinate
+     ::target-branch-head target-branch-head
      ::reachable-hash-digest frozen-digest
      ::hash-count hash-count
      ::materialization-operation operation
@@ -460,25 +460,25 @@
    [:=> [:cat ::retained-observation-request]
     ::retained-observation-result]
    :seon.fn/agent-facing? false}
-  [{::keys [target-coordinate retained-hashes]}]
+  [{::keys [target-branch-head retained-hashes]}]
   (try
     (let [hashes (canonical-retained-hashes retained-hashes)
           invalid-hash (first (remove valid-hash? hashes))]
       (if invalid-hash
       {::ok? false
-       ::target-coordinate target-coordinate
+       ::target-branch-head target-branch-head
        ::error "the retained database contains a malformed :my.blob/hash"}
        {::ok? true
-        ::target-coordinate target-coordinate
+        ::target-branch-head target-branch-head
         ::reachable-hash-digest (sha256 (pr-str hashes))
         ::hash-count (count hashes)}))
     (catch :default error
       {::ok? false
-       ::target-coordinate target-coordinate
+       ::target-branch-head target-branch-head
        ::error (or (some-> error .-message) (str error))})))
 
 (defn- materialize-hash!
-  [effects source-view destination-dir target-coordinate frozen-digest
+  [effects source-view destination-dir target-branch-head frozen-digest
    hash-count counts hash]
   (let [destination (blob-path destination-dir hash)
         source (resolve-blob-evidence source-view hash)
@@ -487,7 +487,7 @@
       (not (contains? source ::ok?))
       (reduced
         (materialization-failure
-          target-coordinate frozen-digest hash-count
+          target-branch-head frozen-digest hash-count
           :my.blob.materialization.operation/verify-source
           (str "no retained source blob exists under " hash)
           {::hash hash
@@ -498,7 +498,7 @@
       (false? (::ok? source))
       (reduced
         (materialization-failure
-          target-coordinate frozen-digest hash-count
+          target-branch-head frozen-digest hash-count
           :my.blob.materialization.operation/verify-source
           (::error source)
           (cond->
@@ -522,7 +522,7 @@
         (if publish-error
           (reduced
             (materialization-failure
-              target-coordinate frozen-digest hash-count
+              target-branch-head frozen-digest hash-count
               :my.blob.materialization.operation/publish-destination
               publish-error
               {::hash hash
@@ -533,7 +533,7 @@
             (if (false? (::ok? final))
               (reduced
                 (materialization-failure
-                  target-coordinate frozen-digest hash-count
+                  target-branch-head frozen-digest hash-count
                   :my.blob.materialization.operation/verify-destination
                   (::error final)
                   (cond->
@@ -549,7 +549,7 @@
 
 (defn- materialize-retained-with-effects!
   "Verify and materialize one frozen intent's exact retained blob set."
-  [{::keys [target-coordinate retained-hashes source-storage-view
+  [{::keys [target-branch-head retained-hashes source-storage-view
             destination-storage-view reachable-hash-digest]}
    effects]
   (let [source-result (normalize-storage-view source-storage-view)
@@ -560,21 +560,21 @@
     (cond
       (false? (::ok? source-result))
       (materialization-failure
-        target-coordinate reachable-hash-digest 0
+        target-branch-head reachable-hash-digest 0
         :my.blob.materialization.operation/validate-request
         (::error source-result)
         {})
 
       (false? (::ok? destination-result))
       (materialization-failure
-        target-coordinate reachable-hash-digest 0
+        target-branch-head reachable-hash-digest 0
         :my.blob.materialization.operation/validate-request
         (::error destination-result)
         {})
 
       (not= destination-dir (first (::read-only-dirs source-view)))
       (materialization-failure
-        target-coordinate reachable-hash-digest 0
+        target-branch-head reachable-hash-digest 0
         :my.blob.materialization.operation/validate-request
         "the main writable archive must be the target view's first inherited base"
         {::destination-path destination-dir})
@@ -588,14 +588,14 @@
           (cond
             invalid-hash
           (materialization-failure
-            target-coordinate reachable-hash-digest hash-count
+            target-branch-head reachable-hash-digest hash-count
             :my.blob.materialization.operation/derive-retained-set
             "the retained database contains a malformed :my.blob/hash"
             {::hash invalid-hash})
 
             (not= reachable-hash-digest derived-digest)
             (materialization-failure
-              target-coordinate reachable-hash-digest hash-count
+              target-branch-head reachable-hash-digest hash-count
               :my.blob.materialization.operation/derive-retained-set
               "the retained blob set does not match the frozen intent digest"
               {::actual-digest derived-digest})
@@ -605,7 +605,7 @@
                   (reduce
                     (partial materialize-hash!
                              effects source-view destination-dir
-                             target-coordinate reachable-hash-digest
+                             target-branch-head reachable-hash-digest
                              hash-count)
                     {::verified-count 0
                      ::newly-materialized-count 0
@@ -615,13 +615,13 @@
                 result
                 (merge
                   {::ok? true
-                   ::target-coordinate target-coordinate
+                   ::target-branch-head target-branch-head
                    ::reachable-hash-digest derived-digest
                    ::hash-count hash-count}
                   result)))))
         (catch :default e
           (materialization-failure
-            target-coordinate reachable-hash-digest 0
+            target-branch-head reachable-hash-digest 0
             :my.blob.materialization.operation/derive-retained-set
             (or (some-> e .-message) (str e))
             {}))))))
@@ -646,13 +646,13 @@
   {:malli/schema
    [:=> [:cat ::intent-materialization-request] ::materialization-result]
    :seon.fn/agent-facing? false}
-  [{::keys [target-coordinate retained-hashes source-storage-view
+  [{::keys [target-branch-head retained-hashes source-storage-view
             destination-storage-view]
     startup-identity :seon.dev.restore/startup-identity}]
   (let [frozen-digest
         (:seon.dev.restore/reachable-hash-digest startup-identity)]
     (materialize-retained!
-      {::target-coordinate target-coordinate
+      {::target-branch-head target-branch-head
        ::retained-hashes retained-hashes
        ::source-storage-view source-storage-view
        ::destination-storage-view destination-storage-view

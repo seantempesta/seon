@@ -10,6 +10,7 @@
 (def digest (apply str (repeat 64 "a")))
 (def database
   {:db-name "test"
+   :store-id [#uuid "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" :db]
    :t 42
    :as-of nil
    :since nil

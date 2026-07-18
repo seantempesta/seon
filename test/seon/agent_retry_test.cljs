@@ -4,15 +4,15 @@
    [clojure.string :as str]
    [cljs.test :refer [async deftest is testing]]
    [seon.agent.turn :as turn]
-   [seon.db.coordinate :as db.coordinate]
+   [seon.db.branch :as db.branch]
    [seon.execution :as execution]
    [seon.execution.host :as execution.host]))
 
 (def ^:private database-value
-  {::db.coordinate/database-id #uuid "00000000-0000-4000-8000-000000000081"
-   ::db.coordinate/branch :db
-   ::db.coordinate/commit-id #uuid "00000000-0000-4000-8000-000000000082"
-   ::db.coordinate/t 42})
+  {::db.branch/store-id #uuid "00000000-0000-4000-8000-000000000081"
+   ::db.branch/name :db
+   ::db.branch/commit-id #uuid "00000000-0000-4000-8000-000000000082"
+   ::db.branch/basis-t 42})
 
 (def ^:private base-resolution
   {:seon.ai/resolved-config
@@ -52,7 +52,7 @@
    (turn/ask-and-eval!
     {:seon.agent/id "AGTretry00001"
      :seon.agent/llm-fn llm-fn
-     ::db.coordinate/coordinate database-value
+     ::db.branch/head database-value
      :seon.db/db database-value
      :seon.ai/config-resolution resolution
      :seon.agent.turn/id-of-turn "turn-retry-test"

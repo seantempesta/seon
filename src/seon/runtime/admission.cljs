@@ -213,10 +213,12 @@
 
 (defn ^:async ^:private acquire-committed-projection!
   []
-  (let [acquired
+  (let [database (await (db/db))
+        acquired
         (await
          (db/execute-many
-          {::db/max-result-weight (* 6 1024 1024)
+          {::db/db database
+           ::db/max-result-weight (* 6 1024 1024)
            ::db/members [(query-member schema-query)
                          (query-member function-contract-query)]}))
         _ (when (:seon.error/message acquired)
@@ -224,7 +226,7 @@
                             {:seon.db/error acquired
                              :seon.error/kind :core-bug})))
         [schemas contracts] (::db/results acquired)]
-    {::db/coordinate (::db/coordinate acquired)
+    {::db/db database
      ::schema-rows (query-result schemas)
      ::function-contract-rows (query-result contracts)}))
 
@@ -249,7 +251,7 @@
              (:seon.schema.projection/fingerprint projection)}))))
     (schema/activate-projection! projection)
     {::projection projection
-     ::db/coordinate (::db/coordinate acquired)
+     ::db/db (::db/db acquired)
      ::instrumentation stats
      ::generation (:seon.schema.projection/fingerprint projection)}))
 
@@ -395,7 +397,7 @@
    Reconciles every wrapper owned by the active projection to the empty
    projection before publishing `:starting`. Repeated calls are idempotent.
    A failed reconciliation leaves admission unavailable and returns an error;
-   the lifecycle owner must retain the database attachment for retry."
+   the lifecycle owner must retain the database session for retry."
   {:malli/schema
    [:=> [:cat]
     [:map {:closed true}

@@ -9,7 +9,7 @@
    `::max-tokens`, `::thinking`, `::timeout-ms`, `::base-url`,
    `::api-key-env`, `::dg-backend`, and `::extra-body-edn`. The execution
    boundary pulls ordinary config and agent maps from one immutable database
-   coordinate and calls [[resolved-config-from-rows]]. Provider requests carry
+   database value and calls [[resolved-config-from-rows]]. Provider requests carry
    that `::config-resolution`; adapters never read a local database.
 
    ENV/CONFIG SEEDS ONCE → THE DB OWNS THE ROW. [[sync!]] (called from
@@ -309,7 +309,7 @@
 ;; under. NEVER stored (owner correction 2026-07-04, derive-don't-store:
 ;; the per-turn `llm-*` stamping this shape once fed is deleted);
 ;; [[resolved-config-from-rows]] derives it from ordinary maps pulled at one
-;; immutable database coordinate.
+;; immutable database value.
 ;; `::thinking` is the row-shape STRING
 ;; ("false"/"true"/effort — the [[thinking-mode]] vocabulary). Keys with
 ;; no value at any resolution tier (anthropic never sends temperature;
@@ -409,7 +409,7 @@
 ;; `::max-tokens`/`::thinking`. `::agent-max-retries` replaces the
 ;; SEON_AI_MAX_RETRIES env read (seon.agent.turn). The execution boundary
 ;; resolves explicit request opt → the agent's own config → the global row →
-;; shipped defaults from ordinary maps pulled at one database coordinate.
+;; shipped defaults from ordinary maps pulled at one database value.
 ;; What an agent resolves to is derived evidence, never a stored stamp.
 ;; ============================================================
 
@@ -653,7 +653,7 @@
 (defn resolved-config-from-rows
   "Resolve effective LLM configuration from ordinary pulled maps.
 
-   Both maps must come from the same immutable database coordinate. This is
+   Both maps must come from the same immutable database value. This is
    the process-independent form used by execution children and turn retries."
   {:malli/schema
    [:=> [:catn [::config-row ::row] [::agent-row :map]]

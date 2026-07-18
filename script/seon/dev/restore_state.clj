@@ -6,7 +6,7 @@
             [clojure.string :as str]
             [malli.core :as m]
             [my.blob.schema]
-            [seon.db.coordinate :as coordinate]
+            [seon.db.branch :as db.branch]
             [seon.db.protocol :as protocol]
             [seon.db.restore :as db.restore]
             [seon.db.restore-admin :as restore-admin]
@@ -39,12 +39,12 @@
   :seon.dev.restore.proof-cut/after-evidence-deletion-before-autonomous-start])
 (schema/register! ::intent-retained? :boolean)
 (schema/register! ::admin-outcome :keyword)
-(schema/register! ::restored-coordinate ::coordinate/coordinate)
+(schema/register! ::restored-branch-head ::db.branch/head)
 (schema/register! ::aborted? [:= true])
-(schema/register! ::prior-main-coordinate ::coordinate/coordinate)
-(schema/register! ::current-main-coordinate ::coordinate/coordinate)
-(schema/register! ::selected-target-coordinate ::coordinate/coordinate)
-(schema/register! ::current-target-coordinate ::coordinate/coordinate)
+(schema/register! ::prior-main-branch-head ::db.branch/head)
+(schema/register! ::current-main-branch-head ::db.branch/head)
+(schema/register! ::selected-target-branch-head ::db.branch/head)
+(schema/register! ::current-target-branch-head ::db.branch/head)
 (schema/register!
  ::effect-request
  [:map {:closed true}
@@ -110,7 +110,7 @@
  ::restore-result
  [:map {:closed true}
   [::restore/intent-id ::restore/intent-id]
-  [::restored-coordinate ::restored-coordinate]
+  [::restored-branch-head ::restored-branch-head]
   [::admin-outcome ::admin-outcome]
   [::transitions ::transitions]])
 (schema/register!
@@ -131,10 +131,10 @@
   [::restore/intent-id ::restore/intent-id]
   [::restore/plan-digest ::restore/plan-digest]
   [::aborted? ::aborted?]
-  [::prior-main-coordinate ::prior-main-coordinate]
-  [::current-main-coordinate ::current-main-coordinate]
-  [::selected-target-coordinate ::selected-target-coordinate]
-  [::current-target-coordinate {:optional true} ::current-target-coordinate]])
+  [::prior-main-branch-head ::prior-main-branch-head]
+  [::current-main-branch-head ::current-main-branch-head]
+  [::selected-target-branch-head ::selected-target-branch-head]
+  [::current-target-branch-head {:optional true} ::current-target-branch-head]])
 (schema/register!
  ::publication-request
  [:map {:closed true}
@@ -309,13 +309,13 @@
     :seon.dev.restore.operation/undo
     (main-blob-url configuration manifest)))
 
-(defn- observe-retained-blobs! [url target-coordinate]
+(defn- observe-retained-blobs! [url target-branch-head]
   (let [response
         (post-edn!
          url
          {:my.blob/operator-operation
           :my.blob.operator.operation/observe-retained
-          :my.blob/target-coordinate target-coordinate}
+          :my.blob/target-branch-head target-branch-head}
          :my.blob/retained-observation-result)]
     (when-not (true? (:my.blob/ok? response))
       (throw (ex-info "The retained blob set could not be frozen."
@@ -338,16 +338,16 @@
         target-descriptor
         (branch/current-descriptor!
          (branch-close-request configuration branch-name))
-        target-coordinate
+        target-branch-head
         (get-in target-descriptor
-                [::launch/database ::coordinate/coordinate])
+                [::launch/database ::db.branch/head])
         blob-observation
         (observe-retained-blobs!
-         (retained-blob-url configuration branch-name) target-coordinate)
+         (retained-blob-url configuration branch-name) target-branch-head)
         main-descriptor
-        (launch/with-coordinate
+        (launch/with-branch-head
          {::launch/descriptor ordinary
-          ::coordinate/coordinate (::protocol/main-coordinate lifecycle)})
+          ::db.branch/head (::protocol/main-branch-head lifecycle)})
         intent
         (restore/derive-intent
          {::restore/intent-id intent-id
@@ -371,8 +371,8 @@
     intent))
 
 (defn- lifecycle->retained-head-observation [lifecycle]
-  {::restore/main-coordinate (::protocol/main-coordinate lifecycle)
-   ::restore/branch-heads (::protocol/branch-coordinates lifecycle)
+  {::restore/main-branch-head (::protocol/main-branch-head lifecycle)
+   ::restore/branch-heads (::protocol/branch-heads lifecycle)
    ::restore/completion-facts (::protocol/restore-completions lifecycle)})
 
 (defn- completion-by-id! [lifecycle completion-id]
@@ -394,12 +394,12 @@
   (let [ordinary (:seon.dev.config/launch-descriptor configuration)
         lifecycle (observe-lifecycle! ordinary)
         completion (completion-by-id! lifecycle completion-id)
-        target-coordinate (restore/completion-undo-coordinate completion)
-        main-coordinate (::protocol/main-coordinate lifecycle)
+        target-branch-head (restore/completion-undo-branch-head completion)
+        main-branch-head (::protocol/main-branch-head lifecycle)
         main-descriptor
-        (launch/with-coordinate
+        (launch/with-branch-head
          {::launch/descriptor ordinary
-          ::coordinate/coordinate main-coordinate})
+          ::db.branch/head main-branch-head})
         target-private
         (branch/request
          {::branch/configuration configuration
@@ -410,7 +410,7 @@
           ::launch/runtime-cluster (::branch/runtime-cluster target-private)
           ::launch/target-database-name
           (::branch/target-database-name target-private)
-          ::launch/target-coordinate target-coordinate
+          ::launch/target-branch-head target-branch-head
           ::launch/process-dir (::branch/process-dir target-private)
           ::launch/log-dir (::branch/log-dir target-private)
           ::launch/http-port (::branch/http-port target-private)
@@ -419,7 +419,7 @@
           (::branch/writable-blob-dir target-private)})
         blob-observation
         (observe-retained-blobs!
-         (main-blob-url configuration manifest) target-coordinate)]
+         (main-blob-url configuration manifest) target-branch-head)]
     (restore/derive-intent
      {::restore/intent-id intent-id
       ::restore/operation :seon.dev.restore.operation/undo
@@ -515,8 +515,8 @@
                       (:my.blob/reachable-hash-digest result))
                    (= (get-in intent
                               [::restore/selected-target-descriptor
-                               ::launch/database ::coordinate/coordinate])
-                      (:my.blob/target-coordinate result)))
+                               ::launch/database ::db.branch/head])
+                      (:my.blob/target-branch-head result)))
       (throw (ex-info "The retained blob result names another restore intent."
                       {:seon.dev.restore-state/blob-result result
                        ::restore/intent-id (::restore/intent-id intent)})))
@@ -528,8 +528,8 @@
     (or (read-materialization-result cluster-dir intent)
         (let [target (::restore/selected-target-descriptor intent)
               main (::restore/pre-restore-main-descriptor intent)
-              target-coordinate
-              (get-in target [::launch/database ::coordinate/coordinate])
+              target-branch-head
+              (get-in target [::launch/database ::db.branch/head])
               result
               (post-edn!
                (blob-url configuration manifest branch-name intent)
@@ -537,7 +537,7 @@
                 :my.blob.operator.operation/materialize-retained
                 :seon.dev.restore/startup-identity
                 (restore/startup-identity intent)
-                :my.blob/target-coordinate target-coordinate
+                :my.blob/target-branch-head target-branch-head
                 :my.blob/source-storage-view
                 (::launch/blob-storage-view target)
                 :my.blob/destination-storage-view
@@ -546,12 +546,12 @@
           (state/write-edn! (blob-result-path cluster-dir intent) result)
           result))))
 
-(defn- require-created-coordinate!
+(defn- require-created-branch-head!
   [intent role response]
   (let [expected (case role
-                   :undo (::restore/undo-coordinate intent)
-                   :target (::restore/prepared-target-coordinate intent))
-        actual (::protocol/coordinate response)]
+                   :undo (::restore/undo-branch-head intent)
+                   :target (::restore/prepared-target-branch-head intent))
+        actual (::protocol/branch-head response)]
     (when-not (and (= expected actual)
                    (not= (::protocol/created? response)
                          (::protocol/adopted? response)))
@@ -565,7 +565,7 @@
 (defn- ensure-descriptor-route!
   [descriptor]
   (let [database (::launch/database descriptor)
-        expected-coordinate (::coordinate/coordinate database)
+        expected-branch-head (::db.branch/head database)
         response
         (writer-call!
          descriptor
@@ -574,20 +574,20 @@
                    ::protocol/database-name
                    (::protocol/database-name database)
                    ::protocol/backend (::protocol/backend database)}
-            (::coordinate/attachment database)
-            (assoc ::coordinate/attachment
-                   (::coordinate/attachment database))
+            (::db.branch/connection-id database)
+            (assoc ::db.branch/connection-id
+                   (::db.branch/connection-id database))
             (::protocol/database-path database)
             (assoc ::protocol/database-path
                    (::protocol/database-path database))))
          ::protocol/ensure-database-response)]
-    (when-not (= expected-coordinate (::coordinate/coordinate response))
+    (when-not (= expected-branch-head (::db.branch/head response))
       (throw
-       (ex-info "The restore source route resolved another exact coordinate."
-                {:seon.dev.restore-state/expected-coordinate
-                 expected-coordinate
-                 :seon.dev.restore-state/actual-coordinate
-                 (::coordinate/coordinate response)})))
+       (ex-info "The restore source route resolved another exact branch-head."
+                {:seon.dev.restore-state/expected-branch-head
+                 expected-branch-head
+                 :seon.dev.restore-state/actual-branch-head
+                 (::db.branch/head response)})))
     response))
 
 (defn- create-reserved-branch!
@@ -597,13 +597,13 @@
           :undo (::restore/pre-restore-main-descriptor intent)
           :target (::restore/selected-target-descriptor intent))
         source-database (::launch/database source-descriptor)
-        source-coordinate
+        source-branch-head
         (get-in source-descriptor
-                [::launch/database ::coordinate/coordinate])
-        target-coordinate
+                [::launch/database ::db.branch/head])
+        target-branch-head
         (case role
-          :undo (::restore/undo-coordinate intent)
-          :target (::restore/prepared-target-coordinate intent))
+          :undo (::restore/undo-branch-head intent)
+          :target (::restore/prepared-target-branch-head intent))
         target-database-name
         (str (:seon.dev.config/cluster-name configuration)
              "-restore-" (name role) "-" (::restore/intent-id intent))
@@ -616,11 +616,11 @@
            ::protocol/source-database-name
            (::protocol/database-name source-database)
            ::protocol/target-database-name target-database-name
-           ::protocol/source-coordinate source-coordinate
-           ::protocol/expected-source-head source-coordinate
-           ::protocol/target-branch (::coordinate/branch target-coordinate)})
+           ::protocol/source-branch-head source-branch-head
+           ::protocol/expected-source-head source-branch-head
+           ::protocol/target-branch (::db.branch/name target-branch-head)})
          ::protocol/create-branch-response)]
-    (require-created-coordinate! intent role response)))
+    (require-created-branch-head! intent role response)))
 
 (defn- stop-retained-pods! [configuration]
   (mapv
@@ -649,15 +649,15 @@
     #{process/pod-id process/writer-id process/watcher-id}}))
 
 (defn- lifecycle->observation [_intent lifecycle]
-  {::restore/main-coordinate (::protocol/main-coordinate lifecycle)
+  {::restore/main-branch-head (::protocol/main-branch-head lifecycle)
    ::restore/main-parent-commit-ids
    (::protocol/main-parent-commit-ids lifecycle)
-   ::restore/branch-heads (::protocol/branch-coordinates lifecycle)
+   ::restore/branch-heads (::protocol/branch-heads lifecycle)
    ::restore/completed-restore-ids
    (::protocol/completed-restore-ids lifecycle)
    ::restore/completion-facts (::protocol/restore-completions lifecycle)
-   ::restore/completion-coordinates
-   (::protocol/restore-completion-coordinates lifecycle)})
+   ::restore/completion-branch-heads
+   (::protocol/restore-completion-branch-heads lifecycle)})
 
 (defn- observe-restore! [configuration intent]
   (lifecycle->observation
@@ -689,8 +689,8 @@
 (defn- require-associated-admin-result! [intent result]
   (let [base (restore-admin/result-base intent)
         associated? (every? (fn [[key value]] (= value (get result key))) base)
-        forced (::restore-admin/forced-main-coordinate result)
-        pre-restore (::restore-admin/pre-restore-main-coordinate base)]
+        forced (::restore-admin/forced-main-branch-head result)
+        pre-restore (::restore-admin/pre-restore-main-branch-head base)]
     (when-not associated?
       (throw (ex-info "The restore-admin result names another immutable intent."
                       {:seon.dev.restore-state/expected-admin-base base
@@ -699,9 +699,9 @@
       (when-not
        (and (= (::restore/expected-branch-roster intent)
                (::restore-admin/branch-roster result))
-            (= :db (::coordinate/branch forced))
-            (= (::coordinate/database-id pre-restore)
-               (::coordinate/database-id forced)))
+            (= :db (::db.branch/name forced))
+            (= (::db.branch/store-id pre-restore)
+               (::db.branch/store-id forced)))
        (throw (ex-info "The successful restore-admin result violates intent fences."
                        {:seon.dev.restore-state/admin-result result}))))
     result))
@@ -810,10 +810,10 @@
              ids)))))
 
 (defn- forced-main-descriptor [configuration admin-result]
-  (launch/with-coordinate
+  (launch/with-branch-head
    {::launch/descriptor (:seon.dev.config/launch-descriptor configuration)
-    ::coordinate/coordinate
-    (::restore-admin/forced-main-coordinate admin-result)}))
+    ::db.branch/head
+    (::restore-admin/forced-main-branch-head admin-result)}))
 
 (defn- start-writer-after-admin!
   [configuration manifest admin-result]
@@ -850,8 +850,8 @@
                                  ::branch/name branch-name})
         selected (::restore/selected-target-descriptor intent)
         selected-branch
-        (get-in selected [::launch/database ::coordinate/coordinate
-                          ::coordinate/branch])]
+        (get-in selected [::launch/database ::db.branch/head
+                          ::db.branch/name])]
     (when-not (= selected-branch (::branch/target-branch request))
       (throw (ex-info "The retained restore intent selects another branch."
                       {::branch-name branch-name
@@ -871,14 +871,14 @@
         completion (completion-by-id! lifecycle completion-id)
         expected
         (get-in intent [::restore/selected-target-descriptor
-                        ::launch/database ::coordinate/coordinate])
-        actual (restore/completion-undo-coordinate completion)]
+                        ::launch/database ::db.branch/head])
+        actual (restore/completion-undo-branch-head completion)]
     (when-not (= expected actual)
       (throw
        (ex-info "The completion does not authorize this retained undo target."
                 {::completion-id completion-id
-                 :seon.dev.restore/expected-undo-coordinate expected
-                 :seon.dev.restore/actual-undo-coordinate actual
+                 :seon.dev.restore/expected-undo-branch-head expected
+                 :seon.dev.restore/actual-undo-branch-head actual
                  :seon.error/kind
                  :seon.dev.restore.error/inconsistent-intent})))
     intent))
@@ -1109,8 +1109,8 @@
                  configuration manifest
                  [process/watcher-id process/writer-id process/pod-id]))))})]
     {::restore/intent-id (::restore/intent-id intent)
-     ::restored-coordinate
-     (::restore/main-coordinate (::restore/observation convergence))
+     ::restored-branch-head
+     (::restore/main-branch-head (::restore/observation convergence))
      ::admin-outcome (::restore-admin/outcome @!admin-result)
      ::transitions (::transitions convergence)}))
 
@@ -1257,7 +1257,7 @@
         completion-ids
         (set (map :seon.db.restore/id (::restore/completion-facts observation)))
         indexed-completion-ids
-        (set (keys (::restore/completion-coordinates observation)))
+        (set (keys (::restore/completion-branch-heads observation)))
         observed-completion-ids (::restore/completed-restore-ids observation)
         heads (::restore/branch-heads observation)
         reserved #{(::restore/undo-branch intent)
@@ -1315,10 +1315,10 @@
           (require-abortable-observation!
            intent (observe-restore! configuration intent))
           cluster-dir (:seon.dev.config/cluster-dir configuration)
-          selected-coordinate
+          selected-branch-head
           (get-in intent [::restore/selected-target-descriptor
-                          ::launch/database ::coordinate/coordinate])
-          selected-branch (::coordinate/branch selected-coordinate)
+                          ::launch/database ::db.branch/head])
+          selected-branch (::db.branch/name selected-branch-head)
           current-target (get (::restore/branch-heads observation)
                               selected-branch)]
       (state/delete-edn! (blob-result-path cluster-dir intent))
@@ -1329,12 +1329,12 @@
        {::restore/intent-id (::restore/intent-id intent)
         ::restore/plan-digest (::restore/plan-digest intent)
         ::aborted? true
-        ::prior-main-coordinate
+        ::prior-main-branch-head
         (get-in intent [::restore/pre-restore-main-descriptor
-                        ::launch/database ::coordinate/coordinate])
-        ::current-main-coordinate (::restore/main-coordinate observation)
-        ::selected-target-coordinate selected-coordinate}
-        current-target (assoc ::current-target-coordinate current-target)))))
+                        ::launch/database ::db.branch/head])
+        ::current-main-branch-head (::restore/main-branch-head observation)
+        ::selected-target-branch-head selected-branch-head}
+        current-target (assoc ::current-target-branch-head current-target)))))
 
 (defn abort!
   "Delete only a proved pre-preparation retained intent with exact authority."

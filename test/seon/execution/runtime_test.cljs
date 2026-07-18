@@ -6,7 +6,7 @@
    [seon.agent.message :as message]
    [seon.config :as config]
    [seon.db :as db]
-   [seon.db.coordinate :as coordinate]
+   [seon.db.branch :as branch]
    [seon.db.protocol :as protocol]
    [seon.eval :as eval]
    [seon.execution :as execution]
@@ -14,10 +14,10 @@
    [seon.render.canvas :as canvas]))
 
 (def point
-  {::coordinate/database-id #uuid "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
-   ::coordinate/branch :db
-   ::coordinate/commit-id #uuid "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
-   ::coordinate/t 42})
+  {::branch/store-id #uuid "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+   ::branch/name :db
+   ::branch/commit-id #uuid "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+   ::branch/basis-t 42})
 
 (def database
   {:db-name "default"
@@ -54,7 +54,7 @@
              (js/Promise.resolve
               (if (and (map? result) (:seon.error/message result))
                 result
-                {::db/coordinate point
+                {::db/branch-head point
                  ::db/results
                  [{::protocol/success? true ::protocol/result result}
                   {::protocol/success? true
@@ -63,11 +63,11 @@
                   {::protocol/success? true
                    ::protocol/result {:seon.ai/model "frozen-model"}}]}))))
      (-> (db/with-tx-context
-           {::db/coordinate point}
+           {::db/branch-head point}
            #(runtime/render-prompt! request invoke-selected!))
          (.finally (fn [] (set! db/execute-many original)))))))
 
-(deftest literal-whole-prompt-uses-the-inherited-coordinate
+(deftest literal-whole-prompt-uses-the-inherited-database-value
   (async done
     (let [observed (atom nil)
           entity {:db/id 1
@@ -89,10 +89,10 @@
              (is (= point
                     (get-in @observed
                             [:seon.execution.runtime-test/context
-                             ::db/coordinate])))
+                             ::db/branch-head])))
              (is (nil? (get-in @observed
                                [:seon.execution.runtime-test/request
-                                ::db/coordinate]))
+                                ::db/branch-head]))
                  "the read inherits C rather than resolving or restating it")
              (is (nil? (:seon.execution.runtime-test/calls @observed))
                  "a literal whole prompt invokes no selected function")
@@ -354,7 +354,7 @@
                  {::protocol/success? true ::protocol/result nil}
                  {::protocol/success? true ::protocol/result nil}]})))
       (-> (db/with-tx-context
-            {::db/coordinate point}
+            {::db/branch-head point}
             #(runtime/render-prompt!
               {:seon.agent/id "agent-1"}
               (fn [_] (js/Promise.resolve []))))
@@ -384,7 +384,7 @@
                   {:seon.config/system-text "frozen system"}}
                  {::protocol/success? true ::protocol/result nil}]})))
       (-> (db/with-tx-context
-            {::db/coordinate point}
+            {::db/branch-head point}
             #(runtime/render-prompt!
               {:seon.agent/id "agent-1"}
               (fn [_]

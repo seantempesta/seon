@@ -161,7 +161,7 @@
    and `:seon.agent.ctx/file-path` (the body stays in the file, read fresh at
    render). Identity-upsert on `:my.skills/name`, so a re-scan at every boot is
    idempotent. [] when the dir is absent or holds no readable SKILL.md. Pure
-   (file reads only); the boot path selects the directory before attachment
+   (file reads only); the boot path selects the directory before the database session
    and transacts the resulting ordinary data as root/boot."
   {:malli/schema [:=> [:catn [::dir :string]] [:vector ::skill-row]]}
   [dir]

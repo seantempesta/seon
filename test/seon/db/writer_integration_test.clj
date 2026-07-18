@@ -3,7 +3,7 @@
   (:require [clojure.test :refer [deftest is]]
             [datahike.api :as d]
             [seon.db.backend :as backend]
-            [seon.db.coordinate :as coordinate]
+            [seon.db.branch :as branch]
             [seon.db.executor :as executor]
             [seon.db.id :as id]
             [seon.db.protocol :as protocol]
@@ -227,16 +227,15 @@
            ::protocol/arguments []})))))
 
 (deftest execute-many-result-weight-is-position-deterministic
-  (let [point {::coordinate/database-id (random-uuid)
-               ::coordinate/branch :main
-               ::coordinate/commit-id (random-uuid)
-               ::coordinate/t 536870912}
+  (let [point {::branch/store-id (random-uuid)
+               ::branch/name :main
+               ::branch/commit-id (random-uuid)
+               ::branch/basis-t 536870912}
         request
         (protocol/execute-many-request
          {::protocol/request-id "many/weight-order"
           ::protocol/database-name "default"
-          ::protocol/attachment (coordinate/attachment point)
-          ::protocol/coordinate point
+          ::protocol/branch-head point
           ::protocol/members
           [{::protocol/operation protocol/pull-operation
             ::protocol/selector [:db/id]
@@ -365,8 +364,8 @@
           ::writer/database-name database-name
           ::writer/backend :memory
           ::writer/request-socket-path request-path})
-        coordinate-before
-        (::registry/coordinate
+        branch-head-before
+        (::registry/branch-head
          (registry/resolve-connection
           {::registry/database-name database-keyword}))]
     (try
@@ -383,9 +382,9 @@
         (is (false? (::writer/stopped? result)))
         (is (schema/valid-candidate-value? ::writer/stop-response result))
         (is (= database-keyword (::registry/database-name failure)))
-        (is (= (coordinate/attachment coordinate-before)
-               (::registry/attachment failure)))
-        (is (= coordinate-before (::registry/coordinate failure)))
+        (is (= (branch/connection-id branch-head-before)
+               (::registry/connection-id failure)))
+        (is (= branch-head-before (::registry/branch-head failure)))
         (is (false? (::registry/released? failure)))
         (is (re-find #"writer release failed"
                      (::registry/release-error failure)))
@@ -421,7 +420,7 @@
     (is (zero? @executor-stops))
     (is (zero? @database-lists))))
 
-(deftest writer-stop-returns-the-pre-release-coordinate-and-outcome
+(deftest writer-stop-returns-the-pre-release-branch-head-and-outcome
   (let [{::registry/keys [snapshot]} (registry/snapshot-registry {})
         database-name (str "writer-release-success-" (random-uuid))
         database-keyword (keyword database-name)
@@ -442,8 +441,8 @@
         (is (schema/valid-candidate-value? ::writer/stop-response result))
         (is (= 1 (count (::writer/release-results result))))
         (is (= {::registry/database-name database-keyword
-                ::registry/attachment (::registry/attachment before)
-                ::registry/coordinate (::registry/coordinate before)
+                ::registry/connection-id (::registry/connection-id before)
+                ::registry/branch-head (::registry/branch-head before)
                 ::registry/released? true}
                release))
         (is (nil? (::registry/conn
@@ -490,7 +489,7 @@
           (.delete (File. request-path))
           nil)))))
 
-(deftest writer-opens-and-routes-an-explicit-native-branch-attachment
+(deftest writer-opens-and-routes-an-explicit-datahike-connection-id
   (let [database-name (str "writer-branch-main-" (random-uuid))
         branch-name (str "writer-branch-route-" (random-uuid))
         request-path (socket-path "branch-request")
@@ -503,9 +502,8 @@
         main
         (registry/resolve-connection
          {::registry/database-name (keyword database-name)})
-        attachment
-        (assoc (::registry/attachment main)
-               ::coordinate/branch :experiment/writer)]
+        connection-id
+        (assoc (::registry/connection-id main) 1 :experiment/writer)]
     (try
       (d/branch! (::registry/conn main) :db :experiment/writer)
       (with-open [channel (uds/connect! request-path)]
@@ -515,7 +513,7 @@
                       {::protocol/request-id "branch/ensure-first"
                        ::protocol/database-name branch-name
                        ::protocol/backend :memory
-                       ::coordinate/attachment attachment}))
+                       ::branch/connection-id connection-id}))
               _
               (call! channel
                      (protocol/acquire-database-request
@@ -529,8 +527,8 @@
                        ::protocol/transaction-data []}))]
           (is (::protocol/success? ensure-response))
           (is (= branch-name (:db-name (:seon.db/db ensure-response))))
-          (is (= attachment
-                 (::registry/attachment
+          (is (= connection-id
+                 (::registry/connection-id
                   (registry/resolve-connection
                    {::registry/database-name (keyword branch-name)}))))
           (is (::protocol/success? transaction-response))
@@ -562,15 +560,15 @@
         (registry/resolve-connection
          {::registry/database-name (keyword database-name)})
         branch :experiment/proximum
-        attachment
-        (assoc (::registry/attachment main) ::coordinate/branch branch)]
+        connection-id
+        (assoc (::registry/connection-id main) 1 branch)]
     (try
       (is (embed/index-declared? (::registry/conn main)))
       (is (embed/index-live? (::registry/conn main)))
       (d/branch! (::registry/conn main)
-                 (::coordinate/commit-id (::registry/coordinate main))
+                 (::branch/commit-id (::registry/branch-head main))
                  branch)
-      (let [before (coordinate/resolved
+      (let [before (branch/head
                     (d/branch-as-db (::registry/conn main) branch))]
         (with-open [channel (uds/connect! request-path)]
           (let [response
@@ -580,12 +578,12 @@
                          ::protocol/database-name branch-name
                          ::protocol/backend :file
                          ::protocol/database-path database-path
-                         ::coordinate/attachment attachment}))
+                         ::branch/connection-id connection-id}))
                 opened
                 (registry/resolve-connection
                  {::registry/database-name (keyword branch-name)})]
             (is (::protocol/success? response))
-            (is (= before (::registry/coordinate opened)))
+            (is (= before (::registry/branch-head opened)))
             (is (embed/index-declared? (::registry/conn opened)))
             (is (embed/index-live? (::registry/conn opened)))
             (is (= [(keyword database-name)] @initializer-calls)
@@ -820,16 +818,16 @@
         (is (= 1 (count (remove ::protocol/success? responses)))
             "the serialized writer rejects the losing request")
         (is (true? (::protocol/success? accepted)))
-        (is (= protocol/stale-coordinate-error
+        (is (= protocol/stale-database-value-error
                (::protocol/error-kind wrong-commit)))
         (is (= committed (:seon.db/current-db wrong-commit))
             "equal t cannot cross a different commit identity")
-        (is (= protocol/stale-coordinate-error
+        (is (= protocol/stale-database-value-error
                (::protocol/error-kind wrong-branch)))
         (is (= committed (:seon.db/current-db wrong-branch))
             "an expected value cannot name a different database")
         (is (protocol/valid-response? rejected))
-        (is (= protocol/stale-coordinate-error
+        (is (= protocol/stale-database-value-error
                (::protocol/error-kind rejected)))
         (is (= frozen (:seon.db/expected-db rejected)))
         (is (= committed (:seon.db/current-db rejected)))

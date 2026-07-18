@@ -26,10 +26,10 @@
                                     the discriminator is \"what were we
                                     calling\" — our machinery throwing
                                     while PREPARING agent code is :core.
-     :seon.error/database-id uuid — catch-site physical database
-     :seon.error/branch      kw   — catch-site branch attachment
+     :seon.error/store-id    uuid — catch-site Datahike store
+     :seon.error/branch-name kw   — catch-site Proximum branch
      :seon.error/commit-id   uuid — immutable containing commit
-     :seon.error/t           int  — temporal cut inside that commit
+     :seon.error/basis-t     int  — basis transaction inside that commit
      :seon.error/frames    vector — EDN stack frames (component entities)
      :seon.error/args-edn  string — bounded full-args print (malli path)
 
@@ -43,7 +43,7 @@
     [goog.object :as gobj]
     [seon.ai.tokens :as tokens]
     [seon.config :as config]
-    [seon.db.coordinate :as coordinate]
+    [seon.db.branch :as branch]
     [seon.error.instrument :as ei]
     [seon.schema :as schema]))
 
@@ -59,10 +59,10 @@
 ;; any mode. :core = our bug (loud per the :seon.config/on-core-error
 ;; dial).
 (schema/register! ::fault [:enum :agent :core])
-(schema/register! ::database-id ::coordinate/database-id)
-(schema/register! ::branch ::coordinate/branch)
-(schema/register! ::commit-id ::coordinate/commit-id)
-(schema/register! ::t ::coordinate/t)
+(schema/register! ::store-id ::branch/store-id)
+(schema/register! ::branch-name ::branch/name)
+(schema/register! ::commit-id ::branch/commit-id)
+(schema/register! ::basis-t ::branch/basis-t)
 (schema/register! ::message :string)
 (schema/register! ::stack :string)
 ;; Bounded, fn-stubbed pr-str of the FULL args vector (malli reports
@@ -267,14 +267,14 @@
 ;; ============================================================
 ;; DB hooks — the late-bound persistence seam. seon.db.internal requires
 ;; seon.error (this ns must stay below seon.db), so seon.db INJECTS its
-;; transact!/coordinate projection here at ITS load (see the bottom of
+;; transact!/branch-head projection here at ITS load (see the bottom of
 ;; seon.db). Before
 ;; the hooks land (very early boot) record! buffers in memory.
 ;; ============================================================
 
 (defonce ^:private !db-hooks
   ;; {:seon.error/transact! (fn [tx-data] Promise|nil)
-  ;;  :seon.error/coordinate (fn [] ::coordinate/coordinate|nil)}
+  ;;  :seon.error/branch-head (fn [] ::branch/head|nil)}
   (atom nil))
 
 (defn set-db-hooks!
@@ -364,57 +364,57 @@
           (.catch (fn [_] (run! buffer! entities))))
       (do (run! buffer! entities) nil))))
 
-(defn- coordinate-now
-  "Complete point via the injected hook, nil when no conn is live yet."
+(defn- branch-head-now
+  "Complete Proximum branch head via the injected hook, or nil."
   []
-  (when-let [f (:seon.error/coordinate @!db-hooks)]
+  (when-let [f (:seon.error/branch-head @!db-hooks)]
     (try
-      (let [point (f)]
-        (when (schema/valid-candidate-value? ::coordinate/coordinate point)
-          point))
+      (let [branch-head (f)]
+        (when (schema/valid-candidate-value? ::branch/head branch-head)
+          branch-head))
       (catch :default _ nil))))
 
-(def ^:private coordinate->error-attr
-  {::coordinate/database-id ::database-id
-   ::coordinate/branch ::branch
-   ::coordinate/commit-id ::commit-id
-   ::coordinate/t ::t})
+(def ^:private branch-head->error-attr
+  {::branch/store-id ::store-id
+   ::branch/name ::branch-name
+   ::branch/commit-id ::commit-id
+   ::branch/basis-t ::basis-t})
 
-(defn- coordinate-error-attrs
-  [point]
+(defn- branch-head-error-attrs
+  [branch-head]
   (into {}
-        (map (fn [[point-attr error-attr]]
-               [error-attr (get point point-attr)]))
-        coordinate->error-attr))
+        (map (fn [[branch-head-attr error-attr]]
+               [error-attr (get branch-head branch-head-attr)]))
+        branch-head->error-attr))
 
 (schema/register!
-  ::recorded-coordinate-response
+  ::recorded-branch-head-response
   [:or
-   ::coordinate/coordinate
+   ::branch/head
    [:map [::message ::message]
     [::kind :keyword]]])
 
-(defn recorded-coordinate
-  "Canonical complete coordinate from one persisted/in-memory error envelope.
+(defn recorded-branch-head
+  "Canonical Proximum branch head from one persisted or in-memory error.
 
-   Old or partial rows return a guiding error value; no current attachment or
-   commit is guessed from a bare t."
-  {:malli/schema [:=> [:cat :map] ::recorded-coordinate-response]}
+   Old or partial rows return an error value; no current branch or commit is
+   guessed from a bare basis transaction."
+  {:malli/schema [:=> [:cat :map] ::recorded-branch-head-response]}
   [error]
-  (let [point (into {}
-                    (map (fn [[point-attr error-attr]]
-                           [point-attr (get error error-attr)]))
-                    coordinate->error-attr)]
-    (if (schema/valid-candidate-value? ::coordinate/coordinate point)
-      point
-      {::message "error has no complete recorded database coordinate"
-       ::kind :missing-database-coordinate})))
+  (let [branch-head (into {}
+                          (map (fn [[branch-head-attr error-attr]]
+                                 [branch-head-attr (get error error-attr)]))
+                          branch-head->error-attr)]
+    (if (schema/valid-candidate-value? ::branch/head branch-head)
+      branch-head
+      {::message "error has no complete recorded Proximum branch head"
+       ::kind :missing-branch-head})))
 
 (defn- datom-projection
   "The EDN-safe datom entity for an envelope — bounded strings, reified
    frames, NO live objects (`:seon.error/raw`, malli Schema leafs)."
   [envelope]
-  (let [{:seon.error/keys [fault database-id branch commit-id t
+  (let [{:seon.error/keys [fault store-id branch-name commit-id basis-t
                            stack frames args-edn data kind]} envelope
         ;; The DEEPEST real cause, not cljs.js's top wrapper ("ERROR") —
         ;; this string is what the SEON-CORE-FAULT marker prints and what
@@ -431,10 +431,10 @@
     (cond-> {:seon.error/fault   fault
              :seon.error/message (tokens/clip-str (str message) 100)}
       kind           (assoc :seon.error/kind kind)
-      database-id    (assoc ::database-id database-id)
-      branch         (assoc ::branch branch)
+      store-id       (assoc ::store-id store-id)
+      branch-name    (assoc ::branch-name branch-name)
       commit-id      (assoc ::commit-id commit-id)
-      t              (assoc ::t t)
+      basis-t        (assoc ::basis-t basis-t)
       stack          (assoc :seon.error/stack stack)
       (seq frames)   (assoc :seon.error/frames frames)
       args-edn       (assoc :seon.error/args-edn args-edn)
@@ -553,7 +553,8 @@
    The iron rule as a fn: nothing is caught without becoming data.
    Builds the [[->map]] envelope from `::raw`, stamps `::fault` (from
    the caller — the catch site is the only place that knows what was
-   being called), the complete catch-site database coordinate when a conn is
+   being called), the complete catch-site Proximum branch head when a database
+   session is
    live, parsed
    `::frames`, and `::args-edn` (lifted from the malli envelope when
    present). Persists the EDN-safe projection without awaiting — a
@@ -578,8 +579,8 @@
                   (get-in envelope [:seon.error/data :seon.error.malli/fn-sym])))
           args-edn (get-in envelope [:seon.error/data :seon.error/args-edn])
           envelope (cond-> (assoc envelope :seon.error/fault fault)
-                     :always  (as-> m (if-let [point (coordinate-now)]
-                                        (merge m (coordinate-error-attrs point)) m))
+                     :always  (as-> m (if-let [branch-head (branch-head-now)]
+                                        (merge m (branch-head-error-attrs branch-head)) m))
                      args-edn (assoc :seon.error/args-edn args-edn)
                      :always  (as-> m (if-let [fs (some-> (:seon.error/stack m)
                                                           parse-frames)]

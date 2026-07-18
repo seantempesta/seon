@@ -907,7 +907,7 @@
    prevent.
 
    AUTHORED-SOURCE BRANCH: when the missing ns is not compiled but exists in
-   the coordinate-pinned ordinary program supplied by the execution owner,
+   the ordinary program read by the execution owner at one database value,
    answer with that source string. cljs.js analyzes its namespace head and
    recursively asks this same load function for dependencies. The loader never
    opens or reads a Datahike value. Macro loads and genuinely absent namespaces
@@ -1472,7 +1472,7 @@
                     bundle's emission).
      ::timeout-ms    override the default timeout for this call.
      ::authored-sources ordinary namespace sources already acquired at the
-                    caller's immutable database coordinate.
+                    caller's immutable database value.
 
    For setup forms that need cljs.core's macro refers wired up via
    `(ns …)` analysis, pass `::analyze-deps? true` explicitly.
@@ -2362,7 +2362,7 @@
    `raw` is rewrite-clj's message, e.g.
    \"Unmatched delimiter: ] [at line 25, column 76]\". `source` is the
    bad span. Falls back to the raw message when no `[at line N, column C]`
-   coordinate is present."
+   database value is present."
   {:malli/schema [:=> [:cat :seon.config/singleton :string :string] :string]}
   [configuration raw source]
   (let [m (re-find #"\[at line (\d+),?\s*column (\d+)\]" (str raw))
@@ -2397,7 +2397,7 @@
             ;; characters. Window the excerpt around the reported column with
             ;; the SAME configured eval-display bound the transcript uses, so
             ;; constructing the guidance never duplicates the full line into
-            ;; both source + caret strings. The exact coordinate remains in
+            ;; both source + caret strings. The exact database value remains in
             ;; the headline; raw reply bytes remain in the turn blob.
             limit   (config/eval-render-cap configuration)
             caret-i (when (and src-ln (pos? col-no))
@@ -3119,7 +3119,7 @@
 
 (defn- stale-database-failure?
   [result]
-  (= db.protocol/stale-coordinate-error
+  (= db.protocol/stale-database-value-error
      (get-in result [:seon.error/data ::db.protocol/error-kind])))
 
 (defn ^:async start-eval!
@@ -3172,7 +3172,7 @@
 
    Receipt, terminal outcome, turn connection, and every accepted program row
    are one transaction. A failure returns the database error without writing a
-   transcript-only success. Stale-coordinate recovery belongs to the caller,
+   transcript-only success. Stale-database-value recovery belongs to the caller,
    which may reacquire and rebuild this transaction from the frozen execution
    result without rerunning the form. No result handle is bound here."
   {:malli/schema [:=> [:catn [::record-request :map]] :any]}
@@ -4296,7 +4296,7 @@
 
    Map keys:
      ::compile-state   — the bootstrap compile-state.
-     ::authored-sources — the ordinary source map acquired at one coordinate.
+     ::authored-sources — the ordinary source map acquired at one database value.
      :seon.agent.turn/id-of-turn — committed owning turn id.
      ::current-ns      — volatile<symbol>, the fold accumulator ns.
      ::n-ok ::n-fail    — volatile<int> counters.

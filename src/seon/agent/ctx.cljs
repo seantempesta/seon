@@ -40,7 +40,7 @@
        `config/system.edn` wires active blocks by SYMBOL (late lookup-value
        resolution), so this ns does NOT require them — they require this
        ns for the shared read API.
-   Child acquisition is asynchronous and coordinate-pinned in
+   Child acquisition is asynchronous over one immutable database value in
    `seon.execution.runtime`; this namespace formats only ordinary values."
   (:require
     [clojure.string :as str]

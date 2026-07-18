@@ -250,7 +250,7 @@
              (if (= 1 (count (filter #(= :record (first %)) @calls)))
                {:seon.error/message "database advanced"
                 :seon.error/data
-                {::protocol/error-kind protocol/stale-coordinate-error}}
+                {::protocol/error-kind protocol/stale-database-value-error}}
                transaction-report)))]
       (-> (call-retry-eval-record!
            frozen acquire! compile-tee record!)

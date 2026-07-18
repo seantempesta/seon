@@ -4,7 +4,7 @@
             [datahike.api :as d]
             [datahike.index.audit :as index-audit]
             [seon.db.backend :as backend]
-            [seon.db.coordinate :as coordinate]
+            [seon.db.branch :as branch]
             [seon.db.protocol :as protocol]
             [seon.db.registry :as registry]
             [seon.db.restore-admin :as restore-admin]
@@ -30,14 +30,14 @@
 
 (defn- restore-intent-fixture []
   (let [database-id (random-uuid)
-        old {::coordinate/database-id database-id
-             ::coordinate/branch :db
-             ::coordinate/commit-id (random-uuid)
-             ::coordinate/t 100}
-        target {::coordinate/database-id database-id
-                ::coordinate/branch :restore.test/selected
-                ::coordinate/commit-id (random-uuid)
-                ::coordinate/t 110}
+        old {::branch/store-id database-id
+             ::branch/name :db
+             ::branch/commit-id (random-uuid)
+             ::branch/basis-t 100}
+        target {::branch/store-id database-id
+                ::branch/name :restore.test/selected
+                ::branch/commit-id (random-uuid)
+                ::branch/basis-t 110}
         intent-id #uuid "70000000-0000-4000-8000-000000000002"
         digest (apply str (repeat 64 "a"))
         writer-owner
@@ -46,7 +46,7 @@
          ::launch/request-socket-path "/process/request.sock"
          ::launch/writer-repl-port-file "/process/writer.port"}
         descriptor
-        (fn [cluster coordinate autonomous? writable read-only]
+        (fn [cluster branch-head autonomous? writable read-only]
           {::launch/runtime
            {::launch/runtime-cluster cluster
             ::launch/artifact-flavor :seon.dev.artifact.flavor/default
@@ -55,8 +55,8 @@
             {:seon.client/autonomous? autonomous?}}
            ::launch/database
            {::protocol/database-name cluster
-            ::coordinate/attachment (coordinate/attachment coordinate)
-            ::coordinate/coordinate coordinate
+            ::branch/connection-id (branch/connection-id branch-head)
+            ::branch/head branch-head
             ::protocol/backend :file
             ::protocol/database-path "/cluster/db"}
            ::launch/writer-owner writer-owner
@@ -111,19 +111,18 @@
                             :db/valueType :db.type/string
                             :db/cardinality :db.cardinality/one}
                            {:db/id -1 :restore.admin/value "old"}])
-            old (coordinate/resolved (d/db main))
+            old (branch/head (d/db main))
             selected-branch :restore.admin/selected
             prepared-branch :restore.admin/prepared
             undo-branch :restore.admin/undo
-            _ (d/branch! main (::coordinate/commit-id old) selected-branch)
+            _ (d/branch! main (::branch/commit-id old) selected-branch)
             selected-config
             (backend/datahike-config
              (cond->
                {::backend/database-name database-name
                 ::backend/backend backend-kind
-                ::coordinate/attachment
-                (assoc (coordinate/attachment old)
-                       ::coordinate/branch selected-branch)}
+                ::branch/connection-id
+                (assoc (branch/connection-id old) 1 selected-branch)}
                (= :file backend-kind)
                (assoc ::backend/path database-path)))
             selected (d/connect selected-config)
@@ -136,21 +135,21 @@
                             (conj {:db/id -2
                                    :seon/embedding embedding
                                    :seon.embed/source-hash "restore-target"})))
-            target (coordinate/resolved (d/db selected))
-            _ (d/branch! selected (::coordinate/commit-id target)
+            target (branch/head (d/db selected))
+            _ (d/branch! selected (::branch/commit-id target)
                          prepared-branch)
-            _ (d/branch! main (::coordinate/commit-id old) undo-branch)
+            _ (d/branch! main (::branch/commit-id old) undo-branch)
             roster #{:db selected-branch prepared-branch undo-branch}
             request
             (cond->
               {::registry/database-name database-name
              ::registry/backend backend-kind
-             ::registry/pre-restore-main-coordinate old
-             ::registry/selected-target-coordinate target
-             ::registry/prepared-target-coordinate
-             (assoc target ::coordinate/branch prepared-branch)
-             ::registry/undo-coordinate
-             (assoc old ::coordinate/branch undo-branch)
+             ::registry/pre-restore-main-branch-head old
+             ::registry/selected-target-branch-head target
+             ::registry/prepared-target-branch-head
+             (assoc target ::branch/name prepared-branch)
+             ::registry/undo-branch-head
+             (assoc old ::branch/name undo-branch)
              ::registry/expected-branch-roster roster
              ::registry/validate-db! (constantly true)}
               (= :file backend-kind)
@@ -176,15 +175,15 @@
         (is (true? (::registry/force-invoked? applied)))
         (is (= :seon.db.restore-admin.connection/released
                (::registry/admin-connection-state applied)))
-        (is (= (::coordinate/t target)
-               (get-in applied [::registry/coordinate ::coordinate/t])))
+        (is (= (::branch/basis-t target)
+               (get-in applied [::registry/branch-head ::branch/basis-t])))
         (is (= roster (::registry/branch-roster applied)))
         (is (= :seon.db.registry.admin/already-applied
                (::registry/admin-outcome retry))
             "a lost first result converges from durable storage")
         (is (false? (::registry/force-invoked? retry)))
-        (is (= (::registry/coordinate applied)
-               (::registry/coordinate retry)))))))
+        (is (= (::registry/branch-head applied)
+               (::registry/branch-head retry)))))))
 
 (deftest file-backed-proximum-root-follows-the-forced-primary-head
   (with-restore-database
@@ -199,8 +198,8 @@
                 (d/branch-as-db
                  connection
                  (get-in request
-                         [::registry/prepared-target-coordinate
-                          ::coordinate/branch]))
+                         [::registry/prepared-target-branch-head
+                          ::branch/name]))
                 main-index (get-in main-db [:secondary-indices embed/index-ident])
                 target-index
                 (get-in target-db [:secondary-indices embed/index-ident])]
@@ -213,9 +212,9 @@
                    (::registry/admin-outcome retry)))
             (is (false? (::registry/force-invoked? retry)))
             (is (= roster (set (d/branches connection))))
-            (is (= (::coordinate/t target)
-                   (::coordinate/t (coordinate/resolved main-db))))
-            (is (= #{(::coordinate/commit-id target)}
+            (is (= (::branch/basis-t target)
+                   (::branch/basis-t (branch/head main-db))))
+            (is (= #{(::branch/commit-id target)}
                    (set (d/parent-commit-ids main-db))))
             (is (= (vec (d/datoms target-db :eavt))
                    (vec (d/datoms main-db :eavt))))
@@ -330,22 +329,22 @@
 (deftest writer-maps-known-and-unknown-registry-outcomes-into-closed-results
   (let [intent (restore-intent-fixture)
         base (restore-admin/result-base intent)
-        forced (assoc (:seon.db.restore-admin/selected-target-coordinate base)
-                      ::coordinate/branch :db)
+        forced (assoc (:seon.db.restore-admin/selected-target-branch-head base)
+                      ::branch/name :db)
         known
         (with-redefs
           [registry/admin-restore-main!
            (fn [_]
              {::registry/admin-outcome :seon.db.registry.admin/applied
-              ::registry/pre-restore-main-coordinate
-              (:seon.db.restore-admin/pre-restore-main-coordinate base)
-              ::registry/selected-target-coordinate
-              (:seon.db.restore-admin/selected-target-coordinate base)
-              ::registry/prepared-target-coordinate
-              (:seon.db.restore-admin/prepared-target-coordinate base)
-              ::registry/undo-coordinate
-              (:seon.db.restore-admin/undo-coordinate base)
-              ::registry/coordinate forced
+              ::registry/pre-restore-main-branch-head
+              (:seon.db.restore-admin/pre-restore-main-branch-head base)
+              ::registry/selected-target-branch-head
+              (:seon.db.restore-admin/selected-target-branch-head base)
+              ::registry/prepared-target-branch-head
+              (:seon.db.restore-admin/prepared-target-branch-head base)
+              ::registry/undo-branch-head
+              (:seon.db.restore-admin/undo-branch-head base)
+              ::registry/branch-head forced
               ::registry/branch-roster
               (:seon.dev.restore/expected-branch-roster intent)
               ::registry/force-invoked? true

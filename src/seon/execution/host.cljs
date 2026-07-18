@@ -1,7 +1,7 @@
 (ns seon.execution.host
   "Native Bun supervision for flavor-owned agent execution children."
   (:require
-   [seon.db.coordinate :as coordinate]
+   [seon.db.branch :as branch]
    [seon.db.protocol :as db.protocol]
    [seon.execution :as execution]
    [seon.launch :as launch]
@@ -266,8 +266,8 @@
        (::db.protocol/database-path database)
        (assoc :seon.db/database-path
               (::db.protocol/database-path database))
-       (::coordinate/attachment database)
-       (assoc :seon.db/attachment (::coordinate/attachment database)))}))
+       (::branch/connection-id database)
+       (assoc :seon.db/connection-id (::branch/connection-id database)))}))
 
 (defn- spawn-child!
   [agent-id]

@@ -100,8 +100,10 @@
 
 (defn- database-value
   [database-name]
-  (let [native (d/db (connection-for database-name))]
+  (let [native (d/db (connection-for database-name))
+        identity (d/committed-value-identity native)]
     {:db-name database-name
+     :store-id (:datahike.value/connection-id identity)
      :t (:max-tx native)
      :as-of nil
      :since nil
@@ -120,6 +122,7 @@
 (defn- descriptor-shaped-ordinary-value
   []
   {:db-name "ordinary"
+   :store-id [(random-uuid) :db]
    :t 1
    :as-of nil
    :since nil

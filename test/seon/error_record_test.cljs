@@ -247,20 +247,20 @@
   (error/set-db-hooks! {})
   nil)
 
-(defn- install-capture-hooks! [batches point]
+(defn- install-capture-hooks! [batches branch-head]
   (error/set-db-hooks!
     {:seon.error/transact!
      (fn [tx-data]
        (swap! batches conj tx-data)
        (js/Promise.resolve {:seon.db/ok? true}))
-     :seon.error/coordinate (constantly point)}))
+     :seon.error/branch-head (constantly branch-head)}))
 
 (defn- captured-errors [batches message]
   (filter #(= message (:seon.error/message %)) (mapcat identity @batches)))
 
-(defn- with-captured-errors [point body done]
+(defn- with-captured-errors [branch-head body done]
   (let [batches (atom [])]
-    (install-capture-hooks! batches point)
+    (install-capture-hooks! batches branch-head)
     (-> (body batches)
         (.catch (fn [e] (is false (str "test chain rejected — " e))))
         (.finally (fn [] (clear-error-hooks!) (done))))))
@@ -292,18 +292,18 @@
       (is (false? (error/recorded? "a string reason")))
       (finally (clear-error-hooks!)))))
 
-(deftest record-persists-projection-with-complete-database-point
+(deftest record-persists-projection-with-complete-branch-head
   (let [batches (atom [])
-        point {:seon.db.coordinate/database-id (random-uuid)
-               :seon.db.coordinate/branch :main
-               :seon.db.coordinate/commit-id (random-uuid)
-               :seon.db.coordinate/t 42}]
+        branch-head {:seon.db.branch/store-id (random-uuid)
+                     :seon.db.branch/name :main
+                     :seon.db.branch/commit-id (random-uuid)
+                     :seon.db.branch/basis-t 42}]
     (try
-      (install-capture-hooks! batches point)
+      (install-capture-hooks! batches branch-head)
       (let [env (error/record! {:seon.error/raw (js/Error. "persisted one")
                                 :seon.error/fault :agent})
             projection (first (captured-errors batches "persisted one"))]
-        (is (= point (error/recorded-coordinate env)))
+        (is (= branch-head (error/recorded-branch-head env)))
         (is (= :agent (:seon.error/fault projection)))
         (is (seq (:seon.error/frames projection))
             "stack frames remain ordinary component transaction data"))
@@ -393,19 +393,19 @@
 ;; Persistence-hook isolation.
 ;; ---------------------------------------------------------------------------
 
-(deftest partial-coordinate-hook-is-omitted-as-a-unit
+(deftest partial-branch-head-hook-is-omitted-as-a-unit
   (try
     (error/set-db-hooks!
       {:seon.error/transact! (fn [_]
                                (js/Promise.resolve {:seon.db/ok? true}))
-       :seon.error/coordinate
-       (constantly {:seon.db.coordinate/database-id (random-uuid)
-                    :seon.db.coordinate/t 536870912})})
+       :seon.error/branch-head
+       (constantly {:seon.db.branch/store-id (random-uuid)
+                    :seon.db.branch/basis-t 536870912})})
     (let [env (error/record! {:seon.error/raw (js/Error. "partial point")
                               :seon.error/fault :agent})]
       (is (= {}
-             (select-keys env [:seon.error/database-id :seon.error/branch
-                               :seon.error/commit-id :seon.error/t]))
+             (select-keys env [:seon.error/store-id :seon.error/branch-name
+                               :seon.error/commit-id :seon.error/basis-t]))
           "a malformed hook cannot create a partial persisted identity"))
     (finally
       (clear-error-hooks!))))
@@ -428,7 +428,7 @@
                        {:seon.error.malli/fn-sym 'seon.db/transact!})
               :seon.error/fault :agent})
            (js/Promise.resolve {:seon.db/ok? true}))
-         :seon.error/coordinate (constantly nil)})
+         :seon.error/branch-head (constantly nil)})
       (error/record! {:seon.error/raw (js/Error. "outer error")
                       :seon.error/fault :agent})
       (is (= 1 @calls)
@@ -452,7 +452,7 @@
            (if (= 1 (swap! calls inc))
              first-p
              (js/Promise.resolve {:seon.db/ok? true})))
-         :seon.error/coordinate (constantly nil)})
+         :seon.error/branch-head (constantly nil)})
       (error/record! {:seon.error/raw (js/Error. "first pending write")
                       :seon.error/fault :agent})
       (error/record!

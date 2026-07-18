@@ -3,7 +3,7 @@
   (:require [clojure.test :refer [deftest is]]
             [datahike.api :as d]
             [datahike.committed-report :as committed-report]
-            [seon.db.coordinate :as coordinate]
+            [seon.db.branch :as branch]
             [seon.db.executor :as executor]
             [seon.db.protocol :as protocol]
             [seon.db.transport.uds :as uds]
@@ -36,6 +36,8 @@
 (defn- database-value
   [database-name native]
   {:db-name database-name
+   :store-id (:datahike.value/connection-id
+              (d/committed-value-identity native))
    :t (:max-tx native)
    :as-of nil
    :since nil
@@ -321,9 +323,9 @@
       (try
         (let [db-value (d/db connection)
               identity (d/committed-value-identity db-value)
-              attachment (coordinate/attachment (coordinate/resolved db-value))
+              connection-id (branch/connection-id (branch/head db-value))
               scope {::executor/database-name "gap"
-                     ::coordinate/attachment attachment
+                     ::branch/connection-id connection-id
                      ::executor/connection-id
                      (:datahike.value/connection-id identity)
                      ::executor/generation (:datahike.value/generation identity)}
@@ -334,7 +336,7 @@
                 ::protocol/datom-patterns [{:seon.db/a :gap/value}]})]
           (locking (::writer/interest-lock runtime)
             (#'writer/install-interest-locked!
-             runtime transport-connection request connection "gap" attachment))
+             runtime transport-connection request connection "gap" connection-id))
           (let [source
                 (get-in @(::writer/interest-state runtime)
                         [::writer/by-scope scope ::writer/source])]
@@ -408,9 +410,9 @@
                     (:tx-data report))
               identity (d/committed-value-identity (:db-after report))
               scope {::executor/database-name "fanout"
-                     ::coordinate/attachment
-                     (coordinate/attachment
-                      (coordinate/resolved (:db-after report)))
+                     ::branch/connection-id
+                     (branch/connection-id
+                      (branch/head (:db-after report)))
                      ::executor/connection-id
                      (:datahike.value/connection-id identity)
                      ::executor/generation (:datahike.value/generation identity)}
@@ -475,6 +477,7 @@
             {::protocol/request-id "empty/listen"
              :seon.db/db
              {:db-name "empty"
+              :store-id [(random-uuid) :db]
               :t 1
               :as-of nil
               :since nil
@@ -482,9 +485,7 @@
               :datahike/commit-id (random-uuid)}
              ::protocol/query-form '[:find ?input :in ?input]})
            {::executor/database-name "empty"
-            ::coordinate/attachment
-            {::coordinate/database-id (random-uuid)
-             ::coordinate/branch :db}
+            ::branch/connection-id [(random-uuid) :db]
             ::executor/connection-id [(random-uuid) :db]
             ::executor/generation (random-uuid)})
           nil
@@ -495,15 +496,11 @@
 
 (deftest one-process-readiness-thread-routes-concurrent-runtime-sources
   (let [scope-a {::executor/database-name "runtime-a"
-                 ::coordinate/attachment
-                 {::coordinate/database-id (random-uuid)
-                  ::coordinate/branch :db}
+                 ::branch/connection-id [(random-uuid) :db]
                  ::executor/connection-id [(random-uuid) :db]
                  ::executor/generation (random-uuid)}
         scope-b {::executor/database-name "runtime-b"
-                 ::coordinate/attachment
-                 {::coordinate/database-id (random-uuid)
-                  ::coordinate/branch :db}
+                 ::branch/connection-id [(random-uuid) :db]
                  ::executor/connection-id [(random-uuid) :db]
                  ::executor/generation (random-uuid)}
         source-a (committed-report/open!

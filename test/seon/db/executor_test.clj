@@ -2,7 +2,7 @@
   (:require [clojure.core.async :as async]
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
-            [seon.db.coordinate :as coordinate]
+            [seon.db.branch :as branch]
             [seon.db.executor :as executor]
             [seon.db.protocol :as protocol]
             [seon.db.registry :as registry])
@@ -116,19 +116,18 @@
 (defn- scope
   [database-name database-id generation]
   {::executor/database-name database-name
-   ::coordinate/attachment {::coordinate/database-id database-id
-                            ::coordinate/branch :db}
+   ::branch/connection-id [database-id :db]
    ::executor/connection-id [database-id :db]
    ::executor/generation generation})
 
 (defn- registry-scope
   [database-name]
-  (let [{::registry/keys [conn attachment]}
+  (let [{::registry/keys [conn connection-id]}
         (registry/resolve-connection
          {::registry/database-name (keyword database-name)})
         identity (d/committed-value-identity (d/db conn))]
     {::executor/database-name database-name
-     ::coordinate/attachment attachment
+     ::branch/connection-id connection-id
      ::executor/connection-id (:datahike.value/connection-id identity)
      ::executor/generation (:datahike.value/generation identity)}))
 
@@ -958,8 +957,8 @@
                      :db/valueType :db.type/long
                      :db/cardinality :db.cardinality/one}
                     {:executor.test/value index}]))})]
-          (is (= (::registry/attachment entry)
-                 (::coordinate/attachment (registry-scope database-name))))))
+          (is (= (::registry/connection-id entry)
+                 (::branch/connection-id (registry-scope database-name))))))
       (let [results
             (mapv
              (fn [database-name]

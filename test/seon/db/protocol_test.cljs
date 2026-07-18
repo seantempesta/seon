@@ -6,6 +6,7 @@
 
 (def ^:private db
   {:db-name "default"
+   :store-id [#uuid "6a56b426-c836-5817-9f6b-20584f2e81d5" :db]
    :t 536870929
    :as-of nil
    :since nil
@@ -16,6 +17,7 @@
 (def ^:private other-db
   (assoc db
          :db-name "research"
+         :store-id [#uuid "b6d0f53b-3044-5f0a-95d8-5ea3218248f5" :db]
          :datahike/commit-id
          #uuid "b6d0f53b-3044-5f0a-95d8-5ea3218248f5"))
 
@@ -42,7 +44,7 @@
     (is (protocol/valid-request? request))
     (is (= [db other-db ordinary] (::protocol/arguments request)))
     (is (false? (protocol/valid-request?
-                 (assoc request ::protocol/coordinate {}))))))
+                 (assoc request ::protocol/branch-head {}))))))
 
 (deftest execute-many-members-carry-independent-database-values
   (let [input {::protocol/request-id "many/cljs"
@@ -97,9 +99,7 @@
     (is (false? (protocol/valid-request?
                  (assoc request :seon.db/db
                         (assoc db :history true)))))
-    (doseq [legacy [(assoc request ::protocol/expected-coordinate {})
-                    (assoc response ::protocol/previous-coordinate {})
-                    (assoc response ::protocol/datoms-added 1)]]
+    (doseq [legacy [(assoc response ::protocol/datoms-added 1)]]
       (is (false? ((if (::protocol/operation legacy)
                      protocol/valid-request?
                      protocol/valid-response?)

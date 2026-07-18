@@ -1,5 +1,5 @@
 (ns seon.render.surface
-  "Pure surface normalization for coordinate-pinned execution-child results."
+  "Pure surface normalization for database-derived execution-child results."
   (:require
    [clojure.string :as str]
    [seon.schema :as schema]
@@ -30,7 +30,7 @@
                   ::selection]}
   [block-name]
   (str "context-"
-       (view-unit/coordinate-token {:seon.agent.ctx/name block-name})))
+       (view-unit/identity-token {:seon.agent.ctx/name block-name})))
 
 (defn- class-token? [attrs token]
   (boolean (some #{token}

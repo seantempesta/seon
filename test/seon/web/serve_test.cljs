@@ -14,7 +14,7 @@
     [seon.agent.run :as run]
     [seon.ai :as ai]
     [seon.db :as db]
-    [seon.db.coordinate :as coordinate]
+    [seon.db.branch :as branch]
     [seon.db.restore :as restore]
     [seon.eval :as seval]
     [seon.runtime.admission :as admission]
@@ -447,21 +447,28 @@
            ::restore/undo-branch :undo
            ::restore/target-branch :target}
           completion (assoc completion-claim ::restore/id "restore00001")
-          c {::coordinate/database-id (::restore/database-id completion)
-             ::coordinate/branch :db
-             ::coordinate/commit-id (::restore/forced-commit-id completion)
-             ::coordinate/t 11}
-          rows (mapv (fn [attr] [attr (::coordinate/t c)]) (keys completion))
+          c {::branch/store-id (::restore/database-id completion)
+             ::branch/name :db
+             ::branch/commit-id (::restore/forced-commit-id completion)
+             ::branch/basis-t 11}
+          database {:db-name "default"
+                    :store-id (branch/connection-id c)
+                    :t (::branch/basis-t c)
+                    :as-of nil
+                    :since nil
+                    :history false
+                    :datahike/commit-id (::branch/commit-id c)}
+          rows (mapv (fn [attr] [attr (::branch/basis-t c)]) (keys completion))
           recorded {::restore/ok? true
                     ::restore/recorded? true
                     ::restore/already-completed? false
                     ::restore/completion completion
-                    ::restore/completion-coordinate c}]
+                    ::restore/completion-branch-head c}]
       (set! db/attached? (constantly true))
       (set! restore/acquire-completion!
             (fn [_]
               (js/Promise.resolve
-                {::restore/current-coordinate c
+                {::restore/current-db database
                  ::restore/installed-schema {}
                  ::restore/completion completion
                  ::restore/publication-rows rows})))
@@ -478,7 +485,10 @@
              (set! restore/acquire-completion!
                    (fn [_]
                      (js/Promise.resolve
-                       {::restore/current-coordinate (update c ::coordinate/t inc)
+                       {::restore/current-db
+                        (-> database
+                            (update :t inc)
+                            (assoc :datahike/commit-id (random-uuid)))
                         ::restore/installed-schema {}
                         ::restore/completion completion
                         ::restore/publication-rows rows})))

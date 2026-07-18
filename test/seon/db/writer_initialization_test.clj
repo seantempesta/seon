@@ -1,7 +1,7 @@
 (ns seon.db.writer-initialization-test
   (:require [clojure.test :refer [deftest is]]
             [datahike.api :as d]
-            [seon.db.coordinate :as coordinate]
+            [seon.db.branch :as branch]
             [seon.db.protocol :as protocol]
             [seon.db.registry :as registry]
             [seon.db.writer :as writer])
@@ -149,8 +149,8 @@
         (registry/lookup-connection
          {::registry/database-name (keyword database-name)})
         branch :experiment/initialization
-        branch-attachment
-        (assoc (::registry/attachment main) ::coordinate/branch branch)
+        branch-connection-id
+        (assoc (::registry/connection-id main) 1 branch)
         invalid-initialization
         (assoc initialization :seon.db/program [])]
     (try
@@ -171,7 +171,7 @@
 
       (d/branch! (::registry/conn main) :db branch)
       (let [before
-            (coordinate/resolved
+            (branch/head
              (d/branch-as-db (::registry/conn main) branch))
             rejected
             (writer/handle-request
@@ -180,10 +180,10 @@
               {::protocol/request-id "initialization/branch"
                ::protocol/database-name branch-name
                ::protocol/backend :memory
-               ::coordinate/attachment branch-attachment
+               ::branch/connection-id branch-connection-id
                :seon.db/initialization initialization}))
             after
-            (coordinate/resolved
+            (branch/head
              (d/branch-as-db (::registry/conn main) branch))]
         (is (false? (::protocol/success? rejected)))
         (is (= before after) "branch initialization cannot advance its head")

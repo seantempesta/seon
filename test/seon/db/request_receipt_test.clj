@@ -2,7 +2,7 @@
   "Durable transaction request receipt and recovery tests."
   (:require [clojure.test :refer [deftest is use-fixtures]]
             [datahike.api :as d]
-            [seon.db.coordinate :as coordinate]
+            [seon.db.branch :as branch]
             [seon.db.executor :as executor]
             [seon.db.protocol :as protocol]
             [seon.db.registry :as registry]
@@ -176,8 +176,8 @@
       (is (true? (::protocol/success? first-response)))
       (is (true? (::protocol/success? recovered-response)))
       (is (true? (::protocol/recovered? recovered-response)))
-      (is (= (::protocol/coordinate first-response)
-             (::protocol/coordinate recovered-response)))
+      (is (= (::protocol/branch-head first-response)
+             (::protocol/branch-head recovered-response)))
       (is (= (:tempids first-response)
              (:tempids recovered-response)))
       (is (empty?
@@ -421,7 +421,7 @@
                          "embedding/before-release"
                          [{:db/id "target" :receipt/value "source"}]))))
         (is (.await provider-entered 5 TimeUnit/SECONDS))
-        (let [{::registry/keys [attachment]}
+        (let [{::registry/keys [connection-id]}
               (registry/resolve-connection
                {::registry/database-name (keyword database-name)})
               acquired
@@ -456,7 +456,7 @@
                   {::protocol/request-id "receipt/reensure"
                    ::protocol/database-name database-name
                    ::protocol/backend :memory
-                   ::coordinate/attachment attachment})))))
+                   ::branch/connection-id connection-id})))))
           (.countDown release-provider)
           (is (eventually
                #(zero? (::executor/running (executor/evidence worker)))))
@@ -532,8 +532,8 @@
         second-response (ensure-database! runtime database-name)]
     (is (true? (::protocol/success? first-response)))
     (is (true? (::protocol/success? second-response)))
-    (is (= (::protocol/coordinate first-response)
-           (::protocol/coordinate second-response)))
+    (is (= (::protocol/branch-head first-response)
+           (::protocol/branch-head second-response)))
     (is (= protocol/reserved-attributes
            (set (filter #(contains? (:schema (d/db (connection database-name))) %)
                         protocol/reserved-attributes))))))

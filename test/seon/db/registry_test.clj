@@ -3,7 +3,7 @@
   (:require [clojure.test :refer [deftest is use-fixtures]]
             [datahike.api :as d]
             [seon.db.backend :as backend]
-            [seon.db.coordinate :as coordinate]
+            [seon.db.branch :as branch]
             [seon.db.datahike.schema :as datahike.schema]
             [seon.db.id :as id]
             [seon.db.registry :as registry]
@@ -99,7 +99,7 @@
                 {::registry/database-name database-name
                  ::registry/backend :memory})
         conn (::registry/conn opened)
-        attachment (::registry/attachment opened)
+        connection-id (::registry/connection-id opened)
         connection-a (Object.)
         connection-b (Object.)
         connect-calls (atom 0)
@@ -124,19 +124,19 @@
             duplicate-acquire
             (registry/acquire-database!
              {::registry/database-name database-name
-              ::registry/attachment attachment
+              ::registry/connection-id connection-id
               ::registry/transport-connection connection-a})
             snapshot-after-duplicate
             (::registry/snapshot (registry/snapshot-registry {}))
             snapshot-before-wrong
             (::registry/snapshot (registry/snapshot-registry {}))
-            wrong-attachment (assoc attachment ::coordinate/branch
+            wrong-connection-id (assoc connection-id 1
                                     :registry.branch/wrong)
             duplicate-wrong
             (try
               (registry/acquire-database!
                {::registry/database-name database-name
-                ::registry/attachment wrong-attachment
+                ::registry/connection-id wrong-connection-id
                 ::registry/transport-connection connection-a})
               nil
               (catch clojure.lang.ExceptionInfo exception exception))
@@ -144,7 +144,7 @@
             (try
               (registry/acquire-database!
                {::registry/database-name database-name
-                ::registry/attachment wrong-attachment
+                ::registry/connection-id wrong-connection-id
                 ::registry/transport-connection connection-b})
               nil
               (catch clojure.lang.ExceptionInfo exception exception))
@@ -153,36 +153,36 @@
             second-acquire
             (registry/acquire-database!
              {::registry/database-name database-name
-              ::registry/attachment attachment
+              ::registry/connection-id connection-id
               ::registry/transport-connection connection-b})]
         (is (::registry/acquired? first-acquire))
-        (is (= attachment (::registry/attachment first-acquire))
-            "an omitted expectation atomically selects the current attachment")
+        (is (= connection-id (::registry/connection-id first-acquire))
+            "an omitted expectation atomically selects the current connection-id")
         (is (false? (::registry/acquired? duplicate-acquire)))
         (is (= snapshot-after-first snapshot-after-duplicate)
             "a duplicate correct acquire changes neither membership nor Datahike ownership")
-        (is (= :seon.db.registry.error/attachment-conflict
+        (is (= :seon.db.registry.error/connection-id-conflict
                (:seon.error/kind (ex-data duplicate-wrong)))
-            "attachment validation precedes duplicate membership")
-        (is (= :seon.db.registry.error/attachment-conflict
+            "connection-id validation precedes duplicate membership")
+        (is (= :seon.db.registry.error/connection-id-conflict
                (:seon.error/kind (ex-data fresh-wrong))))
         (is (= snapshot-before-wrong snapshot-after-wrong)
-            "wrong attachments change neither exact transport membership nor the ensured reference")
+            "wrong connection-ids change neither exact transport membership nor the ensured reference")
         (is (::registry/acquired? second-acquire))
         (is (= #{connection-a connection-b}
                (::registry/transport-connections
                 (registry/acquired-transport-connections
                  {::registry/database-name database-name
-                  ::registry/attachment attachment})))
-            "one exact attachment exposes its current physical sessions")
+                  ::registry/connection-id connection-id})))
+            "one exact connection-id exposes its current physical sessions")
         (is (empty?
              (::registry/transport-connections
               (registry/acquired-transport-connections
                {::registry/database-name database-name
-                ::registry/attachment wrong-attachment})))
-            "a replaced attachment can never receive a later database value")
+                ::registry/connection-id wrong-connection-id})))
+            "a replaced connection-id can never receive a later database value")
         (is (= 1 @connect-calls)
-            "wrong attachments never connect; only the correct sibling reconnects")
+            "wrong connection-ids never connect; only the correct sibling reconnects")
         (is (identical? conn
                         (::registry/conn
                          (registry/resolve-connection
@@ -199,7 +199,7 @@
                (::registry/transport-connections
                 (registry/acquired-transport-connections
                  {::registry/database-name database-name
-                  ::registry/attachment attachment}))))
+                  ::registry/connection-id connection-id}))))
         (is (= (d/db conn)
                (d/db (::registry/conn
                       (registry/resolve-connection
@@ -231,7 +231,7 @@
                      "final drain does not hold the registry-wide lock"))})))
         (is (= 2 @release-calls))
         (is (= [{::registry/database-name database-name
-                 ::registry/attachment (::registry/attachment opened)}]
+                 ::registry/connection-id (::registry/connection-id opened)}]
                @drains))
         (is (= {} (registry/lookup-connection
                    {::registry/database-name database-name})))
@@ -245,7 +245,7 @@
                  ::registry/backend :memory})]
     (registry/acquire-database!
      {::registry/database-name database-name
-      ::registry/attachment (::registry/attachment opened)
+      ::registry/connection-id (::registry/connection-id opened)
       ::registry/transport-connection connection})
     (ensure-database!
      {::registry/database-name database-name ::registry/backend :memory})
@@ -276,7 +276,7 @@
         first-conn (::registry/conn first)]
     (registry/acquire-database!
      {::registry/database-name database-name
-      ::registry/attachment (::registry/attachment first)
+      ::registry/connection-id (::registry/connection-id first)
       ::registry/transport-connection connection-a})
     (let [release
           (future
@@ -292,7 +292,7 @@
             (try
               (registry/acquire-database!
                {::registry/database-name database-name
-                ::registry/attachment (::registry/attachment first)
+                ::registry/connection-id (::registry/connection-id first)
                 ::registry/transport-connection connection-b})
               nil
               (catch clojure.lang.ExceptionInfo exception exception))]
@@ -308,7 +308,7 @@
           "reopen creates a new Datahike connection generation")
       (registry/acquire-database!
        {::registry/database-name database-name
-        ::registry/attachment (::registry/attachment reopened)
+        ::registry/connection-id (::registry/connection-id reopened)
         ::registry/transport-connection connection-b})
       (is (false?
            (::registry/released?
@@ -330,7 +330,7 @@
                  ::registry/backend :memory})]
     (registry/acquire-database!
      {::registry/database-name database-name
-      ::registry/attachment (::registry/attachment opened)
+      ::registry/connection-id (::registry/connection-id opened)
       ::registry/transport-connection connection})
     (let [result
           (registry/release-database-acquisition!
@@ -464,55 +464,55 @@
                        (fn [_request]
                          (throw (ex-info "initializer reran" {})))}))))))
 
-(deftest native-branch-attachments-are-distinct-routes-to-one-database
+(deftest native-branch-connection-ids-are-distinct-routes-to-one-database
   (let [main-name :registry/native-main
         branch-name :registry/native-branch
         main (ensure-database!
               {::registry/database-name main-name
                ::registry/backend :memory})
-        main-attachment (::registry/attachment main)
-        branch-attachment
-        (assoc main-attachment ::coordinate/branch :experiment/one)]
+        main-connection-id (::registry/connection-id main)
+        branch-connection-id
+        (assoc main-connection-id 1 :experiment/one)]
     (d/branch! (::registry/conn main) :db :experiment/one)
     (let [branch (ensure-database!
                   {::registry/database-name branch-name
                    ::registry/backend :memory
-                   ::registry/attachment branch-attachment})
+                   ::registry/connection-id branch-connection-id})
           resolved (registry/resolve-connection
                     {::registry/database-name branch-name})
           summaries (::registry/databases (registry/list-databases {}))]
-      (is (= main-attachment
-             (coordinate/attachment (::registry/coordinate main))))
-      (is (= branch-attachment (::registry/attachment branch)))
-      (is (= branch-attachment
-             (coordinate/attachment (::registry/coordinate branch))))
-      (is (= branch-attachment (::registry/attachment resolved)))
+      (is (= main-connection-id
+             (branch/connection-id (::registry/branch-head main))))
+      (is (= branch-connection-id (::registry/connection-id branch)))
+      (is (= branch-connection-id
+             (branch/connection-id (::registry/branch-head branch))))
+      (is (= branch-connection-id (::registry/connection-id resolved)))
       (is (not (identical? (::registry/conn main)
                             (::registry/conn branch))))
-      (is (= #{main-attachment branch-attachment}
-             (set (map ::registry/attachment summaries)))))))
+      (is (= #{main-connection-id branch-connection-id}
+             (set (map ::registry/connection-id summaries)))))))
 
-(deftest logical-routes-and-attachments-form-a-bijection
+(deftest logical-routes-and-connection-ids-form-a-bijection
   (let [main-name :registry/bijection-main
         main (ensure-database!
               {::registry/database-name main-name
                ::registry/backend :memory})
-        attachment (::registry/attachment main)]
+        connection-id (::registry/connection-id main)]
     (is (thrown-with-msg?
          clojure.lang.ExceptionInfo
          #"already has a logical route"
          (ensure-database!
           {::registry/database-name :registry/duplicate-route
            ::registry/backend :memory
-           ::registry/attachment attachment})))
+           ::registry/connection-id connection-id})))
     (is (thrown-with-msg?
          clojure.lang.ExceptionInfo
-         #"cannot change its registered attachment"
+         #"cannot change its registered connection-id"
          (ensure-database!
           {::registry/database-name main-name
            ::registry/backend :memory
-           ::registry/attachment
-           (assoc attachment ::coordinate/branch :experiment/other)})))
+           ::registry/connection-id
+           (assoc connection-id 1 :experiment/other)})))
     (is (thrown-with-msg?
          clojure.lang.ExceptionInfo
          #"disagree on backend configuration"
@@ -520,10 +520,10 @@
           {::registry/database-name :registry/conflicting-physical-config
            ::registry/backend :file
            ::registry/path "tmp/registry-conflicting-physical-config/db"
-           ::registry/attachment
-           (assoc attachment ::coordinate/branch :experiment/config)})))))
+           ::registry/connection-id
+           (assoc connection-id 1 :experiment/config)})))))
 
-(deftest non-main-attachment-requires-current-durable-roster-membership
+(deftest non-main-connection-id-requires-current-durable-roster-membership
   (let [main-name :registry/roster-main
         branch-name :registry/roster-branch
         main (ensure-database!
@@ -531,25 +531,24 @@
                ::registry/backend :memory})
         main-connection (::registry/conn main)
         branch :experiment/deleted
-        attachment (assoc (::registry/attachment main)
-                          ::coordinate/branch branch)]
+        connection-id (assoc (::registry/connection-id main) 1 branch)]
     (d/branch! main-connection :db branch)
     (let [opened (ensure-database!
                   {::registry/database-name branch-name
                    ::registry/backend :memory
-                   ::registry/attachment attachment})]
-      (is (= attachment (::registry/attachment opened))))
+                   ::registry/connection-id connection-id})]
+      (is (= connection-id (::registry/connection-id opened))))
     (registry/release-database! {::registry/database-name branch-name})
     (d/delete-branch! main-connection branch)
     (is (not (contains? (d/branches main-connection) branch)))
     (let [cfg (backend/datahike-config
                {::backend/database-name branch-name
                 ::backend/backend :memory
-                ::coordinate/attachment attachment})
+                ::branch/connection-id connection-id})
           stale (d/connect cfg)]
       (try
-        (is (= attachment
-               (coordinate/attachment (coordinate/resolved (d/db stale))))
+        (is (= connection-id
+               (branch/connection-id (branch/head (d/db stale))))
             "raw Datahike can still open the deleted branch head")
         (finally
           (d/release stale))))
@@ -559,7 +558,7 @@
          (ensure-database!
           {::registry/database-name branch-name
            ::registry/backend :memory
-           ::registry/attachment attachment})))
+           ::registry/connection-id connection-id})))
     (is (empty? (registry/lookup-connection
                  {::registry/database-name branch-name})))))
 
@@ -577,14 +576,14 @@
                   :db/cardinality :db.cardinality/one}
                  {:registry.lifecycle/value "shared"}])
     (let [source-head
-          (::registry/coordinate
+          (::registry/branch-head
            (registry/resolve-connection
             {::registry/database-name source-name}))
           created
           (registry/create-branch!
            {::registry/source-database-name source-name
             ::registry/target-database-name target-name
-            ::registry/source-coordinate source-head
+            ::registry/source-branch-head source-head
             ::registry/expected-source-head source-head
             ::registry/target-branch target-branch
             ::registry/initialize-connection! (fn [_request] nil)})
@@ -593,8 +592,8 @@
                               {::registry/database-name target-name}))]
       (is (true? (::registry/created? created)))
       (is (false? (::registry/adopted? created)))
-      (is (= (assoc source-head ::coordinate/branch target-branch)
-             (::registry/coordinate created)))
+      (is (= (assoc source-head ::branch/name target-branch)
+             (::registry/branch-head created)))
       (is (= "shared"
              (d/q '[:find ?value .
                     :where [_ :registry.lifecycle/value ?value]]
@@ -605,20 +604,20 @@
                         :where [?entity :registry.lifecycle/value "target-only"]]
                       (d/db source-connection))))
       (let [target-head
-            (::registry/coordinate
+            (::registry/branch-head
              (registry/resolve-connection
               {::registry/database-name target-name}))
             release
-            (registry/release-attachment!
+            (registry/release-connection-id!
              {::registry/target-database-name target-name
-              ::registry/attachment (::registry/attachment created)
+              ::registry/connection-id (::registry/connection-id created)
               ::registry/expected-target-head target-head
               ::registry/drain! (fn [_release] nil)})
             deleted
             (registry/delete-branch!
              {::registry/source-database-name source-name
               ::registry/target-database-name target-name
-              ::registry/attachment (::registry/attachment created)
+              ::registry/connection-id (::registry/connection-id created)
               ::registry/expected-target-head target-head
               ::registry/drain! (fn [_release] nil)})]
         (is (true? (::registry/released? release)))
@@ -634,7 +633,7 @@
              (ensure-database!
               {::registry/database-name target-name
                ::registry/backend :memory
-               ::registry/attachment (::registry/attachment created)})))))))
+               ::registry/connection-id (::registry/connection-id created)})))))))
 
 (deftest lifecycle-observation-reads-the-complete-native-roster
   (let [database-name :registry/lifecycle-observation
@@ -642,21 +641,21 @@
               {::registry/database-name database-name
                ::registry/backend :memory})
         connection (::registry/conn main)
-        main-coordinate (coordinate/resolved (d/db connection))
+        main-branch-head (branch/head (d/db connection))
         retained-branch :registry.branch/unopened]
     (d/branch! connection
-               (::coordinate/commit-id main-coordinate)
+               (::branch/commit-id main-branch-head)
                retained-branch)
-    (let [retained-coordinate
-          (coordinate/resolved (d/branch-as-db connection retained-branch))
+    (let [retained-branch-head
+          (branch/head (d/branch-as-db connection retained-branch))
           observation
           (registry/observe-database-lifecycle
            {::registry/database-name database-name})]
       (is (= #{:db retained-branch}
              (::registry/branch-roster observation)))
-      (is (= main-coordinate (::registry/main-coordinate observation)))
-      (is (= {:db main-coordinate retained-branch retained-coordinate}
-             (::registry/branch-coordinates observation)))
+      (is (= main-branch-head (::registry/main-branch-head observation)))
+      (is (= {:db main-branch-head retained-branch retained-branch-head}
+             (::registry/branch-branch-heads observation)))
       (is (= {}
              (registry/lookup-connection
               {::registry/database-name :registry/unopened-branch}))
@@ -669,8 +668,8 @@
                ::registry/backend :memory})
         connection (::registry/conn main)
         completion-id "restore00001"
-        database-id (::coordinate/database-id
-                     (coordinate/resolved (d/db connection)))
+        database-id (::branch/store-id
+                     (branch/head (d/db connection)))
         completion
         {::db.restore/id completion-id
          ::db.restore/db-name database-name
@@ -697,7 +696,7 @@
            (datahike.schema/malli-map->datahike-schema completion-schema)))
     (d/transact connection [completion])
     (let [main-db (d/db connection)
-          completion-coordinate (coordinate/resolved main-db)
+          completion-branch-head (branch/head main-db)
           completion-t
           (d/q '[:find ?transaction .
                  :in $ ?id
@@ -706,9 +705,9 @@
                (d/history main-db)
                completion-id)
           _ (d/force-branch!
-             main-db :db #{(::coordinate/commit-id completion-coordinate)}
+             main-db :db #{(::branch/commit-id completion-branch-head)}
              {:expected-current-commit
-              (::coordinate/commit-id completion-coordinate)})
+              (::branch/commit-id completion-branch-head)})
           _ (registry/release-database!
              {::registry/database-name database-name})
           reopened (ensure-database!
@@ -723,11 +722,11 @@
       (is (= [completion] (::registry/restore-completions observation)))
       (is (= #{completion-id}
              (::registry/completed-restore-ids observation)))
-      (is (= completion-t (::coordinate/t completion-coordinate)))
-      (is (not= completion-coordinate (coordinate/resolved reopened-db))
-          "the force commit repeats t at a different commit coordinate")
-      (is (= {completion-id completion-coordinate}
-             (::registry/restore-completion-coordinates observation)))
+      (is (= completion-t (::branch/basis-t completion-branch-head)))
+      (is (not= completion-branch-head (branch/head reopened-db))
+          "the force commit repeats t at a different commit branch-head")
+      (is (= {completion-id completion-branch-head}
+             (::registry/restore-completion-branch-heads observation)))
       (let [original-pull d/pull
             foreign
             (with-redefs [d/pull
@@ -867,12 +866,12 @@
                 {::registry/database-name source-name
                  ::registry/backend :memory})
         source-connection (::registry/conn source)
-        source-head (::registry/coordinate
+        source-head (::registry/branch-head
                      (registry/resolve-connection
                       {::registry/database-name source-name}))
         request {::registry/source-database-name source-name
                  ::registry/target-database-name target-name
-                 ::registry/source-coordinate source-head
+                 ::registry/source-branch-head source-head
                  ::registry/expected-source-head source-head
                  ::registry/target-branch target-branch
                  ::registry/initialize-connection! (fn [_request] nil)}
@@ -884,20 +883,20 @@
     (is (true? (::registry/created? created)))
     (is (false? (::registry/created? immediate-retry)))
     (is (true? (::registry/adopted? immediate-retry)))
-    (is (= (::registry/coordinate created)
-           (::registry/coordinate immediate-retry)))
+    (is (= (::registry/branch-head created)
+           (::registry/branch-head immediate-retry)))
     (d/transact target-connection
                 [{:db/ident :registry.retry/value
                   :db/valueType :db.type/string
                   :db/cardinality :db.cardinality/one}])
-    (let [advanced-head (::registry/coordinate
+    (let [advanced-head (::registry/branch-head
                          (registry/resolve-connection
                           {::registry/database-name target-name}))
           restart-retry (registry/create-branch! request)]
-      (is (not= (::registry/coordinate created) advanced-head))
+      (is (not= (::registry/branch-head created) advanced-head))
       (is (false? (::registry/created? restart-retry)))
       (is (true? (::registry/adopted? restart-retry)))
-      (is (= advanced-head (::registry/coordinate restart-retry))
+      (is (= advanced-head (::registry/branch-head restart-retry))
           "a retained create intent adopts the exact route at its fresh head"))))
 
 (deftest native-branch-create-adopts-retained-branch-before-source-head-fence
@@ -906,26 +905,26 @@
                 {::registry/database-name source-name
                  ::registry/backend :memory})
         source-connection (::registry/conn source)
-        source-head (coordinate/resolved (d/db source-connection))
+        source-head (branch/head (d/db source-connection))
         adopted-branch :registry.branch/retained-retry
         mismatch-branch :registry.branch/retained-mismatch
         stale-new-branch :registry.branch/stale-new]
     (d/branch! source-connection
-               (::coordinate/commit-id source-head)
+               (::branch/commit-id source-head)
                adopted-branch)
     (d/transact source-connection
                 [{:db/ident :registry.retained/value
                   :db/valueType :db.type/string
                   :db/cardinality :db.cardinality/one}])
-    (let [current-source-head (coordinate/resolved (d/db source-connection))
+    (let [current-source-head (branch/head (d/db source-connection))
           _ (d/branch! source-connection
-                       (::coordinate/commit-id current-source-head)
+                       (::branch/commit-id current-source-head)
                        mismatch-branch)
           adopted
           (registry/create-branch!
            {::registry/source-database-name source-name
             ::registry/target-database-name :registry/retained-retry-target
-            ::registry/source-coordinate source-head
+            ::registry/source-branch-head source-head
             ::registry/expected-source-head source-head
             ::registry/target-branch adopted-branch
             ::registry/initialize-connection! (fn [_request] nil)})
@@ -934,7 +933,7 @@
             (registry/create-branch!
              {::registry/source-database-name source-name
               ::registry/target-database-name :registry/retained-mismatch-target
-              ::registry/source-coordinate source-head
+              ::registry/source-branch-head source-head
               ::registry/expected-source-head source-head
               ::registry/target-branch mismatch-branch
               ::registry/initialize-connection! (fn [_request] nil)})
@@ -945,7 +944,7 @@
             (registry/create-branch!
              {::registry/source-database-name source-name
               ::registry/target-database-name :registry/stale-new-target
-              ::registry/source-coordinate source-head
+              ::registry/source-branch-head source-head
               ::registry/expected-source-head source-head
               ::registry/target-branch stale-new-branch
               ::registry/initialize-connection! (fn [_request] nil)})
@@ -953,8 +952,8 @@
             (catch clojure.lang.ExceptionInfo exception exception))]
       (is (false? (::registry/created? adopted)))
       (is (true? (::registry/adopted? adopted)))
-      (is (= (assoc source-head ::coordinate/branch adopted-branch)
-             (::registry/coordinate adopted)))
+      (is (= (assoc source-head ::branch/name adopted-branch)
+             (::registry/branch-head adopted)))
       (is (= :seon.db.protocol.error/branch-exists
              (:seon.error/kind (ex-data mismatch))))
       (is (= :seon.db.protocol.error/stale-source-head
@@ -972,18 +971,18 @@
                   :db/valueType :db.type/string
                   :db/cardinality :db.cardinality/one}])
     (let [source-db (d/db source-connection)
-          source-head (coordinate/resolved source-db)
+          source-head (branch/head source-db)
           contained-cut
-          (coordinate/at
-           {::coordinate/db-value source-db
-            ::coordinate/target-t (dec (::coordinate/t source-head))})
+          (branch/at
+           {::branch/db-value source-db
+            ::branch/target-basis-t (dec (::branch/basis-t source-head))})
           cut-branch :registry.branch/cut
           cut-failure
           (try
             (registry/create-branch!
              {::registry/source-database-name source-name
               ::registry/target-database-name :registry/lifecycle-cut-target
-              ::registry/source-coordinate contained-cut
+              ::registry/source-branch-head contained-cut
               ::registry/expected-source-head source-head
               ::registry/target-branch cut-branch
               ::registry/initialize-connection! (fn [_request] nil)})
@@ -999,7 +998,7 @@
               (registry/create-branch!
                {::registry/source-database-name source-name
                 ::registry/target-database-name created-failure-name
-                ::registry/source-coordinate source-head
+                ::registry/source-branch-head source-head
                 ::registry/expected-source-head source-head
                 ::registry/target-branch created-failure-branch
                 ::registry/initialize-connection!
@@ -1015,31 +1014,31 @@
                    {::registry/database-name created-failure-name}))))
       (let [adopted-branch :registry.branch/adopted
             _ (d/branch! source-connection
-                         (::coordinate/commit-id source-head)
+                         (::branch/commit-id source-head)
                          adopted-branch)
             adopted
             (registry/create-branch!
              {::registry/source-database-name source-name
               ::registry/target-database-name :registry/lifecycle-adopted
-              ::registry/source-coordinate source-head
+              ::registry/source-branch-head source-head
               ::registry/expected-source-head source-head
               ::registry/target-branch adopted-branch
               ::registry/initialize-connection! (fn [_request] nil)})]
         (is (false? (::registry/created? adopted)))
         (is (true? (::registry/adopted? adopted)))
-        (is (= (assoc source-head ::coordinate/branch adopted-branch)
-               (::registry/coordinate adopted))))
+        (is (= (assoc source-head ::branch/name adopted-branch)
+               (::registry/branch-head adopted))))
       (let [retained-branch :registry.branch/retained-adoption
             retained-name :registry/lifecycle-retained-adoption
             _ (d/branch! source-connection
-                         (::coordinate/commit-id source-head)
+                         (::branch/commit-id source-head)
                          retained-branch)
             failure
             (try
               (registry/create-branch!
                {::registry/source-database-name source-name
                 ::registry/target-database-name retained-name
-                ::registry/source-coordinate source-head
+                ::registry/source-branch-head source-head
                 ::registry/expected-source-head source-head
                 ::registry/target-branch retained-branch
                 ::registry/initialize-connection!

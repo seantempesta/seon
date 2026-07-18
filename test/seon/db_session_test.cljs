@@ -11,6 +11,7 @@
 
 (def ^:private database-0
   {:db-name database-name
+   :store-id [#uuid "20000000-0000-0000-0000-000000000000" :db]
    :t 536870912
    :as-of nil
    :since nil

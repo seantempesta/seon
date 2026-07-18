@@ -412,8 +412,8 @@
          ::restore/operation :seon.dev.restore.operation/undo
          ::restore/selected-target-descriptor
          {:seon.launch/database
-          {:seon.db.coordinate/coordinate
-           {:seon.db.coordinate/branch :seon.restore.undo/r-prior}}}}
+          {:seon.db.branch/head
+           {:seon.db.branch/name :seon.restore.undo/r-prior}}}}
         calls (atom [])]
     (with-redefs-fn
       {#'cli/retained-restore-intent (constantly intent)
@@ -674,11 +674,11 @@
         plan {::restore/confirmation-text "EXACT CONFIRMATION"}
         result
         {:seon.dev.restore/intent-id "restoretest01"
-         ::restore-state/restored-coordinate
-         {:seon.db.coordinate/database-id (random-uuid)
-          :seon.db.coordinate/branch :db
-          :seon.db.coordinate/commit-id (random-uuid)
-          :seon.db.coordinate/t 42}
+         ::restore-state/restored-branch-head
+         {:seon.db.branch/store-id (random-uuid)
+          :seon.db.branch/name :db
+          :seon.db.branch/commit-id (random-uuid)
+          :seon.db.branch/basis-t 42}
          ::restore-state/admin-outcome
          :seon.db.restore-admin.outcome/applied
          ::restore-state/transitions []}]
@@ -725,11 +725,11 @@
         plan {::restore/confirmation-text "EXACT"}
         result
         {:seon.dev.restore/intent-id "restoretest01"
-         ::restore-state/restored-coordinate
-         {:seon.db.coordinate/database-id (random-uuid)
-          :seon.db.coordinate/branch :db
-          :seon.db.coordinate/commit-id (random-uuid)
-          :seon.db.coordinate/t 42}
+         ::restore-state/restored-branch-head
+         {:seon.db.branch/store-id (random-uuid)
+          :seon.db.branch/name :db
+          :seon.db.branch/commit-id (random-uuid)
+          :seon.db.branch/basis-t 42}
          ::restore-state/admin-outcome
          :seon.db.restore-admin.outcome/applied
          ::restore-state/transitions []}
@@ -809,13 +809,13 @@
            {:seon.dev.restore/intent-id "restoretest01"
             :seon.dev.restore/plan-digest (apply str (repeat 64 "a"))
             ::restore-state/aborted? true
-            ::restore-state/prior-main-coordinate
-            (::restore-state/restored-coordinate result)
-            ::restore-state/current-main-coordinate
-            (::restore-state/restored-coordinate result)
-            ::restore-state/selected-target-coordinate
-            (assoc (::restore-state/restored-coordinate result)
-                   :seon.db.coordinate/branch :seon.branch/target)})}
+            ::restore-state/prior-main-branch-head
+            (::restore-state/restored-branch-head result)
+            ::restore-state/current-main-branch-head
+            (::restore-state/restored-branch-head result)
+            ::restore-state/selected-target-branch-head
+            (assoc (::restore-state/restored-branch-head result)
+                   :seon.db.branch/name :seon.branch/target)})}
         (fn []
           (#'cli/restore-cluster!
            configuration ["target" "--abort" "--confirm" "ABORT"])))
@@ -833,11 +833,11 @@
         plan {::restore/confirmation-text "EXACT UNDO"}
         result
         {:seon.dev.restore/intent-id "restoretest01"
-         ::restore-state/restored-coordinate
-         {:seon.db.coordinate/database-id (random-uuid)
-          :seon.db.coordinate/branch :db
-          :seon.db.coordinate/commit-id (random-uuid)
-          :seon.db.coordinate/t 42}
+         ::restore-state/restored-branch-head
+         {:seon.db.branch/store-id (random-uuid)
+          :seon.db.branch/name :db
+          :seon.db.branch/commit-id (random-uuid)
+          :seon.db.branch/basis-t 42}
          ::restore-state/admin-outcome
          :seon.db.restore-admin.outcome/applied
          ::restore-state/transitions []}
@@ -882,13 +882,13 @@
            {:seon.dev.restore/intent-id "restoretest01"
             :seon.dev.restore/plan-digest (apply str (repeat 64 "a"))
             ::restore-state/aborted? true
-            ::restore-state/prior-main-coordinate
-            (::restore-state/restored-coordinate result)
-            ::restore-state/current-main-coordinate
-            (::restore-state/restored-coordinate result)
-            ::restore-state/selected-target-coordinate
-            (assoc (::restore-state/restored-coordinate result)
-                   :seon.db.coordinate/branch :seon.restore.undo/r-prior)})}
+            ::restore-state/prior-main-branch-head
+            (::restore-state/restored-branch-head result)
+            ::restore-state/current-main-branch-head
+            (::restore-state/restored-branch-head result)
+            ::restore-state/selected-target-branch-head
+            (assoc (::restore-state/restored-branch-head result)
+                   :seon.db.branch/name :seon.restore.undo/r-prior)})}
         #(#'cli/undo-cluster!
           configuration [completion-id "--abort" "--confirm" "ABORT"]))
       (is (= [[:abort {::restore-state/configuration configuration

@@ -185,12 +185,7 @@
                {:seon.state/ok? true
                 :seon.state/changed? false
                 :seon.state/operations 0
-                :seon.state/attempts 1
-                :seon.state/coordinate
-                {:db-id #uuid "00000000-0000-0000-0000-000000000001"
-                 :branch :db
-                 :commit-id #uuid "00000000-0000-0000-0000-000000000002"
-                 :t 1}})))
+                :seon.state/attempts 1})))
       (try
         (let [selected (select-configuration manifest)]
           (-> (open-startup! true selected)

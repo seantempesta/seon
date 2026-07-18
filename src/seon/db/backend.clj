@@ -15,7 +15,7 @@
    where `<short>` is the name portion of the database-name keyword. Caller may
    override via `::path`.
 
-   A request may carry an explicit `{database-id, branch}` attachment. Without
+   A request may carry an explicit Datahike `[store-id branch]` connection ID. Without
    one, the adapter derives the historical per-name UUID and main `:db` branch.
    The returned map is Datahike's third-party config shape. Its literal
    unqualified `:store` key is intentionally confined to this adapter.
@@ -26,7 +26,7 @@
    it actually opens the database. The base path is currently relative
    (`data/clusters/`)."
   (:require [clojure.string :as str]
-            [seon.db.coordinate :as coordinate]
+            [seon.db.branch :as branch]
             [seon.schema :as schema])
   (:import [java.io File]
            [java.util UUID]))
@@ -43,8 +43,8 @@
                    [::database-name ::database-name]
                    [::backend ::backend]
                    [::path {:optional true} ::path]
-                   [::coordinate/attachment {:optional true}
-                    ::coordinate/attachment]
+                   [::branch/connection-id {:optional true}
+                    ::branch/connection-id]
                    [::initial-tx {:optional true} ::initial-tx]])
 
 ;; The returned cfg is an opaque datahike config map. We don't constrain
@@ -54,7 +54,7 @@
 (schema/register!
  ::backend-facts
  [:map
-  [::coordinate/attachment ::coordinate/attachment]
+  [::branch/connection-id ::branch/connection-id]
   [::path {:optional true} ::path]])
 
 (schema/register! ::ensure-parent-dir-request
@@ -98,24 +98,22 @@
     (str "data/clusters/" p "/db")
     p))
 
-(defn database-id
-  "Deterministic default UUID for one logical database name."
+(defn store-id
+  "Return the deterministic Datahike store ID for a database name."
   {:malli/schema [:=> [:catn [::database-name ::database-name]] :uuid]}
   [database-name]
   (UUID/nameUUIDFromBytes (.getBytes (str database-name) "UTF-8")))
 
 (defn backend-facts
-  "Resolve the stable attachment and optional durable path from Seon options.
+  "Resolve the Datahike connection ID and optional durable path.
 
    This is the only public projection of backend identity. Callers never read
    Datahike's private `:store` map."
   {:malli/schema [:=> [:cat ::datahike-config-request] ::backend-facts]}
   [{::keys [database-name backend path]
-    attachment ::coordinate/attachment}]
-  (cond-> {::coordinate/attachment
-           (or attachment
-               {::coordinate/database-id (database-id database-name)
-                ::coordinate/branch :db})}
+    connection-id ::branch/connection-id}]
+  (cond-> {::branch/connection-id
+           (or connection-id [(store-id database-name) :db])}
     (= :file backend)
     (assoc ::path (harden-file-path (or path (default-path database-name))))))
 
@@ -136,19 +134,18 @@
 
    Optional:
      ::path                  — override the on-disk path; ignored for :memory.
-     ::coordinate/attachment — explicit physical database and native branch."
+     ::branch/connection-id — explicit physical database and native branch."
   {:malli/schema [:=> [:cat ::datahike-config-request]
                   ::datahike-config-response]}
   [{::keys [database-name backend initial-tx] :as request}]
-  (let [{attachment ::coordinate/attachment
+  (let [{connection-id ::branch/connection-id
          path ::path} (backend-facts request)
-        database-id (::coordinate/database-id attachment)
-        branch (::coordinate/branch attachment)
+        [store-id branch] connection-id
         options (case backend
-                  :memory {:backend :memory :id database-id}
+                  :memory {:backend :memory :id store-id}
                   :file   {:backend :file
                            :path path
-                           :id database-id})]
+                           :id store-id})]
     (cond-> (assoc base-cfg
                    :store options
                    :branch branch

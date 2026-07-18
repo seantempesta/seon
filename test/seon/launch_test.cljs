@@ -2,7 +2,7 @@
   (:require [cljs.reader :as reader]
             [cljs.test :refer [deftest is testing]]
             [clojure.string :as str]
-            [seon.db.coordinate :as coordinate]
+            [seon.db.branch :as branch]
             [seon.db.protocol :as protocol]
             [seon.launch :as launch]
             [seon.schema :as schema]))
@@ -16,17 +16,17 @@
         #uuid "c5d99792-8f1b-4c22-a0ab-0f15cd11d739"
         point
         (fn [branch commit-id t]
-          {::coordinate/database-id database-id
-           ::coordinate/branch branch
-           ::coordinate/commit-id commit-id
-           ::coordinate/t t})
+          {::branch/store-id database-id
+           ::branch/name branch
+           ::branch/commit-id commit-id
+           ::branch/basis-t t})
         pre (point :db
                    #uuid "7755012e-48ea-422b-9bdb-9a5b00f06378" 51)
         selected (point :seon.branch/retained
                         #uuid "64a83a56-14c2-467f-9bb8-3641b273be5f" 47)
-        prepared (assoc selected ::coordinate/branch
+        prepared (assoc selected ::branch/name
                         :seon.restore.target/r-restoretest1)
-        undo (assoc pre ::coordinate/branch
+        undo (assoc pre ::branch/name
                     :seon.restore.undo/r-restoretest1)
         forced (point :db
                       #uuid "497628ef-2308-455a-ab83-9487584bf2ed" 47)]
@@ -43,11 +43,11 @@
       :seon.db.restore-admin/plan-digest digest-a
       :seon.db.restore-admin/outcome
       :seon.db.restore-admin.outcome/applied
-      :seon.db.restore-admin/pre-restore-main-coordinate pre
-      :seon.db.restore-admin/selected-target-coordinate selected
-      :seon.db.restore-admin/prepared-target-coordinate prepared
-      :seon.db.restore-admin/undo-coordinate undo
-      :seon.db.restore-admin/forced-main-coordinate forced
+      :seon.db.restore-admin/pre-restore-main-branch-head pre
+      :seon.db.restore-admin/selected-target-branch-head selected
+      :seon.db.restore-admin/prepared-target-branch-head prepared
+      :seon.db.restore-admin/undo-branch-head undo
+      :seon.db.restore-admin/forced-main-branch-head forced
       :seon.db.restore-admin/branch-roster
       #{:db :seon.branch/retained
         :seon.restore.target/r-restoretest1
@@ -57,7 +57,7 @@
       :seon.db.restore-admin.connection/released}
      :my.blob/materialization-result
      {:my.blob/ok? true
-      :my.blob/target-coordinate selected
+      :my.blob/target-branch-head selected
       :my.blob/reachable-hash-digest digest-b
       :my.blob/hash-count 2
       :my.blob/verified-count 2
@@ -107,28 +107,26 @@
                   (pr-str (assoc descriptor :seon.test/unknown true)))))))
 
 (deftest branch-descriptor-inherits-source-owners-and-isolates-target-data
-  (let [source-attachment
-        {::coordinate/database-id
-         #uuid "9dcfa740-5f7f-4ff5-ac08-a9c8b605a8aa"
-         ::coordinate/branch :db}
+  (let [source-connection-id
+        [#uuid "9dcfa740-5f7f-4ff5-ac08-a9c8b605a8aa" :db]
         source (assoc-in
                 (ordinary "data/clusters/acme"
                           :seon.dev.artifact.flavor/acme "acme-client")
-                [::launch/database ::coordinate/attachment]
-                source-attachment)
-        target-coordinate
-        {::coordinate/database-id
+                [::launch/database ::branch/connection-id]
+                source-connection-id)
+        target-branch-head
+        {::branch/store-id
          #uuid "9dcfa740-5f7f-4ff5-ac08-a9c8b605a8aa"
-         ::coordinate/branch :trial
-         ::coordinate/commit-id
+         ::branch/name :trial
+         ::branch/commit-id
          #uuid "a2bd215f-7ec6-47dc-a627-f8e4948df581"
-         ::coordinate/t 42}
+         ::branch/basis-t 42}
         branch
         (launch/branch-descriptor
          {::launch/source-descriptor source
           ::launch/runtime-cluster "acme-trial"
           ::launch/target-database-name "acme-trial"
-          ::launch/target-coordinate target-coordinate
+          ::launch/target-branch-head target-branch-head
           ::launch/process-dir "tmp/acme-trial"
           ::launch/log-dir "logs/acme-trial"
           ::launch/http-port 0
@@ -143,10 +141,10 @@
                         [::launch/artifact-flavor ::launch/client-build-id])
            (select-keys (::launch/runtime branch)
                         [::launch/artifact-flavor ::launch/client-build-id])))
-    (is (= (coordinate/attachment target-coordinate)
-           (get-in branch [::launch/database ::coordinate/attachment])))
-    (is (= target-coordinate
-           (get-in branch [::launch/database ::coordinate/coordinate])))
+    (is (= (branch/connection-id target-branch-head)
+           (get-in branch [::launch/database ::branch/connection-id])))
+    (is (= target-branch-head
+           (get-in branch [::launch/database ::branch/head])))
     (is (= "data/clusters/acme/db"
            (get-in branch [::launch/database ::protocol/database-path])))
     (is (= {:my.blob/writable-dir "data/branches/acme-trial/blobs"
@@ -158,20 +156,19 @@
         source (assoc-in
                 (ordinary "data/clusters/default"
                           :seon.dev.artifact.flavor/default "client")
-                [::launch/database ::coordinate/attachment]
-                {::coordinate/database-id database-id
-                 ::coordinate/branch :db})
+                [::launch/database ::branch/connection-id]
+                [database-id :db])
         request
         {::launch/source-descriptor source
          ::launch/runtime-cluster "trial"
          ::launch/target-database-name "trial"
-         ::launch/target-coordinate
-         {::coordinate/database-id
+         ::launch/target-branch-head
+         {::branch/store-id
           database-id
-          ::coordinate/branch :trial
-          ::coordinate/commit-id
+          ::branch/name :trial
+          ::branch/commit-id
           #uuid "a2bd215f-7ec6-47dc-a627-f8e4948df581"
-          ::coordinate/t 42}
+          ::branch/basis-t 42}
          ::launch/process-dir "tmp/trial"
          ::launch/log-dir "logs/trial"
          ::launch/http-port 0
@@ -181,7 +178,7 @@
       (is (thrown? js/Error
                    (launch/branch-descriptor
                     (assoc-in request
-                              [::launch/target-coordinate ::coordinate/branch]
+                              [::launch/target-branch-head ::branch/name]
                               :db)))))
     (testing "every target-private path rejects normalized source containment"
       (doseq [crossed
@@ -194,37 +191,37 @@
                       "data/clusters/default/blobs/http.port")]]
         (is (thrown? js/Error (launch/branch-descriptor crossed)))))))
 
-(deftest complete-coordinate-claim-must-agree-with-retained-attachment
+(deftest complete-branch-head-claim-must-agree-with-retained-connection-id
   (let [descriptor (ordinary "data/clusters/default"
                              :seon.dev.artifact.flavor/default "client")
-        point {::coordinate/database-id
+        point {::branch/store-id
                #uuid "9dcfa740-5f7f-4ff5-ac08-a9c8b605a8aa"
-               ::coordinate/branch :db
-               ::coordinate/commit-id
+               ::branch/name :db
+               ::branch/commit-id
                #uuid "a2bd215f-7ec6-47dc-a627-f8e4948df581"
-               ::coordinate/t 17}
-        pinned (launch/with-coordinate
+               ::branch/basis-t 17}
+        pinned (launch/with-branch-head
                 {::launch/descriptor descriptor
-                 ::coordinate/coordinate point})]
+                 ::branch/head point})]
     (is (= point (get-in pinned
-                         [::launch/database ::coordinate/coordinate])))
-    (is (= (coordinate/attachment point)
-           (get-in pinned [::launch/database ::coordinate/attachment])))
+                         [::launch/database ::branch/head])))
+    (is (= (branch/connection-id point)
+           (get-in pinned [::launch/database ::branch/connection-id])))
     (is (thrown? js/Error
-                 (launch/with-coordinate
+                 (launch/with-branch-head
                   {::launch/descriptor pinned
-                   ::coordinate/coordinate
-                   (assoc point ::coordinate/branch :other)})))))
+                   ::branch/head
+                   (assoc point ::branch/name :other)})))))
 
 (deftest restore-startup-is-closed-serializable-and-generation-bound
   (let [startup (restore-startup-fixture)
         forced-main (get-in startup [:seon.db.restore-admin/result
-                                     :seon.db.restore-admin/forced-main-coordinate])
-        pinned (launch/with-coordinate
+                                     :seon.db.restore-admin/forced-main-branch-head])
+        pinned (launch/with-branch-head
                 {::launch/descriptor
                  (ordinary "data/clusters/default"
                            :seon.dev.artifact.flavor/default "client")
-                 ::coordinate/coordinate forced-main})
+                 ::branch/head forced-main})
         descriptor (launch/with-restore-startup
                     {::launch/descriptor pinned
                      ::launch/restore-startup startup})
@@ -237,7 +234,7 @@
                     :seon.dev.restore/consumer-generations
                     :seon.dev.process/pod])))
     (is (= forced-main
-           (get-in descriptor [::launch/database ::coordinate/coordinate])))
+           (get-in descriptor [::launch/database ::branch/head])))
     (is (= {:seon.client/autonomous? false}
            (get-in descriptor
                    [::launch/runtime :seon.client/launch-capability])))
@@ -255,10 +252,10 @@
 
 (deftest restore-startup-rejects-cross-owner-evidence-mutations
   (let [startup (restore-startup-fixture)
-        different-coordinate
+        different-branch-head
         (assoc (get-in startup [:seon.db.restore-admin/result
-                                :seon.db.restore-admin/forced-main-coordinate])
-               ::coordinate/t 99)
+                                :seon.db.restore-admin/forced-main-branch-head])
+               ::branch/basis-t 99)
         mutations
         [(assoc-in startup [:seon.db.restore-admin/result
                             :seon.db.restore-admin/intent-id]
@@ -270,8 +267,8 @@
                             :my.blob/reachable-hash-digest]
                    digest-a)
          (assoc-in startup [:my.blob/materialization-result
-                            :my.blob/target-coordinate]
-                   different-coordinate)
+                            :my.blob/target-branch-head]
+                   different-branch-head)
          (assoc-in startup [:seon.dev.restore/startup-identity
                             :seon.dev.restore/consumer-generations]
                    {:seon.dev.process/other

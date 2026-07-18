@@ -36,7 +36,7 @@
     [seon.agent.run :as run]
     [seon.config :as config]
     [seon.db :as db]
-    [seon.db.coordinate :as coordinate]
+    [seon.db.branch :as branch]
     [seon.db.restore :as db.restore]
     [seon.derive :as derive]
     [seon.eval :as seval]
@@ -100,8 +100,8 @@
   ([restore-completion-result _req res]
    (let [restore? (some? restore-completion-result)
          completion (::db.restore/completion restore-completion-result)
-         completion-coordinate
-         (::db.restore/completion-coordinate restore-completion-result)
+         completion-branch-head
+         (::db.restore/completion-branch-head restore-completion-result)
          acquired
          (when (and restore? (db/attached?))
            (db.restore/acquire-completion!
@@ -115,9 +115,10 @@
                      {::db.restore/completion completion
                       ::db.restore/current-completion
                       (::db.restore/completion acquired)
-                      ::db.restore/completion-coordinate completion-coordinate
-                      ::db.restore/current-coordinate
-                      (::db.restore/current-coordinate acquired)
+                      ::db.restore/completion-branch-head completion-branch-head
+                      ::db.restore/current-branch-head
+                      (branch/head-from-database-value
+                       (::db.restore/current-db acquired))
                       ::db.restore/publication-rows
                       (::db.restore/publication-rows acquired)
                       :seon.runtime.admission/state (admission/state)}))
@@ -1345,13 +1346,13 @@
                     (some-> error .-message)
                     (str error))]
     {:my.blob/ok? false
-     :my.blob/target-coordinate (:my.blob/target-coordinate request)
+     :my.blob/target-branch-head (:my.blob/target-branch-head request)
      :my.blob/error (subs message 0 (min 1024 (count message)))}))
 
 (defn- execute-blob-operator!
   "Acquire retained hashes from one database value and execute one request."
   [request]
-  (let [target-coordinate (:my.blob/target-coordinate request)]
+  (let [target-branch-head (:my.blob/target-branch-head request)]
     (-> (db/db)
         (.then
           (fn [database]
@@ -1359,9 +1360,9 @@
               (:seon.error/message database)
               database
 
-              (or (not= (:t database) (::coordinate/t target-coordinate))
+              (or (not= (:t database) (::branch/basis-t target-branch-head))
                   (not= (:datahike/commit-id database)
-                        (::coordinate/commit-id target-coordinate)))
+                        (::branch/commit-id target-branch-head)))
               {:seon.error/message
                "The pod database value does not match the retained restore target."}
 
@@ -1381,7 +1382,7 @@
              (case (:my.blob/operator-operation request)
                :my.blob.operator.operation/observe-retained
                (blob/observe-retained
-                {:my.blob/target-coordinate target-coordinate
+                {:my.blob/target-branch-head target-branch-head
                  :my.blob/retained-hashes retained-hashes})
 
                :my.blob.operator.operation/materialize-retained
@@ -1549,7 +1550,7 @@
                ::restore-completion-result restore-completion-result
                :seon.error/kind :core-bug})))
   ;; The authority acknowledges the selective route interest at one immutable
-  ;; coordinate. Compile that exact projection before HTTP admission so request
+  ;; database value. Compile that exact projection before HTTP admission so request
   ;; dispatch never performs a database read.
   (when-not readiness-only?
     (await (router/attach!)))

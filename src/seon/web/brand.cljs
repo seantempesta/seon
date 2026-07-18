@@ -199,10 +199,12 @@
   {:malli/schema [:=> [:cat] ::sync-response]}
   []
   (try
-    (let [acquired
+    (let [database (await (db/db))
+          acquired
           (await
             (db/execute-many
-              {::db/members
+              {::db/db database
+               ::db/members
                [{::protocol/operation protocol/pull-operation
                  ::protocol/selector [::id ::name ::tagline ::theme]
                  ::protocol/entity-id [::id "brand"]
@@ -224,19 +226,16 @@
                              (some? existing) (assoc ::row existing)))]
       (if (empty? tx)
         {::synced? false}
-        (let [{ok?   :seon.db/ok?
-               error :seon.db/error}
-              (await
-                (db/transact!
-                  {::db/tx-data tx
-                   ::db/expected-coordinate (::db/coordinate acquired)}))]
-          (if ok?
+        (let [report
+              (await (db/transact! {::db/tx-data tx
+                                    ::db/expected-db database}))]
+          (if-not (:seon.error/message report)
             (log/info-console! "seon.web.brand" "brand row synced from env"
                                {:tx-ops (count tx)})
             (log/error-console! "seon.web.brand"
                                 "brand env sync transact FAILED — pages render the prior/default brand"
-                                error))
-          {::synced? (boolean ok?)})))
+                                report))
+          {::synced? (not (:seon.error/message report))})))
     (catch :default e
       (log/error-console! "seon.web.brand" "brand env sync threw" e)
       {::synced? false})))

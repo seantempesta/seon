@@ -1,5 +1,5 @@
 (ns seon.ui.agent-view
-  "Pure agent-page formatting from one coordinate-pinned ordinary projection."
+  "Pure agent-page formatting from one database-derived ordinary projection."
   (:require
    [clojure.set :as set]
    [seon.render.surface :as surface]

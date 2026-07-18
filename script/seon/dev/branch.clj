@@ -2,7 +2,7 @@
   "Retained native-branch intent and pod-only open/close transitions."
   (:require [babashka.fs :as fs]
             [malli.core :as m]
-            [seon.db.coordinate :as coordinate]
+            [seon.db.branch :as db.branch]
             [seon.db.protocol :as protocol]
             [seon.db.transport.uds :as uds]
             [seon.dev.artifact :as artifact]
@@ -24,7 +24,7 @@
 (schema/register!
  ::name
  [:re "\\A[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\z"])
-(schema/register! ::coordinate-at-launch ::coordinate/coordinate)
+(schema/register! ::branch-head-at-launch ::db.branch/head)
 (schema/register! ::desired-state [:enum :seon.dev.branch.state/open
                                     :seon.dev.branch.state/closed])
 (schema/register!
@@ -39,7 +39,7 @@
 (schema/register! ::create-request ::protocol/create-branch-request)
 (schema/register! ::create-response ::protocol/create-branch-response)
 (schema/register! ::launch-descriptor ::launch/descriptor)
-(schema/register! ::target-head ::coordinate/coordinate)
+(schema/register! ::target-head ::db.branch/head)
 (schema/register! ::release-request ::protocol/release-database-request)
 (schema/register! ::release-response ::protocol/release-database-response)
 (schema/register! ::delete-request ::protocol/delete-branch-request)
@@ -154,7 +154,7 @@
   [::runtime-cluster ::runtime-cluster]
   [::target-database-name ::target-database-name]
   [::target-branch ::target-branch]
-  [::coordinate-at-launch ::coordinate-at-launch]
+  [::branch-head-at-launch ::branch-head-at-launch]
   [::launch-descriptor {:optional true} ::launch-descriptor]])
 
 (defn- validate!
@@ -174,6 +174,14 @@
                (get-in descriptor
                        [::launch/writer-owner ::launch/request-socket-path]))]
     (uds/call! {::uds/channel channel ::uds/message request})))
+
+(defn- branch-head
+  [database-value]
+  (let [[store-id branch] (:store-id database-value)]
+    {::db.branch/store-id store-id
+     ::db.branch/name branch
+     ::db.branch/commit-id (:datahike/commit-id database-value)
+     ::db.branch/basis-t (:t database-value)}))
 
 (defn- require-success!
   [schema-key response]
@@ -213,9 +221,9 @@
          (cond-> {::protocol/request-id (str (random-uuid))
                   ::protocol/database-name (::protocol/database-name database)
                   ::protocol/backend (::protocol/backend database)}
-           (::coordinate/attachment database)
-           (assoc ::coordinate/attachment
-                  (::coordinate/attachment database))
+           (::db.branch/connection-id database)
+           (assoc ::db.branch/connection-id
+                  (::db.branch/connection-id database))
            (::protocol/database-path database)
            (assoc ::protocol/database-path
                   (::protocol/database-path database))))
@@ -229,12 +237,13 @@
         (select-keys response [::protocol/database-name ::protocol/backend
                                ::protocol/database-path])]
     (when-not (= expected actual)
-      (throw (ex-info "The writer ensured different source coordinates."
+      (throw (ex-info "The writer ensured different source branch-heads."
                       {:seon.dev.branch/expected expected
                        :seon.dev.branch/actual actual})))
-    (launch/with-coordinate
+    (launch/with-branch-head
      {::launch/descriptor descriptor
-      ::coordinate/coordinate (::coordinate/coordinate response)})))
+      ::db.branch/head
+      (branch-head (:seon.db/db response))})))
 
 (defn- target-private
   [request]
@@ -285,8 +294,8 @@
 
 (defn- new-intent
   [request source-descriptor]
-  (let [source-coordinate
-        (get-in source-descriptor [::launch/database ::coordinate/coordinate])
+  (let [source-branch-head
+        (get-in source-descriptor [::launch/database ::db.branch/head])
         create-request
         (protocol/create-branch-request
          {::protocol/request-id (str (random-uuid))
@@ -294,8 +303,8 @@
           (get-in source-descriptor [::launch/database
                                      ::protocol/database-name])
           ::protocol/target-database-name (::target-database-name request)
-          ::protocol/source-coordinate source-coordinate
-          ::protocol/expected-source-head source-coordinate
+          ::protocol/source-branch-head source-branch-head
+          ::protocol/expected-source-head source-branch-head
           ::protocol/target-branch (::target-branch request)})]
     {::desired-state :seon.dev.branch.state/open
      ::phase :seon.dev.branch.phase/intent-retained
@@ -332,33 +341,33 @@
                      :seon.dev.branch/requested (target-private request)})))
   (let [retained (::source-descriptor record)
         current (:seon.dev.config/launch-descriptor configuration)
-        without-current-coordinate
+        without-current-branch-head
         #(update % ::launch/database
-                 dissoc ::coordinate/attachment ::coordinate/coordinate)]
-    (when-not (= (without-current-coordinate retained)
-                 (without-current-coordinate current))
+                 dissoc ::db.branch/connection-id ::db.branch/head)]
+    (when-not (= (without-current-branch-head retained)
+                 (without-current-branch-head current))
       (throw (ex-info "The retained branch intent names another source owner."
                       {:seon.dev.branch/retained-source retained
                        :seon.dev.branch/current-source current}))))
   record)
 
-(defn- expected-target-coordinate
+(defn- expected-target-branch-head
   [record]
-  (assoc (::protocol/source-coordinate (::create-request record))
-         ::coordinate/branch
+  (assoc (::protocol/source-branch-head (::create-request record))
+         ::db.branch/name
          (::protocol/target-branch (::create-request record))))
 
 (defn- require-create-response!
   [record response]
   (let [request (::create-request record)
         source-database (::launch/database (::source-descriptor record))
-        target-coordinate (::protocol/coordinate response)
-        expected-attachment
-        (coordinate/attachment (expected-target-coordinate record))]
+        target-branch-head (::protocol/branch-head response)
+        expected-connection-id
+        (db.branch/connection-id (expected-target-branch-head record))]
     (when-not (and (= (::protocol/target-database-name request)
                       (::protocol/target-database-name response))
-                   (= expected-attachment (::protocol/target-attachment response))
-                   (= expected-attachment (coordinate/attachment target-coordinate))
+                   (= expected-connection-id (::protocol/target-connection-id response))
+                   (= expected-connection-id (db.branch/connection-id target-branch-head))
                    (= (::protocol/backend source-database)
                       (::protocol/backend response))
                    (= (::protocol/database-path source-database)
@@ -366,8 +375,8 @@
                    (not= (::protocol/created? response)
                          (::protocol/adopted? response))
                    (or (::protocol/adopted? response)
-                       (= (expected-target-coordinate record)
-                          target-coordinate)))
+                       (= (expected-target-branch-head record)
+                          target-branch-head)))
       (throw (ex-info "The branch create response does not match retained intent."
                       {:seon.dev.branch/create-request request
                        :seon.dev.branch/create-response response})))
@@ -380,7 +389,7 @@
      {::launch/source-descriptor (::source-descriptor record)
       ::launch/runtime-cluster (::runtime-cluster target)
       ::launch/target-database-name (::target-database-name target)
-      ::launch/target-coordinate (expected-target-coordinate record)
+      ::launch/target-branch-head (expected-target-branch-head record)
       ::launch/process-dir (::process-dir target)
       ::launch/log-dir (::log-dir target)
       ::launch/http-port (::http-port target)
@@ -424,9 +433,9 @@
                          record))
     (when-not (and (= (::protocol/database-name source-database)
                       (::protocol/source-database-name create-request))
-                   (= (::coordinate/coordinate source-database)
-                      (::protocol/source-coordinate create-request))
-                   (= (::protocol/source-coordinate create-request)
+                   (= (::db.branch/head source-database)
+                      (::protocol/source-branch-head create-request))
+                   (= (::protocol/source-branch-head create-request)
                       (::protocol/expected-source-head create-request))
                    (= (::target-database-name target)
                       (::protocol/target-database-name create-request))
@@ -468,10 +477,10 @@
            "The retained pod stop result names another lifecycle."
            record))))
     (when target-head
-      (when-not (= (coordinate/attachment target-head)
+      (when-not (= (db.branch/connection-id target-head)
                    (get-in descriptor
-                           [::launch/database ::coordinate/attachment]))
-        (consistency-fail! "The retained close head names another attachment."
+                           [::launch/database ::db.branch/connection-id]))
+        (consistency-fail! "The retained close head names another connection-id."
                            record)))
     (when (and (= desired :seon.dev.branch.state/open)
                (some some? [target-head release-request release-response
@@ -486,7 +495,7 @@
     (when (= phase :seon.dev.branch.phase/closed)
       (let [target-database (::launch/database descriptor)
             target-name (::protocol/database-name target-database)
-            attachment (::coordinate/attachment target-database)
+            connection-id (::db.branch/connection-id target-database)
             absent-before-release? (and absence-response (nil? target-head))
             released-and-deleted?
             (and target-head release-request release-response delete-request
@@ -499,16 +508,17 @@
           (consistency-fail! "Closed absence evidence is not branch-missing."
                              record))
         (when released-and-deleted?
-          (when-not (and (= target-name
-                             (::protocol/target-database-name release-request)
-                             (::protocol/target-database-name release-response)
-                             (::protocol/target-database-name delete-request))
-                         (= attachment
-                            (::protocol/target-attachment release-request)
-                            (::protocol/target-attachment release-response)
-                            (::protocol/target-attachment delete-request))
+          (let [released-db (:seon.db/db release-request)]
+            (when-not (and (= target-name
+                               (:db-name released-db)
+                               (::protocol/target-database-name delete-request))
+                           (= connection-id
+                              (::protocol/target-connection-id delete-request))
+                           (= (::db.branch/basis-t target-head) (:t released-db))
+                           (= (::db.branch/commit-id target-head)
+                              (:datahike/commit-id released-db))
+                           (true? (::protocol/released? release-response))
                          (= target-head
-                            (::protocol/expected-target-head release-request)
                             (::protocol/expected-target-head delete-request))
                          (= (::protocol/source-database-name create-request)
                             (::protocol/source-database-name delete-request))
@@ -516,11 +526,12 @@
                              (and (= target-name
                                      (::protocol/target-database-name
                                       delete-response))
-                                  (= attachment
-                                     (::protocol/target-attachment
+                                  (= connection-id
+                                     (::protocol/target-connection-id
                                       delete-response)))))
-            (consistency-fail! "Retained inverse evidence names another lifecycle."
-                               record)))))
+              (consistency-fail!
+               "Retained inverse evidence names another lifecycle."
+               record))))))
     record))
 
 (defn- ensure-created!
@@ -562,7 +573,7 @@
                (::target-private record))
         record (require-retained-request! record retained-request configuration)]
     (when-not (::launch-descriptor record)
-      (throw (ex-info "The retained branch has no published attachment."
+      (throw (ex-info "The retained branch has no published connection-id."
                       {::lifecycle-path lifecycle-path
                        ::phase (::phase record)})))
     record))
@@ -616,10 +627,9 @@
                       (::protocol/backend ensured))
                    (= (::protocol/database-path target-database)
                       (::protocol/database-path ensured))
-                   (= (::coordinate/attachment target-database)
-                      (coordinate/attachment
-                       (::coordinate/coordinate ensured))))
-      (throw (ex-info "The writer ensured a different target attachment."
+                   (= (::db.branch/connection-id target-database)
+                      (:store-id (:seon.db/db ensured))))
+      (throw (ex-info "The writer ensured a different target connection-id."
                       {:seon.dev.branch/target-database target-database
                        :seon.dev.branch/ensure-response ensured})))
     ensured))
@@ -634,25 +644,26 @@
                   ::protocol/database-name
                   (::protocol/database-name target-database)
                   ::protocol/backend (::protocol/backend target-database)
-                  ::coordinate/attachment
-                  (::coordinate/attachment target-database)}
+                  ::db.branch/connection-id
+                  (::db.branch/connection-id target-database)}
            (::protocol/database-path target-database)
            (assoc ::protocol/database-path
                   (::protocol/database-path target-database))))
         ensured
         (require-target-ensure!
          target-database (writer-call! descriptor ensure-request))]
-    (launch/with-coordinate
+    (launch/with-branch-head
      {::launch/descriptor descriptor
-      ::coordinate/coordinate (::coordinate/coordinate ensured)})))
+      ::db.branch/head
+      (branch-head (:seon.db/db ensured))})))
 
 (defn- require-target-response!
   [schema-key target-database response]
   (let [response (require-success! schema-key response)]
     (when-not (and (= (::protocol/database-name target-database)
                       (::protocol/target-database-name response))
-                   (= (::coordinate/attachment target-database)
-                      (::protocol/target-attachment response)))
+                   (= (::db.branch/connection-id target-database)
+                      (::protocol/target-connection-id response)))
       (throw (ex-info "The writer response names a different target."
                       {:seon.dev.branch/target-database target-database
                        :seon.dev.branch/response response})))
@@ -684,7 +695,7 @@
            {::protocol/request-id (str (random-uuid))
             ::protocol/database-name (::protocol/database-name target-database)
             ::protocol/backend (::protocol/backend target-database)
-            ::coordinate/attachment (::coordinate/attachment target-database)
+            ::db.branch/connection-id (::db.branch/connection-id target-database)
             ::protocol/database-path (::protocol/database-path target-database)})
           ensure-response (writer-call! descriptor ensure-request)]
       (if (branch-missing? ensure-response)
@@ -697,18 +708,15 @@
           closed)
         (let [ensured
               (require-target-ensure! target-database ensure-response)
-              current-head (::coordinate/coordinate ensured)
-              attachment (::coordinate/attachment target-database)
+              current-head (branch-head (:seon.db/db ensured))
+              connection-id (::db.branch/connection-id target-database)
               release-request
               (protocol/release-database-request
                {::protocol/request-id (str (random-uuid))
-                ::protocol/target-database-name
-                (::protocol/database-name target-database)
-                ::protocol/target-attachment attachment
-                ::protocol/expected-target-head current-head})
+                :seon.db/db (:seon.db/db ensured)})
               release-response
-              (require-target-response!
-               ::protocol/release-database-response target-database
+              (require-success!
+               ::protocol/release-database-response
                (writer-call! descriptor release-request))
               delete-request
               (protocol/delete-branch-request
@@ -717,7 +725,7 @@
                 (::protocol/source-database-name (::create-request closing))
                 ::protocol/target-database-name
                 (::protocol/database-name target-database)
-                ::protocol/target-attachment attachment
+                ::protocol/target-connection-id connection-id
                 ::protocol/expected-target-head current-head})
               delete-response (writer-call! descriptor delete-request)
               deleted
@@ -940,7 +948,7 @@
         ::runtime-cluster (::runtime-cluster target)
         ::target-database-name (::target-database-name target)
         ::target-branch (::target-branch target)
-        ::coordinate-at-launch (expected-target-coordinate record)
+        ::branch-head-at-launch (expected-target-branch-head record)
         :seon.dev.target/name :seon.dev.target/branch})
       descriptor (assoc ::launch-descriptor descriptor))))
 

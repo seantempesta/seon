@@ -3,7 +3,7 @@
   (:require [clojure.test :refer [deftest is testing]]
             [datahike.store :as store]
             [seon.db.backend :as backend]
-            [seon.db.coordinate :as coordinate])
+            [seon.db.branch :as branch])
   (:import [java.io File]))
 
 (defn- delete-tree!
@@ -21,12 +21,12 @@
     (is (= (backend/backend-facts memory-request)
            (backend/backend-facts memory-request))
         "one database name has one deterministic backend identity")
-    (is (uuid? (::coordinate/database-id
-                (::coordinate/attachment
+    (is (uuid? (first
+                (::branch/connection-id
                  (backend/backend-facts memory-request)))))
     (is (= :db
-           (::coordinate/branch
-            (::coordinate/attachment
+           (second
+            (::branch/connection-id
              (backend/backend-facts memory-request)))))
     (is (= "data/clusters/alpha/db"
            (::backend/path (backend/backend-facts file-request))))
@@ -55,8 +55,8 @@
     (try
       (is (= {:backend :file
               :path path
-              :id (::coordinate/database-id
-                   (::coordinate/attachment
+              :id (first
+                   (::branch/connection-id
                     (backend/backend-facts request)))}
              (:store config)))
       (is (= :db (:branch config)))
@@ -83,30 +83,28 @@
                 {::backend/database-name :cluster/beta
                  ::backend/backend :file
                  ::backend/path path})]
-      (is (not= (::coordinate/database-id (::coordinate/attachment alpha))
-                (::coordinate/database-id (::coordinate/attachment beta))))
+      (is (not= (first (::branch/connection-id alpha))
+                (first (::branch/connection-id beta))))
       (is (= (::backend/path alpha) (::backend/path beta))))))
 
-(deftest explicit-attachment-separates-logical-route-from-database-identity
-  (let [database-id (random-uuid)
-        main-attachment {::coordinate/database-id database-id
-                         ::coordinate/branch :db}
-        branch-attachment {::coordinate/database-id database-id
-                           ::coordinate/branch :experiment/one}
+(deftest explicit-connection-id-separates-route-from-store
+  (let [store-id (random-uuid)
+        main-connection-id [store-id :db]
+        branch-connection-id [store-id :experiment/one]
         main-config
         (backend/datahike-config
          {::backend/database-name :route/main
           ::backend/backend :memory
-          ::coordinate/attachment main-attachment})
+                       ::branch/connection-id main-connection-id})
         branch-config
         (backend/datahike-config
          {::backend/database-name :route/experiment
           ::backend/backend :memory
-          ::coordinate/attachment branch-attachment})]
-    (is (= database-id (get-in main-config [:store :id])))
-    (is (= database-id (get-in branch-config [:store :id])))
-    (is (= [database-id :db] (store/connection-id main-config)))
-    (is (= [database-id :experiment/one]
+                         ::branch/connection-id branch-connection-id})]
+    (is (= store-id (get-in main-config [:store :id])))
+    (is (= store-id (get-in branch-config [:store :id])))
+    (is (= [store-id :db] (store/connection-id main-config)))
+    (is (= [store-id :experiment/one]
            (store/connection-id branch-config)))
     (is (not= (store/connection-id main-config)
               (store/connection-id branch-config)))))

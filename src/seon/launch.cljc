@@ -4,7 +4,7 @@
             [clojure.string :as str]
             [my.blob.schema]
             [seon.client.schema]
-            [seon.db.coordinate :as coordinate]
+            [seon.db.branch :as branch]
             [seon.db.protocol :as protocol]
             [seon.db.restore-admin.schema]
             [seon.dev.restore.schema]
@@ -45,8 +45,8 @@
  ::database
  [:map {:closed true}
   [::protocol/database-name ::protocol/database-name]
-  [::coordinate/attachment {:optional true} ::coordinate/attachment]
-  [::coordinate/coordinate {:optional true} ::coordinate/coordinate]
+  [::branch/connection-id {:optional true} ::branch/connection-id]
+  [::branch/head {:optional true} ::branch/head]
   [::protocol/backend ::protocol/backend]
   [::protocol/database-path ::protocol/database-path]])
 (schema/register!
@@ -77,8 +77,8 @@
             (:seon.db.restore-admin/plan-digest admin))
          (= (:seon.dev.restore/reachable-hash-digest identity)
             (:my.blob/reachable-hash-digest blobs))
-         (= (:seon.db.restore-admin/selected-target-coordinate admin)
-            (:my.blob/target-coordinate blobs))
+         (= (:seon.db.restore-admin/selected-target-branch-head admin)
+            (:my.blob/target-branch-head blobs))
          (contains? consumers :seon.dev.process/pod))))
 
 (schema/register!
@@ -94,8 +94,8 @@
   [descriptor]
   (if-let [startup (::restore-startup descriptor)]
     (and (= (get-in startup [:seon.db.restore-admin/result
-                             :seon.db.restore-admin/forced-main-coordinate])
-            (get-in descriptor [::database ::coordinate/coordinate]))
+                             :seon.db.restore-admin/forced-main-branch-head])
+            (get-in descriptor [::database ::branch/head]))
          (false? (get-in descriptor
                          [::runtime :seon.client/launch-capability
                           :seon.client/autonomous?])))
@@ -127,7 +127,7 @@
   [::http-port-file ::http-port-file]])
 (schema/register! ::source-descriptor ::descriptor)
 (schema/register! ::target-database-name ::protocol/database-name)
-(schema/register! ::target-coordinate ::coordinate/coordinate)
+(schema/register! ::target-branch-head ::branch/head)
 (schema/register! ::writable-blob-dir ::path)
 (schema/register!
  ::branch-descriptor-request
@@ -135,7 +135,7 @@
   [::source-descriptor ::source-descriptor]
   [::runtime-cluster ::runtime-cluster]
   [::target-database-name ::target-database-name]
-  [::target-coordinate ::target-coordinate]
+  [::target-branch-head ::target-branch-head]
   [::process-dir ::process-dir]
   [::log-dir ::log-dir]
   [::http-port ::http-port]
@@ -205,7 +205,7 @@
     (validate-restore-startup startup))
   (invariant!
    (descriptor-consistent? descriptor)
-   "Restore startup expects another fresh main coordinate."
+   "Restore startup expects another fresh main branch-head."
    {::descriptor descriptor})
   descriptor)
 
@@ -266,28 +266,28 @@
        :my.blob/read-only-dirs []}})))
 
 (schema/register!
- ::with-coordinate-request
+ ::with-branch-head-request
  [:map {:closed true}
   [::descriptor ::descriptor]
-  [::coordinate/coordinate ::coordinate/coordinate]])
+  [::branch/head ::branch/head]])
 
-(defn with-coordinate
-  "Return `descriptor` pinned to one writer-returned complete coordinate."
-  {:malli/schema [:=> [:cat ::with-coordinate-request] ::descriptor]}
-  [{descriptor ::descriptor point ::coordinate/coordinate}]
+(defn with-branch-head
+  "Return `descriptor` pinned to one writer-returned complete branch-head."
+  {:malli/schema [:=> [:cat ::with-branch-head-request] ::descriptor]}
+  [{descriptor ::descriptor point ::branch/head}]
   (let [database (::database descriptor)
-        retained-attachment (::coordinate/attachment database)
-        attachment (coordinate/attachment point)]
-    (invariant! (or (nil? retained-attachment)
-                    (= retained-attachment attachment))
-                "The writer coordinate does not match the launch attachment."
-                {::coordinate/attachment retained-attachment
-                 ::coordinate/coordinate point})
+        retained-connection-id (::branch/connection-id database)
+        connection-id (branch/connection-id point)]
+    (invariant! (or (nil? retained-connection-id)
+                    (= retained-connection-id connection-id))
+                "The writer branch-head does not match the launch connection-id."
+                {::branch/connection-id retained-connection-id
+                 ::branch/head point})
     (validate-descriptor
      (assoc descriptor ::database
             (assoc database
-                   ::coordinate/attachment attachment
-                   ::coordinate/coordinate point)))))
+                   ::branch/connection-id connection-id
+                   ::branch/head point)))))
 
 (schema/register!
  ::with-execution-artifact-request
@@ -320,12 +320,12 @@
   "Derive one non-autonomous branch descriptor from its source launch."
   {:malli/schema [:=> [:cat ::branch-descriptor-request] ::descriptor]}
   [{::keys [source-descriptor runtime-cluster target-database-name
-            target-coordinate process-dir log-dir http-port http-port-file
+            target-branch-head process-dir log-dir http-port http-port-file
             writable-blob-dir]}]
   (let [source-runtime (::runtime source-descriptor)
         source-database (::database source-descriptor)
-        source-attachment (::coordinate/attachment source-database)
-        target-attachment (coordinate/attachment target-coordinate)
+        source-connection-id (::branch/connection-id source-database)
+        target-connection-id (branch/connection-id target-branch-head)
         source-blobs (::blob-storage-view source-descriptor)
         read-only-dirs
         (vec
@@ -339,17 +339,17 @@
         target-private
         (mapv normalize-path
               [process-dir log-dir http-port-file writable-blob-dir])]
-    (invariant! (some? source-attachment)
-                "A branch launch requires its writer-owned source attachment."
+    (invariant! (some? source-connection-id)
+                "A branch launch requires its writer-owned source connection-id."
                 {::source-descriptor source-descriptor})
-    (invariant! (= (::coordinate/database-id source-attachment)
-                   (::coordinate/database-id target-attachment))
+    (invariant! (= (first source-connection-id)
+                   (first target-connection-id))
                 "A native branch must retain its source database identity."
-                {::coordinate/attachment source-attachment
-                 ::target-coordinate target-coordinate})
-    (invariant! (not= :db (::coordinate/branch target-attachment))
+                {::branch/connection-id source-connection-id
+                 ::target-branch-head target-branch-head})
+    (invariant! (not= :db (second target-connection-id))
                 "A branch launch cannot target the protected main branch."
-                {::target-coordinate target-coordinate})
+                {::target-branch-head target-branch-head})
     (invariant! (not-any? true?
                           (for [target target-private
                                 source source-bases]
@@ -370,8 +370,8 @@
         (assoc ::execution-output (::execution-output source-runtime)))
       ::database
       {::protocol/database-name target-database-name
-       ::coordinate/attachment target-attachment
-       ::coordinate/coordinate target-coordinate
+       ::branch/connection-id target-connection-id
+       ::branch/head target-branch-head
        ::protocol/backend (::protocol/backend source-database)
        ::protocol/database-path (::protocol/database-path source-database)}
       ::writer-owner (::writer-owner source-descriptor)

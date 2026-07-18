@@ -19,7 +19,7 @@
             [datahike.db.utils :as datahike.db]
             [datahike.impl.entity :as datahike.entity]
             [hasch.core :as hasch]
-            [seon.db.coordinate :as coordinate]
+            [seon.db.branch :as branch]
             [seon.db.datahike.schema :as datahike.schema]
             [seon.db.executor :as executor]
             [seon.db.id :as id]
@@ -116,7 +116,7 @@
   [::runtime ::runtime]
   [::registry/conn ::connection]
   [::registry/database-name ::registry/database-name]
-  [::registry/attachment ::coordinate/attachment]
+  [::registry/connection-id ::branch/connection-id]
   [::registry/open-intent ::registry/open-intent]
   [::initialization {:optional true} ::initialization]])
 
@@ -543,13 +543,13 @@
                {::registry/database-name
                 (keyword (::protocol/database-name main-database))
                 ::registry/backend (::protocol/backend main-database)
-                ::registry/pre-restore-main-coordinate
-                (::restore-admin/pre-restore-main-coordinate base)
-                ::registry/selected-target-coordinate
-                (::restore-admin/selected-target-coordinate base)
-                ::registry/prepared-target-coordinate
-                (::restore/prepared-target-coordinate intent)
-                ::registry/undo-coordinate (::restore/undo-coordinate intent)
+                ::registry/pre-restore-main-branch-head
+                (::restore-admin/pre-restore-main-branch-head base)
+                ::registry/selected-target-branch-head
+                (::restore-admin/selected-target-branch-head base)
+                ::registry/prepared-target-branch-head
+                (::restore/prepared-target-branch-head intent)
+                ::registry/undo-branch-head (::restore/undo-branch-head intent)
                 ::registry/expected-branch-roster
                 (::restore/expected-branch-roster intent)
                 ::registry/validate-db! validate-observational-db!}
@@ -565,8 +565,8 @@
               :seon.db.restore-admin.outcome/already-applied)]
         (merge base
                {::restore-admin/outcome outcome
-                ::restore-admin/forced-main-coordinate
-                (::registry/coordinate result)
+                ::restore-admin/forced-main-branch-head
+                (::registry/branch-head result)
                 ::restore-admin/branch-roster
                 (::registry/branch-roster result)
                 ::restore-admin/force-invoked?
@@ -633,7 +633,7 @@
   [{::keys [runtime initialization]
     connection ::registry/conn
     database-name ::registry/database-name
-    attachment ::registry/attachment
+    connection-id ::registry/connection-id
     open-intent ::registry/open-intent}]
   (assert-protocol-native-schema! (d/db connection))
   (when (= :seon.db.registry.open/branch open-intent)
@@ -643,32 +643,34 @@
        (ex-info "A branch database cannot initialize a compiled program."
                 {::failure-kind protocol/protocol-error
                  ::registry/database-name database-name
-                 ::registry/attachment attachment}))))
+                 ::registry/connection-id connection-id}))))
   (when (= :seon.db.registry.open/main open-intent)
     (when initialization
-      (initialize-program! runtime connection (name database-name) attachment
+      (initialize-program! runtime connection (name database-name) connection-id
                            initialization))
     ((::database-initializer runtime) connection database-name))
   (cond-> {::database-initialized? true}
     initialization (assoc ::initialized-db-value (d/db connection))))
 
 (defn- committed-scope
-  [database-name attachment db-value]
+  [database-name connection-id db-value]
   (when-let [identity (d/committed-value-identity db-value)]
     {::executor/database-name database-name
-     ::coordinate/attachment attachment
+     ::branch/connection-id connection-id
      ::executor/connection-id (:datahike.value/connection-id identity)
      ::executor/generation (:datahike.value/generation identity)}))
 
 (defn- database-value
   "Describe one raw committed Datahike value as ordinary transport data."
   [database-name db-value]
-  {:db-name database-name
-   :t (basis-t-of db-value)
-   :as-of nil
-   :since nil
-   :history false
-   :datahike/commit-id (d/commit-id db-value)})
+  (let [identity (d/committed-value-identity db-value)]
+    {:db-name database-name
+     :store-id (:datahike.value/connection-id identity)
+     :t (basis-t-of db-value)
+     :as-of nil
+     :since nil
+     :history false
+     :datahike/commit-id (d/commit-id db-value)}))
 
 (def ^:private byte-array-class (Class/forName "[B"))
 
@@ -982,11 +984,11 @@
 
 (defn- resolve-exact-connection
   [{::keys [database-name scope]}]
-  (let [{::registry/keys [conn attachment]}
+  (let [{::registry/keys [conn connection-id]}
         (registry/resolve-connection
          {::registry/database-name (keyword database-name)})]
     (when (and conn
-               (= scope (committed-scope database-name attachment (d/db conn))))
+               (= scope (committed-scope database-name connection-id (d/db conn))))
       conn)))
 
 (defn- execute-embedding!
@@ -1038,10 +1040,10 @@
                           ::entity-ids entity-ids}})))
 
 (defn- enqueue-embedding!
-  [runtime database-name attachment request-id report]
+  [runtime database-name connection-id request-id report]
   (try
     (let [db-after (:db-after report)
-          scope (committed-scope database-name attachment db-after)
+          scope (committed-scope database-name connection-id db-after)
           entity-ids (embedding-entity-ids report)]
       (submit-embedding! runtime database-name scope request-id entity-ids))
     (catch Throwable throwable
@@ -1052,10 +1054,10 @@
                  ::protocol/request-id request-id}))))
 
 (defn- enqueue-embedding-backfill!
-  [runtime database-name attachment connection]
+  [runtime database-name connection-id connection]
   (try
     (let [db-value (d/db connection)
-          scope (committed-scope database-name attachment db-value)
+          scope (committed-scope database-name connection-id db-value)
           entity-ids ((::embedding-entity-ids runtime) db-value)]
       (doseq [[batch-index batch] (map-indexed vector (partition-all 256 entity-ids))]
         (submit-embedding!
@@ -1186,12 +1188,12 @@
     (when (and expected-db (not= expected-db current-db))
       (throw
        (ex-info "The database changed before commit."
-                {::failure-kind protocol/stale-coordinate-error
+                {::failure-kind protocol/stale-database-value-error
                  :seon.db/expected-db expected-db
                  :seon.db/current-db current-db})))))
 
 (defn- prepare-transaction!
-  [runtime connection database-name attachment request]
+  [runtime connection database-name connection-id request]
   (let [transaction-data (::protocol/transaction-data request)
         transaction-meta (::protocol/transaction-meta request)
         expected-db (:seon.db/expected-db request)
@@ -1244,7 +1246,7 @@
            ::fingerprint fingerprint
            ::candidates candidates
            ::database-name database-name
-           ::coordinate/attachment attachment
+           ::branch/connection-id connection-id
            :seon.db/expected-db expected-db
            ::connection connection
            ::runtime runtime})))))
@@ -1253,7 +1255,7 @@
   [database-name connection expected-db ^Throwable throwable]
   (if (= :transaction/stale-basis (:error (ex-data throwable)))
     (ex-info "The database changed before commit."
-             {::failure-kind protocol/stale-coordinate-error
+             {::failure-kind protocol/stale-database-value-error
               :seon.db/expected-db expected-db
               :seon.db/current-db
               (database-value database-name (d/db connection))}
@@ -1262,7 +1264,7 @@
 
 (defn- finish-transaction!
   [{::keys [runtime connection database-name request-id fingerprint candidates]
-    attachment ::coordinate/attachment
+    connection-id ::branch/connection-id
     db-before-descriptor ::database-before
     expected-db :seon.db/expected-db}
    result]
@@ -1280,15 +1282,15 @@
            (transaction-report-data database-name db-before-descriptor result
                                     request-id))
           generated-entity-ids (::id/generated-eids result)]
-      (enqueue-embedding! runtime database-name attachment request-id result)
+      (enqueue-embedding! runtime database-name connection-id request-id result)
       (cond-> response
         (some? generated-entity-ids)
         (assoc ::protocol/generated-entity-ids generated-entity-ids)))))
 
 (defn- transact-once!
-  [runtime connection database-name attachment request]
+  [runtime connection database-name connection-id request]
   (let [{::keys [response transaction-result] :as prepared}
-        (prepare-transaction! runtime connection database-name attachment request)]
+        (prepare-transaction! runtime connection database-name connection-id request)]
     (if response
       response
       (finish-transaction!
@@ -1298,9 +1300,9 @@
          (catch Throwable throwable throwable))))))
 
 (defn- transact-once-async!
-  [runtime connection database-name attachment request]
+  [runtime connection database-name connection-id request]
   (let [{::keys [response transaction-result] :as prepared}
-        (prepare-transaction! runtime connection database-name attachment request)]
+        (prepare-transaction! runtime connection database-name connection-id request)]
     (if response
       response
       (let [completion (async/promise-chan)]
@@ -1392,11 +1394,11 @@
         initial-data))
 
 (defn- transact-initialization!
-  [runtime connection database-name attachment db-value transaction-data
+  [runtime connection database-name connection-id db-value transaction-data
    transaction-meta]
   (when (seq transaction-data)
     (transact-once!
-     runtime connection database-name attachment
+     runtime connection database-name connection-id
      (protocol/transaction-request
       (cond-> {::protocol/request-id
                (str "database-initialization/" (random-uuid))
@@ -1410,7 +1412,7 @@
 (defn initialize-program!
   "Admit one compiled program and its required initial entities atomically.
    No other write is prepared for this connection during admission."
-  [runtime connection database-name attachment initialization]
+  [runtime connection database-name connection-id initialization]
   (let [desired-program (:seon.db/program initialization)
         initial-data (:seon.db/initial-data initialization)
         boot-meta {:seon.db/user [:seon.agent/id "root"]
@@ -1423,7 +1425,7 @@
                 (let [before-genesis (d/db connection)
                       genesis (genesis-data before-genesis desired-program)
                       _ (transact-initialization!
-                         runtime connection database-name attachment
+                         runtime connection database-name connection-id
                          before-genesis genesis nil)
                       before-program (d/db connection)
                       schema-declarations
@@ -1437,12 +1439,12 @@
                                                    schema-declarations
                                                    initial-data)))]
                   (transact-initialization!
-                   runtime connection database-name attachment before-program
+                   runtime connection database-name connection-id before-program
                    transaction-data boot-meta)
                   (d/db connection))
                 (catch Throwable throwable throwable))]
           (if (and (instance? Throwable result)
-                   (= protocol/stale-coordinate-error
+                   (= protocol/stale-database-value-error
                       (::failure-kind (ex-data result)))
                    (< attempt maximum-program-initialization-attempts))
             (recur (inc attempt))
@@ -1450,25 +1452,25 @@
               (throw result)
               result)))))))
 
-(defn- handle-resolve-transaction-coordinate
+(defn- handle-resolve-transaction-branch-head
   [connection request]
   (protocol/success
-   {::protocol/coordinate
-    (registry/resolve-transaction-coordinate!
+   {::protocol/branch-head
+    (registry/resolve-transaction-branch-head!
      {::registry/conn connection
-      ::registry/main-coordinate (::protocol/head-coordinate request)
+      ::registry/main-branch-head (::protocol/containing-branch-head request)
       ::registry/transaction-id (::protocol/transaction-id request)})}))
 
 ;;; Canonical operation handlers
 
 (defn- registry-request
-  [database-name backend-kind database-path attachment connection-initializer]
+  [database-name backend-kind database-path connection-id connection-initializer]
   (cond->
    {::registry/database-name (keyword database-name)
     ::registry/backend backend-kind
     ::registry/initial-tx protocol-native-schema
     ::registry/initialize-connection! connection-initializer}
-    attachment (assoc ::registry/attachment attachment)
+    connection-id (assoc ::registry/connection-id connection-id)
     database-path (assoc ::registry/path database-path)))
 
 (defn- connection-initializer
@@ -1493,26 +1495,26 @@
           database-name
           (::protocol/backend request)
           (::protocol/database-path request)
-          (::coordinate/attachment request)
+          (::branch/connection-id request)
           (connection-initializer runtime initialization initialized-db)))
-        attachment (::registry/attachment entry)
+        connection-id (::registry/connection-id entry)
         _ (when (and initialization
-                     (not= :db (::coordinate/branch attachment)))
+                     (not= :db (second connection-id)))
             (throw
              (ex-info "A branch database cannot initialize a compiled program."
                       {::failure-kind protocol/protocol-error
                        ::registry/database-name (keyword database-name)
-                       ::registry/attachment attachment})))
+                       ::registry/connection-id connection-id})))
         connection (::registry/conn entry)
         _ (when (and initialization (nil? @initialized-db))
             (vreset! initialized-db
                      (initialize-program! runtime connection
-                                          database-name attachment
+                                          database-name connection-id
                                           initialization)))
         backend-kind (::registry/backend entry)
         database-path (::registry/path entry)]
     (enqueue-embedding-backfill! runtime database-name
-                                 attachment connection)
+                                 connection-id connection)
     (protocol/success
      (cond->
        {::protocol/database-name database-name
@@ -1530,7 +1532,7 @@
           (keyword (::protocol/source-database-name request))
           ::registry/target-database-name
           (keyword (::protocol/target-database-name request))
-          ::registry/source-coordinate (::protocol/source-coordinate request)
+          ::registry/source-branch-head (::protocol/source-branch-head request)
           ::registry/expected-source-head
           (::protocol/expected-source-head request)
           ::registry/target-branch (::protocol/target-branch request)
@@ -1539,8 +1541,8 @@
     (protocol/success
      (cond-> {::protocol/target-database-name
               (::protocol/target-database-name request)
-              ::protocol/target-attachment (::registry/attachment result)
-              ::protocol/coordinate (::registry/coordinate result)
+              ::protocol/target-connection-id (::registry/connection-id result)
+              ::protocol/branch-head (::registry/branch-head result)
               ::protocol/backend (::registry/backend result)
               ::protocol/created? (::registry/created? result)
               ::protocol/adopted? (::registry/adopted? result)}
@@ -1555,18 +1557,18 @@
          {::registry/database-name (keyword database-name)})]
     (protocol/success
      {::protocol/database-name database-name
-      ::protocol/main-coordinate (::registry/main-coordinate observation)
+      ::protocol/main-branch-head (::registry/main-branch-head observation)
       ::protocol/main-parent-commit-ids
       (::registry/main-parent-commit-ids observation)
-      ::protocol/branch-coordinates
-      (::registry/branch-coordinates observation)
+      ::protocol/branch-heads
+      (::registry/branch-branch-heads observation)
       ::protocol/branch-roster (::registry/branch-roster observation)
       ::protocol/restore-completions
       (::registry/restore-completions observation)
       ::protocol/completed-restore-ids
       (::registry/completed-restore-ids observation)
-      ::protocol/restore-completion-coordinates
-      (::registry/restore-completion-coordinates observation)})))
+      ::protocol/restore-completion-branch-heads
+      (::registry/restore-completion-branch-heads observation)})))
 
 (declare await-active-scope!)
 
@@ -1575,12 +1577,12 @@
   (contains? (or (::scopes entry) #{(::scope entry)}) scope))
 
 (defn- database-scope
-  [database-name expected-attachment]
-  (let [{::registry/keys [conn attachment]}
+  [database-name expected-connection-id]
+  (let [{::registry/keys [conn connection-id]}
         (registry/resolve-connection
          {::registry/database-name (keyword database-name)})]
-    (when (and conn (= expected-attachment attachment))
-      (committed-scope database-name attachment (d/db conn)))))
+    (when (and conn (= expected-connection-id connection-id))
+      (committed-scope database-name connection-id (d/db conn)))))
 
 (defn- drain-database-scope!
   [runtime scope]
@@ -1607,8 +1609,8 @@
   scope)
 
 (defn- fence-database-work!
-  [runtime database-name expected-attachment]
-  (when-let [scope (database-scope database-name expected-attachment)]
+  [runtime database-name expected-connection-id]
+  (when-let [scope (database-scope database-name expected-connection-id)]
     (drain-database-scope! runtime scope)))
 
 (declare release-connection-acquisition!)
@@ -1621,23 +1623,23 @@
         result
         (if (::registry/conn route)
           (release-connection-acquisition!
-           runtime transport-connection database-name (::registry/attachment route))
+           runtime transport-connection database-name (::registry/connection-id route))
           {::registry/released? false})]
     (when (::registry/released? result)
       (swap! (::acquisitions transport-connection)
-             disj [database-name (::registry/attachment route)]))
+             disj [database-name (::registry/connection-id route)]))
     (protocol/success
      {::protocol/released? (boolean (::registry/released? result))})))
 
 (defn- handle-delete-branch
   [runtime request]
   (let [database-name (::protocol/target-database-name request)
-        attachment (::protocol/target-attachment request)
-        scope (database-scope database-name attachment)
+        connection-id (::protocol/target-connection-id request)
+        scope (database-scope database-name connection-id)
         released
-        (registry/release-attachment!
+        (registry/release-connection-id!
          {::registry/target-database-name (keyword database-name)
-          ::registry/attachment attachment
+          ::registry/connection-id connection-id
           ::registry/expected-target-head
           (::protocol/expected-target-head request)
           ::registry/drain!
@@ -1653,15 +1655,15 @@
           (keyword (::protocol/source-database-name request))
           ::registry/target-database-name
           (keyword database-name)
-          ::registry/attachment attachment
+          ::registry/connection-id connection-id
           ::registry/expected-target-head
           (::protocol/expected-target-head request)
           ::registry/drain! (fn [_release] nil)})]
     (protocol/success
      {::protocol/target-database-name
       (::protocol/target-database-name request)
-      ::protocol/target-attachment (::registry/attachment result)
-      ::protocol/source-head (::registry/coordinate result)
+      ::protocol/target-connection-id (::registry/connection-id result)
+      ::protocol/source-head (::registry/branch-head result)
       ::protocol/released? (or (::registry/released? released)
                                (::registry/released? result))
       ::protocol/deleted? (::registry/deleted? result)})))
@@ -1683,11 +1685,11 @@
                          ::protocol/database-name database-name})))
             (registry/acquire-database!
              {::registry/database-name (keyword database-name)
-              ::registry/attachment (::registry/attachment route)
+              ::registry/connection-id (::registry/connection-id route)
               ::registry/transport-connection transport-connection})
             (swap! (::acquisitions transport-connection)
-                   conj [database-name (::registry/attachment route)])))
-        {::registry/keys [conn attachment coordinate error-kind error]}
+                   conj [database-name (::registry/connection-id route)])))
+        {::registry/keys [conn connection-id branch-head error-kind error]}
         (if transport-connection
           (registry/resolve-connection
            {::registry/database-name (keyword database-name)
@@ -1696,8 +1698,8 @@
     (if conn
       {::connection conn
        ::database-name database-name
-       ::coordinate/attachment attachment
-       ::coordinate/coordinate coordinate}
+       ::branch/connection-id connection-id
+       ::branch/head branch-head}
       (throw
        (ex-info (or error (str "Unknown or unacquired database: " database-name))
                 {::failure-kind
@@ -1718,14 +1720,14 @@
         (mapv
          (fn [descriptor]
            (let [{::keys [connection database-name]
-                  attachment ::coordinate/attachment}
+                  connection-id ::branch/connection-id}
                  (connection-for-request transport-connection
                                          {:seon.db/db descriptor})]
              {::database-descriptor descriptor
               ::database-name database-name
               ::connection connection
-              ::coordinate/attachment attachment
-              ::scope (committed-scope database-name attachment
+              ::branch/connection-id connection-id
+              ::scope (committed-scope database-name connection-id
                                        (d/db connection))}))
          (distinct (::routing-descriptors plan)))
         primary (first routes)]
@@ -1757,7 +1759,7 @@
               {::failure-kind protocol/protocol-error
                :seon.db/db descriptor})))
   (let [{::keys [connection database-name]
-         attachment ::coordinate/attachment}
+         connection-id ::branch/connection-id}
         (connection-for-request transport-connection {:seon.db/db descriptor})
         head (d/db connection)
         requested-commit (:datahike/commit-id descriptor)
@@ -1798,8 +1800,8 @@
                               temporal)]
         {::connection connection
          ::database-name database-name
-         ::coordinate/attachment attachment
-         ::scope (committed-scope database-name attachment containing)
+         ::branch/connection-id connection-id
+         ::scope (committed-scope database-name connection-id containing)
          ::database-value operation-value
          ::containing-database-value containing
          ::release-containing-database? release?})
@@ -1871,9 +1873,9 @@
         generated? (contains? request ::protocol/generated-candidates)
         failure-kind (::failure-kind (ex-data throwable))]
     (cond
-      (= failure-kind protocol/stale-coordinate-error)
+      (= failure-kind protocol/stale-database-value-error)
       (protocol/failure
-       {::protocol/error-kind protocol/stale-coordinate-error
+       {::protocol/error-kind protocol/stale-database-value-error
         ::protocol/error (.getMessage throwable)
         ::protocol/body
         {:seon.db/expected-db (:seon.db/expected-db (ex-data throwable))
@@ -1918,24 +1920,24 @@
       (transaction-failure request throwable))))
 
 (defn- handle-transact
-  [runtime connection database-name attachment request]
+  [runtime connection database-name connection-id request]
   (locking connection
     (try
       (when (contains? request ::protocol/generated-candidates)
         (id/assert-allocation-writer! connection))
       (transaction-outcome
        request
-       (transact-once! runtime connection database-name attachment request))
+       (transact-once! runtime connection database-name connection-id request))
       (catch Throwable throwable
         (transaction-failure request throwable)))))
 
 (defn- handle-transact-async
-  [runtime connection database-name attachment request]
+  [runtime connection database-name connection-id request]
   (let [result
         (try
           (when (contains? request ::protocol/generated-candidates)
             (id/assert-allocation-writer! connection))
-          (transact-once-async! runtime connection database-name attachment request)
+          (transact-once-async! runtime connection database-name connection-id request)
           (catch Throwable throwable throwable))]
     (if (satisfies? async-protocols/ReadPort result)
       (let [completion (async/promise-chan)]
@@ -1946,9 +1948,9 @@
 
 (defn- execute-mutation!
   [runtime {::keys [connection database-name]
-            attachment ::coordinate/attachment
+            connection-id ::branch/connection-id
             request ::request}]
-  (handle-transact-async runtime connection database-name attachment request))
+  (handle-transact-async runtime connection database-name connection-id request))
 
 (defn- assert-knn-database-value!
   [descriptor]
@@ -2156,10 +2158,10 @@
      ::patterns (::protocol/datom-patterns request)}))
 
 (defn- install-interest-locked!
-  [runtime transport-connection request connection database-name attachment]
+  [runtime transport-connection request connection database-name connection-id]
   (let [request-id (::protocol/request-id request)
         db-value (d/db connection)
-        scope (committed-scope database-name attachment db-value)
+        scope (committed-scope database-name connection-id db-value)
         interest (listen-interest request scope)
         reference (interest-ref transport-connection request-id
                                 (::owner interest))
@@ -2176,7 +2178,7 @@
                    ::source source
                    ::connection connection
                    ::database-name database-name
-                   ::coordinate/attachment attachment
+                   ::branch/connection-id connection-id
                    ::interest-count 0
                    ::all #{}
                    ::by-attribute {}})
@@ -2201,13 +2203,13 @@
         (throw (ex-info "The transport connection closed before listen."
                         {::failure-kind protocol/not-found-error})))
       (let [{::keys [connection database-name]
-             attachment ::coordinate/attachment}
+             connection-id ::branch/connection-id}
             (connection-for-request transport-connection request)
             database
             (locking (::interest-lock runtime)
               (remove-interest-locked! runtime transport-connection request-id)
               (install-interest-locked! runtime transport-connection request
-                                        connection database-name attachment))]
+                                        connection database-name connection-id))]
         (protocol/success
          {::protocol/request-id request-id
           :db-after database
@@ -2285,13 +2287,13 @@
         status))))
 
 (defn- send-database-event!
-  [transport-connection database-name attachment event]
+  [transport-connection database-name connection-id event]
   (locking (::connection-lock transport-connection)
     (when (and (not @(::closed? transport-connection))
                (not (.get ^java.util.concurrent.atomic.AtomicBoolean
                           (::closing? transport-connection)))
                (contains? @(::acquisitions transport-connection)
-                          [database-name attachment]))
+                          [database-name connection-id]))
       (let [result ((::send! transport-connection) event)
             status (::uds/send-status result)]
         (when-not (= uds/send-accepted status)
@@ -2299,18 +2301,18 @@
         status))))
 
 (defn- deliver-database-advanced!
-  [origin attachment database]
+  [origin connection-id database]
   (let [database-name (:db-name database)
         connections
         (::registry/transport-connections
          (registry/acquired-transport-connections
           {::registry/database-name (keyword database-name)
-           ::registry/attachment attachment}))
+           ::registry/connection-id connection-id}))
         event {::protocol/event protocol/database-advanced-event
                :db-after database}]
     (doseq [transport-connection connections
             :when (not (identical? origin transport-connection))]
-      (send-database-event! transport-connection database-name attachment event))))
+      (send-database-event! transport-connection database-name connection-id event))))
 
 (defn- candidate-interests
   [runtime scope datoms]
@@ -2708,8 +2710,8 @@
         (throw throwable)))))
 
 (defn- release-connection-acquisition!
-  [runtime transport-connection database-name attachment]
-  (let [scope (database-scope database-name attachment)
+  [runtime transport-connection database-name connection-id]
+  (let [scope (database-scope database-name connection-id)
         drained? (atom false)
         result
         (registry/release-database-acquisition!
@@ -2721,7 +2723,7 @@
               (throw
                (ex-info "The acquired database scope is unavailable for release."
                         {::protocol/database-name database-name
-                         ::protocol/attachment attachment})))
+                         ::protocol/target-connection-id connection-id})))
             (reset! drained? true)
             (drain-database-scope! runtime scope))})]
     (when (and @drained? (::registry/released? result) (::executor runtime))
@@ -2747,7 +2749,7 @@
                  {::registry/database-name (keyword database-name)
                   ::registry/transport-connection transport-connection})]
             (swap! (::acquisitions transport-connection)
-                   conj [database-name (::registry/attachment result)])
+                   conj [database-name (::registry/connection-id result)])
             result))
         resolved
         (registry/resolve-connection
@@ -3241,7 +3243,7 @@
                          (:db-after response))
                 (deliver-database-advanced!
                  (::transport-connection entry)
-                 (::coordinate/attachment entry)
+                 (::branch/connection-id entry)
                  (:db-after response))))))))
     (when (map? job-id)
       (requeue-scope! runtime job-id))))
@@ -3327,14 +3329,14 @@
          (handle-delete-branch runtime request)
 
          (if-let [{::keys [connection database-name]
-                   attachment ::coordinate/attachment}
+                   connection-id ::branch/connection-id}
                   (connection-for-request transport-connection request)]
            (case (::protocol/operation request)
              :seon.db.protocol.operation/transact
-             (handle-transact runtime connection database-name attachment request)
+             (handle-transact runtime connection database-name connection-id request)
 
-             :seon.db.protocol.operation/resolve-transaction-coordinate
-             (handle-resolve-transaction-coordinate connection request)
+             :seon.db.protocol.operation/resolve-transaction-branch-head
+             (handle-resolve-transaction-branch-head connection request)
 
              :seon.db.protocol.operation/knn-search
              (throw (ex-info "KNN search requires callback completion." {})))
@@ -3358,7 +3360,7 @@
                                   (::executor/scopes submission)
                                   (::executor/job-id submission)
                                   (select-keys (::executor/request submission)
-                                               [::coordinate/attachment
+                                               [::branch/connection-id
                                                 ::connection
                                                 ::database-name]))]
     (try
@@ -3459,9 +3461,9 @@
 (defn- start-transact-request!
   [runtime transport-connection request request-id owner]
   (if-let [{::keys [connection database-name]
-            attachment ::coordinate/attachment}
+            connection-id ::branch/connection-id}
            (connection-for-request transport-connection request)]
-    (let [scope (committed-scope database-name attachment (d/db connection))]
+    (let [scope (committed-scope database-name connection-id (d/db connection))]
       (submit-single!
        runtime request-id owner scope
        {::executor/executor (::executor runtime)
@@ -3473,7 +3475,7 @@
         ::executor/request {::request request
                             ::connection connection
                             ::database-name database-name
-                            ::coordinate/attachment attachment}}))
+                            ::branch/connection-id connection-id}}))
     (deliver-active-request!
      runtime request-id owner
      (protocol/failure
@@ -3583,20 +3585,20 @@
                      {::protocol/request-id request-id}))))
     (when requests
       (await-active-connection! runtime transport-connection))
-    (doseq [[database-name attachment] acquisitions]
+    (doseq [[database-name connection-id] acquisitions]
       (try
         (let [result (release-connection-acquisition!
-                      runtime transport-connection database-name attachment)]
+                      runtime transport-connection database-name connection-id)]
           (when-not (::registry/released? result)
             (log/error "database connection acquisition release was unproved"
                        {::protocol/database-name database-name
-                        ::protocol/attachment attachment
+                        ::protocol/target-connection-id connection-id
                         ::registry/release-error
                         (::registry/release-error result)})))
         (catch Throwable throwable
           (log/error throwable "database connection acquisition release failed"
-                     {::protocol/database-name database-name
-                      ::protocol/attachment attachment}))))))
+                    {::protocol/database-name database-name
+                      ::protocol/target-connection-id connection-id}))))))
 
 (defn handle-request!
   "Start one request and invoke complete! exactly once after physical completion."
@@ -3804,11 +3806,11 @@
             (let [{::registry/keys [databases]} (registry/list-databases {})
                   release-results
                   (mapv
-                   (fn [{::registry/keys [database-name attachment coordinate]}]
+                   (fn [{::registry/keys [database-name connection-id branch-head]}]
                      (merge
                       {::registry/database-name database-name
-                       ::registry/attachment attachment
-                       ::registry/coordinate coordinate}
+                       ::registry/connection-id connection-id
+                       ::registry/branch-head branch-head}
                       (registry/release-database!
                        {::registry/database-name database-name})))
                    databases)]

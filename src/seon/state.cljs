@@ -456,7 +456,7 @@
 
 (defn- stale-database-failure?
   [value]
-  (= protocol/stale-coordinate-error
+  (= protocol/stale-database-value-error
      (get-in value [:seon.error/data ::protocol/error-kind])))
 
 (defn- ^:async current-database!

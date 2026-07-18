@@ -317,10 +317,10 @@
    [::eid                ::eid]
    [:seon.error/fault    :seon.error/fault]
    [:seon.error/message  :seon.error/message]
-   [:seon.error/database-id {:optional true} :seon.error/database-id]
-   [:seon.error/branch      {:optional true} :seon.error/branch]
+   [:seon.error/store-id    {:optional true} :seon.error/store-id]
+   [:seon.error/branch-name {:optional true} :seon.error/branch-name]
    [:seon.error/commit-id   {:optional true} :seon.error/commit-id]
-   [:seon.error/t           {:optional true} :seon.error/t]
+   [:seon.error/basis-t     {:optional true} :seon.error/basis-t]
    [::top-frame          {:optional true} ::top-frame]
    [:seon.agent/id       {:optional true} :seon.agent/id]])
 
@@ -356,8 +356,8 @@
 
 (def ^:private error-pull-pattern
   [:seon.error/fault :seon.error/message
-   :seon.error/database-id :seon.error/branch
-   :seon.error/commit-id :seon.error/t
+   :seon.error/store-id :seon.error/branch-name
+   :seon.error/commit-id :seon.error/basis-t
    :seon.error/stack :seon.error/args-edn :seon.error/data-edn
    {:seon.error/frames [:seon.error.frame/index :seon.error.frame/fn
                         :seon.error.frame/file :seon.error.frame/line
@@ -377,7 +377,7 @@
    Map-in/map-out (0-arity = defaults): optional `:seon.error/fault`
    filter (`:agent` | `:core`) and `::limit` (default 20). Each row:
    the error's entity id (feed it to [[error]] / [[repro]]), fault,
-   the complete catch-site database coordinate, the DEEPEST-cause short
+   the complete catch-site Proximum branch head, the DEEPEST-cause short
    message, the top stack frame, and the recording agent's id when the
    tx carried one. Token-bounded by construction — stored messages are
    already clipped; rows clip further for the list."
@@ -414,10 +414,10 @@
                            :seon.error/fault fault
                            :seon.error/message (tokens/clip-str message 25)}
                           (select-keys persisted
-                                       [:seon.error/database-id
-                                        :seon.error/branch
+                                       [:seon.error/store-id
+                                        :seon.error/branch-name
                                         :seon.error/commit-id
-                                        :seon.error/t]))
+                                        :seon.error/basis-t]))
                   top (assoc ::top-frame top)
                   aid (assoc :seon.agent/id aid))))
             eids persisted agent-ids)})))
@@ -436,10 +436,10 @@
    [::error {:optional true} ::error]
    [:seon.error/fault    {:optional true} :seon.error/fault]
    [:seon.error/message  {:optional true} :seon.error/message]
-   [:seon.error/database-id {:optional true} :seon.error/database-id]
-   [:seon.error/branch      {:optional true} :seon.error/branch]
+   [:seon.error/store-id    {:optional true} :seon.error/store-id]
+   [:seon.error/branch-name {:optional true} :seon.error/branch-name]
    [:seon.error/commit-id   {:optional true} :seon.error/commit-id]
-   [:seon.error/t           {:optional true} :seon.error/t]
+   [:seon.error/basis-t     {:optional true} :seon.error/basis-t]
    [:seon.error/stack    {:optional true} :seon.error/stack]
    [:seon.error/args-edn {:optional true} :seon.error/args-edn]
    [:seon.error/data-edn {:optional true} :seon.error/data-edn]
@@ -448,7 +448,7 @@
    [::turn-eid           {:optional true} ::eid]
    [:seon.agent.turn/id  {:optional true} :seon.agent.turn/id]])
 
-(defn- ^:async turn-active-at-t
+(defn- ^:async turn-active-at-basis-t
   "Latest turn for one agent whose rendered transaction precedes an error."
   [db aid error-t]
   (when (and aid (int? error-t))
@@ -473,7 +473,7 @@
   "Full detail for one persisted error: envelope + turn/agent joins.
 
    Map-in/map-out — `{::eid eid}` (from [[errors]]) returns the whole
-   persisted projection (message, fault, complete coordinate, frames sorted by
+   persisted projection (message, fault, complete branch head, frames sorted by
    index, args-edn, data-edn, stack) plus the JOINS: the recording
    agent's id and the latest turn whose rendered transaction did not follow
    the error — `::turn-eid` plus
@@ -484,14 +484,14 @@
   (let [database (or database (await (db/db)))]
     (if-let [e (await (pull-error database eid))]
       (let [aid (await (tx-agent-id database eid))
-            [teid tid] (await (turn-active-at-t database aid
-                                                (:seon.error/t e)))]
+            [teid tid] (await (turn-active-at-basis-t database aid
+                                                      (:seon.error/basis-t e)))]
         (cond-> (merge {::ok? true ::eid eid}
                        (select-keys e [:seon.error/fault :seon.error/message
-                                       :seon.error/database-id
-                                       :seon.error/branch
+                                       :seon.error/store-id
+                                       :seon.error/branch-name
                                        :seon.error/commit-id
-                                       :seon.error/t :seon.error/stack
+                                       :seon.error/basis-t :seon.error/stack
                                        :seon.error/args-edn :seon.error/data-edn]))
           (seq (:seon.error/frames e))
           (assoc ::frames (->> (:seon.error/frames e)
@@ -519,10 +519,10 @@
    ;; NEVER pr-str it into agent context (it prints the whole index);
    ;; render its t and abbreviated commit instead.
    [:seon.db/db          {:optional true} :seon.db/db]
-   [:seon.error/database-id {:optional true} :seon.error/database-id]
-   [:seon.error/branch      {:optional true} :seon.error/branch]
+   [:seon.error/store-id    {:optional true} :seon.error/store-id]
+   [:seon.error/branch-name {:optional true} :seon.error/branch-name]
    [:seon.error/commit-id   {:optional true} :seon.error/commit-id]
-   [:seon.error/t           {:optional true} :seon.error/t]
+   [:seon.error/basis-t     {:optional true} :seon.error/basis-t]
    [::fn-sym             {:optional true} ::fn-sym]
    [:seon.error/args-edn {:optional true} :seon.error/args-edn]
    [::turn-eid           {:optional true} ::eid]
@@ -580,23 +580,23 @@
             aid      (await (tx-agent-id database eid))
             fn-sym   (fn-sym-from-data-edn data-edn)
             args-edn (readable-args-edn args-edn)
-            transaction-id (:seon.error/t e)]
+            transaction-id (:seon.error/basis-t e)]
         (if-not (int? transaction-id)
           {::ok? false ::eid eid
            ::error (str "error " eid
                         " has no transaction id — no database value can be reconstructed")}
           (let [historical-db (db/as-of database transaction-id)
                 [teid tid]
-                (await (turn-active-at-t database aid transaction-id))]
+                (await (turn-active-at-basis-t database aid transaction-id))]
             (cond-> (merge
                      {::ok? true ::eid eid
                       :seon.db/db historical-db
                       ::repro-expr
                       (repro-expr-str transaction-id fn-sym args-edn)}
-                     (select-keys e [:seon.error/database-id
-                                     :seon.error/branch
+                     (select-keys e [:seon.error/store-id
+                                     :seon.error/branch-name
                                      :seon.error/commit-id
-                                     :seon.error/t]))
+                                     :seon.error/basis-t]))
               fn-sym (assoc ::fn-sym fn-sym)
               args-edn (assoc :seon.error/args-edn args-edn)
               teid (assoc ::turn-eid teid :seon.agent.turn/id tid)

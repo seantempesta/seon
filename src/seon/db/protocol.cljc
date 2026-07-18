@@ -14,7 +14,7 @@
             #?@(:cljs [[cognitect.transit :as transit]
                        [goog.object :as gobj]])
             [malli.core :as m]
-            [seon.db.coordinate :as coordinate]
+            [seon.db.branch :as branch]
             [seon.db.restore.schema]
             [seon.schema :as schema]))
 
@@ -43,8 +43,8 @@
   :seon.db.protocol.operation/release-database)
 (def delete-branch-operation :seon.db.protocol.operation/delete-branch)
 (def transact-operation :seon.db.protocol.operation/transact)
-(def resolve-transaction-coordinate-operation
-  :seon.db.protocol.operation/resolve-transaction-coordinate)
+(def resolve-transaction-branch-head-operation
+  :seon.db.protocol.operation/resolve-transaction-branch-head)
 (def knn-search-operation :seon.db.protocol.operation/knn-search)
 
 (def datoms-event :seon.db.protocol.event/datoms)
@@ -56,12 +56,12 @@
 (def internal-error :seon.db.protocol.error/internal)
 (def not-found-error :seon.db.protocol.error/not-found)
 (def request-conflict-error :seon.db.protocol.error/request-conflict)
-(def stale-coordinate-error :seon.db.protocol.error/stale-coordinate)
+(def stale-database-value-error :seon.db.protocol.error/stale-database-value)
 (def generated-candidate-conflict-error
   :seon.db.protocol.error/generated-candidate-conflict)
 (def duplicate-route-error :seon.db.protocol.error/duplicate-route)
-(def duplicate-attachment-error :seon.db.protocol.error/duplicate-attachment)
-(def attachment-mismatch-error :seon.db.protocol.error/attachment-mismatch)
+(def duplicate-connection-id-error :seon.db.protocol.error/duplicate-connection-id)
+(def connection-id-mismatch-error :seon.db.protocol.error/connection-id-mismatch)
 (def stale-source-head-error :seon.db.protocol.error/stale-source-head)
 (def stale-target-head-error :seon.db.protocol.error/stale-target-head)
 (def missing-commit-error :seon.db.protocol.error/missing-commit)
@@ -84,7 +84,7 @@
   :seon.db.protocol.error/ambiguous-history)
 
 (def lifecycle-error-kinds
-  #{duplicate-route-error duplicate-attachment-error attachment-mismatch-error
+  #{duplicate-route-error duplicate-connection-id-error connection-id-mismatch-error
     stale-source-head-error stale-target-head-error missing-commit-error
     unsupported-history-error cut-not-branchable-error branch-exists-error
     branch-missing-error protected-main-branch-error active-branch-error
@@ -195,7 +195,7 @@
   release-database-operation
   delete-branch-operation
   transact-operation
-  resolve-transaction-coordinate-operation
+  resolve-transaction-branch-head-operation
   knn-search-operation])
 (schema/register! ::success? :boolean)
 (schema/register! ::pong? :boolean)
@@ -213,6 +213,7 @@
 (schema/register! :seon.db/db
                   [:map {:closed true}
                    [:db-name [:string {:min 1}]]
+                   [:store-id [:vector {:min 2 :max 3} :any]]
                    [:t [:int {:min 0}]]
                    [:as-of [:or :nil [:int {:min 0}] :inst]]
                    [:since [:or :nil [:int {:min 0}] :inst]]
@@ -246,27 +247,27 @@
   [:seon.execution/artifact-digest [:re "^[0-9a-f]{64}$"]]
   [:seon.db/program :seon.db/program]
   [:seon.db/initial-data :seon.db/initial-data]])
-(schema/register! ::coordinate ::coordinate/coordinate)
+(schema/register! ::branch-head ::branch/head)
 (schema/register!
- ::head-coordinate
+ ::containing-branch-head
  [:map {:closed true}
-  [::coordinate/database-id ::coordinate/database-id]
-  [::coordinate/branch [:= :db]]
-  [::coordinate/commit-id ::coordinate/commit-id]
-  [::coordinate/t ::coordinate/t]])
-(schema/register! ::transaction-id ::coordinate/t)
-(schema/register! ::source-coordinate ::coordinate/coordinate)
-(schema/register! ::expected-source-head ::coordinate/coordinate)
-(schema/register! ::expected-target-head ::coordinate/coordinate)
-(schema/register! ::source-head ::coordinate/coordinate)
-(schema/register! ::target-attachment ::coordinate/attachment)
+  [::branch/store-id ::branch/store-id]
+  [::branch/name [:= :db]]
+  [::branch/commit-id ::branch/commit-id]
+  [::branch/basis-t ::branch/basis-t]])
+(schema/register! ::transaction-id ::branch/basis-t)
+(schema/register! ::source-branch-head ::branch/head)
+(schema/register! ::expected-source-head ::branch/head)
+(schema/register! ::expected-target-head ::branch/head)
+(schema/register! ::source-head ::branch/head)
+(schema/register! ::target-connection-id ::branch/connection-id)
 (schema/register! ::target-branch :keyword)
-(schema/register! ::main-coordinate ::coordinate/coordinate)
-(schema/register! ::branch-coordinates
-                  [:map-of :keyword ::coordinate/coordinate])
+(schema/register! ::main-branch-head ::branch/head)
+(schema/register! ::branch-heads
+                  [:map-of :keyword ::branch/head])
 (schema/register! ::branch-roster [:set :keyword])
-(schema/register! ::restore-completion-coordinates
-                  [:map-of :seon.db.restore/id ::coordinate/coordinate])
+(schema/register! ::restore-completion-branch-heads
+                  [:map-of :seon.db.restore/id ::branch/head])
 (schema/register! ::source-database-name ::database-name)
 (schema/register! ::target-database-name ::database-name)
 (schema/register! ::created? :boolean)
@@ -337,9 +338,9 @@
 (schema/register!
  ::error-kind
  [:enum protocol-error database-error internal-error not-found-error
-  request-conflict-error stale-coordinate-error
+  request-conflict-error stale-database-value-error
   generated-candidate-conflict-error
-  duplicate-route-error duplicate-attachment-error attachment-mismatch-error
+  duplicate-route-error duplicate-connection-id-error connection-id-mismatch-error
   stale-source-head-error stale-target-head-error missing-commit-error
   unsupported-history-error cut-not-branchable-error branch-exists-error
   branch-missing-error protected-main-branch-error active-branch-error
@@ -360,8 +361,8 @@
  ::writer-release-result
  [:map {:closed true}
   [:seon.db.registry/database-name :keyword]
-  [:seon.db.registry/attachment ::coordinate/attachment]
-  [:seon.db.registry/coordinate ::coordinate/coordinate]
+  [:seon.db.registry/connection-id ::branch/connection-id]
+  [:seon.db.registry/branch-head ::branch/head]
   [:seon.db.registry/released? :boolean]
   [:seon.db.registry/release-error {:optional true}
    [:string {:min 1}]]])
@@ -587,7 +588,7 @@
   [::database-name ::database-name]
   [::backend ::backend]
   [::database-path {:optional true} ::database-path]
-  [::coordinate/attachment {:optional true} ::coordinate/attachment]
+  [::branch/connection-id {:optional true} ::branch/connection-id]
   [:seon.db/initialization {:optional true} :seon.db/initialization]])
 (schema/register!
  ::acquire-database-request
@@ -608,7 +609,7 @@
   [::request-id ::request-id]
   [::source-database-name ::source-database-name]
   [::target-database-name ::target-database-name]
-  [::source-coordinate ::source-coordinate]
+  [::source-branch-head ::source-branch-head]
   [::expected-source-head ::expected-source-head]
   [::target-branch ::target-branch]])
 (schema/register!
@@ -624,7 +625,7 @@
   [::request-id ::request-id]
   [::source-database-name ::source-database-name]
   [::target-database-name ::target-database-name]
-  [::target-attachment ::target-attachment]
+  [::target-connection-id ::target-connection-id]
   [::expected-target-head ::expected-target-head]])
 (schema/register!
   ::transaction-request
@@ -637,12 +638,12 @@
   [::transaction-meta {:optional true} ::transaction-meta]
   [::generated-candidates {:optional true} ::generated-candidates]])
 (schema/register!
- ::resolve-transaction-coordinate-request
+ ::resolve-transaction-branch-head-request
  [:map {:closed true}
-  [::operation [:= resolve-transaction-coordinate-operation]]
+  [::operation [:= resolve-transaction-branch-head-operation]]
   [::request-id ::request-id]
   [::database-name ::database-name]
-  [::head-coordinate ::head-coordinate]
+  [::containing-branch-head ::containing-branch-head]
   [::transaction-id ::transaction-id]])
 (schema/register!
   ::knn-search-request
@@ -677,8 +678,8 @@
   [release-database-operation ::release-database-request]
   [delete-branch-operation ::delete-branch-request]
   [transact-operation ::transaction-request]
-  [resolve-transaction-coordinate-operation
-   ::resolve-transaction-coordinate-request]
+  [resolve-transaction-branch-head-operation
+   ::resolve-transaction-branch-head-request]
   [knn-search-operation ::knn-search-request]])
 (schema/register!
  ::failed-response
@@ -814,22 +815,22 @@
   [::success? [:= true]]
   [::request-id ::request-id]
   [::database-name ::database-name]
-  [::main-coordinate ::main-coordinate]
+  [::main-branch-head ::main-branch-head]
   [::main-parent-commit-ids [:set :uuid]]
-  [::branch-coordinates ::branch-coordinates]
+  [::branch-heads ::branch-heads]
   [::branch-roster ::branch-roster]
   [::restore-completions [:vector :seon.db.restore/completion]]
   [::completed-restore-ids [:set :seon.db.restore/id]]
-  [::restore-completion-coordinates
-   ::restore-completion-coordinates]])
+  [::restore-completion-branch-heads
+   ::restore-completion-branch-heads]])
 (schema/register!
  ::create-branch-response
  [:map {:closed true}
   [::success? [:= true]]
   [::request-id ::request-id]
   [::target-database-name ::target-database-name]
-  [::target-attachment ::target-attachment]
-  [::coordinate ::coordinate]
+  [::target-connection-id ::target-connection-id]
+  [::branch-head ::branch-head]
   [::backend ::backend]
   [::database-path {:optional true} ::database-path]
   [::created? ::created?]
@@ -846,7 +847,7 @@
   [::success? [:= true]]
   [::request-id ::request-id]
   [::target-database-name ::target-database-name]
-  [::target-attachment ::target-attachment]
+  [::target-connection-id ::target-connection-id]
   [::source-head ::source-head]
   [::released? ::released?]
   [::deleted? ::deleted?]])
@@ -863,11 +864,11 @@
   [::generated-entity-ids {:optional true} ::generated-entity-ids]
   [::recovered? {:optional true} ::recovered?]])
 (schema/register!
- ::resolve-transaction-coordinate-response
+ ::resolve-transaction-branch-head-response
  [:map {:closed true}
   [::success? [:= true]]
   [::request-id ::request-id]
-  [::coordinate ::coordinate]])
+  [::branch-head ::branch-head]])
 (schema/register!
  ::knn-search-response
  [:map {:closed true}
@@ -899,7 +900,7 @@
   ::release-database-response
   ::delete-branch-response
   ::transaction-response
-  ::resolve-transaction-coordinate-response
+  ::resolve-transaction-branch-head-response
   ::knn-search-response])
 
 (schema/register! ::body :map)
@@ -917,7 +918,7 @@
   [::database-name ::database-name]
   [::backend ::backend]
   [::database-path {:optional true} ::database-path]
-  [::coordinate/attachment {:optional true} ::coordinate/attachment]
+  [::branch/connection-id {:optional true} ::branch/connection-id]
   [:seon.db/initialization {:optional true} :seon.db/initialization]])
 (schema/register!
  ::acquire-database-request-input
@@ -1032,7 +1033,7 @@
   [::request-id ::request-id]
   [::source-database-name ::source-database-name]
   [::target-database-name ::target-database-name]
-  [::source-coordinate ::source-coordinate]
+  [::source-branch-head ::source-branch-head]
   [::expected-source-head ::expected-source-head]
   [::target-branch ::target-branch]])
 (schema/register!
@@ -1046,7 +1047,7 @@
   [::request-id ::request-id]
   [::source-database-name ::source-database-name]
   [::target-database-name ::target-database-name]
-  [::target-attachment ::target-attachment]
+  [::target-connection-id ::target-connection-id]
   [::expected-target-head ::expected-target-head]])
 (schema/register!
   ::transaction-request-input
@@ -1058,11 +1059,11 @@
   [::transaction-meta {:optional true} ::transaction-meta]
   [::generated-candidates {:optional true} ::generated-candidates]])
 (schema/register!
- ::resolve-transaction-coordinate-request-input
+ ::resolve-transaction-branch-head-request-input
  [:map {:closed true}
   [::request-id ::request-id]
   [::database-name ::database-name]
-  [::head-coordinate ::head-coordinate]
+  [::containing-branch-head ::containing-branch-head]
   [::transaction-id ::transaction-id]])
 (schema/register!
   ::knn-request-input
@@ -1166,8 +1167,8 @@
            ::database-name database-name
            ::backend backend}
     database-path (assoc ::database-path database-path)
-    (::coordinate/attachment input)
-    (assoc ::coordinate/attachment (::coordinate/attachment input))
+    (::branch/connection-id input)
+    (assoc ::branch/connection-id (::branch/connection-id input))
     initialization (assoc :seon.db/initialization initialization)))
 
 (defn acquire-database-request
@@ -1223,13 +1224,13 @@
     (contains? input ::generated-candidates)
     (assoc ::generated-candidates generated-candidates)))
 
-(defn resolve-transaction-coordinate-request
-  "Construct one frozen-head transaction-coordinate request."
+(defn resolve-transaction-branch-head-request
+  "Construct one transaction-to-branch-head resolution request."
   {:malli/schema
-   [:=> [:cat ::resolve-transaction-coordinate-request-input]
-    ::resolve-transaction-coordinate-request]}
+   [:=> [:cat ::resolve-transaction-branch-head-request-input]
+    ::resolve-transaction-branch-head-request]}
   [input]
-  (assoc input ::operation resolve-transaction-coordinate-operation))
+  (assoc input ::operation resolve-transaction-branch-head-operation))
 
 (defn knn-search-request
   "Construct one bounded embedding-neighbor request."

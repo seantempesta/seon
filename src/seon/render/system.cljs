@@ -2,7 +2,7 @@
   "Root's authority-backed cluster view.
 
    The execution child invokes [[system-view]] at its inherited immutable
-   coordinate. One database query returns ordinary agent rows; this namespace
+   database value. One database query returns ordinary agent rows; this namespace
    only derives state and formats the human and AI twins. It never receives a
    Datahike value and never recursively renders another agent's surfaces."
   (:require
@@ -113,7 +113,7 @@
               agents))))
 
 (defn ^:async system-view
-  "Render root's human and AI cluster views at the child's pinned coordinate."
+  "Render root's human and AI cluster views at the child's database value."
   {:malli/schema [:=> [:cat :map :any] :seon.render/html-response]}
   [_render-input _invoke-selected!]
   (let [rows (await (db/query {::db/query agent-query}))

@@ -110,7 +110,7 @@
              (set! db/pull original-pull)
              (done)))))))
 
-(deftest turn-diff-compares-basis-transactions-without-a-coordinate-wrapper
+(deftest turn-diff-compares-basis-transactions-directly
   (async done
     (let [original debug/turn]
       (set! debug/turn
@@ -144,7 +144,7 @@
           error-row
           {:seon.error/fault :core
            :seon.error/message "core failure"
-           :seon.error/t 41
+           :seon.error/basis-t 41
            :seon.error/args-edn "[{:probe/value 1}]"
            :seon.error/data-edn
            "{:seon.error.malli/fn-sym probe/run}"

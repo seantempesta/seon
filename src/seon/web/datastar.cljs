@@ -34,7 +34,7 @@
     [clojure.set :as set]
     [clojure.string :as str]
     [seon.db :as db]
-    [seon.db.coordinate :as db.coordinate]
+    [seon.db.branch :as db.branch]
     [seon.execution :as execution]
     [seon.execution.host :as execution.host]
     [seon.log :as log]
@@ -62,7 +62,7 @@
   [:or
    [:tuple [:= :seon.web.feed/agent] :seon.agent/id]
    [:tuple [:= :seon.web.feed/agent] :seon.agent/id
-    [:= :seon.web.feed/at] ::db.coordinate/coordinate]
+    [:= :seon.web.feed/at] ::db.branch/head]
    [:tuple [:= :seon.web.feed/data] [:maybe :qualified-keyword]]
    [:tuple [:= :seon.web.feed/debug] :seon.agent/id]])
 (schema/register! ::render 'fn?)
@@ -71,7 +71,7 @@
  [:map
    [:seon.web.feed/key ::feed-key]
    [:seon.web.feed/live? ::live?]
-   [:seon.web.feed/coordinate {:optional true} ::db.coordinate/coordinate]
+   [:seon.web.feed/branch-head {:optional true} ::db.branch/head]
    [::db {:optional true} :seon.db/db]
    [:seon.web.feed/render ::render]
    [::dependencies {:optional true} ::dependencies]
@@ -1002,9 +1002,9 @@
                "Cache-Control"     "no-store"
                "Connection"        "keep-alive"
                "X-Accel-Buffering" "no"}
-        (:seon.web.feed/coordinate feed)
-        (assoc "Seon-Database-Coordinate"
-               (pr-str (:seon.web.feed/coordinate feed))))))
+        (:seon.web.feed/branch-head feed)
+        (assoc "Seon-Database-Branch-Head"
+               (pr-str (:seon.web.feed/branch-head feed))))))
   (let [gz (.createGzip zlib)
         feed-id (random-uuid)
         supplied-view-id (::view-id feed)
@@ -1121,20 +1121,20 @@
 (def ^:private branch-param-re #"[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)?")
 
 (def ^:private historical-query-keys
-  ["database-id" "branch" "commit-id" "t"])
+  ["store-id" "branch" "commit-id" "basis-t"])
 
 (defn- selector-error
   [message supplied]
   {:seon.error/message message
-   :seon.error/kind :invalid-database-coordinate
+   :seon.error/kind :invalid-branch-head
    :seon.error/data {:seon.web.historical/supplied supplied
                      :seon.web.historical/required historical-query-keys}})
 
-(defn- parse-historical-coordinate
-  "Parse one all-or-none historical selector from a node request URL.
+(defn- parse-historical-branch-head
+  "Parse one all-or-none Proximum branch head from a Node request URL.
 
-   No coordinate fields means the live feed. Any partial, blank, malformed,
-   or noncanonical selector is an error value; history never falls back live."
+   No branch-head fields means the live feed. Any partial, blank, malformed,
+   or noncanonical branch head is an error value; history never falls back live."
   [^js req]
   (try
     (let [url  (or (.-url ^js req) "")
@@ -1149,32 +1149,32 @@
             (empty? present) nil
 
             (not= (count historical-query-keys) (count present))
-            (selector-error "historical feed coordinate is incomplete" supplied)
+            (selector-error "historical feed branch head is incomplete" supplied)
 
             :else
-            (let [database-id (get supplied "database-id")
+            (let [store-id (get supplied "store-id")
                   branch (get supplied "branch")
                   commit-id (get supplied "commit-id")
-                  t-value (get supplied "t")]
-              (if-not (and (re-matches canonical-uuid-re database-id)
+                  basis-t-value (get supplied "basis-t")]
+              (if-not (and (re-matches canonical-uuid-re store-id)
                            (re-matches branch-param-re branch)
                            (re-matches canonical-uuid-re commit-id)
-                           (re-matches #"[0-9]+" t-value))
-                (selector-error "historical feed coordinate is malformed" supplied)
-                (let [t-number (js/Number t-value)
-                      point {::db.coordinate/database-id (uuid database-id)
-                             ::db.coordinate/branch (keyword branch)
-                             ::db.coordinate/commit-id (uuid commit-id)
-                             ::db.coordinate/t t-number}]
-                  (if (and (js/Number.isSafeInteger t-number)
+                           (re-matches #"[0-9]+" basis-t-value))
+                (selector-error "historical feed branch head is malformed" supplied)
+                (let [basis-t (js/Number basis-t-value)
+                      branch-head {::db.branch/store-id (uuid store-id)
+                                   ::db.branch/name (keyword branch)
+                                   ::db.branch/commit-id (uuid commit-id)
+                                   ::db.branch/basis-t basis-t}]
+                  (if (and (js/Number.isSafeInteger basis-t)
                            (schema/valid-candidate-value?
-                             ::db.coordinate/coordinate point))
-                    point
+                             ::db.branch/head branch-head))
+                    branch-head
                     (selector-error
-                      "historical feed coordinate is outside the supported value domain"
+                      "historical feed branch head is outside the supported value domain"
                       supplied)))))))))
     (catch :default e
-      (selector-error "historical feed coordinate could not be parsed"
+      (selector-error "historical feed branch head could not be parsed"
                       {:seon.error/message (.-message e)}))))
 
 (defn- write-historical-error!
@@ -1285,10 +1285,10 @@
    Lazily installs the tx-listener (idempotent). Invalid or stale ids 404. Public —
    db->routes resolves its symbol.
 
-   A historical request supplies all four `database-id`, `branch`, `commit-id`,
-   and `t` query fields. That ordinary coordinate is passed to the compiled
-   child and used as the frozen subscription key. Partial or malformed
-   coordinates return a structured 422; only an absent coordinate opens live."
+   A historical request supplies all four `store-id`, `branch`, `commit-id`,
+   and `basis-t` query fields. That Proximum branch head is passed to the
+   compiled child and used as the frozen subscription key. Partial or malformed
+   branch heads return a structured 422; only an absent branch head opens live."
   [r]
   (let [^js req (:seon.http/node-req r)
         ^js res (:seon.http/node-res r)
@@ -1311,24 +1311,24 @@
           (write-database-error! res exists?)
 
           exists?
-          (let [selector (parse-historical-coordinate req)]
+          (let [selector (parse-historical-branch-head req)]
         (cond
           (:seon.error/message selector)
           (write-historical-error! res selector)
 
           selector
-          (if (and (= :db (::db.coordinate/branch selector))
+          (if (and (= :db (::db.branch/name selector))
                    (= (:datahike/commit-id database)
-                      (::db.coordinate/commit-id selector))
-                   (<= (::db.coordinate/t selector) (:t database)))
-            (let [historical (db/as-of database (::db.coordinate/t selector))]
+                      (::db.branch/commit-id selector))
+                   (<= (::db.branch/basis-t selector) (:t database)))
+            (let [historical (db/as-of database (::db.branch/basis-t selector))]
               (open-feed!
                req res
                (cond->
                 {:seon.web.feed/key [:seon.web.feed/agent id
                                      :seon.web.feed/at selector]
                  :seon.web.feed/live? false
-                 :seon.web.feed/coordinate selector
+                 :seon.web.feed/branch-head selector
                  ::db historical
                  :seon.web.feed/render
                  (fn [value] (render-agent-view! id value))}

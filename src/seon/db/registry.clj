@@ -3,8 +3,9 @@
 
    The process-local atom maps `{database-name -> entry}`
    where each entry retains the live connection, stable
-   `{database-id, branch}` attachment, backend, and optional path. The current
-   coordinate is always derived from the live Datahike value.
+   Datahike `[store-id branch]` connection ID, backend, and optional path. The
+   current
+   branch-head is always derived from the live Datahike value.
 
    One database-server JVM hosts every cluster database. A database-name is a
    logical route (`:default`, `:acme`, or a branch route), not physical
@@ -13,9 +14,9 @@
 
    ## Idempotent semantics
 
-   Logical names and attachments form a bijection. `ensure-database!` on an
+   Logical names and connection-ids form a bijection. `ensure-database!` on an
    existing database-name returns the same connection, while a second name for
-   its attachment is rejected. Main `:db` may create a database. Non-main
+   its connection-id is rejected. Main `:db` may create a database. Non-main
    branches are open-only and must be present in Datahike's durable branch
    roster before connect. `release-database!` on an absent name is a no-op returning
    `{::released? false}`. A failed release retains the registered identity and
@@ -31,14 +32,14 @@
    Connection setup is an explicit dependency of `ensure-database!`, not a global
    callback registry. The writer assembles one fixed initializer at boot and
    passes it on every open. The initializer receives one request describing
-   the exact attachment and whether the open is main or branch-observational.
+   the exact connection-id and whether the open is main or branch-observational.
    A failed initializer releases the new connection and leaves no
    half-initialized registry entry."
   (:require [clojure.set :as set]
             [datahike.api :as d]
             [datahike.index.audit :as index-audit]
             [konserve.core :as k]
-            [seon.db.coordinate :as coordinate]
+            [seon.db.branch :as branch]
             [seon.db.id :as id]
             [seon.db.restore :as db.restore]
             [seon.schema :as schema]
@@ -53,8 +54,8 @@
 (schema/register! ::backend :seon.db.backend/backend)
 (schema/register! ::path :seon.db.backend/path)
 (schema/register! ::initial-tx :seon.db.backend/initial-tx)
-(schema/register! ::attachment ::coordinate/attachment)
-(schema/register! ::coordinate ::coordinate/coordinate)
+(schema/register! ::connection-id ::branch/connection-id)
+(schema/register! ::branch-head ::branch/head)
 (schema/register! ::release-error :string)
 (schema/register! ::initialization-error :string)
 (schema/register! ::transport-connection 'some?)
@@ -63,7 +64,7 @@
  ::acquired-transport-connections-request
  [:map {:closed true}
   [::database-name ::database-name]
-  [::attachment ::attachment]])
+  [::connection-id ::connection-id]])
 (schema/register!
  ::acquired-transport-connections-response
  [:map {:closed true}
@@ -79,9 +80,9 @@
 (schema/register! ::open-intent
                   [:enum :seon.db.registry.open/main
                    :seon.db.registry.open/branch])
-(schema/register! ::source-coordinate ::coordinate)
-(schema/register! ::expected-source-head ::coordinate)
-(schema/register! ::expected-target-head ::coordinate)
+(schema/register! ::source-branch-head ::branch-head)
+(schema/register! ::expected-source-head ::branch-head)
+(schema/register! ::expected-target-head ::branch-head)
 (schema/register! ::target-branch :keyword)
 (schema/register! ::created? :boolean)
 (schema/register! ::adopted? :boolean)
@@ -94,19 +95,19 @@
   :seon.db.restore-admin.connection/cleanup-unproved])
 (schema/register! ::expected-branch-roster [:set :keyword])
 (schema/register! ::branch-roster [:set :keyword])
-(schema/register! ::main-coordinate ::coordinate)
+(schema/register! ::main-branch-head ::branch-head)
 (schema/register! ::main-parent-commit-ids [:set :uuid])
-(schema/register! ::branch-coordinates [:map-of :keyword ::coordinate])
+(schema/register! ::branch-branch-heads [:map-of :keyword ::branch-head])
 (schema/register! ::restore-completions [:vector ::db.restore/completion])
 (schema/register! ::completed-restore-ids [:set ::db.restore/id])
-(schema/register! ::restore-completion-coordinates
-                  [:map-of ::db.restore/id ::coordinate])
-(schema/register! ::transaction-id ::coordinate/t)
+(schema/register! ::restore-completion-branch-heads
+                  [:map-of ::db.restore/id ::branch-head])
+(schema/register! ::transaction-id ::branch/basis-t)
 (schema/register! ::commit-id :uuid)
-(schema/register! ::pre-restore-main-coordinate ::coordinate)
-(schema/register! ::selected-target-coordinate ::coordinate)
-(schema/register! ::prepared-target-coordinate ::coordinate)
-(schema/register! ::undo-coordinate ::coordinate)
+(schema/register! ::pre-restore-main-branch-head ::branch-head)
+(schema/register! ::selected-target-branch-head ::branch-head)
+(schema/register! ::prepared-target-branch-head ::branch-head)
+(schema/register! ::undo-branch-head ::branch-head)
 (schema/register! ::validate-db! 'fn?)
 (schema/register! ::admin-outcome
                   [:enum :seon.db.registry.admin/applied
@@ -119,7 +120,7 @@
 (schema/register! ::entry
                   [:map
                    [::conn ::conn]
-                   [::attachment ::attachment]
+                   [::connection-id ::connection-id]
                    [::backend ::backend]
                    [::path {:optional true} ::path]
                    [::ensured? ::ensured?]
@@ -135,7 +136,7 @@
                    [::database-name ::database-name]
                    [::backend {:optional true} ::backend]
                    [::path {:optional true} ::path]
-                   [::attachment {:optional true} ::attachment]
+                   [::connection-id {:optional true} ::connection-id]
                    [::initial-tx {:optional true} ::initial-tx]
                    [::initialize-connection! 'fn?]])
 
@@ -143,15 +144,15 @@
                   [:map
                    [::conn ::conn]
                    [::database-name ::database-name]
-                   [::attachment ::attachment]
+                   [::connection-id ::connection-id]
                    [::open-intent ::open-intent]])
 
 (schema/register! ::entry-view
                   [:map
                    [::database-name ::database-name]
                    [::conn ::conn]
-                   [::attachment ::attachment]
-                   [::coordinate ::coordinate]
+                   [::connection-id ::connection-id]
+                   [::branch-head ::branch-head]
                    [::backend ::backend]
                    [::entry-state ::entry-state]
                    [::path {:optional true} ::path]
@@ -165,14 +166,14 @@
  ::acquire-database!-request
  [:map {:closed true}
   [::database-name ::database-name]
-  [::attachment {:optional true} ::attachment]
+  [::connection-id {:optional true} ::connection-id]
   [::transport-connection ::transport-connection]])
 (schema/register!
  ::acquire-database!-response
  [:map
   [::database-name ::database-name]
-  [::attachment ::attachment]
-  [::coordinate ::coordinate]
+  [::connection-id ::connection-id]
+  [::branch-head ::branch-head]
   [::backend ::backend]
   [::entry-state ::entry-state]
   [::path {:optional true} ::path]
@@ -199,20 +200,20 @@
  ::observe-database-lifecycle-response
  [:map {:closed true}
   [::database-name ::database-name]
-  [::main-coordinate ::main-coordinate]
+  [::main-branch-head ::main-branch-head]
   [::main-parent-commit-ids ::main-parent-commit-ids]
-  [::branch-coordinates ::branch-coordinates]
+  [::branch-branch-heads ::branch-branch-heads]
   [::branch-roster ::branch-roster]
   [::restore-completions ::restore-completions]
   [::completed-restore-ids ::completed-restore-ids]
-  [::restore-completion-coordinates
-   ::restore-completion-coordinates]])
+  [::restore-completion-branch-heads
+   ::restore-completion-branch-heads]])
 
 (schema/register!
- ::resolve-transaction-coordinate!-request
+ ::resolve-transaction-branch-head!-request
  [:map {:closed true}
   [::conn ::conn]
-  [::main-coordinate ::main-coordinate]
+  [::main-branch-head ::main-branch-head]
   [::transaction-id ::transaction-id]])
 (schema/register!
  ::commit-reachable?-request
@@ -225,7 +226,7 @@
  [:map
   [::source-database-name ::source-database-name]
   [::target-database-name ::target-database-name]
-  [::source-coordinate ::source-coordinate]
+  [::source-branch-head ::source-branch-head]
   [::expected-source-head ::expected-source-head]
   [::target-branch ::target-branch]
   [::initialize-connection! 'fn?]])
@@ -233,25 +234,25 @@
  ::create-branch!-response
  [:map
   [::target-database-name ::target-database-name]
-  [::attachment ::attachment]
-  [::coordinate ::coordinate]
+  [::connection-id ::connection-id]
+  [::branch-head ::branch-head]
   [::backend ::backend]
   [::path {:optional true} ::path]
   [::created? ::created?]
   [::adopted? ::adopted?]])
 
 (schema/register!
- ::release-attachment!-request
+ ::release-connection-id!-request
  [:map
   [::target-database-name ::target-database-name]
-  [::attachment ::attachment]
+  [::connection-id ::connection-id]
   [::expected-target-head ::expected-target-head]
   [::drain! ::drain!]])
 (schema/register!
- ::release-attachment!-response
+ ::release-connection-id!-response
  [:map
   [::target-database-name ::target-database-name]
-  [::attachment ::attachment]
+  [::connection-id ::connection-id]
   [::released? :boolean]])
 
 (schema/register!
@@ -259,15 +260,15 @@
  [:map
   [::source-database-name ::source-database-name]
   [::target-database-name ::target-database-name]
-  [::attachment ::attachment]
+  [::connection-id ::connection-id]
   [::expected-target-head ::expected-target-head]
   [::drain! ::drain!]])
 (schema/register!
  ::delete-branch!-response
  [:map
   [::target-database-name ::target-database-name]
-  [::attachment ::attachment]
-  [::coordinate ::coordinate]
+  [::connection-id ::connection-id]
+  [::branch-head ::branch-head]
   [::released? :boolean]
   [::deleted? ::deleted?]])
 
@@ -277,21 +278,21 @@
   [::database-name ::database-name]
   [::backend ::backend]
   [::path {:optional true} ::path]
-  [::pre-restore-main-coordinate ::pre-restore-main-coordinate]
-  [::selected-target-coordinate ::selected-target-coordinate]
-  [::prepared-target-coordinate ::prepared-target-coordinate]
-  [::undo-coordinate ::undo-coordinate]
+  [::pre-restore-main-branch-head ::pre-restore-main-branch-head]
+  [::selected-target-branch-head ::selected-target-branch-head]
+  [::prepared-target-branch-head ::prepared-target-branch-head]
+  [::undo-branch-head ::undo-branch-head]
   [::expected-branch-roster ::expected-branch-roster]
   [::validate-db! ::validate-db!]])
 (schema/register!
  ::admin-restore-main!-response
  [:map {:closed true}
   [::admin-outcome ::admin-outcome]
-  [::pre-restore-main-coordinate ::pre-restore-main-coordinate]
-  [::selected-target-coordinate ::selected-target-coordinate]
-  [::prepared-target-coordinate ::prepared-target-coordinate]
-  [::undo-coordinate ::undo-coordinate]
-  [::coordinate ::coordinate]
+  [::pre-restore-main-branch-head ::pre-restore-main-branch-head]
+  [::selected-target-branch-head ::selected-target-branch-head]
+  [::prepared-target-branch-head ::prepared-target-branch-head]
+  [::undo-branch-head ::undo-branch-head]
+  [::branch-head ::branch-head]
   [::branch-roster ::branch-roster]
   [::force-invoked? ::force-invoked?]
   [::admin-connection-state ::admin-connection-state]])
@@ -311,8 +312,8 @@
 (schema/register! ::database-summary
                   [:map
                    [::database-name ::database-name]
-                   [::attachment ::attachment]
-                   [::coordinate ::coordinate]
+                   [::connection-id ::connection-id]
+                   [::branch-head ::branch-head]
                    [::backend ::backend]
                    [::entry-state ::entry-state]
                    [::path {:optional true} ::path]
@@ -352,8 +353,8 @@
                   [:map
                    [::conn {:optional true} ::conn]
                    [::database-name {:optional true} ::database-name]
-                   [::attachment {:optional true} ::attachment]
-                   [::coordinate {:optional true} ::coordinate]
+                   [::connection-id {:optional true} ::connection-id]
+                   [::branch-head {:optional true} ::branch-head]
                    [::error-kind {:optional true}
                     [:enum :seon.db.registry.error/not-found
                      :seon.db.registry.error/cleanup-required]]
@@ -365,9 +366,9 @@
   ;; {database-name -> entry-map}
   (atom {}))
 
-(defn- current-coordinate
+(defn- current-branch-head
   [{::keys [conn]}]
-  (coordinate/resolved (d/db conn)))
+  (branch/head (d/db conn)))
 
 (defn- cleanup-required?
   [entry]
@@ -392,16 +393,16 @@
       (dissoc ::ensured? ::transport-connections ::release-completion)
       (assoc ::database-name database-name
              ::entry-state (derived-entry-state entry)
-             ::coordinate (current-coordinate entry))))
+             ::branch-head (current-branch-head entry))))
 
 (defn- summary
   "Public view of an entry, sans live conn."
-  [database-name {::keys [attachment backend path release-error
+  [database-name {::keys [connection-id backend path release-error
                           initialization-error]
                   :as entry}]
   (cond-> {::database-name database-name
-           ::attachment attachment
-           ::coordinate (current-coordinate entry)
+           ::connection-id connection-id
+           ::branch-head (current-branch-head entry)
            ::backend backend
            ::entry-state (derived-entry-state entry)}
     path (assoc ::path path)
@@ -409,56 +410,56 @@
     initialization-error (assoc ::initialization-error initialization-error)))
 
 (defn- backend-request
-  [{::keys [database-name backend path attachment initial-tx]}]
+  [{::keys [database-name backend path connection-id initial-tx]}]
   (cond-> {::backend/database-name database-name
            ::backend/backend backend}
     path (assoc ::backend/path path)
-    attachment (assoc ::coordinate/attachment attachment)
+    connection-id (assoc ::branch/connection-id connection-id)
     (seq initial-tx) (assoc ::backend/initial-tx initial-tx)))
 
 (defn- entry-config
-  [database-name {::keys [attachment backend path]}]
+  [database-name {::keys [connection-id backend path]}]
   (id/allocation-connect-config
    (backend/datahike-config
     (backend-request
      {::database-name database-name
       ::backend backend
       ::path path
-      ::attachment attachment}))))
+      ::connection-id connection-id}))))
 
-(defn- fail-attachment!
+(defn- fail-connection-id!
   [message data]
   (throw
    (ex-info message
             (assoc data :seon.error/kind
-                   :seon.db.registry.error/attachment-conflict))))
+                   :seon.db.registry.error/connection-id-conflict))))
 
 (defn- validate-route-bijection!
-  [registry database-name attachment backend-kind path]
+  [registry database-name connection-id backend-kind path]
   (when-let [[other-name _]
              (some (fn [[registered-name entry]]
                      (when (and (not= registered-name database-name)
-                                (= attachment (::attachment entry)))
+                                (= connection-id (::connection-id entry)))
                        [registered-name entry]))
                    registry)]
-    (fail-attachment!
-     "The requested database attachment already has a logical route."
+    (fail-connection-id!
+     "The requested database connection-id already has a logical route."
      {::database-name database-name
-      ::attachment attachment
+      ::connection-id connection-id
       ::existing-database-name other-name}))
-  (let [database-id (::coordinate/database-id attachment)]
+  (let [store-id (first connection-id)]
     (doseq [[registered-name entry] registry
-            :let [registered-attachment (::attachment entry)
-                  registered-id (::coordinate/database-id registered-attachment)
+            :let [registered-connection-id (::connection-id entry)
+                  registered-id (first registered-connection-id)
                   registered-backend (::backend entry)
                   registered-path (::path entry)]]
-      (when (and (= database-id registered-id)
+      (when (and (= store-id registered-id)
                  (or (not= backend-kind registered-backend)
                      (not= path registered-path)))
-        (fail-attachment!
+        (fail-connection-id!
          "Routes for one physical database disagree on backend configuration."
          {::database-name database-name
-          ::attachment attachment
+          ::connection-id connection-id
           ::backend backend-kind
           ::path path
           ::existing-database-name registered-name
@@ -467,26 +468,26 @@
       (when (and (= :file backend-kind)
                  (= :file registered-backend)
                  (= path registered-path)
-                 (not= database-id registered-id))
-        (fail-attachment!
+                 (not= store-id registered-id))
+        (fail-connection-id!
          "One durable backend path cannot name two physical databases."
          {::database-name database-name
-          ::attachment attachment
+          ::connection-id connection-id
           ::path path
           ::existing-database-name registered-name
-          ::existing-attachment registered-attachment})))))
+          ::existing-connection-id registered-connection-id})))))
 
 (defn- validate-existing-route!
-  [database-name entry attachment backend-kind path]
-  (when-not (= [attachment backend-kind path]
-               [(::attachment entry) (::backend entry) (::path entry)])
-    (fail-attachment!
-     "A logical database name cannot change its registered attachment."
+  [database-name entry connection-id backend-kind path]
+  (when-not (= [connection-id backend-kind path]
+               [(::connection-id entry) (::backend entry) (::path entry)])
+    (fail-connection-id!
+     "A logical database name cannot change its registered connection-id."
      {::database-name database-name
-      ::attachment attachment
+      ::connection-id connection-id
       ::backend backend-kind
       ::path path
-      ::existing-attachment (::attachment entry)
+      ::existing-connection-id (::connection-id entry)
       ::existing-backend (::backend entry)
       ::existing-path (::path entry)}))
   (cond
@@ -495,8 +496,8 @@
      (ex-info "A failed database open still requires resource cleanup."
               {:seon.error/kind :seon.db.registry.error/cleanup-required
                ::database-name database-name
-               ::attachment (::attachment entry)
-               ::coordinate (current-coordinate entry)
+               ::connection-id (::connection-id entry)
+               ::branch-head (current-branch-head entry)
                ::release-error (::release-error entry)
                ::initialization-error (::initialization-error entry)}))
 
@@ -505,24 +506,24 @@
      (ex-info "The database connection is being released."
               {:seon.error/kind :seon.db.registry.error/releasing
                ::database-name database-name
-               ::attachment (::attachment entry)}))
+               ::connection-id (::connection-id entry)}))
 
     :else
     (entry-view database-name entry)))
 
 (defn- branch-source
-  [registry attachment]
-  (let [database-id (::coordinate/database-id attachment)]
+  [registry connection-id]
+  (let [store-id (first connection-id)]
     (some (fn [[_ entry]]
-            (when (= database-id
-                     (::coordinate/database-id (::attachment entry)))
+            (when (= store-id
+                     (first (::connection-id entry)))
               (::conn entry)))
           registry)))
 
 (defn- ensure-existing-reference!
-  [database-name entry attachment backend-kind path]
+  [database-name entry connection-id backend-kind path]
   (validate-existing-route!
-   database-name entry attachment backend-kind path)
+   database-name entry connection-id backend-kind path)
   (if (get entry ::ensured? true)
     (entry-view database-name entry)
     (let [acquired (d/connect (entry-config database-name entry))]
@@ -535,55 +536,55 @@
                   {:seon.error/kind
                    :seon.db.registry.error/connection-mismatch
                    ::database-name database-name
-                   ::attachment (::attachment entry)})))
+                   ::connection-id (::connection-id entry)})))
       (let [updated (assoc entry ::ensured? true)]
         (swap! !registry assoc database-name updated)
         (entry-view database-name updated)))))
 
 (defn- open-entry!
-  "Open and validate one exact Datahike attachment."
-  [registry database-name backend-kind path attachment initial-tx]
+  "Open and validate one exact Datahike connection-id."
+  [registry database-name backend-kind path connection-id initial-tx]
   (let [request (backend-request
                  {::database-name database-name
                   ::backend backend-kind
                   ::path path
-                  ::attachment attachment
+                  ::connection-id connection-id
                   ::initial-tx initial-tx})
         cfg (backend/datahike-config request)
-        branch (::coordinate/branch attachment)]
+        branch (second connection-id)]
     (if (= :db branch)
       (do
         (when path
           (backend/ensure-parent-dir! {::backend/path path}))
         (when-not (d/database-exists? cfg)
           (d/create-database cfg)))
-      (let [source (branch-source registry attachment)]
+      (let [source (branch-source registry connection-id)]
         (when-not source
-          (fail-attachment!
+          (fail-connection-id!
            "A non-main branch requires a registered physical database."
-           {::database-name database-name ::attachment attachment}))
+           {::database-name database-name ::connection-id connection-id}))
         (when-not (contains? (d/branches source) branch)
-          (fail-attachment!
+          (fail-connection-id!
            "The requested branch is absent from Datahike's durable branch roster."
            {::database-name database-name
-            ::attachment attachment
+            ::connection-id connection-id
             ::available-branches (d/branches source)}))))
     (let [conn (d/connect (id/allocation-connect-config cfg))
           entry (cond-> {::conn conn
-                         ::attachment attachment
+                         ::connection-id connection-id
                          ::backend backend-kind
                          ::ensured? true
                          ::transport-connections #{}}
                   path (assoc ::path path))]
       (try
         (id/assert-allocation-writer! conn)
-        (let [actual (coordinate/attachment (coordinate/resolved (d/db conn)))]
-          (when-not (= attachment actual)
-            (fail-attachment!
-             "Datahike connected a different database attachment."
+        (let [actual (branch/connection-id (branch/head (d/db conn)))]
+          (when-not (= connection-id actual)
+            (fail-connection-id!
+             "Datahike connected a different database connection-id."
              {::database-name database-name
-              ::attachment attachment
-              ::actual-attachment actual})))
+              ::connection-id connection-id
+              ::actual-connection-id actual})))
         entry
         (catch Throwable throwable
           (try
@@ -600,8 +601,8 @@
                   {:seon.error/kind
                    :seon.db.registry.error/cleanup-required
                    ::database-name database-name
-                   ::attachment attachment
-                   ::coordinate (current-coordinate retained)
+                   ::connection-id connection-id
+                   ::branch-head (current-branch-head retained)
                    ::initialization-error (.toString throwable)
                    ::release-error (.toString release-throwable)}
                   throwable)))))
@@ -625,58 +626,58 @@
    It runs exactly once for a newly opened connection, before publication. A
    failure releases the connection and is rethrown; no broken entry survives."
   {:malli/schema [:=> [:cat ::ensure-database!-request] ::ensure-database!-response]}
-  [{::keys [database-name backend path attachment initial-tx
+  [{::keys [database-name backend path connection-id initial-tx
             initialize-connection!]
     :or {backend :file}}]
   (let [request (backend-request
                  {::database-name database-name
                   ::backend backend
                   ::path path
-                  ::attachment attachment
+                  ::connection-id connection-id
                   ::initial-tx initial-tx})
         facts (backend/backend-facts request)
-        attachment* (::coordinate/attachment facts)
+        connection-id* (::branch/connection-id facts)
         backend-path (::backend/path facts)]
     (if-let [entry (get @!registry database-name)]
       (if (get entry ::ensured? true)
         (validate-existing-route!
-         database-name entry attachment* backend backend-path)
+         database-name entry connection-id* backend backend-path)
         (locking !registry
           (ensure-existing-reference!
            database-name (get @!registry database-name)
-           attachment* backend backend-path)))
+           connection-id* backend backend-path)))
       (locking !registry
         (if-let [entry (get @!registry database-name)]
           (ensure-existing-reference!
-           database-name entry attachment* backend backend-path)
+           database-name entry connection-id* backend backend-path)
           (let [registry @!registry]
             (validate-route-bijection!
-             registry database-name attachment* backend backend-path)
+             registry database-name connection-id* backend backend-path)
             (let [entry (open-entry! registry database-name backend backend-path
-                                     attachment* initial-tx)
+                                     connection-id* initial-tx)
                   conn (::conn entry)
-                  branch (::coordinate/branch attachment*)
+                  branch (second connection-id*)
                   open-intent (if (= :db branch)
                                 :seon.db.registry.open/main
                                 :seon.db.registry.open/branch)
-                  coordinate-before (current-coordinate entry)]
+                  branch-head-before (current-branch-head entry)]
               (try
                 (initialize-connection!
                  {::conn conn
                   ::database-name database-name
-                  ::attachment attachment*
+                  ::connection-id connection-id*
                   ::open-intent open-intent})
                 (when (and (= :seon.db.registry.open/branch open-intent)
-                           (not= coordinate-before (current-coordinate entry)))
+                           (not= branch-head-before (current-branch-head entry)))
                   (throw
                    (ex-info
                     "A non-main branch initializer changed its database head."
                     {:seon.error/kind
                      :seon.db.registry.error/branch-initializer-wrote
                      ::database-name database-name
-                     ::attachment attachment*
-                     ::coordinate-before coordinate-before
-                     ::coordinate-after (current-coordinate entry)})))
+                     ::connection-id connection-id*
+                     ::branch-head-before branch-head-before
+                     ::branch-head-after (current-branch-head entry)})))
                 (swap! !registry assoc database-name entry)
                 (entry-view database-name entry)
                 (catch Throwable throwable
@@ -694,8 +695,8 @@
                           {:seon.error/kind
                            :seon.db.registry.error/cleanup-required
                            ::database-name database-name
-                           ::attachment attachment*
-                           ::coordinate (current-coordinate retained)
+                           ::connection-id connection-id*
+                           ::branch-head (current-branch-head retained)
                            ::initialization-error (.toString throwable)
                            ::release-error (.toString release-throwable)}
                           throwable)))))
@@ -718,21 +719,21 @@
    acquisition is an idempotent no-op. The first connection takes ownership of
    an existing administrative ensure reference; later connections acquire one
    matching reference through Datahike's own connection registry. An optional
-   expected attachment is validated before either membership or connection
+   expected connection-id is validated before either membership or connection
    acquisition; omitting it atomically acquires the route that is current while
    the registry lock is held."
   {:malli/schema [:=> [:cat ::acquire-database!-request]
                   ::acquire-database!-response]}
-  [{::keys [database-name attachment transport-connection]}]
+  [{::keys [database-name connection-id transport-connection]}]
   (locking !registry
     (let [entry (require-ready-entry! database-name)
-          _ (when (and attachment
-                       (not= attachment (::attachment entry)))
-              (fail-attachment!
-               "The requested database attachment does not match its logical route."
+          _ (when (and connection-id
+                       (not= connection-id (::connection-id entry)))
+              (fail-connection-id!
+               "The requested database connection-id does not match its logical route."
                {::database-name database-name
-                ::attachment attachment
-                ::existing-attachment (::attachment entry)}))
+                ::connection-id connection-id
+                ::existing-connection-id (::connection-id entry)}))
           connections (::transport-connections entry #{})]
       (if (owns-transport-connection? connections transport-connection)
         (assoc (entry-view database-name entry) ::acquired? false)
@@ -750,7 +751,7 @@
               {:seon.error/kind
                :seon.db.registry.error/connection-mismatch
                ::database-name database-name
-               ::attachment (::attachment entry)})))
+               ::connection-id (::connection-id entry)})))
           (let [updated
                 (-> entry
                     (assoc ::ensured? false)
@@ -782,7 +783,7 @@
   [database-name completion entry drain!]
   (try
     (drain! {::database-name database-name
-             ::attachment (::attachment entry)})
+             ::connection-id (::connection-id entry)})
     (d/release (::conn entry))
     (locking !registry
       (when (identical? completion
@@ -868,8 +869,8 @@
        :seon.db.protocol.error/cleanup-required
        "The requested database route has unproved resource cleanup."
        {::database-name database-name
-        ::attachment (::attachment entry)
-        ::coordinate (current-coordinate entry)
+        ::connection-id (::connection-id entry)
+        ::branch-head (current-branch-head entry)
         ::release-error (::release-error entry)})
 
       (::release-completion entry)
@@ -877,17 +878,17 @@
        :seon.db.registry.error/releasing
        "The requested database route is being released."
        {::database-name database-name
-        ::attachment (::attachment entry)})
+        ::connection-id (::connection-id entry)})
 
       :else entry)))
 
-(defn- require-attachment!
+(defn- require-connection-id!
   [label expected actual data]
   (when-not (= expected actual)
     (lifecycle-fail!
-     :seon.db.protocol.error/attachment-mismatch
-     (str label " belongs to a different database attachment.")
-     (assoc data ::expected-attachment expected ::actual-attachment actual))))
+     :seon.db.protocol.error/connection-id-mismatch
+     (str label " belongs to a different database connection-id.")
+     (assoc data ::expected-connection-id expected ::actual-connection-id actual))))
 
 (defn- require-head!
   [kind label expected actual data]
@@ -895,10 +896,10 @@
     (lifecycle-fail!
      kind
      (str label " changed before the lifecycle operation.")
-     (assoc data ::expected-coordinate expected ::coordinate actual))))
+     (assoc data ::expected-branch-head expected ::branch-head actual))))
 
-(defn- observe-native-branch-coordinates!
-  [database-name connection attachment roster]
+(defn- observe-native-branch-branch-heads!
+  [database-name connection connection-id roster]
   (into {}
         (map
          (fn [branch]
@@ -910,29 +911,29 @@
                 {::database-name database-name
                  ::branch-roster roster
                  ::target-branch branch}))
-             (let [resolved (coordinate/resolved db-value)
-                   expected-attachment
-                   (assoc attachment ::coordinate/branch branch)]
-               (require-attachment!
-                "Observed native branch" expected-attachment
-                (coordinate/attachment resolved)
+             (let [resolved (branch/head db-value)
+                   expected-connection-id
+                   (assoc connection-id 1 branch)]
+               (require-connection-id!
+                "Observed native branch" expected-connection-id
+                (branch/connection-id resolved)
                 {::database-name database-name
                  ::target-branch branch
-                 ::coordinate resolved})
+                 ::branch-head resolved})
                [branch resolved])))
          (sort roster))))
 
-(defn- coordinate-resolution-error!
+(defn- branch-head-resolution-error!
   [kind message data]
   (lifecycle-fail! kind message data))
 
 (defn- retained-stored-commit!
   [store commit-id]
   (or (k/get store commit-id nil {:sync? true})
-      (coordinate-resolution-error!
+      (branch-head-resolution-error!
        :seon.db.protocol.error/unsupported-history
-       "Transaction-coordinate ancestry is incomplete."
-       {::coordinate/commit-id commit-id})))
+       "Transaction-branch-head ancestry is incomplete."
+       {::branch/commit-id commit-id})))
 
 (defn commit-reachable?
   "True when `commit-id` is retained on the connection's current lineage."
@@ -955,12 +956,12 @@
             false))
         false))))
 
-(defn- stored-coordinate
+(defn- stored-branch-head
   [stored]
-  {::coordinate/database-id (get-in stored [:config :store :id])
-   ::coordinate/branch (get-in stored [:config :branch])
-   ::coordinate/commit-id (get-in stored [:meta :datahike/commit-id])
-   ::coordinate/t (:max-tx stored)})
+  {::branch/store-id (get-in stored [:config :store :id])
+   ::branch/name (get-in stored [:config :branch])
+   ::branch/commit-id (get-in stored [:meta :datahike/commit-id])
+   ::branch/basis-t (:max-tx stored)})
 
 (defn- transaction-origin?
   [store branch transaction stored]
@@ -986,7 +987,7 @@
                 candidates (cond-> candidates
                              (transaction-origin?
                               store branch transaction stored)
-                             (conj (stored-coordinate stored)))
+                             (conj (stored-branch-head stored)))
                 parents
                 (if (>= basis-t transaction)
                   (mapv #(retained-stored-commit! store %)
@@ -997,49 +998,49 @@
                    candidates))))
       candidates)))
 
-(defn resolve-transaction-coordinate!
+(defn resolve-transaction-branch-head!
   "Resolve one transaction's exact origin on the retained main lineage."
   {:malli/schema
-   [:=> [:cat ::resolve-transaction-coordinate!-request] ::coordinate]}
-  [{::keys [conn main-coordinate transaction-id]}]
+   [:=> [:cat ::resolve-transaction-branch-head!-request] ::branch-head]}
+  [{::keys [conn main-branch-head transaction-id]}]
   (let [current-db (d/db conn)
-        current-coordinate (coordinate/resolved current-db)
+        current-branch-head (branch/head current-db)
         store (:store current-db)]
     (when (false? (get-in current-db [:config :commit-graph?] true))
-      (coordinate-resolution-error!
+      (branch-head-resolution-error!
        :seon.db.protocol.error/unsupported-history
-       "Transaction-coordinate resolution requires retained commit history."
-       {::main-coordinate main-coordinate
+       "Transaction-branch-head resolution requires retained commit history."
+       {::main-branch-head main-branch-head
         ::transaction-id transaction-id}))
-    (when-not (and (= :db (::coordinate/branch current-coordinate))
-                   (= :db (::coordinate/branch main-coordinate)))
-      (coordinate-resolution-error!
-       :seon.db.protocol.error/attachment-mismatch
-       "Restore completion coordinates resolve only on the live :db lineage."
-       {::main-coordinate main-coordinate
-        ::coordinate current-coordinate}))
-    (when-not (= (coordinate/attachment current-coordinate)
-                 (coordinate/attachment main-coordinate))
-      (coordinate-resolution-error!
-       :seon.db.protocol.error/attachment-mismatch
-       "The frozen head names a different database attachment."
-       {::main-coordinate main-coordinate
-        ::coordinate current-coordinate}))
+    (when-not (and (= :db (::branch/name current-branch-head))
+                   (= :db (::branch/name main-branch-head)))
+      (branch-head-resolution-error!
+       :seon.db.protocol.error/connection-id-mismatch
+       "Restore completion branch-heads resolve only on the live :db lineage."
+       {::main-branch-head main-branch-head
+        ::branch-head current-branch-head}))
+    (when-not (= (branch/connection-id current-branch-head)
+                 (branch/connection-id main-branch-head))
+      (branch-head-resolution-error!
+       :seon.db.protocol.error/connection-id-mismatch
+       "The frozen head names a different database connection-id."
+       {::main-branch-head main-branch-head
+        ::branch-head current-branch-head}))
     (let [head (retained-stored-commit!
-                store (::coordinate/commit-id main-coordinate))
-          resolved-head (stored-coordinate head)]
-      (when-not (= main-coordinate resolved-head)
-        (coordinate-resolution-error!
-         :seon.db.protocol.error/attachment-mismatch
-         "The retained commit does not resolve the frozen head coordinate."
-         {::main-coordinate main-coordinate
-          ::coordinate resolved-head}))
+                store (::branch/commit-id main-branch-head))
+          resolved-head (stored-branch-head head)]
+      (when-not (= main-branch-head resolved-head)
+        (branch-head-resolution-error!
+         :seon.db.protocol.error/connection-id-mismatch
+         "The retained commit does not resolve the frozen head branch-head."
+         {::main-branch-head main-branch-head
+          ::branch-head resolved-head}))
       (when-not
-       (loop [pending [(::coordinate/commit-id current-coordinate)]
+       (loop [pending [(::branch/commit-id current-branch-head)]
               visited #{}]
          (if-let [commit-id (first pending)]
            (cond
-             (= commit-id (::coordinate/commit-id main-coordinate)) true
+             (= commit-id (::branch/commit-id main-branch-head)) true
              (contains? visited commit-id)
              (recur (next pending) visited)
              :else
@@ -1048,30 +1049,30 @@
                               (get-in stored [:meta :datahike/parents]))
                       (conj visited commit-id))))
            false))
-        (coordinate-resolution-error!
+        (branch-head-resolution-error!
          :seon.db.protocol.error/non-ancestor
          "The frozen head is not an ancestor of the current branch head."
-         {::main-coordinate main-coordinate
-          ::coordinate current-coordinate}))
+         {::main-branch-head main-branch-head
+          ::branch-head current-branch-head}))
       (let [candidates
             (transaction-origin-candidates
-             store head (::coordinate/branch main-coordinate) transaction-id)]
+             store head (::branch/name main-branch-head) transaction-id)]
         (case (count candidates)
           1 (first candidates)
-          0 (coordinate-resolution-error!
+          0 (branch-head-resolution-error!
              :seon.db.protocol.error/not-found
              "No original commit for the transaction is reachable from the frozen head."
-             {::main-coordinate main-coordinate
+             {::main-branch-head main-branch-head
               ::transaction-id transaction-id})
-          (coordinate-resolution-error!
+          (branch-head-resolution-error!
            :seon.db.protocol.error/ambiguous-history
            "Several original commits match the transaction on this branch."
-           {::main-coordinate main-coordinate
+           {::main-branch-head main-branch-head
             ::transaction-id transaction-id
-            :seon.db.registry/candidate-coordinates candidates}))))))
+            :seon.db.registry/candidate-branch-heads candidates}))))))
 
 (defn- durable-restore-completions!
-  [database-name connection main-db main-coordinate]
+  [database-name connection main-db main-branch-head]
   (let [ids (->> (d/q '[:find [?id ...]
                          :where
                          [?completion :seon.db.restore/id ?id]]
@@ -1099,13 +1100,13 @@
               (and (schema/valid-candidate-value?
                     ::db.restore/completion completion)
                    (= database-name (::db.restore/db-name completion))
-                   (= (::coordinate/database-id main-coordinate)
+                   (= (::branch/store-id main-branch-head)
                       (::db.restore/database-id completion)))
                (lifecycle-fail!
                 :seon.db.protocol.error/restore-divergence
                 "A durable restore completion disagrees with the observed main database."
                 {::database-name database-name
-                 ::main-coordinate main-coordinate
+                 ::main-branch-head main-branch-head
                  :seon.db.restore/id completion-id
                  :seon.db.restore/completion completion}))
              completion))
@@ -1132,7 +1133,7 @@
                       :seon.db.protocol.error/restore-divergence
                       "A durable restore completion was not published atomically."
                       {::database-name database-name
-                       ::main-coordinate main-coordinate
+                       ::main-branch-head main-branch-head
                        :seon.db.restore/id completion-id
                        :seon.db.restore/completion completion
                        :seon.db.restore/publication-rows rows}))
@@ -1150,21 +1151,21 @@
                       :seon.db.protocol.error/restore-divergence
                       "A durable restore completion no longer has its original publication transaction."
                       {::database-name database-name
-                       ::main-coordinate main-coordinate
+                       ::main-branch-head main-branch-head
                        :seon.db.restore/id completion-id
                        :seon.db.restore/transaction-ids transactions
                        :seon.db.restore/current-transaction
                        (get current-transactions completion-id)}))
                    [completion-id (first transactions)]))
               ids))
-        completion-coordinates
+        completion-branch-heads
         (into {}
               (map
                (fn [[completion-id transaction]]
                  [completion-id
-                  (resolve-transaction-coordinate!
+                  (resolve-transaction-branch-head!
                    {::conn connection
-                    ::main-coordinate main-coordinate
+                    ::main-branch-head main-branch-head
                     ::transaction-id transaction})]))
               transaction-ts)]
     (when-not (= (set ids) (set (keys transactions-by-id)))
@@ -1172,33 +1173,33 @@
        :seon.db.protocol.error/restore-divergence
        "Restore completion history disagrees with the current main database."
        {::database-name database-name
-        ::main-coordinate main-coordinate
+        ::main-branch-head main-branch-head
         ::completed-restore-ids (set ids)
         :seon.db.restore/historical-completion-ids
         (set (keys transactions-by-id))}))
     {::main-parent-commit-ids (set (or (d/parent-commit-ids main-db) []))
      ::restore-completions completions
      ::completed-restore-ids (set ids)
-     ::restore-completion-coordinates completion-coordinates}))
+     ::restore-completion-branch-heads completion-branch-heads}))
 
 (defn- observe-main-lifecycle-facts!
-  [database-name connection attachment expected-coordinate]
+  [database-name connection connection-id expected-branch-head]
   (let [main-db (d/branch-as-db connection :db)]
     (when-not main-db
       (lifecycle-fail!
        :seon.db.protocol.error/branch-missing
        "The main branch disappeared during lifecycle observation."
        {::database-name database-name}))
-    (let [main-coordinate (coordinate/resolved main-db)]
-      (require-attachment!
-       "Observed main branch" attachment (coordinate/attachment main-coordinate)
-       {::database-name database-name ::main-coordinate main-coordinate})
+    (let [main-branch-head (branch/head main-db)]
+      (require-connection-id!
+       "Observed main branch" connection-id (branch/connection-id main-branch-head)
+       {::database-name database-name ::main-branch-head main-branch-head})
       (require-head!
        :seon.db.protocol.error/stale-target-head
-       "Observed main branch" expected-coordinate main-coordinate
+       "Observed main branch" expected-branch-head main-branch-head
        {::database-name database-name})
       (durable-restore-completions!
-       database-name connection main-db main-coordinate))))
+       database-name connection main-db main-branch-head))))
 
 (defn observe-database-lifecycle
   "Observe every exact native branch head from the registered main route."
@@ -1208,31 +1209,31 @@
   [{::keys [database-name]}]
   (locking !registry
     (let [entry (require-ready-entry! database-name)
-          attachment (::attachment entry)
+          connection-id (::connection-id entry)
           connection (::conn entry)]
-      (when-not (= :db (::coordinate/branch attachment))
+      (when-not (= :db (second connection-id))
         (lifecycle-fail!
-         :seon.db.protocol.error/attachment-mismatch
+         :seon.db.protocol.error/connection-id-mismatch
          "Database lifecycle observation requires the main :db route."
          {::database-name database-name
-          ::attachment attachment}))
+          ::connection-id connection-id}))
       (locking connection
         (let [roster-before (set (d/branches connection))
-              coordinates-before
-              (observe-native-branch-coordinates!
-               database-name connection attachment roster-before)
+              branch-heads-before
+              (observe-native-branch-branch-heads!
+               database-name connection connection-id roster-before)
               main-facts-before
               (observe-main-lifecycle-facts!
-               database-name connection attachment (get coordinates-before :db))
+               database-name connection connection-id (get branch-heads-before :db))
               roster-middle (set (d/branches connection))
-              branch-coordinates
-              (observe-native-branch-coordinates!
-               database-name connection attachment roster-before)
+              branch-branch-heads
+              (observe-native-branch-branch-heads!
+               database-name connection connection-id roster-before)
               main-facts
               (observe-main-lifecycle-facts!
-               database-name connection attachment (get branch-coordinates :db))
+               database-name connection connection-id (get branch-branch-heads :db))
               roster-after (set (d/branches connection))
-              main-coordinate (get branch-coordinates :db)]
+              main-branch-head (get branch-branch-heads :db)]
           (when-not (= roster-before roster-middle roster-after)
             (lifecycle-fail!
              :seon.db.protocol.error/stale-branch-roster
@@ -1240,13 +1241,13 @@
              {::database-name database-name
               ::expected-branch-roster roster-before
               ::branch-roster roster-after}))
-          (when-not (= coordinates-before branch-coordinates)
+          (when-not (= branch-heads-before branch-branch-heads)
             (lifecycle-fail!
              :seon.db.protocol.error/stale-target-head
              "A native branch head changed during lifecycle observation."
              {::database-name database-name
-              ::expected-coordinate coordinates-before
-              ::coordinate branch-coordinates}))
+              ::expected-branch-head branch-heads-before
+              ::branch-head branch-branch-heads}))
           (when-not (= main-facts-before main-facts)
             (lifecycle-fail!
              :seon.db.protocol.error/stale-target-head
@@ -1255,23 +1256,23 @@
               :seon.db.registry/expected-main-lifecycle-facts main-facts-before
               :seon.db.registry/main-lifecycle-facts main-facts}))
           (when-not (and (contains? roster-before :db)
-                         main-coordinate
-                         (= roster-before (set (keys branch-coordinates))))
+                         main-branch-head
+                         (= roster-before (set (keys branch-branch-heads))))
             (lifecycle-fail!
              :seon.db.protocol.error/stale-branch-roster
              "Database lifecycle observation is incomplete."
              {::database-name database-name
               ::branch-roster roster-before
-              ::branch-coordinates branch-coordinates}))
+              ::branch-branch-heads branch-branch-heads}))
           {::database-name database-name
-           ::main-coordinate main-coordinate
+           ::main-branch-head main-branch-head
            ::main-parent-commit-ids (::main-parent-commit-ids main-facts)
-           ::branch-coordinates branch-coordinates
+           ::branch-branch-heads branch-branch-heads
            ::branch-roster roster-before
            ::restore-completions (::restore-completions main-facts)
            ::completed-restore-ids (::completed-restore-ids main-facts)
-           ::restore-completion-coordinates
-           (::restore-completion-coordinates main-facts)})))))
+           ::restore-completion-branch-heads
+           (::restore-completion-branch-heads main-facts)})))))
 
 (defn- datahike-lifecycle-kind
   [throwable]
@@ -1311,7 +1312,7 @@
       :else false)))
 
 (defn- delete-unpublished-branch!
-  [source-entry target-database-name target-branch attachment cause]
+  [source-entry target-database-name target-branch connection-id cause]
   (when-let [target-entry (get @!registry target-database-name)]
     (let [{::keys [released? release-error]}
           (release-database! {::database-name target-database-name})]
@@ -1320,8 +1321,8 @@
          :seon.db.protocol.error/cleanup-required
          "Branch open failed and target connection cleanup is unproved."
          {::target-database-name target-database-name
-          ::attachment attachment
-          ::coordinate (current-coordinate target-entry)
+          ::connection-id connection-id
+          ::branch-head (current-branch-head target-entry)
           ::release-error release-error
           ::initialization-error (.toString cause)}))))
   (try
@@ -1331,7 +1332,7 @@
        :seon.db.protocol.error/cleanup-required
        "Branch open failed and target branch cleanup is unproved."
        {::target-database-name target-database-name
-        ::attachment attachment
+        ::connection-id connection-id
         ::release-error (.toString cleanup-throwable)
         ::initialization-error (.toString cause)})))
   (when (contains? (d/branches (::conn source-entry)) target-branch)
@@ -1339,91 +1340,91 @@
      :seon.db.protocol.error/cleanup-required
      "Target branch remained in the durable roster after cleanup."
      {::target-database-name target-database-name
-      ::attachment attachment
+      ::connection-id connection-id
       ::initialization-error (.toString cause)})))
 
 (defn- branch-result
-  [target-database-name attachment coordinate backend-kind path created?]
+  [target-database-name connection-id branch-head backend-kind path created?]
   (cond-> {::target-database-name target-database-name
-           ::attachment attachment
-           ::coordinate coordinate
+           ::connection-id connection-id
+           ::branch-head branch-head
            ::backend backend-kind
            ::created? created?
            ::adopted? (not created?)}
     path (assoc ::path path)))
 
 (defn- reconcile-existing-target!
-  [{::keys [target-database-name target-branch source-connection attachment
+  [{::keys [target-database-name target-branch source-connection connection-id
             backend path]
     target-entry ::entry}]
-  (let [actual-coordinate (current-coordinate target-entry)]
-    (require-attachment!
-     "Existing target route" attachment (::attachment target-entry)
+  (let [actual-branch-head (current-branch-head target-entry)]
+    (require-connection-id!
+     "Existing target route" connection-id (::connection-id target-entry)
      {::target-database-name target-database-name})
     (when-not (contains? (d/branches source-connection) target-branch)
       (lifecycle-fail!
        :seon.db.protocol.error/branch-missing
        "The existing target route is absent from the durable branch roster."
        {::target-database-name target-database-name
-        ::attachment attachment}))
+        ::connection-id connection-id}))
     (when-not (and (= backend (::backend target-entry))
                    (= path (::path target-entry)))
       (lifecycle-fail!
        :seon.db.protocol.error/duplicate-route
-       "The target route uses different physical database coordinates."
+       "The target route uses different physical database branch-heads."
        {::target-database-name target-database-name
-        ::attachment attachment}))
-    (branch-result target-database-name attachment actual-coordinate
+        ::connection-id connection-id}))
+    (branch-result target-database-name connection-id actual-branch-head
                    backend path false)))
 
 (defn- retained-source-db!
-  [source-connection source-attachment source-coordinate]
+  [source-connection source-connection-id source-branch-head]
   (let [commit-db
         (call-datahike-lifecycle!
          #(d/commit-as-db source-connection
-                          (::coordinate/commit-id source-coordinate))
-         {::source-coordinate source-coordinate})]
+                          (::branch/commit-id source-branch-head))
+         {::source-branch-head source-branch-head})]
     (when-not commit-db
       (lifecycle-fail!
        :seon.db.protocol.error/missing-commit
        "The requested source commit is not retained."
-       {::source-coordinate source-coordinate}))
-    (let [commit-coordinate (coordinate/resolved commit-db)]
-      (require-attachment!
-       "Retained source commit" source-attachment
-       (coordinate/attachment commit-coordinate)
-       {::source-coordinate source-coordinate
-        ::coordinate commit-coordinate})
-      (when-not (= (::coordinate/commit-id source-coordinate)
-                   (::coordinate/commit-id commit-coordinate))
+       {::source-branch-head source-branch-head}))
+    (let [commit-branch-head (branch/head commit-db)]
+      (require-connection-id!
+       "Retained source commit" source-connection-id
+       (branch/connection-id commit-branch-head)
+       {::source-branch-head source-branch-head
+        ::branch-head commit-branch-head})
+      (when-not (= (::branch/commit-id source-branch-head)
+                   (::branch/commit-id commit-branch-head))
         (lifecycle-fail!
          :seon.db.protocol.error/missing-commit
          "The retained commit did not resolve to the requested id."
-         {::source-coordinate source-coordinate
-          ::coordinate commit-coordinate}))
-      (when-not (= (::coordinate/t source-coordinate)
-                   (::coordinate/t commit-coordinate))
+         {::source-branch-head source-branch-head
+          ::branch-head commit-branch-head}))
+      (when-not (= (::branch/basis-t source-branch-head)
+                   (::branch/basis-t commit-branch-head))
         (lifecycle-fail!
          :seon.db.protocol.error/cut-not-branchable
          "The requested temporal cut is not the containing commit head."
-         {::source-coordinate source-coordinate
-          ::coordinate commit-coordinate})))
+         {::source-branch-head source-branch-head
+          ::branch-head commit-branch-head})))
     commit-db))
 
 (defn create-branch!
   "Create or adopt one exact native branch and publish its logical route."
   {:malli/schema [:=> [:cat ::create-branch!-request]
                   ::create-branch!-response]}
-  [{::keys [source-database-name target-database-name source-coordinate
+  [{::keys [source-database-name target-database-name source-branch-head
             expected-source-head target-branch initialize-connection!]}]
   (locking !registry
     (let [source-entry (require-ready-entry! source-database-name)
-          source-attachment (::attachment source-entry)
+          source-connection-id (::connection-id source-entry)
           source-connection (::conn source-entry)
-          target-attachment
-          (assoc source-attachment ::coordinate/branch target-branch)
-          expected-target-coordinate
-          (assoc source-coordinate ::coordinate/branch target-branch)
+          target-connection-id
+          (assoc source-connection-id 1 target-branch)
+          expected-target-branch-head
+          (assoc source-branch-head ::branch/name target-branch)
           backend-kind (::backend source-entry)
           path (::path source-entry)]
       (when (= :db target-branch)
@@ -1431,13 +1432,13 @@
          :seon.db.protocol.error/protected-main-branch
          "The main :db branch cannot be a lifecycle target."
          {::target-branch target-branch}))
-      (require-attachment!
-       "Source coordinate" source-attachment
-       (coordinate/attachment source-coordinate)
-       {::source-coordinate source-coordinate})
-      (require-attachment!
-       "Expected source head" source-attachment
-       (coordinate/attachment expected-source-head)
+      (require-connection-id!
+       "Source branch-head" source-connection-id
+       (branch/connection-id source-branch-head)
+       {::source-branch-head source-branch-head})
+      (require-connection-id!
+       "Expected source head" source-connection-id
+       (branch/connection-id expected-source-head)
        {::expected-source-head expected-source-head})
       (if-let [target-entry (get @!registry target-database-name)]
         (locking source-connection
@@ -1445,19 +1446,19 @@
            {::target-database-name target-database-name
             ::target-branch target-branch
             ::source-connection source-connection
-            ::attachment target-attachment
+            ::connection-id target-connection-id
             ::backend backend-kind
             ::path path
             ::entry target-entry}))
         (do
           (when (some (fn [[_ entry]]
-                        (= target-attachment (::attachment entry)))
+                        (= target-connection-id (::connection-id entry)))
                       @!registry)
             (lifecycle-fail!
-             :seon.db.protocol.error/duplicate-attachment
-             "The target database attachment already has a logical route."
+             :seon.db.protocol.error/duplicate-connection-id
+             "The target database connection-id already has a logical route."
              {::target-database-name target-database-name
-              ::attachment target-attachment}))
+              ::connection-id target-connection-id}))
           (locking source-connection
             (let [existing?
                   (contains? (d/branches source-connection) target-branch)
@@ -1465,60 +1466,60 @@
                       (require-head!
                        :seon.db.protocol.error/stale-source-head
                        "Source head" expected-source-head
-                       (current-coordinate source-entry)
+                       (current-branch-head source-entry)
                        {::source-database-name source-database-name}))
                   commit-db
-                  (retained-source-db! source-connection source-attachment
-                                       source-coordinate)
+                  (retained-source-db! source-connection source-connection-id
+                                       source-branch-head)
                   _ (when-not existing?
                       (call-datahike-lifecycle!
                        #(d/branch! source-connection
-                                   (::coordinate/commit-id source-coordinate)
+                                   (::branch/commit-id source-branch-head)
                                    target-branch)
                        {::target-branch target-branch}))]
               (try
                 (let [target-db
                       (d/branch-as-db source-connection target-branch)
-                      target-coordinate (coordinate/resolved target-db)
+                      target-branch-head (branch/head target-db)
                       _ (when (and existing?
-                                   (not= expected-target-coordinate
-                                         target-coordinate))
+                                   (not= expected-target-branch-head
+                                         target-branch-head))
                           (lifecycle-fail!
                            :seon.db.protocol.error/branch-exists
-                           "The target branch exists at a different coordinate."
-                           {::expected-coordinate expected-target-coordinate
-                            ::coordinate target-coordinate}))
+                           "The target branch exists at a different branch-head."
+                           {::expected-branch-head expected-target-branch-head
+                            ::branch-head target-branch-head}))
                       _ (when-not (same-ordered-values?
                                    (d/datoms commit-db :eavt)
                                    (d/datoms target-db :eavt))
                           (lifecycle-fail!
                            :seon.db.protocol.error/initializer
                            "The target branch primary datoms differ from its source commit."
-                           {::source-coordinate source-coordinate
-                            ::coordinate target-coordinate}))
+                           {::source-branch-head source-branch-head
+                            ::branch-head target-branch-head}))
                       entry
                       (ensure-database!
                        (cond-> {::database-name target-database-name
                                 ::backend backend-kind
-                                ::attachment target-attachment
+                                ::connection-id target-connection-id
                                 ::initialize-connection!
                                 initialize-connection!}
                          path (assoc ::path path)))
-                      actual-coordinate (::coordinate entry)]
-                  (when-not (= expected-target-coordinate actual-coordinate)
+                      actual-branch-head (::branch-head entry)]
+                  (when-not (= expected-target-branch-head actual-branch-head)
                     (lifecycle-fail!
                      :seon.db.protocol.error/initializer
                      "The opened target branch moved from its exact fork point."
-                     {::expected-coordinate expected-target-coordinate
-                      ::coordinate actual-coordinate}))
-                  (branch-result target-database-name target-attachment
-                                 actual-coordinate backend-kind path
+                     {::expected-branch-head expected-target-branch-head
+                      ::branch-head actual-branch-head}))
+                  (branch-result target-database-name target-connection-id
+                                 actual-branch-head backend-kind path
                                  (not existing?)))
                 (catch Throwable throwable
                   (when-not existing?
                     (delete-unpublished-branch!
                      source-entry target-database-name target-branch
-                     target-attachment throwable))
+                     target-connection-id throwable))
                   (throw throwable))))))))))
 
 (defn- require-branch-roster!
@@ -1534,17 +1535,17 @@
 
 (defn- branch-db-at!
   [connection expected label]
-  (let [branch (::coordinate/branch expected)
+  (let [branch (::branch/name expected)
         db-value (d/branch-as-db connection branch)]
     (when-not db-value
       (lifecycle-fail!
        :seon.db.protocol.error/branch-missing
        (str label " is absent from durable storage.")
-       {::coordinate expected}))
-    (let [actual (coordinate/resolved db-value)]
+       {::branch-head expected}))
+    (let [actual (branch/head db-value)]
       (require-head!
        :seon.db.protocol.error/stale-target-head
-       label expected actual {::coordinate expected})
+       label expected actual {::branch-head expected})
       db-value)))
 
 (defn- secondary-identifiers [db-value]
@@ -1564,16 +1565,16 @@
   [validate-db! expected-main selected-target target-db main-db]
   (validate-db! target-db)
   (validate-db! main-db)
-  (let [actual (coordinate/resolved main-db)
+  (let [actual (branch/head main-db)
         target-secondary-roots (secondary-roots target-db)
         main-secondary-roots (secondary-roots main-db)]
-    (and (= (::coordinate/database-id expected-main)
-            (::coordinate/database-id actual))
-         (= :db (::coordinate/branch actual))
-         (= (::coordinate/t selected-target) (::coordinate/t actual))
-         (not= (::coordinate/commit-id expected-main)
-               (::coordinate/commit-id actual))
-         (= #{(::coordinate/commit-id selected-target)}
+    (and (= (::branch/store-id expected-main)
+            (::branch/store-id actual))
+         (= :db (::branch/name actual))
+         (= (::branch/basis-t selected-target) (::branch/basis-t actual))
+         (not= (::branch/commit-id expected-main)
+               (::branch/commit-id actual))
+         (= #{(::branch/commit-id selected-target)}
             (set (d/parent-commit-ids main-db)))
          (same-ordered-values? (d/datoms target-db :eavt)
                                (d/datoms main-db :eavt))
@@ -1638,52 +1639,52 @@
   "Move main to one prepared branch head without publishing runtime resources."
   {:malli/schema [:=> [:cat ::admin-restore-main!-request]
                   ::admin-restore-main!-response]}
-  [{::keys [database-name backend path pre-restore-main-coordinate
-            selected-target-coordinate prepared-target-coordinate
-            undo-coordinate expected-branch-roster validate-db!]}]
-  (let [main-attachment (coordinate/attachment pre-restore-main-coordinate)
-        database-id (::coordinate/database-id main-attachment)
+  [{::keys [database-name backend path pre-restore-main-branch-head
+            selected-target-branch-head prepared-target-branch-head
+            undo-branch-head expected-branch-roster validate-db!]}]
+  (let [main-connection-id (branch/connection-id pre-restore-main-branch-head)
+        database-id (first main-connection-id)
         config (backend/datahike-config
                 (cond-> {::backend/database-name database-name
                          ::backend/backend backend
-                         ::coordinate/attachment main-attachment}
+                         ::branch/connection-id main-connection-id}
                   path (assoc ::backend/path path)))
         required-branches
         #{:db
-          (::coordinate/branch prepared-target-coordinate)
-          (::coordinate/branch undo-coordinate)}]
-    (when-not (= :db (::coordinate/branch pre-restore-main-coordinate))
+          (::branch/name prepared-target-branch-head)
+          (::branch/name undo-branch-head)}]
+    (when-not (= :db (::branch/name pre-restore-main-branch-head))
       (lifecycle-fail!
-       :seon.db.protocol.error/attachment-mismatch
+       :seon.db.protocol.error/connection-id-mismatch
        "Restore administration requires the main :db branch."
-       {::pre-restore-main-coordinate pre-restore-main-coordinate}))
+       {::pre-restore-main-branch-head pre-restore-main-branch-head}))
     (when-not (and (= database-id
-                      (::coordinate/database-id selected-target-coordinate)
-                      (::coordinate/database-id prepared-target-coordinate)
-                      (::coordinate/database-id undo-coordinate))
-                   (= (::coordinate/commit-id selected-target-coordinate)
-                      (::coordinate/commit-id prepared-target-coordinate))
-                   (= (::coordinate/t selected-target-coordinate)
-                      (::coordinate/t prepared-target-coordinate))
-                   (= (::coordinate/commit-id pre-restore-main-coordinate)
-                      (::coordinate/commit-id undo-coordinate))
-                   (= (::coordinate/t pre-restore-main-coordinate)
-                      (::coordinate/t undo-coordinate))
+                      (::branch/store-id selected-target-branch-head)
+                      (::branch/store-id prepared-target-branch-head)
+                      (::branch/store-id undo-branch-head))
+                   (= (::branch/commit-id selected-target-branch-head)
+                      (::branch/commit-id prepared-target-branch-head))
+                   (= (::branch/basis-t selected-target-branch-head)
+                      (::branch/basis-t prepared-target-branch-head))
+                   (= (::branch/commit-id pre-restore-main-branch-head)
+                      (::branch/commit-id undo-branch-head))
+                   (= (::branch/basis-t pre-restore-main-branch-head)
+                      (::branch/basis-t undo-branch-head))
                    (every? expected-branch-roster required-branches))
       (lifecycle-fail!
-       :seon.db.protocol.error/attachment-mismatch
-       "Restore administration coordinates are not one prepared transition."
-       {::pre-restore-main-coordinate pre-restore-main-coordinate
-        ::selected-target-coordinate selected-target-coordinate
-        ::prepared-target-coordinate prepared-target-coordinate
-        ::undo-coordinate undo-coordinate
+       :seon.db.protocol.error/connection-id-mismatch
+       "Restore administration branch-heads are not one prepared transition."
+       {::pre-restore-main-branch-head pre-restore-main-branch-head
+        ::selected-target-branch-head selected-target-branch-head
+        ::prepared-target-branch-head prepared-target-branch-head
+        ::undo-branch-head undo-branch-head
         ::expected-branch-roster expected-branch-roster}))
     (when-not (d/database-exists? config)
       (lifecycle-fail!
        :seon.db.protocol.error/not-found
        "Restore administration never creates a missing database."
        {::database-name database-name
-        ::attachment main-attachment}))
+        ::connection-id main-connection-id}))
     (let [force-called? (atom false)
           {::keys [admin-outcome force-invoked?]}
           (with-admin-connection
@@ -1692,32 +1693,32 @@
             (fn [connection]
               (require-branch-roster! connection expected-branch-roster)
               (let [target-db
-                    (branch-db-at! connection prepared-target-coordinate
+                    (branch-db-at! connection prepared-target-branch-head
                                    "Prepared target head")
-                    _ (branch-db-at! connection undo-coordinate "Undo head")
+                    _ (branch-db-at! connection undo-branch-head "Undo head")
                     main-db (d/branch-as-db connection :db)
-                    actual-main (coordinate/resolved main-db)]
+                    actual-main (branch/head main-db)]
                 (cond
-                  (= pre-restore-main-coordinate actual-main)
+                  (= pre-restore-main-branch-head actual-main)
                   (do
                     (validate-db! target-db)
                     (reset! force-called? true)
                     (call-datahike-lifecycle!
                      #(d/force-branch!
                        target-db :db
-                       #{(::coordinate/commit-id selected-target-coordinate)}
+                       #{(::branch/commit-id selected-target-branch-head)}
                        {:expected-current-commit
-                        (::coordinate/commit-id pre-restore-main-coordinate)})
-                     {::pre-restore-main-coordinate
-                      pre-restore-main-coordinate
-                      ::selected-target-coordinate
-                      selected-target-coordinate
+                        (::branch/commit-id pre-restore-main-branch-head)})
+                     {::pre-restore-main-branch-head
+                      pre-restore-main-branch-head
+                      ::selected-target-branch-head
+                      selected-target-branch-head
                       ::force-invoked? true})
                     {::admin-outcome :seon.db.registry.admin/applied
                      ::force-invoked? true})
 
-                  (desired-main? validate-db! pre-restore-main-coordinate
-                                 selected-target-coordinate target-db main-db)
+                  (desired-main? validate-db! pre-restore-main-branch-head
+                                 selected-target-branch-head target-db main-db)
                   {::admin-outcome
                    :seon.db.registry.admin/already-applied
                    ::force-invoked? false}
@@ -1726,9 +1727,9 @@
                   (lifecycle-fail!
                    :seon.db.protocol.error/restore-divergence
                    "Main is neither the expected nor the prepared restore value."
-                   {::pre-restore-main-coordinate
-                    pre-restore-main-coordinate
-                    ::coordinate actual-main})))))
+                   {::pre-restore-main-branch-head
+                    pre-restore-main-branch-head
+                    ::branch-head actual-main})))))
           final
           (try
             (with-admin-connection
@@ -1738,21 +1739,21 @@
                 (let [roster (require-branch-roster!
                               connection expected-branch-roster)
                       target-db
-                      (branch-db-at! connection prepared-target-coordinate
+                      (branch-db-at! connection prepared-target-branch-head
                                      "Prepared target head")
-                      _ (branch-db-at! connection undo-coordinate "Undo head")
+                      _ (branch-db-at! connection undo-branch-head "Undo head")
                       main-db (d/branch-as-db connection :db)
-                      coordinate (coordinate/resolved main-db)]
+                      branch-head (branch/head main-db)]
                   (when-not
-                    (desired-main? validate-db! pre-restore-main-coordinate
-                                   selected-target-coordinate target-db main-db)
+                    (desired-main? validate-db! pre-restore-main-branch-head
+                                   selected-target-branch-head target-db main-db)
                     (lifecycle-fail!
                      :seon.db.protocol.error/restore-divergence
                      "Forced main failed complete restore read-back."
-                     {::pre-restore-main-coordinate
-                      pre-restore-main-coordinate
-                      ::coordinate coordinate}))
-                  {::coordinate coordinate
+                     {::pre-restore-main-branch-head
+                      pre-restore-main-branch-head
+                      ::branch-head branch-head}))
+                  {::branch-head branch-head
                    ::branch-roster roster})))
             (catch clojure.lang.ExceptionInfo throwable
               (throw
@@ -1762,20 +1763,20 @@
                         throwable))))]
       (merge
        {::admin-outcome admin-outcome
-        ::pre-restore-main-coordinate pre-restore-main-coordinate
-        ::selected-target-coordinate selected-target-coordinate
-        ::prepared-target-coordinate prepared-target-coordinate
-        ::undo-coordinate undo-coordinate
+        ::pre-restore-main-branch-head pre-restore-main-branch-head
+        ::selected-target-branch-head selected-target-branch-head
+        ::prepared-target-branch-head prepared-target-branch-head
+        ::undo-branch-head undo-branch-head
         ::force-invoked? force-invoked?
         ::admin-connection-state
         :seon.db.restore-admin.connection/released}
        final))))
 
-(defn release-attachment!
-  "Release one exact logical attachment without deleting its native branch."
-  {:malli/schema [:=> [:cat ::release-attachment!-request]
-                  ::release-attachment!-response]}
-  [{::keys [target-database-name attachment expected-target-head drain!]}]
+(defn release-connection-id!
+  "Release one exact logical connection-id without deleting its native branch."
+  {:malli/schema [:=> [:cat ::release-connection-id!-request]
+                  ::release-connection-id!-response]}
+  [{::keys [target-database-name connection-id expected-target-head drain!]}]
   (let [action
         (locking !registry
           (if-let [entry (get @!registry target-database-name)]
@@ -1785,13 +1786,13 @@
                  :seon.db.protocol.error/database-in-use
                  "The target database is still acquired by live connections."
                  {::target-database-name target-database-name
-                  ::attachment (::attachment entry)}))
-              (require-attachment!
-               "Release target" attachment (::attachment entry)
+                  ::connection-id (::connection-id entry)}))
+              (require-connection-id!
+               "Release target" connection-id (::connection-id entry)
                {::target-database-name target-database-name})
               (require-head!
                :seon.db.protocol.error/stale-target-head
-               "Target head" expected-target-head (current-coordinate entry)
+               "Target head" expected-target-head (current-branch-head entry)
                {::target-database-name target-database-name})
               (let [completion (promise)
                     releasing (assoc entry ::release-completion completion)]
@@ -1807,58 +1808,58 @@
            :seon.db.protocol.error/release
            "The target database connection release is unproved."
            {::target-database-name target-database-name
-            ::attachment attachment
+            ::connection-id connection-id
             ::release-error release-error}))
         {::target-database-name target-database-name
-         ::attachment attachment
+         ::connection-id connection-id
          ::released? (::released? result)})
       {::target-database-name target-database-name
-       ::attachment attachment
+       ::connection-id connection-id
        ::released? false})))
 
 (defn delete-branch!
   "Release and delete one exact non-main native branch."
   {:malli/schema [:=> [:cat ::delete-branch!-request]
                   ::delete-branch!-response]}
-  [{::keys [source-database-name target-database-name attachment
+  [{::keys [source-database-name target-database-name connection-id
             expected-target-head drain!]}]
   (locking !registry
     (let [source-entry (require-ready-entry! source-database-name)
-          source-attachment (::attachment source-entry)
+          source-connection-id (::connection-id source-entry)
           source-connection (::conn source-entry)
-          branch (::coordinate/branch attachment)]
+          branch (second connection-id)]
       (when (= :db branch)
         (lifecycle-fail!
          :seon.db.protocol.error/protected-main-branch
          "The main :db branch cannot be deleted."
-         {::attachment attachment}))
-      (when-not (= (::coordinate/database-id source-attachment)
-                   (::coordinate/database-id attachment))
+         {::connection-id connection-id}))
+      (when-not (= (first source-connection-id)
+                   (first connection-id))
         (lifecycle-fail!
-         :seon.db.protocol.error/attachment-mismatch
+         :seon.db.protocol.error/connection-id-mismatch
          "The target branch does not belong to the source physical database."
-         {::attachment attachment ::source-attachment source-attachment}))
-      (require-attachment!
-       "Expected target head" attachment
-       (coordinate/attachment expected-target-head)
+         {::connection-id connection-id ::source-connection-id source-connection-id}))
+      (require-connection-id!
+       "Expected target head" connection-id
+       (branch/connection-id expected-target-head)
        {::expected-target-head expected-target-head})
       (locking source-connection
         (let [target-entry (get @!registry target-database-name)
               released?
               (if target-entry
                 (do
-                  (require-attachment!
-                   "Delete target route" attachment (::attachment target-entry)
+                  (require-connection-id!
+                   "Delete target route" connection-id (::connection-id target-entry)
                    {::target-database-name target-database-name})
                   (require-head!
                    :seon.db.protocol.error/stale-target-head
                    "Target head" expected-target-head
-                   (current-coordinate target-entry)
+                   (current-branch-head target-entry)
                    {::target-database-name target-database-name})
                   (::released?
-                   (release-attachment!
+                   (release-connection-id!
                     {::target-database-name target-database-name
-                     ::attachment attachment
+                     ::connection-id connection-id
                      ::expected-target-head expected-target-head
                      ::drain! drain!})))
                 false)
@@ -1867,25 +1868,25 @@
             (lifecycle-fail!
              :seon.db.protocol.error/branch-missing
              "The target branch is absent from the durable roster."
-             {::attachment attachment}))
-          (let [target-coordinate
-                (coordinate/resolved
+             {::connection-id connection-id}))
+          (let [target-branch-head
+                (branch/head
                  (d/branch-as-db source-connection branch))]
             (require-head!
              :seon.db.protocol.error/stale-target-head
-             "Target head" expected-target-head target-coordinate
+             "Target head" expected-target-head target-branch-head
              {::target-database-name target-database-name})
             (call-datahike-lifecycle!
              #(d/delete-branch! source-connection branch)
-             {::attachment attachment})
+             {::connection-id connection-id})
             (when (contains? (d/branches source-connection) branch)
               (lifecycle-fail!
                :seon.db.protocol.error/cleanup-required
                "The target branch remained in the durable roster after deletion."
-               {::attachment attachment}))
+               {::connection-id connection-id}))
             {::target-database-name target-database-name
-             ::attachment attachment
-             ::coordinate (current-coordinate source-entry)
+             ::connection-id connection-id
+             ::branch-head (current-branch-head source-entry)
              ::released? released?
              ::deleted? true}))))))
 
@@ -1952,17 +1953,17 @@
                   ::delete-database!-response]}
   [{::keys [database-name]}]
   (locking !registry
-    (if-let [{::keys [attachment backend path]}
+    (if-let [{::keys [connection-id backend path]}
              (get @!registry database-name)]
       (cond
-        (not= :db (::coordinate/branch attachment))
+        (not= :db (second connection-id))
         {::released? false ::deleted? false
          ::error "delete-database! only accepts the physical database's :db route"}
 
         (some (fn [[registered-name entry]]
                 (and (not= registered-name database-name)
-                     (= (::coordinate/database-id attachment)
-                        (::coordinate/database-id (::attachment entry)))))
+                     (= (first connection-id)
+                        (first (::connection-id entry)))))
               @!registry)
         {::released? false ::deleted? false
          ::error "delete-database! requires every branch route to be released first"}
@@ -1976,7 +1977,7 @@
             (let [cfg (backend/datahike-config
                        (cond-> {::backend/database-name database-name
                                 ::backend/backend backend
-                                ::coordinate/attachment attachment}
+                                ::branch/connection-id connection-id}
                          path (assoc ::backend/path path)))]
               (try
                 (d/delete-database cfg)
@@ -2009,8 +2010,8 @@
 (defn resolve-connection
   "Resolve one explicitly named database connection.
 
-   A registered name returns its stable attachment and freshly derived current
-   coordinate with the live connection. An unknown name returns a typed
+   A registered name returns its stable connection-id and freshly derived current
+   branch-head with the live connection. An unknown name returns a typed
    not-found value."
   {:malli/schema [:=> [:cat ::resolve-connection-request] ::resolve-connection-response]}
   [{::keys [database-name transport-connection] :as request}]
@@ -2031,16 +2032,16 @@
      ::error (str "unknown database-name: " database-name)}))
 
 (defn acquired-transport-connections
-  "Snapshot the physical sessions acquiring one exact database attachment."
+  "Snapshot the physical sessions acquiring one exact database connection-id."
   {:malli/schema
    [:=> [:cat ::acquired-transport-connections-request]
     ::acquired-transport-connections-response]}
-  [{::keys [database-name attachment]}]
+  [{::keys [database-name connection-id]}]
   (locking !registry
     (let [entry (get @!registry database-name)]
       {::transport-connections
        (if (and entry
-                (= attachment (::attachment entry))
+                (= connection-id (::connection-id entry))
                 (not (cleanup-required? entry))
                 (nil? (::release-completion entry)))
          (::transport-connections entry #{})

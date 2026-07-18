@@ -655,8 +655,8 @@
 ;;; THE CONFIG RESOLVER. `resolve-config-singleton` maps a manifest
 ;;; to the FLAT `:seon.config` singleton entity map — every SCALAR knob resolved
 ;;; to its EFFECTIVE value (env→manifest→default, coerced) + the three decoded
-;;; collections. It is the ONE pre-attachment resolution point used to seed a
-;;; fresh database. After attachment the owning operation acquires and decodes
+;;; collections. It is the ONE pre-session resolution point used to seed a
+;;; fresh database. After the database session opens, the owning operation acquires and decodes
 ;;; the database singleton once, then passes that ordinary map to the pure
 ;;; accessors below. There is no ambient reader or fallback.
 ;;; ============================================================
@@ -705,7 +705,7 @@
   "The FLAT `:seon.config` singleton entity map for `manifest`.
 
    Every knob RESOLVED to its effective value (the default reproduces today's
-   byte-parity behavior). The one explicit pre-attachment resolution point seeds
+   byte-parity behavior). The one explicit pre-session resolution point seeds
    the database. `:seon.config/system-text` is
    OPTIONAL (no default): included ONLY when the manifest carries it; the exact
    desired-state reconcile retracts a previously stored value when it is later
@@ -1091,7 +1091,7 @@
 (defn on-core-error
   "The core-fault escalation dial: `:crash`, `:gate`, or `:log`.
 
-   Read from explicit ordinary config data. Before attachment the caller may
+   Read from explicit ordinary config data. Before the database session opens the caller may
    pass the explicitly selected manifest's resolved singleton. Default `:gate`
    (the SHIPPED posture — pod never crashes, the
    CI-shaped wrappers fail runs that accumulated a new `:core`-fault datom).

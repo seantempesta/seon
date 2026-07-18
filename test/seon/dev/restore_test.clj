@@ -2,7 +2,7 @@
   (:require [babashka.fs :as fs]
             [clojure.test :refer [deftest is testing]]
             [malli.core :as m]
-            [seon.db.coordinate :as coordinate]
+            [seon.db.branch :as db.branch]
             [seon.db.protocol :as protocol]
             [seon.db.restore :as db.restore]
             [seon.db.restore-admin :as restore-admin]
@@ -36,28 +36,28 @@
 (defrecord UnsupportedRecord [value])
 
 (def source
-  {::coordinate/database-id database-id
-   ::coordinate/branch :db
-   ::coordinate/commit-id source-commit
-   ::coordinate/t 100})
+  {::db.branch/store-id database-id
+   ::db.branch/name :db
+   ::db.branch/commit-id source-commit
+   ::db.branch/basis-t 100})
 
 (def target
-  {::coordinate/database-id database-id
-   ::coordinate/branch :seon.branch/target
-   ::coordinate/commit-id target-commit
-   ::coordinate/t 80})
+  {::db.branch/store-id database-id
+   ::db.branch/name :seon.branch/target
+   ::db.branch/commit-id target-commit
+   ::db.branch/basis-t 80})
 
 (def latest-source
   (assoc source
-         ::coordinate/commit-id latest-commit
-         ::coordinate/t 120))
+         ::db.branch/commit-id latest-commit
+         ::db.branch/basis-t 120))
 
 (def prior-undo-branch
   (keyword "seon.restore.undo" (str "r-" prior-completion-id)))
 (def prior-target-branch
   (keyword "seon.restore.target" (str "r-" prior-completion-id)))
-(def prior-undo-coordinate
-  (assoc source ::coordinate/branch prior-undo-branch))
+(def prior-undo-branch-head
+  (assoc source ::db.branch/name prior-undo-branch))
 
 (def undo-branch (keyword "seon.restore.undo" (str "r-" intent-id)))
 (def prepared-target-branch
@@ -77,8 +77,8 @@
     :seon.client/launch-capability {:seon.client/autonomous? true}}
    ::launch/database
    {::protocol/database-name "default"
-    ::coordinate/attachment (coordinate/attachment source)
-    ::coordinate/coordinate source
+    ::db.branch/connection-id (db.branch/connection-id source)
+    ::db.branch/head source
     ::protocol/backend :file
     ::protocol/database-path "/cluster/db"}
    ::launch/writer-owner writer-owner
@@ -99,8 +99,8 @@
     :seon.client/launch-capability {:seon.client/autonomous? false}}
    ::launch/database
    {::protocol/database-name "target"
-    ::coordinate/attachment (coordinate/attachment target)
-    ::coordinate/coordinate target
+    ::db.branch/connection-id (db.branch/connection-id target)
+    ::db.branch/head target
     ::protocol/backend :file
     ::protocol/database-path "/cluster/db"}
    ::launch/writer-owner writer-owner
@@ -115,9 +115,9 @@
 
 (defn- descriptor-at [descriptor point]
   (-> descriptor
-      (assoc-in [::launch/database ::coordinate/attachment]
-                (coordinate/attachment point))
-      (assoc-in [::launch/database ::coordinate/coordinate] point)))
+      (assoc-in [::launch/database ::db.branch/connection-id]
+                (db.branch/connection-id point))
+      (assoc-in [::launch/database ::db.branch/head] point)))
 
 (def prior-completion
   {:seon.db.restore/id prior-completion-id
@@ -136,28 +136,28 @@
 (defn- retained-observation
   ([] (retained-observation [prior-completion]))
   ([completions]
-   {::restore/main-coordinate latest-source
+   {::restore/main-branch-head latest-source
     ::restore/branch-heads
     {:db latest-source
      :seon.branch/target target
-     prior-undo-branch prior-undo-coordinate
+     prior-undo-branch prior-undo-branch-head
      prior-target-branch
-     (assoc target ::coordinate/branch prior-target-branch)}
+     (assoc target ::db.branch/name prior-target-branch)}
     ::restore/completion-facts completions}))
 
 (defn- undo-lifecycle
   ([] (undo-lifecycle [prior-completion]))
   ([completions]
-   {::protocol/main-coordinate latest-source
+   {::protocol/main-branch-head latest-source
     ::protocol/main-parent-commit-ids #{latest-commit}
     ::protocol/branch-roster
     #{:db :seon.branch/target prior-undo-branch prior-target-branch}
-    ::protocol/branch-coordinates
+    ::protocol/branch-heads
     (::restore/branch-heads (retained-observation completions))
     ::protocol/restore-completions completions
     ::protocol/completed-restore-ids
     (set (map :seon.db.restore/id completions))
-    ::protocol/restore-completion-coordinates
+    ::protocol/restore-completion-branch-heads
     (into {} (map (fn [completion]
                     [(:seon.db.restore/id completion) latest-source]))
           completions)}))
@@ -208,7 +208,7 @@
                ::restore/pre-restore-main-descriptor
                (descriptor-at main-descriptor latest-source)
                ::restore/selected-target-descriptor
-               (descriptor-at target-descriptor prior-undo-coordinate)
+               (descriptor-at target-descriptor prior-undo-branch-head)
                ::restore/expected-branch-roster
                (conj (set (keys (::restore/branch-heads observation)))
                      undo-branch prepared-target-branch)
@@ -232,41 +232,41 @@
 
 (defn- completion-fact [intent forced-commit-id]
   (let [from (get-in intent [::restore/pre-restore-main-descriptor
-                             ::launch/database ::coordinate/coordinate])
+                             ::launch/database ::db.branch/head])
         to (get-in intent [::restore/selected-target-descriptor
-                           ::launch/database ::coordinate/coordinate])]
+                           ::launch/database ::db.branch/head])]
     {:seon.db.restore/id completion-id
      :seon.db.restore/plan-digest (::restore/plan-digest intent)
      :seon.db.restore/db-name
      (keyword
       (get-in intent [::restore/pre-restore-main-descriptor
                       ::launch/database ::protocol/database-name]))
-     :seon.db.restore/database-id (::coordinate/database-id from)
-     :seon.db.restore/from-branch (::coordinate/branch from)
-     :seon.db.restore/from-commit-id (::coordinate/commit-id from)
-     :seon.db.restore/from-t (::coordinate/t from)
-     :seon.db.restore/to-branch (::coordinate/branch to)
-     :seon.db.restore/to-commit-id (::coordinate/commit-id to)
-     :seon.db.restore/to-t (::coordinate/t to)
+     :seon.db.restore/database-id (::db.branch/store-id from)
+     :seon.db.restore/from-branch (::db.branch/name from)
+     :seon.db.restore/from-commit-id (::db.branch/commit-id from)
+     :seon.db.restore/from-t (::db.branch/basis-t from)
+     :seon.db.restore/to-branch (::db.branch/name to)
+     :seon.db.restore/to-commit-id (::db.branch/commit-id to)
+     :seon.db.restore/to-t (::db.branch/basis-t to)
      :seon.db.restore/forced-commit-id forced-commit-id
      :seon.db.restore/undo-branch (::restore/undo-branch intent)
      :seon.db.restore/target-branch (::restore/prepared-target-branch intent)}))
 
 (defn- observation
   [_intent main heads parents completions completion-index]
-  {::restore/main-coordinate main
+  {::restore/main-branch-head main
    ::restore/main-parent-commit-ids parents
    ::restore/branch-heads
    (merge {:db main :seon.branch/target target} heads)
    ::restore/completed-restore-ids
    (set (map :seon.db.restore/id completions))
    ::restore/completion-facts completions
-   ::restore/completion-coordinates
+   ::restore/completion-branch-heads
    (into {}
          (map (fn [[completion-id value]]
                 [completion-id
                  (if (int? value)
-                   (assoc main ::coordinate/t value)
+                   (assoc main ::db.branch/basis-t value)
                    value)]))
          completion-index)})
 
@@ -275,7 +275,7 @@
    (restore/next-command {::restore/intent intent
                           ::restore/observation observation})))
 
-(deftest immutable-intent-derives-reserved-branches-and-coordinates
+(deftest immutable-intent-derives-reserved-branches-and-branch-heads
   (let [intent (derived-intent)
         target-branch prepared-target-branch]
     (is (= #{:db :seon.branch/target undo-branch prepared-target-branch}
@@ -284,10 +284,10 @@
     (is (m/validate ::restore/intent intent))
     (is (= undo-branch (::restore/undo-branch intent)))
     (is (= target-branch (::restore/prepared-target-branch intent)))
-    (is (= (assoc source ::coordinate/branch undo-branch)
-           (::restore/undo-coordinate intent)))
-    (is (= (assoc target ::coordinate/branch target-branch)
-           (::restore/prepared-target-coordinate intent)))
+    (is (= (assoc source ::db.branch/name undo-branch)
+           (::restore/undo-branch-head intent)))
+    (is (= (assoc target ::db.branch/name target-branch)
+           (::restore/prepared-target-branch-head intent)))
     (is (= :seon.dev.restore.overlay/preserve
            (::restore/core-overlay-selection intent)))
     (is (= :seon.dev.restore.overlay/preserve
@@ -307,10 +307,10 @@
            (::restore/operation undo-intent)))
     (is (= (descriptor-at main-descriptor latest-source)
            (::restore/pre-restore-main-descriptor undo-intent)))
-    (is (= (descriptor-at target-descriptor prior-undo-coordinate)
+    (is (= (descriptor-at target-descriptor prior-undo-branch-head)
            (::restore/selected-target-descriptor undo-intent)))
-    (is (= (assoc latest-source ::coordinate/branch undo-branch)
-           (::restore/undo-coordinate undo-intent))
+    (is (= (assoc latest-source ::db.branch/name undo-branch)
+           (::restore/undo-branch-head undo-intent))
         "the inverse preserves the actual latest main as redo")
     (is (not-any? #(contains? undo-intent %)
                   [::restore/retained-head-observation
@@ -388,7 +388,7 @@
           (assoc-in
            (undo-intent-request)
            [::restore/retained-head-observation ::restore/branch-heads
-            prior-undo-branch ::coordinate/commit-id]
+            prior-undo-branch ::db.branch/commit-id]
            (random-uuid)))))
     (is (thrown-with-msg?
          clojure.lang.ExceptionInfo
@@ -398,7 +398,7 @@
                   disj prior-target-branch)))))
   (testing "new reserved names must still be absent at publication"
     (let [existing
-          (assoc prior-undo-coordinate ::coordinate/branch undo-branch)]
+          (assoc prior-undo-branch-head ::db.branch/name undo-branch)]
       (is (thrown-with-msg?
            clojure.lang.ExceptionInfo
            #"already exist"
@@ -448,8 +448,8 @@
                (restore/derive-intent
                 (assoc-in (intent-request)
                           [::restore/selected-target-descriptor
-                           ::launch/database ::coordinate/coordinate
-                           ::coordinate/database-id]
+                           ::launch/database ::db.branch/head
+                           ::db.branch/store-id]
                           (random-uuid)))))
   (is (thrown? Exception
                (restore/derive-intent
@@ -667,30 +667,30 @@
 
 (deftest convergence-rereads-facts-and-retains-no-phase
   (let [intent (derived-intent)
-        promoted (assoc source ::coordinate/commit-id forced-commit
-                        ::coordinate/t 101)
-        completed (assoc source ::coordinate/commit-id completion-commit
-                         ::coordinate/t 102)
+        promoted (assoc source ::db.branch/commit-id forced-commit
+                        ::db.branch/basis-t 101)
+        completed (assoc source ::db.branch/commit-id completion-commit
+                         ::db.branch/basis-t 102)
         completion (completion-fact intent forced-commit)
         observations
         (atom [(observation intent source {} #{} [] {})
                (observation intent source
-                            {undo-branch (::restore/undo-coordinate intent)}
+                            {undo-branch (::restore/undo-branch-head intent)}
                             #{} [] {})
                (observation intent source
-                            {undo-branch (::restore/undo-coordinate intent)
+                            {undo-branch (::restore/undo-branch-head intent)
                              prepared-target-branch
-                             (::restore/prepared-target-coordinate intent)}
+                             (::restore/prepared-target-branch-head intent)}
                             #{} [] {})
                (observation intent promoted
-                            {undo-branch (::restore/undo-coordinate intent)
+                            {undo-branch (::restore/undo-branch-head intent)
                              prepared-target-branch
-                             (::restore/prepared-target-coordinate intent)}
+                             (::restore/prepared-target-branch-head intent)}
                             #{target-commit} [] {})
                (observation intent completed
-                            {undo-branch (::restore/undo-coordinate intent)
+                            {undo-branch (::restore/undo-branch-head intent)
                              prepared-target-branch
-                             (::restore/prepared-target-coordinate intent)}
+                             (::restore/prepared-target-branch-head intent)}
                             #{forced-commit} [completion]
                             {completion-id 102})])
         effects (atom [])
@@ -719,8 +719,8 @@
 (deftest convergence-fails-before-an-effect-on-divergence
   (let [intent (derived-intent)
         effects (atom [])
-        completed (assoc source ::coordinate/commit-id completion-commit
-                         ::coordinate/t 102)
+        completed (assoc source ::db.branch/commit-id completion-commit
+                         ::db.branch/basis-t 102)
         completion (assoc (completion-fact intent forced-commit)
                           :seon.db.restore/to-commit-id (random-uuid))]
     (is (thrown-with-msg?
@@ -732,9 +732,9 @@
            (fn [_]
              (observation
               intent completed
-              {undo-branch (::restore/undo-coordinate intent)
+              {undo-branch (::restore/undo-branch-head intent)
                prepared-target-branch
-               (::restore/prepared-target-coordinate intent)}
+               (::restore/prepared-target-branch-head intent)}
               #{forced-commit} [completion] {completion-id 102}))
            ::restore-state/effect!
            (fn [effect] (swap! effects conj effect))})))
@@ -989,38 +989,38 @@
   (let [intent (derived-intent)
         completion (completion-fact intent forced-commit)
         current (assoc source
-                       ::coordinate/commit-id completion-commit
-                       ::coordinate/t 102)
+                       ::db.branch/commit-id completion-commit
+                       ::db.branch/basis-t 102)
         lifecycle
-        {::protocol/main-coordinate current
+        {::protocol/main-branch-head current
          ::protocol/main-parent-commit-ids #{forced-commit}
-         ::protocol/branch-coordinates
+         ::protocol/branch-heads
          {:db current
           :seon.branch/target target
-          undo-branch (::restore/undo-coordinate intent)
-          prepared-target-branch (::restore/prepared-target-coordinate intent)}
+          undo-branch (::restore/undo-branch-head intent)
+          prepared-target-branch (::restore/prepared-target-branch-head intent)}
          ::protocol/completed-restore-ids #{completion-id}
          ::protocol/restore-completions [completion]
-         ::protocol/restore-completion-coordinates {completion-id current}}
+         ::protocol/restore-completion-branch-heads {completion-id current}}
         observation (#'restore-state/lifecycle->observation intent lifecycle)]
     (is (m/validate ::restore/observation observation))
     (is (= #{forced-commit} (::restore/main-parent-commit-ids observation)))
     (is (= {completion-id current}
-           (::restore/completion-coordinates observation)))))
+           (::restore/completion-branch-heads observation)))))
 
-(deftest completion-admission-requires-the-exact-commit-coordinate
+(deftest completion-admission-requires-the-exact-commit-branch-head
   (let [intent (derived-intent)
         completion (completion-fact intent forced-commit)
         current (assoc source
-                       ::coordinate/commit-id completion-commit
-                       ::coordinate/t 102)
+                       ::db.branch/commit-id completion-commit
+                       ::db.branch/basis-t 102)
         other-force-at-same-t
-        (assoc current ::coordinate/commit-id (random-uuid))
+        (assoc current ::db.branch/commit-id (random-uuid))
         observed
         (observation
          intent current
-         {undo-branch (::restore/undo-coordinate intent)
-          prepared-target-branch (::restore/prepared-target-coordinate intent)}
+         {undo-branch (::restore/undo-branch-head intent)
+          prepared-target-branch (::restore/prepared-target-branch-head intent)}
          #{forced-commit} [completion]
          {completion-id other-force-at-same-t})]
     (is (= :seon.dev.restore.command/diagnose-divergence
@@ -1032,11 +1032,11 @@
         duplicate-id "restore00002"
         duplicate (assoc completion :seon.db.restore/id duplicate-id)
         current (assoc source
-                       ::coordinate/commit-id completion-commit
-                       ::coordinate/t 102)
-        heads {undo-branch (::restore/undo-coordinate intent)
+                       ::db.branch/commit-id completion-commit
+                       ::db.branch/basis-t 102)
+        heads {undo-branch (::restore/undo-branch-head intent)
                prepared-target-branch
-               (::restore/prepared-target-coordinate intent)}]
+               (::restore/prepared-target-branch-head intent)}]
     (is (thrown-with-msg?
          clojure.lang.ExceptionInfo
          #"plan digest resolves more than one completion"
@@ -1058,23 +1058,23 @@
         intent (derived-intent)
         completion (completion-fact intent forced-commit)
         current (assoc source
-                       ::coordinate/commit-id completion-commit
-                       ::coordinate/t 102)
+                       ::db.branch/commit-id completion-commit
+                       ::db.branch/basis-t 102)
         observation
         (observation
          intent current
-         {undo-branch (::restore/undo-coordinate intent)
-          prepared-target-branch (::restore/prepared-target-coordinate intent)}
+         {undo-branch (::restore/undo-branch-head intent)
+          prepared-target-branch (::restore/prepared-target-branch-head intent)}
          #{forced-commit} [completion] {completion-id current})
         expected {::db.restore/ready? true
                   ::db.restore/executable? false
                   ::db.restore/completion completion
-                  ::db.restore/completion-coordinate current}
+                  ::db.restore/completion-branch-head current}
         response (atom expected)
         calls (atom [])]
     (is (m/validate ::db.restore/readiness-response expected))
     (is (= {::db.restore/completion completion
-            ::db.restore/completion-coordinate current}
+            ::db.restore/completion-branch-head current}
            (restore/completion-evidence
             {::restore/intent intent ::restore/observation observation})))
     (with-redefs-fn
@@ -1101,8 +1101,8 @@
                  ::db.restore/readiness-response]]
                @calls))
         (reset! response
-                (assoc expected ::db.restore/completion-coordinate
-                       (assoc current ::coordinate/commit-id (random-uuid))))
+                (assoc expected ::db.restore/completion-branch-head
+                       (assoc current ::db.branch/commit-id (random-uuid))))
         (is (thrown-with-msg?
              clojure.lang.ExceptionInfo
              #"does not prove exact completion"
@@ -1154,7 +1154,7 @@
            (fn [url point]
              (swap! calls conj [:observe-blobs url point])
              {:my.blob/ok? true
-              :my.blob/target-coordinate point
+              :my.blob/target-branch-head point
               :my.blob/reachable-hash-digest digest
               :my.blob/hash-count 0})
            #'restore-state/publish-intent!
@@ -1166,16 +1166,16 @@
         intent (::restore/intent plan)
         selected
         (get-in intent [::restore/selected-target-descriptor
-                        ::launch/database ::coordinate/coordinate])]
+                        ::launch/database ::db.branch/head])]
     (is (= :seon.dev.restore.operation/undo (::restore/operation intent)))
     (is (= latest-source
            (get-in intent [::restore/pre-restore-main-descriptor
-                           ::launch/database ::coordinate/coordinate])))
-    (is (= prior-undo-coordinate selected))
+                           ::launch/database ::db.branch/head])))
+    (is (= prior-undo-branch-head selected))
     (is (= [:observe-lifecycle
             [:observe-blobs
              "http://127.0.0.1:7890/_seon/operator/blobs"
-             prior-undo-coordinate]]
+             prior-undo-branch-head]]
            @calls))
     (is (= (restore/confirmation-text
             {::restore/intent intent
@@ -1193,7 +1193,7 @@
          #'restore-state/observe-retained-blobs!
          (fn [_ point]
            {:my.blob/ok? true
-            :my.blob/target-coordinate point
+            :my.blob/target-branch-head point
             :my.blob/reachable-hash-digest digest
             :my.blob/hash-count 0})}
         plan #(restore-state/plan-undo!
@@ -1217,8 +1217,8 @@
              (assoc base #'restore-state/observe-lifecycle!
                     (constantly
                      (update-in (undo-lifecycle)
-                                [::protocol/branch-coordinates
-                                 prior-undo-branch ::coordinate/commit-id]
+                                [::protocol/branch-heads
+                                 prior-undo-branch ::db.branch/commit-id]
                                 (constantly (random-uuid)))))
              plan))))))
 
@@ -1245,7 +1245,7 @@
          (fn [request]
            (swap! calls conj [:resume request])
            {::restore/intent-id intent-id
-            ::restore-state/restored-coordinate latest-source
+            ::restore-state/restored-branch-head latest-source
             ::restore-state/admin-outcome
             :seon.db.restore-admin.outcome/applied
             ::restore-state/transitions []})}
@@ -1321,7 +1321,7 @@
          (fn [_]
            (swap! calls conj :resume)
            {::restore/intent-id intent-id
-            ::restore-state/restored-coordinate source
+            ::restore-state/restored-branch-head source
             ::restore-state/admin-outcome
             :seon.db.restore-admin.outcome/applied
             ::restore-state/transitions []})}]
@@ -1405,7 +1405,7 @@
            (assoc redefs #'restore-state/observe-restore!
                   (fn [& _]
                     (observation intent source
-                                 {undo-branch (::restore/undo-coordinate intent)}
+                                 {undo-branch (::restore/undo-branch-head intent)}
                                  #{} [] {})))
            #(restore-state/abort!
              {::restore-state/configuration configuration
@@ -1504,14 +1504,14 @@
   (let [intent (derived-intent)
         base (restore-admin/result-base intent)
         forced (assoc target
-                      ::coordinate/branch :db
-                      ::coordinate/commit-id forced-commit
-                      ::coordinate/t 101)
+                      ::db.branch/name :db
+                      ::db.branch/commit-id forced-commit
+                      ::db.branch/basis-t 101)
         result
         (merge base
                {::restore-admin/outcome
                 :seon.db.restore-admin.outcome/applied
-                ::restore-admin/forced-main-coordinate forced
+                ::restore-admin/forced-main-branch-head forced
                 ::restore-admin/branch-roster
                 (::restore/expected-branch-roster intent)
                 ::restore-admin/force-invoked? true
@@ -1549,15 +1549,15 @@
   (let [intent (derived-intent)
         undo-branch (::restore/undo-branch intent)
         target-branch (::restore/prepared-target-branch intent)
-        undo (::restore/undo-coordinate intent)
-        prepared-target (::restore/prepared-target-coordinate intent)
-        promoted (assoc source ::coordinate/commit-id forced-commit
-                        ::coordinate/t 101)
+        undo (::restore/undo-branch-head intent)
+        prepared-target (::restore/prepared-target-branch-head intent)
+        promoted (assoc source ::db.branch/commit-id forced-commit
+                        ::db.branch/basis-t 101)
         completion (completion-fact intent forced-commit)
-        completed (assoc source ::coordinate/commit-id completion-commit
-                         ::coordinate/t 102)
-        later (assoc completed ::coordinate/commit-id (random-uuid)
-                     ::coordinate/t 103)
+        completed (assoc source ::db.branch/commit-id completion-commit
+                         ::db.branch/basis-t 102)
+        later (assoc completed ::db.branch/commit-id (random-uuid)
+                     ::db.branch/basis-t 103)
         reserved {undo-branch undo target-branch prepared-target}]
     (testing "preparation advances only from exact observed branch heads"
       (is (= :seon.dev.restore.command/create-undo
@@ -1600,14 +1600,14 @@
         (is (= :seon.dev.restore.command/diagnose-divergence
                (command intent
                         (observation intent
-                                     (assoc source ::coordinate/commit-id
+                                     (assoc source ::db.branch/commit-id
                                             divergent-commit)
                                      {} #{divergent-commit} [] {})))))
       (is (= :seon.dev.restore.command/diagnose-divergence
              (command intent
                       (observation intent source
                                    {undo-branch
-                                    (assoc undo ::coordinate/commit-id
+                                    (assoc undo ::db.branch/commit-id
                                            (random-uuid))}
                                    #{} [] {}))))
       (is (= :seon.dev.restore.command/diagnose-divergence
@@ -1627,17 +1627,17 @@
   (let [intent (derived-intent)
         wrong-database (random-uuid)
         completion (completion-fact intent forced-commit)
-        completed (assoc source ::coordinate/commit-id completion-commit
-                         ::coordinate/t 102)
-        reserved {undo-branch (::restore/undo-coordinate intent)
+        completed (assoc source ::db.branch/commit-id completion-commit
+                         ::db.branch/basis-t 102)
+        reserved {undo-branch (::restore/undo-branch-head intent)
                   prepared-target-branch
-                  (::restore/prepared-target-coordinate intent)}]
+                  (::restore/prepared-target-branch-head intent)}]
     (is (thrown? Exception
                  (restore/next-command
                   {::restore/intent intent
                    ::restore/observation
                    (observation intent
-                                (assoc source ::coordinate/database-id
+                                (assoc source ::db.branch/store-id
                                        wrong-database)
                                 {} #{} [] {})})))
     (is (thrown-with-msg?
@@ -1649,14 +1649,14 @@
            (assoc-in
             (observation intent source {} #{} [] {})
             [::restore/branch-heads :seon.branch/target
-             ::coordinate/commit-id]
+             ::db.branch/commit-id]
             (random-uuid))})))
     (is (thrown? Exception
                  (restore/next-command
                   {::restore/intent intent
                    ::restore/observation
                    (observation intent source
-                                {:wrong (assoc source ::coordinate/branch :db)}
+                                {:wrong (assoc source ::db.branch/name :db)}
                                 #{} [] {})})))
     (is (thrown? Exception
                  (restore/next-command

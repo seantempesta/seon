@@ -77,7 +77,7 @@
       "publication cannot steal a quiescing runtime"))
 
 (defn- acquired-program []
-  {::db/coordinate
+  {::db/branch-head
    {:db-name "admission-test"
     :t 42
     :datahike/commit-id #uuid "00000000-0000-0000-0000-000000000042"}
@@ -195,7 +195,7 @@
              ::record! (constantly nil)}
             (fn []
               (is (true? (admission/begin-publication!))
-                  "publication captures attachment A before replay")
+                  "publication captures projection A before replay")
               (reset! !active projection-b)
               (admission/publish-committed!)))
             (.then

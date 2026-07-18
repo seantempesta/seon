@@ -2,7 +2,7 @@
   "Effective-provider dispatch for the agent LLM boundary.
 
    Provider and DiffusionGemma backend selection come from the immutable
-   `:seon.ai/config-resolution` captured at the prompt coordinate. Missing
+   `:seon.ai/config-resolution` captured at the prompt database value. Missing
    credentials select the deterministic stub; missing resolution is an
    explicit error value."
   (:require

@@ -25,11 +25,11 @@
    :datahike/commit-id #uuid "10000000-0000-4000-8000-000000000001"})
 
 (def ^:private target
-  {:seon.db.coordinate/database-id
+  {:seon.db.branch/store-id
    #uuid "20000000-0000-4000-8000-000000000001"
-   :seon.db.coordinate/branch :db
-   :seon.db.coordinate/commit-id (:datahike/commit-id database)
-   :seon.db.coordinate/t (:t database)})
+   :seon.db.branch/name :db
+   :seon.db.branch/commit-id (:datahike/commit-id database)
+   :seon.db.branch/basis-t (:t database)})
 
 (defonce ^:private !saved-storage-view (atom nil))
 (defonce ^:private !projections (atom {}))
@@ -144,7 +144,7 @@
     {:overlay overlay :main main}))
 
 (defn- materialization-request [overlay main hashes]
-  {:my.blob/target-coordinate target
+  {:my.blob/target-branch-head target
    :my.blob/retained-hashes hashes
    :my.blob/source-storage-view (storage-view overlay main)
    :my.blob/destination-storage-view (storage-view main)
@@ -278,7 +278,7 @@
         b (content-hash "b")
         result
         (blob/observe-retained
-         {:my.blob/target-coordinate target
+         {:my.blob/target-branch-head target
           :my.blob/retained-hashes [b a b]})]
     (is (:my.blob/ok? result))
     (is (= 2 (:my.blob/hash-count result)))
@@ -290,7 +290,7 @@
 (deftest malformed-retained-hash-is-refused
   (let [result
         (blob/observe-retained
-         {:my.blob/target-coordinate target
+         {:my.blob/target-branch-head target
           :my.blob/retained-hashes ["not-a-hash"]})]
     (is (false? (:my.blob/ok? result)))
     (is (str/includes? (:my.blob/error result) "malformed"))))

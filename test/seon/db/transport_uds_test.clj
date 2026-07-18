@@ -1,7 +1,7 @@
 (ns seon.db.transport-uds-test
   "Protocol validation and Unix-socket transport tests."
   (:require [clojure.test :refer [deftest is]]
-            [seon.db.coordinate :as coordinate]
+            [seon.db.branch :as branch]
             [seon.db.protocol :as protocol]
             [seon.db.transport.uds :as uds])
   (:import [com.sun.management UnixOperatingSystemMXBean]
@@ -15,6 +15,7 @@
 
 (def ^:private database
   {:db-name "alpha"
+   :store-id [#uuid "ca2dd867-e51c-4165-b3b7-430bfe199f2e" :db]
    :t 536870929
    :as-of nil
    :since nil
@@ -177,81 +178,79 @@
     (is (false? (protocol/valid-response?
                  (assoc response ::protocol/acquired? :yes))))))
 
-(deftest transaction-coordinate-request-and-response-are-transit-stable
+(deftest transaction-branch-head-request-and-response-are-transit-stable
   (let [head
-        {::coordinate/database-id
+        {::branch/store-id
          #uuid "54b5b7e7-51fb-3220-b079-81a81914d86f"
-         ::coordinate/branch :db
-         ::coordinate/commit-id
+         ::branch/name :db
+         ::branch/commit-id
          #uuid "6a56b426-c836-5817-9f6b-20584f2e81d5"
-         ::coordinate/t 536870929}
+         ::branch/basis-t 536870929}
         original
         (assoc head
-               ::coordinate/commit-id
+               ::branch/commit-id
                #uuid "6a56b425-30e5-53b3-86c1-e31381023716"
-               ::coordinate/t 536870920)
+               ::branch/basis-t 536870920)
         request
-        (protocol/resolve-transaction-coordinate-request
-         {::protocol/request-id "coordinate/resolve"
+        (protocol/resolve-transaction-branch-head-request
+         {::protocol/request-id "branch-head/resolve"
           ::protocol/database-name "default"
-          ::protocol/head-coordinate head
-          ::protocol/transaction-id (::coordinate/t original)})
+          ::protocol/containing-branch-head head
+          ::protocol/transaction-id (::branch/basis-t original)})
         response (protocol/success
-                  {::protocol/request-id "coordinate/resolve"
-                   ::protocol/coordinate original})]
+                  {::protocol/request-id "branch-head/resolve"
+                   ::protocol/branch-head original})]
     (is (protocol/valid-request? request))
     (is (protocol/valid-response? response))
     (is (= request (uds/decode (uds/encode request))))
     (is (= response (uds/decode (uds/encode response))))))
 
-(deftest ensure-request-roundtrip-preserves-explicit-attachment
-  (let [attachment
-        {::coordinate/database-id
-         #uuid "54b5b7e7-51fb-3220-b079-81a81914d86f"
-         ::coordinate/branch :experiment/cold}
+(deftest ensure-request-roundtrip-preserves-explicit-connection-id
+  (let [connection-id
+        [#uuid "54b5b7e7-51fb-3220-b079-81a81914d86f"
+         :experiment/cold]
         request
         (protocol/ensure-database-request
-         {::protocol/request-id "ensure/attachment"
+         {::protocol/request-id "ensure/connection-id"
           ::protocol/database-name "experiment-cold"
           ::protocol/backend :file
           ::protocol/database-path "data/clusters/default/db"
-          ::coordinate/attachment attachment})
+          ::branch/connection-id connection-id})
         decoded (uds/decode (uds/encode request))]
     (is (protocol/valid-request? decoded))
-    (is (= attachment (::coordinate/attachment decoded)))
+    (is (= connection-id (::branch/connection-id decoded)))
     (is (= request decoded))))
 
 (deftest lifecycle-requests-are-closed-and-transit-stable
   (let [source
-        {::coordinate/database-id
+        {::branch/store-id
          #uuid "54b5b7e7-51fb-3220-b079-81a81914d86f"
-         ::coordinate/branch :db
-         ::coordinate/commit-id
+         ::branch/name :db
+         ::branch/commit-id
          #uuid "6a56b426-c836-5817-9f6b-20584f2e81d5"
-         ::coordinate/t 536870929}
-        target-attachment
-        (assoc (coordinate/attachment source)
-               ::coordinate/branch :experiment/lifecycle)
-        target-head (merge source target-attachment)
+         ::branch/basis-t 536870929}
+        target-connection-id
+        (assoc (branch/connection-id source) 1 :experiment/lifecycle)
+        target-head (assoc source ::branch/name :experiment/lifecycle)
         requests
         [(protocol/create-branch-request
           {::protocol/request-id "lifecycle/create"
            ::protocol/source-database-name "default"
            ::protocol/target-database-name "default-lifecycle"
-           ::protocol/source-coordinate source
+           ::protocol/source-branch-head source
            ::protocol/expected-source-head source
            ::protocol/target-branch :experiment/lifecycle})
         (protocol/release-database-request
           {::protocol/request-id "lifecycle/release"
            :seon.db/db (assoc database
                               :db-name "default-lifecycle"
-                              :datahike/commit-id (::coordinate/commit-id
+                              :datahike/commit-id (::branch/commit-id
                                                    target-head))})
          (protocol/delete-branch-request
           {::protocol/request-id "lifecycle/delete"
            ::protocol/source-database-name "default"
            ::protocol/target-database-name "default-lifecycle"
-           ::protocol/target-attachment target-attachment
+           ::protocol/target-connection-id target-connection-id
            ::protocol/expected-target-head target-head})]]
     (is (every? protocol/valid-request? requests))
     (is (= requests (mapv #(uds/decode (uds/encode %)) requests)))
@@ -261,34 +260,34 @@
                      requests))
         "lifecycle requests reject unknown fields")
     (is (false? (protocol/valid-request?
-                 (dissoc (first requests) ::protocol/source-coordinate))))))
+                 (dissoc (first requests) ::protocol/source-branch-head))))))
 
 (deftest synchronous-call-preserves-complete-lifecycle-values
   (let [path (socket-path "transport-lifecycle-call")
         source
-        {::coordinate/database-id
+        {::branch/store-id
          #uuid "54b5b7e7-51fb-3220-b079-81a81914d86f"
-         ::coordinate/branch :db
-         ::coordinate/commit-id
+         ::branch/name :db
+         ::branch/commit-id
          #uuid "6a56b426-c836-5817-9f6b-20584f2e81d5"
-         ::coordinate/t 536870929}
-        target-attachment
-        (assoc (coordinate/attachment source)
-               ::coordinate/branch :experiment/portable-call)
+         ::branch/basis-t 536870929}
+        target-connection-id
+        (assoc (branch/connection-id source) 1 :experiment/portable-call)
         request
         (protocol/create-branch-request
          {::protocol/request-id "lifecycle/call"
           ::protocol/source-database-name "default"
           ::protocol/target-database-name "default-portable-call"
-          ::protocol/source-coordinate source
+          ::protocol/source-branch-head source
           ::protocol/expected-source-head source
           ::protocol/target-branch :experiment/portable-call})
         response
         (protocol/success
          {::protocol/request-id "lifecycle/call"
           ::protocol/target-database-name "default-portable-call"
-          ::protocol/target-attachment target-attachment
-          ::protocol/coordinate (merge source target-attachment)
+          ::protocol/target-connection-id target-connection-id
+          ::protocol/branch-head
+          (assoc source ::branch/name :experiment/portable-call)
           ::protocol/backend :file
           ::protocol/database-path "data/clusters/default/db"
           ::protocol/created? true

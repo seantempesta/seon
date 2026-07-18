@@ -2,7 +2,7 @@
   "Explicit database routing and connection initialization tests."
   (:require [clojure.test :refer [deftest is use-fixtures]]
             [datahike.api :as d]
-            [seon.db.coordinate :as coordinate]
+            [seon.db.branch :as branch]
             [seon.db.registry :as registry]))
 
 (defn- isolate-registry
@@ -52,15 +52,15 @@
         calls (atom [])
         reports (atom [])
         initialize!
-        (fn [{::registry/keys [conn database-name attachment open-intent]}]
-          (swap! calls conj [database-name (some? @conn) attachment open-intent])
+        (fn [{::registry/keys [conn database-name connection-id open-intent]}]
+          (swap! calls conj [database-name (some? @conn) connection-id open-intent])
           (d/listen conn ::capture #(swap! reports conj %)))
         first-entry (ensure-memory! database-name initialize!)
         second-entry (ensure-memory! database-name initialize!)
         connection (::registry/conn first-entry)]
     (is (identical? connection (::registry/conn second-entry)))
     (is (= [[database-name true
-             (::registry/attachment first-entry)
+             (::registry/connection-id first-entry)
              :seon.db.registry.open/main]]
            @calls))
     (d/transact connection
@@ -96,17 +96,16 @@
         main (ensure-memory! main-name (fn [_request] nil))
         main-connection (::registry/conn main)
         branch :routing.branch/observational
-        attachment (assoc (::registry/attachment main)
-                          ::coordinate/branch branch)]
+        connection-id (assoc (::registry/connection-id main) 1 branch)]
     (d/branch! main-connection :db branch)
-    (let [before (coordinate/resolved
+    (let [before (branch/head
                   (d/branch-as-db main-connection branch))
           failure
           (try
             (registry/ensure-database!
              {::registry/database-name branch-name
               ::registry/backend :memory
-              ::registry/attachment attachment
+              ::registry/connection-id connection-id
               ::registry/initialize-connection!
               (fn [{::registry/keys [conn open-intent]}]
                 (is (= :seon.db.registry.open/branch open-intent))
@@ -118,8 +117,8 @@
             (catch clojure.lang.ExceptionInfo exception exception))]
       (is (= :seon.db.registry.error/branch-initializer-wrote
              (:seon.error/kind (ex-data failure))))
-      (is (= before (::registry/coordinate-before (ex-data failure))))
-      (is (not= before (::registry/coordinate-after (ex-data failure))))
+      (is (= before (::registry/branch-head-before (ex-data failure))))
+      (is (not= before (::registry/branch-head-after (ex-data failure))))
       (is (= {} (registry/lookup-connection
                  {::registry/database-name branch-name}))))))
 
@@ -129,8 +128,7 @@
         main (ensure-memory! main-name (fn [_request] nil))
         main-connection (::registry/conn main)
         branch :routing.branch/cleanup
-        attachment (assoc (::registry/attachment main)
-                          ::coordinate/branch branch)]
+        connection-id (assoc (::registry/connection-id main) 1 branch)]
     (d/branch! main-connection :db branch)
     (let [failure
           (with-redefs [d/release
@@ -140,7 +138,7 @@
               (registry/ensure-database!
                {::registry/database-name branch-name
                 ::registry/backend :memory
-                ::registry/attachment attachment
+                ::registry/connection-id connection-id
                 ::registry/initialize-connection!
                 (fn [{::registry/keys [conn]}]
                   (d/transact conn
@@ -163,7 +161,7 @@
              (:seon.error/kind (ex-data failure))))
       (is (= :seon.db.registry.entry/cleanup-required
              (::registry/entry-state retained)))
-      (is (= attachment (::registry/attachment retained)))
+      (is (= connection-id (::registry/connection-id retained)))
       (is (re-find #"branch initializer changed"
                    (::registry/initialization-error retained)))
       (is (re-find #"injected open cleanup failure"

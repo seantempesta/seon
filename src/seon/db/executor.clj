@@ -3,7 +3,7 @@
   (:require [clojure.core.async :as async]
             [clojure.core.async.impl.protocols :as async-protocols]
             [clojure.set :as set]
-            [seon.db.coordinate :as coordinate]
+            [seon.db.branch :as branch]
             [seon.db.protocol :as protocol]
             [seon.schema :as schema]
             [taoensso.timbre :as log])
@@ -18,7 +18,7 @@
 (schema/register! ::scope
                   [:map {:closed true}
                    [::database-name ::database-name]
-                   [::coordinate/attachment ::coordinate/attachment]
+                   [::branch/connection-id ::branch/connection-id]
                    [::connection-id ::connection-id]
                    [::generation ::generation]])
 (schema/register! ::scopes [:set {:min 1} ::scope])
@@ -618,7 +618,7 @@
     {::abandoned-count (count queued)}))
 
 (defn release-scope!
-  "Forget a fully drained fence after its database attachment is released."
+  "Forget a fully drained fence after its database value is released."
   [{::keys [executor scope]}]
   (locking (::lock executor)
     (when (let [state @(::state executor)]

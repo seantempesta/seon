@@ -20,6 +20,7 @@
 
 (def ^:private database
   {:db-name "transport"
+   :store-id [#uuid "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" :db]
    :t 536870929
    :as-of nil
    :since nil

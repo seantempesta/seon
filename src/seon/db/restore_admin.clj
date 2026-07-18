@@ -1,7 +1,7 @@
 (ns seon.db.restore-admin
   "Closed data exchanged by the restore operator and no-listener writer."
   (:require [malli.core :as m]
-            [seon.db.coordinate :as coordinate]
+            [seon.db.branch :as branch]
             [seon.db.restore-admin.schema]
             [seon.dev.restore :as restore]
             [seon.launch :as launch]
@@ -19,16 +19,16 @@
   [intent]
   {::intent-id (::restore/intent-id intent)
    ::plan-digest (::restore/plan-digest intent)
-   ::pre-restore-main-coordinate
+   ::pre-restore-main-branch-head
    (get-in intent
            [::restore/pre-restore-main-descriptor
-            ::launch/database ::coordinate/coordinate])
-   ::selected-target-coordinate
+            ::launch/database ::branch/head])
+   ::selected-target-branch-head
    (get-in intent
            [::restore/selected-target-descriptor
-            ::launch/database ::coordinate/coordinate])
-   ::prepared-target-coordinate (::restore/prepared-target-coordinate intent)
-   ::undo-coordinate (::restore/undo-coordinate intent)})
+            ::launch/database ::branch/head])
+   ::prepared-target-branch-head (::restore/prepared-target-branch-head intent)
+   ::undo-branch-head (::restore/undo-branch-head intent)})
 
 (defn valid-result?
   "True when `value` is one complete restore-admin result variant."

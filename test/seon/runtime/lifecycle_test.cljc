@@ -27,8 +27,5 @@
   (testing "the discriminator and closed shape are exact"
     (is (not (m/validate ::lifecycle/quiesce-response
                          (assoc success :seon.client/quiesced? false))))
-    (is (not (m/validate
-              ::lifecycle/quiesce-response
-              (assoc success :seon.db.coordinate/coordinate {}))))
     (is (not (m/validate ::lifecycle/quiesce-response
                          (assoc success :seon.runtime.lifecycle/extra true))))))

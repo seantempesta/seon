@@ -2,12 +2,13 @@
   "Closed transport-neutral database protocol tests."
   (:require [clojure.test :refer [deftest is testing]]
             [cognitect.transit :as transit]
-            [seon.db.coordinate :as coordinate]
+            [seon.db.branch :as branch]
             [seon.db.protocol :as protocol])
   (:import [java.io ByteArrayInputStream ByteArrayOutputStream]))
 
 (def ^:private db
   {:db-name "default"
+   :store-id [#uuid "ca2dd867-e51c-4165-b3b7-430bfe199f2e" :db]
    :t 536870929
    :as-of nil
    :since nil
@@ -18,6 +19,7 @@
 (def ^:private other-db
   (assoc db
          :db-name "research"
+         :store-id [#uuid "7e95571c-c0d0-478e-b95e-da58d8e47822" :db]
          :datahike/commit-id
          #uuid "b6d0f53b-3044-5f0a-95d8-5ea3218248f5"))
 
@@ -63,8 +65,7 @@
            (nth (::protocol/arguments query) 2)))
     (is (= query (transit-roundtrip query)))
     (doseq [legacy [(assoc query ::protocol/database-name "default")
-                    (assoc query ::protocol/coordinate {})
-                    (assoc query ::protocol/attachment {})
+                    (assoc query ::protocol/branch-head {})
                     (assoc query ::protocol/history? true)]]
       (is (false? (protocol/valid-request? legacy))))
     (is (false?
@@ -123,18 +124,17 @@
                         :seon.db/initial-data [{:bare-key true}]))))
         "initial fact maps require namespaced attribute keys")))
 
-(deftest ensure-database-preserves-an-explicit-branch-attachment
-  (let [attachment {::coordinate/database-id
-                    #uuid "ca2dd867-e51c-4165-b3b7-430bfe199f2e"
-                    ::coordinate/branch :experiment/program}
+(deftest ensure-database-preserves-an-explicit-connection-id
+  (let [connection-id [#uuid "ca2dd867-e51c-4165-b3b7-430bfe199f2e"
+                       :experiment/program]
         request
         (protocol/ensure-database-request
          {::protocol/request-id "ensure/branch"
           ::protocol/database-name "experiment"
           ::protocol/backend :memory
-          ::coordinate/attachment attachment})]
+          ::branch/connection-id connection-id})]
     (is (protocol/valid-request? request))
-    (is (= attachment (::coordinate/attachment request)))
+    (is (= connection-id (::branch/connection-id request)))
     (is (= request (transit-roundtrip request)))))
 
 (deftest index-pages-use-datahikes-native-eager-shape
@@ -213,9 +213,7 @@
     (is (every? protocol/valid-request? [request listen]))
     (is (every? protocol/valid-response?
                 [response event resynchronization database-advanced]))
-    (doseq [legacy [(assoc request ::protocol/expected-coordinate {})
-                    (assoc response ::protocol/previous-coordinate {})
-                    (assoc response ::protocol/datoms-added 1)
+    (doseq [legacy [(assoc response ::protocol/datoms-added 1)
                     (assoc response ::protocol/datoms-retracted 0)]]
       (is (false? ((if (::protocol/operation legacy)
                      protocol/valid-request?
@@ -242,23 +240,19 @@
     (is (protocol/valid-request? request))
     (is (protocol/valid-response? response))
     (is (false? (protocol/valid-request?
-                 (assoc request ::protocol/target-attachment {}))))))
+                 (assoc request ::protocol/target-connection-id {}))))))
 
-(deftest private-branch-administration-retains-native-coordinates
-  (let [point {::coordinate/database-id
+(deftest private-branch-administration-retains-native-branch-heads
+  (let [branch-head {::branch/store-id
                #uuid "54b5b7e7-51fb-3220-b079-81a81914d86f"
-               ::coordinate/branch :db
-               ::coordinate/commit-id
+               ::branch/name :db
+               ::branch/commit-id
                #uuid "6a56b426-c836-5817-9f6b-20584f2e81d5"
-               ::coordinate/t 536870929}
-        request (protocol/resolve-transaction-coordinate-request
+               ::branch/basis-t 536870929}
+        request (protocol/resolve-transaction-branch-head-request
                  {::protocol/request-id "restore/tx"
                   ::protocol/database-name "default"
-                  ::protocol/head-coordinate
-                  {::coordinate/database-id (::coordinate/database-id point)
-                   ::coordinate/branch :db
-                   ::coordinate/commit-id (::coordinate/commit-id point)
-                   ::coordinate/t (::coordinate/t point)}
+                  ::protocol/containing-branch-head branch-head
                   ::protocol/transaction-id 536870929})]
     (is (protocol/valid-request? request))))
 

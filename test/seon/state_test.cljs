@@ -247,7 +247,7 @@
           stale-error
           {:seon.error/message "database advanced"
            :seon.error/data
-           {::protocol/error-kind protocol/stale-coordinate-error}}
+           {::protocol/error-kind protocol/stale-database-value-error}}
           restore! (fn []
                      (set! db/db original-db)
                      (set! db/execute-many original-execute)

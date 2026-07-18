@@ -25,12 +25,12 @@
           {:seon.db/socket-path socket-path
            :seon.db/database-name database-name
            :seon.db/backend :memory}))
-        coordinate (::db/coordinate opened)]
+        branch-head (::db/branch-head opened)]
     (emit! {:seon.authority-density/phase :ready
             :seon.authority-density/pid (.-pid js/process)
-            ::db/coordinate coordinate})
+            ::db/branch-head branch-head})
     (await (wait-until barrier-ms))
-    (let [request {::db/coordinate coordinate
+    (let [request {::db/branch-head branch-head
                    ::db/query query-form
                    ::db/args []
                    ::db/max-work 250000

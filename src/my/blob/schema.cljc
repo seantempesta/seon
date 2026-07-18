@@ -1,6 +1,6 @@
 (ns my.blob.schema
   "Portable storage-view schemas owned by `my.blob`."
-  (:require [seon.db.coordinate :as coordinate]
+  (:require [seon.db.branch :as branch]
             [seon.schema :as schema]))
 
 (schema/register! :my.blob/directory [:string {:min 1}])
@@ -14,7 +14,7 @@
 
 (schema/register! :my.blob/ok? :boolean)
 (schema/register! :my.blob/digest [:re "[0-9a-f]{64}"])
-(schema/register! :my.blob/target-coordinate ::coordinate/coordinate)
+(schema/register! :my.blob/target-branch-head ::branch/head)
 (schema/register! :my.blob/reachable-hash-digest :my.blob/digest)
 (schema/register! :my.blob/hash-count [:int {:min 0}])
 (schema/register! :my.blob/error [:string {:min 1 :max 1024}])
@@ -22,14 +22,14 @@
  :my.blob/retained-observation-success
  [:map {:closed true}
   [:my.blob/ok? [:= true]]
-  [:my.blob/target-coordinate :my.blob/target-coordinate]
+  [:my.blob/target-branch-head :my.blob/target-branch-head]
   [:my.blob/reachable-hash-digest :my.blob/reachable-hash-digest]
   [:my.blob/hash-count :my.blob/hash-count]])
 (schema/register!
  :my.blob/retained-observation-failure
  [:map {:closed true}
   [:my.blob/ok? [:= false]]
-  [:my.blob/target-coordinate :my.blob/target-coordinate]
+  [:my.blob/target-branch-head :my.blob/target-branch-head]
   [:my.blob/error :my.blob/error]])
 (schema/register!
  :my.blob/retained-observation-result
@@ -42,7 +42,7 @@
  :my.blob/materialization-success
  [:map {:closed true}
   [:my.blob/ok? [:= true]]
-  [:my.blob/target-coordinate :my.blob/target-coordinate]
+  [:my.blob/target-branch-head :my.blob/target-branch-head]
   [:my.blob/reachable-hash-digest :my.blob/reachable-hash-digest]
   [:my.blob/hash-count :my.blob/hash-count]
   [:my.blob/verified-count :my.blob/verified-count]

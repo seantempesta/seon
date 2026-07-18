@@ -1,6 +1,6 @@
 (ns seon.db.restore-admin.schema
   "Portable closed result schemas for the no-listener restore writer."
-  (:require [seon.db.coordinate :as coordinate]
+  (:require [seon.db.branch :as branch]
             [seon.db.protocol :as protocol]
             [seon.dev.restore.schema]
             [seon.schema :as schema]))
@@ -9,16 +9,16 @@
                   :seon.dev.restore/intent-id)
 (schema/register! :seon.db.restore-admin/plan-digest
                   :seon.dev.restore/plan-digest)
-(schema/register! :seon.db.restore-admin/pre-restore-main-coordinate
-                  ::coordinate/coordinate)
-(schema/register! :seon.db.restore-admin/selected-target-coordinate
-                  ::coordinate/coordinate)
-(schema/register! :seon.db.restore-admin/prepared-target-coordinate
-                  ::coordinate/coordinate)
-(schema/register! :seon.db.restore-admin/undo-coordinate
-                  ::coordinate/coordinate)
-(schema/register! :seon.db.restore-admin/forced-main-coordinate
-                  ::coordinate/coordinate)
+(schema/register! :seon.db.restore-admin/pre-restore-main-branch-head
+                  ::branch/head)
+(schema/register! :seon.db.restore-admin/selected-target-branch-head
+                  ::branch/head)
+(schema/register! :seon.db.restore-admin/prepared-target-branch-head
+                  ::branch/head)
+(schema/register! :seon.db.restore-admin/undo-branch-head
+                  ::branch/head)
+(schema/register! :seon.db.restore-admin/forced-main-branch-head
+                  ::branch/head)
 (schema/register! :seon.db.restore-admin/branch-roster [:set :keyword])
 (schema/register! :seon.db.restore-admin/force-invoked? :boolean)
 (schema/register!
@@ -39,14 +39,14 @@
  [:map {:closed true}
   [:seon.db.restore-admin/intent-id :seon.db.restore-admin/intent-id]
   [:seon.db.restore-admin/plan-digest :seon.db.restore-admin/plan-digest]
-  [:seon.db.restore-admin/pre-restore-main-coordinate
-   :seon.db.restore-admin/pre-restore-main-coordinate]
-  [:seon.db.restore-admin/selected-target-coordinate
-   :seon.db.restore-admin/selected-target-coordinate]
-  [:seon.db.restore-admin/prepared-target-coordinate
-   :seon.db.restore-admin/prepared-target-coordinate]
-  [:seon.db.restore-admin/undo-coordinate
-   :seon.db.restore-admin/undo-coordinate]])
+  [:seon.db.restore-admin/pre-restore-main-branch-head
+   :seon.db.restore-admin/pre-restore-main-branch-head]
+  [:seon.db.restore-admin/selected-target-branch-head
+   :seon.db.restore-admin/selected-target-branch-head]
+  [:seon.db.restore-admin/prepared-target-branch-head
+   :seon.db.restore-admin/prepared-target-branch-head]
+  [:seon.db.restore-admin/undo-branch-head
+   :seon.db.restore-admin/undo-branch-head]])
 
 (def ^:private released
   [:= :seon.db.restore-admin.connection/released])
@@ -56,16 +56,16 @@
    [:seon.db.restore-admin/intent-id :seon.db.restore-admin/intent-id]
    [:seon.db.restore-admin/plan-digest :seon.db.restore-admin/plan-digest]
    [:seon.db.restore-admin/outcome [:= outcome]]
-   [:seon.db.restore-admin/pre-restore-main-coordinate
-    :seon.db.restore-admin/pre-restore-main-coordinate]
-   [:seon.db.restore-admin/selected-target-coordinate
-    :seon.db.restore-admin/selected-target-coordinate]
-   [:seon.db.restore-admin/prepared-target-coordinate
-    :seon.db.restore-admin/prepared-target-coordinate]
-   [:seon.db.restore-admin/undo-coordinate
-    :seon.db.restore-admin/undo-coordinate]
-   [:seon.db.restore-admin/forced-main-coordinate
-    :seon.db.restore-admin/forced-main-coordinate]
+   [:seon.db.restore-admin/pre-restore-main-branch-head
+    :seon.db.restore-admin/pre-restore-main-branch-head]
+   [:seon.db.restore-admin/selected-target-branch-head
+    :seon.db.restore-admin/selected-target-branch-head]
+   [:seon.db.restore-admin/prepared-target-branch-head
+    :seon.db.restore-admin/prepared-target-branch-head]
+   [:seon.db.restore-admin/undo-branch-head
+    :seon.db.restore-admin/undo-branch-head]
+   [:seon.db.restore-admin/forced-main-branch-head
+    :seon.db.restore-admin/forced-main-branch-head]
    [:seon.db.restore-admin/branch-roster
     :seon.db.restore-admin/branch-roster]
    [:seon.db.restore-admin/force-invoked? [:= force-invoked?]]
@@ -89,16 +89,16 @@
   [:seon.db.restore-admin/plan-digest :seon.db.restore-admin/plan-digest]
   [:seon.db.restore-admin/error-kind :seon.db.restore-admin/error-kind]
   [:seon.db.restore-admin/error :seon.db.restore-admin/error]
-  [:seon.db.restore-admin/pre-restore-main-coordinate
-   :seon.db.restore-admin/pre-restore-main-coordinate]
-  [:seon.db.restore-admin/selected-target-coordinate
-   :seon.db.restore-admin/selected-target-coordinate]
-  [:seon.db.restore-admin/prepared-target-coordinate
-   :seon.db.restore-admin/prepared-target-coordinate]
-  [:seon.db.restore-admin/undo-coordinate
-   :seon.db.restore-admin/undo-coordinate]
-  [:seon.db.restore-admin/forced-main-coordinate {:optional true}
-   :seon.db.restore-admin/forced-main-coordinate]
+  [:seon.db.restore-admin/pre-restore-main-branch-head
+   :seon.db.restore-admin/pre-restore-main-branch-head]
+  [:seon.db.restore-admin/selected-target-branch-head
+   :seon.db.restore-admin/selected-target-branch-head]
+  [:seon.db.restore-admin/prepared-target-branch-head
+   :seon.db.restore-admin/prepared-target-branch-head]
+  [:seon.db.restore-admin/undo-branch-head
+   :seon.db.restore-admin/undo-branch-head]
+  [:seon.db.restore-admin/forced-main-branch-head {:optional true}
+   :seon.db.restore-admin/forced-main-branch-head]
   [:seon.db.restore-admin/branch-roster {:optional true}
    :seon.db.restore-admin/branch-roster]
   [:seon.db.restore-admin/force-invoked?
@@ -122,14 +122,14 @@
   [:seon.db.restore-admin/plan-digest :seon.db.restore-admin/plan-digest]
   [:seon.db.restore-admin/error-kind :seon.db.restore-admin/error-kind]
   [:seon.db.restore-admin/error :seon.db.restore-admin/error]
-  [:seon.db.restore-admin/pre-restore-main-coordinate
-   :seon.db.restore-admin/pre-restore-main-coordinate]
-  [:seon.db.restore-admin/selected-target-coordinate
-   :seon.db.restore-admin/selected-target-coordinate]
-  [:seon.db.restore-admin/prepared-target-coordinate
-   :seon.db.restore-admin/prepared-target-coordinate]
-  [:seon.db.restore-admin/undo-coordinate
-   :seon.db.restore-admin/undo-coordinate]
+  [:seon.db.restore-admin/pre-restore-main-branch-head
+   :seon.db.restore-admin/pre-restore-main-branch-head]
+  [:seon.db.restore-admin/selected-target-branch-head
+   :seon.db.restore-admin/selected-target-branch-head]
+  [:seon.db.restore-admin/prepared-target-branch-head
+   :seon.db.restore-admin/prepared-target-branch-head]
+  [:seon.db.restore-admin/undo-branch-head
+   :seon.db.restore-admin/undo-branch-head]
   [:seon.db.restore-admin/effect-state
    [:= :seon.db.restore-admin.effect/unknown]]
   [:seon.db.restore-admin/connection-state

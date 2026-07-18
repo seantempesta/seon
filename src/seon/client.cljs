@@ -60,7 +60,7 @@
     [seon.ai :as ai]
     [seon.ai.dispatch :as ai.dispatch]
     [seon.db :as db]
-    [seon.db.coordinate :as db.coordinate]
+    [seon.db.branch :as db.branch]
     [seon.db.id :as id]
     [seon.db.process :as db.process]
     [seon.derive :as derive]
@@ -307,12 +307,12 @@
 (defn runtime-advertisement
   "Project this pod's MCP addressable agents from its database interest.
 
-   Runtime and writer coordinates are immutable launch configuration. Agent
+   Runtime and writer process settings are immutable launch configuration. Agent
    membership is the last accepted result of the same nonterminated,
    born-agent query used by cold resume. One addressed database interest keeps
    that ordinary projection current without making this synchronous MCP probe
    perform I/O.
-   Before the database attaches, the pod still advertises its runtime and
+   Before the database session opens, the pod still advertises its runtime and
    writer owner with no agent ids so an ordinary cluster-pinned REPL can
    connect during boot."
   {:malli/schema
@@ -615,7 +615,7 @@
 ;;
 ;; start-runtime! opens the authority session, installs the database schema,
 ;; and resumes the durable agents.
-;; Repeated calls consult that one live attachment and return status without
+;; Repeated calls consult that one open database session and return status without
 ;; repeating cold work; hot reload reconstructs only process-local runtimes.
 ;; ---------------------------------------------------------------------------
 
@@ -902,7 +902,7 @@
   [descriptor initialization]
   (let [writer-owner (::launch/writer-owner descriptor)
         database (::launch/database descriptor)
-        coordinate (::db.coordinate/coordinate database)]
+        branch-head (::db.branch/head database)]
     (cond-> {::db/socket-path (::launch/request-socket-path writer-owner)
              ::db/database-name (::db.protocol/database-name database)
              ::db/backend (::db.protocol/backend database)}
@@ -910,8 +910,8 @@
       (assoc ::db/database-path (::db.protocol/database-path database))
       initialization
       (assoc ::db/initialization initialization)
-      coordinate
-      (assoc ::db/attachment (db.coordinate/attachment coordinate)))))
+      branch-head
+      (assoc ::db/connection-id (db.branch/connection-id branch-head)))))
 
 (defn ^:async open-database-session!
   "Open this process's one persistent database authority session.
@@ -1872,12 +1872,12 @@
   "Prove retained completion evidence against the current authority head."
   [claim result]
   (let [completion (::db.restore/completion result)
-        coordinate (::db.restore/completion-coordinate result)
+        branch-head (::db.restore/completion-branch-head result)
         acquired
         (when (and (true? (::db.restore/ok? result))
                    (= claim (dissoc completion ::db.restore/id))
                    (schema/valid-candidate-value?
-                    ::db.coordinate/coordinate coordinate))
+                    ::db.branch/head branch-head))
           (await
            (db.restore/acquire-completion!
             {::db.restore/plan-digest (::db.restore/plan-digest claim)})))
@@ -1887,9 +1887,10 @@
             {::db.restore/completion completion
              ::db.restore/current-completion
              (::db.restore/completion acquired)
-             ::db.restore/completion-coordinate coordinate
-             ::db.restore/current-coordinate
-             (::db.restore/current-coordinate acquired)
+             ::db.restore/completion-branch-head branch-head
+             ::db.restore/current-branch-head
+             (db.branch/head-from-database-value
+              (::db.restore/current-db acquired))
              ::db.restore/publication-rows
              (::db.restore/publication-rows acquired)
              :seon.runtime.admission/state (admission/state)}))]
@@ -1902,7 +1903,7 @@
                   :seon.error/kind :core-bug})))
     result))
 
-(defn- ^:async validate-restore-attachment!
+(defn- ^:async validate-restore-database!
   [descriptor startup claim]
   (when startup
     (let [acquired
@@ -1911,26 +1912,27 @@
             {::db.restore/plan-digest (::db.restore/plan-digest claim)}))
           _ (when (:seon.error/message acquired)
               (throw
-               (ex-info "Restore startup attachment acquisition failed."
+              (ex-info "Restore startup database acquisition failed."
                         {:seon.db/error acquired
                          :seon.error/kind :core-bug})))
-          actual (::db.restore/current-coordinate acquired)
+          actual (db.branch/head-from-database-value
+                  (::db.restore/current-db acquired))
           expected (get-in descriptor
-                           [::launch/database ::db.coordinate/coordinate])
+                           [::launch/database ::db.branch/head])
           forced (get-in startup
                          [:seon.db.restore-admin/result
-                          :seon.db.restore-admin/forced-main-coordinate])
+                          :seon.db.restore-admin/forced-main-branch-head])
           missing-schema
           (into []
                 (remove #(contains? (::db.restore/installed-schema acquired) %))
                 db.restore/completion-attrs)]
       (when-not (and (= expected forced actual)
-                     (= :db (::db.coordinate/branch actual)))
+                     (= :db (::db.branch/name actual)))
         (throw
           (ex-info "Restore startup attached another main database point."
-                   {:seon.client/expected-restore-coordinate expected
-                    :seon.client/forced-restore-coordinate forced
-                    :seon.client/actual-restore-coordinate actual
+                   {:seon.client/expected-restore-branch-head expected
+                    :seon.client/forced-restore-branch-head forced
+                    :seon.client/actual-restore-branch-head actual
                     :seon.error/kind :core-bug})))
       (when (seq missing-schema)
         (throw
@@ -2021,7 +2023,7 @@
       (let [_session-open
             (await (open-startup-session! startup? selected-configuration))
             _ (await
-               (validate-restore-attachment!
+               (validate-restore-database!
                 descriptor restore-startup restore-completion-claim))]
         (when (some? selected-manifest)
           (let [reconciled
@@ -2094,6 +2096,7 @@
                       (ex-info
                         "start-runtime!: restore program preparation failed"
                         preparation)))
+                restore-db (when restore-startup (await (db/db)))
                 completion-result
                 (when restore-startup
                   (await
@@ -2105,10 +2108,7 @@
                         (db.restore/record!
                          {::db.restore/completion-claim
                           restore-completion-claim
-                          ::db.restore/expected-coordinate
-                          (get-in descriptor
-                                  [::launch/database
-                                   ::db.coordinate/coordinate])})))))
+                          ::db.restore/expected-db restore-db})))))
                 completion-result
                 (when restore-startup
                   (await
@@ -2202,7 +2202,7 @@
             (when-not (db/attached?)
               (throw
                (ex-info
-                "The runtime lost its database attachment during launch."
+                "The runtime lost its database session during launch."
                 {::runtime-phase :seon.client.runtime/starting})))
             (swap! !state assoc ::runtime-phase :seon.client.runtime/running)
             result)
