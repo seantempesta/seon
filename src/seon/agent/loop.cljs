@@ -347,7 +347,7 @@
   (await (close-loop-run! nil run-id :quiesced state :quiesce)))
 
 (defn ^:async ^:private recover-retired-child!
-  [agent-id run-id state]
+  [agent-id run-id state evidence]
   (let [recovered
         (await
          (db/with-tx-context
@@ -355,10 +355,13 @@
            :seon.db/process [:seon.db.process/id :seon.db.process/repl]}
           (fn []
             (recovery/recover!
-             {:seon.agent/id agent-id
-              :seon.agent.run/id run-id
-              :seon.runtime.recovery/detail
-              "execution child retired during active work"}))))]
+             (cond->
+              {:seon.agent/id agent-id
+               :seon.agent.run/id run-id
+               :seon.runtime.recovery/detail
+               "execution child retired during active work"}
+               (seq evidence)
+               (assoc :seon.runtime.recovery/evidence evidence))))))]
     (if (::recovery/repaired? recovered)
       (do
         (log agent-id "halt" "execution child retired → run :crashed")
@@ -470,7 +473,8 @@
                   :available
                   (if errored?
                     (if child-retired?
-                      (recover-retired-child! id run-id state)
+                      (recover-retired-child! id run-id state
+                                              (:seon.error/data r))
                     ;; §8c — distinguish LOST AUTHORITY (the turn's leading
                     ;; CAS aborted) from a genuine turn error.
                       (let [latest (await (acquire-loop-state id run-id))

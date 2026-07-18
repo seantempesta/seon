@@ -225,8 +225,11 @@
           _ (set! turn/run-turn!
                   (fn [_input]
                     (js/Promise.resolve
-                     {:seon.agent.turn/id "turn-a"
+                    {:seon.agent.turn/id "turn-a"
                       :seon.agent.turn/status :error
+                      :seon.error/data
+                      {:seon.execution.host/pid 444
+                       ::execution/child-retired? true}
                       ::execution/child-retired? true})))
           _ (set! recovery/recover!
                   (fn [request]
@@ -248,7 +251,10 @@
              (is (= {:seon.agent/id "agent-a"
                      :seon.agent.run/id "run-a"
                      :seon.runtime.recovery/detail
-                     "execution child retired during active work"}
+                     "execution child retired during active work"
+                     :seon.runtime.recovery/evidence
+                     {:seon.execution.host/pid 444
+                      ::execution/child-retired? true}}
                     @!recovery-request))
              (is (zero? @!ordinary-close-count))))
           (.catch (fn [error]

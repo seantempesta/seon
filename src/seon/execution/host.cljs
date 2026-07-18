@@ -19,6 +19,44 @@
 (schema/register! ::cancel-grace-ms [:int {:min 1}])
 (schema/register! ::spawn! 'fn?)
 (schema/register! ::run-fence-current? 'fn?)
+(schema/register! ::pid :int)
+(schema/register! ::ready? :boolean)
+(schema/register! ::retiring? :boolean)
+(schema/register! ::stdout-tail :string)
+(schema/register! ::stderr-tail :string)
+(schema/register! ::started-at :inst)
+(schema/register! ::elapsed-ms :int)
+(schema/register!
+ ::resource-usage
+ [:map {:closed true}
+  [::subprocess/rss-bytes :int]
+  [::subprocess/max-rss-bytes {:optional true} :int]
+  [::subprocess/cpu-time
+   {:optional true}
+   [:map {:closed true}
+    [::subprocess/user :int]
+    [::subprocess/system :int]
+    [::subprocess/total :int]]]])
+(schema/register!
+ ::invocation
+ [:map {:closed true}
+  [::execution/invocation-id ::execution/invocation-id]
+  [::execution/function-identity ::execution/function-identity]
+  [::execution/deadline-ms ::execution/deadline-ms]
+  [::started-at ::started-at]])
+(schema/register!
+ ::process
+ [:map {:closed true}
+  [::execution/agent-id ::execution/agent-id]
+  [::pid ::pid]
+  [::artifact-digest ::execution/artifact-digest]
+  [::ready? ::ready?]
+  [::retiring? ::retiring?]
+  [::stdout-tail ::stdout-tail]
+  [::stderr-tail ::stderr-tail]
+  [::resource-usage {:optional true} ::resource-usage]
+  [::invocation {:optional true} ::invocation]])
+(schema/register! ::processes [:vector ::process])
 (schema/register!
  ::configure-request
  [:map {:closed true}
@@ -82,18 +120,31 @@
 (defn- child [agent-id] (get-in @!host [::children agent-id]))
 
 (defn- child-evidence [current]
-  (let [usage ((::subprocess/resource-usage! (::control current)))]
+  (let [usage ((::subprocess/resource-usage! (::control current)))
+        started-at (get-in current [::active ::started-at])]
     (cond-> {::pid (::pid current)
              ::artifact-digest (::artifact-digest current)
              ::stdout-tail (::stdout-tail current)
              ::stderr-tail (::stderr-tail current)}
-      usage (assoc ::resource-usage usage))))
+      usage (assoc ::resource-usage usage)
+      started-at (assoc ::elapsed-ms
+                        (max 0 (- (.now js/Date) (.getTime started-at)))))))
+
+(defn- exit-evidence [current result]
+  (cond-> (child-evidence current)
+    (some? (::subprocess/exit result))
+    (assoc ::exit-code (::subprocess/exit result))
+    (::subprocess/signal result)
+    (assoc ::signal (::subprocess/signal result))
+    (::subprocess/resource-usage result)
+    (assoc ::resource-usage (::subprocess/resource-usage result))))
 
 (defn processes
   "Return one demanded ordinary-data snapshot of supervised execution children.
 
    Sampling is parent-owned and synchronous; it does not ask the child event
    loop to cooperate and does not retain or transact healthy measurements."
+  {:malli/schema [:=> [:cat] ::processes]}
   []
   (->> (::children @!host)
        (map (fn [[agent-id current]]
@@ -141,8 +192,7 @@
   (when (same-child? agent-id generation child-id)
     (let [current (child agent-id)
           active (::active current)
-          exit (::exit current)
-          exit-code (::subprocess/exit result)]
+          exit (::exit current)]
       (when-let [timer (::ready-timer current)] (js/clearTimeout timer))
       (when-let [timer (::idle-timer current)] (js/clearTimeout timer))
       (when-let [timer (::kill-timer current)] (js/clearTimeout timer))
@@ -151,27 +201,19 @@
          (host-error
           {::execution/invocation-id "startup"}
           "The execution child exited before becoming ready."
-          {::pid (::pid current)
-           ::exit-code exit-code
-           ::stdout-tail (::stdout-tail current)
-           ::stderr-tail (::stderr-tail current)
-           ::artifact-digest (::artifact-digest current)
-           ::execution/child-retired? true})))
+          (assoc (exit-evidence current result)
+                 ::execution/child-retired? true))))
       (when active
         ((::resolve! active)
          (host-error
           (::invocation active)
           "The execution child exited before returning a result."
-          {::pid (::pid current)
-           ::exit-code exit-code
-           ::stdout-tail (::stdout-tail current)
-           ::stderr-tail (::stderr-tail current)
-           ::artifact-digest (::artifact-digest current)
-           ::execution/child-retired? true
-           :seon.db/db
-           (get-in active [::invocation :seon.db/db])})))
+          (assoc (exit-evidence current result)
+                 ::execution/child-retired? true
+                 :seon.db/db
+                 (get-in active [::invocation :seon.db/db])))))
       (remove-child! agent-id generation child-id)
-      ((::resolve! exit) exit-code))))
+      ((::resolve! exit) (::subprocess/exit result)))))
 
 (defn- schedule-idle-stop!
   [agent-id generation child-id]

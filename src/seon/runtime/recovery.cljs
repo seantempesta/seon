@@ -12,6 +12,7 @@
    which agents still have no later run. No affected refs, acknowledgement,
    or rendered notification is persisted."
   (:require
+    [my.blob :as blob]
     [seon.db :as db]
     [seon.db.id :as db.id]
     [seon.db.protocol :as protocol]
@@ -31,13 +32,47 @@
 (schema/register! :seon.runtime.recovery/reason
                   [:enum :unexpected-exit])
 (schema/register! :seon.runtime.recovery/detail [:string {:max 2048}])
+(schema/register! :seon.runtime.recovery/diagnostic-blob :seon.db/ref)
+(schema/register! :seon.runtime.recovery/pid :int)
+(schema/register! :seon.runtime.recovery/exit-code :int)
+(schema/register! :seon.runtime.recovery/signal :string)
+(schema/register! :seon.runtime.recovery/cpu-user-microseconds :int)
+(schema/register! :seon.runtime.recovery/cpu-system-microseconds :int)
+(schema/register! :seon.runtime.recovery/cpu-total-microseconds :int)
+(schema/register! :seon.runtime.recovery/rss-bytes :int)
+(schema/register! :seon.runtime.recovery/max-rss-bytes :int)
+(schema/register! :seon.runtime.recovery/elapsed-ms :int)
+(schema/register! :seon.runtime.recovery/stdout-tail [:string {:max 2048}])
+(schema/register! :seon.runtime.recovery/stderr-tail [:string {:max 2048}])
 
 (schema/register! :seon.runtime.recovery
   [:map {:seon.db/entity true}
    [:seon.runtime.recovery/id :seon.runtime.recovery/id]
    [:seon.runtime.recovery/reason :seon.runtime.recovery/reason]
    [:seon.runtime.recovery/detail
-    {:optional true} :seon.runtime.recovery/detail]])
+    {:optional true} :seon.runtime.recovery/detail]
+   [:seon.runtime.recovery/diagnostic-blob
+    {:optional true} :seon.runtime.recovery/diagnostic-blob]
+   [:seon.runtime.recovery/pid {:optional true} :seon.runtime.recovery/pid]
+   [:seon.runtime.recovery/exit-code
+    {:optional true} :seon.runtime.recovery/exit-code]
+   [:seon.runtime.recovery/signal {:optional true} :seon.runtime.recovery/signal]
+   [:seon.runtime.recovery/cpu-user-microseconds
+    {:optional true} :seon.runtime.recovery/cpu-user-microseconds]
+   [:seon.runtime.recovery/cpu-system-microseconds
+    {:optional true} :seon.runtime.recovery/cpu-system-microseconds]
+   [:seon.runtime.recovery/cpu-total-microseconds
+    {:optional true} :seon.runtime.recovery/cpu-total-microseconds]
+   [:seon.runtime.recovery/rss-bytes
+    {:optional true} :seon.runtime.recovery/rss-bytes]
+   [:seon.runtime.recovery/max-rss-bytes
+    {:optional true} :seon.runtime.recovery/max-rss-bytes]
+   [:seon.runtime.recovery/elapsed-ms
+    {:optional true} :seon.runtime.recovery/elapsed-ms]
+   [:seon.runtime.recovery/stdout-tail
+    {:optional true} :seon.runtime.recovery/stdout-tail]
+   [:seon.runtime.recovery/stderr-tail
+    {:optional true} :seon.runtime.recovery/stderr-tail]])
 
 ;; ---------------------------------------------------------------------------
 ;; Recovery operation contract.
@@ -51,6 +86,7 @@
 (schema/register! ::run-ids [:vector ::db.id/compact-value])
 (schema/register! ::turn-ids [:vector ::db.id/compact-value])
 (schema/register! ::eval-ids [:vector ::db.id/compact-value])
+(schema/register! ::evidence :map)
 (schema/register!
  ::recover-request
  [:or
@@ -61,7 +97,8 @@
    [:seon.agent/id :string]
    [:seon.agent.run/id ::db.id/compact-value]
    [:seon.runtime.recovery/detail
-    {:optional true} :seon.runtime.recovery/detail]]])
+    {:optional true} :seon.runtime.recovery/detail]
+   [:seon.runtime.recovery/evidence {:optional true} ::evidence]]])
 (schema/register! ::recover-response
   [:or
    [:map
@@ -192,9 +229,67 @@
                       vec)
          ::generator (member-value! "generator-policy acquisition" policy)}))))
 
+(def ^:private maximum-tail-characters 2048)
+
+(defn- tail [value]
+  (when (string? value)
+    (let [length (count value)]
+      (if (<= length maximum-tail-characters)
+        value
+        (subs value (- length maximum-tail-characters))))))
+
+(defn- evidence-projection [evidence diagnostic-blob]
+  (let [usage (:seon.execution.host/resource-usage evidence)
+        cpu (:seon.subprocess/cpu-time usage)]
+    (cond-> {}
+      diagnostic-blob
+      (assoc :seon.runtime.recovery/diagnostic-blob diagnostic-blob)
+      (:seon.execution.host/pid evidence)
+      (assoc :seon.runtime.recovery/pid
+             (:seon.execution.host/pid evidence))
+      (:seon.execution.host/exit-code evidence)
+      (assoc :seon.runtime.recovery/exit-code
+             (:seon.execution.host/exit-code evidence))
+      (:seon.execution.host/signal evidence)
+      (assoc :seon.runtime.recovery/signal
+             (str (:seon.execution.host/signal evidence)))
+      (:seon.execution.host/elapsed-ms evidence)
+      (assoc :seon.runtime.recovery/elapsed-ms
+             (:seon.execution.host/elapsed-ms evidence))
+      (:seon.subprocess/user cpu)
+      (assoc :seon.runtime.recovery/cpu-user-microseconds
+             (:seon.subprocess/user cpu))
+      (:seon.subprocess/system cpu)
+      (assoc :seon.runtime.recovery/cpu-system-microseconds
+             (:seon.subprocess/system cpu))
+      (:seon.subprocess/total cpu)
+      (assoc :seon.runtime.recovery/cpu-total-microseconds
+             (:seon.subprocess/total cpu))
+      (:seon.subprocess/rss-bytes usage)
+      (assoc :seon.runtime.recovery/rss-bytes
+             (:seon.subprocess/rss-bytes usage))
+      (or (:seon.subprocess/max-rss-bytes usage)
+          (:seon.subprocess/max-rss usage))
+      (assoc :seon.runtime.recovery/max-rss-bytes
+             (or (:seon.subprocess/max-rss-bytes usage)
+                 (:seon.subprocess/max-rss usage)))
+      (tail (:seon.execution.host/stdout-tail evidence))
+      (assoc :seon.runtime.recovery/stdout-tail
+             (tail (:seon.execution.host/stdout-tail evidence)))
+      (tail (:seon.execution.host/stderr-tail evidence))
+      (assoc :seon.runtime.recovery/stderr-tail
+             (tail (:seon.execution.host/stderr-tail evidence))))))
+
+(defn- ^:async capture-evidence! [evidence]
+  (when (seq evidence)
+    (let [result (await (blob/put! {:my.blob/content (pr-str evidence)
+                                    :my.blob/media :edn}))]
+      (when (:my.blob/ok? result)
+        [:my.blob/hash (:my.blob/hash result)]))))
+
 (defn- compile-recovery
   [{::keys [targets turns evals] ::db/keys [db]}
-   recovery-id closed-at detail]
+   recovery-id closed-at detail projection]
   (let [agent-ids (mapv first targets)
         run-ids (mapv second targets)
         open-run-ids (->> targets
@@ -240,7 +335,9 @@
                  {:seon.runtime.recovery/id recovery-id
                   :seon.runtime.recovery/reason :unexpected-exit}
                  detail
-                 (assoc :seon.runtime.recovery/detail detail))]
+                 (assoc :seon.runtime.recovery/detail detail)
+                 (seq projection)
+                 (merge projection))]
     {::db/expected-db db
      ::db/tx-data (-> fences
                       (into pointer-retractions)
@@ -277,11 +374,13 @@
    returned as direct error values; no partial repair can commit."
   {:malli/schema [:=> [:catn [::request ::recover-request]]
                   ::recover-response]}
-  [{:seon.runtime.recovery/keys [detail]
+  [{:seon.runtime.recovery/keys [detail evidence]
     agent-id :seon.agent/id
     run-id :seon.agent.run/id}]
   (try
-    (let [database (await (db/db))]
+    (let [diagnostic-blob (await (capture-evidence! evidence))
+          projection (evidence-projection evidence diagnostic-blob)
+          database (await (db/db))]
       (if (error-value? database)
         database
         (let [{::keys [targets generator] :as acquired}
@@ -315,13 +414,15 @@
                          acquired
                          (get ids :seon.runtime.recovery/id)
                          closed-at
-                         detail)
+                         detail
+                         projection)
                         [::db/expected-db ::db/tx-data]))}))
                   recovery-id
                   (get-in result [::db.id/ids :seon.runtime.recovery/id])
                   compiled
                   (when (transaction-report? result)
-                    (compile-recovery acquired recovery-id closed-at detail))]
+                    (compile-recovery acquired recovery-id closed-at detail
+                                      projection))]
               (cond
                 (error-value? result)
                 result
