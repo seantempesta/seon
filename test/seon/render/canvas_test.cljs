@@ -108,7 +108,8 @@
 (deftest welcome-emits-tagged-blocks-and-twin
   (let [{:seon.render/keys [hiccup ai]}
         (canvas/welcome {:seon.agent/id "wlcm-2206110001"
-                         :seon.agent/entity {:seon.agent/id "wlcm-2206110001"}})
+                         :seon.agent/entity {:seon.agent/id "wlcm-2206110001"}}
+                        nil)
         classes (->> (flatten hiccup) (filter map?) (keep :class))]
     (is (canvas/valid-hiccup? hiccup))
     (is (= "seon-card" (:class (second hiccup)))
@@ -135,7 +136,8 @@
         (canvas/welcome {:seon.agent/id "wlcm-2206110002"
                          :seon.agent/entity
                        {:seon.agent/id      "wlcm-2206110002"
-                        :seon.agent/purpose "track your workouts"}})]
+                        :seon.agent/purpose "track your workouts"}}
+                        nil)]
     (is (some #(re-find #"track your workouts" %) (hiccup-strings hiccup)))
     (is (re-find #"track your workouts" ai)
         "the twin tells the agent its purpose is on display")))
@@ -143,7 +145,8 @@
 (deftest welcome-generic-without-purpose-or-name
   (let [{:seon.render/keys [hiccup]}
         (canvas/welcome {:seon.agent/id "wlcm-2206110003"
-                         :seon.agent/entity {:seon.agent/id "wlcm-2206110003"}})]
+                         :seon.agent/entity {:seon.agent/id "wlcm-2206110003"}}
+                        nil)]
     (is (some #(re-find #"finding my purpose" %) (hiccup-strings hiccup))
         "gracefully generic — no purpose, no name, still elegant")))
 
@@ -152,7 +155,8 @@
         (canvas/welcome {:seon.agent/id "wlcm-2206110004"
                          :seon.agent/entity
                        {:seon.agent/id      "wlcm-2206110004"
-                        :seon.agent/purpose "track your workouts"}})]
+                        :seon.agent/purpose "track your workouts"}}
+                        nil)]
     (is (some #(= "wlcm-2206110004" %) (hiccup-strings hiccup))
         "the agent's id renders on the default tile (canvas U3)")
     (is (re-find #"track your workouts" ai)
@@ -164,7 +168,8 @@
           {:seon.agent/id "wlcm-2206110005"
            :seon.agent/entity {:seon.agent/id "wlcm-2206110005"}
            :seon.user/name "Sean"
-           :seon.render.chat/last-reply "I found 3 workouts this week"})]
+           :seon.render.chat/last-reply "I found 3 workouts this week"}
+          nil)]
     (is (some #{"I found 3 workouts this week"} (hiccup-strings hiccup)))
     (is (some #(str/includes? % "Sean") (hiccup-strings hiccup)))
     (is (str/includes? ai "I found 3 workouts this week"))
@@ -226,7 +231,8 @@
   (is (nil? (canvas/hiccup-structure-error
               (:seon.render/hiccup
                 (canvas/welcome {:seon.agent/id "structok-000001"
-                                 :seon.agent/entity {:seon.agent/id "structok-000001"}}))))
+                                 :seon.agent/entity {:seon.agent/id "structok-000001"}}
+                                nil))))
       "the core welcome passes its own gate"))
 
 (deftest structure-error-locates-vector-of-vectors

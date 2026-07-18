@@ -445,11 +445,14 @@
    The operation that acquired the agent may also supply `:seon.user/name`
    and `:seon.render.chat/last-reply`; this formatter performs no database
    acquisition of its own."
-  {:malli/schema [:=> [:cat :seon.render/system-input] :seon.render/html-response]}
+  {:malli/schema
+   [:=> [:cat :seon.render/system-input :any]
+    :seon.render/html-response]}
   [{entity :seon.agent/entity
     id :seon.agent/id
     uname :seon.user/name
-    reply :seon.render.chat/last-reply}]
+    reply :seon.render.chat/last-reply}
+   _invoke-selected!]
   (let [now        (js/Date.)
         greet      (greeting (.getHours now))
         greet-line (if uname
