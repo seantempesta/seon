@@ -3883,3 +3883,16 @@ The next dependency boundary is the relative, content-verified release
 inventory and the existing operator's packaged writer-plus-pod projection.
 Only the extracted source-free runtime can supply final startup, idle, and
 1/2/4-child memory evidence.
+
+An authorized clean default-database reset then exercised the current complete
+initialization path. The operator drained pod and writer cleanly, rebuilt and
+admitted current artifacts, seeded the empty database once, and returned all
+three development processes ready. A fresh ordinary agent executed real forms,
+committed its reply, and rendered its page plus Datastar feed without a
+transcript error. The prior grown database had exposed
+`datahike result-weight budget exceeded` while rendering a transcript; that
+growth defect is preserved with exact owners and acceptance evidence in
+[[../../seon/issues/grown-transcript-exceeds-result-weight-budget]]. The reset
+proves clean startup but does not close the defect. A generated maximum-content
+retained-window fixture and real grown-page proof are required before complete
+browser graduation.
