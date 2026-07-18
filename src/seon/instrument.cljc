@@ -64,6 +64,27 @@
        f)))
 
 #?(:cljs
+   (defn- expose-namespace-to-malli!
+     "Expose Malli's namespace owner as the same object CLJS resolves.
+
+      Malli 0.20.0 resolves instrumented vars only through `goog.global`.
+      Simple-optimized Node bundles keep namespace objects in module scope,
+      where `cljs.core/find-ns-obj` finds them but Malli cannot. Export the
+      existing object rather than copying any vars, so Malli and Seon mutate
+      one namespace owner."
+     [ns-sym]
+     (when-let [ns-object (cljs.core/find-ns-obj ns-sym)]
+       (js/goog.exportSymbol (munge (str ns-sym)) ns-object)
+       ns-object)))
+
+#?(:cljs
+   (defn- expose-data-namespaces-to-malli!
+     "Make the exact namespaces in Malli instrumentation data resolvable."
+     [data]
+     (doseq [ns-sym (keys data)]
+       (expose-namespace-to-malli! ns-sym))))
+
+#?(:cljs
    (defn- -original-fn
      "See through malli's per-var instrumentation record: a wrapped var's
       live fn carries the ORIGINAL under `malli$instrument$original`
@@ -754,6 +775,7 @@
      "Remove Malli data and complete its exact unwrapped callable state."
      [data syms]
      (when (seq data)
+       (expose-data-namespaces-to-malli! data)
        (restore-multi-wrapper-vars! syms)
        (mi/unstrument! {:data data})
        (restore-original-accessors! syms)
@@ -764,6 +786,7 @@
      "Apply Malli data and complete its exact variadic callable shape."
      [data accepted-syms]
      (when (seq data)
+       (expose-data-namespaces-to-malli! data)
        (let [originals
              (into {}
                    (keep (fn [sym]
