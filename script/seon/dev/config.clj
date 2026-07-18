@@ -21,6 +21,8 @@
    [:seon.dev.config/http-port-file :string]
    [:seon.dev.config/writer-repl-port [:int {:min 0 :max 65535}]]
    [:seon.dev.config/writer-repl-port-file :string]
+   [:seon.dev.config/writer-max-heap
+    {:optional true} [:string {:min 2 :max 8}]]
    [:seon.dev.config/artifact-flavor
     [:enum :seon.dev.artifact.flavor/default
      :seon.dev.artifact.flavor/acme]]
@@ -33,7 +35,20 @@
    [:seon.dev.config/artifact-manifest :string]
    [:seon.dev.config/launch-descriptor :seon.launch/descriptor]])
 
+(def default-writer-max-heap "512m")
+
+(defn writer-max-heap
+  "Return the one bounded writer heap selected by the operator configuration."
+  [configuration]
+  (or (:seon.dev.config/writer-max-heap configuration)
+      default-writer-max-heap))
+
 (defn- validate-configuration! [configuration]
+  (when-not (re-matches #"[1-9][0-9]*[kKmMgG]"
+                        (writer-max-heap configuration))
+    (throw (ex-info "The writer maximum heap must be a positive JVM size."
+                    {:seon.dev.config/writer-max-heap
+                     (writer-max-heap configuration)})))
   (when-not (m/validate configuration-schema configuration)
     (throw (ex-info "The derived Seon host configuration is invalid."
                     {:seon.dev.config/explanation
@@ -355,6 +370,8 @@
          :seon.dev.config/writer-repl-port
          (parse-long (get environment "SEON_WRITER_REPL_PORT" "0"))
          :seon.dev.config/writer-repl-port-file writer-port-file
+         :seon.dev.config/writer-max-heap
+         (get environment "SEON_WRITER_MAX_HEAP" default-writer-max-heap)
          :seon.dev.config/writer-output
          (str (fs/path root "target/seon-database-server-standalone.jar"))
          :seon.dev.config/artifact-manifest

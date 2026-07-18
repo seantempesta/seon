@@ -48,7 +48,7 @@
    :jvm-opts ["--add-modules" "jdk.incubator.vector"
               "--enable-native-access=ALL-UNNAMED"
               "--sun-misc-unsafe-memory-access=allow"
-              "-XX:+UseG1GC" "-Xmx2g"]}
+              "-XX:+UseG1GC" "-Xmx512m"]}
 
   ;; Focused writer tests add source only; clojure.test already rides Clojure.
   ;; bin/test-writer selects exact retained namespaces without booting the

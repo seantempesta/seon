@@ -450,7 +450,8 @@
      {:seon.dev.process/id writer-id
       :seon.dev.process/argv
       [java "--add-modules" "jdk.incubator.vector"
-       "--enable-native-access=ALL-UNNAMED" "-XX:+UseG1GC" "-Xmx2g"
+       "--enable-native-access=ALL-UNNAMED" "-XX:+UseG1GC"
+       (str "-Xmx" (config/writer-max-heap config))
        "-jar" (:seon.dev.config/writer-output config)
        "--backend" "file"
        "--db-name" (:seon.dev.config/cluster-name config)

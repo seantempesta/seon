@@ -21,6 +21,19 @@
          Exception #"descriptor is invalid"
          (config/select-launch-descriptor configuration {})))))
 
+(deftest writer-heap-policy-is-bounded-data
+  (let [configuration (config/load! ".")
+        descriptor (:seon.dev.config/launch-descriptor configuration)]
+    (is (= "512m" (config/writer-max-heap {})))
+    (is (= "768m"
+           (config/writer-max-heap
+            {:seon.dev.config/writer-max-heap "768m"})))
+    (is (thrown-with-msg?
+         Exception #"positive JVM size"
+         (config/select-launch-descriptor
+          (assoc configuration :seon.dev.config/writer-max-heap "unbounded")
+          descriptor)))))
+
 (deftest artifact-flavors-own-cache-build-output-and-manifest-identities
   (let [root (str (fs/normalize (fs/absolutize ".")))
         default (config/artifact-configuration root {})

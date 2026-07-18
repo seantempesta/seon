@@ -670,7 +670,9 @@
                [(get-in config [:seon.dev.config/environment "JAVA_CMD"] "java")
                 "--add-modules" "jdk.incubator.vector"
                 "--enable-native-access=ALL-UNNAMED"
-                "-XX:+UseG1GC" "-Xmx2g" "-jar"
+                "-XX:+UseG1GC"
+                (str "-Xmx" (config/writer-max-heap config))
+                "-jar"
                 (:seon.dev.config/writer-output config) "--preflight"]))
   (run-step! config "build self-host bootstrap"
              (cljs-command config "compile" "bootstrap"))
