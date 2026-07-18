@@ -5,6 +5,7 @@
    [seon.db.protocol :as protocol]
    [seon.eval :as seval]
    [seon.execution :as execution]
+   [seon.runtime.admission :as admission]
    [seon.schema :as schema]))
 
 (def digest (apply str (repeat 64 "a")))
@@ -160,6 +161,42 @@
             (.catch
              (fn [error]
                (is false (str "compiled dispatch rejected: " error))
+               (done))))))))
+
+(deftest child-publishes-the-committed-program-before-ready
+  (async done
+    (let [events (atom [])
+          messages (atom [])
+          publication {::admission/published? true
+                       ::admission/recovered? false
+                       ::admission/generation 42}]
+      (with-redefs [db/open-session!
+                    (fn [_]
+                      (swap! events conj :session-opened)
+                      (js/Promise.resolve {:seon.db/db database}))
+                    admission/publish-committed!
+                    (fn []
+                      (swap! events conj :publication-started)
+                      (js/Promise.resolve publication))]
+        (-> (js/Promise.resolve
+             (@#'execution/start-child!
+              {} startup
+              (fn [encoded]
+                (swap! events conj :ready-sent)
+                ((decoded-sender messages) encoded))
+              (fn [_] (swap! events conj :receiver-installed))
+              (fn [_])))
+            (.then
+             (fn [_]
+               (is (= [:session-opened :publication-started :ready-sent
+                       :receiver-installed]
+                      @events))
+               (is (= execution/ready-message
+                      (::execution/message (first @messages))))
+               (done)))
+            (.catch
+             (fn [error]
+               (is false (str "child startup rejected: " error))
                (done))))))))
 
 (deftest unpinned-compiled-dispatch-can-read-the-moving-authority-head

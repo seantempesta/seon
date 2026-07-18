@@ -10,6 +10,7 @@
    [seon.db.protocol :as db.protocol]
    [seon.error :as error]
    [seon.eval :as eval]
+   [seon.runtime.admission :as admission]
    [seon.schema :as schema]))
 
 ;;; Data contract
@@ -903,18 +904,27 @@
     (-> (db/open-session! (::database-selection startup))
         (.then
          (fn [{database :seon.db/db}]
-           (send! send-message!
-                  {::message ready-message
-                   ::protocol-version protocol-version
-                   ::agent-id (::agent-id startup)
-                   ::bun-version (or (.-version js/Bun) "unknown")
-                   ::shadow-build-id (::shadow-build-id startup)
-                   ::artifact-digest (::artifact-digest startup)
-                   :seon.db/db database})
-           (on-message!
-            (fn [encoded]
-              (receive! state encoded send-message! exit! (.now js/Date))))
-           state)))))
+           (-> (admission/publish-committed!)
+               (.then
+                (fn [{::admission/keys [published?] :as publication}]
+                  (when-not published?
+                    (throw
+                     (ex-info "The execution child could not publish the committed program."
+                              {:seon.runtime.admission/publication publication
+                               :seon.error/kind :core-bug})))
+                  (send! send-message!
+                         {::message ready-message
+                          ::protocol-version protocol-version
+                          ::agent-id (::agent-id startup)
+                          ::bun-version (or (.-version js/Bun) "unknown")
+                          ::shadow-build-id (::shadow-build-id startup)
+                          ::artifact-digest (::artifact-digest startup)
+                          :seon.db/db database})
+                  (on-message!
+                   (fn [encoded]
+                     (receive! state encoded send-message! exit!
+                               (.now js/Date))))
+                  state))))))))
 
 (defn- valid-compiled-functions?
   [compiled-functions]
