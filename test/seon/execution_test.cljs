@@ -271,7 +271,19 @@
     (let [result (execution/bounded-result (js/Promise.resolve 1) 4096)]
       (is (false? (::execution/ok? result)))
       (is (= :agent (get-in result [::execution/error
-                                    :seon.error/kind])))))
+                                    :seon.error/kind])))
+      (is (= [] (get-in result [::execution/error :seon.error/data
+                                ::execution/value-path])))
+      (is (= "object" (get-in result [::execution/error :seon.error/data
+                                      ::execution/value-type])))))
+  (testing "the refusal identifies a nested lazy sequence"
+    (let [result (execution/bounded-result
+                  {:seon.render/hiccup [:div (map identity [1 2])]}
+                  4096)]
+      (is (false? (::execution/ok? result)))
+      (is (= [:seon.render/hiccup 1]
+             (get-in result [::execution/error :seon.error/data
+                             ::execution/value-path])))))
   (testing "the caller's smaller byte limit is enforced"
     (let [result (execution/bounded-result {:my.render/value (apply str
                                                                          (repeat 100 "x"))}

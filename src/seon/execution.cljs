@@ -188,6 +188,50 @@
                       {:seon.error/kind :core-bug})))
     message))
 
+(defn- value-type [value]
+  (cond
+    (nil? value) "nil"
+    (record? value) (or (some-> value type str) "record")
+    :else (goog/typeOf value)))
+
+(defn- first-non-ordinary
+  "Describe the first value that cannot cross the execution IPC boundary."
+  ([value] (first-non-ordinary [] value))
+  ([path value]
+   (cond
+     (db.protocol/ordinary-wire-value? value)
+     nil
+
+     (or (record? value)
+         (fn? value)
+         (satisfies? IDeref value)
+         (instance? js/Promise value)
+         (instance? js/Error value))
+     {::value-path path
+      ::value-type (value-type value)}
+
+     (map? value)
+     (or (some (fn [[key item]]
+                 (or (first-non-ordinary (conj path [:key key]) key)
+                     (first-non-ordinary (conj path key) item)))
+               value)
+         {::value-path path ::value-type (value-type value)})
+
+     (or (vector? value) (list? value))
+     (or (some identity
+               (map-indexed (fn [index item]
+                              (first-non-ordinary (conj path index) item))
+                            value))
+         {::value-path path ::value-type (value-type value)})
+
+     (set? value)
+     (or (some #(first-non-ordinary (conj path :set-member) %) value)
+         {::value-path path ::value-type (value-type value)})
+
+     :else
+     {::value-path path
+      ::value-type (value-type value)})))
+
 (defn valid-parent-message?
   "True when a value is one complete ordinary parent message."
   {:malli/schema [:=> [:cat :any] :boolean]}
@@ -212,7 +256,8 @@
     {::ok? false
      ::error {:seon.error/message
               "The function returned a value that cannot cross IPC."
-              :seon.error/kind :agent}}
+              :seon.error/kind :agent
+              :seon.error/data (first-non-ordinary value)}}
 
     :else
     (let [encoded (encode-message {::value value})
