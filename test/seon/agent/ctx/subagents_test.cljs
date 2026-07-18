@@ -144,6 +144,30 @@
               (set! db/execute-many original)
               (done)))))))
 
+(deftest no-orphans-render-as-absent-with-explicit-query-arguments
+  (async done
+    (let [original db/execute-many
+          observed (atom nil)]
+      (set! db/execute-many
+            (fn [request]
+              (reset! observed request)
+              (js/Promise.resolve
+               {::db/results [(success #{}) (success #{})]})))
+      (-> (sub/orphaned-agents-block {::db/db database} nil)
+          (.then
+           (fn [out]
+             (is (= "" out))
+             (is (= [[] []]
+                    (mapv ::protocol/arguments (::db/members @observed)))
+                 "every protocol query member carries its arguments vector")))
+          (.catch
+           (fn [error]
+             (is false (str "empty orphan acquisition rejected: " error))))
+          (.finally
+           (fn []
+             (set! db/execute-many original)
+             (done)))))))
+
 (deftest orphaned-owner-still-uses-one-bounded-remote-request
   (async done
     (let [original db/execute-many

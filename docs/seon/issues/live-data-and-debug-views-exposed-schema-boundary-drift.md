@@ -44,6 +44,10 @@ existing unit gates:
   require-edge components and showed they were not declared as stored entity
   data. `:seon.ns` now declares its component ref and the existing analyzer
   require-edge map is marked as the stored component entity it already is.
+- The empty orphaned-agent queries then exposed a protocol constructor that
+  omitted `:seon.db.protocol/arguments` for `[]`. The JVM query-member contract
+  requires an arguments vector even when it is empty; both shared context query
+  constructors now send that exact value.
 
 ## Acceptance
 
@@ -58,6 +62,8 @@ existing unit gates:
 - No maintained source or test uses the removed pull request keys.
 - Namespace and require-edge entity schemas install every attribute used by
   the structural require-edge pull selector.
+- Empty query members carry `:seon.db.protocol/arguments []`, and an empty
+  orphaned-agent result omits the block instead of rendering a false failure.
 - The data view consumes Datahike's `:datahike.index-page/datoms` result
   directly.
 - Prompt acquisition uses bounded but realistic Datahike result-tree and

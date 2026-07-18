@@ -167,12 +167,12 @@
   ([query-form arguments]
    (query-member query-form arguments 4096 524288))
   ([query-form arguments max-results max-result-weight]
-   (cond-> {::protocol/operation protocol/query-operation
-            ::protocol/query-form query-form
-            :datahike.resource/max-work 2000000
-            :datahike.resource/max-results max-results
-            :datahike.resource/max-result-weight max-result-weight}
-     (seq arguments) (assoc ::protocol/arguments arguments))))
+   {::protocol/operation protocol/query-operation
+    ::protocol/query-form query-form
+    ::protocol/arguments (vec arguments)
+    :datahike.resource/max-work 2000000
+    :datahike.resource/max-results max-results
+    :datahike.resource/max-result-weight max-result-weight}))
 
 (defn- pull-member [selector entity-id]
   {::protocol/operation protocol/pull-operation
@@ -365,7 +365,9 @@
     (cond
       (or (nil? rows) (nil? open-runs))
       (str "[orphaned-agents] render failed: "
-           (pr-str (::db/results acquired)))
+           (pr-str (if (:seon.error/message acquired)
+                     acquired
+                     (::db/results acquired))))
 
       (empty? rows)
       ""

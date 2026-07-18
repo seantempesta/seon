@@ -270,12 +270,12 @@
                     :seon.ns.require/as-alias?]}])
 
 (defn- query-member [query arguments max-results max-weight]
-  (cond-> {::protocol/operation protocol/query-operation
-           ::protocol/query-form query
-           :datahike.resource/max-work 1000000
-           :datahike.resource/max-results max-results
-           :datahike.resource/max-result-weight max-weight}
-    (seq arguments) (assoc ::protocol/arguments arguments)))
+  {::protocol/operation protocol/query-operation
+   ::protocol/query-form query
+   ::protocol/arguments (vec arguments)
+   :datahike.resource/max-work 1000000
+   :datahike.resource/max-results max-results
+   :datahike.resource/max-result-weight max-weight})
 
 (defn- member-result [member]
   (when (true? (::protocol/success? member))
