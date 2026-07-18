@@ -27,6 +27,7 @@
         :seon.agent.message/to      [[:seon.agent/id \"<agent-id>\"]]
         :seon.agent.message/content \"hello\"})"
   (:require
+    ["node:path" :as npath]
     [cljs.reader :as reader]
     [clojure.set :as set]
     [clojure.string :as str]
@@ -2699,6 +2700,12 @@
   ;; cold-store web UI render, 2026-06-09). Must run before start-runtime!
   ;; opens the store.
   (log/quiet-library-logs!)
+  (log/configure!
+   {:seon.log/file
+    (.join npath
+           (get-in launch/process-launch-descriptor
+                   [::launch/process ::launch/log-dir])
+           "pod-events.log")})
   (claim-blob-storage-view!
    (::launch/blob-storage-view launch/process-launch-descriptor))
   (install-process-safety-net!)

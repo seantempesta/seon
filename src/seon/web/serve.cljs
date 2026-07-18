@@ -1514,16 +1514,10 @@
 ;; Lifecycle
 ;; ============================================================
 
-(defn- ensure-tmp-dir! []
-  ;; Project-local `tmp/` per CLAUDE.md ("never use /tmp"). Created
-  ;; relative to cwd — assumes the pod runs from the project root.
-  (try (.mkdirSync fs "tmp" #js {:recursive true})
-       (catch :default _ nil)))
-
 (defn- write-port-file! [port]
-  (ensure-tmp-dir!)
   (let [target (or (.. js/process -env -SEON_PORT_FILE)
                    "tmp/seon-port")]
+    (.mkdirSync fs (.dirname path target) #js {:recursive true})
     (.writeFileSync fs target (str port))
     target))
 

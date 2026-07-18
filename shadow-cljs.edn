@@ -65,13 +65,17 @@
    :devtools         {:enabled      true
                       :preloads     [seon.demo]
                       :build-notify seon.client/shadow-build-notify!}
-   ;; externs/node_fs.js declares `fs.existsSync` etc. so Closure's
-   ;; :advanced pass doesn't rename them to `fs.g_(...)` and crash
+   ;; The pod resolves compiled Vars from qualified Clojure symbols at runtime,
+   ;; so production must preserve namespace and member property names. Simple
+   ;; optimization retains that contract; advanced optimization renames or
+   ;; removes the properties and makes routes, renders, and instrumentation
+   ;; unresolvable. `externs/node_fs.js` also preserves Node interop names for
    ;; environ.core's load-time `.lein-env` probe. Originally shipped
    ;; in datahike's tree but its deps.cljs points at the wrong path
    ;; (`datahike/externs.js` vs the real `externs/node_fs.js`), so we
-   ;; vendor the file directly here. Only matters under :release.
+   ;; vendor the file directly here. Both settings matter under :release.
    :compiler-options {:warnings-as-errors false
+                      :optimizations      :simple
                       :externs           ["externs/node_fs.js"]}}
 
   ;; Acme (third-party harness) pod bundle. A BYTE-FOR-BYTE MIRROR of
@@ -102,6 +106,7 @@
    :devtools         {:enabled  true
                       :preloads [seon.demo acme.pod]}
    :compiler-options {:warnings-as-errors false
+                      :optimizations      :simple
                       :externs           ["externs/node_fs.js"]}}
 
   ;; FROZEN bench-pod bundle. A BYTE-FOR-BYTE MIRROR of :client EXCEPT
@@ -124,6 +129,7 @@
    :devtools         {:enabled  true
                       :preloads [seon.demo]}
    :compiler-options {:warnings-as-errors false
+                      :optimizations      :simple
                       :externs           ["externs/node_fs.js"]}}
 
   ;; Per-agent execution child for the DEFAULT artifact flavor. It is compiled

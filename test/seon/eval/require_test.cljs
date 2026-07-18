@@ -10,8 +10,8 @@
    stored `(ns …)` row.
 
    The fix is `seon.eval/guarded-load`'s host-bundle fallback: when
-   the bundle index misses but the ns's munged JS object is live on
-   globalThis ([[seon.eval/ns-live-on-globalthis?]]), the load is
+   the bundle index misses but the namespace is already loaded
+   ([[seon.eval/ns-loaded?]]), the load is
    answered with an empty `:js` source — the JS is already loaded by
    construction. Genuinely-absent namespaces still error legibly.
 
@@ -39,13 +39,13 @@
        (keep :seon.error/message)
        (str/join " <- ")))
 
-(deftest ns-live-on-globalthis?-separates-host-bundled-from-absent
-  (is (true? (seval/ns-live-on-globalthis? 'my.kb))
-      "my.kb is compiled into this build — its munged object is live")
-  (is (true? (seval/ns-live-on-globalthis? 'seon.eval))
+(deftest ns-loaded?-separates-host-bundled-from-absent
+  (is (true? (seval/ns-loaded? 'my.kb))
+      "my.kb is compiled into this build")
+  (is (true? (seval/ns-loaded? 'seon.eval))
       "core nses resolve the same way")
-  (is (false? (seval/ns-live-on-globalthis? 'no.such.namespace))
-      "an absent ns has no globalThis object"))
+  (is (false? (seval/ns-loaded? 'no.such.namespace))
+      "an absent namespace is not loaded"))
 
 (deftest require-of-host-bundled-ns-succeeds-and-alias-resolves
   (async done

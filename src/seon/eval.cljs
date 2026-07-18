@@ -469,18 +469,14 @@
 (defn lookup-ns-object
   "The live JS namespace object for `ns-name`, or nil.
 
-   `ns-name` is a dotted string like
-   \"seon.db\" / \"acme.helpers\"; resolved on `js/globalThis`. THE ONE munge
-   scheme: splits on `.`, munges each segment via `cljs.core/munge`, and walks
-   `gobj/get` from `js/globalThis` — exactly the path-prefix [[lookup-value]]
-   uses before its final member read, factored out so member resolution and
-   member enumeration ([[ns-fn-members]]) share one scheme. Never throws."
+   `ns-name` is a dotted string like \"seon.db\" / \"acme.helpers\". Uses
+   ClojureScript's bootstrap namespace lookup, which resolves development
+   globals and the module-scoped namespaces emitted by simple optimization.
+   Member resolution and enumeration share this one language-level owner.
+   Never throws."
   {:malli/schema [:=> [:catn [::ns-name :string]] [:maybe :any]]}
   [ns-name]
-  (reduce (fn [obj seg]
-            (when obj (gobj/get obj (cljs.core/munge seg))))
-          js/globalThis
-          (str/split ns-name #"\.")))
+  (cljs.core/find-ns-obj (symbol ns-name)))
 
 (defn lookup-value
   "Resolve a fully-qualified symbol to its runtime value, or nil.
@@ -488,14 +484,13 @@
    Nil if unresolvable. The CLJS-bootstrap equivalent of JVM's
    `clojure.core/resolve`.
 
-   Walks `js/globalThis` segment-by-segment, munging each ns segment
-   via `cljs.core/munge` to match the JS names shadow-cljs emits.
-   Handles reserved-word munge (`default` → `default$`, etc.).
+   Resolves the namespace through ClojureScript's bootstrap namespace owner,
+   then reads the munged member name. This works for development globals and
+   module-scoped namespaces emitted by simple optimization.
 
    Works uniformly for:
 
-   - Core fns precompiled into `out/client/main.js` by
-     shadow-cljs (live at goog-global munged paths).
+   - Core fns precompiled into `out/client/main.js` by shadow-cljs.
    - Agent-defined fns written by `cljs.js/eval-str` (cljs.js uses
      the same munge logic; lands at the same paths).
 
@@ -709,10 +704,12 @@
                     (and core-path (resolves-on-globalthis? core-path))
                     (resolves-on-globalthis? munged-suffix)))))))
 
-(defn ns-live-on-globalthis?
-  "True when `ns-sym`'s munged JS object exists on globalThis — i.e.
-   its JS has actually executed in this process. Two callers, two
-   views of the same fact:
+(defn ns-loaded?
+  "True when `ns-sym` has executed in this ClojureScript runtime.
+
+   Uses the same ClojureScript namespace lookup as [[lookup-value]], so it
+   covers development globals and simple-optimized module scope. Two callers,
+   two views of the same fact:
 
    [[guarded-load*]]: a ns missing from the bootstrap bundle's index but
    live here is HOST-BUNDLED (compiled into out/client/main.js — `my.kb`,
@@ -724,7 +721,7 @@
    ns is never re-evaled from its display rows.)"
   {:malli/schema [:=> [:cat :symbol] :boolean]}
   [ns-sym]
-  (some? (js/goog.getObjectByName (str (cljs.core/munge ns-sym)))))
+  (some? (lookup-ns-object (str ns-sym))))
 
 (defn ns-rows-in-db?
   "TRUE when `ns-sym` has a `:seon.ns/name` row in `db`.
@@ -891,7 +888,7 @@
    (logs/pod-events.log: `replay of ns :my.kb.instruction failed:
    Could not require my.kb`; the failed ns row then cascaded into
    `Cannot set/read properties of undefined` for every def in the ns).
-   When the missing ns is live on globalThis ([[ns-live-on-globalthis?]] —
+   When the missing ns is already loaded ([[ns-loaded?]] —
    compiled into the host bundle), its JS is ALREADY loaded: answer the
    load with an empty `:js` source. cljs.js marks the ns loaded, the
    alias map wires up from the ns form's parse, and cross-ns var refs
@@ -924,7 +921,7 @@
             (or (:macros rc) (not (symbol? nm)))
             (throw e)
 
-            (ns-live-on-globalthis? nm)
+            (ns-loaded? nm)
             (cb {:lang :js :source ""})
 
             (contains? authored-sources (keyword nm))
@@ -3974,7 +3971,7 @@
                                  ;; into a fn call.
                                  (not (str/ends-with? m "."))
                                  (or (seq (:defs (get nses n')))
-                                     (ns-live-on-globalthis? n'))
+                                     (ns-loaded? n'))
                                  (not (contains? (:defs (get nses n'))
                                                  (symbol m)))
                                  (not (contains? (:defs (get nses
@@ -4788,7 +4785,7 @@
           ;; loaded (analyzer entry or live on globalThis) → pure
           ;; movement; nothing re-eval'd, nothing overwritten.
           (or (analyzer-ns-entry? compile-state target)
-              (ns-live-on-globalthis? target))
+              (ns-loaded? target))
           (do (await (ensure-analyzer-ns! compile-state target))
               (vreset! current-ns target)
               (await (record-form-result! (assoc m ::value target))))
@@ -4836,7 +4833,7 @@
                                          "alias, then the namespace"))))
 
           (not (or (analyzer-ns-entry? compile-state t)
-                   (ns-live-on-globalthis? t)
+                   (ns-loaded? t)
                    (contains? authored-sources (keyword t))))
           (await (record-form-result!
                    (assoc m ::error
