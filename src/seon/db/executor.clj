@@ -124,7 +124,8 @@
          provider (min 6 processors)
          read-queue (max 16 (* 8 cpu-workers))
          read-database-queue (min read-queue
-                                  (max 16 (* 4 cpu-workers)))]
+                                  (max 16 (* 4 cpu-workers)))
+         mutation-queue (max 64 (* 16 mutation))]
      {::available-processors (.availableProcessors (Runtime/getRuntime))
       ::selected-processors processors
       ::cpu-workers cpu-workers
@@ -144,8 +145,8 @@
                   ::maximum-queued (* 2 provider)
                   ::maximum-queued-by-database 2}
        :mutation {::maximum-active mutation
-                  ::maximum-queued (max 8 (* 4 mutation))
-                  ::maximum-queued-by-database 8}
+                  ::maximum-queued mutation-queue
+                  ::maximum-queued-by-database mutation-queue}
        :delivery {::maximum-active cpu-workers
                   ::maximum-queued (max 16 (* 4 cpu-workers))
                   ::maximum-queued-by-database 1}

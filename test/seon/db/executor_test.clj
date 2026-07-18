@@ -84,6 +84,12 @@
                              ::executor/maximum-queued-by-database])
                  [two four eight]))
         "one database admits at least two complete grouped program reads")
+    (is (= [64 64 64]
+           (mapv #(get-in % [::executor/classes :mutation
+                             ::executor/maximum-queued-by-database])
+                 [two four eight]))
+        "bursty serialized writes wait behind the database writer; queued byte
+         capacity remains the process-wide memory bound")
     (is (every? #(= (+ Integer/BYTES protocol/maximum-frame-bytes)
                     (::executor/maximum-request-bytes %))
                 [two four eight]))))
