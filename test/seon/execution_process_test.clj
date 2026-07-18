@@ -83,6 +83,7 @@
 (defn- initialization []
   {:seon.execution/artifact-digest
    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+   :seon.db/attributes []
    :seon.db/program
    (into [{:seon.ns/name :seon.execution-proof.bootstrap
            :seon.ns/source "(ns seon.execution-proof.bootstrap)"}

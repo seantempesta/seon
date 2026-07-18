@@ -77,6 +77,7 @@
   (let [initialization
         {:seon.execution/artifact-digest
          "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+         :seon.db/attributes []
          :seon.db/program
          [{:seon.ns/name :seon.db
            :seon.ns/source "(ns seon.db)"}

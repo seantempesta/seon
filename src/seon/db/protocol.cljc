@@ -238,12 +238,14 @@
 (schema/register! ::backend [:enum :memory :file])
 (schema/register! :seon.db/program
                   [:vector [:map-of :qualified-keyword :any]])
+(schema/register! :seon.db/attributes [:vector :qualified-keyword])
 (schema/register! :seon.db/initial-data
                   [:vector [:map-of :qualified-keyword :any]])
 (schema/register!
  :seon.db/initialization
  [:map {:closed true}
   [:seon.execution/artifact-digest [:re "^[0-9a-f]{64}$"]]
+  [:seon.db/attributes :seon.db/attributes]
   [:seon.db/program :seon.db/program]
   [:seon.db/initial-data :seon.db/initial-data]])
 (schema/register! ::branch-head ::branch/head)

@@ -60,6 +60,8 @@
           #(build (descriptor) configuration))]
     (is (= forward reverse))
     (is (= digest (:seon.execution/artifact-digest forward)))
+    (is (= client/agent-bootstrap-attrs (:seon.db/attributes forward)))
+    (is (some #{:seon.render/full?} (:seon.db/attributes forward)))
     (is (= [:seon.ns/name :seon.fn/sym :seon.schema/key]
            (mapv (fn [row]
                    (cond

@@ -1766,6 +1766,7 @@
                 {:seon.error/kind :core-bug
                  ::launch/runtime (::launch/runtime descriptor)})))
     {:seon.execution/artifact-digest artifact-digest
+     :seon.db/attributes agent-bootstrap-attrs
      :seon.db/program program
      :seon.db/initial-data (vec (initial-data))}))
 

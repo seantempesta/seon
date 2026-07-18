@@ -27,6 +27,7 @@
 (def ^:private initialization-0
   {:seon.execution/artifact-digest
    "0000000000000000000000000000000000000000000000000000000000000000"
+   :seon.db/attributes []
    :seon.db/program []
    :seon.db/initial-data []})
 

@@ -19,13 +19,17 @@ complete ordinary work.
 `seon.render` registers `:seon.render/full?` and
 `seon.agent.ctx.transcript/eval-transcript-data` pulls it. A clean runtime
 reported `Bad entity attribute :seon.render/full? ... not defined in current
-schema` once per turn. `seon.client/agent-bootstrap-attrs`, which supplies the
-cold-start schema, contained only the render slot attributes.
+schema` once per turn. `seon.client/agent-bootstrap-attrs` originally omitted
+the attribute. After adding it, a clean restart exposed the deeper failure:
+the pod never sent that explicit attribute set to the JVM initializer. The
+writer derived native schema only from entity-map shapes in the compiled
+program, so registered dataless scalar attributes remained uninstalled.
 
 ## Owner
 
-The existing `seon.client/agent-bootstrap-attrs` cold-start schema and the
-transcript prompt that consumes it.
+The existing `seon.client/agent-bootstrap-attrs` cold-start schema, the typed
+database initialization value, and the JVM writer's one initialization
+transaction.
 
 ## Acceptance
 

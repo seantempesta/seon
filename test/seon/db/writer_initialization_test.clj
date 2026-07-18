@@ -31,6 +31,7 @@
    :seon.db.process/id
    "[:and {:seon.db/identity true} [:enum :seon.db.process/boot :seon.db.process/config :seon.db.process/repl]]"
    :seon.user/id "[:string {:seon.db/identity true}]"
+   :seon.render/full? ":boolean"
    :seon.ns/name "[:keyword {:seon.db/identity true}]"
    :seon.ns/source ":string"
    :seon.fn/sym "[:string {:seon.db/identity true}]"
@@ -50,6 +51,11 @@
 (def initialization
   {:seon.execution/artifact-digest
    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+   :seon.db/attributes
+   [:seon.agent/id :seon.db/user :seon.db/process :seon.db.process/id
+    :seon.user/id :seon.ns/name :seon.ns/source :seon.fn/sym :seon.fn/ns
+    :seon.fn/source :seon.fn/doc :seon.fn/arglists :seon.fn/private?
+    :seon.fn/agent-facing? :seon.render/full?]
    :seon.db/program
    (into [{:seon.ns/name :my.core
            :seon.ns/source "(ns my.core)"}
@@ -77,14 +83,17 @@
           ::writer/request-socket-path (.getAbsolutePath socket-file)})
         runtime (::writer/runtime server)
         ensure
-        (fn [request-id]
+        (fn [request-id initialization]
           (writer/handle-request
            runtime
            (protocol/ensure-database-request
             {::protocol/request-id request-id
              ::protocol/database-name database-name
              ::protocol/backend :memory
-             :seon.db/initialization initialization})))]
+             :seon.db/initialization initialization})))
+        base-initialization
+        (update initialization :seon.db/attributes
+                #(vec (remove #{:seon.render/full?} %)))]
     (try
       (let [before
             (:max-tx
@@ -92,9 +101,11 @@
               (::registry/conn
                (registry/lookup-connection
                 {::registry/database-name (keyword database-name)}))))
-            admitted (ensure "initialization/first")
+            admitted (ensure "initialization/first" base-initialization)
             after-first (:t (:seon.db/db admitted))
-            converged (ensure "initialization/converged")
+            upgraded (ensure "initialization/upgrade" initialization)
+            after-upgrade (:t (:seon.db/db upgraded))
+            converged (ensure "initialization/converged" initialization)
             connection
             (::registry/conn
              (registry/lookup-connection
@@ -102,7 +113,9 @@
         (is (::protocol/success? admitted) (pr-str admitted))
         (is (= (+ before 2) after-first)
             "fresh admission is one genesis plus one boot transaction")
-        (is (= after-first (:t (:seon.db/db converged)))
+        (is (= (inc after-first) after-upgrade)
+            "a populated database installs a newly selected attribute once")
+        (is (= after-upgrade (:t (:seon.db/db converged)))
             "a converged ensure creates no transaction")
         (is (= "(defn answer [] 42)"
                (d/q '[:find ?source .
@@ -119,6 +132,8 @@
             "request schemas remain queryable program facts")
         (is (contains? (:schema (d/db connection)) :seon.user/id)
             "stored entity attributes are installed before initial data")
+        (is (contains? (:schema (d/db connection)) :seon.render/full?)
+            "explicit dataless scalar attributes are installed at initialization")
         (is (not (contains? (:schema (d/db connection))
                             :datahike.index-page/cursor))
             "request fields are not installed as Datahike attributes")

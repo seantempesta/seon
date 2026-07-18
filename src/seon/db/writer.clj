@@ -1417,6 +1417,7 @@
    No other write is prepared for this connection during admission."
   [runtime connection database-name connection-id initialization]
   (let [desired-program (:seon.db/program initialization)
+        attributes (:seon.db/attributes initialization)
         initial-data (:seon.db/initial-data initialization)
         boot-meta {:seon.db/user [:seon.agent/id "root"]
                    :seon.db/process
@@ -1432,7 +1433,9 @@
                          before-genesis genesis nil)
                       before-program (d/db connection)
                       schema-declarations
-                      (derive-declared-schema before-program desired-program)
+                      (compile-schema-declarations before-program
+                                                   desired-program
+                                                   (set attributes))
                       transaction-data
                       (into (vec schema-declarations)
                             (concat
