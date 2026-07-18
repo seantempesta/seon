@@ -3406,3 +3406,23 @@ remains unavailable, so the dependency-ready work is failure/recovery proof,
 then honest cold/warm startup, database-hop, query-reuse, render/feed,
 event-loop, CPU, heap, and RSS measurement. Bun-native HTTP/SSE and packaging
 remain the final transport cut after those behavioral and resource baselines.
+
+### 2026-07-18 complete correctness checkpoint
+
+The source-frozen retained architecture passes every complete maintained code
+gate after the socket backpressure and targeted wake-listener changes. The JVM
+writer passes 219 tests and 1,821 assertions, the ClojureScript runtime passes
+1,105 tests and 4,902 assertions, and the operator passes 243 tests and 1,393
+assertions, all with zero failures or errors.
+
+Planned supervisor restart and shutdown attempts did not falsify an active
+public request: `/agents/run` completed with HTTP 200 before the supported
+transition interrupted it. That is useful graceful-drain evidence but does not
+prove ungraceful writer or session recovery. The earliest dependency-ready
+boundary is therefore deterministic failure injection through an operator- or
+fixture-owned process, with concurrent committed work proving bounded errors,
+reconnection, listener restoration, and exactly-once durable outcomes. The
+real-browser interaction journey remains independently blocked by unavailable
+browser tooling. Once recovery is proven, the next ordered boundary is the
+honest cold/warm startup, database-hop, query-reuse, render/feed, event-loop,
+CPU, heap, and RSS baseline before any transport optimization.
