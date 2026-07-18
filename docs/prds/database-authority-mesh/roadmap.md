@@ -3043,3 +3043,22 @@ supervising pod retained 906,096 KiB. The finding is recorded at
 [[../../seon/issues/execution-children-retain-hundreds-of-megabytes]] but does
 not displace recovery ordering. The earliest unsettled contract is JVM writer
 crash recovery, followed by feed reconnect and independent cluster databases.
+
+The writer crash cut preserved process isolation: killing the JVM workload left
+the Bun pod and watcher alive, and `bin/seon status` reported the writer
+degraded rather than claiming readiness. A full `bin/seon restart` recognized
+the prior generation's `unexpected-exit`, force-cleaned its containment owner,
+reopened the same database, and returned all three components ready. The
+healthy-component reconciliation path is not yet complete: `bin/seon up`
+refused the dead managed writer until that full restart, so
+[[../../seon/issues/operator-up-cannot-recover-an-unexpected-writer-exit]] is
+the earliest unsettled recovery contract.
+
+That restart also falsified the resumed-agent work query on the populated
+database: its Datalog `:limit 1` was paired with only 64 retained result nodes,
+and every resumed agent failed acquisition. Commit `9f752544` separates those
+concerns with 65,536 bounded retained nodes while keeping the ordered semantic
+limit at one; 13 focused loop tests/55 assertions pass, and a clean restart no
+longer logs committed-work budget failures. Live completion of a message
+committed before restart remains the final acceptance check before archiving
+that issue.
