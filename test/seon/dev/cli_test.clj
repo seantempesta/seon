@@ -8,6 +8,7 @@
             [seon.dev.cli :as cli]
             [seon.dev.cluster :as cluster]
             [seon.dev.process :as process]
+            [seon.dev.release :as release]
             [seon.dev.restore :as restore]
             [seon.dev.restore-state :as restore-state]
             [seon.dev.state :as state]))
@@ -56,6 +57,34 @@
        (is (true? (:seon.dev.doctor/bun? checks)))
        (is (not (contains? checks :seon.dev.doctor/node?)))
        (is (not (contains? checks :seon.dev.doctor/npm?))))))
+
+(deftest release-command-publishes-through-the-one-release-producer
+  (let [root (fs/create-temp-dir {:prefix "seon-cli-release-"})
+        configuration {:seon.dev.config/root (str root)
+                       :seon.dev.config/environment {"PATH" "/maintained"}}
+        digest (apply str (repeat 64 "a"))
+        calls (atom [])]
+    (try
+      (with-redefs-fn
+        {#'release/build-package!
+         (fn [request]
+           (swap! calls conj request)
+           (fs/create-dirs (::release/package-root request))
+           {:seon.dev.release/application-sha-256 digest})}
+        (fn []
+          (let [output (with-out-str (#'cli/release! configuration ["dist"]))]
+            (is (str/includes?
+                 output
+                 (str "release " (fs/canonicalize (fs/path root "dist")))))
+            (is (str/includes? output digest)))))
+      (is (= [{::release/root (str root)
+               ::release/package-root (str (fs/path root "dist"))
+               ::release/environment {"PATH" "/maintained"}}]
+             @calls))
+      (doseq [arguments [[] ["one" "two"]]]
+        (is (thrown-with-msg? Exception #"exactly one output directory"
+                              (#'cli/release! configuration arguments))))
+      (finally (fs/delete-tree root {:force true})))))
 
 (deftest stop-evidence-selects-only-bounded-correlation-fields
   (let [generation #uuid "00000000-0000-0000-0000-000000000001"

@@ -1,15 +1,35 @@
 (ns seon.dev.release
   "Content-addressed inventory for a relocatable Seon release directory."
   (:require [babashka.fs :as fs]
+            [babashka.process :as process]
+            [cheshire.core :as json]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]
-            [malli.core :as m])
+            [malli.core :as m]
+            [seon.db.protocol :as database-protocol])
   (:import [java.nio.charset StandardCharsets]
            [java.nio.file Files LinkOption]
            [java.security MessageDigest]))
 
 (def current-version 1)
+
+(def ^:private patched-bun-revision
+  "d8ecf098572e2b8265b23e40c04efb4067e516cc")
+
+(def ^:private execution-protocol-version 3)
+
+(def ^:private package-members
+  {:seon.release.member/bun "runtime/bun"
+   :seon.release.member/writer "runtime/writer.jar"
+   :seon.release.member/pod "runtime/pod.js"
+   :seon.release.member/execution "runtime/execution.js"
+   :seon.release.member/runtime-assets "runtime-root"
+   :seon.release.member/program-source "runtime/program-sources.edn"
+   :seon.release.member/node-modules "node_modules"
+   :seon.release.member/package-json "package.json"
+   :seon.release.member/bun-lock "bun.lock"
+   :seon.release.member/license "LICENSE"})
 
 (def ^:private sha-256-schema [:re #"[0-9a-f]{64}"])
 
@@ -303,3 +323,197 @@
     ;; directory becomes the authority for any member resolution.
     (validate-manifest! manifest)
     (verify-package! (str (fs/parent (fs/absolutize manifest-path))) manifest)))
+
+(defn- copy-file! [source target]
+  (when-not (fs/regular-file? source)
+    (manifest-error "A release input file is missing."
+                    {:seon.dev.release/path (str source)}))
+  (fs/create-dirs (fs/parent target))
+  (fs/copy source target {:replace-existing true})
+  target)
+
+(defn- copy-directory! [source target]
+  (when-not (fs/directory? source)
+    (manifest-error "A release input directory is missing."
+                    {:seon.dev.release/path (str source)}))
+  (fs/create-dirs (fs/parent target))
+  (fs/copy-tree source target {:replace-existing true})
+  target)
+
+(defn- remove-symbolic-links! [root]
+  (doseq [file (reverse (file-seq (io/file (str root))))
+          :when (symbolic-link? file)]
+    (fs/delete file))
+  root)
+
+(defn- runtime-identity [bun-version]
+  {:seon.dev.release/bun-version bun-version
+   :seon.dev.release/bun-revision patched-bun-revision
+   :seon.dev.release/database-protocol-version database-protocol/current-version
+   :seon.dev.release/execution-protocol-version execution-protocol-version
+   :seon.dev.release/bun-member :seon.release.member/bun
+   :seon.dev.release/writer-member :seon.release.member/writer
+   :seon.dev.release/pod-member :seon.release.member/pod
+   :seon.dev.release/execution-member :seon.release.member/execution
+   :seon.dev.release/runtime-assets-member
+   :seon.release.member/runtime-assets
+   :seon.dev.release/program-source-member
+   :seon.release.member/program-source})
+
+(defn assemble-package!
+  "Assemble and verify one source-free release from built runtime inputs."
+  {:malli/schema
+   [:=>
+    [:cat [:map {:closed true}
+           [::package-root :string]
+           [::bun :string]
+           [::bun-version :string]
+           [::writer :string]
+           [::pod :string]
+           [::execution :string]
+           [::bootstrap :string]
+           [::public-assets :string]
+           [::program-source :string]
+           [::node-modules :string]
+           [::package-json :string]
+           [::bun-lock :string]
+           [::license :string]]]
+    release-manifest-schema]}
+  [{::keys [package-root bun bun-version writer pod execution bootstrap
+            public-assets program-source node-modules package-json bun-lock
+            license]}]
+  (let [root (fs/path package-root)
+        runtime (fs/path root "runtime")
+        runtime-root (fs/path root "runtime-root")]
+    (when (fs/exists? root)
+      (manifest-error "The release staging directory already exists."
+                      {::package-root (str root)}))
+    (fs/create-dirs runtime)
+    (copy-file! bun (fs/path runtime "bun"))
+    (.setExecutable (io/file (str (fs/path runtime "bun"))) true false)
+    (copy-file! writer (fs/path runtime "writer.jar"))
+    (copy-file! pod (fs/path runtime "pod.js"))
+    (copy-file! execution (fs/path runtime "execution.js"))
+    (copy-file! program-source (fs/path runtime "program-sources.edn"))
+    (copy-directory! bootstrap (fs/path runtime-root "out/bootstrap"))
+    (copy-directory! public-assets
+                     (fs/path runtime-root "resources/public"))
+    (copy-directory! node-modules (fs/path root "node_modules"))
+    (remove-symbolic-links! (fs/path root "node_modules"))
+    (let [command-links (fs/path root "node_modules/.bin")]
+      (when (fs/exists? command-links)
+        (fs/delete-tree command-links {:force true})))
+    (copy-file! package-json (fs/path root "package.json"))
+    (copy-file! bun-lock (fs/path root "bun.lock"))
+    (copy-file! license (fs/path root "LICENSE"))
+    (let [manifest (create-manifest (str root) package-members
+                                    (runtime-identity bun-version))
+          manifest-path (fs/path root "release.edn")]
+      (spit (str manifest-path) (str (pr-str manifest) "\n"))
+      (read-manifest! (str manifest-path)))))
+
+(defn- run! [root environment & command]
+  (let [result (process/shell {:dir (str root)
+                               :env environment
+                               :out :inherit
+                               :err :inherit
+                               :continue true
+                               :cmd (vec command)})]
+    (when-not (zero? (:exit result))
+      (manifest-error "A release build command failed."
+                      {::command (vec command) ::exit (:exit result)}))
+    result))
+
+(defn- inspect-bun! [root environment bun]
+  (let [result (process/shell
+                {:dir (str root) :env environment :out :string :err :string
+                 :continue true
+                 :cmd [bun "-e"
+                       "process.stdout.write(JSON.stringify({version:Bun.version,revision:Bun.revision}))"]})
+        identity (when (zero? (:exit result))
+                   (json/parse-string (:out result) true))]
+    (when-not (= patched-bun-revision (:revision identity))
+      (manifest-error "The release requires the maintained patched Bun revision."
+                      {::bun bun ::reported-identity identity
+                       ::required-revision patched-bun-revision}))
+    identity))
+
+(defn- production-package-json! [source target]
+  (let [value (json/parse-string (slurp source) true)
+        release-value (-> value
+                          (assoc :license "AGPL-3.0-only")
+                          (dissoc :devDependencies :scripts :directories
+                                  :main :test))]
+    (spit (str target) (str (json/generate-string release-value {:pretty true})
+                            "\n"))))
+
+(defn build-package!
+  "Build and atomically publish one relocatable source-free release."
+  {:malli/schema
+   [:=>
+    [:cat [:map {:closed true}
+           [::root :string]
+           [::package-root :string]
+           [::environment {:optional true} [:map-of :string :string]]]]
+    release-manifest-schema]}
+  [{::keys [root package-root environment]}]
+  (let [root (fs/canonicalize (fs/path root))
+        target (fs/absolutize (fs/path package-root))
+        environment (or environment (into {} (System/getenv)))
+        bun (str (fs/path root "reference-code/bun/build/release/bun"))
+        {:keys [version]} (inspect-bun! root environment bun)
+        build-root (fs/path root "tmp/release-package-build" (str (random-uuid)))
+        stage (fs/path (fs/parent target)
+                       (str "." (fs/file-name target) "." (random-uuid) ".tmp"))
+        closure (fs/path build-root "closure")
+        release-programs
+        {:seon.dev.artifact/release-cache-root
+         (str (fs/path build-root "shadow-cache"))
+         :seon.dev.artifact/release-client-output
+         (str (fs/path build-root "pod.js"))
+         :seon.dev.artifact/release-execution-output
+         (str (fs/path build-root "execution.js"))
+         :seon.dev.artifact/release-program-source-output
+         (str (fs/path build-root "program-sources.edn"))}
+        config {:seon.dev.config/root (str root)
+                :seon.dev.config/environment environment}]
+    (when (fs/exists? target)
+      (manifest-error "The release target already exists."
+                      {::package-root (str target)}))
+    (try
+      (fs/create-dirs build-root closure (fs/parent target))
+      (run! root environment "clojure" "-X:deps" "prep" ":aliases"
+            "[:writer :cljs]")
+      (run! root environment "clojure" "-T:build" "writer-uber")
+      (run! root environment "clojure" "-M:cljs" "compile" "bootstrap")
+      (run! root environment (str (fs/path root "bin/fix-bootstrap-macros")))
+      (run! root environment bun "run" "--bun" "css:build")
+      ((requiring-resolve 'seon.dev.artifact/build-release-programs!)
+       config release-programs)
+      (production-package-json! (fs/path root "package.json")
+                                (fs/path closure "package.json"))
+      (copy-file! (fs/path root "bun.lock") (fs/path closure "bun.lock"))
+      (run! closure environment bun "install" "--production" "--frozen-lockfile")
+      (assemble-package!
+       {::package-root (str stage)
+        ::bun bun
+        ::bun-version version
+        ::writer (str (fs/path root
+                               "target/seon-database-server-standalone.jar"))
+        ::pod (:seon.dev.artifact/release-client-output release-programs)
+        ::execution (:seon.dev.artifact/release-execution-output
+                     release-programs)
+        ::bootstrap (str (fs/path root "out/bootstrap"))
+        ::public-assets (str (fs/path root "resources/public"))
+        ::program-source
+        (:seon.dev.artifact/release-program-source-output release-programs)
+        ::node-modules (str (fs/path closure "node_modules"))
+        ::package-json (str (fs/path closure "package.json"))
+        ::bun-lock (str (fs/path closure "bun.lock"))
+        ::license (str (fs/path root "LICENSE"))})
+      (fs/move stage target {:atomic-move true})
+      (read-manifest! (str (fs/path target "release.edn")))
+      (finally
+        (when (fs/exists? stage) (fs/delete-tree stage {:force true}))
+        (when (fs/exists? build-root)
+          (fs/delete-tree build-root {:force true}))))))

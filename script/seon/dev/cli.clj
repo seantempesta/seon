@@ -641,6 +641,25 @@
           (println (str "  artifact "
                         (name (:seon.dev.doctor/artifact-status result)))))))))
 
+(defn- release! [configuration arguments]
+  (when-not (= 1 (count arguments))
+    (throw (ex-info "`release` requires exactly one output directory."
+                    {:seon.dev.cli/arguments (vec arguments)})))
+  (let [root (:seon.dev.config/root configuration)
+        requested (fs/path (first arguments))
+        package-root (if (fs/relative? requested)
+                       (fs/path root requested)
+                       requested)
+        manifest
+        (release/build-package!
+         {::release/root root
+          ::release/package-root (str package-root)
+          ::release/environment (:seon.dev.config/environment configuration)})]
+    (println (str "● release " (fs/canonicalize package-root)))
+    (println (str "  application sha256: "
+                  (:seon.dev.release/application-sha-256 manifest)))
+    manifest))
+
 (defn- reset-cluster! [configuration arguments]
   (let [cluster-name (first arguments)]
     (when (or (nil? cluster-name) (next arguments))
@@ -1060,6 +1079,7 @@
          "  branch open|restart|close|status NAME [--edn]\n"
          "  logs [writer|watcher|pod] [--lines N] [--follow]\n"
          "  doctor [--edn]           check host prerequisites\n"
+         "  release <directory>      build one source-free release package\n"
          "  test changed --path PATH...  run affected tests from the warm graph\n"
          "  test pod|database|operator|all [selector]\n"
          "  skills sync|check        generate or verify tool-facing skill adapters\n"
@@ -1086,6 +1106,7 @@
           "branch" (branch! configuration command-arguments)
           "logs" (logs! configuration command-arguments)
           "doctor" (doctor! configuration command-arguments)
+          "release" (release! configuration command-arguments)
           "test" (test! configuration command-arguments)
           "skills" (skills! configuration command-arguments)
           "config" (config! configuration command-arguments)

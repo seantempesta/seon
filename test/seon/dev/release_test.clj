@@ -153,3 +153,54 @@
                 (release/create-manifest (str root) (into {} (reverse members))
                                          runtime-identity)))))
       (finally (fs/delete-tree root {:force true})))))
+
+(deftest source-free-package-assembly-publishes-only-declared-runtime-files
+  (let [inputs (fs/create-temp-dir {:prefix "seon-release-inputs-"})
+        package (fs/path inputs "published")
+        node-modules (fs/path inputs "production-node-modules")]
+    (try
+      (doseq [directory ["bootstrap" "public" "production-node-modules/lib"
+                         "production-node-modules/.bin"]]
+        (fs/create-dirs (fs/path inputs directory)))
+      (doseq [[path content]
+              [["bun" "bun"] ["writer.jar" "writer"] ["pod.js" "pod"]
+               ["execution.js" "execution"]
+               ["program-sources.edn" "{}"]
+               ["bootstrap/core.js" "bootstrap"]
+               ["public/output.css" "css"]
+               ["production-node-modules/lib/index.js" "module"]
+               ["package.json" "{\"license\":\"AGPL-3.0-only\"}"]
+               ["bun.lock" "lock"] ["LICENSE" "AGPL"]]]
+        (spit (str (fs/path inputs path)) content))
+      (fs/create-sym-link (fs/path node-modules ".bin/tool")
+                          (fs/path node-modules "lib/index.js"))
+      (let [manifest
+            (release/assemble-package!
+             {::release/package-root (str package)
+              ::release/bun (str (fs/path inputs "bun"))
+              ::release/bun-version "1.4.0"
+              ::release/writer (str (fs/path inputs "writer.jar"))
+              ::release/pod (str (fs/path inputs "pod.js"))
+              ::release/execution (str (fs/path inputs "execution.js"))
+              ::release/bootstrap (str (fs/path inputs "bootstrap"))
+              ::release/public-assets (str (fs/path inputs "public"))
+              ::release/program-source
+              (str (fs/path inputs "program-sources.edn"))
+              ::release/node-modules (str node-modules)
+              ::release/package-json (str (fs/path inputs "package.json"))
+              ::release/bun-lock (str (fs/path inputs "bun.lock"))
+              ::release/license (str (fs/path inputs "LICENSE"))})]
+        (is (= manifest
+               (release/read-manifest! (str (fs/path package "release.edn")))))
+        (is (fs/executable? (fs/path package "runtime/bun")))
+        (is (fs/regular-file?
+             (fs/path package "runtime-root/out/bootstrap/core.js")))
+        (is (fs/regular-file?
+             (fs/path package "runtime-root/resources/public/output.css")))
+        (is (fs/regular-file?
+             (fs/path package "node_modules/lib/index.js")))
+        (is (not (fs/exists? (fs/path package "node_modules/.bin/tool"))))
+        (is (not (re-find (re-pattern
+                           (java.util.regex.Pattern/quote (str inputs)))
+                          (slurp (str (fs/path package "release.edn")))))))
+      (finally (fs/delete-tree inputs {:force true})))))
