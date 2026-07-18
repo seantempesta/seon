@@ -225,3 +225,28 @@ This does not require workers, shared memory, inspector attachment, a second
 monitor process, or child access to the parent's internals. It strengthens the
 existing process seam and keeps failure isolation effective when the code being
 observed is precisely the code that has stopped cooperating.
+
+## Implemented proof state
+
+Vendored Bun commit `d8ecf098572e2b8265b23e40c04efb4067e516cc`
+implements the explicit `resourceUsage({ live: true })` overload while leaving
+the no-argument post-exit path unchanged. Linux reads CPU and current RSS from
+`/proc/<pid>/stat` and optional peak RSS from `/proc/<pid>/status`; macOS uses
+`proc_pid_rusage` with the SDK's `rusage_info_v0`; Windows reuses the retained
+process handle and obtains CPU plus current/peak working set in one sample.
+Other Unix targets return `undefined` rather than fabricated counters.
+
+The `bun_spawn_sys` and `bun_spawn` crates pass `cargo check --locked` on the
+host `aarch64-apple-darwin`, `aarch64-unknown-linux-gnu`, and
+`aarch64-pc-windows-msvc` targets. Rustfmt and `git diff --check` pass. The
+focused JavaScript test covers a synchronous busy loop, current RSS, CPU
+growth, invalid options, post-exit compatibility, and ten repeated samples
+through process exit. Bun 1.3.14 fails that test at the intended live-sample
+assertion because it returns `undefined`.
+
+This checkout cannot yet execute the changed native Bun binary: `bun bd`
+rejects the installed LLVM 22.1.8 and Apple clang 17 because this revision
+requires LLVM `>=21.1.0 <21.1.99`. A raw Cargo unit-test binary also cannot
+link through Bun's unsupported direct path because it injects Windows system
+libraries on macOS. The supported debug build plus focused JavaScript test
+remains the final execution gate on a host with Bun's pinned LLVM toolchain.
