@@ -946,7 +946,8 @@
             stage-two-members
             (cond-> []
               (seq turns)
-              (conj (query-member database eval-rows-query (mapv :db/id turns)
+              (conj (query-member database eval-rows-query
+                                  [(mapv :db/id turns)]
                                   1000000 1000000 524288))
               true
               (conj (query-member database (messages-query cutoff-at)

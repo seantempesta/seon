@@ -62,10 +62,11 @@
                 {::db/results
                  (mapv (fn [result]
                          {:seon.db.protocol/success? true
-                          :seon.db.protocol/result result})
+                          :datahike.query/result result})
                        (if (= 1 (count @requests))
-                         [{} 0 [] [] []]
-                         [[]]))})))
+                         [1 [[101 (js/Date. 1) false 201 "run-1"]]
+                          [["my.agent.test"]] nil]
+                         [[] []]))})))
       (-> (transcript/transcript-block
             {:seon.agent/id "agent" ::db/db database} nil)
           (.then (fn [_]
@@ -80,7 +81,10 @@
                    (is (= ["agent"]
                           (-> @requests first ::db/members first
                               ::protocol/arguments))
-                       "the database value is not a Datalog :in argument")))
+                       "the database value is not a Datalog :in argument")
+                   (is (some #(= [[101]] (::protocol/arguments %))
+                             (mapcat ::db/members @requests))
+                       "a collection binding remains one Datalog argument")))
           (.catch (fn [error] (is false (str error))))
           (.finally (fn []
                       (set! db/execute-many original-execute)
