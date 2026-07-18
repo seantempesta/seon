@@ -721,7 +721,7 @@
         ::accepted-syms #{} ::rejected []}
        (let [{::keys [data accepted-syms rejected] :as prepared}
              (prepare-targets targets)
-             fatal-rejections rejected]
+             fatal-rejections (remove #(= ::no-var (::reason %)) rejected)]
          ;; Malli mutates each target as it walks `:data`. Reject the complete
          ;; candidate before that walk so one invalid arity contract cannot
          ;; leave an earlier target wrapped and a later target corrupted.
@@ -763,7 +763,7 @@
         ::accepted-syms #{} ::rejected []}
        (let [{::keys [data accepted-syms rejected] :as prepared}
              (prepare-targets targets)
-             fatal-rejections rejected]
+             fatal-rejections (remove #(= ::no-var (::reason %)) rejected)]
          ;; Compile the complete replacement set before touching a live var.
          ;; A bad target must not remove its still-valid old wrapper and leave
          ;; the runtime in a mixed generation.
@@ -853,7 +853,7 @@
                    new-contracts)
              {::keys [data accepted-syms rejected] :as prepared}
              (prepare-targets targets)
-             fatal-rejections rejected]
+             fatal-rejections (remove #(= ::no-var (::reason %)) rejected)]
          (if (seq fatal-rejections)
            (assoc prepared
                   ::enabled? true

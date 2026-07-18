@@ -310,6 +310,25 @@
             {::instrument/changed-syms #{pure-variadic-sym}
              ::instrument/targets []}))))))
 
+(deftest cold-instrumentation-wraps-live-vars-and-reports-absent-vars
+  (when (instrument/enabled?)
+    (try
+      (let [missing-sym 'instrumenttest.contract/not-compiled
+            result
+            (instrument/instrument-targets!
+              [(target a-sym [:=> [:cat :int] :int])
+               (target missing-sym [:=> [:cat :int] :int])])]
+        (is (true? (::instrument/ok? result)))
+        (is (= 1 (::instrument/n-instrumented result)))
+        (is (= [{::instrument/sym missing-sym
+                 ::instrument/reason ::instrument/no-var}]
+               (::instrument/rejected result)))
+        (is (trapped? #(probe-a "wrong"))))
+      (finally
+        (instrument/instrument-delta!
+          {::instrument/changed-syms #{a-sym}
+           ::instrument/targets []})))))
+
 (deftest schema-change-refreshes-only-transitive-function-dependents
   (let [a-form [:=> [:cat :instrumenttest.contract/root]
                 :instrumenttest.contract/root]
