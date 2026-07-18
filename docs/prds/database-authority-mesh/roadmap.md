@@ -3028,3 +3028,18 @@ same 107,036-character prompt at the identical database value without caller
 retry. Thirteen focused host tests pass with 59 assertions. The earliest
 unsettled contract is therefore unexpected execution-child death and automatic
 reconstruction, followed by writer crash recovery.
+
+Unexpected execution-child death is now proven too. A new focused host test
+forces exit code 137 during an active invocation, observes exactly one bounded
+failure carrying that exit code, and proves the next call starts exactly one
+replacement; the host suite passes 14 tests/64 assertions. Live, the root
+child was killed with `SIGKILL` after producing a 107,036-character prompt.
+The Bun pod and JVM writer remained ready, and the next call reconstructed a
+new child and returned the identical prompt at the same database value.
+
+That live proof also measured a major graduation blocker: the two idle root
+children retained 650,224 and 646,624 KiB RSS respectively, while the
+supervising pod retained 906,096 KiB. The finding is recorded at
+[[../../seon/issues/execution-children-retain-hundreds-of-megabytes]] but does
+not displace recovery ordering. The earliest unsettled contract is JVM writer
+crash recovery, followed by feed reconnect and independent cluster databases.
