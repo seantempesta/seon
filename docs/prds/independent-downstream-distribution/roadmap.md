@@ -85,9 +85,27 @@ packages and 81 JVM artifacts. Two complete builds are byte-for-byte identical
 with application digest `ce1f0284…`, release-manifest SHA-256 `21af6e45…`, and
 SBOM SHA-256 `66dac763…`.
 
-The earliest unsettled distribution contract is now the generalization
-remainder: replace the closed default/ACME development flavor map with one
-validated downstream descriptor before final graduation.
+The closed default/ACME development flavor map is now removed. Commit
+`c11bd152` makes one validated downstream descriptor own the qualified artifact
+identity, test-build choice, client and execution build IDs, cache root,
+outputs, and release-manifest name. Watcher selection, MCP discovery, source
+identity, launch admission, and runtime autocomplete consume those descriptor
+facts without an ACME case.
+
+Two clean default release builds from that exact committed source are
+byte-for-byte identical with application digest
+`f3df6eb22b51c3a40755eac7229b11cda41ec4311280406fadbe5ff072bc372f`,
+release-manifest SHA-256
+`c453d3a3188eb59a3835ce570038e61b8ce47c8506b0693ce34107add34c99fc`,
+and SBOM SHA-256
+`21bf609990896541a7ca5c005c866a5027280af26f1ad718f7ece925626941bd`.
+One package ran from `/Users/sean/seon-package-c11bd152` with all mutable state
+outside its tree, served root and data pages plus complete gzip Datastar feeds,
+restarted into new writer and pod generations, and shut down cleanly through
+its packaged operator. A complete `diff -qr` against the untouched second
+build remained empty before runtime and after shutdown. The next distribution
+boundary is the same descriptor driving the clean ACME SDK and package proof;
+default package parity no longer blocks it.
 
 The first production-entry boundary is now implemented and directly proven.
 The pod no longer requires `shadow.cljs.devtools.client.env`; its build identity

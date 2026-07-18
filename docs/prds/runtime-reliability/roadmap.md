@@ -202,6 +202,17 @@ retired, and `down` drained the Bun pod and JVM writer cleanly. Generated state
 remained outside the immutable package. Native `Bun.serve` intentionally keeps
 loopback SSE uncompressed; remote configurable compression remains a separate
 transport graduation item and is not silently represented as a gzip result.
+
+The generalized-artifact source at commit `c11bd152` independently repeats the
+default package boundary. Two clean builds are byte-for-byte identical with
+application digest `f3df6eb22b51c3a40755eac7229b11cda41ec4311280406fadbe5ff072bc372f`.
+The relocated package served root and data pages and complete configured gzip
+feeds, restarted into new writer and pod generations, and shut down cleanly.
+Its complete tree remained byte-identical to the untouched second build before
+and after runtime. A separate operator defect was exposed: a later `status`
+must currently restate launch-time environment overrides or its desired-spec
+comparison falsely labels healthy processes degraded. The runtime readiness
+probes themselves remained green; the durable issue owns the correction.
 The downstream ACME boundary now also uses the one JVM authority. Launch data
 separates the Shadow watcher owner from the Datahike writer owner: ACME owns
 its `acme-client`/`acme-execution` watcher and Bun pod while pointing directly
