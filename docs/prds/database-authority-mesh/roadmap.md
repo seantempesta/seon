@@ -3494,3 +3494,15 @@ concurrent agent failure/load and startup measurement. Final graduation still
 requires the complete maintained gates, browser and agent journeys, recovery,
 multi-cluster isolation, measured load/resources, and only then the
 `Bun.serve` transport cut.
+
+The phase evidence immediately exposed one duplicate owner interaction rather
+than a transport limit. Listener registration refreshed a subscription whose
+initial render was already computing the exact same immutable database value,
+because the refresh check recognized only completed output. Commit `339093b1`
+recognizes that same value in completed, active, or pending render state. The
+same three live feed opens then requested and completed exactly three renders
+instead of requesting six and superseding three, with identical decoded event
+sizes and zero new feed mechanism. Focused proof passes 13 tests and 45
+assertions. Debug still took 1,702.6 ms and root 79.6 ms; the ordered render
+investigation therefore moves into those retained projection owners rather
+than gzip, socket, or listener scheduling.
