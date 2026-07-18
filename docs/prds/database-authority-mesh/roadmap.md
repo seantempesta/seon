@@ -3525,6 +3525,16 @@ growth measurements are dependency-ready. The final admission gate remains
 the complete maintained tests plus recovery, browser/agent, multi-cluster,
 load/resource, and Bun-native transport evidence.
 
+The later memory sample found a development reload slope rather than retained
+idle children. After two more Shadow hot reloads, the pod reached 353 MiB live
+JSC heap and 1.90 GiB RSS after full collection, with 95 wake inputs, 97
+database interests, zero execution children, and zero running loops. An
+explicit additional rehost of all 95 agents changed live heap by only 0.18 MiB,
+so re-registration itself is not the retained owner. The clean-start and
+heap-snapshot falsifier is tracked at
+[[../../seon/issues/pod-hot-reload-retains-cljs-heap]]; it must distinguish
+development code-generation retention from production steady state.
+
 The accepted-response-loss boundary is now proven against the live initialized
 default database without a test-only initializer. A process-local probe let one
 ordinary `seon.db/transact!` request reach the real JVM writer, discarded its
