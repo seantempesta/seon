@@ -170,14 +170,17 @@
     ::protocol/selector '[*]
     ::protocol/entity-id [:seon.config/id config/cluster-config-id]
     :datahike.resource/max-work 100000
-    :datahike.resource/max-results 1
-    :datahike.resource/max-result-weight 65536}
+    ;; Datahike charges pull results per retained result-tree node, not per
+    ;; top-level entity. A wildcard cluster configuration is intentionally
+    ;; bounded like the existing agent-view configuration pull.
+    :datahike.resource/max-results 4096
+    :datahike.resource/max-result-weight 1048576}
    {::protocol/operation protocol/pull-operation
     ::protocol/selector (ai/config-pull-pattern)
     ::protocol/entity-id [:seon.ai/id "config"]
     :datahike.resource/max-work 100000
-    :datahike.resource/max-results 1
-    :datahike.resource/max-result-weight 65536}])
+    :datahike.resource/max-results 256
+    :datahike.resource/max-result-weight 1048576}])
 
 (defn- acquired-member [member]
   (when (true? (::protocol/success? member))
@@ -215,7 +218,7 @@
                           [0 ::protocol/entity-id]
                           [:seon.agent/id id])
         acquired (await (db/execute-many {::db/members members
-                                          ::db/max-result-weight 3670016}))
+                                          ::db/max-result-weight 8388608}))
         [agent-member cluster-config-member ai-config-member]
         (::db/results acquired)
         member-failure?

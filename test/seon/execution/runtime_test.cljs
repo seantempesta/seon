@@ -112,6 +112,17 @@
                     (get-in @observed
                             [:seon.execution.runtime-test/request ::db/members
                              2 ::protocol/entity-id])))
+             (is (= [65536 4096 256]
+                    (mapv :datahike.resource/max-results
+                          (get-in @observed
+                                  [:seon.execution.runtime-test/request
+                                   ::db/members])))
+                 "Datahike pull budgets count retained result-tree nodes")
+             (is (= 8388608
+                    (get-in @observed
+                            [:seon.execution.runtime-test/request
+                             ::db/max-result-weight]))
+                 "the grouped response can contain every independently bounded pull")
              (is (= "frozen-model"
                     (get-in rendered [:seon.ai/config-resolution
                                       :seon.ai/resolved-config

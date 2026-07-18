@@ -26,6 +26,11 @@ existing unit gates:
 - The repaired index request returned rows, but the view read
   `:seon.db/datoms` instead of the producer's established
   `:datahike.index-page/datoms` field.
+- Once the schema and result fields matched, prompt acquisition reached its
+  resource limits and exposed a mistaken assumption: two Datahike pull members
+  used `max-results 1` as though it counted top-level entities. Datahike charges
+  pull work per retained result-tree node, so ordinary configuration maps
+  exceeded that bound.
 
 ## Acceptance
 
@@ -37,6 +42,8 @@ existing unit gates:
   consumed by prompt and transcript rendering.
 - The data view consumes Datahike's `:datahike.index-page/datoms` result
   directly.
+- Prompt acquisition uses bounded but realistic Datahike result-tree and
+  response-weight limits; ordinary root prompt rendering completes.
 - Restarting an existing database installs the missing schema delta without
   retransacting converged program or initial data.
 - `/data` and `/agent/root/debug` render through their Datastar feeds without a
