@@ -328,6 +328,22 @@ friction: `up` safely refused obsolete `wire-server` records until one normal
 `down` removed them. The architecture boundary itself is green; current
 resource evidence and the complete audit remain.
 
+The exact-current package now repeats the resource boundary with a stricter
+simultaneous sample. Four real `/agents/run` requests kept four distinct task
+execution children alive beside the root execution child. All four committed
+the exact reply `current resource sample 42`. Their macOS physical footprints
+were 196.7, 198.7, 207.6, and 206.7 MiB; the root child was 170.5 MiB. After
+settling, the JVM writer and Bun pod measured 553.2 and 223.4 MiB. The complete
+writer, pod, root, and four-task-child workload therefore occupied about 1.72
+GiB before the small containment helpers, while per-process RSS continued to
+overstate pressure by counting shared mapped pages. This is stronger than the
+required four-child sample and remains within the prior 1.8 GiB improvement
+target and 2.0 GiB hard limit. Exact raw responses and `vmmap` summaries live
+under the external state directory at
+`tmp/load-current-1784414845`; they are evidence, not package content. The
+remaining ordered boundary is the complete requirement audit and measured
+database-hop/query-reuse and Datastar fanout work.
+
 The downstream production overlay now passes the same immutable boundary.
 ACME supplies separate Shadow mains for the Bun pod and Bun execution child,
 so its source is compiled and dynamically reachable in both isolated runtime

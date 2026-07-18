@@ -47,6 +47,16 @@ clean. Loopback is deliberately uncompressed under native `Bun.serve`; the
 remote configurable-compression journey remains pending rather than restoring
 the removed per-feed gzip machinery.
 
+Current-source release `0d8bc9c2…` repeats this envelope with a stricter
+root-plus-four-task-child sample. The task children retained 196.7--207.6 MiB,
+the root child retained 170.5 MiB, and every real `/agents/run` request
+committed the requested reply. Settled writer and pod footprints were 553.2
+and 223.4 MiB, putting the complete five-child workload at about 1.72 GiB
+before its small containment helpers. This confirms that the subsequent
+repair, reactive-canvas, and packaging changes did not recreate the earlier
+apparent 500 MiB-per-child regression; that number was RSS counting shared
+mapped pages rather than private physical pressure.
+
 The Bun source audit
 [[research/bun-production-runtime-integration-audit-2026-07-15]] establishes a
 candidate full JavaScript-runtime migration after exact-artifact parity: Shadow
