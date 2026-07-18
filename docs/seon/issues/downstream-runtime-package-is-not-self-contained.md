@@ -12,8 +12,8 @@ tags: [issue, component, cljs, flow]
 ACME now proves that a third party can build and run a customized source-free
 Seon production package without access to the producer checkout. The remaining
 blocker is completing the public distribution contract around that working
-runtime: a general downstream descriptor and the complete selected-source/
-license/notice/SBOM inventory.
+runtime: a general downstream descriptor in place of the closed default/ACME
+development flavor map.
 
 ## Evidence
 
@@ -35,6 +35,11 @@ license/notice/SBOM inventory.
   registrations. Under producer-read denial it built and started a clean
   development cluster, then returned `:sdk-writer/42` through `eval_clj` and
   `:sdk-pod/42` through cluster-qualified `eval_cljs` before a clean shutdown.
+- Release application `ce1f0284…` ships manifest-bound source revisions,
+  Bun/Datahike/Babashka license texts, third-party notices, and a CycloneDX 1.6
+  inventory of 36 npm and 81 JVM components. A second complete build is
+  byte-identical; both manifests have SHA-256 `21af6e45…` and both SBOMs have
+  SHA-256 `66dac763…`.
 - Development artifact manifest version 4 still contains absolute
   client/cache paths and omits release/protocol/SDK/runtime/license
   compatibility data. It now binds the exact six maintained public-Git
@@ -52,8 +57,7 @@ license/notice/SBOM inventory.
 - Development MCP remains intentionally backed by the SDK's Shadow nREPL and
   writer `io-prepl`. The production process boundary deliberately ships
   neither.
-- Root `LICENSE` is AGPL-3.0 while `package.json` declares ISC; the complete
-  notice/SBOM and selected-source inventory is not yet shipped.
+- Root `LICENSE` and `package.json` both declare AGPL-3.0-only.
 - Selected ClojureScript is `1.12.145`, but the current
   `reference-code/clojurescript` mirror identifies itself as `1.12.41`.
   Exact source is also absent for Clojure, tools.build, superv.async, and

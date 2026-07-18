@@ -255,10 +255,14 @@ Clean downstream development MCP is now closed as well. SDK revision
 with patched Bun, built and started its own watcher/JVM writer/Bun pod, then
 returned `:sdk-writer/42` through `eval_clj` and `:sdk-pod/42` through
 cluster-qualified `eval_cljs`. Normal operator shutdown retired all three
-processes cleanly. The next distribution boundary is the remaining
-selected-source/license/notice/SBOM inventory and general downstream
-descriptor; runtime immutability, reproducibility, clean build, and MCP no
-longer block it.
+processes cleanly. Release metadata is now closed too: each package ships
+manifest-bound source revisions, Bun/Datahike/Babashka license texts,
+third-party notices, and a CycloneDX 1.6 inventory containing 36 npm and 81 JVM
+components. Two full builds remain byte-identical at application digest
+`ce1f0284…`, manifest SHA-256 `21af6e45…`, and SBOM SHA-256 `66dac763…`.
+The next distribution boundary is the general downstream descriptor; runtime
+immutability, reproducibility, clean build, MCP, and metadata no longer block
+it.
 
 The existing remote query surface now exposes its protocol-native historical
 view, closing the only facade gap needed by coordinate-pinned startup birth.

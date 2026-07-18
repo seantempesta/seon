@@ -76,10 +76,18 @@ Bun and install the frozen dependency set, while archived Datahike source uses
 the Git URL/SHA identity emitted by the SDK instead of requiring a `.git`
 directory.
 
-The earliest unsettled distribution contract is now the release-metadata and
-generalization remainder: publish the complete selected-source/license/
-notice/SBOM inventory and replace the remaining closed development flavor map
-with the validated downstream descriptor before final graduation.
+The release metadata boundary now passes without weakening reproducibility.
+The committed npm license is AGPL-3.0-only, and each package ships manifest-
+bound Seon, Bun, Datahike, and Babashka source/license metadata, human-readable
+third-party notices, and a CycloneDX 1.6 inventory derived from its actual
+production closure. The current inventory contains 117 components: 36 npm
+packages and 81 JVM artifacts. Two complete builds are byte-for-byte identical
+with application digest `ce1f0284…`, release-manifest SHA-256 `21af6e45…`, and
+SBOM SHA-256 `66dac763…`.
+
+The earliest unsettled distribution contract is now the generalization
+remainder: replace the closed default/ACME development flavor map with one
+validated downstream descriptor before final graduation.
 
 The first production-entry boundary is now implemented and directly proven.
 The pod no longer requires `shadow.cljs.devtools.client.env`; its build identity
