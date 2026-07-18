@@ -13,7 +13,7 @@ One database authority owns each database's ordered writes, immutable indexed
 values, shared query computation, and committed-report source. The first
 authority implementation is the JVM/Datahike service and may host many isolated
 cluster databases concurrently. Bun agent children and the Bun web host are
-clients: they issue direct coordinate-pinned operations and never reconstruct a
+clients: they issue operations over explicit immutable database values and never reconstruct a
 Datahike database, index, cache, or transaction feed. Transport details may
 differ locally and remotely without changing database semantics.
 
@@ -21,7 +21,7 @@ differ locally and remotely without changing database semantics.
 
 `seon.db.protocol` is the one semantic protocol. Messages are eager ordinary
 data encoded with Transit. Request and response values name their operation,
-one request identity, database attachment/coordinate, and typed result or error.
+one request identity, database value, and typed result or error.
 Transport owners carry those values and do not reinterpret them.
 Protocol version 7 preserves the existing `:seon.error/kind` on failed outer
 and member responses alongside the protocol's operation-level error kind. A
@@ -32,12 +32,12 @@ The authority is the sole durable writer and indexed-read owner. Clients never
 send closures or database handles; transaction functions such as CAS cross only
 in their data form. One persistent multiplexed session carries independently
 correlated requests, responses, cancellation, and selective database
-interests. Reads require an exact coordinate, and `execute-many` resolves one
+interests. Reads require an exact database value, and `execute-many` resolves one
 immutable database value for independent members. Its required outer result
 bound is accepted in member position order, while member work may finish in
 parallel; exact encoded frame bytes remain a separate delivery fence.
 Successful writes wake only matching interests with committed ordinary data; a
-gap causes current-coordinate resynchronization, never transaction replay into
+gap reacquires the current database value, never transaction replay into
 a replica. Durable request
 receipts provide same-request mutation recovery without a second write path.
 
@@ -66,6 +66,6 @@ their host owners.
 ## Related
 
 - [[architecture]] — the authority, Bun host, and isolated-child topology.
-- [[data-model]] — transaction provenance and complete coordinates.
+- [[data-model]] — transaction provenance and database values.
 - [[agent-runtime]] — CAS fences and lifecycle transitions.
-- [[observability]] — replay and forensic coordinates.
+- [[observability]] — replay and forensic database values.

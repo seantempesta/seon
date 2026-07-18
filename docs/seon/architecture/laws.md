@@ -21,7 +21,7 @@ sample sizes, and acceptance evidence belong in PRD research and roadmaps.
 - **Cache stability.** Aged transcript clips and stable-prefix material remain
   byte-identical. Eviction does not reflow retained content.
 - **Database-deterministic context body.** The same agent rendered from the
-  same immutable database coordinate produces the same cacheable-body bytes.
+  same immutable database value produces the same cacheable-body bytes.
   A root-only free dynamic tail may add no more than roughly 50 estimated
   tokens of live operational telemetry after every cache boundary; the exact
   sent prompt blob is its historical authority. Filesystem reads and

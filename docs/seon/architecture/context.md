@@ -23,8 +23,9 @@ context = (str/join (map #(% db) (render-fns-in-scope agent)))
 Every turn re-derives the cacheable body from one frozen db value. Nothing is
 accumulated. The agent, current turn, namespace, window policy, persisted
 timestamps, tool/schema graph, plan, event membership, and block order are facts
-or pure queries over that value. Rendering the same `{database-id, branch,
-commit-id, t}` coordinate for the same agent produces a byte-identical body.
+or pure queries over that value. Rendering the same database value (the same
+store ID, branch, commit ID, and basis transaction) for the same agent produces
+a byte-identical body.
 Filesystem state, process-local cache membership, random ids, and map iteration
 order never leak into it. Which functions are in scope, and in what order, is
 the entire design — and whether that set is **complete** is what makes the agent
@@ -37,7 +38,7 @@ It is root-only, comment-shaped, capped at roughly 50 estimated tokens, and
 always occupies the absolute end after every provider cache boundary. It never
 changes context membership, tool availability, plans, or transcript history.
 The sent prompt blob is the byte ground truth for the whole request; the
-recorded coordinate regenerates the body exactly and the captured blob preserves
+recorded database value regenerates the body exactly and the captured blob preserves
 the ephemeral tail exactly. This makes prompt diffs, content hashes, cache
 attribution, and failure reproduction ordinary database operations rather than
 transcript archaeology.
@@ -90,11 +91,11 @@ always renders:
   work-tracking that still carries a live lifecycle status is not a settled
   finding and never renders as one.
 - **what changed since I last looked** — the **delta**, derived from the
-  previous turn's rendered `{database-id, branch, commit-id, t}` coordinate: the
+  previous turn's rendered database value: the
   datoms transacted since I last saw the view when that commit is an ancestor
   of the current head (new messages, newly-completed children, newly-failed
   items). A series of independent snapshots becomes a felt continuity because
-  each turn can name what is new. The exact coordinate is already recorded per
+  each turn can name what is new. The exact database value is already recorded per
   turn ([[observability]]); the delta is a query over it, not new state. A
   lineage change renders a reset/diff boundary instead of pretending bare t is
   continuous.
@@ -172,7 +173,7 @@ site. `:seon.render/full?` and the agent's escape-clipping policy may release
 successful authored source and stdout, while `full?` may release a successful
 citable result; neither flag releases failed source, captured stdout, Malli
 diagnostics, read errors, or runtime errors. Large parse failures window the
-source excerpt around the exact reported coordinate before the transcript
+source excerpt around the exact reported source location before the transcript
 renderer applies that same cap. Exact raw replies and error evidence remain
 separate database/blob facts, so bounded agent context never weakens forensic
 capture.
@@ -252,7 +253,7 @@ the db value (all data is reachable from it — [[think-in-clojure]]); it
 `require`s only the *code* it calls. It is pure over the frozen db, so it
 re-runs safely every turn, is bounded + errors-as-values through the exec
 service (a throw becomes a `:seon/error` card, never a crash), and replays
-from database state at a resolved coordinate ([[observability]]). The historical prompt
+from an immutable database value ([[observability]]). The historical prompt
 blob—not a re-executed effect—is the byte ground truth.
 
 ## Shared view — the agent knows the human sees it
@@ -291,8 +292,9 @@ boundary** — never read from an ambient dynamic var deep in the body. The
 contract:
 
 - A map-in fn declares an injectable as an **optional** request key —
-  `:seon.db/db`, `:seon.agent/id` ("me"), `:seon.render/at` (the branch-local t
-  display aid; the db/attachment carries the resolved coordinate), and
+  `:seon.db/db`, `:seon.agent/id` ("me"), `:seon.render/at` (the branch-local
+  basis-transaction display aid; the database value carries the store ID,
+  branch, commit ID, and basis transaction), and
   `:seon.web.session/id` (the browser tab attached to the human message this
   turn is answering),
   and whatever else the registry grows to hold. It is `{:optional true}` in the
@@ -337,7 +339,7 @@ bounded core fault. Context may show that current fault concisely, while the
 detailed coverage diagnosis is pulled on demand through [[observability]].
 Coverage diagnostics are never standing context blocks. Injection happens before input
 validation, so the filled map satisfies the declared request shape and remains
-reproducible at the resolved coordinate.
+reproducible from the captured database value.
 
 The **scope-by-signature** rule falls out: a fn that declares `:seon.agent/id`
 reads/writes **per-agent** data (it stamps `:my.plan/agent me` and filters by
@@ -402,7 +404,7 @@ Position is sorted by **observed rendered-byte stability**, so the prompt reads
 most-stable → most-dynamic and the provider prefix-cache survives most turns.
 Every captured turn records each block's name, content hash, estimated tokens,
 position, and cache band as observability facts. The next ordering is a pure
-query over that changelog at the turn's frozen database coordinate; it does not
+query over that changelog at the turn's immutable database value; it does not
 guess an arbitrary renderer's dependencies or persist a mutable stability
 field.
 
@@ -510,14 +512,15 @@ manifest, which overrides defaults), and the exact population reconciler
 restores the declared config singleton/routes/root-context/skill-import subset. Omitted managed attributes and
 stale exclusive rows retract; outside facts remain untouched; equal state emits
 no transaction. A config-free boot skips this transition. The write is
-`{user root, process config}`. From attachment onward every
+`{user root, process config}`. After database acquisition every
 runtime read is an ordinary singleton acquisition at the operation's immutable
 database value. The operation decodes its EDN slots once and passes that map to
 pure accessors such as `config/eval-render-cap`, `config/on-core-error`,
 `config/web-policy`, and `config/namespaces-policy`. No accessor owns an atom,
 injected reader, manifest fallback, or second projection cache. Explicitly
 selected manifest data or resolved code defaults are valid only before
-attachment; afterward missing required config is a typed readiness error.
+database initialization; afterward missing required config is a typed readiness
+error.
 Collection knobs
 (`:seon.config/always`, `:seon.config.repair/classes`,
 `:seon.agent.web/allowed-domains`) ride the mixed-`:or` EDN-slot bridge (the
@@ -550,10 +553,10 @@ and then forgets the path. A later config-free boot reads those facts from the
 database and adds no skill block on its own.
 
 Prompt acquisition resolves the system text and the agent's selected context
-inside the same compiled child operation at one database coordinate. That one
+inside the same compiled child operation over one immutable database value. That one
 ordinary result flows unchanged through turn capture, token accounting, every
 retry, the provider adapter, and the debug view. None of those consumers
-re-resolves live config after the prompt coordinate has been chosen.
+re-resolves live config after the prompt database value has been chosen.
 
 ## See also
 

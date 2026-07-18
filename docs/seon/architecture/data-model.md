@@ -949,8 +949,8 @@ After database acquisition, each coherent runtime operation acquires the
 singleton once at its immutable database value, decodes its EDN slots once,
 and passes that ordinary map to pure `seon.config` accessors. There is no
 ambient reader, injected function, or second config cache. Explicitly selected
-manifest data or resolved code defaults serve only pre-attachment package
-initialization and are never exposed as attached runtime config. A
+manifest data or resolved code defaults serve only package initialization
+before database acquisition and are never exposed as runtime config. A
 required missing DB fact after acquisition is a typed readiness error, not a
 silent current default. Every manifest section is `{:optional true}`, so `{}` is
 a valid explicitly selected desired value; an unknown key fails loud. The full boot/read
