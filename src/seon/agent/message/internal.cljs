@@ -62,6 +62,8 @@
 (def ^:private sender-pull-pattern
   '[:db/id :seon.user/id :seon.agent/id])
 
+(def ^:private participant-max-results 64)
+
 (defn- query-member
   [database query arguments max-results]
   {::protocol/operation protocol/query-operation
@@ -77,7 +79,7 @@
    ::db/db database
    ::protocol/selector sender-pull-pattern
    ::protocol/entity-ids refs
-   :datahike.resource/max-results (max 1 (count refs))
+   :datahike.resource/max-results participant-max-results
    :datahike.resource/max-result-weight 65536})
 
 (defn- member-result

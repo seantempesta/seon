@@ -152,12 +152,9 @@
   (:seon.config.run/deadline-ms (config/default-run-policy)))
 
 ;; ============================================================
-;; Optional agent-local run-bound overrides. The cluster defaults live only in
-;; the database config singleton; these attrs carry no duplicate default.
+;; Optional agent-local run-bound overrides live in `seon.agent`. The cluster
+;; defaults live only in the database config singleton.
 ;; ============================================================
-
-(schema/register! ::default-turn-limit  [:int {:min 1}])
-(schema/register! ::default-deadline-ms [:int {:min 1}])
 
 (schema/register! ::effective-deadline-request
   [:map
@@ -165,8 +162,7 @@
    [:seon.agent/id {:optional true} :string]])
 
 (defn- deadline-ms-from [agent policy]
-  (or (::default-deadline-ms agent)
-      (:seon.agent/default-deadline-ms agent)
+  (or (:seon.agent/default-deadline-ms agent)
       (:seon.config.run/deadline-ms policy)))
 
 (defn- error-value? [value]
@@ -218,13 +214,12 @@
 (defn ^:async effective-deadline-ms
   "Effective run deadline duration for an agent and database value."
   {:malli/schema [:=> [:cat ::effective-deadline-request]
-                  [:or ::default-deadline-ms ::direct-error]]}
+                  [:or [:int {:min 1}] ::direct-error]]}
   [{:seon.db/keys [db] id :seon.agent/id}]
   (let [members (cond-> [(pull-member db config-selector
                                       [:seon.config/id config/cluster-config-id])]
                   id (conj (pull-member db
-                                        [::default-deadline-ms
-                                         :seon.agent/default-deadline-ms]
+                                        [:seon.agent/default-deadline-ms]
                                         [:seon.agent/id id])))
         acquired (await (db/execute-many {::db/db db ::db/members members}))
         results (::db/results acquired)]
@@ -472,8 +467,7 @@
               {::db/db database
                ::db/members
                [(pull-member database
-                             [::default-turn-limit ::default-deadline-ms
-                              :seon.agent/default-turn-limit
+                             [:seon.agent/default-turn-limit
                               :seon.agent/default-deadline-ms]
                              [:seon.agent/id id])
                 (pull-member database config-selector
@@ -498,7 +492,6 @@
             ;; Agent-level datoms are explicit overrides. Cluster defaults are
             ;; the frozen config singleton policy above.
             turn-limit (or tl
-                           (:seon.agent.run/default-turn-limit a)
                            (:seon.agent/default-turn-limit a)
                            ;; mode-denominated const fallback: forms under
                            ;; :stream, turns under :batch (repl-milestone rung-0 verdict).

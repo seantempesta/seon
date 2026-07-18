@@ -700,12 +700,12 @@
               (with-agent-repl
                 id
                 (fn ^:async wake! []
-                  (await (open-or-renew-message-run! input cause-eid))))
+                  (await (open-or-renew-message-run! input cause-eid)))))
             (.catch
               (fn [exception]
                 (js/console.error
                   (str "seon.agent.loop: wake loop threw for " id ": "
-                       (or (.-message exception) exception)))))))
+                       (or (.-message exception) exception))))))
       0))))
 
 (defn wake-handler

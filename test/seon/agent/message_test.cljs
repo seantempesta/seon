@@ -158,6 +158,10 @@
               (is (= database (::db/db result)))
               (is (= 2 (count (::db/members (first @requests))))
                   "sender pulls and the human barrier share one request")
+              (is (= 64
+                     (get-in (first @requests)
+                             [::db/members 0
+                              :datahike.resource/max-results])))
               (is (every? #(= database (::db/db %))
                           (::db/members (first @requests))))
               (is (= database (::db/db (second @requests)))

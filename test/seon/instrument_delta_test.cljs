@@ -88,23 +88,30 @@
         "instrument exactly the namespaces the Shadow Node client reloaded")))
 
 (deftest shadow-publication-closes-before-build-and-does-not-rearm-on-failure
-  (let [!effects (atom [])]
-    (with-redefs [db/attached? (constantly true)
-                  admission/begin-publication!
-                  (fn [] (swap! !effects conj :close) true)
-                  admission/mark-unavailable!
-                  (fn [_] (swap! !effects conj :failed) true)
-                  admission/publish-committed!
-                  (fn []
-                    (swap! !effects conj :publish)
-                    {::admission/published? false})
-                  agent-loop/install-ticker!
-                  (fn [] (swap! !effects conj :ticker))]
-      (is (true? (client/shadow-build-notify! {:type :build-start})))
-      (is (true? (client/shadow-build-notify! {:type :build-failure})))
-      (is (true? (client/shadow-build-notify! {:type :build-complete})))
-      (is (= [:close :failed] @!effects)
-          "a failed generation never publishes or rearms autonomous work"))))
+  (let [!effects (atom [])
+        original-state @client/!state]
+    (try
+      (reset! client/!state
+              (assoc original-state
+                     ::client/runtime-phase :seon.client.runtime/running))
+      (with-redefs [db/attached? (constantly true)
+                    admission/begin-publication!
+                    (fn [] (swap! !effects conj :close) true)
+                    admission/mark-unavailable!
+                    (fn [_] (swap! !effects conj :failed) true)
+                    admission/publish-committed!
+                    (fn []
+                      (swap! !effects conj :publish)
+                      {::admission/published? false})
+                    agent-loop/install-ticker!
+                    (fn [] (swap! !effects conj :ticker))]
+        (is (true? (client/shadow-build-notify! {:type :build-start})))
+        (is (true? (client/shadow-build-notify! {:type :build-failure})))
+        (is (true? (client/shadow-build-notify! {:type :build-complete})))
+        (is (= [:close :failed] @!effects)
+            "a failed generation never publishes or rearms autonomous work"))
+      (finally
+        (reset! client/!state original-state)))))
 
 (deftest exact-data-and-delta-refresh-only-affected-wrappers
   (let [function-schemas-before (m/function-schemas :cljs)

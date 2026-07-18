@@ -111,12 +111,14 @@
     (let [original-db db/db
           original-execute db/execute-many
           original-allocate db.id/allocate!
+          acquisition-request (atom nil)
           allocation-request (atom nil)
           built (atom nil)]
       (set! db/db (fn ([] (js/Promise.resolve database))
                     ([_] (js/Promise.resolve database))))
       (set! db/execute-many
-            (fn [_]
+            (fn [request]
+              (reset! acquisition-request request)
               (js/Promise.resolve
                {::db/results
                 [(pull-result {:seon.agent/default-turn-limit 4})
@@ -144,6 +146,10 @@
                cas (second (:seon.db/tx-data @built))]
            (is (= "run-a" (:seon.agent.run/id result)))
            (is (= 4 (:seon.agent.run/turn-limit result)))
+           (is (= [:seon.agent/default-turn-limit
+                   :seon.agent/default-deadline-ms]
+                  (get-in @acquisition-request
+                          [::db/members 0 ::db.protocol/selector])))
            (is (identical? database (::db/db @allocation-request)))
            (is (= :db.fn/cas (first cas)))
            (is (nil? (nth cas 3)))))))))
