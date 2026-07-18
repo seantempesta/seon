@@ -225,8 +225,12 @@ pod per active cluster, with three logical roles:
 - **Agent execution** — active agents may run as separately supervised Bun
   children for real CPU, heap, cancellation, and crash isolation. They query the
   authority through ordinary data and never build one Datahike index copy per
-  child. Per-agent workers or microVMs implement the same data-only execution
-  contract; they do not move database authority.
+  child. A child is disposable: its replacement starts from the newest admitted
+  execution artifact, reconstructs current functions, schemas, tests, and
+  namespaces from database program facts, and continues durable work with an
+  explicit interruption boundary. Per-agent workers, lightweight containers,
+  or microVMs implement this same data-only execution contract; they do not move
+  database authority or change recovery semantics.
 
 The JVM authority is one process for the installation, not one process per
 cluster. Dormant databases retain durable facts without an active Bun pod or hot

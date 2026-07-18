@@ -210,6 +210,17 @@ stable forensic flow is fault list → error detail → reproduction bundle →
 non-autonomous historical runtime; operator command names are not part of
 the data model.
 
+Execution-child recovery retains two database values rather than inventing a
+rollback point: the value pinned for the interrupted invocation and the current
+value at which recovery terminalizes it. Their basis transactions and commit IDs
+show exactly what the child saw and which transactions committed before it
+disappeared. The process exit record retains the admitted artifact and source
+identity, PID, signal or exit code, deadline classification, bounded stdout and
+stderr tails, and available resource usage. The next-turn recovery render states
+that a replacement loaded the current database program and that transient
+Promises, handles, and `result/<id>` values were lost. It never claims committed
+effects were undone or silently retries an interrupted effect.
+
 ## The forensic agent
 
 Debugging an agent is done **by another agent given the exact db the target

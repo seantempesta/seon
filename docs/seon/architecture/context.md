@@ -71,6 +71,12 @@ always renders:
   most salient standing frame in the prompt wins by default — so evergreen
   advice ("after a restart, resume your plan") is **conditional/derived**,
   rendered only when its condition actually holds, never planted every turn.
+  A self-healing execution-child replacement is one such condition: the next
+  turn names the interrupted eval and process failure, confirms that current
+  functions/schemas/tests were reconstructed from database program facts, and
+  states that live `result/<id>` values, Promises, and other process-local state
+  were lost. It does not imply that committed transactions were rolled back or
+  that the interrupted form was replayed.
 - **where I am** — the plan, rendered with unambiguous status. The plan is not
   a checklist; it is **externalized intent** — the one thing a stateless
   boundary cannot reconstruct unless it was written down as data. An open step

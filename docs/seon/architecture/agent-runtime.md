@@ -315,6 +315,46 @@ no stored state**: the window sliding past re-enables it. Human/agent MESSAGES s
 wake it (deliberate contact is not a loop); only schedules are gated. The refusal is
 visible in the subagents-section line.
 
+## Self-healing agents — replace the process, preserve understanding
+
+An execution child is disposable runtime capacity, not the agent's memory. The
+agent's durable understanding is its current database program, plan and other
+facts, transcript evidence, and context derived from one database value. If a
+child exits, wedges in synchronous code, exceeds its parent deadline, or fails
+its protocol, the parent terminates and reaps that complete child generation.
+The next generation starts from the newest admitted execution artifact and
+reconstructs the current namespace sections, functions, schemas, tests, aliases,
+and instrumentation from database program facts. It never replays every eval or
+assumes a process-local value survived.
+
+Recovery preserves history rather than pretending to reverse execution. Every
+database transaction that committed before the crash remains true. The exact
+running eval is terminalized `:interrupted`, its turn records the process loss,
+and the old run closes `:crashed` under its existing fence. Pending Promises,
+timers, open handles, JavaScript object identity, and live `result/<id>` values
+are explicitly lost. The next turn derives a concise recovery section from
+those facts: it names the interrupted source and process failure, states that a
+fresh child loaded the current program, and tells the agent that transient
+results did not survive. Source text is never rewritten to insert a synthetic
+crash message.
+
+The supervisor opens one bounded recovery run after replacement so the agent
+continues its existing plan instead of waiting for a human to rediscover the
+failure. This is a new run and turn over current database truth, never a replay
+of the interrupted form. Repeated crashes for the same source and artifact
+digest trip a derived breaker and leave the agent idle for its parent, root, or
+the human to inspect; recovery cannot become an autonomous crash loop. Another
+agent may observe and manage this entirely through the same run, error, program,
+and process facts.
+
+Bun cannot restore a dead JavaScriptCore heap. Heap snapshots and structured
+serialization are diagnostic/data tools, not process resurrection. Process
+replacement is the hard bound for native loops that timers, core.async,
+superv.async, partial CPS transforms, and interpreter checks cannot preempt.
+The isolation implementation may later move from an operating-system child to
+a lightweight container or microVM without changing this contract: database
+facts cross the boundary, runtime state does not.
+
 ## Triggering + fencing — the reactive wake
 
 Triggering is **DB-reactive**. Each active agent child registers one database
