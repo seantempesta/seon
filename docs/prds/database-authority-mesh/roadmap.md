@@ -3306,3 +3306,41 @@ gzip-feed inspection found three correctness owners now ahead of model load:
 debug/data headers use a static zero-agent projection; two retained agents have
 visible feed render failures; and a nonexistent ordinary-agent page serves a
 loading shell whose feed returns 404. Those are the current ordered falsifiers.
+
+### 2026-07-18 correctness and feed checkpoint
+
+The complete maintained writer door now covers the mutation-admission change:
+218 tests and 1,814 assertions pass. The complete operator door passes 243
+tests and 1,393 assertions. Both ran against the source-frozen mutation-load
+artifact.
+
+Commit `fbadfb91` removes the static header outside the debug and database
+`#app-view`; each feed now derives its sole header from the same immutable
+database value as its content. The same commit makes an unknown well-formed
+agent page consult database truth and redirect home instead of serving a shell
+whose feed can never replace it. Focused render and route proof passes 29 tests
+and 109 assertions.
+
+The retained-agent failures exposed two independent bounded-result mistakes.
+Commit `244fbebd` leaves recent message count to its already-bounded reverse
+index read instead of applying that entity count to every nested Datahike pull
+value. It also makes the plan renderer's complete result ordinary protocol
+data. The first live repeat caught that a vector of children cannot itself be
+a hiccup child because it is interpreted as an element tag. Commit `9fc4294c`
+therefore eagerly splices each bounded collection into its parent hiccup vector
+with `into`. Focused message and plan proof passes 35 tests/142 assertions; the
+complete ClojureScript gate passes 1,100 tests/4,892 assertions.
+
+The rebuilt live repeat returns complete HTTP 200 gzip morphs for
+`solid-worms-punch`, `floppy-monkeys-chew`, and `olive-forks-buy`; every morph
+has one `#app-view`, one `#system-header`, the same database-derived count of
+72 agents, and no message, IPC, plan, tag, or generic render error. The debug
+and database feeds also each contain one header and the same count. A request
+for `/agent/no-such-agent` returns 302 to `/`.
+
+The earliest remaining correctness boundary is a real browser journey plus
+public agent/model execution and failure injection under concurrent activity.
+The current browser connector remains unavailable, so server-side feed proof
+does not claim console, focus, morph, or interaction graduation. Once that
+boundary is green, measure startup, database calls and query reuse, render/feed
+work, event-loop delay, CPU, heap, and RSS before the Bun-native HTTP/SSE cut.
