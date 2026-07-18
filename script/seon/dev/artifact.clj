@@ -237,24 +237,36 @@
     :else nil))
 
 (defn- local-root-coordinate!
-  [root local-root]
-  (let [directory (fs/path root local-root)
-        dirty (command-output! directory "git" "status" "--porcelain")
-        url (public-github-url
-             (command-output! directory "git" "remote" "get-url" "origin"))
-        sha (command-output! directory "git" "rev-parse" "HEAD")]
-    (when (seq dirty)
-      (throw (ex-info "A maintained local dependency has uncommitted changes."
-                      {:seon.dev.artifact/dependency-root (str directory)
-                       :seon.dev.artifact/dependency-status
-                       (str/split-lines dirty)})))
-    {:git/url url :git/sha sha}))
+  [root library local-root]
+  (let [directory (fs/path root local-root)]
+    (if (fs/exists? (fs/path directory ".git"))
+      (let [dirty (command-output! directory "git" "status" "--porcelain")
+            url (public-github-url
+                 (command-output! directory "git" "remote" "get-url" "origin"))
+            sha (command-output! directory "git" "rev-parse" "HEAD")]
+        (when (seq dirty)
+          (throw
+           (ex-info "A maintained local dependency has uncommitted changes."
+                    {:seon.dev.artifact/dependency-root (str directory)
+                     :seon.dev.artifact/dependency-status
+                     (str/split-lines dirty)})))
+        {:git/url url :git/sha sha})
+      (let [identity-file (fs/path root "sdk-dependencies.edn")
+            identities (when (fs/regular-file? identity-file)
+                         (edn/read-string (slurp (str identity-file))))]
+        (or (get identities library)
+            (throw
+             (ex-info "An archived local dependency lacks its SDK identity."
+                      {:seon.dev.artifact/dependency-library library
+                       :seon.dev.artifact/dependency-root (str directory)
+                       :seon.dev.artifact/identity-file
+                       (str identity-file)})))))))
 
 (defn- git-coordinate! [root dependencies library alias dependency-section]
   (let [coordinate (get-in dependencies
                            [:aliases alias dependency-section library])
         identity (if-let [local-root (:local/root coordinate)]
-                   (when root (local-root-coordinate! root local-root))
+                   (when root (local-root-coordinate! root library local-root))
                    coordinate)
         git-url (public-github-url (:git/url identity))
         git-sha (:git/sha identity)]

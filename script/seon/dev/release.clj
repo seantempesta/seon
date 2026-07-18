@@ -514,6 +514,8 @@
         datahike-root (fs/path root "reference-code/datahike")
         datahike-revision
         (command-output! datahike-root "git" "rev-parse" "HEAD")
+        datahike-url
+        (command-output! datahike-root "git" "remote" "get-url" "origin")
         bun (fs/path root "reference-code/bun/build/release/bun")
         _ (inspect-bun! root environment (str bun))
         babashka-root (fs/path root "reference-code/babashka")
@@ -535,6 +537,11 @@
       (git-archive! root source-revision sdk-source-paths source)
       (git-archive! datahike-root datahike-revision datahike-sdk-paths
                     (fs/path source "reference-code/datahike"))
+      (spit (str (fs/path source "sdk-dependencies.edn"))
+            (str (pr-str
+                  {'org.replikativ/datahike
+                   {:git/url datahike-url :git/sha datahike-revision}})
+                 "\n"))
       (copy-file! bun (fs/path source "reference-code/bun/build/release/bun"))
       (.setExecutable
        (io/file (str (fs/path source "reference-code/bun/build/release/bun")))

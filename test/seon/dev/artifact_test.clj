@@ -795,6 +795,32 @@
             "git" "rev-parse" "HEAD")
            (:seon.dev.artifact/dependency-git-sha datahike)))))
 
+(deftest archived-local-root-uses-the-sdk-dependency-identity
+  (let [root (fs/create-temp-dir {:prefix "seon-sdk-dependency-test-"})
+        revision (apply str (repeat 40 "a"))
+        datahike-root (fs/path root "reference-code/datahike")
+        dependencies
+        (-> (maintained-deps)
+            (assoc-in [:aliases :writer :replace-deps
+                       'org.replikativ/datahike]
+                      {:local/root "reference-code/datahike"})
+            (assoc-in [:aliases :cljs :override-deps
+                       'org.replikativ/datahike]
+                      {:local/root "reference-code/datahike"}))]
+    (try
+      (fs/create-dirs datahike-root)
+      (spit (str (fs/path root "sdk-dependencies.edn"))
+            (pr-str {'org.replikativ/datahike
+                     {:git/url "git@github.com:example/datahike.git"
+                      :git/sha revision}}))
+      (let [datahike
+            (first (#'artifact/maintained-dependencies-from root dependencies))]
+        (is (= "https://github.com/example/datahike.git"
+               (:seon.dev.artifact/dependency-git-url datahike)))
+        (is (= revision
+               (:seon.dev.artifact/dependency-git-sha datahike))))
+      (finally (fs/delete-tree root {:force true})))))
+
 (deftest application-identity-binds-writer-and-maintained-dependencies
   (let [directory (fs/create-temp-dir {:prefix "seon-v4-identity-test-"})
         writer (fs/path directory "target/writer.jar")
