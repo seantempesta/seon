@@ -3896,3 +3896,38 @@ growth defect is preserved with exact owners and acceptance evidence in
 proves clean startup but does not close the defect. A generated maximum-content
 retained-window fixture and real grown-page proof are required before complete
 browser graduation.
+
+The release boundary now has one closed, relocatable inventory and one operator
+process graph. The verified manifest names the exact patched Bun binary,
+writer, pod, execution child, runtime assets, and program source; every byte is
+content-addressed, symbolic links and undeclared package entries are rejected,
+and package paths resolve relative to the extracted root. Package configuration
+is admitted before launch and the existing operator derives its owned processes
+from that configuration: a source checkout owns watcher, writer, and pod while
+an extracted package owns only writer and pod. Package reconciliation reads the
+verified `release.edn` directly and cannot invoke Shadow or the source artifact
+builder. The integrated release/config/process/CLI gate passes 110 tests/450
+assertions. A coordinated source-checkout restart then drained all three
+development processes cleanly, rebuilt current artifacts, returned them ready,
+served `/`, `/data`, and a gzip Datastar patch, and showed no error in the new
+pod or writer logs.
+
+The MCP default CLJS session now classifies a replaced Shadow port as a
+reconnectable transport failure and retries the complete discovery/session/
+evaluation operation once; focused proof passes 17 tests/54 assertions and a
+cluster-qualified live evaluation after restart returned `42`. The Codex task
+that predates this commit still runs its old stdio MCP server and therefore
+cannot be counted as live default-session proof. Restarting the Codex task and
+then evaluating through the bare default session is the remaining live gate for
+this cut.
+
+The earliest unsettled contract is assembling the complete extracted package
+from the admitted members plus its production JavaScript dependency closure,
+then starting and restarting that exact tree while the producer checkout is
+unavailable. Its integrated proof must show only writer, pod, and demanded
+execution children, with no Shadow/Clojure development process or checkout
+path, before package startup and memory measurements count. The next safe
+refills are the generated grown-transcript fixture and browser proof, followed
+by package load/memory measurement and the patched-Bun runtime/transport
+decision. Final graduation remains the complete correctness, browser,
+multi-cluster, resource-budget, and ACME downstream matrix.
