@@ -23,7 +23,7 @@ compile rebuilt the bundle.
 - The pod failed before tests with `ENOENT` for
   `cljs-runtime/seon.db.coordinate.js` under the selected content-addressed
   bundle.
-- `bin/test-cljs --test=seon.db.coordinate-test` compiled one new file and then
+- `bin/test-cljs --test=seon.db.branch-test` compiled one new file and then
   passed three tests/11 assertions.
 - Later edits widened and compiled normally, confirming the source itself was
   valid and the first retained artifact was incomplete.

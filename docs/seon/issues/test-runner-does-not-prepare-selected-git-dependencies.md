@@ -65,7 +65,7 @@ Node pass in one command at
 `tmp/test-cljs-20260715-034817-65956.log`.
 
 The public writer path was also exercised directly with
-`bin/test-writer seon.db.coordinate-test`. It selected and completed the shared
+`bin/test-writer seon.db.branch-test`. It selected and completed the shared
 `[:writer]` preparation owner, then passed 4 tests and 16 assertions with zero
 failures/errors.
 

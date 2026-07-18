@@ -7,7 +7,8 @@
    [seon.error :as error]
    [seon.schema :as schema]))
 
-;;; Process-local execution context. Database values never enter these scopes.
+;;; Process-local execution context. Ordinary database descriptors may pin
+;;; reads; native Datahike database values never enter these scopes.
 
 (defonce ^:private tx-context
   (let [ctor (.-AsyncLocalStorage (js/require "node:async_hooks"))]
