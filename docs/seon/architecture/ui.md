@@ -307,9 +307,10 @@ The front door is **reitit** (vendored `reference-code/reitit`, `.cljc`, runs in
 method, unique name (reverse routing), owning agent (`:seon.route/owner`, rides as
 route-data for auth), and a `:seon.route/handler` symbol that **IS a layout
 symbol** — the same render machinery as a block's html render, not a separate
-mechanism. `db->routes` projects the datoms into reitit's route vector;
-a ~20-line Node↔Ring adapter feeds the router, which is a pure derived value of
-the route datoms rebuilt on tx via a reloading thunk. This replaces hand-rolled
+mechanism. `db->routes` projects the datoms into reitit's route vector. A small
+boundary translates Bun's WHATWG Request into Ring routing data; handlers return
+WHATWG Response values. The router remains a pure derived value of the route
+datoms rebuilt on tx via a reloading thunk. This replaces hand-rolled
 `case`/`cond`/`re-matches` dispatch. (The `:seon.route/*` attributes are
 registered per [[data-model]].)
 
@@ -439,8 +440,9 @@ implements the `view = f(db)` model through `seon.web.datastar`.
   One shared heartbeat timer emits inert SSE
   comments for every writable feed, so reverse proxies can keep otherwise-idle
   views open without one timer per socket. A
-  backpressured connection retains only its newest derived event and resumes on
-  `drain`; stale UI states never form an unbounded write queue.
+  backpressured connection retains only its newest derived event and resumes
+  after Bun's `flush(true)` drain boundary; stale UI states never form an
+  unbounded write queue.
 - **Selective interest, complete rendering.** Each renderer declares the
   attributes that can affect its complete projection. The one database interest
   is the union across live subscriptions; native transaction `:tx-data`

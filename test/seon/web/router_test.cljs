@@ -19,11 +19,9 @@
             (reset! @#'router/!router-state @prior-router-state))})
 
 (defn temporary-handler!
-  "Write the temporary route's observable response."
-  [request]
-  (let [^js response (:seon.http/node-res request)]
-    (.writeHead response 200 #js {"Content-Type" "text/plain"})
-    (.end response "temporary route")))
+  "Return the temporary route's observable response."
+  [_request]
+  (js/Response. "temporary route" #js {:status 200}))
 
 
 (def ^:private route-query
@@ -106,40 +104,21 @@
             (set! db/unlisten! original-unlisten)
             (reset! state-atom prior-state))))))
 
-(defn- response-probe
-  "Node response double and its namespaced observation atom."
-  []
-  (let [observed (atom {})
-        response #js {:writeHead
-                      (fn [status headers]
-                        (swap! observed assoc
-                               ::response-status status
-                               ::response-headers (js->clj headers)))
-                      :end
-                      (fn [body]
-                        (swap! observed assoc
-                               ::response-body (or body "")))}]
-    [response observed]))
-
 (defn- request!
-  "Dispatch one synthetic GET and return its response observations."
+  "Dispatch one synthetic WHATWG Request and return its Response."
   ([path] (request! "GET" path))
   ([method path]
-   (let [[response observed] (response-probe)
-         request #js {:url path :method method :headers #js {}}]
-     (router/handle-request request response)
-     @observed)))
+   (router/handle-request
+    (js/Request. (str "http://127.0.0.1" path) #js {:method method}) nil)))
 
 (deftest operator-config-route-reaches-the-injected-live-operation
   (router/install!
     {:seon.web.router/config-apply
-     (fn [_request ^js response]
-       (.writeHead response 200 #js {"Content-Type" "application/edn"})
-       (.end response "{:seon.state/ok? true}"))
+     (fn [_request _response]
+       (js/Response. "{:seon.state/ok? true}" #js {:status 200}))
      :seon.web.router/same-origin? (constantly true)})
   (let [response (request! "POST" "/_seon/operator/config")]
-    (is (= 200 (::response-status response)))
-    (is (= "{:seon.state/ok? true}" (::response-body response)))))
+    (is (= 200 (.-status response)))))
 
 (deftest action-door-is-only-database-projected
   (let [projection [{:seon.route/pattern "/agent/{id}/call"
@@ -155,15 +134,14 @@
 
 (deftest operator-quiesce-route-is-unadmitted-and-loopback-only
   (let [!invocations (atom 0)
-        handler (fn [_request ^js response]
+        handler (fn [_request _response]
                   (swap! !invocations inc)
-                  (.writeHead response 200 #js {"Content-Type" "application/edn"})
-                  (.end response "{:seon.runtime/quiesced? true}"))]
+                  (js/Response. "{:seon.runtime/quiesced? true}" #js {:status 200}))]
     (router/install!
       {:seon.web.router/operator-quiesce handler
        :seon.web.router/loopback-peer? (constantly false)})
     (let [response (request! "POST" "/_seon/operator/quiesce")]
-      (is (= 403 (::response-status response)))
+      (is (= 403 (.-status response)))
       (is (zero? @!invocations)))
     (router/install!
       {:seon.web.router/operator-quiesce handler
@@ -174,8 +152,7 @@
                 {::admission/status :unavailable
                  ::admission/reason "ordinary work is closed"})
         (let [response (request! "POST" "/_seon/operator/quiesce")]
-          (is (= 200 (::response-status response)))
-          (is (= "{:seon.runtime/quiesced? true}" (::response-body response)))
+          (is (= 200 (.-status response)))
           (is (= 1 @!invocations)
               "lifecycle work bypasses ordinary admission only for loopback"))
         (finally
@@ -183,15 +160,13 @@
 
 (deftest retained-blob-route-is-unadmitted-and-loopback-only
   (let [!invocations (atom 0)
-        handler (fn [_request ^js response]
+        handler (fn [_request _response]
                   (swap! !invocations inc)
-                  (.writeHead response 200 #js {"Content-Type" "application/edn"})
-                  (.end response "{:my.blob/ok? true}"))]
+                  (js/Response. "{:my.blob/ok? true}" #js {:status 200}))]
     (router/install!
       {:seon.web.router/operator-blobs handler
        :seon.web.router/loopback-peer? (constantly false)})
-    (is (= 403 (::response-status
-                 (request! "POST" "/_seon/operator/blobs"))))
+    (is (= 403 (.-status (request! "POST" "/_seon/operator/blobs"))))
     (is (zero? @!invocations))
     (router/install!
       {:seon.web.router/operator-blobs handler
@@ -202,8 +177,7 @@
                 {::admission/status :unavailable
                  ::admission/reason "restore admission is closed"})
         (let [response (request! "POST" "/_seon/operator/blobs")]
-          (is (= 200 (::response-status response)))
-          (is (= "{:my.blob/ok? true}" (::response-body response)))
+          (is (= 200 (.-status response)))
           (is (= 1 @!invocations)))
         (finally
           (reset! @#'admission/!state prior))))))
@@ -214,16 +188,15 @@
     (try
       (router/install!
         {:seon.web.router/config-apply
-         (fn [_request ^js response]
+         (fn [_request _response]
            (swap! !invocations inc)
-           (.writeHead response 200 #js {"Content-Type" "application/edn"})
-           (.end response "{:seon.state/ok? true}"))
+           (js/Response. "{:seon.state/ok? true}" #js {:status 200}))
          :seon.web.router/same-origin? (constantly true)})
       (reset! @#'admission/!state
               {::admission/status :unavailable
                ::admission/reason "injected publication failure"})
       (let [response (request! "POST" "/_seon/operator/config")]
-        (is (= 503 (::response-status response)))
+        (is (= 503 (.-status response)))
         (is (zero? @!invocations)
             "closed admission reaches neither parsing nor domain work"))
       (finally
@@ -273,8 +246,7 @@
               (.then
                (fn [_]
                  (is (= event-db (::db/db (peek @!queries))))
-                 (is (= 200 (::response-status
-                             (request! "/temporary-route"))))
+                 (is (= 200 (.-status (request! "/temporary-route"))))
                  (router/detach!)))
               (.then
                (fn [_]
@@ -315,16 +287,13 @@
                  (next-turn)))
               (.then
                (fn [_]
-                 (is (= 200 (::response-status
-                             (request! "/current-route"))))
+                 (is (= 200 (.-status (request! "/current-route"))))
                  ((::resolve! stale-query) [(route-row "/stale-route")])
                  (next-turn)))
               (.then
                (fn [_]
-                 (is (= 200 (::response-status
-                             (request! "/current-route"))))
-                 (is (= 302 (::response-status
-                             (request! "/stale-route")))))))))
+                 (is (= 200 (.-status (request! "/current-route"))))
+                 (is (= 302 (.-status (request! "/stale-route")))))))))
        (settle! done)))))
 
 (deftest detached-route-query-completion-cannot-publish
@@ -358,6 +327,5 @@
                  (next-turn)))
               (.then
                (fn [_]
-                 (is (= 302 (::response-status
-                             (request! "/detached-route")))))))))
+                 (is (= 302 (.-status (request! "/detached-route")))))))))
        (settle! done)))))

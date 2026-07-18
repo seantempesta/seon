@@ -159,42 +159,38 @@
         {::ok? false ::error (err->msg e)}))))
 
 ;; ============================================================
-;; HTTP handler — POST /agent/{id}/call. Opaque (req,res), like the debug +
-;; serve handlers (no Malli schema on the Ring-style boundary).
+;; HTTP handler — POST /agent/{id}/call. The Ring request carries the native
+;; WHATWG Request; every branch returns exactly one Response.
 ;; ============================================================
 
-(defn- write-json! [^js res code m]
-  (.writeHead res code #js {"Content-Type"  "application/json; charset=utf-8"
-                            "Cache-Control" "no-store"})
-  (.end res (js/JSON.stringify (clj->js m))))
+(defn- json-response [code m]
+  (js/Response.
+   (js/JSON.stringify (clj->js m))
+   #js {:status code
+        :headers #js {"Content-Type" "application/json; charset=utf-8"
+                      "Cache-Control" "no-store"}}))
 
 (defn- datastar-request? [^js req]
-  (= "true" (some-> (aget (.-headers req) "datastar-request") str/lower-case)))
+  (= "true" (some-> (.-headers req)
+                     (.get "datastar-request")
+                     str/lower-case)))
 
-(defn- write-success!
-  "End a successful browser action without a redundant response payload.
+(defn- success-response
+  "Return a successful browser action without a redundant payload.
 
    The database listener owns the visible update. Direct API callers retain
    the small JSON acknowledgement."
-  [^js req ^js res]
+  [^js req]
   (if (datastar-request? req)
-    (do (.writeHead res 204 #js {"Cache-Control" "no-store"})
-        (.end res))
-    (write-json! res 200 {::ok? true})))
+    (js/Response. nil #js {:status 204
+                           :headers #js {"Cache-Control" "no-store"}})
+    (json-response 200 {::ok? true})))
 
 (defn- query-val [^js req k]
   (try
-    (let [u (js/URL. (str "http://x" (.-url req)))]
+    (let [u (js/URL. (.-url req))]
       (.get (.-searchParams u) k))
     (catch :default _ nil)))
-
-(defn- read-body [^js req]
-  (js/Promise.
-    (fn [resolve! _reject]
-      (let [chunks (atom [])]
-        (.on req "data" (fn [c] (swap! chunks conj c)))
-        (.on req "end"
-             (fn [] (resolve! (.toString (.concat js/Buffer (clj->js @chunks))))))))))
 
 (defn- parse-signals
   "Datastar sends current signals as a JSON body on POST. Parse to a map with
@@ -236,26 +232,21 @@
    `?args=` is malformed / non-data (refused before invoke); 400 for a missing
    fn. Every path through here writes exactly one response — a bad `?args=`
    decode is caught inside the promise chain, never a hung request. The UI
-   update is the reactive feed's job — the invoked fn's transact fans out via
-   the web UI tx-listener."
-  ([r]
-   ;; The router's calling convention: self-extract node-req/node-res from the
-   ;; Ring request and delegate to the (req res) gate UNCHANGED. The seeded
-   ;; :seon.route/agent-call resolves this symbol. NO logic here — extraction
-   ;; only.
-   (handle! (:seon.http/node-req r) (:seon.http/node-res r)))
-  ([^js req ^js res]
-   (if-not (admission/available?)
-     (write-json! res 503
-                  {::ok? false
-                   ::unavailable? true
-                   ::error
-                   (get-in (admission/unavailable)
-                           [:seon/error :seon.error/message])})
-     (let [fn-str (query-val req "fn")]
+  update is the reactive feed's job — the invoked fn's transact fans out via
+  the web UI tx-listener."
+  [request]
+  (let [^js req (:seon.http/request request)]
+    (if-not (admission/available?)
+      (json-response 503
+                     {::ok? false
+                      ::unavailable? true
+                      ::error
+                      (get-in (admission/unavailable)
+                              [:seon/error :seon.error/message])})
+      (let [fn-str (query-val req "fn")]
        (if (str/blank? fn-str)
-         (write-json! res 400 {::ok? false
-                               ::error "missing 'fn' query param"})
+         (json-response 400 {::ok? false
+                             ::error "missing 'fn' query param"})
          (try
            (let [fn-sym (symbol fn-str)
                  database (await (db/db))
@@ -264,15 +255,15 @@
                        (await (capability-check database fn-sym)))]
              (cond
                (:seon.error/message cap)
-               (write-json! res 503 {::ok? false
-                                     ::unavailable? true
-                                     ::error (:seon.error/message cap)})
+               (json-response 503 {::ok? false
+                                   ::unavailable? true
+                                   ::error (:seon.error/message cap)})
 
                (::refused cap)
                (let [reason (::refused cap)]
                  (log/info-console! "seon.web.reactive.call" "agent call REFUSED"
                                     {:seon.web.call/fn fn-str})
-                 (write-json! res 403 {::ok? false ::refused reason}))
+                 (json-response 403 {::ok? false ::refused reason}))
 
                :else
                (let [agent-id (::agent-id cap)
@@ -281,15 +272,15 @@
                      (if (some? args-q)
                        (try {::args (transform/decode-args args-q)}
                             (catch :default e {::arg-error (err->msg e)}))
-                       (let [signals (parse-signals (await (read-body req)))]
+                       (let [signals (parse-signals (await (.text req)))]
                          {::args (if (seq signals) [signals] [])}))]
                  (if arg-error
                    (do
                      (log/info-console! "seon.web.reactive.call" "agent call BAD ARGS"
                                         {:seon.web.call/fn fn-str
                                          :seon.web.call/error arg-error})
-                     (write-json! res 422 {::ok? false
-                                           ::error (str "bad args: " arg-error)}))
+                     (json-response 422 {::ok? false
+                                         ::error (str "bad args: " arg-error)}))
                    (let [{ok? ::ok? err ::error}
                          (await (invoke! database agent-id fn-sym args))]
                      (if ok?
@@ -297,12 +288,12 @@
                          (log/info-console! "seon.web.reactive.call" "agent call OK"
                                             {:seon.web.call/fn fn-str
                                              :seon.agent/id agent-id})
-                         (write-success! req res))
+                         (success-response req))
                        (do
                          (log/error-console! "seon.web.reactive.call"
                                              "agent call invoke error" (str err))
-                         (write-json! res 422 {::ok? false
-                                               ::error (str err)}))))))))
+                         (json-response 422 {::ok? false
+                                             ::error (str err)}))))))))
            (catch :default e
              (log/error-console! "seon.web.reactive.call" "agent call threw" e)
-             (write-json! res 500 {::ok? false ::error (str e)}))))))))
+             (json-response 500 {::ok? false ::error (str e)}))))))))

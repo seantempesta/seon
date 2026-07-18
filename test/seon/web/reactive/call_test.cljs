@@ -144,55 +144,53 @@
 ;; and invoke! is resolve-and-apply — the injected expression can never run.
 ;; ---------------------------------------------------------------------------
 
-(defn- mock-res
-  "A minimal Node `res` capturing the written `{:code …, :body …, :ended? …}`."
-  []
-  (let [state (atom {})]
-    {::state state
-     ::res   #js {:writeHead (fn [code _headers] (swap! state assoc :code code))
-                  :end       (fn [body] (swap! state assoc :body body :ended? true))}}))
-
 (defn- call-req
-  "A mock agent-call request carrying encoded fn and optional args."
-  [fn-sym args-str]
-  (let [base (str "/agent/" agent-id "/call?fn="
-                  (js/encodeURIComponent (str fn-sym)))]
-    #js {:method "POST"
-         :url    (if args-str
-                   (str base "&args=" (js/encodeURIComponent args-str))
-                   base)
-         :headers #js {}}))
+  "A Ring request carrying a WHATWG Request with fn and optional args."
+  ([fn-sym args-str]
+   (call-req fn-sym args-str nil))
+  ([fn-sym args-str options]
+   (let [base (str "/agent/" agent-id "/call?fn="
+                   (js/encodeURIComponent (str fn-sym)))]
+     {:seon.http/request
+      (js/Request.
+       (str "http://seon.test"
+            (if args-str
+              (str base "&args=" (js/encodeURIComponent args-str))
+              base))
+       (or options #js {:method "POST"}))})))
 
 (deftest datastar-success-is-an-empty-acknowledgement
-  (let [{state ::state res ::res} (mock-res)
-        req #js {:headers #js {"datastar-request" "true"}}]
-    (@#'call/write-success! req res)
-    (is (= 204 (:code @state)))
-    (is (true? (:ended? @state)))
-    (is (nil? (:body @state)) "the live feed, not a duplicate body, updates UI")))
+  (let [req (js/Request. "http://seon.test/agent/id/call"
+                         #js {:headers #js {"datastar-request" "true"}})
+        response (@#'call/success-response req)]
+    (is (= 204 (.-status response)))
+    (is (nil? (.-body response))
+        "the live feed, not a duplicate body, updates UI")))
 
 (deftest unavailable-runtime-refuses-before-capability-or-body-work
-  (let [{state ::state res ::res} (mock-res)]
-    (try
-      (reset! @#'admission/!state
-              {::admission/status :unavailable
-               ::admission/reason "test publication failure"})
-      ;; Deliberately no database connection and no request event API. Reaching
-      ;; capability-check or read-body would throw; a 503 proves the admission
-      ;; refusal owns the earliest boundary.
-      (call/handle! (call-req granted-sym nil) res)
-      (is (= 503 (:code @state)))
-      (is (true? (:ended? @state)))
-      (is (str/includes? (:body @state) "Runtime program generation"))
-      (finally
-        (reset! @#'admission/!state
-                {::admission/status :available
-                 ::admission/generation 0})))))
+  (async done
+    (reset! @#'admission/!state
+            {::admission/status :unavailable
+             ::admission/reason "test publication failure"})
+    (-> (call/handle! (call-req granted-sym nil))
+        (.then
+         (fn [response]
+           (is (= 503 (.-status response)))
+           (.text response)))
+        (.then
+         (fn [body]
+           (is (str/includes? body "Runtime program generation"))))
+        (.catch (fn [error] (is false (str error))))
+        (.finally
+         (fn []
+           (reset! @#'admission/!state
+                   {::admission/status :available
+                    ::admission/generation 0})
+           (done))))))
 
 (deftest database-failure-is-unavailable-not-a-capability-refusal
   (async done
-    (let [{state ::state res ::res} (mock-res)
-          original-db db/db
+    (let [original-db db/db
           original-capability call/capability-check
           checks (atom 0)]
       (set! db/db
@@ -204,12 +202,15 @@
       (set! call/capability-check
             (fn [& _] (swap! checks inc)))
       (-> (call/handle! (call-req granted-sym
-                                  (transform/encode-args [])) res)
+                                  (transform/encode-args [])))
           (.then
-           (fn [_]
-             (is (= 503 (:code @state)))
+           (fn [response]
+             (is (= 503 (.-status response)))
              (is (zero? @checks))
-             (is (str/includes? (:body @state) "authority unavailable"))))
+             (.text response)))
+          (.then
+           (fn [body]
+             (is (str/includes? body "authority unavailable"))))
           (.catch (fn [error] (is false (str error))))
           (.finally
            (fn []
@@ -219,8 +220,7 @@
 
 (deftest successful-http-call-reuses-the-acquired-database-value
   (async done
-    (let [{state ::state res ::res} (mock-res)
-          original-db db/db
+    (let [original-db db/db
           original-capability call/capability-check
           original-invoke call/invoke!
           observed (atom [])]
@@ -237,10 +237,10 @@
               (swap! observed conj database-value)
               (js/Promise.resolve {::call/ok? true})))
       (-> (call/handle! (call-req granted-sym
-                                  (transform/encode-args ["value"])) res)
+                                  (transform/encode-args ["value"])))
           (.then
-           (fn [_]
-             (is (= 200 (:code @state)))
+           (fn [response]
+             (is (= 200 (.-status response)))
              (is (= 2 (count @observed)))
              (is (every? #(identical? database %) @observed))))
           (.catch (fn [error] (is false (str error))))
@@ -256,8 +256,7 @@
   ;; data-only whitelist refuses it with a 422 "bad args" BEFORE invoke!, so the
   ;; injected expression never executes and the granted fn never runs.
   (async done
-    (let [{state ::state res ::res} (mock-res)
-          payload "[[\"~#list\",[\"~$js/require\",\"child_process\"]]]"
+    (let [payload "[[\"~#list\",[\"~$js/require\",\"child_process\"]]]"
           invocations (atom 0)
           original-db db/db
           original-capability call/capability-check
@@ -268,12 +267,13 @@
       (set! call/capability-check
             (fn [_ _] (js/Promise.resolve {::call/agent-id agent-id})))
       (set! call/invoke! (fn [& _] (swap! invocations inc)))
-      (-> (call/handle! (call-req granted-sym payload) res)
+      (-> (call/handle! (call-req granted-sym payload))
           (.then
-           (fn [_]
-             (is (= 422 (:code @state)))
-             (is (str/includes? (str (:body @state)) "bad args"))
-             (is (zero? @invocations))))
+           (fn [response]
+             (is (= 422 (.-status response)))
+             (is (zero? @invocations))
+             (.text response)))
+          (.then (fn [body] (is (str/includes? body "bad args"))))
           (.catch (fn [error] (is false (str error))))
           (.finally
            (fn []
@@ -284,21 +284,19 @@
 
 (deftest call-malformed-args-writes-response-not-hang
   ;; Garbage ?args= (not valid transit) → a written 422, not an uncaught
-  ;; rejection / hung request. handle! resolves and the response is ended.
+  ;; rejection / hung request. handle! resolves with the response.
   (async done
-    (let [{state ::state res ::res} (mock-res)
-          original-db db/db
+    (let [original-db db/db
           original-capability call/capability-check]
       (set! db/db (fn
                     ([] (js/Promise.resolve database))
                     ([_] (js/Promise.resolve database))))
       (set! call/capability-check
             (fn [_ _] (js/Promise.resolve {::call/agent-id agent-id})))
-      (-> (call/handle! (call-req granted-sym "not-valid-transit-%%%") res)
+      (-> (call/handle! (call-req granted-sym "not-valid-transit-%%%"))
           (.then
-           (fn [_]
-             (is (true? (:ended? @state)))
-             (is (= 422 (:code @state)))))
+           (fn [response]
+             (is (= 422 (.-status response)))))
           (.catch (fn [error] (is false (str error))))
           (.finally
            (fn []

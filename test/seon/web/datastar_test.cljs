@@ -17,13 +17,7 @@
   (async done
     (let [original-db db/db
           original-query db/query
-          status (atom nil)
-          headers (atom nil)
-          body (atom nil)
-          response #js {:writeHead (fn [value value-headers]
-                                     (reset! status value)
-                                     (reset! headers value-headers))
-                        :end #(reset! body %)}]
+          request (js/Request. "http://127.0.0.1/agent/no-such-agent")]
       (set! db/db (fn ([] (js/Promise.resolve database))
                     ([_] (js/Promise.resolve database))))
       (set! db/query
@@ -31,13 +25,15 @@
               (is (identical? database (::db/db request)))
               (js/Promise.resolve #{})))
       (-> (datastar/serve-agent-page!
-           {:seon.http/node-res response
+           {:seon.http/request request
             :path-params {:id "no-such-agent"}})
           (.then
-           (fn [_]
-             (is (= 302 @status))
-             (is (= "/" (aget @headers "Location")))
-             (is (= "" @body))))
+           (fn [response]
+             (is (instance? js/Response response))
+             (is (= 302 (.-status response)))
+             (is (= "/" (.get (.-headers response) "Location")))
+             (.text response)))
+          (.then #(is (= "" %)))
           (.catch (fn [error] (is false (str error))))
           (.finally
            (fn []
@@ -194,6 +190,41 @@
                   {::datastar/event event})]
     (is (= event (::datastar/full-event recorded)))
     (is (= database (::datastar/rendered-db recorded)))))
+
+(deftest direct-stream-backpressure-keeps-only-the-newest-event
+  (async done
+    (let [writes (atom [])
+          finish-flush (atom nil)
+          flush (js/Promise. (fn [resolve _reject]
+                               (reset! finish-flush resolve)))
+          first-write? (atom true)
+          controller
+          #js {:write (fn [event]
+                        (swap! writes conj event)
+                        (if (compare-and-set! first-write? true false) -1 1))
+               :flush (fn [wait?]
+                        (is (true? wait?))
+                        flush)}
+          conn {:seon.web.feed/controller controller
+                :seon.web.feed/closed? (atom false)
+                :seon.web.feed/pending-event (atom nil)
+                :seon.web.feed/draining? (atom false)
+                :seon.web.feed/backpressured-at (atom nil)
+                :seon.web.feed/close! (fn [_] nil)}]
+      (@#'datastar/push-event! conn "first")
+      (@#'datastar/push-event! conn "obsolete")
+      (@#'datastar/push-event! conn "latest")
+      (is (= ["first"] @writes))
+      (@finish-flush nil)
+      (-> flush
+          (.then (fn [] (js/Promise.resolve nil)))
+          (.then
+           (fn []
+             (is (= ["first" "latest"] @writes))
+             (is (nil? @(:seon.web.feed/pending-event conn)))
+             (is (false? @(:seon.web.feed/draining? conn)))))
+          (.catch (fn [error] (is false (str error))))
+          (.finally done)))))
 
 (deftest performance-measurements-are-bounded-and-reset-without-closing-feeds
   (let [feeds @#'datastar/!feeds

@@ -17,11 +17,12 @@
 (schema/register! ::ring-request :map)
 (schema/register! ::data-attribute [:or :nil :keyword])
 
-(defn- write-status! [^js res status content-type body]
-  (.writeHead res status
-              #js {"Content-Type" content-type
-                   "Cache-Control" "no-store, no-cache, must-revalidate"})
-  (.end res body))
+(defn- response [status content-type body]
+  (js/Response.
+   body
+   #js {:status status
+        :headers #js {"Content-Type" content-type
+                      "Cache-Control" "no-store, no-cache, must-revalidate"}}))
 
 (defn- brand-style []
   (when-let [css (brand/css-text)]
@@ -60,9 +61,9 @@
       result
       (boolean (seq result)))))
 
-(defn- database-unavailable! [res error]
-  (write-status! res 503 "text/plain; charset=utf-8"
-                 (or (:seon.error/message error) "database unavailable")))
+(defn- database-unavailable [error]
+  (response 503 "text/plain; charset=utf-8"
+            (or (:seon.error/message error) "database unavailable")))
 
 (defn- header-projection [agents]
   (if (:seon.error/message agents)
@@ -104,52 +105,49 @@
 (defn ^:async debug-page!
   "Serve the lightweight debug shell after confirming the agent exists."
   [request]
-  (let [^js res (:seon.http/node-res request)
-        agent-id (get-in request [:path-params :id])
+  (let [agent-id (get-in request [:path-params :id])
         database (await (db/db))]
     (cond
-      (:seon.error/message database) (database-unavailable! res database)
-      (str/blank? agent-id) (write-status! res 404 "text/plain; charset=utf-8"
-                                           "agent not found")
+      (:seon.error/message database) (database-unavailable database)
+      (str/blank? agent-id) (response 404 "text/plain; charset=utf-8"
+                                      "agent not found")
       :else
       (let [exists? (await (agent-exists? database agent-id))]
         (cond
-          (:seon.error/message exists?) (database-unavailable! res exists?)
+          (:seon.error/message exists?) (database-unavailable exists?)
           exists?
           (let [view-id (datastar/new-view-id)]
-            (write-status!
-             res 200 "text/html; charset=utf-8"
-             (page-html (str "agent " agent-id " · debug")
-                        (str "/agent/" agent-id "/debug/feed?view=" view-id)
-                        "loading debug view…")))
+            (response 200 "text/html; charset=utf-8"
+                      (page-html (str "agent " agent-id " · debug")
+                                 (str "/agent/" agent-id "/debug/feed?view=" view-id)
+                                 "loading debug view…")))
           :else
-          (write-status! res 404 "text/plain; charset=utf-8"
-                         (str "agent " agent-id " not found")))))))
+          (response 404 "text/plain; charset=utf-8"
+                    (str "agent " agent-id " not found")))))))
 
 (defn ^:async debug-feed!
   "Open the database-value-pinned exact-prompt feed for one agent."
   [request]
-  (let [^js res (:seon.http/node-res request)
-        agent-id (get-in request [:path-params :id])
+  (let [agent-id (get-in request [:path-params :id])
         database (await (db/db))
         view-id (or (datastar/request-view-id request)
                     (datastar/new-view-id))]
     (cond
-      (:seon.error/message database) (database-unavailable! res database)
-      (str/blank? agent-id) (write-status! res 404 "text/plain; charset=utf-8"
-                                           "agent not found")
+      (:seon.error/message database) (database-unavailable database)
+      (str/blank? agent-id) (response 404 "text/plain; charset=utf-8"
+                                      "agent not found")
       :else
       (let [exists? (await (agent-exists? database agent-id))]
         (cond
-          (:seon.error/message exists?) (database-unavailable! res exists?)
+          (:seon.error/message exists?) (database-unavailable exists?)
           exists? (datastar/open-view-feed!
                    request (debug-feed-definition agent-id view-id))
-          :else (write-status! res 404 "text/plain; charset=utf-8"
-                               (str "agent " agent-id " not found")))))))
+          :else (response 404 "text/plain; charset=utf-8"
+                          (str "agent " agent-id " not found")))))))
 
 (defn- query-value [^js request name]
   (try
-    (let [url (js/URL. (str "http://seon" (.-url request)))]
+    (let [url (js/URL. (.-url request))]
       (.get (.-searchParams url) name))
     (catch :default _ nil)))
 
@@ -191,22 +189,22 @@
 
 (defn data-page!
   "Serve the lightweight remote database-browser shell."
-  [^js request ^js response]
-  (let [view-id (datastar/new-view-id)
-        attribute (data-attribute request)
+  [request]
+  (let [http-request (:seon.http/request request)
+        view-id (datastar/new-view-id)
+        attribute (data-attribute http-request)
         query (if attribute
                 (str "&attr=" (js/encodeURIComponent (subs (str attribute) 1)))
                 "")]
-    (write-status!
-     response 200 "text/html; charset=utf-8"
-     (page-html "data" (str "/data/feed?view=" view-id query)
-                "loading database…"))))
+    (response 200 "text/html; charset=utf-8"
+              (page-html "data" (str "/data/feed?view=" view-id query)
+                         "loading database…"))))
 
 (defn data-feed!
   "Open the remote bounded-index database-browser feed."
   [request]
-  (let [node-request (:seon.http/node-req request)
+  (let [http-request (:seon.http/request request)
         view-id (or (datastar/request-view-id request)
                     (datastar/new-view-id))]
     (datastar/open-view-feed!
-     request (data-feed-definition (data-attribute node-request) view-id))))
+     request (data-feed-definition (data-attribute http-request) view-id))))

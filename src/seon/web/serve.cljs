@@ -18,10 +18,9 @@
    actually-bound port to `$SEON_PORT_FILE` (default
    `tmp/seon-port` — project-local per CLAUDE.md). External tooling
    reads this file rather than
-   parsing logs. Live views use the one normalized gzip feed registry in
+   parsing logs. Live views use the one normalized direct-stream feed registry in
    `seon.web.datastar`."
   (:require
-    ["node:http" :as http]
     ["node:fs" :as fs]
     ["node:path" :as path]
     [cljs.reader :as reader]
@@ -86,12 +85,14 @@
     (str/ends-with? filename ".svg")  "image/svg+xml"
     :else                             "application/octet-stream"))
 
-(defn- write-status! [^js res code mime body]
-  (.writeHead res code #js {"Content-Type"  mime
-                            "Cache-Control" "no-store, no-cache, must-revalidate"
-                            "Pragma"        "no-cache"
-                            "Expires"       "0"})
-  (.end res body))
+(defn- write-status! [_res code mime body]
+  (js/Response.
+   body
+   #js {:status code
+        :headers #js {"Content-Type" mime
+                      "Cache-Control" "no-store, no-cache, must-revalidate"
+                      "Pragma" "no-cache"
+                      "Expires" "0"}}))
 
 (defn- handle-readiness!
   "Report current executable admission; this can turn false after startup."
@@ -148,7 +149,7 @@
              (pr-str {::db.restore/ready? false
                       ::db.restore/executable? false}))))))))
 
-(defn- serve-static! [res url]
+(defn ^:async ^:private serve-static! [res url]
   (if-let [[prefix root] (some (fn [[p r]]
                                  (when (str/starts-with? url p) [p r]))
                                static-roots)]
@@ -163,12 +164,12 @@
               (str/includes? safe "/..")
               (.isAbsolute path safe))
         (write-status! res 404 "text/plain; charset=utf-8" (str "Not found: " url))
-        (let [full (.join path root safe)]
-          (try
-            (let [body (.readFileSync fs full)]
-              (write-status! res 200 (mime-type full) body))
-            (catch :default _
-              (write-status! res 404 "text/plain; charset=utf-8" (str "Not found: " url)))))))
+        (let [full (.join path root safe)
+              file (.file js/Bun full)]
+          (if (await (.exists file))
+            (write-status! res 200 (mime-type full) file)
+            (write-status! res 404 "text/plain; charset=utf-8"
+                           (str "Not found: " url))))))
     (write-status! res 404 "text/plain; charset=utf-8" (str "Not found: " url))))
 
 ;; ============================================================
@@ -186,18 +187,9 @@
 ;; ============================================================
 
 (defn- read-body
-  "Collect a Node request body into a String. Returns a Promise."
+  "Read a WHATWG Request body. Returns a Promise<String>."
   [^js req]
-  (js/Promise.
-    (fn [resolve _reject]
-      (let [chunks (atom [])]
-        (.on req "data"
-             (fn [chunk]
-               (swap! chunks conj chunk)))
-        (.on req "end"
-             (fn []
-               (resolve (.toString
-                          (.concat js/Buffer (clj->js @chunks))))))))))
+  (.text req))
 
 (defn- parse-urlencoded
   "Parse an `application/x-www-form-urlencoded` body into a map of
@@ -207,12 +199,11 @@
     (into {} (map (fn [[k v]] [k v]) (es6-iterator-seq (.entries params))))))
 
 (defn- query-param
-  "Pull a single query-string value out of `req.url`. Returns nil if
+  "Pull a single query-string value out of `Request.url`. Returns nil if
    absent. Defensive against malformed URLs."
   [req k]
   (try
-    (let [full-url (str "http://x" (.-url req))   ; URL needs an origin
-          u (js/URL. full-url)]
+    (let [u (js/URL. (.-url req))]
       (.get (.-searchParams u) k))
     (catch :default _ nil)))
 
@@ -381,15 +372,14 @@
 (defn create-agent!
   "Database-routed POST `/agents` handler.
 
-   Extracts the opaque Node request/response pair from the canonical Ring
-   adapter and delegates to the single agent-creation transition above."
+   Extracts the WHATWG Request from the canonical Ring value and delegates to
+   the single agent-creation transition above."
   {:malli/schema [:=> [:catn [::ring-request ::ring-request]] :any]}
   [ring-request]
   (if (admission/available?)
-    (handle-create-agent! (:seon.http/node-req ring-request)
-                          (:seon.http/node-res ring-request))
+    (handle-create-agent! (:seon.http/request ring-request) nil)
     (write-status!
-      (:seon.http/node-res ring-request)
+      nil
       503 "text/plain; charset=utf-8"
       (get-in (admission/unavailable)
               [:seon/error :seon.error/message]))))
@@ -1351,15 +1341,16 @@
   #{"127.0.0.1" "::1" "::ffff:127.0.0.1"})
 
 (defn loopback-peer?
-  "Whether the TCP peer of this Node request is the local machine.
+  "Whether Bun reports the request's TCP peer as the local machine.
 
    This is the operator lifecycle identity check, not a browser-origin check.
    Missing socket evidence fails closed; Host and Origin headers are never
    accepted as substitutes for the kernel-reported remote address."
-  {:malli/schema [:=> [:cat :any] :boolean]}
-  [^js req]
+  {:malli/schema [:=> [:cat :any :any] :boolean]}
+  [^js req ^js server]
   (contains? loopback-peer-addresses
-             (some-> req .-socket .-remoteAddress)))
+             (when (some? (gobj/get server "requestIP"))
+               (some-> server (.requestIP req) .-address))))
 
 (defn- handle-operator-quiesce!
   "Drain this pod and flush its typed lifecycle result as EDN."
@@ -1476,16 +1467,15 @@
    Same-origin is decided by matching the Origin's host to the request's own
    `Host` header (so it holds for loopback dev AND a Caddy/Tauri front that
    preserves Host). When no Host is available we fall back to allowing loopback
-   origins only. `req` is an opaque Node IncomingMessage (Ring-style boundary,
-   no Malli schema — same as the /call, debug, and serve handlers)."
+   origins only. `req` is a WHATWG Request."
   [^js req]
   (let [headers (.-headers req)
-        origin  (when headers (gobj/get headers "origin"))]
+        origin  (when headers (.get headers "origin"))]
     (boolean
       (or (str/blank? origin)
           (try
             (let [o-host (.-host (js/URL. origin))            ; host[:port] of Origin
-                  h-host (when headers (gobj/get headers "host"))]
+                  h-host (when headers (.get headers "host"))]
               (or (and h-host (= o-host h-host))               ; genuine same-origin
                   (contains? loopback-hosts (.-hostname (js/URL. origin)))))
             (catch :default _ false))))))
@@ -1496,7 +1486,7 @@
 ;; the SSE registry) and the same-origin? gate (a
 ;; test pins it). We INJECT both into router here. This call re-runs on
 ;; hot-reload, so the cached router always holds the freshly-reloaded
-;; handler fns. createServer (below) dispatches every request through
+;; handler fns. Bun.serve (below) dispatches every request through
 ;; `router/handle-request`.
 ;; ============================================================
 
@@ -1608,14 +1598,14 @@
   (await
    (js/Promise.
     (fn [resolve reject]
-      (if-let [live-addr (some-> @!server .address)]
+      (if-let [server @!server]
         ;; Already listening — reuse (see docstring; a second
         ;; start-runtime! on the same pod must NOT bounce the server).
         (if (= (boolean readiness-only?)
                (boolean (gobj/get @!server "seonReadinessOnly")))
           (if (= restore-completion-result
                  (gobj/get @!server "seonRestoreCompletionResult"))
-            (resolve {:seon.web/port      (.-port live-addr)
+            (resolve {:seon.web/port      (.-port server)
                       :seon.web/port-file
                       (or (.. js/process -env -SEON_PORT_FILE)
                           "tmp/seon-port")})
@@ -1628,45 +1618,42 @@
         (do
           (when-let [old @!server]
             ;; Exists but not listening (closed/dead) — replace it.
-            (try (.close old) (catch :default _ nil))
+            (try (.stop old true) (catch :default _ nil))
             (reset! !server nil))
-          (let [;; LATE-BINDING wrapper: createServer captures the fn OBJECT,
-                ;; so the wrapper re-reads `router/handle-request` on every
-                ;; request. `handle-request` derefs the cached reitit
-                ;; ring-handler, which `router/install!` rebuilds on every
-                ;; serve hot-reload — so a reloaded route never 404s until
-                ;; pod restart (the live 2026-06-10 agent-birth failure mode).
+          (let [port (requested-port)
                 server
-                (.createServer
-                 http
-                 (if readiness-only?
-                   (fn [req res]
-                     (if (and (= "GET" (.-method req))
-                              (= "/_seon/ready" (.-url req)))
-                       (handle-readiness! restore-completion-result req res)
-                       (write-status! res 503 "text/plain; charset=utf-8"
-                                      "Restore preparation is not executable.")))
-                   (fn [req res] (router/handle-request req res))))
-                port   (requested-port)]
+                (.serve js/Bun
+                        #js {:port port
+                             :hostname (bind-host)
+                             :idleTimeout 0
+                             :fetch
+                             (if readiness-only?
+                               (fn [req _server]
+                                 (let [url (js/URL. (.-url req))]
+                                   (if (and (= "GET" (.-method req))
+                                            (= "/_seon/ready" (.-pathname url)))
+                                     (handle-readiness! restore-completion-result req nil)
+                                     (write-status! nil 503 "text/plain; charset=utf-8"
+                                                    "Restore preparation is not executable."))))
+                               (fn [req server]
+                                 (router/handle-request req server)))
+                             :error
+                             (fn [error]
+                               (log/error-console! "seon.web.serve"
+                                                   "Bun.serve request failed" error)
+                               (write-status! nil 500 "text/plain; charset=utf-8"
+                                              "Internal error"))})]
             (gobj/set server "seonReadinessOnly" (boolean readiness-only?))
             (gobj/set server "seonRestoreCompletionResult"
                       restore-completion-result)
-            (.once server "error"
-                   (fn [err]
-                     (log/error-console! "seon.web.serve"
-                                         (str "listen failed on port " port) err)
-                     (reject err)))
-            (.listen server port (bind-host)
-                     (fn []
-                       (let [addr      (.address server)
-                             bound     (.-port addr)
-                             port-file (write-port-file! bound)]
-                         (reset! !server server)
-                         (log/info-console! "seon.web.serve"
-                                            (str "listening on http://127.0.0.1:" bound)
-                                            {:port-file port-file})
-                         (resolve {:seon.web/port bound
-                                   :seon.web/port-file port-file})))))))))))
+            (let [bound (.-port server)
+                  port-file (write-port-file! bound)]
+              (reset! !server server)
+              (log/info-console! "seon.web.serve"
+                                 (str "listening on http://127.0.0.1:" bound)
+                                 {:port-file port-file})
+              (resolve {:seon.web/port bound
+                        :seon.web/port-file port-file})))))))))
 
 (defn ^:async stop!
   "Close every SSE feed and await HTTP server shutdown."
@@ -1676,16 +1663,9 @@
   (await (router/detach!))
   (await
    (if-let [server @!server]
-     (js/Promise.
-      (fn [resolve reject]
-        (try
-          (.close server
-                  (fn [error]
-                    (if error
-                      (reject error)
-                      (do
-                        (reset! !server nil)
-                        (resolve nil)))))
-          (catch :default error
-            (reject error)))))
+     (js/Promise.resolve
+      (do
+        (.stop server true)
+        (reset! !server nil)
+        nil))
      (js/Promise.resolve nil))))

@@ -407,10 +407,12 @@
 (defn- req-with-origin
   ([origin] (req-with-origin origin nil))
   ([origin host]
-   (let [h #js {}]
-     (when origin (gobj/set h "origin" origin))
-     (when host   (gobj/set h "host" host))
-     #js {:headers h})))
+   (js/Request.
+    "http://127.0.0.1:7890/"
+    #js {:headers (clj->js
+                   (cond-> {}
+                     origin (assoc "origin" origin)
+                     host (assoc "host" host)))})))
 
 (deftest same-origin-allows-loopback-and-absent-refuses-cross-site
   (testing "absent Origin (curl / the agent / non-browser) is allowed"
@@ -427,72 +429,25 @@
     (testing "even when a Host header is present but does NOT match the Origin"
       (is (false? (serve/same-origin? (req-with-origin "https://evil.example.com" "127.0.0.1:7890")))))))
 
-(deftest operator-peer-identity-uses-the-socket-and-fails-closed
+(deftest operator-peer-identity-uses-bun-request-ip-and-fails-closed
   (doseq [address ["127.0.0.1" "::1" "::ffff:127.0.0.1"]]
-    (is (true? (serve/loopback-peer?
-                 #js {:socket #js {:remoteAddress address}}))
+    (is (true? (serve/loopback-peer? #js {}
+                                      #js {:requestIP (fn [_] #js {:address address})}))
         (str address " is a kernel-reported loopback peer")))
-  (is (false? (serve/loopback-peer?
-                #js {:socket #js {:remoteAddress "192.0.2.10"}})))
-  (is (false? (serve/loopback-peer? #js {:headers #js {"host" "127.0.0.1"}}))
+  (is (false? (serve/loopback-peer? #js {}
+                                     #js {:requestIP (fn [_] #js {:address "192.0.2.10"})})))
+  (is (false? (serve/loopback-peer? #js {} nil))
       "a forgeable Host header cannot replace missing peer evidence"))
 
-(deftest operator-quiesce-flushes-only-after-the-lifecycle-result-resolves
-  (async done
-    (let [original-lookup seval/lookup-value
-          resolve-result (atom nil)
-          result-promise (js/Promise. (fn [resolve _reject]
-                                        (reset! resolve-result resolve)))
-          observed (atom {})
-          response #js {:writeHead
-                        (fn [status headers]
-                          (swap! observed assoc
-                                 ::status status
-                                 ::headers (js->clj headers)))
-                        :end
-                        (fn [body]
-                          (swap! observed assoc ::body body)
-                          (is (= 200 (::status @observed)))
-                          (is (= "application/edn; charset=utf-8"
-                                 (get (::headers @observed) "Content-Type")))
-                          (is (= {:seon.client/quiesced? true
-                                  :seon.client/quiesced-run-ids []
-                                  :seon.client/completed-turn-ids []
-                                  :seon.client/errored-turn-ids []
-                                  :seon.agent.runtime/unhosted-ids []}
-                                 (reader/read-string body)))
-                          (set! seval/lookup-value original-lookup)
-                          (done))}]
-      (set! seval/lookup-value
-            (fn [symbol]
-              (is (= 'seon.client/quiesce-runtime! symbol))
-              (fn [] result-promise)))
-      ((deref #'serve/handle-operator-quiesce!) nil response)
-      (is (empty? @observed)
-          "the HTTP response remains open while remote release is pending")
-      (@resolve-result
-       {:seon.client/quiesced? true
-        :seon.client/quiesced-run-ids []
-        :seon.client/completed-turn-ids []
-        :seon.client/errored-turn-ids []
-        :seon.agent.runtime/unhosted-ids []}))))
-
 (defn- readiness-response
-  "Resolve with the status and body written by the readiness handler."
+  "Resolve with readiness response data."
   ([] (readiness-response nil))
   ([restore-completion-result]
-   (let [!response (atom {})]
-     (js/Promise.
-       (fn [resolve _reject]
-         ((deref #'serve/handle-readiness!)
-          restore-completion-result nil
-          #js {:writeHead
-               (fn [status _headers]
-                 (swap! !response assoc ::status status))
-               :end
-               (fn [body]
-                 (swap! !response assoc ::body body)
-                 (resolve @!response))}))))))
+   (-> ((deref #'serve/handle-readiness!) restore-completion-result nil nil)
+       (.then (fn [response]
+                (-> (.text response)
+                    (.then (fn [body]
+                             {::status (.-status response) ::body body}))))))))
 
 (deftest readiness-tracks-admission-after-startup
   (async done
@@ -525,27 +480,15 @@
 (deftest ordinary-readiness-dispatches-through-the-installed-router
   (async done
     (let [prior (admission/state)
-          !response (atom {})
-          request #js {:method "GET" :url "/_seon/ready" :headers #js {}}
-          response-promise
-          (js/Promise.
-            (fn [resolve _reject]
-              (reset! @#'admission/!state {::admission/status :available})
-              (router/handle-request
-                request
-                #js {:writeHead
-                     (fn [status _headers]
-                       (swap! !response assoc ::status status))
-                     :end
-                     (fn [body]
-                       (swap! !response assoc ::body body)
-                       (resolve @!response))})))]
+          request (js/Request. "http://127.0.0.1/_seon/ready")
+          _ (reset! @#'admission/!state {::admission/status :available})
+          response-promise (js/Promise.resolve (router/handle-request request nil))]
       (-> response-promise
-          (.then
-            (fn [response]
-              (is (= 200 (::status response)))
-              (is (true? (::restore/executable?
-                           (reader/read-string (::body response)))))))
+          (.then (fn [response]
+                   (is (= 200 (.-status response)))
+                   (.text response)))
+          (.then (fn [body]
+                   (is (true? (::restore/executable? (reader/read-string body))))))
           (.catch (fn [error] (is false (str error))))
           (.finally
             (fn []

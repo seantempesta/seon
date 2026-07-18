@@ -1,10 +1,41 @@
 ---
 type: prd
-status: planned
+status: active
 tags: [prd, flow, web, agent]
 ---
 
 # Bun-native runtime simplification roadmap
+
+## Current implementation state
+
+Package C and D are implemented in the shared checkout and are at live-runtime
+graduation. `Bun.serve` now owns HTTP lifecycle; reitit receives an ordinary
+request map containing the WHATWG Request; handlers return `Response` values;
+and Datastar uses one Bun direct `ReadableStream` controller per connection.
+The Node raw-request/raw-response injection, hijack sentinel, `node:http`,
+`node:zlib`, per-feed gzip objects, and EventEmitter drain/error ownership are
+removed.
+
+The focused boundary passes 47 tests / 169 assertions across router, Datastar,
+reactive-call, and server namespaces. The complete cut currently nets 113 fewer
+lines (582 additions, 695 deletions) including its architecture and roadmap
+updates. A first hot cut correctly failed readiness on a stale one-argument
+Malli schema for Bun's two-value peer check; the schema is repaired. The old
+Node server cannot consume Promise-returning `Response` handlers after hot
+reload, so the supervisor must complete one forced drain at this atomic host
+boundary before the first Bun-native cold start. This is transition evidence,
+not a retained compatibility design.
+
+The first cold Bun-native start reached ready and served `/_seon/ready`, `/`,
+`/data`, and an identity-encoded root SSE feed. The root feed delivered its
+complete 114,560-byte initial Datastar event and cancellation released the
+final feed. A 100-connection `/data/feed` load reached exactly 100 registered
+feeds, added about 272 KiB to the already-grown pod RSS, and returned to zero
+registered feeds after every client disconnected. A 5,000-request, concurrency
+50 readiness run completed without failure at 2,622.67 requests/second and
+0.381 ms mean server time per request. Browser interaction, complete suite,
+restart/recovery, multi-cluster, and final percentile/resource measurements
+remain graduation gates.
 
 ## Outcome
 

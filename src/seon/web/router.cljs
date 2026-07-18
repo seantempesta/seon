@@ -22,25 +22,18 @@
    `:seon.route/handler` is a `:db.type/symbol`; [[route-handler]] resolves it
    at REQUEST time via `seon.eval/lookup-value` (the same late-binding the
    render engine uses), so a redefine takes effect with no router rebuild. Each
-   seeded handler is a Ring handler that takes the Ring request `r` and
-   self-extracts `(:seon.http/node-req r)` / `(:seon.http/node-res r)` /
-   `(get-in r [:path-params :id])`, so [[db->routes]] wraps every one
+   seeded handler is a Ring handler that takes the Ring request `r`, reads its
+   WHATWG Request from `:seon.http/request`, and uses reitit's path params, so
+   [[db->routes]] wraps every one
    uniformly. An optional `:seon.route/middleware` keyword resolves through reitit's
    `:reitit.middleware/registry` ([[mw-registry]]).
 
-   ## The Node↔Ring adapter + the hijack sentinel
+   ## Bun Request/Response boundary
 
-   reitit speaks Ring (a request MAP → a response MAP); the pod speaks raw
-   `node:http` `(req, res)`. [[node->ring]] builds a Ring request from the node
-   `req` (method, uri sans query, query-string, headers) AND injects the raw
-   node `req`/`res` under `:seon.http/node-req` / `:seon.http/node-res` so the
-   streaming + static handlers can reach the socket. A handler that takes over
-   the socket itself (the SSE open, a static file pipe, the gzip /agent-view feed,
-   an agent-action JSON write) returns the **hijack sentinel** `{:seon.http/hijacked
-   true}`; [[handle-request]] sees it and writes NOTHING (the handler already
-   owns the stream). A handler that returns a plain Ring response map is
-   written to the node res by [[write-ring-response!]] — so a future pure-Ring
-   handler needs no socket knowledge.
+   [[request->ring]] translates Bun's WHATWG Request into the ordinary Ring
+   routing fields and retains the Request for body/header access. Handlers
+   return WHATWG Response values (or Promises of them); only Datastar's body is
+   a long-lived direct ReadableStream. No handler takes ownership of a socket.
 
    ## Cycle-free wiring — serve injects, router routes
 
@@ -88,97 +81,69 @@
          ::ring-handler     nil}))
 
 ;; ============================================================
-;; Low-level node writes (the adapter's own minimal helpers — the
-;; route handlers do their own writing; these cover the adapter's
-;; 403 / 404 / ring-response-map paths).
+;; HTTP responses remain ordinary WHATWG values all the way to Bun.serve.
 ;; ============================================================
 
-(defn- write-text! [^js res code body]
-  (.writeHead res code #js {"Content-Type"  "text/plain; charset=utf-8"
-                            "Cache-Control" "no-store"})
-  (.end res body))
+(defn- text-response [code body]
+  (js/Response. body #js {:status code
+                          :headers #js {"Content-Type" "text/plain; charset=utf-8"
+                                        "Cache-Control" "no-store"}}))
 
-(defn- write-ring-response!
-  "Write a plain Ring response map `{:status :headers :body}` to the node
-   res. The escape hatch for handlers that return data instead of writing the
-   socket; today every route handler hijacks, so this is the forward-looking
-   pure-Ring path."
-  [^js res {:keys [status headers body]}]
-  (.writeHead res (or status 200) (clj->js (or headers {})))
-  (.end res (or body "")))
+(defn- ring-response [{:keys [status headers body]}]
+  (js/Response. (or body "")
+                #js {:status (or status 200)
+                     :headers (clj->js (or headers {}))}))
 
 ;; ============================================================
 ;; Node↔Ring adapter.
 ;; ============================================================
 
-(def ^:private hijacked
-  "The handler-owns-the-socket sentinel. A handler that wrote (or will write)
-   the node res directly returns this so the adapter double-writes nothing.
-
-   LOAD-BEARING INVARIANT: every reitit handler here MUST return a TRUTHY value
-   (this sentinel). reitit's sync `ring-handler` is `(or (handler req)
-   (default-handler req))` (reitit-ring/ring.cljc:389) — a handler that writes the
-   socket then returns a FALSY value makes reitit re-invoke the default-handler
-   (`not-found`), which writes the res AGAIN → a 'headers already sent' crash.
-   The `hijacked` sentinel is truthy, so the `or` short-circuits and the default
-   never double-fires. Keep every handler returning it."
-  {:seon.http/hijacked true})
-
-(defn- node-req [r] (:seon.http/node-req r))
-(defn- node-res [r] (:seon.http/node-res r))
-
-(defn- node->ring
-  "Build a Ring request map from a node IncomingMessage, injecting the raw
-   node `req`/`res` so socket-owning handlers (SSE, static, agent action) can reach
-   them. `:uri` is the path with the query stripped (reitit matches on it);
-   `:query-string` is the raw query; `:request-method` is a lower-cased
-   keyword. Headers ride as a plain map for completeness — routing + the
-   same-origin gate read the raw node req, so the map is not load-bearing."
-  [^js req ^js res]
-  (let [url    (or (.-url req) "/")
-        qidx   (str/index-of url "?")
-        uri    (if qidx (subs url 0 qidx) url)
-        qs     (when qidx (subs url (inc qidx)))
+(defn- request->ring
+  "Translate one WHATWG Request into the ordinary data reitit consumes."
+  [^js req ^js server]
+  (let [url    (js/URL. (.-url req) "http://127.0.0.1")
+        uri    (.-pathname url)
+        qs     (some-> (.-search url) (subs 1) not-empty)
         method (-> (or (.-method req) "GET") str/lower-case keyword)]
     {:request-method      method
      :uri                 uri
      :query-string        qs
-     :headers             (js->clj (.-headers req))
-     :seon.http/node-req  req
-     :seon.http/node-res  res}))
+     :headers             (into {}
+                                (map (fn [[k v]] [k v]))
+                                (es6-iterator-seq (.entries (.-headers req))))
+     :seon.http/request   req
+     :seon.http/server    server}))
 
 ;; ============================================================
 ;; Same-origin middleware — a reitit middleware on every state-changing
 ;; POST route. Delegates to the injected predicate (serve owns the
 ;; same-origin? logic verbatim); a cross-origin POST is refused 403 and
-;; the request is hijacked (nothing further runs).
+;; the request is refused before the route handler runs.
 ;; ============================================================
 
 (def ^:private same-origin-mw
   {:name ::same-origin
    :wrap (fn [handler]
            (fn [r]
-             (if ((::same-origin-pred @!router-state) (node-req r))
+             (if ((::same-origin-pred @!router-state) (:seon.http/request r))
                (handler r)
                (do
                  (log/info-console! "seon.web.router" "POST cross-origin REFUSED"
                                     {:path (:uri r)})
-                 (write-text! (node-res r) 403 "cross-origin POST refused")
-                 hijacked))))})
+                 (text-response 403 "cross-origin POST refused")))))})
 
 (def ^:private loopback-peer-mw
   {:name ::loopback-peer
    :wrap (fn [handler]
            (fn [r]
-             (if ((::loopback-peer-pred @!router-state) (node-req r))
+             (if ((::loopback-peer-pred @!router-state)
+                  (:seon.http/request r) (:seon.http/server r))
                (handler r)
                (do
                  (log/info-console! "seon.web.router"
                                     "operator request from non-loopback peer REFUSED"
                                     {:path (:uri r)})
-                 (write-text! (node-res r) 403
-                              "loopback operator request required")
-                 hijacked))))})
+                 (text-response 403 "loopback operator request required")))))})
 
 ;; ============================================================
 ;; Middleware registry — the ONE place a `:seon.route/middleware` keyword
@@ -206,17 +171,15 @@
   "A reitit ring handler for a route's late-bound handler SYMBOL `sym`.
    Resolves `sym` via `eval/lookup-value` at REQUEST time (late binding, like
    the render engine's `:seon.render/html` symbols), calls it with the Ring
-   request `r` (the handler self-extracts node-req/node-res/path-params), and
-   returns the hijack sentinel. An unresolved symbol degrades to a 500 — never
-   a falsy return that would re-fire the default-handler (a double write)."
+   request `r`, and returns its Response. An unresolved symbol degrades to a
+   500 Response."
   [sym]
   (fn [r]
     (if-let [f (seval/lookup-value sym)]
-      (do (f r) hijacked)
+      (f r)
       (do (log/error-console! "seon.web.router" "route handler unresolved"
                               {:sym (str sym) :path (:uri r)})
-          (write-text! (node-res r) 500 (str "route handler unresolved: " sym))
-          hijacked))))
+          (text-response 500 (str "route handler unresolved: " sym))))))
 
 (def ^:private route-query
   '[:find [(pull ?route [:seon.route/pattern
@@ -275,21 +238,20 @@
 ;; ============================================================
 
 (defn- post-handler
-  "Wrap a serve `(req res)` handler as a reitit ring handler that hijacks."
+  "Wrap a serve request handler as a reitit ring handler."
   [f]
-  (fn [r] (f (node-req r) (node-res r)) hijacked))
+  (fn [r] (f (:seon.http/request r) nil)))
 
 (defn- admitted-post-handler
   "Refuse state-changing web admission before request parsing or domain work."
   [f]
   (fn [r]
     (if (admission/available?)
-      (f (node-req r) (node-res r))
-      (write-text!
-        (node-res r) 503
+      (f (:seon.http/request r) nil)
+      (text-response
+        503
         (get-in (admission/unavailable)
-                [:seon/error :seon.error/message])))
-    hijacked))
+                [:seon/error :seon.error/message])))))
 
 (defn- static-supplement
   "The non-core reitit routes built from serve's injected handlers."
@@ -298,17 +260,16 @@
                  complete agent-run config-apply operator-quiesce
                  operator-blobs]} h]
     (cond->
-     [["/css/{*path}" {:get {:handler (fn [r] (static (node-res r) (:uri r)) hijacked)}}]
-     ["/js/{*path}"  {:get {:handler (fn [r] (static (node-res r) (:uri r)) hijacked)}}]
+     [["/css/{*path}" {:get {:handler (fn [r] (static nil (:uri r)))}}]
+     ["/js/{*path}"  {:get {:handler (fn [r] (static nil (:uri r)))}}]
 
      ;; The data browser is a static operator route, but its live projection
      ;; rides the same canonical Datastar feed registry as every seeded view.
-     ["/data"     {:get {:handler (fn [r] (debug/data-page! (node-req r) (node-res r)) hijacked)}}]
-     ["/data/feed" {:get {:handler (fn [r] (debug/data-feed! r) hijacked)}}]
+     ["/data"     {:get {:handler debug/data-page!}}]
+     ["/data/feed" {:get {:handler debug/data-feed!}}]
      ["/_seon/ready" {:get {:handler
                              (fn [r]
-                               (readiness (node-req r) (node-res r))
-                               hijacked)}}]
+                               (readiness (:seon.http/request r) nil))}}]
 
      ["/chat"        {:post {:middleware [:seon.route/same-origin] :handler (admitted-post-handler chat)}}]
      ["/stop"        {:post {:middleware [:seon.route/same-origin] :handler (post-handler stop)}}]
@@ -323,9 +284,8 @@
      ["/_seon/operator/config" {:post {:middleware [:seon.route/same-origin]
                                         :handler (admitted-post-handler config-apply)}}]
      ["/agent/{id}/complete" {:post {:middleware [:seon.route/same-origin]
-                                     :handler (fn [r] (complete (node-req r) (node-res r)
-                                                                (get-in r [:path-params :id]))
-                                                hijacked)}}]]
+                                     :handler (fn [r] (complete (:seon.http/request r) nil
+                                                                (get-in r [:path-params :id])))}}]]
       operator-quiesce
       (conj ["/_seon/operator/quiesce"
              {:post {:middleware [:seon.route/loopback-peer]
@@ -342,11 +302,10 @@
 ;; system dashboard) so a mistyped/stale URL always lands somewhere live.
 ;; ============================================================
 
-(defn- not-found [r]
-  (let [^js res (node-res r)]
-    (.writeHead res 302 #js {"Location" "/" "Cache-Control" "no-store"})
-    (.end res ""))
-  hijacked)
+(defn- not-found [_r]
+  (js/Response. "" #js {:status 302
+                         :headers #js {"Location" "/"
+                                       "Cache-Control" "no-store"}}))
 
 ;; ============================================================
 ;; Build + dispatch.
@@ -499,23 +458,19 @@
   nil)
 
 (defn handle-request
-  "The single node `(req, res)` HTTP entry point.
-
-   `seon.web.serve`'s createServer wrapper calls this. Builds a Ring
-   request, runs the cached reitit ring-handler, and either lets the
-   handler keep the socket (the hijack sentinel → write nothing) or writes
-   the returned Ring response map. A throw anywhere degrades to a 500
-   (never crash the single pod thread)."
-  [^js req ^js res]
+  "The single Bun.serve request entry point."
+  [^js req ^js server]
   (try
     (let [rh (::ring-handler @!router-state)
-          result (rh (node->ring req res))]
-      (cond
-        (nil? result)                  (write-text! res 404 (str "Not found: " (or (.-url req) "/")))
-        (:seon.http/hijacked result)   nil
-        (map? result)                  (write-ring-response! res result)
-        :else                          (write-text! res 404 (str "Not found: " (or (.-url req) "/")))))
+          normalize (fn [result]
+                      (cond
+                        (instance? js/Response result) result
+                        (map? result) (ring-response result)
+                        :else (text-response 404 (str "Not found: " (.-url req)))))
+          result (rh (request->ring req server))]
+      (if (instance? js/Promise result)
+        (.then result normalize)
+        (normalize result)))
     (catch :default e
       (log/error-console! "seon.web.router" "handle-request error" e)
-      (try (write-text! res 500 (str "Internal error: " e))
-           (catch :default _ nil)))))
+      (text-response 500 (str "Internal error: " e)))))

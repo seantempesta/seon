@@ -1,16 +1,15 @@
 (ns seon.web.datastar
-  "Datastar gzip-morph SSE streamer — the hyperlith `view = f(db)` model
+  "Datastar SSE streamer — the hyperlith `view = f(db)` model
    ported into the pod.
 
    Each route derives a complete view from one immutable database value.
    Initial paint and later relevant commits send the whole `#app-view`.
-   Equivalent open feeds share that render and receive the same gzip-compressed
-   event.
+   Equivalent open feeds share that render and receive the same encoded event.
 
    ## The surfaces (seeded `:seon.route/*` datoms → this ns's handlers)
 
      GET /agent/{id}   → one agent's view ([[serve-agent-page!]]); its
-     GET /agent/{id}/feed  gzip feed ([[open-agent-feed!]] → agent-view).
+     GET /agent/{id}/feed  SSE feed ([[open-agent-feed!]] → agent-view).
      GET /             → root's view ([[serve-root!]]); `/` IS root's
                          dashboard and fleet list.
 
@@ -21,16 +20,10 @@
    with the matching id), so a plain whole-element morph needs no
    selector/mode dataline. A blank line terminates the event.
 
-   ## gzip (Content-Encoding: gzip) — proven against our datastar.js
-
-   `zlib.createGzip()` is piped to the response; each event is written then
-   `gz.flush(Z_SYNC_FLUSH)`ed so the compressed bytes hit the wire
-   immediately. The browser transparently gunzips before datastar's fetch
-   reader sees text. Crash-proofed: error handlers on gz + res, a
-   writableEnded guard before every write, and `req.on('close')` ends the
-   gzip stream + deregisters the connection."
+   Bun owns each connection through a direct `ReadableStream`. Negative writes
+   are accepted but backpressured, so the feed awaits `flush(true)` and retains
+   only the newest pending application event until the socket drains."
   (:require
-    ["node:zlib" :as zlib]
     [clojure.set :as set]
     [clojure.string :as str]
     [seon.db :as db]
@@ -217,7 +210,7 @@
 
 ;; ============================================================
 ;; Per-connection push + broadcast. Equivalent feeds share a render; each
-;; gzip stream independently applies latest-wins backpressure. Best-effort.
+;; direct stream independently applies latest-wins backpressure. Best-effort.
 ;; ============================================================
 
 (declare push-event!)
@@ -239,8 +232,8 @@
 
 (defn- push-event!
   "Write one rendered event, retaining only the newest event under pressure."
-  [{gz :seon.web.feed/gzip
-    res :seon.web.feed/response
+  [{controller :seon.web.feed/controller
+    closed? :seon.web.feed/closed?
     pending :seon.web.feed/pending-event
     draining? :seon.web.feed/draining?
     backpressured-at :seon.web.feed/backpressured-at
@@ -248,7 +241,7 @@
    event]
   (try
     (cond
-      (or (.-writableEnded ^js gz) (.-writableEnded ^js res))
+      @closed?
       (reset! pending nil)
 
       @draining?
@@ -258,16 +251,22 @@
         (reset! pending event))
 
       :else
-      (let [accepted? (.write ^js gz event)]
-        (record-count! (if accepted? ::write-accepted ::write-backpressured) 1)
-        (.flush ^js gz (.. zlib -constants -Z_SYNC_FLUSH))
-        (when-not accepted?
+      (let [written (.write ^js controller event)
+            backpressured? (and (number? written) (neg? written))]
+        (record-count! (if backpressured?
+                         ::write-backpressured
+                         ::write-accepted) 1)
+        (when backpressured?
           (when backpressured-at
             (reset! backpressured-at (.now js/performance)))
           (reset! draining? true)
-          (.once ^js gz "drain" #(drain-feed! conn)))))
+          (-> (js/Promise.resolve (.flush ^js controller true))
+              (.then #(drain-feed! conn))
+              (.catch (fn [error]
+                        ((:seon.web.feed/close! conn) error)))))))
     (catch :default e
-      (log/error-console! "seon.web.datastar" "push-event! failed" e))))
+      (log/error-console! "seon.web.datastar" "push-event! failed" e)
+      ((:seon.web.feed/close! conn) e))))
 
 (def ^:private heartbeat-interval-ms 15000)
 
@@ -283,24 +282,27 @@
 
 (defn- push-heartbeat!
   "Flush one inert SSE comment without displacing pending application state."
-  [{gz :seon.web.feed/gzip
-    res :seon.web.feed/response
+  [{controller :seon.web.feed/controller
+    closed? :seon.web.feed/closed?
     draining? :seon.web.feed/draining?
     :as conn}]
   (try
-    (when (and (not (.-writableEnded ^js gz))
-               (not (.-writableEnded ^js res))
+    (when (and (not @closed?)
                (not @draining?))
-      (let [accepted? (.write ^js gz ": keep-alive\n\n")]
-        (.flush ^js gz (.. zlib -constants -Z_SYNC_FLUSH))
-        (when-not accepted?
+      (let [written (.write ^js controller ": keep-alive\n\n")
+            backpressured? (and (number? written) (neg? written))]
+        (when backpressured?
           (when-let [backpressured-at
                      (:seon.web.feed/backpressured-at conn)]
             (reset! backpressured-at (.now js/performance)))
           (reset! draining? true)
-          (.once ^js gz "drain" #(drain-feed! conn)))))
+          (-> (js/Promise.resolve (.flush ^js controller true))
+              (.then #(drain-feed! conn))
+              (.catch (fn [error]
+                        ((:seon.web.feed/close! conn) error)))))))
     (catch :default e
-      (log/error-console! "seon.web.datastar" "feed heartbeat failed" e))))
+      (log/error-console! "seon.web.datastar" "feed heartbeat failed" e)
+      ((:seon.web.feed/close! conn) e))))
 
 (defn- heartbeat! []
   (doseq [conn (vals (::views @!feeds))]
@@ -657,7 +659,7 @@
                 timer (set-broadcast-timeout!
                         #(drain-coalescer! timer-token)
                         delay-ms)]
-            ;; Publish pending data + timer ownership as one value. Node cannot
+            ;; Publish pending data + timer ownership as one value. Bun cannot
             ;; run the new timeout until this stack returns; a queued old
             ;; callback is fenced by timer-token and becomes inert after reset.
             (reset! !coalescer
@@ -1025,12 +1027,13 @@
 
 (defn- prepare-feed
   "Attach one fresh socket to a feed descriptor."
-  [feed view-id feed-id gz res]
+  [feed view-id feed-id controller closed? close!]
   (assoc feed
          ::view-id view-id
          :seon.web.feed/id feed-id
-         :seon.web.feed/gzip gz
-         :seon.web.feed/response res
+         :seon.web.feed/controller controller
+         :seon.web.feed/closed? closed?
+         :seon.web.feed/close! close!
          :seon.web.feed/pending-event (atom nil)
          :seon.web.feed/draining? (atom false)
          :seon.web.feed/backpressured-at (atom nil)
@@ -1056,10 +1059,10 @@
     false))
 
 (defn- close-feed-socket!
-  "End one gzip socket without changing view ownership."
+  "Close one direct stream without changing view ownership."
   [conn]
-  (when-let [gz (:seon.web.feed/gzip conn)]
-    (try (.end ^js gz) (catch :default _ nil))))
+  (when-let [close! (:seon.web.feed/close! conn)]
+    (close! nil)))
 
 (defn close-all-feeds!
   "Close every Datastar feed and release its complete runtime state."
@@ -1079,32 +1082,27 @@
     nil))
 
 (defn- open-feed!
-  "Open a long-lived gzip SSE stream from one derived-view descriptor."
-  [^js req ^js res feed]
-  (.writeHead
-    res 200
-    (clj->js
-      (cond-> {"Content-Type"      "text/event-stream; charset=utf-8"
-               "Content-Encoding"  "gzip"
-               "Cache-Control"     "no-store"
-               "Connection"        "keep-alive"
-               "X-Accel-Buffering" "no"}
-        (:seon.web.feed/branch-head feed)
-        (assoc "Seon-Database-Branch-Head"
-               (pr-str (:seon.web.feed/branch-head feed))))))
-  (let [gz (.createGzip zlib)
-        feed-id (random-uuid)
+  "Return a long-lived Bun direct-stream SSE response."
+  [feed]
+  (let [feed-id (random-uuid)
         supplied-view-id (::view-id feed)
         view-id (if (safe-view-id? supplied-view-id)
                   supplied-view-id
                   (str (random-uuid)))
-        conn (prepare-feed feed view-id feed-id gz res)
         closed? (atom false)
+        !conn (atom nil)
+        !finish-stream (atom nil)
+        stream-finished
+        (js/Promise. (fn [resolve _reject]
+                       (reset! !finish-stream resolve)))
         close!
-        (fn []
+        (fn [error]
           (when (compare-and-set! closed? false true)
             (let [released? (release-feed! view-id feed-id)]
-              (close-feed-socket! conn)
+              (when-let [controller (:seon.web.feed/controller @!conn)]
+                (try (.close ^js controller error) (catch :default _ nil)))
+              (when-let [finish @!finish-stream]
+                (finish nil))
               (when (and released? (empty? (::views @!feeds)))
                 (uninstall!))
               (log/info-console! "seon.web.datastar" "FEED CLOSE"
@@ -1113,48 +1111,45 @@
                                   :seon.web.feed/released? released?
                                   :seon.web.feed/count
                                   (count (::views @!feeds))}))))]
-    (.on gz "error"
-         (fn [e]
-           (log/error-console! "seon.web.datastar" "gz error" e)
-           (close!)))
-    (.on res "error"
-         (fn [e]
-           (log/error-console! "seon.web.datastar" "res error" e)
-           (close!)))
-    (.pipe gz res)
-    (when-let [replaced (replace-feed! conn)]
-      (close-feed-socket! replaced))
-    ;; Attach first so the one authority interest can be the exact union of
-    ;; live normalized subscription dependencies. A dependency-less first
-    ;; render starts broad, then narrows after returning its declared attrs.
-    (install!)
-    (push-full! (get-in @!feeds [::views view-id]))
-    (ensure-heartbeat!)
-    (log/info-console! "seon.web.datastar" "FEED OPEN"
+    (let [stream
+          (js/ReadableStream.
+           #js {:type "direct"
+                :pull
+                (fn [controller]
+                  (when-not @!conn
+                    (let [conn (prepare-feed feed view-id feed-id
+                                             controller closed? close!)]
+                      (reset! !conn conn)
+                      (when-let [replaced (replace-feed! conn)]
+                        (close-feed-socket! replaced))
+                      ;; Attach first so the database interest is the exact
+                      ;; union of live normalized subscription dependencies.
+                      (install!)
+                      (push-full! (get-in @!feeds [::views view-id]))
+                      (ensure-heartbeat!)
+                      (log/info-console!
+                       "seon.web.datastar" "FEED OPEN"
                        {:seon.web.feed/id (str feed-id)
                         :seon.web.datastar/view-id view-id
-                        :seon.web.feed/count (count (::views @!feeds))})
-    ;; `ServerResponse.close` is the raw Node equivalent of a stream abort. It
-    ;; follows the response/socket lifetime; `IncomingMessage.close` changed
-    ;; semantics across Node releases and is not the ownership authority.
-    (.once res "close" close!)
-    (.once req "aborted" close!)
-    view-id))
-
-(defn- query-value
-  "Decoded query value named `parameter`, or nil when absent or malformed."
-  [query-string parameter]
-  (try
-    (.get (js/URLSearchParams. (or query-string "")) parameter)
-    (catch :default _ nil)))
+                        :seon.web.feed/count (count (::views @!feeds))})))
+                  stream-finished)
+                :cancel (fn [_reason] (close! nil))})
+          headers
+          (cond-> {"Content-Type" "text/event-stream; charset=utf-8"
+                   "Cache-Control" "no-store"
+                   "Connection" "keep-alive"
+                   "X-Accel-Buffering" "no"}
+            (:seon.web.feed/branch-head feed)
+            (assoc "Seon-Database-Branch-Head"
+                   (pr-str (:seon.web.feed/branch-head feed))))]
+      (js/Response. stream #js {:status 200 :headers (clj->js headers)}))))
 
 (defn- requested-view-id
-  "Safe `view` query value from one node request, or nil."
-  [^js req]
+  "Safe `view` query value from one WHATWG request, or nil."
+  [^js request]
   (try
-    (let [url (or (.-url req) "")
-          qidx (str/index-of url "?")
-          view-id (when qidx (query-value (subs url (inc qidx)) "view"))]
+    (let [url (js/URL. (.-url request))
+          view-id (.get (.-searchParams url) "view")]
       (when (safe-view-id? view-id) view-id))
     (catch :default _ nil)))
 
@@ -1162,7 +1157,7 @@
   "The validated ephemeral `view` query value from one Ring request."
   {:malli/schema [:=> [:cat ::ring-request] ::optional-view-id]}
   [r]
-  (requested-view-id (:seon.http/node-req r)))
+  (requested-view-id (:seon.http/request r)))
 
 (defn new-view-id
   "Mint one ephemeral browser-view identity."
@@ -1171,12 +1166,12 @@
   (str (random-uuid)))
 
 (defn open-view-feed!
-  "Open one derived view on the shared gzip Datastar feed registry."
+  "Open one derived view on the shared Datastar feed registry."
   {:malli/schema [:=> [:catn [::ring-request ::ring-request]
                              [::feed-definition ::feed-definition]]
-                  ::view-id]}
+                  :any]}
   [r feed]
-  (open-feed! (:seon.http/node-req r) (:seon.http/node-res r) feed))
+  (open-feed! feed))
 
 ;; ============================================================
 ;; Per-agent view (/agent/{id}) — the shim page + the feed bound to
@@ -1218,16 +1213,16 @@
                      :seon.web.historical/required historical-query-keys}})
 
 (defn- parse-historical-branch-head
-  "Parse one all-or-none Proximum branch head from a Node request URL.
+  "Parse one all-or-none Proximum branch head from a WHATWG request URL.
 
    No branch-head fields means the live feed. Any partial, blank, malformed,
    or noncanonical branch head is an error value; history never falls back live."
-  [^js req]
+  [^js request]
   (try
-    (let [url  (or (.-url ^js req) "")
-          qidx (str/index-of url "?")]
-      (when qidx
-        (let [params (js/URLSearchParams. (subs url (inc qidx)))
+    (let [url (js/URL. (.-url request))
+          params (.-searchParams url)]
+      (when (seq (.-search url))
+        (let [
               supplied (into {}
                              (map (fn [key] [key (.get params key)]))
                              historical-query-keys)
@@ -1264,18 +1259,20 @@
       (selector-error "historical feed branch head could not be parsed"
                       {:seon.error/message (.-message e)}))))
 
-(defn- write-historical-error!
-  [^js res error]
-  (.writeHead res 422 #js {"Content-Type" "application/edn; charset=utf-8"
-                           "Cache-Control" "no-store"})
-  (.end res (pr-str error))
-  nil)
+(defn- response
+  [body status content-type-or-headers]
+  (let [headers (if (string? content-type-or-headers)
+                  {"Content-Type" content-type-or-headers
+                   "Cache-Control" "no-store"}
+                  content-type-or-headers)]
+    (js/Response. body #js {:status status :headers (clj->js headers)})))
 
-(defn- write-database-error! [^js res error]
-  (.writeHead res 503 #js {"Content-Type" "text/plain; charset=utf-8"
-                           "Cache-Control" "no-store"})
-  (.end res (or (:seon.error/message error) "database unavailable"))
-  nil)
+(defn- historical-error-response [error]
+  (response (pr-str error) 422 "application/edn; charset=utf-8"))
+
+(defn- database-error-response [error]
+  (response (or (:seon.error/message error) "database unavailable")
+            503 "text/plain; charset=utf-8"))
 
 (defn- agent-page-html
   "The per-agent (/agent/{id}) view shim page (brand-aware head — see
@@ -1290,48 +1287,46 @@
              (str (chat-form-html id)
                   (agent-feed-opener-html id))))
 
-(defn- write-agent-page!
-  "Write the shared agent shim for already-validated `id`."
-  [^js res id]
-  (.writeHead res 200 #js {"Content-Type"  "text/html; charset=utf-8"
-                           "Cache-Control" "no-store, no-cache, must-revalidate"})
-  (.end res (agent-page-html id)))
+(defn- agent-page-response
+  "Return the shared agent shim for already-validated `id`."
+  [id]
+  (response (agent-page-html id) 200
+            {"Content-Type" "text/html; charset=utf-8"
+             "Cache-Control" "no-store, no-cache, must-revalidate"}))
+
+(defn- redirect-home-response []
+  (response "" 302 {"Location" "/" "Cache-Control" "no-store"}))
 
 (defn ^:async serve-agent-page!
   "Serve the per-agent view shim page (the seeded :seon.route/agent handler).
-   A Ring handler: takes the Ring request `r`, self-extracts the node res + the
-   `{id}` path-param. Invalid ids 404. Public — db->routes resolves its symbol
+   A Ring handler: takes the Ring request `r` and its `{id}` path-param.
+   Invalid ids redirect home. Public — db->routes resolves its symbol
    via eval/lookup-value at request time."
   [r]
-  (let [^js res (:seon.http/node-res r)
-        id      (get-in r [:path-params :id])]
+  (let [id (get-in r [:path-params :id])]
     (cond
       (= id "root")
-      (do (.writeHead res 302 #js {"Location" "/" "Cache-Control" "no-store"})
-          (.end res ""))
+      (redirect-home-response)
 
       ;; A malformed id (injection attempt, junk path segment) → home.
       (not (safe-id? id))
-      (do (.writeHead res 302 #js {"Location" "/" "Cache-Control" "no-store"})
-          (.end res ""))
+      (redirect-home-response)
       :else
       (let [database (await (db/db))]
         (if (:seon.error/message database)
-          (write-database-error! res database)
+          (database-error-response database)
           (let [exists? (await (agent-exists? database id))]
             (cond
               (:seon.error/message exists?)
-              (write-database-error! res exists?)
+              (database-error-response exists?)
 
               exists?
-              (write-agent-page! res id)
+              (agent-page-response id)
 
               ;; #28 — a well-formed but unknown agent (stale bookmark,
               ;; reset database, typo) redirects home before a feed opens.
               :else
-              (do (.writeHead res 302
-                              #js {"Location" "/" "Cache-Control" "no-store"})
-                  (.end res "")))))))))
+              (redirect-home-response))))))))
 
 (defn serve-root!
   "Serve `/` — root's view (the all-agents dashboard).
@@ -1343,8 +1338,8 @@
    canvas = `seon.render.system/system-view` (root's seeded canvas content).
    One mechanism and no root-special feed; `/agent/root` canonicalizes to `/`.
    Public — db->routes resolves its symbol at request time."
-  [r]
-  (write-agent-page! (:seon.http/node-res r) "root"))
+  [_r]
+  (agent-page-response "root"))
 
 (def agent-view-function 'seon.execution.runtime/render-agent-view!)
 
@@ -1379,10 +1374,10 @@
    view-id (assoc ::view-id view-id)))
 
 (defn ^:async open-agent-feed!
-  "Open the per-agent view gzip feed.
+  "Open the per-agent view feed.
 
    The seeded :seon.route/agent-feed handler. A Ring handler: takes the
-   Ring request `r`, self-extracts node-req/node-res + the `{id}` path-param.
+   Ring request `r`, self-extracts its WHATWG request + `{id}` path-param.
    Lazily installs the tx-listener (idempotent). Invalid or stale ids 404. Public —
    db->routes resolves its symbol.
 
@@ -1391,59 +1386,54 @@
    compiled child and used as the frozen subscription key. Partial or malformed
    branch heads return a structured 422; only an absent branch head opens live."
   [r]
-  (let [^js req (:seon.http/node-req r)
-        ^js res (:seon.http/node-res r)
+  (let [^js request (:seon.http/request r)
         id      (get-in r [:path-params :id])
-        view-id (requested-view-id req)
+        view-id (requested-view-id request)
         database (await (db/db))]
     (cond
       (:seon.error/message database)
-      (write-database-error! res database)
+      (database-error-response database)
 
       (not (safe-id? id))
-      (do (.writeHead res 404 #js {"Content-Type" "text/plain; charset=utf-8"
-                                   "Cache-Control" "no-store"})
-          (.end res "unknown agent id"))
+      (response "unknown agent id" 404 "text/plain; charset=utf-8")
 
       :else
       (let [exists? (await (agent-exists? database id))]
         (cond
           (:seon.error/message exists?)
-          (write-database-error! res exists?)
+          (database-error-response exists?)
 
           exists?
-          (let [selector (parse-historical-branch-head req)]
-        (cond
-          (:seon.error/message selector)
-          (write-historical-error! res selector)
+          (let [selector (parse-historical-branch-head request)]
+            (cond
+              (:seon.error/message selector)
+              (historical-error-response selector)
 
-          selector
-          (if (and (= :db (::db.branch/name selector))
-                   (= (:datahike/commit-id database)
-                      (::db.branch/commit-id selector))
-                   (<= (::db.branch/basis-t selector) (:t database)))
-            (let [historical (db/as-of database (::db.branch/basis-t selector))]
-              (open-feed!
-               req res
-               (cond->
-                {:seon.web.feed/key [:seon.web.feed/agent id
-                                     :seon.web.feed/at selector]
-                 :seon.web.feed/live? false
-                 :seon.web.feed/branch-head selector
-                 ::db historical
-                 :seon.web.feed/render
-                 (fn [value] (render-agent-view! id value))}
-                view-id (assoc ::view-id view-id))))
-            (write-historical-error!
-             res
-             (selector-error
-              "historical feed does not belong to the active database"
-              selector)))
+              selector
+              (if (and (= :db (::db.branch/name selector))
+                       (= (:datahike/commit-id database)
+                          (::db.branch/commit-id selector))
+                       (<= (::db.branch/basis-t selector) (:t database)))
+                (let [historical
+                      (db/as-of database (::db.branch/basis-t selector))]
+                  (open-feed!
+                   (cond->
+                    {:seon.web.feed/key [:seon.web.feed/agent id
+                                         :seon.web.feed/at selector]
+                     :seon.web.feed/live? false
+                     :seon.web.feed/branch-head selector
+                     ::db historical
+                     :seon.web.feed/render
+                     (fn [value] (render-agent-view! id value))}
+                    view-id (assoc ::view-id view-id))))
+                (historical-error-response
+                 (selector-error
+                  "historical feed does not belong to the active database"
+                  selector)))
+
+              :else
+              (open-feed! (live-agent-feed-definition id view-id))))
 
           :else
-          (open-feed! req res (live-agent-feed-definition id view-id))))
-
-          :else
-          (do (.writeHead res 404 #js {"Content-Type" "text/plain; charset=utf-8"
-                                       "Cache-Control" "no-store"})
-              (.end res "unknown agent id")))))))
+          (response "unknown agent id" 404
+                    "text/plain; charset=utf-8"))))))
