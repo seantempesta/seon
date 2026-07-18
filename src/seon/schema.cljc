@@ -531,6 +531,24 @@
   [schema-key value]
   (m/explain schema-key value {:registry (candidate-registry)}))
 
+(register! ::compiled-validator 'fn?)
+
+(defn candidate-validator
+  "Compile a recursively resolved validator from current declarations."
+  {:malli/schema [:=> [:catn [::registry-key ::registry-key]]
+                  ::compiled-validator]}
+  [schema-key]
+  (m/validator
+   (m/deref-recursive schema-key {:registry (candidate-registry)})))
+
+(defn candidate-explainer
+  "Compile a recursively resolved explainer from current declarations."
+  {:malli/schema [:=> [:catn [::registry-key ::registry-key]]
+                  ::compiled-validator]}
+  [schema-key]
+  (m/explainer
+   (m/deref-recursive schema-key {:registry (candidate-registry)})))
+
 (defn ^:seon.fn/agent-facing? schemas-in-namespace
   "The `{keyword definition}` map of schemas registered under `ns-name`.
 

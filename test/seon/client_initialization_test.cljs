@@ -255,6 +255,7 @@
   (let [owner (js-obj)]
     (assoc @client/!state
            ::client/launch-capability {::client/autonomous? true}
+           ::client/runtime-phase :seon.client.runtime/running
            ::client/advertisement-owner owner
            ::client/advertisement-interest-key :runtime-advertisement
            ::client/resumable-agent-ids ["root"])))
@@ -281,7 +282,7 @@
           finish (atom nil)
           finished (js/Promise. (fn [resolve _] (reset! finish resolve)))]
       (reset! client/!state (shadow-ready-state))
-      (set! db/attached? (constantly true))
+      (set! db/attached? (constantly false))
       (set! db/db
             (fn
               ([] (js/Promise.resolve {:db-name "default"}))
@@ -333,7 +334,7 @@
                      :publish
                      [::resume {:seon.agent/id "root"}]]
                     @effects)
-                 "ticker waits for the one rehost Promise")
+                 "a running runtime recovers its lost session before rehosting")
              (@finish-resume
               {:seon.agent.runtime/resumed? true
                :seon.agent/id "root"})

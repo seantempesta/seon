@@ -171,6 +171,9 @@
                                       (::protocol/event %))
                                   events))))
           (is (= protocol/datoms-event (::protocol/event event)))
+          (is (protocol/valid-response? event))
+          (is (= (get-in event [:db-after :store-id])
+                 (get-in event [:db-before :store-id])))
           (is (= request-id (::protocol/request-id event)))
           (is (= :duplicate/replacement
                  (some (fn [[_entity attribute]]

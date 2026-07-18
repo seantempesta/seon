@@ -47,7 +47,12 @@
           (is (true? (schema/valid-candidate-value? attr 1)))
           (is (false? (schema/valid-candidate-value? attr "active")))
           (is (true? (m/validate attr "active")))
-          (is (false? (m/validate attr 1))))
+          (is (false? (m/validate attr 1)))
+          (let [validator (schema/candidate-validator attr)
+                explainer (schema/candidate-explainer attr)]
+            (is (true? (validator 1)))
+            (is (false? (validator "active")))
+            (is (map? (explainer "active")))))
         (let [int-projection (schema/build-projection (schema/snapshot))]
           (with-redefs [mr/set-default-registry!
                         (fn [_]

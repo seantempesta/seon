@@ -604,10 +604,13 @@
   [database-name db-before-descriptor report request-id]
   (let [db-after (:db-after report)
         db-before (:db-before report)
+        db-after-value (database-value database-name db-after)
+        db-before-value (database-value database-name db-before)
         transaction-data (public-transaction-datoms (:tx-data report))]
     {:db-before (or db-before-descriptor
-                    (database-value database-name db-before))
-     :db-after (database-value database-name db-after)
+                    (assoc db-before-value
+                           :store-id (:store-id db-after-value)))
+     :db-after db-after-value
      :tx-data (transaction-data->protocol transaction-data)
      :tempids
      (merge

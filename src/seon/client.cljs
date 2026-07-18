@@ -554,10 +554,10 @@
       (db/decode-edn-values stored))))
 
 (defn shadow-build-notify!
-  "Close on build start; reconstruct and rehost only after a complete build."
+  "Close admission on build start and publish only a complete build."
   {:malli/schema [:=> [:catn [::message :any]] :boolean]}
   [message]
-  (when (and (db/attached?)
+  (when (and (= :seon.client.runtime/running (runtime-phase))
              (nil? (::launch/restore-startup
                     launch/process-launch-descriptor)))
     (case (:type message)

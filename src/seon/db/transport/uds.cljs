@@ -443,7 +443,14 @@
                               (protocol/valid-response? message))
                        (enqueue-event! message frame-bytes)
                        (throw
-                        (failure "Database session received an invalid event."
+                        (failure
+                         (str "Database session received an invalid event: "
+                              (pr-str
+                               {::protocol/event event
+                                ::protocol/request-id request-id
+                                :db-after (:db-after message)
+                                ::protocol/explanation
+                                (protocol/explain-response message)}))
                                  :seon.db.transport.uds.failure/protocol
                                  {::protocol/response message
                                   ::protocol/explanation

@@ -13,7 +13,6 @@
   (:require #?@(:bb [] :default [[hasch.core :as hasch]])
             #?@(:cljs [[cognitect.transit :as transit]
                        [goog.object :as gobj]])
-            [malli.core :as m]
             [seon.db.branch :as branch]
             [seon.db.restore.schema]
             [seon.schema :as schema]))
@@ -1261,22 +1260,16 @@
     (:seon.error/kind input)
     (assoc :seon.error/kind (:seon.error/kind input))))
 
-(defonce ^:private request-schema
-  (delay (m/deref-recursive ::request)))
-(defonce ^:private response-schema
-  (delay (m/deref-recursive ::response)))
-(defonce ^:private writer-terminal-result-schema
-  (delay (m/deref-recursive ::writer-terminal-result)))
-(defonce ^:private request-validator
-  (delay (m/validator @request-schema)))
-(defonce ^:private request-explainer
-  (delay (m/explainer @request-schema)))
-(defonce ^:private response-validator
-  (delay (m/validator @response-schema)))
-(defonce ^:private response-explainer
-  (delay (m/explainer @response-schema)))
-(defonce ^:private writer-terminal-result-validator
-  (delay (m/validator @writer-terminal-result-schema)))
+(def ^:private request-validator
+  (delay (schema/candidate-validator ::request)))
+(def ^:private response-validator
+  (delay (schema/candidate-validator ::response)))
+(def ^:private writer-terminal-result-validator
+  (delay (schema/candidate-validator ::writer-terminal-result)))
+(def ^:private request-explainer
+  (delay (schema/candidate-explainer ::request)))
+(def ^:private response-explainer
+  (delay (schema/candidate-explainer ::response)))
 
 (defn- generated-candidate-keys-unique?
   [request]
