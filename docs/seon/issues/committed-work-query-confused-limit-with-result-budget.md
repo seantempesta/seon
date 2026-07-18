@@ -21,6 +21,9 @@ After a clean system restart, the pod found the committed user message for
 its batched read with `datahike query-results budget exceeded`. The query is
 already ordered and carries `:limit 1`; only its resource allowance was one.
 Datahike's `resource/charge-result!` charges each retained result node.
+Raising the allowance from one to 64 only postponed the same failure: on the
+populated default database, a clean restart on 2026-07-18 logged this error for
+every resumed agent, including root, before any committed work could run.
 
 ## Owner
 

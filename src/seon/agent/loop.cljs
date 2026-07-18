@@ -620,7 +620,7 @@
                  [:seon.agent/id id])
                 (assoc (query-member database pending-inbound-query
                                      [id warn/hop-cap])
-                       :datahike.resource/max-results 64
+                       :datahike.resource/max-results 65536
                        :datahike.resource/max-result-weight 4096)]
                ::db/max-result-weight 524288}))
             members (::db/results acquired)]
