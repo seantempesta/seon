@@ -450,7 +450,7 @@
           ::artifact-digest]
      ::invoke]
     [:=> [:cat ::agent-id ::function-symbol ::arguments :seon.db/db
-          ::artifact-digest ::run-fence]
+          ::artifact-digest [:or :nil ::run-fence]]
      ::invoke]]}
   ([agent-id function-symbol arguments database artifact-digest]
    (compiled-invocation agent-id function-symbol arguments database

@@ -661,7 +661,7 @@
      :map]
     [:=> [:cat :seon.db/db :seon.execution/agent-id
           :seon.execution/function-symbol :seon.execution/arguments
-          :seon.execution/run-fence]
+          [:or :nil :seon.execution/run-fence]]
      :map]]}
   ([database agent-id function-symbol arguments]
    (await (invoke-compiled! database agent-id function-symbol arguments nil)))
