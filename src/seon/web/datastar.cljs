@@ -88,6 +88,7 @@
 (def ^:private empty-feed-registry
   {::views {}
    ::subscriptions {}
+   ::measurements {}
    ::listener-installed? false})
 
 (defonce ^{:doc "Ephemeral views and their normalized subscription authorities.
@@ -95,6 +96,42 @@
                   views share one render transition and dependency set until
                   the final consumer closes."}
   !feeds (atom empty-feed-registry))
+
+(defn- record-count! [measurement amount]
+  (swap! !feeds update-in [::measurements measurement] (fnil + 0) amount))
+
+(defn- record-sample! [measurement value]
+  (swap! !feeds update-in
+         [::measurements measurement]
+         (fn [sample]
+           (let [sample (or sample {::sample-count 0
+                                    ::sample-total 0
+                                    ::sample-maximum 0})]
+             (-> sample
+                 (update ::sample-count inc)
+                 (update ::sample-total + value)
+                 (update ::sample-maximum max value)
+                 (assoc ::sample-latest value))))))
+
+(defn performance-snapshot
+  "Return bounded, process-local Datastar feed measurements as plain data."
+  {:malli/schema [:=> [:cat] :map]}
+  []
+  (let [registry @!feeds]
+    {::measurements (::measurements registry)
+     ::view-count (count (::views registry))
+     ::subscription-count (count (::subscriptions registry))
+     ::active-render-count
+     (count (filter ::active-render (vals (::subscriptions registry))))
+     ::pending-render-count
+     (count (filter ::pending-render (vals (::subscriptions registry))))}))
+
+(defn reset-performance!
+  "Reset only Datastar feed measurements; open feeds and renders continue."
+  {:malli/schema [:=> [:cat] :map]}
+  []
+  (swap! !feeds assoc ::measurements {})
+  (performance-snapshot))
 
 ;; ============================================================
 ;; SSE framing — the datastar-patch-elements builder.
@@ -189,7 +226,12 @@
   "Resume one backpressured feed with only its newest pending event."
   [{pending :seon.web.feed/pending-event
     draining? :seon.web.feed/draining?
+    backpressured-at :seon.web.feed/backpressured-at
     :as conn}]
+  (when backpressured-at
+    (when-let [started-at @backpressured-at]
+      (record-sample! ::drain-duration-ms (- (.now js/performance) started-at))
+      (reset! backpressured-at nil)))
   (reset! draining? false)
   (when-let [event @pending]
     (reset! pending nil)
@@ -201,6 +243,7 @@
     res :seon.web.feed/response
     pending :seon.web.feed/pending-event
     draining? :seon.web.feed/draining?
+    backpressured-at :seon.web.feed/backpressured-at
     :as conn}
    event]
   (try
@@ -209,12 +252,18 @@
       (reset! pending nil)
 
       @draining?
-      (reset! pending event)
+      (do
+        (when (some? @pending)
+          (record-count! ::pending-replacement 1))
+        (reset! pending event))
 
       :else
       (let [accepted? (.write ^js gz event)]
+        (record-count! (if accepted? ::write-accepted ::write-backpressured) 1)
         (.flush ^js gz (.. zlib -constants -Z_SYNC_FLUSH))
         (when-not accepted?
+          (when backpressured-at
+            (reset! backpressured-at (.now js/performance)))
           (reset! draining? true)
           (.once ^js gz "drain" #(drain-feed! conn)))))
     (catch :default e
@@ -245,6 +294,9 @@
       (let [accepted? (.write ^js gz ": keep-alive\n\n")]
         (.flush ^js gz (.. zlib -constants -Z_SYNC_FLUSH))
         (when-not accepted?
+          (when-let [backpressured-at
+                     (:seon.web.feed/backpressured-at conn)]
+            (reset! backpressured-at (.now js/performance)))
           (reset! draining? true)
           (.once ^js gz "drain" #(drain-feed! conn)))))
     (catch :default e
@@ -335,6 +387,16 @@
         connections
         (when emit?
           (keep #(get-in @!feeds [::views %]) consumer-view-ids))]
+    (when (= render-id (::render-id active-before))
+      (record-count! (if promoted ::render-superseded ::render-completed) 1)
+      (when-let [started-at (::render-started-at active-before)]
+        (record-sample! ::render-duration-ms
+                        (- (.now js/performance) started-at)))
+      (when event
+        (record-sample! ::serialized-event-bytes
+                        (.byteLength js/Buffer event "utf8"))))
+    (when emit?
+      (record-sample! ::fanout (count connections)))
     (doseq [conn connections]
       (push-event! conn event))
     (when (and completed? (contains? rendered ::dependencies))
@@ -367,6 +429,10 @@
                            [::subscriptions subscription-key ::active-render]
                            request)
                  registry)))
+      (when (= (::render-id request)
+               (get-in @!feeds [::subscriptions subscription-key
+                                 ::active-render ::render-id]))
+        (record-count! ::render-started 1))
       (finish-render-result! subscription-key subscription-id
                              (::render-id request)
                              (render-request-result subscription request)))))
@@ -399,6 +465,11 @@
                          ::active-render request)))
                registry))))
         active (get-in after [::subscriptions subscription-key ::active-render])]
+    (when (or (= (::render-id request) (::render-id active))
+              (= (::render-id request)
+                 (get-in after [::subscriptions subscription-key
+                                ::pending-render ::render-id])))
+      (record-count! ::render-requested 1))
     (when (= (::render-id request) (::render-id active))
       (start-render! subscription-key subscription-id))))
 
@@ -496,12 +567,18 @@
 (defn- broadcast!
   "Render each normalized live subscription once, then fan out its patch."
   [change]
-  (doseq [[subscription-key subscription] (::subscriptions @!feeds)
-          :when (and (::live? subscription)
-                     (subscription-affected? subscription change))]
-    (enqueue-render! subscription-key
-                     {::db (::db change)
-                      ::change change})))
+  (let [live-subscriptions (filter (comp ::live? val)
+                                   (::subscriptions @!feeds))
+        affected (filter (fn [[_ subscription]]
+                           (subscription-affected? subscription change))
+                         live-subscriptions)]
+    (record-count! ::affected-subscription-count (count affected))
+    (record-count! ::skipped-subscription-count
+                   (- (count live-subscriptions) (count affected)))
+    (doseq [[subscription-key _subscription] affected]
+      (enqueue-render! subscription-key
+                       {::db (::db change)
+                        ::change change}))))
 
 ;; ============================================================
 ;; Coalescing — one lifecycle-owned state collapses a tx burst into one
@@ -947,6 +1024,7 @@
          :seon.web.feed/response res
          :seon.web.feed/pending-event (atom nil)
          :seon.web.feed/draining? (atom false)
+         :seon.web.feed/backpressured-at (atom nil)
          :seon.web.feed/opened-at (js/Date.)))
 
 (defn- replace-feed!

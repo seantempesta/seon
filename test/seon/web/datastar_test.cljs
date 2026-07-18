@@ -183,3 +183,31 @@
                   {::datastar/event event})]
     (is (= event (::datastar/full-event recorded)))
     (is (= database (::datastar/rendered-db recorded)))))
+
+(deftest performance-measurements-are-bounded-and-reset-without-closing-feeds
+  (let [feeds @#'datastar/!feeds
+        original @feeds]
+    (try
+      (reset! feeds {::datastar/views {"view" {::datastar/view-id "view"}}
+                     ::datastar/subscriptions {:agent {}}
+                     ::datastar/measurements {}})
+      (@#'datastar/record-count! ::datastar/render-requested 2)
+      (@#'datastar/record-sample! ::datastar/render-duration-ms 4)
+      (@#'datastar/record-sample! ::datastar/render-duration-ms 10)
+      (let [snapshot (datastar/performance-snapshot)]
+        (is (= 1 (::datastar/view-count snapshot)))
+        (is (= 1 (::datastar/subscription-count snapshot)))
+        (is (= 2 (get-in snapshot [::datastar/measurements
+                                   ::datastar/render-requested])))
+        (is (= {::datastar/sample-count 2
+                ::datastar/sample-total 14
+                ::datastar/sample-maximum 10
+                ::datastar/sample-latest 10}
+               (get-in snapshot [::datastar/measurements
+                                 ::datastar/render-duration-ms]))))
+      (let [reset-snapshot (datastar/reset-performance!)]
+        (is (= {} (::datastar/measurements reset-snapshot)))
+        (is (= 1 (::datastar/view-count reset-snapshot)))
+        (is (= 1 (::datastar/subscription-count reset-snapshot))))
+      (finally
+        (reset! feeds original)))))
