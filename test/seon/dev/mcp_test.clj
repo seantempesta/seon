@@ -217,6 +217,14 @@
         (.close server)
         (deref accepted 500 nil)))))
 
+(deftest replaced-shadow-port-is-a-reconnectable-runtime-failure
+  (let [server (ServerSocket. 0)
+        port (.getLocalPort server)]
+    (.close server)
+    (let [result (#'mcp/nrepl-eval port "stale-session" "(+ 1 1)" 10)]
+      (is (= :transport (:seon.dev.mcp/failure result)))
+      (is (true? (#'mcp/stale-runtime? result))))))
+
 (deftest cljs-sentinel-results-are-tool-errors
   (doseq [sentinel [":repl/exception!" ":repl/print-error!"]]
     (let [response (#'mcp/render-eval-result

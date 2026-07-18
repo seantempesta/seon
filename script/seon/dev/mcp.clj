@@ -295,7 +295,9 @@
          :status (vec status)}))
     (catch Exception e
       (log-error "eval failed:" (.getMessage e))
-      {:err (.getMessage e) :status ["error"]})))
+      {:err (.getMessage e)
+       :status ["error"]
+       :seon.dev.mcp/failure :transport})))
 
 (defn- nrepl-interrupt
   [port nrepl-session]
@@ -905,29 +907,32 @@
 
    1. **Loud failure** — :err carries 'No available JS runtime' or
       similar message. Detected by substring.
-   2. **Silent failure** — :status contains \"error\" but :err is
+   2. **Transport failure** — the tracked session's Shadow port is no longer
+      reachable because the watcher was replaced.
+   3. **Silent failure** — :status contains \"error\" but :err is
       empty (or just whitespace), :value is nil. This happens when
       shadow's nREPL session is bound to a :runtime-id of a runtime
       that has disconnected but hasn't been GC'd yet. shadow returns
       a status-only error envelope; the message is lost.
 
-   Both signal the same recovery: drop the session, create a fresh
+   All signal the same recovery: drop the session, create a fresh
    one (which under :repl {:runtime-select :latest} routes to the
    currently-connected runtime), retry.
 
    See research/shadow-node-runtime-2026-05-23.md §Q3 + gotcha 3."
-  [{:keys [err value status]}]
+  [{:keys [err value status] :as result}]
   (or
+    (= :transport (:seon.dev.mcp/failure result))
     ;; Shape 1 — :err message match
     (and (seq err)
          (or (str/includes? err "No available JS runtime")
              (str/includes? err "previously used runtime disappeared")
              (str/includes? err "client-not-found")))
-    ;; Shape 2 — status=error with no value AND no useful :err
+    ;; Shape 3 — status=error with no value AND no useful :err
     (and (some #{"error"} status)
          (nil? value)
          (or (nil? err) (str/blank? err)))
-    ;; Shape 3 — WEDGED session (the historical `default` NPE): the session
+    ;; Shape 4 — WEDGED session (the historical `default` NPE): the session
     ;; fell out of the CLJS REPL (worker restart under it / half-failed
     ;; pivot) so evals hit the CLJ compiler with no *ns* bound:
     ;;   NullPointerException ... Compiler.currentNS() is null
