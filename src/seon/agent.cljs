@@ -941,7 +941,7 @@
                        [?agent :seon.agent/id ?id]
                        (not [?agent :seon.agent/terminated-at _])]
                      ::db/args [namespace-name]
-                     ::db/max-results agent-creation-max-results
+                     ::db/max-results 64
                      ::db/max-result-weight 4096})))
                 namespace-eid
                 (when (and namespace-name (not (error-value? resident-id)))
@@ -952,7 +952,7 @@
                      '[:find ?namespace . :in $ ?name :where
                        [?namespace :seon.ns/name ?name]]
                      ::db/args [namespace-name]
-                     ::db/max-results agent-creation-max-results
+                     ::db/max-results 64
                      ::db/max-result-weight 4096})))]
             (if (error-value? configuration)
               configuration
@@ -1265,7 +1265,7 @@
                      [?agent :seon.agent/id ?id]
                      (not [?agent :seon.agent/terminated-at _])]
                    ::db/args [namespace-name]
-                   ::db/max-results agent-creation-max-results
+                   ::db/max-results 64
                    ::db/max-result-weight 4096}))]
             (cond
               (error-value? resident-id) resident-id
@@ -1278,7 +1278,7 @@
                       {::db/db database
                        ::db/pull-pattern [:db/id :seon.ns/name]
                        ::db/ref [:seon.ns/name namespace-name]
-                       ::db/max-results agent-creation-max-results
+                       ::db/max-results 64
                        ::db/max-result-weight 4096}))]
                 (if (error-value? namespace-entity)
                   namespace-entity

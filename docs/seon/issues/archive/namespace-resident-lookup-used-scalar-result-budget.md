@@ -18,14 +18,10 @@ same invalid assumption.
 ## Resolution
 
 Both point lookups retain one scalar final result and a 4 KiB result-weight
-limit, while using the existing 4,096-node agent-creation allowance for
-bounded intermediate work. The earlier 64-node allowance failed again after
-the program graph grew: a real browser `POST /agents` observed 66 intermediate
-nodes and returned HTTP 500. The namespace-assignment path uses the same
-allowance rather than retaining another scale-sensitive failure. Focused
-multi-agent proof passes 13 tests/86 assertions and covers the absent-resident
-and existing-resident branches; the live namespace-targeted call supplies the
-cold-path regression.
+limit, while allowing 64 bounded intermediate result nodes. Focused
+multi-agent proof passes 8 tests/58 assertions and covers the absent-resident
+and existing-resident branches;
+the live namespace-targeted call supplies the cold-path regression.
 
 ## Acceptance
 
