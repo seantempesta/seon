@@ -74,6 +74,17 @@
     (is (not (contains? enabled :reasoning_effort)))
     (is (not (contains? enabled :thinking)))))
 
+(deftest compatible-gateways-omit-unconfigured-sampling-fields
+  (let [body (params {:seon.ai/ctx "hi"}
+                     (resolution {:seon.ai/provider :openai-compat
+                                  :seon.ai/base-url "https://api.moonshot.ai/v1"
+                                  :seon.ai/model "kimi-k3"}))]
+    (is (= "kimi-k3" (:model body)))
+    (is (not (contains? body :temperature))
+        "fixed-sampling gateways must not inherit DeepSeek's temperature")
+    (is (not (contains? body :reasoning_effort))
+        "Kimi K3 defaults to its only supported effort without an explicit field")))
+
 (deftest tools-and-extra-body-stay-at-their-own-seams
   (let [tools [{:type "function" :function {:name "f" :parameters {}}}]
         absent (params {:seon.ai/ctx "hi"})

@@ -74,7 +74,7 @@ bin/seon restart pod
 
 ```sh
 export SEON_AI_PROVIDER=openai-compat
-export SEON_AI_BASE_URL=https://your-gateway/v1/chat/completions   # FULL URL
+export SEON_AI_BASE_URL=https://your-gateway/v1                    # preferred root
 export SEON_AI_MODEL=your-model-id
 export SEON_AI_API_KEY=your-key            # or SEON_AI_API_KEY_ENV=MY_KEY_VAR
 bin/seon restart pod

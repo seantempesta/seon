@@ -46,7 +46,9 @@ second LLM retry or transport path. Adapters are `openai_compat.cljs`
 Verified `:openai-compat` gateways: OpenRouter (acme), Meta Model API
 (Muse Spark 1.1 — config recipe, measured speed, and the
 `SEON_AI_THINKING=minimal` dial in
-`docs/prds/agent-ctx/research/meta-model-api-muse-spark-2026-07-10.md`).
+`docs/prds/agent-ctx/research/meta-model-api-muse-spark-2026-07-10.md`), and
+Moonshot AI (Kimi K3 — `https://api.moonshot.ai/v1`, `kimi-k3`, credential
+name `MOONSHOT_API_KEY`; K3 only accepts max reasoning effort today).
 On `:openai-compat` a string thinking goes out as the STANDARD
 `reasoning_effort` and the vendor `:thinking` field is NEVER sent
 (strict gateways 400 unknown params); `:deepseek` keeps its explicit

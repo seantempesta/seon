@@ -173,15 +173,16 @@
   (let [cfg      (:seon.ai/resolved-config resolution)
         thinking (ai/thinking-mode cfg)
         compat?  (openai-compat? resolution)
+        temperature* (or temperature (:seon.ai/temperature cfg))
         tools*   (or tools (:seon.ai/tools cfg))
         choice*  (or tool-choice (:seon.ai/tool-choice cfg))]
     (cond->
       {:model          (or model (:seon.ai/model cfg))
        :messages       [{:role "system" :content (ai/effective-system-prompt request)}
                         {:role "user"   :content ctx}]
-       :temperature    (or temperature (:seon.ai/temperature cfg))
        :max_tokens     (or max-tokens (:seon.ai/max-tokens cfg))
        :stream_options {:include_usage true}}
+      (some? temperature*) (assoc :temperature temperature*)
       ;; :deepseek always sends the vendor :thinking toggle (that API
       ;; defaults to enabled); :openai-compat never sends it — only the
       ;; standard :reasoning_effort (see the thinking-mode note above).

@@ -345,7 +345,7 @@
                     ::max-tokens 4096 ::thinking "false"
                     ::timeout-ms 60000
                     ::base-url "https://api.deepseek.com/v1"}
-   :openai-compat  {::model "deepseek-v4-pro" ::temperature 0.7
+   :openai-compat  {::model "deepseek-v4-pro"
                     ::max-tokens 4096 ::thinking "false"
                     ::timeout-ms 60000}
    :anthropic      {::model "claude-opus-4-8" ::max-tokens 16000

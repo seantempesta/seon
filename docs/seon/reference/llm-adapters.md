@@ -6,9 +6,9 @@ tags: [reference, agent]
 
 # LLM Adapters — providers, config, and usage
 
-The Seon CLJS pod talks to LLMs through two adapters, both on official Node
-SDKs (migrated 2026-06-16). This is the complete reference for configuring and
-calling them — including how to point the pod at a self-hosted
+The Seon CLJS pod talks to hosted LLMs through two SDK-backed adapters and an
+optional DiffusionGemma worker path. This is the complete reference for
+configuring and calling them — including how to point the pod at a self-hosted
 **Qwen3.6-35B-A3B** (or any OpenAI-compatible server), enable tool-calling, and
 read back per-turn usage.
 
@@ -99,8 +99,10 @@ accepted — the adapter strips a trailing `/chat/completions` (or
 | timeout-ms | `60000` | `60000` |
 | thinking | disabled unless turned on | adaptive when truthy |
 
-`:openai-compat` has **no shipped endpoint** — `SEON_AI_BASE_URL` is required
-(missing → a legible error envelope at call time, never a throw).
+`:openai-compat` has **no shipped endpoint or temperature** —
+`SEON_AI_BASE_URL` is required (missing → a legible error envelope at call
+time, never a throw). Sampling is omitted unless explicitly configured because
+some compatible models fix those fields and reject supplied values.
 
 ### Thinking
 
@@ -116,14 +118,54 @@ accepted — the adapter strips a trailing `/chat/completions` (or
 - `:anthropic` maps any truthy thinking to `{:thinking {:type "adaptive"}}`;
   falsy omits the key entirely.
 
-## Model catalog — the top models and their good configs (2026-07-10)
+## Model catalog — the top models and their good configs (2026-07-19)
 
 The one place that lists CURRENT recommended models per provider with the
 config that actually works. Update this table when a provider ships or
 deprecates a model — same discipline as code. ✔ = verified live from seon;
 ◇ = from provider reference, not yet driven live.
 
+This catalog tracks every model Seon actively recommends, defaults to, or uses
+as a maintained specialist. It deliberately does not mirror every vendor SKU:
+adding a row means Seon has a concrete role and configuration for that model.
+Each tracked entry must retain model id, provider/adapter, current price,
+context, reasoning/latency behavior, verification status, recommendation,
+primary refresh link, and checked date.
+
+Prices are snapshots, not configuration truth. Each hosted-provider section
+carries a primary pricing link and an “as of” date; refresh the number from
+that link before a large run. The durable decision is the relative role (daily
+loop, planning, or specialist), which should be revalidated with Seon's Inspect
+scorecard whenever model behavior or pricing changes.
+
+### Hosted-model cost and role snapshot (2026-07-19)
+
+USD per one million tokens. Input columns distinguish automatic prefix-cache
+hits where the provider publishes a separate rate.
+
+| Model | Cache-hit input | Cache-miss input | Output | Context | Reasoning / speed | Seon role |
+|---|---:|---:|---:|---:|---|---|
+| `deepseek-v4-flash` | $0.0028 | $0.14 | $0.28 | 1M | Thinking selectable; ~68 tok/s measured | Cheapest fast worker / routine turns |
+| `deepseek-v4-pro` | $0.003625 | $0.435 | $0.87 | 1M | Thinking selectable; ~43 tok/s measured | Default quality/cost baseline |
+| `muse-spark-1.1` | $0.15 | $1.25 | $4.25 | 1M | Always reasons; `minimal` measured at ~900–1,060 tok/s | Fast daily agent and iterative implementation |
+| `kimi-k3` | $0.30 | $3.00 | $15.00 | 1M | Always reasons; only `max`, no live Seon speed yet | Selective long-horizon planning, research, and difficult coding |
+| `claude-haiku-4-5` | $0.10 | $1.00 | $5.00 | 200K | Fast tier; not live-verified in Seon | Quick specialist calls when Anthropic behavior matters |
+| `claude-sonnet-5` | $0.20 | $2.00 | $10.00 | 1M | Adaptive reasoning; new tokenizer | Coding/agentic alternative through 2026-08-31 intro pricing |
+| `claude-opus-4-8` | $0.50 | $5.00 | $25.00 | 1M | Adaptive reasoning; optional premium fast mode | Hard cross-boundary coding and judgment |
+| `claude-fable-5` | $1.00 | $10.00 | $50.00 | 1M | Thinking always on | Rarest hardest long-horizon work only |
+| `Qwen/Qwen3.6-35B-A3B` | local | local | local | server-dependent | Thinking selectable with correct parser | Self-hosted OpenAI-compatible baseline |
+| DiffusionGemma | local / RunPod | local / RunPod | local / RunPod | backend-dependent | Diffusion generation; ~120 tok/s measured on M-series | Experimental local specialist, opt-in only |
+
+At these rates, K3 costs about 6.9×/17.2× DeepSeek V4 Pro on uncached
+input/output, 21.4×/53.6× V4 Flash, and 2.4×/3.5× Muse Spark. Cache behavior,
+reasoning-token volume, retries, and task success can dominate sticker price,
+so compare cost per successful task in `evals/scorecard.jsonl`, not only cost
+per token.
+
 ### DeepSeek direct (`:deepseek` — the shipped default)
+
+Price source: [DeepSeek models and pricing](https://api-docs.deepseek.com/quick_start/pricing),
+checked 2026-07-19.
 
 | Model | In/out $/M (cache-hit in) | Notes |
 |---|---|---|
@@ -143,6 +185,10 @@ DEEPSEEK_API_KEY=<key>
 
 ### Meta Model API (`:openai-compat`) — Muse Spark 1.1
 
+Release source: [Meta's Muse Spark 1.1 announcement](https://ai.meta.com/blog/introducing-muse-spark-meta-model-api/).
+The public-preview prices below were checked 2026-07-19 against the provider
+recipe/evidence linked after the table; recheck during preview.
+
 | Model | In/out $/M | Notes |
 |---|---|---|
 | ✔ `muse-spark-1.1` | $1.25 / $4.25 (reasoning bills as output) | ~900–1,060 tok/s decode (≈20× v4-pro); hidden reasoning has NO off-switch — ALWAYS dial `SEON_AI_THINKING=minimal` (TTFT 3.9s, wall 7.7s, beats v4-flash). 1M ctx, multimodal in. Public preview. |
@@ -150,7 +196,52 @@ DEEPSEEK_API_KEY=<key>
 Full recipe, measured tables, gotchas:
 `docs/prds/agent-ctx/research/meta-model-api-muse-spark-2026-07-10.md`.
 
+### Moonshot AI (`:openai-compat`) — Kimi K3
+
+Price source: [Kimi K3 pricing](https://platform.kimi.ai/docs/pricing/chat-k3),
+checked 2026-07-19. Capability/config source:
+[Kimi K3 quickstart](https://platform.kimi.ai/docs/guide/kimi-k3-quickstart).
+
+| Model | Context | Notes |
+|---|---|---|
+| ◇ `kimi-k3` | 1M | Flagship long-horizon coding/knowledge model. Thinking is always enabled; as of 2026-07-19, `reasoning_effort` accepts only `max` (also the default). Sampling values are fixed, so omit temperature/top-p rather than sending them. Automatic prefix caching is available. |
+
+Kimi uses the conventional `MOONSHOT_API_KEY` name and the existing generic
+adapter; no Kimi-specific provider or retry path is needed:
+
+```bash
+export MOONSHOT_API_KEY=<key>
+export SEON_AI_PROVIDER=openai-compat
+export SEON_AI_BASE_URL=https://api.moonshot.ai/v1
+export SEON_AI_MODEL=kimi-k3
+export SEON_AI_API_KEY_ENV=MOONSHOT_API_KEY
+```
+
+Leave `SEON_AI_THINKING` unset or `false`. For `:openai-compat`, that means
+“omit the reasoning field,” not “disable model reasoning,” so K3 applies its
+required `max` default. Setting `max` produces the same effort and is not a
+latency optimization. Lower effort levels are announced but not yet available;
+there is currently no supported K3 dial that trades quality for lower latency.
+For ordinary low-latency turns, keep a faster model as the cluster default and
+route only long-horizon agents to K3 (or use a separate K3 cluster because the
+OpenAI-compatible base URL/key selection is global).
+
+The useful mixed-cost topology in one cluster is therefore **DeepSeek globally,
+Kimi for selected planning agents**: keep `:seon.ai/provider :deepseek` on the
+config singleton while storing the Moonshot base URL and credential variable
+there; set the planning agent's provider/model overrides to
+`:openai-compat`/`"kimi-k3"`. DeepSeek ignores that compatible-gateway endpoint,
+while the selected planner resolves it. Muse and Kimi cannot both be selected
+as separate per-agent OpenAI-compatible gateways in one cluster today because
+base URL and credential selection are global-row settings; use separate
+clusters when comparing them live.
+
 ### Anthropic (`:anthropic`)
+
+Price source: [Claude API pricing](https://docs.anthropic.com/en/docs/about-claude/pricing),
+checked 2026-07-19. Cache-hit prices and context sizes are included in the
+cross-provider table above. Sonnet 5's $2/$10 introductory price ends after
+2026-08-31; its published standard price is $3/$15.
 
 | Model | In/out $/M | Notes |
 |---|---|---|
