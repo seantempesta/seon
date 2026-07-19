@@ -646,6 +646,66 @@
         [#(set! message/message! %) message!]
         [#(set! db.id/allocate! %) allocate!]]))))
 
+(deftest ensure-namespace-agent-reuses-resident-with-a-launch-variant
+  (async done
+    (let [available? admission/available?
+          db! db/db
+          query db/query
+          pull-many db/pull-many
+          message! message/message!
+          allocate! db.id/allocate!
+          query-count (atom 0)
+          message-count (atom 0)
+          allocation-count (atom 0)]
+      (set! admission/available? (constantly true))
+      (set! db/db
+            (fn
+              ([] (js/Promise.resolve database))
+              ([_] (js/Promise.resolve database))))
+      (set! db/pull-many
+            (fn
+              ([request]
+               (is (identical? database (::db/db request)))
+               (js/Promise.resolve
+                [{:seon.agent/id "parent"}
+                 (assoc stored-configuration
+                        :seon.config/model-variants
+                        (pr-str {:execution
+                                 {:seon.ai/agent-model "executor"}}))]))
+              ([_ _]
+               (js/Promise.reject (js/Error. "unexpected pull-many arity")))
+              ([_ _ _]
+               (js/Promise.reject (js/Error. "unexpected pull-many arity")))))
+      (set! db/query
+            (fn [_request]
+              (js/Promise.resolve
+               (if (= 1 (swap! query-count inc)) "tax-resident" 7000))))
+      (set! message/message!
+            (fn [_]
+              (swap! message-count inc)
+              (js/Promise.resolve {:seon.error/message "must not message"})))
+      (set! db.id/allocate!
+            (fn [_]
+              (swap! allocation-count inc)
+              (js/Promise.resolve {:seon.error/message "must not allocate"})))
+      (finish!
+       (-> (agent/ensure-namespace-agent!
+            {:seon.agent/id "parent"
+             :seon.agent/namespace 'my.tax
+             :seon.config/model-variant :execution})
+           (.then
+            (fn [result]
+              (is (= {:seon.agent/id "tax-resident"} result))
+              (is (zero? @message-count))
+              (is (zero? @allocation-count)))))
+       done
+       [[#(set! admission/available? %) available?]
+        [#(set! db/db %) db!]
+        [#(set! db/query %) query]
+        [#(set! db/pull-many %) pull-many]
+        [#(set! message/message! %) message!]
+        [#(set! db.id/allocate! %) allocate!]]))))
+
 (deftest set-purpose-authorizes-and-writes-at-one-database-value
   (async done
     (let [current-agent-id db/current-agent-id

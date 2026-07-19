@@ -977,7 +977,7 @@
 
 (defn ^:async ^:private spawn-child-with-retry!
   [function-name parent-id model-variant purpose default-turn-limit
-   initial-message-content namespace]
+   initial-message-content namespace reuse-resident?]
   (loop [attempt 1]
     (let [acquisition
           (await (acquire-spawn-database function-name parent-id namespace))]
@@ -1001,7 +1001,7 @@
                 (error-value? model-overrides)
                 model-overrides
 
-                (and resident-id model-variant)
+                (and resident-id model-variant (not reuse-resident?))
                 {:seon.error/message
                  (str function-name ": model variant " (pr-str model-variant)
                       " applies only when launching a new agent; namespace "
@@ -1058,7 +1058,36 @@
     (await
      (spawn-child-with-retry!
       "start!" (db/current-agent-id) model-variant purpose default-turn-limit
-      nil namespace))))
+      nil namespace false))))
+
+(schema/register! ::ensure-namespace-agent-request
+  [:map {:closed true}
+   [:seon.agent/id :seon.agent/id]
+   [:seon.agent/namespace :symbol]
+   [:seon.config/model-variant {:optional true} :seon.config/model-variant]
+   [:seon.agent/purpose {:optional true} :seon.agent/purpose]
+   [:seon.agent/default-turn-limit {:optional true}
+    :seon.agent/default-turn-limit]])
+
+(defn ^:async ^:no-doc ensure-namespace-agent!
+  "Return the live resident for a namespace, birthing it when absent.
+
+   A model variant is copied only by the birth transaction. A resident found
+   during the initial read or a concurrent retry retains its already committed
+   model attributes. The agent remains idle until an ordinary inbound message
+   commits and wakes it."
+  {:malli/schema [:=> [:cat ::ensure-namespace-agent-request]
+                  ::start-response]}
+  [{parent-id :seon.agent/id
+    namespace :seon.agent/namespace
+    model-variant :seon.config/model-variant
+    :seon.agent/keys [purpose default-turn-limit]}]
+  (if-not (admission/available?)
+    (unavailable-response)
+    (await
+     (spawn-child-with-retry!
+      "ensure-namespace-agent!" parent-id model-variant purpose
+      default-turn-limit nil namespace true))))
 
 ;; ============================================================
 ;; delegate! — the one atomic child-birth plus initial-task transition.
@@ -1105,7 +1134,7 @@
       (await
        (spawn-child-with-retry!
         "delegate!" parent-id model-variant purpose default-turn-limit content
-        namespace))
+        namespace false))
       (internal/no-agent-error "delegate!"))))
 
 ;; ============================================================
