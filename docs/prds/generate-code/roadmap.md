@@ -30,6 +30,22 @@ has one configuration owner, the `:namespaces` block. Cluster
 `:seon.config/namespaces` controls only which framework source is stored, and
 agent-entity namespace render overrides no longer exist.
 
+The pure parser projection is complete at `824575c4`. `parse-program` reads a
+reply once and `project-program` retains entries and spans, groups namespace
+sections, recognizes schema registration through actual aliases/refers, derives
+deterministic generated requirements, fences malformed/duplicate declarations,
+and returns structural cycle errors. Its final changed-test proof passed 1,217
+tests/5,461 assertions. Stage 3 executor composition is now the next seam.
+
+Ordinary agent replies already pass through `parse-forms` once and
+`eval-batch!` evaluates entries sequentially. Each whole top-level Promise is
+awaited before the next entry, successful `(ns ...)` forms change the active
+namespace for later entries, failures do not discard later independent forms,
+and the return already carries ordered `:seon.eval/ids`. Ordinary replies do
+not yet derive namespace units or dependency order. The pure projection and
+ordered namespace executor below strengthen that one path; they are not a
+second parser or evaluator.
+
 ## Settled design from the audit
 
 - The public operation is `seon.ai/generate-code!`; it is explicit and
@@ -58,6 +74,93 @@ agent-entity namespace render overrides no longer exist.
   code generation does not add another namespace renderer or allowlist.
 - Kimi K3 is an explicit, high-latency planning option. It is not the default
   executor and never bypasses Seon's contracts or verification.
+
+## Native multi-namespace parser and executor contract
+
+The parser, executor, and orchestration have distinct jobs.
+
+### Parse and project once
+
+`seon.repl.internal/parse-forms` remains the only forgiving reader. It keeps
+the authored lexical order, original/evaluable source, narration and comments,
+spans, mechanically repaired delimiters, and `#code/<lang> <<SENTINEL`
+heredocs. One pure projection over those entries:
+
+- assigns each entry to the last structurally valid `(ns ...)` declaration;
+- leaves forms before the first declaration explicitly unassigned;
+- records duplicate declarations deterministically without losing either
+  source span;
+- derives namespace requirements only from real `ns` `:require` clauses;
+- recognizes `schema/register!` through the alias declared by that namespace,
+  not by textual matching;
+- preserves malformed entries in their source location; and
+- returns generated dependency cycles as structural errors before evaluation.
+
+Repair stays mechanical. It may balance delimiters, preserve independently
+readable forms, and turn the existing heredoc syntax into valid quoted string
+data. It must not invent a namespace, dependency, schema owner, `await`, or
+intended program meaning. The transcript shows the parser's existing repaired
+source and repair note so the agent learns the valid form that actually ran.
+
+### Execute dependency order, preserve authored order
+
+The executor topologically orders namespace units from their generated
+requirements. Within one namespace it preserves authored order except for the
+settled schema-first phases:
+
+1. evaluate the `ns` declaration;
+2. evaluate that namespace's recognized `schema/register!` forms in authored
+   order;
+3. evaluate remaining definitions and ordinary forms in authored order; and
+4. run the existing affected behavioral-test gate.
+
+A dependent namespace becomes eligible only after every generated prerequisite
+passes its complete gate. Independent namespace units may run concurrently.
+One bad form does not erase valid forms on either side, but a namespace cannot
+be marked done while any required eval or behavioral contract fails. Accepted
+forms continue through the existing eval, analyzer, schema publication, and
+program-fact paths exactly once; there is no generated-file authority,
+compiler-state fork, replay log, or second indexer.
+
+### Retain full evidence, return a compact result
+
+Every parsed entry already records one durable eval and `eval-batch!` returns
+its ordered `:seon.eval/ids`. The generation workflow retains those ordinary
+eval facts, including namespace, original and repaired source, timing,
+result/error, and test evidence. It derives namespace status and diffs from the
+same database value instead of storing duplicate result or diff blobs.
+
+The small calling agent receives one ordinary result map derived at an immutable
+database value. Its final schema must reuse established `my.plan` status and
+step connections, `:seon.ns/name`, and the existing ordered `:seon.eval/ids`
+rather than introduce a generation/result vocabulary. The rendered result
+shows the combined source diff, namespace-level applied/failed status, failed
+forms with the minimum repair context, acceptance evidence, and the existing
+eval/result IDs for expansion. Successful values remain queryable but are not
+dumped into the caller's context by default.
+
+### Drive namespace-focused repair agents
+
+The namespace DAG is the input to the database-reactive scheduler, not work the
+small caller performs. Green first-pass units need no worker. Each failed ready
+unit is atomically claimed and sent to one reusable namespace-focused agent
+with:
+
+- the original complete planning reply and root acceptance contract;
+- its exact namespace unit, accepted forms, failed eval IDs, and test errors;
+- prerequisite results and compact sibling status;
+- full current source for its namespace, selected owners, and their `.internal`
+  descendants; and
+- ordinary REPL instructions for redefining, testing, and explicitly deleting
+  functions/tests.
+
+Completion is derived only from successful eval and behavioral-test facts.
+Worker prose or an empty reply cannot mark a unit done. A blocked worker records
+the existing `my.plan` blocked transition plus its error evidence; that wakes
+only the owning coordinator. When all ready work settles, the reactive frontier
+exposes dependents without polling. A later generation prefers the warm idle
+agent that previously completed that namespace, preserving useful transcript
+continuity while replacing stale assignment-specific context.
 
 ## Proposed interaction
 
@@ -268,10 +371,11 @@ The current configuration supports the complete non-secret provider surface on
 each agent entity: provider, model, temperature, output cap, thinking, timeout,
 base URL, credential-variable name, DiffusionGemma backend, extra body, and
 retries. Explicit request options override agent values, which override the
-global row, which overrides shipped defaults. `generate-code!` can therefore
-attach a planning configuration directly and mechanically; callers never
-select a provider. Named reusable profiles remain a convenience to evaluate,
-not a prerequisite for multi-model execution.
+global row, which overrides shipped defaults. Commit `0a99a7d9` adds named
+sparse `:planning` and `:execution` variants plus a request-only selector on
+every agent-birth function. The selected ordinary agent attributes are copied
+into the atomic birth transaction, so `generate-code!` selects a role name and
+callers never choose a provider or carry its configuration.
 
 Provider-specific options stay inside that existing adapter configuration. Kimi
 K3 always reasons, currently accepts only maximal reasoning effort, and needs
@@ -311,6 +415,9 @@ Exit:
 - the complete affected CLJS gate plus a fresh live cluster pass.
 
 ### Stage 2 — pure generation projection
+
+**Graduated 2026-07-19 at `824575c4`.** `parse-program` and `project-program`
+landed in the existing parser namespace with the full exit battery below.
 
 Add one pure function beside the existing REPL parser that groups
 `parse-forms` entries into namespace units, classifies actual aliased
@@ -390,9 +497,10 @@ Exit:
 ### Stage 7 — public function and model routing
 
 Add `seon.ai/generate-code!` over the approved root, planner, projection,
-scheduler, and result query. Select planning/execution/repair settings by
-attaching the existing per-agent model attributes. Add named reusable profiles
-only if the MVP shows direct configuration repetition is materially costly.
+scheduler, and result query. Select planning/execution/repair settings through
+the existing named model variants, whose values are copied onto the new agent
+at birth. The variant mechanism is complete at `0a99a7d9`; this stage consumes
+it without branching on providers.
 
 Exit:
 
@@ -432,9 +540,11 @@ Exit:
 
 ## Next implementation boundary
 
-Stage 1 is dependency-critical: migrate namespace values to symbols through the
-single analyzer/index/config/context/query path, wipe and rebuild an isolated
-database, and prove the second index pass is a no-op. Stage 2's pure projection
-and Stage 7's model-profile source inventory can proceed as non-overlapping
-research, but no orchestration code may assume symbol identities until Stage 1
-passes its live rebuild gate.
+Stage 1 remains the persistence-critical boundary: migrate namespace values to
+symbols through the single analyzer/index/config/context/query path, wipe and
+rebuild an isolated database, and prove the second index pass is a no-op. The
+completed Stage 2 projection allows Stage 3's invocation-local evaluator
+composition to proceed independently. Stage 4 database reconciliation and all
+later orchestration must not assume symbol identities until Stage 1 passes its
+live rebuild gate. Named model variants are available now; their isolated Kimi
+compatibility proof can also proceed without touching namespace persistence.
