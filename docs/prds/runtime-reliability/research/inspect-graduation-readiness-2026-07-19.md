@@ -202,3 +202,29 @@ The final Inspect gate is green only when the fixed/generated thresholds pass
 on one exact admitted source and model identity, every deterministic run is
 valid, and the scored evidence is ordinary database/turn/eval/process data
 from the same product doors used by the browser and runtime graduation.
+
+## Post-audit correction
+
+The deterministic harness defect identified by this audit is resolved. The
+fixed database good fixture now expresses the complete current workflow, and
+the offline proof declares and checks the expected primary scorer mean for
+each of its sixteen runs. A missing metric, changed metric, or unsuccessful
+Inspect run now makes the command exit nonzero.
+
+Focused regression evidence:
+
+```bash
+cd src-inspect-ai
+.venv/bin/pytest -q \
+  tests/test_tasks_offline.py \
+  tests/test_offline_proof.py \
+  tests/test_milestone.py
+```
+
+Result: **55 passed with 13 dependency-deprecation warnings in 6.08 seconds**.
+
+The real sixteen-arm offline proof then returned zero in 7.6 seconds. The
+database good and bad arms produced the required `milestone_scorer` mean
+accuracies of **1.0** and **0.0**. All other declared expected means also
+matched. This closes ordered implementation step 1; it does not claim any of
+the still-missing live product scenarios listed above.

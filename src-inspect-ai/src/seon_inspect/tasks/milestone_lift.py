@@ -77,12 +77,25 @@ ROWS: dict[str, dict] = {
         "good": {
             "reply": "The total weight of caches over 10 kg is 59.5 kg.",
             "eval_rows": [
-                {"source": "(schema/register! :my.cache/weight-kg :double)",
+                {"source": "(schema/register! :my.cache/name "
+                           "[:string {:seon.db/identity true}])",
+                 "ok": True},
+                {"source": "(schema/register! :my.cache/weight-kg :int)",
                  "ok": True},
                 {"source": "(db/transact! [{:my.cache/name \"KESTREL\" "
-                           ":my.cache/weight-kg 42.5}])", "ok": True},
-                {"source": "(db/query '[:find (sum ?w) . :with ?e :where "
+                           ":my.cache/weight-kg 42.5} "
+                           "{:my.cache/name \"MARMOT\" "
+                           ":my.cache/weight-kg 17.0} "
+                           "{:my.cache/name \"TERN\" "
+                           ":my.cache/weight-kg 8.25} "
+                           "{:my.cache/name \"PLOVER\" "
+                           ":my.cache/weight-kg 3.75}])", "ok": True},
+                {"source": "(db/query '[:find (sum ?w) . :where "
                            "[?e :my.cache/weight-kg ?w] [(> ?w 10)]])",
+                 "ok": True},
+                {"source": "(message/user \"The recalled total is 59.5\")",
+                 "ok": True},
+                {"source": "(complete \"The recalled total is 59.5\")",
                  "ok": True},
             ],
         },

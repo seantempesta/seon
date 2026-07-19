@@ -11,6 +11,7 @@ from inspect_ai import eval as inspect_eval
 from seon_inspect.tasks.e1_spec_fn import e1_spec_fn
 from seon_inspect.tasks.ladder_lift import ladder_lift
 from seon_inspect.tasks.long_term_planning import long_term_planning
+from seon_inspect.tasks.milestone_lift import milestone_lift
 from seon_inspect.tasks.skill_lift import skill_lift
 
 
@@ -49,6 +50,17 @@ def test_skill_lift_discriminates(condition, expected):
 def test_ladder_lift_discriminates(ladder, expected):
     got = _mean_accuracy(ladder_lift(ladder=ladder, endpoint="mock:ladder"))
     assert got == pytest.approx(expected)
+
+
+@pytest.mark.parametrize("milestone,endpoint,expected", [
+    ("namespaces", "mock:good", 1.0),
+    ("namespaces", "mock:bad", 0.0),
+    ("db", "mock:good", 1.0),
+    ("db", "mock:bad", 0.0),
+])
+def test_milestone_fixtures_use_real_scorer(milestone, endpoint, expected):
+    task = milestone_lift(milestone=milestone, endpoint=endpoint)
+    assert _mean_accuracy(task) == pytest.approx(expected)
 
 
 @pytest.mark.parametrize("arm,expected", [
