@@ -467,7 +467,9 @@ prose is supporting evidence only.
 - [x] Prove abnormal pod TERM/KILL leaves no execution child or descendant
   through Bun no-orphans cleanup.
 - [x] Pass three consecutive fixed live namespace epochs without fabrication.
-- [ ] Pass the fixed live namespace and later-turn database-memory scenarios.
+- [x] Pass the fixed live namespace and later-turn database-memory scenarios.
+- [x] Pass a seeded generated database-memory row against dynamic attributes
+  and the typed final database query.
 - [ ] Pass generated namespace and database variants without adding scorer
   exceptions for model answers.
 - [ ] Graduate plan persistence across pod restart with the same agent.

@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, agent, database, milestone]
 ---
@@ -60,3 +60,12 @@ reply, that duplicate side effect was removed from this database-specific
 contract. The frozen generated artifact and hashes were intentionally updated;
 the combined focused gate passes 156 tests. A fresh generated run remains the
 archival gate.
+
+## Resolution
+
+The fixed workflow passes live in 48 seconds with accuracy 1.0 and zero
+fabrication. After the two live contract simplifications above, a fresh seed-3
+generated row passes in 61 seconds with dynamic attributes, exact stored facts,
+the later computation, and the typed final database query. Native logs are
+`2026-07-19T08-16-22-00-00_milestone-lift_j9nCsGHjfczVVYrB7G7c86.eval` and
+`2026-07-19T08-27-42-00-00_milestone-lift_2hSWbcW8Lb6FvYPyNaHtHH.eval`.

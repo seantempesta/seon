@@ -113,11 +113,23 @@ artifact and hashes were regenerated through the canonical generator. The
 combined milestone/generator/solver proof passes 156 tests with 11 net lines
 removed in this simplification. A fresh generated run remains required.
 
+The final falsifier passes. The fixed database workflow scored accuracy 1.0
+and zero fabrication in 48 seconds
+(`2026-07-19T08-16-22-00-00_milestone-lift_j9nCsGHjfczVVYrB7G7c86.eval`). A
+fresh seed-3 generated workflow then scored accuracy 1.0 and zero fabrication
+in 61 seconds
+(`2026-07-19T08-27-42-00-00_milestone-lift_2hSWbcW8Lb6FvYPyNaHtHH.eval`)
+using dynamic attributes, exact final
+facts, and the typed final database query. Seed 1's correct work exposed the
+query/computation mismatch; seed 2's correct database work exposed redundant
+reporting; seed 3 proves the simplified contract end to end. The milestone
+database scorer is graduated. Reachability is now the earliest stale evidence
+consumer.
+
 ## Ordered next boundary
 
-1. Run the corrected fixed database scenario against its final typed query.
-2. Standardize reachability on `pod_database_value`, basis transaction `t`, and
+1. Standardize reachability on `pod_database_value`, basis transaction `t`, and
    `rendered_transaction`.
-3. Run seeded database and reachability variants against production evidence.
-4. Retain operation evidence only where the database cannot derive the fact;
+2. Run seeded reachability variants against production evidence.
+3. Retain operation evidence only where the database cannot derive the fact;
    do not rebuild a generic parallel event system for the scorer.

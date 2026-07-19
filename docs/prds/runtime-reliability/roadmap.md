@@ -119,8 +119,10 @@ ordered contract. The milestone scorer now consumes the ordinary database
 value, checks eval transactions against its basis transaction, and reads the
 actual stored pairs once through the typed product-evidence query; the
 synthetic operation tree and fixtures are gone, with 70 focused tests passing
-and 28 net lines removed. Live fixed-database proof is next, while reachability
-still owns the same stale assumptions independently. The real browser/Datastar
+and 28 net lines removed. The fixed workflow passes in 48 seconds and a fresh
+seed-3 generated workflow passes in 61 seconds, both with accuracy 1.0 and zero
+fabrication. Reachability still owns the same stale assumptions independently
+and is now the earliest Inspect contract. The real browser/Datastar
 journey is the dependency-ready parallel portfolio; the
 complete live Inspect, browser, package, downstream,
 multi-cluster, and modest-hardware matrix remains the final gate.
