@@ -84,6 +84,16 @@ are detached. Focused host/execution/client compilation passes 54 tests/223
 assertions, and operator process selection passes 61/314. Retained-branch close
 and abnormal TERM/KILL remain the live graduation proof.
 
+Normal retained-branch proof now passes. The branch pod PID `39947` owned
+execution child PIDs `40245` and `41046`; the first survived an earlier
+provider-level failure and the second completed a real namespace workflow.
+`bin/seon branch close inspect-anthropic` returned success, all three PIDs were
+absent one second later, the branch database was deleted without a
+database-in-use refusal, and the shared writer remained ready. The namespace
+workflow itself passed with accuracy 1.0 and zero fabrication in native Inspect
+log `2026-07-19T07-56-56-00-00_milestone-lift_jCpMNc4cVt8U5b7pdnKhbv.eval`.
+Abnormal TERM/KILL remains open.
+
 ## Owner
 
 The one managed-process transition in `script/seon/dev/process.clj` and the

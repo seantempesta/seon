@@ -104,7 +104,13 @@ occupy separate sessions while normal pod drain never awaited them. The one
 runtime inverse now awaits child exits, installs an IPC-disconnect backstop,
 and selects vendored Bun's no-orphans parent-death cleanup in the pod's managed
 environment. Focused CLJS and operator proof passes; retained-branch close and
-abnormal parent-loss proof remain. The same three-epoch live run must
+abnormal parent-loss proof remain. Normal retained-branch close now reaped two
+execution children and released the branch while the shared writer stayed
+ready. One real Anthropic-backed namespace sample also passed in 2:24 with
+accuracy 1.0 and zero fabrication; the default persisted Meta-compatible
+provider currently returns HTTP 402, so that external configuration cannot be
+mistaken for a runtime regression. Abnormal parent-loss and the same
+three-epoch live run must
 close both contracts before the database scorer advances. The real browser/Datastar
 journey is the dependency-ready parallel portfolio; the
 complete live Inspect, browser, package, downstream,

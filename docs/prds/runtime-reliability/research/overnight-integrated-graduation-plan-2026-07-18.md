@@ -107,7 +107,18 @@ source lines in this ledger or the owning successor PRD.
   disconnect reuses child shutdown, and the descriptor-derived pod environment
   enables Bun's existing no-orphans parent-death/descendant cleanup. Focused
   CLJS proof passes 54 tests/223 assertions and operator process proof passes
-  61/314. Live branch close plus abnormal parent loss remain unchecked.
+  61/314. A retained branch then closed normally while owning two execution
+  children, including one retained across an earlier provider failure; both
+  child PIDs and the pod PID were gone and the writer stayed ready. Abnormal
+  parent loss remains unchecked.
+- The first post-fix namespace sample exposed persisted provider truth rather
+  than a runtime failure. The source branch inherited `:openai-compat` with the
+  Meta endpoint and `muse-spark-1.1`; that provider returned HTTP 402. The
+  configured DeepSeek key fingerprint was the expected current key and was not
+  selected. A disposable branch transaction selected Anthropic and retracted
+  the incompatible endpoint attributes; the fixed namespace scenario then
+  passed in 2:24 with accuracy 1.0 and fabrication 0.0. Native log:
+  `src-inspect-ai/logs/2026-07-19T07-56-56-00-00_milestone-lift_jCpMNc4cVt8U5b7pdnKhbv.eval`.
 - The first admitted live namespace battery now reaches the real scorer. Native
   log `…fxN7bWkJXsVehcJBqs9K3B.eval` completed all three samples with two
   passes, zero fabrication, and one `NaN` failure after repeated unquoted
@@ -444,9 +455,10 @@ prose is supporting evidence only.
   keep the pod subscribed and let execution children decline unconsumed events.
 - [x] Preserve every structurally bounded model-attempt row instead of applying
   a render display cap to formal Inspect evidence.
-- [ ] Prove normal retained-branch close and abnormal pod TERM/KILL leave no
-  execution child, descendant, or database acquisition after the awaited host
-  drain plus Bun no-orphans correction.
+- [x] Prove normal retained-branch close leaves no execution child or database
+  acquisition after the awaited host drain.
+- [ ] Prove abnormal pod TERM/KILL leaves no execution child or descendant
+  through Bun no-orphans cleanup.
 - [ ] Pass the fixed live namespace and later-turn database-memory scenarios.
 - [ ] Pass generated namespace and database variants without adding scorer
   exceptions for model answers.
