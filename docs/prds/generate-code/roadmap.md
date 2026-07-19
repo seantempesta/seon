@@ -411,6 +411,15 @@ These are required follow-on contracts, not optional ideas:
   namespace catalog and compact/full selections. Disabled, unavailable, or
   failed embedding search degrades to deterministic catalog context and never
   creates a second corpus, renderer, or execution path.
+- **Explicit compact inclusion on the existing block:** the current namespace
+  renderer selects only the current namespace, its real require targets, and
+  `full-source` pins. Merely omitting a ranked hit from `full-source` cannot
+  make that namespace appear compact. Add one block-owned presence-set for
+  explicitly included compact namespaces; `full-source` remains the
+  full-detail subset. Both sets are exact assignment projections and are
+  replaced on warm-agent reassignment. This extends the one `:namespaces`
+  mechanism rather than introducing another code renderer or fake require
+  edge.
 - **Agent-directed expansion:** repair the stale `my.ns/functions` guidance
   and add agent-facing full/compact operations that update the existing
   `:namespaces` block through `seon.agent.ctx/install!`. They preserve every
@@ -650,6 +659,27 @@ it without branching on providers. REPL mode joins the same sparse per-agent
 launch data: planning and generated repair variants select `:batch` even when
 the cluster's ordinary default is `:stream`.
 
+The public wrapper is not the first implementation seam. The ordinary planner
+turn already calls `parse-program` once and evaluates its ordered projection,
+but `seon.agent.turn` currently discards the parsed program and reduces the
+batch result before generation orchestration can consume them. First add one
+cause-linked handoff that gives the existing plan publisher that exact
+in-memory program and eval result. The publisher atomically reconciles the
+namespace leaves through `compile-namespace-dag` and then starts the existing
+execution scheduler. Re-reading and reparsing the reply blob is forbidden.
+
+That handoff also closes these prerequisites through their existing owners:
+
+- the ordinary root request accepts `:my.plan/description` with goal and
+  expectation;
+- planner launch connects its initial assignment message to the generation
+  root, so message, run cause, turn, evals, and reply identify one result;
+- the root is durably discoverable before its first namespace child exists;
+- scheduler/dispatch failures become plan error evidence or a blocked
+  transition instead of disappearing in a reactive callback; and
+- terminal delivery derives one compact result and commits an addressed
+  message rather than only releasing the observer.
+
 Exit:
 
 - a small calling model can correctly frame the three-field request;
@@ -703,6 +733,18 @@ registry, parser, or worker-selection path.
 
 After that assignment-time reconciliation lands, the next two bounded Stage 6
 slices are the `my.ns` full/compact operations plus stale-guidance repair, then
-embedding-ranked namespace augmentation. The AI-only effective-definition
-transcript projection follows as its own evidence slice because it touches
-history acquisition and must prove the HTML/debug transcript remains raw.
+embedding-ranked namespace augmentation. The first is complete at `15acdaf9`.
+The embedding slice must first add explicit compact inclusion to the existing
+namespaces block; current selection cannot render an unrelated ranked hit as a
+compact card. Search the existing function-source corpus only, scope to usable
+function rows, pull each hit's owning namespace, group by namespace using its
+best distance with deterministic tie-breaking, and reconcile exact compact
+and full presence-sets. Disabled or failed embedding search returns the
+deterministic selection unchanged. Do not add namespace-summary embeddings,
+fake require edges, or another context renderer.
+
+After Stage 6, Stage 7 begins with the parse-once planner-turn handoff and
+database-owning DAG publication described above, not a standalone public
+wrapper. The AI-only effective-definition transcript projection remains its
+own evidence slice because it touches history acquisition and must prove the
+HTML/debug transcript remains raw.
