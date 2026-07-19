@@ -25,10 +25,10 @@ probes, context measurements, and paid Kimi K3 results live in
 [[research/design-seam-audit-2026-07-19]]. This roadmap is the implementation
 ledger for the staged implementation below.
 
-Stages 1–4 and the first Stage 5 scheduler boundary are now source-complete.
-The remaining workflow is not yet public or end-to-end: startup recovery,
-progressive repair context, evidence-derived completion, the public wrapper,
-and live graduation remain open.
+Stages 1–4 and the projected-root portion of the Stage 5 scheduler are now
+source-complete. The remaining workflow is not yet public or end-to-end:
+root-only planner recovery, progressive repair context, evidence-derived
+completion, the public wrapper, and live graduation remain open.
 
 The preparatory context cleanup is complete at `e205dc9e`: namespace rendering
 has one configuration owner, the `:namespaces` block. Cluster
@@ -525,16 +525,25 @@ Exit:
 
 ### Stage 5 — reactive scheduler and atomic assignment
 
-**Source-complete 2026-07-19 at `92bfccfd`, `3bfe78da`, `2dbb0fce`, plus the
-startup-recovery slice.** The stable root observer, atomic claim transaction,
-namespace-resident scheduling callback, and cold/hot restoration are
-implemented. One transaction
+**Projected-root scheduler complete 2026-07-19 at `92bfccfd`, `3bfe78da`,
+`2dbb0fce`, plus the startup-restoration slice.** The stable root observer,
+atomic claim transaction, namespace-resident scheduling callback, and cold/hot
+restoration of roots that already have namespace children are implemented. One transaction
 contains the claim CAS, ordinary addressed assignment message, and plan-message
 connection. Competing claim attempts reread the committed claim to classify a
 benign loss without parsing writer errors. The namespace's unique resident is
 ensured idle before assignment; only the winning addressed message starts work.
 New residents copy the named execution model variant, while an existing or
 concurrently won resident retains its committed model attributes.
+
+The restoration query currently discovers a generation through a child carrying
+`:my.plan/namespace`. It therefore cannot recover the root-only interval after a
+planner assignment/reply is durable but before `compile-namespace-dag` commits
+the first child. Stage 7 must make a generation root recognizable from its own
+claim/message/goal facts and reproject the retained reply blob without
+re-evaluating accepted forms. The original awaited Promise cannot survive a pod
+restart; recovery also needs an addressed terminal result plus root-id
+inspection.
 
 Focused scheduler proof passes 183 tests/916 assertions; the recovery/client
 gate passes 55 tests/348 assertions. Together they cover one committed message
