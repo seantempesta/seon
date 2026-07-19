@@ -39,8 +39,9 @@ parts of the target:
 - complete Datastar snapshots use stable-ID outer morphs and latest-wins
   backpressure.
 
-Current page invalidation is implemented but not yet proven sound live end to
-end. The execution child
+Current page invalidation has sustained-import, newest-value convergence,
+browser morph, reconnect, and resource-release proof. The remaining live gap is
+slow-consumer socket convergence under backpressure. The execution child
 captures the Datahike-owned read evidence from successful query, pull,
 pull-many, entity, schema, index, and mixed `execute-many` operations in one
 fiber-local scope and returns it on the ordinary invocation result. The writer
@@ -56,7 +57,7 @@ progress; plan replacement uses the listener acknowledgement database value
 to close the evaluation race; Clojure `=` suppresses established-consumer
 notifications; a fresh consumer receives the current value; and the final
 consumer releases its timer, value, database reachability, and writer
-interest. Sustained live/import proof remains the next ordered boundary.
+interest. Sustained live/import proof is closed below.
 
 The first 260-transaction capacity probe exposed one lower transport boundary:
 the exact-request retry already recognized local `:busy`, but the public
@@ -65,7 +66,7 @@ ordinary flow control as a core fault. Capacity refusal now resolves as
 transport failure data, which `seon.db` adapts to its existing error value and
 retries without reconnecting. The full CLJS gate passed 1,209 tests / 5,420
 assertions; focused transport and remote-contract gates passed 17 / 66 and
-21 / 97. A rebuilt live retry remains required before the SSE pressure proof.
+21 / 97.
 
 The rebuilt live retry on the disposable `pressure-sse` cluster completed all
 260 concurrent transactions in 25,123 ms with zero error values. Pod, watcher,
