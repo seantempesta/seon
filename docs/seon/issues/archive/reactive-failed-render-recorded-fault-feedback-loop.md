@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: closed
 severity: blocker
 tags: [issue, web, database, flow]
 ---
@@ -52,6 +52,19 @@ datom still repairs and narrows. No classifier attribute or extra transaction
 metadata is stored.
 
 Focused proof passes 7 reactive tests / 49 assertions and 16 Datastar tests /
-75 assertions. Resolution still requires a rebuilt live
-deterministic failure showing one stored/visible fault, no repeating writer
-errors, successful unrelated repair, and zero retained owners.
+75 assertions.
+
+The rebuilt live proof at Seon `aa9970c1` used unique marker
+`reactive-fault-proof-2f3cc07d-0b8c-458c-92d4-9ef0a0554784`. One fault entity
+was stored and its error value delivered once. Through a 1.5-second quiet
+interval, evaluation count remained one and
+`:seon.reactive/failure-evidence-events-suppressed` reached one. A relevant
+ordinary transaction at basis transaction 536870928 caused exactly the second
+evaluation, delivered the repaired value, and installed exact evidence for
+`:seon.agent/id` and `:seon.agent/purpose` at that same basis transaction.
+Active and pending high-water marks remained one. Final unobserve returned
+registration, consumer, active, pending, and timer counts to zero. The writer
+committed-report readiness queue was zero with only the normal default source;
+watcher, writer, and pod remained ready. The harness retracted both its root
+purpose marker and fault entity, leaving root purpose absent and no matching
+fault entity.

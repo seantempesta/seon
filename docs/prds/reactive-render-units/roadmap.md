@@ -237,8 +237,18 @@ report arriving before and after failure completion, and proves an ordinary
 schema declaration plus relevant domain datom does recompute. Exact plan
 narrowing and zero ownership follow. The focused reactive gate passes 7 tests /
 49 assertions and Datastar passes 16 / 75; the earlier combined reactive,
-Datastar, and remote database gate passed 44 / 220. Live deterministic
-failure/repair evidence remains before closing
+Datastar, and remote database gate passed 44 / 220.
+
+The rebuilt live proof at Seon `aa9970c1` stored and delivered one unique fault
+once. Through a 1.5-second quiet interval the registration performed exactly
+one evaluation and suppressed its own persistence report once. A relevant
+ordinary transaction at basis transaction 536870928 performed exactly one
+repair evaluation, delivered the new value, and installed exact evidence for
+`:seon.agent/id` and `:seon.agent/purpose` at that same basis transaction.
+Active and pending high-water marks remained one. Final unobserve returned all
+reactive owners to zero; the writer readiness queue was empty with only the
+normal default committed-report source; watcher, writer, and pod remained
+ready. The unique fault and domain marker were retracted. This closes
 [[reactive-failed-render-recorded-fault-feedback-loop]].
 
 Cache inheritance is demand-driven. A commit updates only attribute revision
