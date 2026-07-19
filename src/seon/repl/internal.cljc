@@ -1229,6 +1229,26 @@
     (:seon.repl/span entry)
     (assoc :seon.repl/span (:seon.repl/span entry))))
 
+(defn- parsed-entry-error [entry]
+  (let [error (:seon/error entry)]
+    (cond-> {:seon.error/kind (or (:seon.error/kind error) :read)
+             :seon.error/message (:seon.error/message error)
+             :seon.repl/entry entry}
+      (:seon.repl/span entry)
+      (assoc :seon.repl/span (:seon.repl/span entry)))))
+
+(defn- unscheduled-eval-entry [entry]
+  (if (= :read (:seon.repl/kind entry))
+    entry
+    (-> entry
+        (assoc :seon.repl/kind :read
+               :seon.repl/ok? false
+               :seon/error
+               {:seon.error/kind :namespace
+                :seon.error/message
+                "This form was not evaluated because no valid namespace declaration owned it."})
+        (dissoc :seon.repl/form))))
+
 (defn- dependency-order [sections]
   (let [names (mapv :seon.ns/name sections)
         generated (set names)
@@ -1259,6 +1279,77 @@
                            (apply dissoc remaining ready))
                      (into ordered ready)))))))))
 
+(defn- namespace-section [declaration require-info]
+  (cond-> {:seon.ns/require-edges (:libraries require-info)
+           :seon.repl/schema-entries []
+           :seon.repl/entries []
+           ::require-info require-info}
+    declaration (assoc :seon.repl/declaration declaration)))
+
+(defn- namespace-index [namespaces name]
+  (first
+    (keep-indexed
+      (fn [index namespace]
+        (when (= name (:seon.ns/name namespace)) index))
+      namespaces)))
+
+(defn- append-namespace-section [state name declaration require-info]
+  (let [namespaces (:namespaces state)
+        existing-index (namespace-index namespaces name)
+        section (namespace-section declaration require-info)]
+    (if (some? existing-index)
+      (let [section-index
+            (count (get-in state [:namespaces existing-index
+                                  :seon.repl/sections]))]
+        (-> state
+            (assoc :current [existing-index section-index])
+            (update-in [:namespaces existing-index :seon.ns/require-edges]
+                       into (:libraries require-info))
+            (update-in [:namespaces existing-index :seon.repl/sections]
+                       conj section)))
+      (let [new-index (count namespaces)]
+        (-> state
+            (assoc :current [new-index 0])
+            (update :namespaces conj
+                    {:seon.ns/name name
+                     :seon.ns/require-edges (:libraries require-info)
+                     :seon.repl/sections [section]}))))))
+
+(defn- append-namespace-entry [state [namespace-index section-index] entry]
+  (let [section-path [:namespaces namespace-index :seon.repl/sections
+                      section-index]
+        require-info (get-in state (conj section-path ::require-info))
+        entry-key (if (schema-registration? require-info entry)
+                    :seon.repl/schema-entries
+                    :seon.repl/entries)]
+    (update-in state (conj section-path entry-key) conj entry)))
+
+(defn- program-eval-entries [root namespaces namespace-order]
+  (let [by-name (into {} (map (juxt :seon.ns/name identity)) namespaces)
+        annotate
+        (fn [name required phase entry]
+          (assoc entry
+                 :seon.repl/namespace name
+                 :seon.repl/require-edges required
+                 :seon.repl/phase phase))]
+    (into (vec root)
+          (mapcat
+            (fn [name]
+              (let [{:seon.ns/keys [require-edges]
+                     :seon.repl/keys [sections]} (get by-name name)]
+                (mapcat
+                  (fn [{:seon.repl/keys
+                        [declaration schema-entries entries]}]
+                    (concat
+                      (when declaration
+                        [(annotate name require-edges :namespace declaration)])
+                      (map (partial annotate name require-edges :schema)
+                           schema-entries)
+                      (map (partial annotate name require-edges :form)
+                           entries)))
+                  sections)))
+            namespace-order))))
+
 (defn project-program
   "Project one [[parse-forms]] result into namespace sections and dependency
    order without reparsing source.
@@ -1269,104 +1360,62 @@
    edges use the analyzer/program fact name `:seon.ns/require-edges`; only
    edges between namespaces in this projection participate in ordering."
   [entries & [{current-ns :seon.repl/current-ns}]]
-  (let [{:keys [root sections errors]}
+  (let [{:keys [root namespaces errors unscheduled]}
         (reduce
-          (fn [{:keys [sections current] :as state} entry]
+          (fn [{:keys [current] :as state} entry]
             (let [form (:seon.repl/form entry)]
               (cond
                 (and (= :form (:seon.repl/kind entry))
                      (ns-declaration? form))
                 (if (valid-ns-declaration? form)
-                  (let [name (second form)
-                        require-info (ns-require-info form)
-                        existing-index
-                        (first (keep-indexed
-                                 (fn [index section]
-                                   (when (= name (:seon.ns/name section)) index))
-                                 sections))]
-                    (cond
-                      (and (some? existing-index)
-                           (nil? (:seon.repl/declaration
-                                   (nth sections existing-index)))
-                           (= existing-index (dec (count sections))))
-                      (-> state
-                          (assoc :current name)
-                          (assoc-in [:sections existing-index
-                                     :seon.repl/declaration] entry)
-                          (assoc-in [:sections existing-index
-                                     :seon.ns/require-edges]
-                                    (:libraries require-info))
-                          (assoc-in [:sections existing-index ::require-info]
-                                    require-info))
-
-                      (some? existing-index)
-                      (-> state
-                          (assoc :current nil)
-                          (update :errors conj
-                                  (projection-error
-                                    entry
-                                    (str "Duplicate namespace declaration: " name))))
-
-                      :else
-                      (-> state
-                          (assoc :current name)
-                          (update :sections conj
-                                  {:seon.ns/name name
-                                   :seon.ns/require-edges
-                                   (:libraries require-info)
-                                   :seon.repl/declaration entry
-                                   :seon.repl/schema-entries []
-                                   :seon.repl/entries []
-                                   ::require-info require-info}))))
+                  (append-namespace-section state (second form) entry
+                                            (ns-require-info form))
                   (-> state
                       (assoc :current nil)
+                      (update :unscheduled conj entry)
                       (update :errors conj
                               (projection-error
                                 entry
                                 "Namespace declaration requires a symbol name."))))
 
                 current
-                (let [index (dec (count sections))
-                      info (::require-info (nth sections index))
-                      state (if (schema-registration? info entry)
-                              (update-in state
-                                         [:sections index
-                                          :seon.repl/schema-entries]
-                                         conj entry)
-                              (update-in state
-                                         [:sections index :seon.repl/entries]
-                                         conj entry))]
+                (let [state (append-namespace-entry state current entry)]
                   (if (= :read (:seon.repl/kind entry))
                     (update state :errors conj
-                            (or (:seon/error entry)
-                                (projection-error entry
-                                  "The namespace contains an unreadable form.")))
+                            (parsed-entry-error entry))
                     state))
 
                 (= :comment (:seon.repl/kind entry))
                 (update state :root conj entry)
 
                 :else
-                (update state :errors conj
-                        (projection-error
-                          entry
-                          "A form outside a valid namespace declaration cannot be scheduled.")))))
+                (-> state
+                    (update :unscheduled conj entry)
+                    (update :errors conj
+                            (projection-error
+                              entry
+                              "A form outside a valid namespace declaration cannot be scheduled."))))))
           {:root []
-           :sections
+           :namespaces
            (cond-> []
              (symbol? current-ns)
              (conj {:seon.ns/name current-ns
                     :seon.ns/require-edges #{}
-                    :seon.repl/declaration nil
-                    :seon.repl/schema-entries []
-                    :seon.repl/entries []
-                    ::require-info
-                    {:libraries #{} :aliases {} :refers {}}}))
+                    :seon.repl/sections
+                    [(namespace-section nil
+                       {:libraries #{} :aliases {} :refers {}})]}))
            :errors []
-           :current (when (symbol? current-ns) current-ns)}
+           :unscheduled []
+           :current (when (symbol? current-ns) [0 0])}
           entries)
-        sections (mapv #(dissoc % ::require-info) sections)
-        {:seon.repl/keys [namespace-order cycle]} (dependency-order sections)
+        namespaces
+        (mapv (fn [namespace]
+                (update namespace :seon.repl/sections
+                        (fn [sections]
+                          (mapv #(dissoc % ::require-info) sections))))
+              namespaces)
+        {:seon.repl/keys [namespace-order cycle]}
+        (dependency-order namespaces)
         errors (cond-> errors
                  (seq cycle)
                  (conj {:seon.error/kind :namespace-cycle
@@ -1376,8 +1425,13 @@
                         :seon.ns/names cycle}))]
     {:seon.repl/entries entries
      :seon.repl/root-entries root
-     :seon.repl/namespaces sections
+     :seon.repl/namespaces namespaces
      :seon.repl/namespace-order namespace-order
+     :seon.repl/error-entries (mapv unscheduled-eval-entry unscheduled)
+     :seon.repl/eval-entries
+     (when-not (seq cycle)
+       (into (mapv unscheduled-eval-entry unscheduled)
+             (program-eval-entries root namespaces namespace-order)))
      :seon.repl/errors errors}))
 
 (defn parse-program

@@ -5134,11 +5134,23 @@
                 ::narration       narration
                 ::source          source})))))
 
+(defn- program-entry-skipped?
+  "True when an ordered program entry cannot run after an earlier failure."
+  [failed-namespaces declaration-failures entry]
+  (let [entry-namespace (:seon.repl/namespace entry)
+        namespace-declaration? (= :namespace (:seon.repl/phase entry))]
+    (and entry-namespace
+         (or (and (not namespace-declaration?)
+                  (contains? declaration-failures entry-namespace))
+             (some failed-namespaces (:seon.repl/require-edges entry))))))
+
 (defn ^:async eval-batch!
   "Execute a sequence of parsed entries as a REPL batch.
 
-   Partial-failure: every entry gets its own try + record + result binding; entry
-   N+1 always runs even if N failed.
+   Partial-failure: every independent entry gets its own try + record + result
+   binding. In a namespace-ordered program, a failed declaration fences only
+   the rest of that namespace, and a failed namespace fences only generated
+   dependents; independent namespaces still run.
 
    Per entry, three kinds (`:form` / `:read` / `:comment`, below):
 
@@ -5260,6 +5272,9 @@
         n-ok       (volatile! 0)
         n-fail     (volatile! 0)
         current-ns (volatile! agent-ns-sym)
+        failed-namespaces (volatile! #{})
+        declaration-failures (volatile! #{})
+        skipped-entries (volatile! [])
         ;; A.4 false-confidence guard: symbols whose `(def …)`/`(defn …)`
         ;; eval FAILED this batch. A later non-defining reference to one
         ;; of them escalates to an honest error instead of reading nil
@@ -5296,10 +5311,16 @@
     ;; volatiles stay at their empty seed, and the return below flags :fenced?.
     (doseq [entry (when-not fence-lost? parsed)
             :while (admission/available?)]
-      (await
-        (run-entry!
-          (fn ^:async run-one-entry! []
-            (cond
+      (let [entry-namespace (:seon.repl/namespace entry)
+            skip? (program-entry-skipped? @failed-namespaces
+                                           @declaration-failures entry)]
+        (if skip?
+          (vswap! skipped-entries conj entry)
+          (let [failures-before @n-fail]
+            (await
+              (run-entry!
+                (fn ^:async run-one-entry! []
+                  (cond
                 ;; Read-failure entry from seon.repl.internal. A.2: attempt
                 ;; a PER-FORM parinfer indent-mode repair on the bad span
                 ;; (never the whole reply — that would mangle good forms
@@ -5402,23 +5423,35 @@
                 ;; exact same `dispatch-eval-entry!` the repair sub-loop
                 ;; above calls. One mechanism, no parallel path.
                 :else
-                (append-record!
-                  (await
-                    (dispatch-eval-entry!
-                      {::compile-state   compile-state
-                       :seon.config/configuration configuration
-                       ::authored-sources authored-sources
-                       :seon.agent.turn/id-of-turn turn-id
-                       ::current-ns      current-ns
-                       ::n-ok            n-ok
-                       ::n-fail          n-fail
-                       ::failed-defs     failed-defs
-                       ::outer-test-run? outer-test-run?
-                       ::entry           entry
-                       ::narration       (:seon.repl/narration entry)}))))))))
+                  (append-record!
+                    (await
+                      (dispatch-eval-entry!
+                        {::compile-state   compile-state
+                         :seon.config/configuration configuration
+                         ::authored-sources authored-sources
+                         :seon.agent.turn/id-of-turn turn-id
+                         ::current-ns      current-ns
+                         ::n-ok            n-ok
+                         ::n-fail          n-fail
+                         ::failed-defs     failed-defs
+                         ::outer-test-run? outer-test-run?
+                         ::entry           entry
+                         ::narration       (:seon.repl/narration entry)})))))))
+            (when (and entry-namespace (> @n-fail failures-before))
+              (vswap! failed-namespaces conj entry-namespace)
+              (when (= :namespace (:seon.repl/phase entry))
+                (vswap! declaration-failures conj entry-namespace)))
+            (when (and entry-namespace
+                       (= :namespace (:seon.repl/phase entry))
+                       (= @n-fail failures-before))
+              (vswap! declaration-failures disj entry-namespace))))))
     (cond-> {:seon.eval/ids    @eids
              :seon.eval/n-ok   @n-ok
              :seon.eval/n-fail @n-fail}
       fence-lost? (assoc :seon.eval/fenced? true)
+      (seq @failed-namespaces)
+      (assoc :seon.repl/failed-namespaces @failed-namespaces)
+      (seq @skipped-entries)
+      (assoc :seon.repl/skipped-entries @skipped-entries)
       (not (admission/available?))
       (assoc :seon/error (:seon/error (admission/unavailable)))))))

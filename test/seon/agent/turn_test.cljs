@@ -26,6 +26,39 @@
    :seon.config/repl-mode :batch
    :seon.eval/ns :my.agent.agent-1})
 
+(def ^:private reply-program (deref #'turn/reply-program))
+
+(deftest batch-replies-use-the-shared-ordered-program-projection
+  (let [program
+        (reply-program
+          (str "(ns my.feature.ui (:require [my.feature.model]))\n"
+               "(defn view [] (my.feature.model/value))\n"
+               "(ns my.feature.model (:require [seon.schema :as schema]))\n"
+               "(def before-schema 1)\n"
+               "(schema/register! ::id :string)\n"
+               "(def value 2)")
+          false
+          'my.agent.agent-1)]
+    (is (= ['my.agent.agent-1 'my.feature.model 'my.feature.ui]
+           (:seon.repl/namespace-order program)))
+    (is (= [[:namespace "(ns my.feature.model (:require [seon.schema :as schema]))"]
+            [:schema "(schema/register! ::id :string)"]
+            [:form "(def before-schema 1)"]
+            [:form "(def value 2)"]
+            [:namespace "(ns my.feature.ui (:require [my.feature.model]))"]
+            [:form "(defn view [] (my.feature.model/value))"]]
+           (->> (:seon.repl/eval-entries program)
+                (filter :seon.repl/phase)
+                (mapv (juxt :seon.repl/phase :seon.repl/source)))))))
+
+(deftest stream-replies-retain-the-existing-first-form-boundary
+  (let [program (reply-program ";; first\n(+ 1 2)\n(+ 3 4)" true
+                               'my.agent.agent-1)]
+    (is (= ["(+ 1 2)"]
+           (->> (:seon.repl/eval-entries program)
+                (filter #(= :form (:seon.repl/kind %)))
+                (mapv :seon.repl/source))))))
+
 (deftest prompt-is-the-database-value-pinned-child-result
   (async done
     (let [original execution.host/invoke-compiled!

@@ -448,3 +448,65 @@
              (set! seval/record-eval! original-record)
              (set! admission/available? original-available)
              (done)))))))
+
+(deftest ordered-program-salvages-independent-namespaces
+  (async done
+    (let [original-record seval/record-eval!
+          original-available admission/available?
+          next-id (atom 0)
+          entry (fn [namespace requires kind source]
+                  (cond-> {:seon.repl/kind kind
+                           :seon.repl/namespace namespace
+                           :seon.repl/require-edges requires
+                           :seon.repl/source source}
+                    (= :read kind)
+                    (assoc :seon.repl/ok? false
+                           :seon/error
+                           {:seon.error/message "unreadable generated form"})
+                    (= :comment kind)
+                    (assoc :seon.repl/narration source)))]
+      (set! admission/available? (constantly true))
+      (set! seval/record-eval!
+            (fn [_request]
+              (js/Promise.resolve
+                {:seon.eval/id (str "eval-" (swap! next-id inc))})))
+      (-> (seval/eval-batch!
+            nil
+            [(assoc (entry 'my.model #{} :read "(ns my.model broken)")
+                    :seon.repl/phase :namespace)
+             (assoc (entry 'my.model #{} :comment
+                           "unsafe body is withheld")
+                    :seon.repl/phase :form)
+             (assoc (entry 'my.model #{} :comment
+                           "later declaration re-establishes namespace")
+                    :seon.repl/phase :namespace)
+             (assoc (entry 'my.model #{} :comment
+                           "later section body runs")
+                    :seon.repl/phase :form)
+             (entry 'my.service #{'my.model} :comment
+                    "dependent service is withheld")
+             (entry 'my.audit #{} :comment "independent audit still runs")]
+            'my.model "AGTreceipt0001" "TRNreceipt0001" nil
+            {:seon.config/configuration
+             (assoc configuration :seon.config.repair/level :off)
+             ::seval/authored-sources {}
+             ::db/db database})
+          (.then
+            (fn [result]
+              (is (zero? (:seon.eval/n-ok result))
+                  "comment evidence records without counting as a successful form")
+              (is (= 1 (:seon.eval/n-fail result)))
+              (is (= ["eval-1" "eval-2" "eval-3" "eval-4"]
+                     (:seon.eval/ids result)))
+              (is (= #{'my.model}
+                     (:seon.repl/failed-namespaces result)))
+              (is (= ["unsafe body is withheld"
+                      "dependent service is withheld"]
+                     (mapv :seon.repl/source
+                           (:seon.repl/skipped-entries result))))))
+          (.catch (fn [error] (is false (str error))))
+          (.finally
+            (fn []
+              (set! seval/record-eval! original-record)
+              (set! admission/available? original-available)
+              (done)))))))

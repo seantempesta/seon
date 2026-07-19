@@ -6,6 +6,7 @@
    schemas and orchestration, while per-form isolation, context composition,
    and run fencing remain in their established namespaces."
   (:require
+    [clojure.string :as str]
     [seon.ai :as ai]
     [seon.ai.tokens :as tokens]
     [seon.config :as config]
@@ -517,6 +518,25 @@
 ;; message (notes-to-self are eval narration, not message rows).
 ;; ============================================================
 
+(defn- reply-program
+  "Parse one provider reply for the configured REPL mode."
+  [raw-reply stream? starting-ns]
+  (if-not stream?
+    (repl-internal/parse-program
+      raw-reply {:seon.repl/current-ns starting-ns})
+    (let [parsed (repl-internal/parse-forms raw-reply)
+          first-form-index
+          (reduce (fn [index entry]
+                    (if (= :form (:seon.repl/kind entry))
+                      (reduced index)
+                      (inc index)))
+                  0 parsed)]
+      {:seon.repl/eval-entries
+       (if (< first-form-index (count parsed))
+         (vec (take (inc first-form-index) parsed))
+         parsed)
+       :seon.repl/errors []})))
+
 (defn ^:async ^:private ask-and-eval-reply!
   "Internal — the successful-LLM-reply half of `ask-and-eval!`: parse the
    reply and eval-batch the forms. `id` / `id-of-turn` are LOCALS threaded
@@ -545,7 +565,9 @@
                          (js/console.warn
                            "[seon.agent.turn] eager reply-blob link failed (turn continues):"
                            e))))
-        parsed     (repl-internal/parse-forms raw-reply)
+        program    (reply-program raw-reply stream?
+                                  (or start-ns (home/home-ns id)))
+        parsed     (:seon.repl/eval-entries program)
         ;; `:stream` single-form close (repl-milestone rung-0 verdict, 2026-07-10):
         ;; the stream aborts at the FIRST complete form, but the delta that
         ;; completed it can carry a tail that parses into extra entries
@@ -553,25 +575,29 @@
         ;; ONE form: keep everything through the first `:form` entry and
         ;; treat the tail as prose — it stays byte-intact in the reply blob,
         ;; it just never evals. `:batch` evals the full parse as before.
-        parsed     (if stream?
-                     (let [i (reduce (fn [idx e]
-                                       (if (= :form (:seon.repl/kind e))
-                                         (reduced idx)
-                                         (inc idx)))
-                                     0 parsed)]
-                       (if (< i (count parsed))
-                         (vec (take (inc i) parsed))
-                         parsed))
-                     parsed)
         ;; The batch starts where the agent IS (the derived current-ns the
         ;; cursor + namespaces block already show), NOT the home ns — an
         ;; `(in-ns …)` in a PRIOR turn must hold across the turn boundary
         ;; (namespaces-milestone rung-1 root cause, 2026-07-10: seeding home here made every
         ;; `:stream` turn silently define into my.agent.*, cursor flip-flop,
         ;; ns-interns nil, cross-ns resolution failures).
-        batch      (await (eval-parsed! id database parsed
-                                        (or start-ns (home/home-ns id))
-                                        id-of-turn run-id))
+        batch      (if (some #(= :namespace-cycle (:seon.error/kind %))
+                             (:seon.repl/errors program))
+                     {:seon.eval/ids []
+                      :seon.eval/n-ok 0
+                      :seon.eval/n-fail 0
+                      :seon.error/message
+                      (->> (:seon.repl/errors program)
+                           (map :seon.error/message)
+                           (str/join "\n"))
+                      :seon.error/kind :namespace-cycle}
+                     (cond->
+                       (await (eval-parsed! id database parsed
+                                           (or start-ns (home/home-ns id))
+                                           id-of-turn run-id))
+                       (seq (:seon.repl/errors program))
+                       (assoc :seon.repl/errors
+                              (:seon.repl/errors program))))
         _          (when (:seon.error/message batch)
                      (throw (ex-info (:seon.error/message batch) batch)))]
     (cond->

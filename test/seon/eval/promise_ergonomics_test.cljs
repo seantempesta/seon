@@ -12,6 +12,8 @@
 (def ^:private valid-ending-ns? (deref #'eval/valid-ending-ns?))
 (def ^:private namespace-declaration?
   (deref #'eval/namespace-declaration?))
+(def ^:private program-entry-skipped?
+  (deref #'eval/program-entry-skipped?))
 
 (deftest only-real-analyzer-namespaces-can-advance-the-eval-fold
   (let [compile-state
@@ -26,6 +28,22 @@
   (is (namespace-declaration? "(ns my.agent.next)"))
   (is (not (namespace-declaration? "(js/Promise.resolve 323)")))
   (is (not (namespace-declaration? "(message/user \"done\")"))))
+
+(deftest ordered-program-skips-only-unsafe-namespace-work
+  (let [entry {:seon.repl/namespace 'my.orders.service
+               :seon.repl/require-edges #{'my.orders.model}}]
+    (is (program-entry-skipped? #{'my.orders.model} #{} entry)
+        "a failed generated requirement prevents its dependent")
+    (is (program-entry-skipped? #{} #{'my.orders.service} entry)
+        "a failed declaration prevents forms from leaking into another ns")
+    (is (not (program-entry-skipped?
+               #{} #{'my.orders.service}
+               (assoc entry :seon.repl/phase :namespace)))
+        "a later declaration can re-establish the same namespace safely")
+    (is (not (program-entry-skipped? #{'my.unrelated} #{} entry))
+        "an independent namespace remains executable")
+    (is (not (program-entry-skipped? #{'my.orders.service} #{} entry))
+        "an ordinary form failure does not discard later forms in that ns")))
 
 (deftest defer-wraps-promises-and-passes-ordinary-values
   (is (instance? eval/Deferred (eval/defer (js/Promise.resolve 1))))
