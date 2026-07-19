@@ -229,6 +229,80 @@
              (set! admission/state admission-state)
              (done)))))))
 
+(deftest successful-read-only-forms-do-not-reset-the-no-progress-streak
+  (async done
+    (let [admission-state admission/state
+          db-fn db/db
+          execute-many db/execute-many
+          beat run/beat!
+          run-turn turn/run-turn!
+          consult plan-internal/maybe-consult!
+          close-run run/close-run!
+          database {:db-name "default" :t 17 :as-of nil :since nil
+                    :history false
+                    :datahike/commit-id
+                    #uuid "10000000-0000-0000-0000-000000000017"}
+          open-run {:seon.agent.run/id "run-read-only"
+                    :seon.agent.run/status :open
+                    :seon.agent.run/turn-limit 5
+                    :seon.agent.run/deadline
+                    (js/Date. (+ (.now js/Date) 60000))}
+          !turn-count (atom 0)
+          !close-request (atom nil)
+          _ (set! admission/state
+                  (fn [] {::admission/status :available}))
+          _ (set! db/db
+                  (fn
+                    ([] (js/Promise.resolve database))
+                    ([_request] (js/Promise.resolve database))))
+          _ (set! db/execute-many
+                  (fn [_request]
+                    (js/Promise.resolve
+                     (loop-read open-run "run-read-only" :batch
+                                @!turn-count @!turn-count))))
+          _ (set! run/beat!
+                  (fn [_request]
+                    (js/Promise.resolve
+                     {:db-before database :db-after database
+                      :tx-data [] :tempids {} :tx-meta {}})))
+          _ (set! turn/run-turn!
+                  (fn [_input]
+                    (let [n (swap! !turn-count inc)]
+                      (js/Promise.resolve
+                       {:seon.agent.turn/id (str "turn-read-only-" n)
+                        :seon.agent/eval-count 1
+                        :seon.agent.turn/evals
+                        [{:seon.eval/progress? false}]}))))
+          _ (set! plan-internal/maybe-consult!
+                  (fn [_request] (js/Promise.resolve nil)))
+          _ (set! run/close-run!
+                  (fn [request]
+                    (reset! !close-request request)
+                    (js/Promise.resolve
+                     {:db-before database :db-after database
+                      :tx-data [] :tempids {} :tx-meta {}})))]
+      (-> (loop/run-loop! {:seon.agent/id "agent-a"} "run-read-only")
+          (.then
+           (fn [result]
+             (is (= :idle result))
+             (is (= loop/no-forms-streak-limit @!turn-count)
+                 "successful read-only forms are not durable progress")
+             (is (= :no-forms
+                    (:seon.agent.run/closed-reason @!close-request)))))
+          (.catch
+           (fn [error]
+             (is false (str "read-only progress falsifier rejected: " error))))
+          (.finally
+           (fn []
+             (set! db/db db-fn)
+             (set! db/execute-many execute-many)
+             (set! run/beat! beat)
+             (set! turn/run-turn! run-turn)
+             (set! plan-internal/maybe-consult! consult)
+             (set! run/close-run! close-run)
+             (set! admission/state admission-state)
+             (done)))))))
+
 (deftest retired-execution-child-recovers-the-exact-run
   (async done
     (let [admission-state admission/state

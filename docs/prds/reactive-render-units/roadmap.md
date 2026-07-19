@@ -183,6 +183,18 @@ contract and falsifier are recorded in
 an observability/optimization unit; it does not weaken the already-proven
 reactive invalidation or transport graduation.
 
+The representative run also exposed a dependency-critical loop defect before
+the attribution overlay can be trusted: every successful eval reset the
+no-progress streak. The corrected boundary persists positive eval progress only
+for a transaction committed during the raw user-form span or an accepted
+program/schema declaration. Derived namespace-edge receipt operations do not
+count. Focused eval, database-session, and loop tests prove read-only
+`my.plan/active!`, `my.plan/status`, and pure computation remain non-progress,
+while `message/user` is progress and three repeated read-only turns close via
+the existing `:no-forms` bound. The next integrated exit is a rebuilt Inspect
+namespace run that parks the root without polling and waits for existing child
+message/eval facts between driver phases.
+
 The gate now also exercises the real timer rather than only the `due-at`
 arithmetic. With a 1,000 ms moving settle edge and 20 ms maximum latency, a
 120 ms continuous event stream completes repeatedly before the producer stops,

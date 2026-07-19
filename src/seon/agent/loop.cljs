@@ -469,7 +469,12 @@
                         (plan-internal/maybe-consult!
                          {:seon.agent/id id})))
                       (recur (transition state :turn-ok)
-                             (if (zero? (or (:seon.agent/eval-count r) 0))
+                             (if-not
+                              (if (contains? r :seon.agent.turn/evals)
+                                (boolean
+                                 (some :seon.eval/progress?
+                                       (:seon.agent.turn/evals r)))
+                                (pos? (or (:seon.agent/eval-count r) 0)))
                                (inc streak)
                                0)))))))))
 

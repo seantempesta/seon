@@ -91,6 +91,7 @@
 (schema/register! :seon.eval/status
                   [:enum :running :done :error :interrupted])
 (schema/register! :seon.eval/ok? :boolean)
+(schema/register! :seon.eval/progress? :boolean)
 (schema/register! :seon.eval/result-edn :string)
 ;; println/prn output captured during the eval span (*print-fn* otherwise
 ;; routes to the pod's stdout, invisible to the agent; a REPL shows print
@@ -3242,7 +3243,8 @@
    which may reacquire and rebuild this transaction from the frozen execution
    result without rerunning the form. No result handle is bound here."
   {:malli/schema [:=> [:catn [::record-request :map]] :any]}
-  [{::keys [at narration source result duration-ms tee output pending? eval-id]
+  [{::keys [at narration source result duration-ms tee output pending? eval-id
+            progress?]
     configuration :seon.config/configuration
     database ::db/db
     expected-database ::db/expected-db
@@ -3261,6 +3263,9 @@
                  :seon.eval/ns          ns}
           aid
           (assoc :seon.eval/agent [:seon.agent/id aid])
+
+          progress?
+          (assoc :seon.eval/progress? true)
 
           (and (string? output) (not (str/blank? output)))
           (assoc :seon.eval/output
@@ -3884,6 +3889,12 @@
                ::result (::result compiled)
                ::pending? (::pending? compiled)
                ::output (::output frozen)
+               ;; `compile-eval-tee` also refreshes derived namespace edges
+               ;; for ordinary read-only forms. Those transaction ops are
+               ;; receipt bookkeeping, not agent progress. The frozen flag is
+               ;; derived before that compilation from a user-span commit or
+               ;; a newly accepted program/schema declaration.
+               ::progress? (boolean (::progress? frozen))
                ::tee (::tee compiled)}
               (::db/db acquired)
               (assoc ::db/db (::db/db acquired)
@@ -4540,21 +4551,26 @@
             ;; `.run` callback is an `^:async` iife so the store propagates
             ;; through eval + maybe-await-value; we await its result.
             out-bucket  (atom "")
+            committed?  (atom false)
             captured
             (if-not (database-error? started)
               (await
                 (.run print-als out-bucket
                   (fn ^:async run-with-print-capture! []
-                    (let [raw (await (eval compile-state source
-                                           {:seon.config/configuration configuration
-                                            ::starting-ns @current-ns
-                                            ::authored-sources
-                                            authored-sources
-                                            ::analyze-deps? false}))]
-                      {::raw raw
-                       ::awaited (when (::ok? raw)
-                                   (await (maybe-await-value
-                                            (::value raw))))}))))
+                    (await
+                     (db/with-tx-context
+                      {::db/on-commit! (fn [_report] (reset! committed? true))}
+                      (fn ^:async run-observed-form! []
+                        (let [raw (await (eval compile-state source
+                                               {:seon.config/configuration configuration
+                                                ::starting-ns @current-ns
+                                                ::authored-sources
+                                                authored-sources
+                                                ::analyze-deps? false}))]
+                          {::raw raw
+                           ::awaited (when (::ok? raw)
+                                       (await (maybe-await-value
+                                                (::value raw))))})))))))
               {::raw
                {::ok? false
                 :seon/error started}})
@@ -4681,6 +4697,9 @@
                ::duration-ms duration-ms
                ::narration narration
                ::output output
+               ::progress? (boolean (or @committed?
+                                        (seq tee-entities)
+                                        (seq changed-schemas)))
                :seon.config/configuration configuration
                :seon.agent.turn/id-of-turn turn-id}
               attempt
@@ -4822,6 +4841,7 @@
                        ::source      source
                        ::ending-ns   @current-ns
                        ::result      result
+                       ::progress?   (boolean (or (seq tee) (some? committed!)))
                        ::tee         (vec (or tee []))}
                       database
                       (assoc ::db/db database)

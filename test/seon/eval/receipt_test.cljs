@@ -167,6 +167,30 @@
              (set! db/transact! original)
              (done)))))))
 
+(deftest record-eval-persists-only-positive-progress-evidence
+  (async done
+    (let [original db/transact!
+          requests (atom [])]
+      (set! db/transact!
+            (fn [& [request]]
+              (swap! requests conj request)
+              (js/Promise.resolve transaction-report)))
+      (-> (seval/record-eval! record-request)
+          (.then
+           (fn [_]
+             (seval/record-eval! (assoc record-request ::seval/progress? true))))
+          (.then
+           (fn [_]
+             (let [[read-only write] (map #(second (:seon.db/tx-data %))
+                                          @requests)]
+               (is (not (contains? read-only :seon.eval/progress?)))
+               (is (true? (:seon.eval/progress? write))))))
+          (.catch (fn [error] (is false (str error))))
+          (.finally
+           (fn []
+             (set! db/transact! original)
+             (done)))))))
+
 (deftest record-eval-bounds-structured-error-data-at-the-write-owner
   (async done
     (let [original db/transact!
@@ -266,6 +290,7 @@
                   ::seval/ending-ns 'my.agent.receipt
                   ::seval/result {::seval/ok? true ::seval/value value}
                   ::seval/eval-id "EVLreceipt0001"
+                  ::seval/progress? true
                   :seon.agent.turn/id-of-turn "TRNreceipt0001"}
           acquire!
           (fn [_request]
@@ -297,6 +322,8 @@
                (is (= transaction-report recorded))
                (is (= 2 (count (filter #(= :acquire (first %)) @calls))))
                (is (= 2 (count requests)))
+               (is (every? #(true? (::seval/progress? %)) requests)
+                   "accepted declaration progress survives stale publication retry")
                (is (every? #(identical? value
                                         (get-in % [::seval/result
                                                    ::seval/value]))
@@ -409,6 +436,63 @@
           (.finally
            (fn []
              (set! db/transact! original-transact)
+             (set! seval/record-eval! original-record)
+             (set! admission/available? original-available)
+             (done)))))))
+
+(deftest eval-batch-records-commits-not-successful-read-only-results-as-progress
+  (async done
+    (let [original-start seval/start-eval!
+          original-eval seval/eval
+          original-record seval/record-eval!
+          original-available admission/available?
+          requests (atom [])
+          next-id (atom 0)
+          compile-state (atom {:cljs.analyzer/namespaces {}})
+          sources ["(my.plan/active! {:my.plan/id \"already-active\"})"
+                   "(my.plan/status {:my.plan/id \"already-active\"})"
+                   "(+ 1 1)"
+                   "(message/user \"done\")"]]
+      (set! admission/available? (constantly true))
+      (set! seval/start-eval!
+            (fn [_]
+              (js/Promise.resolve
+               (assoc transaction-report
+                      :seon.eval/id (str "eval-" (swap! next-id inc))))))
+      (set! seval/eval
+            (fn [_ source _]
+              (when (= source (last sources))
+                (when-let [on-commit (::db/on-commit! (db/current-tx-context))]
+                  (on-commit transaction-report)))
+              (js/Promise.resolve
+               {::seval/ok? true
+                ::seval/value :ok
+                ::seval/ending-ns 'my.agent.receipt})))
+      (set! seval/record-eval!
+            (fn [request]
+              (swap! requests conj request)
+              (js/Promise.resolve
+               (assoc transaction-report :seon.eval/id (::seval/eval-id request)))))
+      (-> (seval/eval-batch!
+           compile-state
+           (mapv (fn [source]
+                   {:seon.repl/kind :form
+                    :seon.repl/source source})
+                 sources)
+           'my.agent.receipt "AGTreceipt0001" "TRNreceipt0001" nil
+           {:seon.config/configuration configuration
+            ::seval/authored-sources {}
+            ::db/db database})
+          (.then
+           (fn [result]
+             (is (= 4 (:seon.eval/n-ok result)))
+             (is (= [false false false true]
+                    (mapv #(true? (::seval/progress? %)) @requests)))))
+          (.catch (fn [error] (is false (str error "\n" (.-stack error)))))
+          (.finally
+           (fn []
+             (set! seval/start-eval! original-start)
+             (set! seval/eval original-eval)
              (set! seval/record-eval! original-record)
              (set! admission/available? original-available)
              (done)))))))

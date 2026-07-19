@@ -277,6 +277,18 @@ polling is indistinguishable from task progress. The agent-loop issue owns that
 semantic correction; lowering the 100-turn work budget or adding an Inspect
 watchdog would only hide it.
 
+The source correction now derives progress from the eval rows already returned
+with the turn. A successful raw form records positive progress only when its
+scoped execution commits a database transaction or accepts a new program/schema
+declaration; compiled namespace-edge bookkeeping is explicitly excluded.
+Repeated already-active `my.plan/active!`, `my.plan/status`, and pure arithmetic
+therefore advance the existing no-progress streak, while `message/user` resets
+it. The red loop characterization previously ran all five allowed turns and
+closed at `:turn-limit`; the corrected focused matrix closes after the existing
+three-turn bound with `:no-forms`. Live current-artifact Inspect proof remains
+after rebuild, including the separate fact that `delegate!` returns a child id
+rather than synchronously awaiting the child's report.
+
 The same controlled branch also reproduced the one-call release race with the
 writer's exact `database-in-use` response. Pod containment completed cleanly
 and recorded root plus child as unhosted, but selector-owned UDS acquisition

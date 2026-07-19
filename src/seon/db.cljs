@@ -841,6 +841,13 @@
                                     [:db-before :db-after :tx-data
                                      :tempids :tx-meta])]
             (swap! !session cache-database (:db-after report))
+            ;; Process-local eval progress observes only transactions committed
+            ;; inside the caller's explicitly scoped raw-form span. The
+            ;; observer is not transaction metadata and never crosses the
+            ;; protocol; eval receipt/terminal transactions run outside that
+            ;; scope, so they cannot make a read-only form look productive.
+            (when-let [on-commit (::on-commit! (current-tx-context))]
+              (on-commit report))
             (cond-> report
               (seq (::protocol/generated-entity-ids response))
               (assoc :seon.db.id/eids (::protocol/generated-entity-ids response))

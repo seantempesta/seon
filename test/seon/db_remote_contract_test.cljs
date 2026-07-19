@@ -203,6 +203,31 @@
                      ::db/database-name database-name
                      ::db/backend :memory}))
 
+(deftest committed-transaction-calls-the-scoped-process-local-observer
+  (async done
+    (let [reports (atom [])]
+      (->
+        (with-recording-authority
+          {}
+          (fn [_]
+            (-> (open!)
+                (.then
+                 (fn [_]
+                   (db/with-tx-context
+                    {::db/on-commit! #(swap! reports conj %)}
+                    #(db/transact!
+                      {::db/db database
+                       ::db/tx-data [{:seon.agent/id "AGTreceipt0001"}]}))))
+                (.then
+                 (fn [report]
+                   (is (= [report] @reports))
+                   (is (= database (:db-after report))))))))
+          (.then (fn [_] (done)))
+          (.catch
+           (fn [error]
+             (is false (str error "\n" (.-stack error)))
+             (done)))))))
+
 (deftest invalid-public-query-is-user-input-and-never-reaches-the-writer
   (async done
     (-> (with-recording-authority
