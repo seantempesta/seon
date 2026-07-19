@@ -81,9 +81,10 @@ selection. Inactive and ordinary agents retain ordinary block configuration.
 
 ## Blocking seams
 
-1. Named model variants copy provider/model attributes but not REPL mode, and
-   prompt acquisition still reads only the cluster singleton. Planning and
-   generated repair variants must select `:batch` per agent.
+1. **Resolved by `e3eda379`.** Named model variants now copy REPL mode with
+   provider/model attributes, and prompt acquisition prefers the agent's
+   persisted mode over the cluster singleton. Planning and generated repair
+   variants select `:batch` per agent.
 2. No progressive `:generate-code` block is installed yet.
 3. Explicitly pinned `.internal` namespaces are filtered before
    `full-source` selection.

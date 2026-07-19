@@ -285,11 +285,11 @@ environment name is `MOONSHOT_API_KEY`, the OpenAI-compatible base URL is
 `https://api.moonshot.ai/v1`, and K3 currently exposes only maximal reasoning
 effort. Prices in this report are a dated observation, not configuration truth.
 
-| Probe | Completion cap | Wall time | Cache | Reasoning | Visible answer | Result |
+| Probe | Completion cap | Wall time | Cache | Completion total | Reasoning subset | Result |
 |---|---:|---:|---:|---:|---:|---|
-| planning | 4,096 | 107.17 s | miss | 4,093 tokens | 0 tokens | `length`; no code |
-| planning | 8,192 | 47.18 s | 239-token hit | 975 tokens | 1,106 tokens | `stop`; code returned |
-| isolated named variant | 16,384 | 13.30 s | miss | 0 reported | 2 tokens | `stop`; `(+ 20 22)` evaluated to `42` |
+| planning | 4,096 | 107.17 s | miss | 4,093 tokens | 4,093 tokens | `length`; no code |
+| planning | 8,192 | 47.18 s | 239-token hit | 1,106 tokens | 975 tokens | `stop`; roughly 131 visible tokens and code returned |
+| isolated named variant | 16,384 | 13.30 s | miss | 2 tokens | 0 reported | `stop`; `(+ 20 22)` evaluated to `42` |
 
 At the supplied prices, the first probe cost approximately $0.062 and produced
 nothing usable; the second cost approximately $0.017. These costs treat

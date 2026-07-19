@@ -45,8 +45,12 @@ cache, no restart). Consequence: to change a value on an EXISTING
 deployment, transact the row (or wipe it) — editing the env alone does
 nothing after first boot.
 
-**Precedence for every setting:** explicit request opt → agent entity override
-→ config row → shipped default.
+Generation fields exposed by the closed request schema, such as model,
+temperature, maximum output, tools, and extra body, resolve explicit request
+option → agent entity override → config row → shipped default. Routing and
+transport fields—provider, endpoint, credential-variable name, timeout,
+backend, and retry policy—are database-owned and resolve agent entity override
+→ config row → shipped default; they are not arbitrary per-call options.
 
 | Env var | Config-row attr | Type | Applies to | Notes |
 |---------|-----------------|------|------------|-------|
@@ -68,9 +72,11 @@ a local `.env` or shell startup file contains a live key, keep that file
 owner-only (`chmod 600 <file>`); repository examples contain names and
 placeholders only.
 
-Three settings have no env var and are per-call / runtime-transact only (they
-also accept a config-row default): `:seon.ai/tools`, `:seon.ai/tool-choice`,
-`:seon.ai/extra-body` (see below).
+`:seon.ai/tools` and `:seon.ai/tool-choice` are direct-call options only; they
+have no environment variable or stored config-row form. `:seon.ai/extra-body`
+is the decoded direct-call option, while `SEON_AI_EXTRA_BODY` and the stored
+`:seon.ai/extra-body-edn` string provide its agent-loop configuration (see
+below).
 
 ### API-key resolution order
 
@@ -191,6 +197,10 @@ DEEPSEEK_API_KEY=<key>
 
 - **Scheduled to retire 2026-07-24 15:59 UTC:** `deepseek-chat` and
   `deepseek-reasoner`, the legacy v4-flash slugs. Do not add new uses.
+- DeepSeek thinking-mode tool continuation requires replaying the complete
+  assistant message, including `reasoning_content`, before the tool result.
+  Seon's one-shot visible-text path is verified; provider-native multi-turn
+  continuation is not yet a maintained agent-loop claim.
 
 ### Meta Model API (`:openai-compat`) — Muse Spark 1.1
 
@@ -236,10 +246,12 @@ For ordinary low-latency turns, keep a faster model as the cluster default and
 route only long-horizon agents to K3.
 
 Seon's paid 2026-07-19 planning probes establish the actual latency/headroom
-tradeoff. A 4,096-token cap took 107.17 seconds, spent 4,093 reasoning tokens,
-returned no visible answer, and cost about $0.062. An 8,192-token cap took
-47.18 seconds, used 975 reasoning plus 1,106 visible tokens, stopped normally,
-and cost about $0.017. The second answer was useful but still invented an
+tradeoff. A 4,096-token cap took 107.17 seconds, reported 4,093 completion
+tokens (all reasoning), returned no visible answer, and cost about $0.062. An
+8,192-token cap took 47.18 seconds and reported 1,106 completion tokens,
+including 975 reasoning tokens; the remaining visible answer was roughly 131
+tokens. It stopped normally and cost about $0.017. The second answer was useful
+but still invented an
 unavailable namespace and misplaced tests. K3 therefore needs at least 8K
 completion headroom, retrieved real contracts, behavioral verification, and a
 per-run cost ceiling; it is not a blind execution model. Full evidence lives in
@@ -413,7 +425,8 @@ emit-and-eval loop is unaffected when you pass no tools.
 ;; → {:seon.ai/text "…" :seon.ai/tool-calls [{...}] :seon.ai/usage {...} :seon.ai/raw …}
 ```
 
-`:seon.ai/tools` / `:seon.ai/tool-choice` can also be set as config-row defaults.
+The ordinary agent-loop request schema does not expose tools yet; these options
+are currently for explicit adapter calls and wire-contract tests.
 
 ## Extra request fields (`:seon.ai/extra-body`)
 
@@ -450,13 +463,13 @@ token-by-token surface to consumers.
 
 On every successful call the result carries:
 
-- `:seon.ai/usage` — the provider's usage map (always set on success).
+- `:seon.ai/usage` — the provider's usage map when the provider supplies one.
 - `:seon.ai/provider-fields` — every unrecognized top-level response field
   (governance scores, cost ledgers, cache stats, …), preserved open-world.
 
 These are also **persisted per turn** on the turn entity:
 
-- `:seon.agent.turn/llm-usage` (map)
+- `:seon.agent.turn/llm-usage` (EDN string)
 - `:seon.agent.turn/llm-meta` (EDN string of the provider-fields)
 
 so spend/metadata is queryable as datoms.
@@ -486,16 +499,34 @@ authority. Anthropic refusals (`stop_reason "refusal"`) become a legible
 
 ## Direct calls (REPL / debugging)
 
+Every adapter call requires one immutable `:seon.ai/config-resolution`. In the
+running agent path, the execution boundary derives it from the config and agent
+rows acquired at one database value. For a disposable adapter probe, construct
+the same ordinary value explicitly:
+
 ```clojure
-;; OpenAI-compatible (deepseek / openai-compat — provider from config/env):
-(seon.ai.openai-compat/complete {:seon.ai/ctx "say hi"})
+(def resolution
+  (seon.ai/resolved-config-from-rows
+    {:seon.ai/provider :openai-compat
+     :seon.ai/model "kimi-k3"
+     :seon.ai/base-url "https://api.moonshot.ai/v1"
+     :seon.ai/api-key-env "MOONSHOT_API_KEY"}
+    {}))
 
-;; Anthropic:
-(seon.ai.anthropic/complete {:seon.ai/ctx "say hi"})
+(await
+  (seon.ai.openai-compat/complete
+    {:seon.ai/ctx "Return one Clojure form that adds 20 and 22."
+     :seon.ai/config-resolution resolution}))
 
-;; Inspect exactly what goes over the wire WITHOUT calling:
-(seon.ai.openai-compat/request-params {:seon.ai/ctx "hi"})
+;; Inspect exactly what goes over the wire without calling:
+(seon.ai.openai-compat/request-params
+  {:seon.ai/ctx "hi"}
+  resolution)
 ```
+
+This literal construction is only a probe seam. Production turns use the
+database rows captured by the execution runtime; do not replace that authority
+with an environment-reading or process-local config cache.
 
 Override per call with any of `:seon.ai/model`, `:seon.ai/temperature`
 (openai-compat), `:seon.ai/max-tokens`, `:seon.ai/system-prompt`,
@@ -503,11 +534,18 @@ Override per call with any of `:seon.ai/model`, `:seon.ai/temperature`
 
 ## Verifying a deployment
 
-1. Set the env vars, boot the pod, confirm the provider:
-   `(seon.ai/provider)` → your provider keyword.
-2. Confirm a key resolves: `(seon.ai.openai-compat/api-key-configured?)` (or
-   `ANTHROPIC_API_KEY` for anthropic).
-3. Smoke a completion: `(seon.ai.openai-compat/complete {:seon.ai/ctx "say hi"})`
+1. Set the credential environment variable and select/apply the configuration,
+   then boot the pod.
+2. Pull the config row and target agent row from one database value and derive
+   `resolution` with `seon.ai/resolved-config-from-rows`.
+3. Confirm the non-secret projection under
+   `[:seon.ai/resolved-config :seon.ai/provider]`, model, endpoint, and
+   credential-variable name.
+4. Confirm the credential resolves with
+   `(seon.ai.openai-compat/api-key-configured? resolution)` (or the Anthropic
+   equivalent).
+5. Run the explicit adapter probe above or, preferably, launch one bounded
+   agent turn and inspect its persisted `:seon.ai.attempt/*` evidence.
    → `{:seon.ai/text "…" :seon.ai/usage {…}}`, no `:seon.ai/error`.
 4. Qwen extra-body: confirm the server log shows `chat_template_kwargs` and
    reasoning is suppressed when you set `{:enable_thinking false}`.

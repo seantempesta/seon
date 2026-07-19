@@ -203,11 +203,13 @@ It is however ~¼ of Anthropic/OpenAI frontier rates, with a 1M context
 window and full multimodality. Positioning: a mid-price
 reasoning/agentic option — interesting for forensic/debug agents via
 per-agent provider routing (`:seon.ai/agent-provider`), not a
-cost-competitive default. (Note: per-agent routing can select the
-provider, but `:seon.ai/base-url`/`:seon.ai/api-key-env` live on the
-GLOBAL row — routing one agent to Meta while others stay on DeepSeek
-works only because `:deepseek` ignores the row's base-url; two
-different `:openai-compat` gateways at once is not supported today.)
+cost-competitive default.
+
+**Superseded implementation constraint:** at the time of this measurement,
+`base-url` and `api-key-env` lived only on the global row, so two different
+OpenAI-compatible gateways could not coexist. Per-agent transport mirrors now
+persist both fields on each agent; current configuration and routing truth
+lives in `docs/seon/reference/llm-adapters.md`.
 
 ## Sources
 
