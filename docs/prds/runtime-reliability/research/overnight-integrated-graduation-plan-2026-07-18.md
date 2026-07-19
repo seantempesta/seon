@@ -214,12 +214,15 @@ source lines in this ledger or the owning successor PRD.
   source path and digest instead of testing only the runtime file that happened
   to trigger the hook. Focused operator and program-index proof passes 17
   tests/119 assertions.
-- The complete Inspect offline suite passes 498 tests with eight intentional
+- The complete Inspect offline suite passes 523 tests with eight intentional
   skips. Commits `c007ef49` and `ba95bfa1` close a false-green proof fixture:
   every oracle arm now asserts its expected metric, decimal weights use the
   declared `:double` schema, and generated integer variants explicitly retain
-  `:int`. Focused proof passes 56 tests; the real 16-arm offline proof reports
-  exact means for every expected success and failure arm.
+  `:int`. Commit `cc230208` adds native database-derived scenarios for
+  namespace-targeted residency, cross-agent reuse and repair, child recovery,
+  and pod restart. The real 24-arm offline proof reports exact means for every
+  expected success and failure arm; live execution still requires the one
+  ownership-fenced cluster lease and typed final database read-back.
 - The browser/Datastar graduation audit is recorded in
   [[browser-datastar-graduation-matrix-2026-07-19]]. It identifies the existing
   one-feed behavior and the smallest missing product proofs: namespace plus
@@ -227,6 +230,31 @@ source lines in this ledger or the owning successor PRD.
   rapid-submit cancellation, semantic feed sharing, reconnect, and slow-client
   isolation. These remain acceptance work, not a reason to add another route,
   renderer, or reactive channel.
+- Commit `81070ae9` closes the HTTP half of namespace-targeted browser birth.
+  Existing `POST /agents` fields translate directly to `start!` or atomic
+  `delegate!` under root's agent scope; malformed namespace symbols return 422
+  before lifecycle work. Focused proof passes 20 tests/82 assertions. The root
+  view still needs its dedicated namespace and initial-message controls before
+  the browser checkbox can close.
+- The live application drive exposed that the normal operator's repository
+  grant was read-only but unlocked: root changed the process-global grant and
+  rewrote `src/my/ns.cljs`. Commit `4f0d3045` makes the one normal operator set
+  both `SEON_FS_READ_ONLY=1` and `SEON_FS_LOCK=1`. Focused proof passes 7
+  tests/47 assertions. The rebuilt pod reported a locked read-only grant,
+  refused both reconfiguration and the attempted edit, and retained the exact
+  committed file.
+- The resumed fulfillment agent called `my.customers/display-name` in eval
+  `e2w2ay0f5drr` and `my.orders/total-cents` in eval `p8j78ybzf2jk`. It then
+  reproduced the vector-only integration defect with an ordinary list and set,
+  moved into `my.orders`, redefined that same function with a sequential input
+  schema in eval `xwlhot0s684z`, and ran its attached test through the one test
+  runner in eval `xjbefkcupnu7`. This is cross-child reuse and cross-namespace
+  repair in place, not a parallel function.
+- [[deterministic-core-fault-boundary-audit-2026-07-19]] finds the older
+  six-boundary checkbox stale. Ticker, reload, startup/publication,
+  selected-call, and top-level compiled-child paths already have focused and
+  exact live evidence. The earliest remaining contract is exact-artifact
+  persist-before-exit proof for a generic core render failure.
 
 ## Execution ledger
 
@@ -325,13 +353,13 @@ namespace while immutable agent IDs preserve history and refs.
 
 ### 4. Live multi-agent application journey
 
-- [ ] **IN PROGRESS:** root delegates `my.orders`, `my.customers`, and `my.fulfillment` work to
+- [x] Root delegates `my.orders`, `my.customers`, and `my.fulfillment` work to
   separate agents.
-- [ ] Agents exchange database-backed messages with explicit from/to refs.
-- [ ] One agent uses functions written by another; a different agent finds and
+- [x] Agents exchange database-backed messages with explicit from/to refs.
+- [x] One agent uses functions written by another; a different agent finds and
   fixes a defect in that namespace without creating a parallel function.
-- [ ] Kill one execution child during work, record the failed turn/eval evidence,
-  replace it once, and continue from database state.
+- [ ] **IN PROGRESS:** kill one execution child during work, record the failed
+  turn/eval evidence, replace it once, and continue from database state.
 - [ ] Restart the pod between phases and complete the integrated application.
 
 Exit: database queries prove agent, parent, run, turn, message, namespace,
