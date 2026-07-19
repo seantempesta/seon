@@ -255,7 +255,7 @@
          desired)))
 
 (defn- agent-home-name [agent-id]
-  (keyword (str "my.agent." agent-id)))
+  (symbol (str "my.agent." agent-id)))
 
 (defn- stale-entity-tx
   [boot-program-rows identities values agent-ids]

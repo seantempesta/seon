@@ -19,7 +19,7 @@
 (def driver-artifact "out/execution-integration/client.js")
 
 (def schema-forms
-  {:seon.db/lookup-ref-value "[:or :string :uuid :keyword :int]"
+  {:seon.db/lookup-ref-value "[:or :string :uuid :keyword :symbol :int]"
    :seon.db/ref
    "[:or :int :string [:tuple :keyword :seon.db/lookup-ref-value]]"
    :seon.schema/key "[:keyword {:seon.db/identity true}]"
@@ -32,7 +32,7 @@
    :seon.db.process/id
    "[:and {:seon.db/identity true} [:enum :seon.db.process/boot :seon.db.process/config :seon.db.process/repl]]"
    :seon.user/id "[:string {:seon.db/identity true}]"
-   :seon.ns/name "[:keyword {:seon.db/identity true}]"
+   :seon.ns/name "[:symbol {:seon.db/identity true}]"
    :seon.ns/source ":string"
    :seon.fn/sym "[:string {:seon.db/identity true}]"
    :seon.fn/ns ":seon.db/ref"
@@ -54,26 +54,26 @@
        "   :seon.execution-proof/removed (removed)})"))
 
 (def authored-program
-  [{:seon.ns/name :my.execution-proof
+  [{:seon.ns/name 'my.execution-proof
     :seon.ns/source
     "(ns my.execution-proof (:require [seon.db :as db] [seon.eval :as eval] [seon.render :as render]))"}
    {:seon.fn/sym "my.execution-proof/current"
-    :seon.fn/ns [:seon.ns/name :my.execution-proof]
+    :seon.fn/ns [:seon.ns/name 'my.execution-proof]
     :seon.fn/source old-current-source}
    {:seon.fn/sym "my.execution-proof/removed"
-    :seon.fn/ns [:seon.ns/name :my.execution-proof]
+    :seon.fn/ns [:seon.ns/name 'my.execution-proof]
     :seon.fn/source "(defn removed [] :present)"}
    {:seon.fn/sym "my.execution-proof/publish!"
-    :seon.fn/ns [:seon.ns/name :my.execution-proof]
+    :seon.fn/ns [:seon.ns/name 'my.execution-proof]
     :seon.fn/source
     (str "(defn ^:async publish! [database tx-data]\n"
          "  (await (db/transact! {:seon.db/db database\n"
          "                        :seon.db/tx-data tx-data})))")}
    {:seon.fn/sym "my.execution-proof/spin"
-    :seon.fn/ns [:seon.ns/name :my.execution-proof]
+    :seon.fn/ns [:seon.ns/name 'my.execution-proof]
     :seon.fn/source "(defn spin [_] (loop [] (recur)))"}
    {:seon.fn/sym "my.execution-proof/nested-render"
-    :seon.fn/ns [:seon.ns/name :my.execution-proof]
+    :seon.fn/ns [:seon.ns/name 'my.execution-proof]
     :seon.fn/source
     (str "(defn nested-render []\n"
          "  (render/render :seon.render/ai {}\n"
@@ -94,10 +94,10 @@
    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
    :seon.db/attributes []
    :seon.db/program
-   (into [{:seon.ns/name :seon.execution-proof.bootstrap
+   (into [{:seon.ns/name 'seon.execution-proof.bootstrap
            :seon.ns/source "(ns seon.execution-proof.bootstrap)"}
           {:seon.fn/sym "seon.execution-proof.bootstrap/present"
-           :seon.fn/ns [:seon.ns/name :seon.execution-proof.bootstrap]
+           :seon.fn/ns [:seon.ns/name 'seon.execution-proof.bootstrap]
            :seon.fn/source "(defn present [] true)"}]
          (map (fn [[attribute form]]
                 {:seon.schema/key attribute :seon.schema/form form}))

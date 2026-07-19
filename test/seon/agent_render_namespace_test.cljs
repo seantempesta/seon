@@ -7,7 +7,7 @@
    [seon.db :as db]))
 
 (def ^:private namespace-row
-  {:seon.ns/name :pure.root
+  {:seon.ns/name 'pure.root
    :seon.fn/_ns
    [{:seon.fn/sym "pure.root/run"
      :seon.fn/arglists "([request])"
@@ -33,7 +33,7 @@
 
 (deftest eager-namespace-formatting-is-pure-and-closes-schema-refs
   (let [render #(ctx/render-namespace-ai
-                 {:seon.ns/name :pure.root
+                 {:seon.ns/name 'pure.root
                   :seon.agent.ctx/namespace-rows [namespace-row]
                   :seon.agent.ctx/schema-rows schema-rows})
         text (with-redefs [db/query fail-on-database-io
@@ -64,17 +64,17 @@
                       :seon.schema/form
                       (if (= i 40) ":string" (pr-str (keys (inc i))))})
                    (range 41) keys)
-        row {:seon.ns/name :pure.cap.root
+        row {:seon.ns/name 'pure.cap.root
              :seon.fn/_ns
              [{:seon.fn/sym "pure.cap.root/run"
                :seon.fn/spec
                (str "[:=> [:cat " (pr-str (first keys)) "] :string]")}]}
         capped (ctx/render-namespace-ai
-                {:seon.ns/name :pure.cap.root
+                {:seon.ns/name 'pure.cap.root
                  :seon.agent.ctx/namespace-rows [row]
                  :seon.agent.ctx/schema-rows rows})
         missing (ctx/render-namespace-ai
-                 {:seon.ns/name :pure.absent
+                 {:seon.ns/name 'pure.absent
                   :seon.agent.ctx/namespace-rows [row]
                   :seon.agent.ctx/schema-rows rows})]
     (is (= 40 (count (re-seq #"\(register! :pure.cap/k" capped)))

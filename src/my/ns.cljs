@@ -13,10 +13,10 @@
     [seon.result]
     [seon.schema :as schema]))
 
-;; [[functions]]'s map-in / map-out. `::ns` tolerates the three spellings a
-;; caller naturally reaches for ('my.plan, :my.plan, "my.plan"). A card is
+;; [[functions]]'s map-in / map-out. `::ns` is the canonical namespace symbol.
+;; A card is
 ;; one inert `fn full.ns/name [args] — "doc line 1" — :malli/schema …` record.
-(schema/register! ::ns [:or :symbol :keyword :string])
+(schema/register! ::ns :symbol)
 (schema/register! ::card :string)
 (schema/register! ::cards [:vector ::card])
 (schema/register! ::count :int)
@@ -51,11 +51,11 @@
    An unknown namespace returns an ok?-false envelope whose `::hint`
    carries the query that lists every indexed namespace. To read ONE
    fn's FULL source afterwards, drill:
-   (seon.agent.ctx/render-namespace {:seon.ns/name :my.plan
+   (seon.agent.ctx/render-namespace {:seon.ns/name 'my.plan
                                      :seon.ns/member \"done!\"})."
   {:malli/schema [:=> [:cat ::functions-request] ::functions-response]}
   [{ns-name ::ns dbv :seon.db/db}]
-  (let [ns-kw (if (keyword? ns-name) ns-name (keyword (str ns-name)))
+  (let [ns-sym ns-name
         database (or dbv (await (db/db)))]
     (if (:seon.error/message database)
       {:seon.result/ok? false
@@ -65,7 +65,7 @@
                   {:seon.db/db database
                    :seon.db/query
                    '[:find ?e . :in $ ?n :where [?e :seon.ns/name ?n]]
-                   :seon.db/args [ns-kw]}))]
+                   :seon.db/args [ns-sym]}))]
         (cond
           (:seon.error/message eid)
           {:seon.result/ok? false
@@ -73,7 +73,7 @@
 
           (nil? eid)
           {:seon.result/ok? false
-           ::error (str "namespace " (name ns-kw)
+           ::error (str "namespace " ns-sym
                         " is not indexed — no :seon.ns row.")
            ::hint  (str "(seon.db/query '[:find [?n ...] :where "
                         "[_ :seon.ns/name ?n]]) lists every indexed namespace.")}
@@ -105,5 +105,5 @@
                   (assoc ::hint
                          (str "indexed, but no public schema-complete fns — "
                               "(seon.agent.ctx/render-namespace "
-                              "{:seon.ns/name " ns-kw
+                              "{:seon.ns/name " (pr-str ns-sym)
                               "}) shows the whole namespace.")))))))))))

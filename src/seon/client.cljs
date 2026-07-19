@@ -1316,7 +1316,7 @@
         ;; write-time extraction, never a render-time re-parse. Stub
         ;; nses (compiled seon.* — never SCI-rendered) skip the edges.
         edges (when full? (analyzer-info/require-edges-from-source src))]
-    (cond-> {:seon.ns/name   (keyword ns-sym-str)
+    (cond-> {:seon.ns/name   (symbol ns-sym-str)
              :seon.ns/source src}
       (seq edges) (assoc :seon.ns/require-edges (vec edges)))))
 
@@ -1404,7 +1404,7 @@
   [v now]
   (let [m       (meta v)
         sym     (str (:ns m) "/" (:name m))
-        ns-kw   (keyword (str (:ns m)))
+        ns-kw   (:ns m)
         ;; Per-var blast-radius guard (sci-not-available incident,
         ;; 2026-06-11): CLJS var meta is UNEVALUATED data, so a
         ;; `:malli/schema` form that embeds a symbol-referenced fn
@@ -1584,7 +1584,7 @@
    and carries the real spec). Returns a vector of rows (possibly empty)."
   [ns-sym-str txt now]
   (let [n     (count txt)
-        ns-kw (keyword ns-sym-str)]
+        ns-kw (symbol ns-sym-str)]
     (loop [i 0 rows []]
       (if (>= i n)
         rows
@@ -1695,7 +1695,7 @@
    + var meta for spec/doc). Replaces the old curated `seed-core-fns!`.
 
    Per owning ns, emits a `:seon.ns/name` + `:seon.ns/source` row (via
-   [[ns-row]]) so the `[:seon.ns/name <kw>]` lookup-ref on `:seon.fn/ns`
+   [[ns-row]]) so the `[:seon.ns/name <symbol>]` lookup-ref on `:seon.fn/ns`
    resolves. EXEMPLAR nses (context-focus-redesign root set) carry the
    REAL FULL FILE TEXT; all other core nses keep the minimal `(ns x)` stub.
 
@@ -1703,7 +1703,7 @@
    + the registered `!extra-core-vars` + the admitted program sources,
    independent of any conn. Re-seeding the same rows on a
    later boot is idempotent at the DB layer: every row upserts on its identity
-   attr (`:seon.ns/name` / `:seon.fn/sym`). The lookup-ref `[:seon.ns/name <kw>]`
+   attr (`:seon.ns/name` / `:seon.fn/sym`). The lookup-ref `[:seon.ns/name <symbol>]`
    is the only ref shape ever emitted for `:seon.fn/ns` (a single
    `:seon.db/ref`); it is never a bare keyword.
 
@@ -1779,7 +1779,7 @@
                                (:seon.db.id/generator properties))
                         (namespace k)
                         (assoc :seon.schema/ns
-                               {:seon.ns/name (keyword (namespace k))}))))))
+                               {:seon.ns/name (symbol (namespace k))}))))))
           (schema/registered-schemas))))
 
 (def ^:private compiled-program-wall-clock-attrs

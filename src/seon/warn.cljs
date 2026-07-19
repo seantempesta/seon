@@ -99,7 +99,8 @@
 
 (defn- fn-rows
   "Every `:seon.fn` row joined to its owning ns name, optionally
-   filtered to `ns-kw` (compared by `name` so :my.ns ≡ 'my.ns).
+   filtered to `ns-kw`. This request scope remains a keyword UI option, so the
+   comparison translates by name at this boundary only.
    Each row is a projection speaking the PERSISTED attr keys
    (`:seon.fn/sym`/`:seon.ns/name`/`:seon.fn/spec`/`:seon.fn/fn-var?`/
    `:seon.fn/private?`/`:seon.fn/schema-error` — C39, no bare twins).

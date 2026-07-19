@@ -367,7 +367,7 @@
                           :seon.agent.ctx/rendered-blocks []
                           :seon.ai/system-prompt "frozen system"
                           :seon.config/repl-mode :batch
-                          :seon.eval/ns (keyword (str "my.agent." id))})]
+                          :seon.eval/ns (symbol (str "my.agent." id))})]
       (-> (call-with-acquired-agent
            {} {:seon.agent/id "empty"} observed)
           (.then
@@ -486,7 +486,7 @@
           setup (atom nil)
           program
           {::execution/namespace-rows
-           [{:seon.ns/name :my.agent.agent-1
+           [{:seon.ns/name 'my.agent.agent-1
              :seon.ns/source "(ns my.agent.agent-1)"
              :seon.ns/require-edges []
              :seon.fn/_ns []
@@ -540,7 +540,7 @@
                      'my.agent.agent-1
                      "agent-1" "turn-1" "run-1"
                      {::eval/authored-sources
-                      {:my.agent.agent-1 "(ns my.agent.agent-1)"}
+                      {'my.agent.agent-1 "(ns my.agent.agent-1)"}
                       :seon.config/configuration configuration
                       ::db/db database}]
                     (:seon.execution.runtime-test/arguments @observed)))

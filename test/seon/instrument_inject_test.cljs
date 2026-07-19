@@ -19,12 +19,12 @@
       [:seon.config/configuration
        {:optional true}
        :seon.config/singleton]
-      [:seon.eval/ns {:optional true} :keyword]
+      [:seon.eval/ns {:optional true} :symbol]
       [:probe/x :int]]]
     [:map
      [:probe/got-id {:optional true} :string]
      [:probe/got-configuration? :boolean]
-     [:probe/got-ns {:optional true} :keyword]
+     [:probe/got-ns {:optional true} :symbol]
      [:probe/x :int]]]}
   [{id :seon.agent/id
     operation-configuration :seon.config/configuration
@@ -84,7 +84,7 @@
    valid-id
    #(db/with-tx-context
      {:seon.config/configuration operation-configuration
-      :seon.eval/ns :my.instrument.probe}
+      :seon.eval/ns 'my.instrument.probe}
      thunk)))
 
 (deftest declared-absent-dependencies-come-from-one-operation
@@ -92,7 +92,7 @@
                  #(probe-injects {:probe/x 1}))]
     (is (= valid-id (:probe/got-id result)))
     (is (true? (:probe/got-configuration? result)))
-    (is (= :my.instrument.probe (:probe/got-ns result)))
+    (is (= 'my.instrument.probe (:probe/got-ns result)))
     (is (= 1 (:probe/x result)))))
 
 (deftest caller-provided-agent-id-remains-inspectable

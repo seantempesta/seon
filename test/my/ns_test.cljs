@@ -94,7 +94,7 @@
   (async done
     (finish
      (with-program-results
-       {:my.demo demo-function-rows}
+       {'my.demo demo-function-rows}
        (fn []
          (-> (functions 'my.demo)
              (.then
@@ -133,28 +133,25 @@
                       "cards are inert documentation if copied into a reply")))))))
      done)))
 
-(deftest functions-accepts-symbol-keyword-and-string
+(deftest functions-accepts-the-canonical-symbol
   (async done
     (finish
      (with-program-results
-       {:my.demo demo-function-rows}
+       {'my.demo demo-function-rows}
        (fn []
-         (-> (js/Promise.all
-              #js [(functions 'my.demo)
-                   (functions :my.demo)
-                   (functions "my.demo")])
+         (-> (js/Promise.all #js [(functions 'my.demo) (functions 'my.demo)])
              (.then
               (fn [results]
-                (let [[by-symbol by-keyword by-string] (js->clj results)]
-                  (is (= by-symbol by-keyword by-string)
-                      "the three spellings are one question")))))))
+                (let [[first-result second-result] (js->clj results)]
+                  (is (= first-result second-result)
+                      "the namespace symbol is stable across calls")))))))
      done)))
 
 (deftest functions-acquires-one-database-value-when-omitted
   (async done
     (finish
      (with-program-results
-       {:my.demo demo-function-rows}
+       {'my.demo demo-function-rows}
        (fn []
          (-> (my-ns/functions {:my.ns/ns 'my.demo})
              (.then
@@ -182,9 +179,9 @@
   (async done
     (finish
      (with-program-results
-       {:my.hollow []}
+       {'my.hollow []}
        (fn []
-         (-> (functions :my.hollow)
+         (-> (functions 'my.hollow)
              (.then
               (fn [{ok? :seon.result/ok? :as result}]
                 (is (true? ok?) "no functions is success, not an error")

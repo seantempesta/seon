@@ -17,7 +17,7 @@
                    [:seon.eval/at :inst]
                    [:seon.eval/source :string]
                    [:seon.eval/narration :string]
-                   [:seon.eval/ns :keyword]
+                   [:seon.eval/ns :symbol]
                    [:seon.eval/agent {:optional true} :seon.db/ref]])
 (schema/register! ::terminal-request
                   [:map {:closed true}

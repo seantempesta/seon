@@ -174,7 +174,7 @@
                      "my.kb/source-detail"
                      "my.kb/source-entity"]
         ns-source   (:seon.ns/source
-                      (first (filter #(= :my.kb (:seon.ns/name %)) tx)))]
+                      (first (filter #(= 'my.kb (:seon.ns/name %)) tx)))]
     (doseq [sym capabilities]
       (let [row    (by-sym tx sym)
             source (:seon.fn/source row)]
@@ -255,7 +255,7 @@
         "no row carries a `,,,` stub")))
 
 (deftest emits-ns-rows-for-owning-nses
-  ;; Each owning ns gets a :seon.ns row so the [:seon.ns/name kw] lookup-ref
+  ;; Each owning ns gets a :seon.ns row so its symbol lookup-ref resolves.
   ;; on :seon.fn/ns resolves. A seon.* FRAMEWORK BULK ns keeps the minimal
   ;; `(ns x)` stub — it is DROPPED from the :namespaces section (still
   ;; indexed via its member rows); my.* nses AND the curated full-source
@@ -263,11 +263,11 @@
   (let [tx      @core-tx
         ns-rows (filter :seon.ns/name tx)
         names   (set (map :seon.ns/name ns-rows))]
-    (is (contains? names :seon.db) ":seon.db ns row emitted")
-    (is (contains? names :seon.schema) ":seon.schema ns row emitted")
-    (is (contains? names :seon.test.runner) ":seon.test.runner ns row emitted")
+    (is (contains? names 'seon.db) "seon.db ns row emitted")
+    (is (contains? names 'seon.schema) "seon.schema ns row emitted")
+    (is (contains? names 'seon.test.runner) "seon.test.runner ns row emitted")
     (is (= "(ns seon.warn)"
-           (:seon.ns/source (first (filter #(= :seon.warn (:seon.ns/name %)) ns-rows))))
+           (:seon.ns/source (first (filter #(= 'seon.warn (:seon.ns/name %)) ns-rows))))
         "a non-whitelisted framework-bulk ns source is the minimal (ns x) stub")))
 
 (deftest core-ns-rows-stub-bulk-full-source-whitelist
@@ -288,29 +288,29 @@
                           (and (not= (str "(ns " (name k) ")") s)
                                (str/starts-with? (str/triml s) (str "(ns " (name k)))
                                (str/includes? s "defn"))))
-        warn    (:seon.ns/source (row-for :seon.warn))
-        eval-ns (:seon.ns/source (row-for :seon.eval))]
+        warn    (:seon.ns/source (row-for 'seon.warn))
+        eval-ns (:seon.ns/source (row-for 'seon.eval))]
     (is (= "(ns seon.warn)" warn)
         "seon.warn (framework bulk) source is the minimal (ns x) stub")
     (is (= "(ns seon.eval)" eval-ns)
         "seon.eval (framework bulk) source is the minimal (ns x) stub")
     ;; my.kb (the DB manual) is full-source via the my.* rule, and the
     ;; whitelisted tool carries its REAL full file source — neither a stub.
-    (is (full? :my.kb)
+    (is (full? 'my.kb)
         "my.kb (the runnable DB manual, full via the my.* rule) source is its REAL full file text")
-    (is (full? :my.plan)
+    (is (full? 'my.plan)
         "my.plan (whitelist) source is its REAL full file text")
     ;; seon.db itself is DE-whitelisted — the raw db source is no longer
     ;; dumped; it drops to the minimal (ns x) stub (still indexed via its
     ;; member rows). The worked-example layer (my.kb, full via the my.* rule)
     ;; replaces it.
-    (is (= "(ns seon.db)" (:seon.ns/source (row-for :seon.db)))
+    (is (= "(ns seon.db)" (:seon.ns/source (row-for 'seon.db)))
         "seon.db (de-whitelisted) source is the minimal (ns x) stub")
     ;; LEAN: search + fs are NO LONGER whitelisted — they drop to the minimal
     ;; (ns x) stub (still indexed via their member rows below).
-    (is (= "(ns seon.agent.search)" (:seon.ns/source (row-for :seon.agent.search)))
+    (is (= "(ns seon.agent.search)" (:seon.ns/source (row-for 'seon.agent.search)))
         "seon.agent.search (de-whitelisted) source is the minimal (ns x) stub")
-    (is (= "(ns seon.agent.fs)" (:seon.ns/source (row-for :seon.agent.fs)))
+    (is (= "(ns seon.agent.fs)" (:seon.ns/source (row-for 'seon.agent.fs)))
         "seon.agent.fs (de-whitelisted) source is the minimal (ns x) stub")
     ;; the members are still indexed (dropped nses via member rows; the
     ;; whitelist via its full source).
@@ -322,8 +322,8 @@
 
 (deftest pure-index-emits-valid-refs
   ;; index-core! is a PURE builder: every :seon.fn/ns it emits is a
-  ;; [:seon.ns/name <kw>] lookup-ref (a single :seon.db/ref), NEVER a bare
-  ;; keyword — the malformed value the Run-3 findings traced to the second boot.
+  ;; [:seon.ns/name <symbol>] lookup-ref (a single :seon.db/ref), NEVER a bare
+  ;; value — the malformed shape the Run-3 findings traced to the second boot.
   ;;
   ;; DERIVED expectations: the indexed vars now come from the compile-time
   ;; `seon.indexing/public-fn-vars` macro over EVERY public first-party fn
@@ -350,9 +350,9 @@
       (is (some #{sym} syms) (str sym " present in the indexed vars")))
     (is (every? #(let [r (:seon.fn/ns %)]
                    (and (vector? r) (= 2 (count r)) (= :seon.ns/name (first r))
-                        (keyword? (second r))))
+                        (symbol? (second r))))
                 fns)
-        "every :seon.fn/ns is a valid [:seon.ns/name kw] lookup-ref")))
+        "every :seon.fn/ns is a valid symbol namespace lookup-ref")))
 
 (deftest index-schemas-covers-the-whole-registry
   ;; Fix b: ALL registered schemas — attr-level included — become
@@ -368,7 +368,7 @@
         ":seon.schema/form is derived from the registered Malli form")
     (is (every? (fn [{k :seon.schema/key ns-ref :seon.schema/ns}]
                   (if (namespace k)
-                    (= {:seon.ns/name (keyword (namespace k))} ns-ref)
+                    (= {:seon.ns/name (symbol (namespace k))} ns-ref)
                     (nil? ns-ref)))
                 rows)
         "namespaced keys carry the owning-ns nested ref; bare kinds don't")))

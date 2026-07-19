@@ -60,7 +60,7 @@
          nil
          -7)]
     (is (= -7 (:db/id namespace-row)))
-    (is (= :my.agent.historical (:seon.ns/name namespace-row)))
+    (is (= 'my.agent.historical (:seon.ns/name namespace-row)))
     (is (str/includes? (:seon.ns/source namespace-row)
                        "[seon.db :as database]"))
     (is (= {:seon.agent/id "historical"
@@ -68,10 +68,10 @@
            agent-row)))
   (is (= [{:seon.agent/id "historical"
            :seon.agent/namespace
-           [:seon.ns/name :my.agent.historical]}]
+           [:seon.ns/name 'my.agent.historical]}]
          (#'agent/missing-namespace-tx
           {:seon.agent/id "historical"}
-          {:seon.ns/name :my.agent.historical}
+          {:seon.ns/name 'my.agent.historical}
           -7))))
 
 (deftest namespace-assignment-transaction-reuses-existing-namespace
@@ -79,12 +79,12 @@
            [:seon.agent/id "child"]
            :seon.agent/namespace]
           {:seon.agent/id "child"
-           :seon.agent/namespace [:seon.ns/name :my.orders]}]
+           :seon.agent/namespace [:seon.ns/name 'my.orders]}]
          (#'agent/namespace-assignment-tx
           {::agent/namespace-target
            {:seon.agent/id "child"
             :seon.agent/namespace
-            {:db/id 41 :seon.ns/name :my.agent.child}}
+            {:db/id 41 :seon.ns/name 'my.agent.child}}
            ::agent/namespace-exists? true
            :seon.agent/id "child"
            :seon.agent/namespace 'my.orders}))))
@@ -96,13 +96,13 @@
           {:seon.agent/id "child"
            :seon.eval/home-requires '[[seon.db :as db]]
            :seon.agent/namespace
-           {:db/id 41 :seon.ns/name :my.agent.child}}
+           {:db/id 41 :seon.ns/name 'my.agent.child}}
           ::agent/namespace-exists? false
           :seon.agent/id "child"
           :seon.agent/namespace 'my.orders})
         [namespace-row release-current agent-row] transaction]
     (is (= -1 (:db/id namespace-row)))
-    (is (= :my.orders (:seon.ns/name namespace-row)))
+    (is (= 'my.orders (:seon.ns/name namespace-row)))
     (is (str/includes? (:seon.ns/source namespace-row)
                        "[seon.db :as db]"))
     (is (= [:db.fn/retractAttribute
@@ -135,7 +135,7 @@
                   {:seon.agent/id "child"
                    :seon.eval/home-requires '[[seon.db :as db]]
                    :seon.agent/namespace
-                   {:db/id 41 :seon.ns/name :my.agent.child}})))
+                   {:db/id 41 :seon.ns/name 'my.agent.child}})))
               ([_ _] (js/Promise.reject (js/Error. "unexpected pull arity")))
               ([_ _ _]
                (js/Promise.reject (js/Error. "unexpected pull arity")))))
@@ -167,7 +167,7 @@
               (let [[namespace-row release-current agent-row]
                     (::db/tx-data @transaction)]
                 (is (= -1 (:db/id namespace-row)))
-                (is (= :my.orders (:seon.ns/name namespace-row)))
+                (is (= 'my.orders (:seon.ns/name namespace-row)))
                 (is (= [:db.fn/retractAttribute
                         [:seon.agent/id "child"]
                         :seon.agent/namespace]
@@ -309,7 +309,7 @@
               (is (= {:seon.agent/id "created"} result))
               (is (identical? database (::db/db @pull-request)))
               (is (= [[:seon.agent/id "created"]
-                      [:seon.ns/name :my.agent.created]
+                      [:seon.ns/name 'my.agent.created]
                       [:seon.config/id config/cluster-config-id]]
                      (::db/refs @pull-request)))
               (is (= 4096 (::db/max-results @pull-request)))
@@ -328,7 +328,7 @@
                 (is (= (:db/id home-row)
                        (:seon.agent/namespace agent-row))
                     "a new namespace and its agent share one transaction tempid")
-                (is (= :my.agent.created (:seon.ns/name home-row)))
+                (is (= 'my.agent.created (:seon.ns/name home-row)))
                 (is (str/includes? (:seon.ns/source home-row)
                                    "[seon.db :as configured-db]"))))))
        done
@@ -446,7 +446,7 @@
                     "the child identity precedes its task lookup ref")
                 (is (= [[:seon.agent/id "child"]]
                        (:seon.agent.message/to (nth tx message-index))))
-                (is (= [:seon.ns/name :my.tax]
+                (is (= [:seon.ns/name 'my.tax]
                        (:seon.agent/namespace (nth tx child-index))))
                 (is (not-any? :seon.ns/name tx)
                     "an existing namespace declaration is not overwritten")

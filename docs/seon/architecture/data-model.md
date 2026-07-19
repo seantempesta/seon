@@ -146,7 +146,7 @@ value either satisfies its owning identity schema or is rejected.
 | `:seon.db.process/id` | `[:keyword {:seon.db/identity true}]` | `:db.type/keyword` | boot/config/REPL provenance path |
 | `:seon.fn/sym` | `[:string {:seon.db/identity true}]` | `:db.type/string` | fn qualified-sym key |
 | `:seon.test/sym` | `[:string {:seon.db/identity true}]` | `:db.type/string` | test key |
-| `:seon.ns/name` | `[:keyword {:seon.db/identity true}]` | `:db.type/keyword` | ns key |
+| `:seon.ns/name` | `[:symbol {:seon.db/identity true}]` | `:db.type/symbol` | canonical ClojureScript namespace symbol |
 | `:seon.schema/key` | `[:keyword {:seon.db/identity true}]` | `:db.type/keyword` | schema-attr key |
 | `:seon.route/name` | `[:keyword {:seon.db/identity true}]` | `:db.type/keyword` | reverse-routing key |
 | `:my.kb.shared/id` | `[:string {:seon.db/identity true}]` | `:db.type/string` | global KB entry key |
@@ -661,6 +661,7 @@ fabricated eval rows.
 |---|---|---|---|
 | `:seon.eval/id` | `[:and {:seon.db/identity true :seon.db.id/generator :seon.db.id.generator/compact} :seon.db.id/compact-value]` | string / one / identity | compact |
 | `:seon.eval/source` | `:string` | string / one | the form's source |
+| `:seon.eval/ns` | `:symbol` | symbol / one | canonical namespace where the form ended |
 | `:seon.eval/ok?` | `:boolean` | boolean / one | false ⇒ a failed eval |
 | `:seon.eval/error` | `:string` | string / one | optional; the rendered error headline |
 | `:seon.eval/error-data` | `:string` | string / one | optional; EDN of the structured error payload (§6) |
@@ -700,7 +701,7 @@ only the identities and core refs matter here.
 
 | entity | identity attr | valueType | other refs |
 |---|---|---|---|
-| `:seon.ns` | `:seon.ns/name` `[:keyword {:seon.db/identity true}]` | keyword | `:seon.ns/require-edges` (component rows `{:seon.ns.require/target :keyword, alias :symbol, refers [:set :symbol]}` — the sole reified `:as`/`:refer` facts used to compile the reachable authored source closure and synthesize boot replay's `(ns …)` head; committed with the home namespace at agent birth, updated by the analyzer tee, and indexed from full source at boot), `:seon.ns/source :string` |
+| `:seon.ns` | `:seon.ns/name` `[:symbol {:seon.db/identity true}]` | symbol | `:seon.ns/require-edges` (component rows `{:seon.ns.require/target :symbol, alias :symbol, refers [:set :symbol]}` — the sole reified `:as`/`:refer` facts used to compile the reachable authored source closure and synthesize boot replay's `(ns …)` head; committed with the home namespace at agent birth, updated by the analyzer tee, and indexed from full source at boot), `:seon.ns/source :string` |
 
 Render-time consumers never reparse `:seon.ns/source` to recover aliases or
 refers. Namespace source and require-edge facts are committed together; the

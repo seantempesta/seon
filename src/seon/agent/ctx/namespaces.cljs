@@ -30,9 +30,8 @@
 ;;
 ;; Attribute-PRESENCE is the config (decision 22/23): a ns present in a set
 ;; IS its config; compact is the ABSENCE. The element type is
-;; `:seon.ns/name` (currently a keyword, matching the identity
-;; attr's shape) — the bridge derives the SAME cardinality-many keyword
-;; column as a bare `:keyword` would, but names the shape. A keyword (not a
+;; `:seon.ns/name` symbol, matching the identity attr's shape. The bridge
+;; derives a cardinality-many symbol column. A value (not a
 ;; `:db.type/ref`) tolerates configuring a not-yet-indexed ns (a fresh
 ;; `my.agent.*` home ns): an unmatched name simply no-ops in the render.
 ;; Defaults ride each spec (malli-native, decision 4) — a fresh block is
@@ -47,7 +46,7 @@
 
 ;; ============================================================
 ;; The namespace-display rules. Two SEPARATE concerns, both pure
-;; string/keyword/symbol fns (no dependency on anything in `seon.agent.ctx`):
+;; string/symbol boundary fns (no dependency on anything in `seon.agent.ctx`):
 ;;
 ;;   - WHICH rows are indexable/renderable at all — [[included-ns?]]
 ;;     (`*.internal` / `*-test` excluded). Shared by the boot indexer and
@@ -64,10 +63,10 @@
   "Rule 1: a `*.internal` namespace is indexed but never rendered.
 
    Applies to the ns or any of its children — the naming convention IS
-   the filter. String/keyword/symbol tolerant."
-  {:malli/schema [:=> [:cat [:or :string :keyword :symbol]] :boolean]}
+   the filter. Source strings convert only at the database boundary."
+  {:malli/schema [:=> [:cat [:or :string :symbol]] :boolean]}
   [ns-name]
-  (let [s (if (keyword? ns-name) (name ns-name) (str ns-name))]
+  (let [s (str ns-name)]
     (boolean (or (str/ends-with? s ".internal")
                  (str/includes? s ".internal.")))))
 
@@ -75,9 +74,9 @@
   "Rule 2: `my.*` is human-authored code and data — always shown.
 
    Provenance is not consulted (one name rule, no special cases)."
-  {:malli/schema [:=> [:cat [:or :string :keyword :symbol]] :boolean]}
+  {:malli/schema [:=> [:cat [:or :string :symbol]] :boolean]}
   [ns-name]
-  (let [s (if (keyword? ns-name) (name ns-name) (str ns-name))]
+  (let [s (str ns-name)]
     (boolean (or (= s "my") (str/starts-with? s "my.")))))
 
 (defn test-ns-name?
@@ -87,10 +86,10 @@
    agent, and the per-fn `:test` usage example already rides the fn's attr-map in
    the compact head. Full tests stay searchable as indexed database data.
    STRUCTURAL, like [[hidden-ns-name?]]: the
-   suffix IS the filter. String/keyword/symbol tolerant."
-  {:malli/schema [:=> [:cat [:or :string :keyword :symbol]] :boolean]}
+   suffix IS the filter. Source strings and namespace symbols are accepted."
+  {:malli/schema [:=> [:cat [:or :string :symbol]] :boolean]}
   [ns-name]
-  (let [s (if (keyword? ns-name) (name ns-name) (str ns-name))]
+  (let [s (str ns-name)]
     (str/ends-with? s "-test")))
 
 (defn included-ns?
@@ -101,9 +100,9 @@
    to seon, my.*, and downstream code alike. No prefix allow-list: the
    library gate lives on the INDEX side (only first-party + SEON_EXTRA_SRC
    code ever gets a :seon.ns row — seon.indexing/first-party-file?)."
-  {:malli/schema [:=> [:cat [:or :string :keyword :symbol]] :boolean]}
+  {:malli/schema [:=> [:cat [:or :string :symbol]] :boolean]}
   [ns-name]
-  (let [s (if (keyword? ns-name) (name ns-name) (str ns-name))]
+  (let [s (str ns-name)]
     (boolean (and (not (hidden-ns-name? s))
                   (not (test-ns-name? s))))))
 
@@ -117,7 +116,7 @@
     ns-str))
 
 (defn- always-full?
-  "True when `ns-name` (string/keyword/symbol) is in the resolved config
+  "True when `ns-name` (source string or symbol) is in the resolved config
    policy's `:seon.config/always` set. BOOT-STORAGE only ([[full-source-ns?]]):
    the boot indexer stores these nses' real file source so a per-agent
    `::full-source` pin CAN promote them to full. It does NOT itself render
@@ -126,12 +125,12 @@
   [configuration ns-name]
   (contains? (:seon.config/always
                (config/namespaces-policy configuration))
-             (if (keyword? ns-name) ns-name (keyword (str ns-name)))))
+             (if (symbol? ns-name) ns-name (symbol (str ns-name)))))
 
 (defn full-source-ns?
   "True when `ns-name` carries its REAL FULL FILE TEXT as `:seon.ns/source`.
 
-   Accepts a string, symbol, or ns-name keyword. Every `my.*` ns (the
+   Accepts a source string or namespace symbol. Every `my.*` ns (the
    human-authored code and data — always inlined), INCLUDING `.internal` siblings and
    `-test` siblings (the `-test` suffix is stripped to the subject ns
    first), AND every non-hidden seon.* ns the config policy lists in
@@ -154,20 +153,20 @@
    file read). Every other ns gets the minimal `(ns x)` stub at boot (still
    indexed + searchable)."
   {:malli/schema [:=> [:cat :seon.config/singleton
-                       [:or :string :keyword :symbol]] :boolean]}
+                       [:or :string :symbol]] :boolean]}
   [configuration ns-name]
-  (let [s    (if (keyword? ns-name) (name ns-name) (str ns-name))
+  (let [s    (str ns-name)
         base (base-ns-name s)]
     (boolean (or (my-ns-name? base)
                  (and (not (hidden-ns-name? s))
                       (always-full? configuration base))))))
 
 (defn- seon-framework-ns?
-  "True when `ns-name` (string/keyword/symbol) is a `seon.*` framework ns —
+  "True when `ns-name` (source string or symbol) is a `seon.*` framework ns —
    used to route a STABLE seon.* required ns into the name-sorted cache PREFIX
    vs the recency BODY (the agent's churning my.* / current ns)."
   [ns-name]
-  (let [s (if (keyword? ns-name) (name ns-name) (str ns-name))]
+  (let [s (str ns-name)]
     (str/starts-with? s "seon.")))
 
 (defn- required-ns-selections
@@ -547,7 +546,7 @@
    [[seon.agent.home/home-ns-form]], NOT a bare-name reconstruction from the
    stored edges. No hidden aliasing: the agent reads the form and knows
    `message/user`, `db/transact!`, `schema/register!`, `wait`, `complete`
-   exist and how to call them. `nm` is a ns-name keyword whose `:seon.ns/name`
+   exist and how to call them. `nm` is a namespace symbol whose `:seon.ns/name`
    row the caller already matched (an included, current-ns row). `id` is the
    agent id, threaded so the stub prose shows THIS agent's actual configured
    requires ([[seon.agent.home/home-requires-for]]) — not the const default."
@@ -662,10 +661,10 @@
    `:namespaces` BLOCK entity, then the Malli default ([[resolve-cfg]] — a
    `db/transact!` re-derives next render, no apply step):
 
-     - `::full-source` — a presence-set of ns keywords to force FULL;
+     - `::full-source` — a presence-set of namespace symbols to force FULL;
      - `::current-full?` (default true) — whether the agent's CURRENT ns
        renders full (false → its compact card);
-     - `::with-tests` — a presence-set of ns keywords whose indexed test SOURCE
+     - `::with-tests` — a presence-set of namespace symbols whose indexed test SOURCE
        rides along under the ns's block; the current ns joins this set when
        `::current-tests?` (default true) is on.
 

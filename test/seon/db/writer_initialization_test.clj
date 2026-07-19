@@ -18,7 +18,7 @@
    ::writer/knn (fn [_db-value _vector _k _eids] [])})
 
 (def schema-forms
-  {:seon.db/lookup-ref-value "[:or :string :uuid :keyword :int]"
+  {:seon.db/lookup-ref-value "[:or :string :uuid :keyword :symbol :int]"
    :seon.db/ref
    "[:or :int :string [:tuple :keyword :seon.db/lookup-ref-value]]"
    :seon.schema/key "[:keyword {:seon.db/identity true}]"
@@ -32,7 +32,7 @@
    "[:and {:seon.db/identity true} [:enum :seon.db.process/boot :seon.db.process/config :seon.db.process/repl]]"
    :seon.user/id "[:string {:seon.db/identity true}]"
    :seon.render/full? ":boolean"
-   :seon.ns/name "[:keyword {:seon.db/identity true}]"
+   :seon.ns/name "[:symbol {:seon.db/identity true}]"
    :seon.ns/source ":string"
    :seon.fn/sym "[:string {:seon.db/identity true}]"
    :seon.fn/ns ":seon.db/ref"
@@ -57,10 +57,10 @@
     :seon.fn/source :seon.fn/doc :seon.fn/arglists :seon.fn/private?
     :seon.fn/agent-facing? :seon.render/full?]
    :seon.db/program
-   (into [{:seon.ns/name :my.core
+   (into [{:seon.ns/name 'my.core
            :seon.ns/source "(ns my.core)"}
           {:seon.fn/sym "my.core/answer"
-           :seon.fn/ns [:seon.ns/name :my.core]
+           :seon.fn/ns [:seon.ns/name 'my.core]
            :seon.fn/source "(defn answer [] 42)"
            :seon.fn/doc "Answer."
            :seon.fn/arglists "([])"

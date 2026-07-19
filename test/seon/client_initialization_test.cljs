@@ -1,6 +1,7 @@
 (ns seon.client-initialization-test
   (:require
    [cljs.test :refer [async deftest is testing]]
+   [malli.core :as m]
    [my.skills :as skills]
    [seon.agent :as agent]
    [seon.agent.loop :as agent-loop]
@@ -18,6 +19,25 @@
 
 (def ^:private digest
   "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+
+(deftest namespace-identities-use-the-symbol-storage-contract
+  (is (m/validate :seon.ns/name 'my.orders))
+  (is (not (m/validate :seon.ns/name :my.orders)))
+  (is (= :db.type/symbol
+         (:db/valueType
+          (first (db/malli->datahike-schema [:seon.ns/name])))))
+  (is (= [{:db/id [:seon.ns/name 'my.orders]}]
+         (db.internal/normalize-entity-ref-keys
+          (db.internal/coerce-identity-symbol-idents
+           [{:seon.db/ref [:seon.ns/name 'my.orders]}]))))
+  (is (= [{:seon.ns/name 'my.orders}]
+         (db.internal/coerce-identity-symbol-idents
+          [{:seon.ns/name 'my.orders}])))
+  (is (= [[:db/add [:seon.ns/name 'my.orders]
+           :seon.agent/namespace [:seon.ns/name 'my.orders]]]
+         (db.internal/coerce-identity-symbol-idents
+          [[:db/add [:seon.ns/name 'my.orders]
+            :seon.agent/namespace [:seon.ns/name 'my.orders]]]))))
 
 (defn- descriptor []
   {::launch/runtime {::launch/execution-digest digest}})
@@ -79,11 +99,11 @@
 
 (deftest initialization-is-one-deterministic-complete-value
   (let [namespace-row
-        {:seon.ns/name :example.core
+        {:seon.ns/name 'example.core
          :seon.ns/source "(ns example.core)"}
         function-row
         {:seon.fn/sym "example.core/identity"
-         :seon.fn/ns [:seon.ns/name :example.core]
+         :seon.fn/ns [:seon.ns/name 'example.core]
          :seon.fn/source "(defn identity [value] value)"
          :seon.fn/spec "[:=> [:cat :example/id] :example/id]"
          :seon.fn/created-at (js/Date. 1)}
@@ -146,7 +166,7 @@
           original-entity db/entity
           original-resolve config/resolve-config-singleton
           retained (assoc configuration
-                          :seon.config/always #{:custom.core})
+                          :seon.config/always #{'custom.core})
           stored (update retained :seon.config/always pr-str)
           cleanup!
           (fn []
@@ -270,10 +290,10 @@
       (set! launch/process-launch-descriptor (descriptor))
       (set! client/index-core!
             (fn [_configuration]
-              [{:seon.ns/name :example.core
+              [{:seon.ns/name 'example.core
                 :seon.ns/source "(ns example.core)"}
                {:seon.fn/sym "example.core/broken"
-                :seon.fn/ns [:seon.ns/name :example.core]
+                :seon.fn/ns [:seon.ns/name 'example.core]
                 :seon.fn/source "(defn broken [value] value)"
                 :seon.fn/spec
                 "[:=> [:cat :example/missing] :example/missing]"}]))

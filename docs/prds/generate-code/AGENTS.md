@@ -19,12 +19,12 @@ each implementation boundary. Reuse `my.plan`, `seon.agent` messages/runs,
 existing `:namespaces` context block; do not create a parallel plan language,
 parser, task registry, event bus, worker lifecycle, or namespace renderer.
 
-Namespace names in the target model are complete symbols such as
+Namespace names are complete symbols such as
 `my.library.model` (Malli `:symbol`, not `:qualified-symbol`, which implies a
-slash). The current database uses keyword values for `:seon.ns/name`; Datahike
-cannot change that installed value type in place. The conversion is therefore
-a coordinated foundational migration and database-rebuild boundary with its
-own inventory and proof gate. Do not add keyword/symbol coercions.
+slash). `:seon.ns/name`, `:seon.ns.require/target`, and `:seon.eval/ns` use
+that representation directly. Datahike cannot change an installed value type
+in place, so applying this source boundary requires a fresh database rebuild.
+Do not add keyword/symbol coercions.
 
 The source-fenced projection is invocation-local ordinary data. Persist only
 the existing model reply, eval/program facts, plan steps, messages, and runs.

@@ -812,7 +812,7 @@
               ([_]
                (js/Promise.resolve
                 {:seon.agent/id "agent-a"
-                 :seon.agent/namespace {:seon.ns/name :my.tax}}))
+                 :seon.agent/namespace {:seon.ns/name 'my.tax}}))
               ([_ _]
                (js/Promise.reject (js/Error. "unexpected pull arity")))
               ([_ _ _]

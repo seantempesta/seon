@@ -78,12 +78,11 @@
    ;; block may select it later. This list does not itself render anything.
    [:seon.config/always {:optional true} [:vector :symbol]]])
 
-;; The RESOLVED policy the renderer + boot indexer read (symbols → ns-name
-;; keywords, defaults applied). Registered once + referenced by
+;; The RESOLVED symbol policy the renderer + boot indexer read. Registered once + referenced by
 ;; [[resolve-namespaces]].
 (schema/register! :seon.config/namespaces-policy
   [:map
-   [:seon.config/always [:set :keyword]]])
+   [:seon.config/always [:set :symbol]]])
 
 (schema/register! :seon.config/route-spec
   [:map
@@ -411,9 +410,9 @@
 ;;; heterogeneous collections ride the mixed-`:or` EDN-slot bridge (a `:nil` alt
 ;;; makes it a mixed `:or` so `transact!` pr-str's the value and the acquiring
 ;;; operation decodes it once with `seon.db/decode-edn-value`).
-;; The always-on FULL-source ns render list — the resolved keyword set
+;; The always-on FULL-source ns render list — the resolved symbol set
 ;; (`:seon.config/namespaces` `:always`). EDN-slot bridged (mixed `:or`).
-(schema/register! :seon.config/always [:or [:set :keyword] :nil])
+(schema/register! :seon.config/always [:or [:set :symbol] :nil])
 ;; Selected skill-corpus input. The manifest shape is a map; the database slot
 ;; is cardinality-one EDN so replacement is exact and optional means absent.
 (schema/register! :seon.config/skills [:or :seon.config/skills-spec :nil])
@@ -686,12 +685,6 @@
   {:seon.config/always '[my.kb my.data my.ui my.canvas
                           my.plan seon.agent.message seon.agent.lifecycle]})
 
-(defn- ns-sym->kw
-  "An ns-name SYMBOL (config) → its ns-name KEYWORD (the DB `:seon.ns/name`
-   shape the renderer matches): `my.kb` → `:my.kb`."
-  [s]
-  (keyword (str s)))
-
 (defn resolve-namespaces
   "Resolve the `:seon.config/namespaces` section into render policy.
 
@@ -705,7 +698,7 @@
   [manifest]
   (let [merged (merge default-namespaces-policy (:seon.config/namespaces manifest))]
     {:seon.config/always
-     (into #{} (map ns-sym->kw) (:seon.config/always merged))}))
+     (into #{} (:seon.config/always merged))}))
 
 ;;; ============================================================
 ;;; THE CONFIG RESOLVER. `resolve-config-singleton` maps a manifest

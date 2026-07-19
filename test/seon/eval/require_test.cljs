@@ -129,14 +129,14 @@
           caller (symbol (str "my.authority.caller" suffix))
           sources
           (seval/authored-sources
-           [{:seon.ns/name (keyword dep)
+           [{:seon.ns/name (symbol dep)
              :seon.ns/source (str "(ns " dep ")")
              :seon.ns/require-edges []
              :seon.fn/_ns
              [{:seon.fn/sym (symbol (str dep "/base"))
                :seon.fn/source "(defn base [] 41)"}]
              :seon.test/_ns []}
-            {:seon.ns/name (keyword target)
+            {:seon.ns/name (symbol target)
              :seon.ns/source
              (str "(ns " target " (:require [" dep " :as dep]))")
              :seon.ns/require-edges []
@@ -170,7 +170,7 @@
           caller (symbol (str "my.authority.consumer" suffix))
           sources
           (seval/authored-sources
-           [{:seon.ns/name (keyword target)
+           [{:seon.ns/name (symbol target)
              :seon.ns/source
              (str "(ns " target " (:require [" missing " :as missing]))")
              :seon.ns/require-edges []

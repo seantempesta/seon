@@ -354,14 +354,14 @@
 
 (deftest authored-program-identity-is-order-independent
   (let [edge-a {:db/id 1
-                :seon.ns.require/target :my.dep
+                :seon.ns.require/target 'my.dep
                 :seon.ns.require/refers #{'z 'a}}
-        edge-b {:db/id 2 :seon.ns.require/target :seon.db
+        edge-b {:db/id 2 :seon.ns.require/target 'seon.db
                 :seon.ns.require/alias 'db}
-        namespace-rows [[:my.render "(ns my.render)"]]
-        edge-rows [[:my.render edge-a] [:my.render edge-b]]
-        row-a ["my.render/view" "(defn view [_] :ok)" :my.render]
-        row-b ["my.render/helper" "(defn helper [] 1)" :my.render]
+        namespace-rows [['my.render "(ns my.render)"]]
+        edge-rows [['my.render edge-a] ['my.render edge-b]]
+        row-a ["my.render/view" "(defn view [_] :ok)" 'my.render]
+        row-b ["my.render/helper" "(defn helper [] 1)" 'my.render]
         first-value (execution/canonical-program
                      (set namespace-rows) edge-rows [] [row-a row-b] []
                      [[:z/schema ":string"] [:a/schema ":int"]]
@@ -397,12 +397,12 @@
   (async done
     (let [request (atom nil)
           results
-          [#{[:my.agent.agent-1 "(ns my.agent.agent-1)"]}
+          [#{['my.agent.agent-1 "(ns my.agent.agent-1)"]}
            #{}
            #{["my.agent.agent-1/run" "(defn run [] :ok)"
-              :my.agent.agent-1]}
+              'my.agent.agent-1]}
            #{["my.agent.agent-1/check" "(deftest check (is true))"
-              :my.agent.agent-1]}
+              'my.agent.agent-1]}
            #{}
            #{}]
           response
@@ -424,7 +424,7 @@
                                 (first (::protocol/arguments %)))
                            (::db/members @request)))
                (let [row (first (::execution/namespace-rows program))]
-                 (is (= :my.agent.agent-1 (:seon.ns/name row)))
+                 (is (= 'my.agent.agent-1 (:seon.ns/name row)))
                  (is (= ['my.agent.agent-1/run]
                         (mapv :seon.fn/sym (:seon.fn/_ns row))))
                  (is (= ['my.agent.agent-1/check]
@@ -445,7 +445,7 @@
          {:seon.execution/schema-forms []
           :seon.execution/function-contracts []
           :seon.execution/namespace-rows
-          [{:seon.ns/name :my.execution.alpha
+          [{:seon.ns/name 'my.execution.alpha
             :seon.ns/source "(ns my.execution.alpha)"
             :seon.ns/require-edges []
             :seon.fn/_ns
@@ -454,7 +454,7 @@
              {:seon.fn/sym 'my.execution.alpha/second
               :seon.fn/source "(defn second [] 2)"}]
             :seon.test/_ns []}
-           {:seon.ns/name :my.execution.beta
+           {:seon.ns/name 'my.execution.beta
             :seon.ns/source "(ns my.execution.beta)"
             :seon.ns/require-edges []
             :seon.fn/_ns
@@ -488,12 +488,12 @@
            {:seon.execution/schema-forms []
             :seon.execution/function-contracts []
             :seon.execution/namespace-rows
-            [{:seon.ns/name :my.execution.referred
+            [{:seon.ns/name 'my.execution.referred
               :seon.ns/source
               (str "(ns my.execution.referred\n"
                    "  (:require [seon.agent.lifecycle :refer [complete]]))")
               :seon.ns/require-edges
-              [{:seon.ns.require/target :seon.agent.lifecycle
+              [{:seon.ns.require/target 'seon.agent.lifecycle
                 :seon.ns.require/refers #{'complete}}]
               :seon.fn/_ns
               [{:seon.fn/sym sym
@@ -757,10 +757,10 @@
 
 (deftest ordinary-namespace-source-preserves-one-compile-unit
   (let [source (seval/namespace-source
-                {:seon.ns/name :my.render
+                {:seon.ns/name 'my.render
                  :seon.ns/source ""
                  :seon.ns/require-edges
-                 [{:seon.ns.require/target :my.dep
+                 [{:seon.ns.require/target 'my.dep
                    :seon.ns.require/alias 'dep}]
                  :seon.fn/_ns
                  [{:seon.fn/sym 'my.render/view
@@ -775,10 +775,10 @@
 
 (deftest namespace-source-reconstructs-effective-aliases-after-bare-reentry
   (let [source (seval/namespace-source
-                {:seon.ns/name :my.consumer
+                {:seon.ns/name 'my.consumer
                  :seon.ns/source "(ns my.consumer)"
                  :seon.ns/require-edges
-                 [{:seon.ns.require/target :my.base
+                 [{:seon.ns.require/target 'my.base
                    :seon.ns.require/alias 'base}]
                  :seon.fn/_ns
                  [{:seon.fn/sym 'my.consumer/answer

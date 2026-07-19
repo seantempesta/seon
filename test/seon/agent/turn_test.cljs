@@ -24,7 +24,7 @@
    :seon.ai/system-prompt "frozen system"
    :seon.ai/config-resolution resolution
    :seon.config/repl-mode :batch
-   :seon.eval/ns :my.agent.agent-1})
+   :seon.eval/ns 'my.agent.agent-1})
 
 (def ^:private reply-program (deref #'turn/reply-program))
 

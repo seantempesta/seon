@@ -139,7 +139,7 @@
    (`:seon.eval/result-var? true`): `seon.eval/bind-result-var!`
    registers each eval's value under the reserved `result` ns, and
    without this guard those would tee as bogus `:seon.fn` rows + a
-   sourceless `{:seon.ns/name :result}` row (the prefix allow-list was
+   sourceless `{:seon.ns/name 'result}` row (the prefix allow-list was
    the only thing hiding them — once it is gone they leak into the program
    graph)."
   {:malli/schema [:=> [:cat ::defs-snapshot ::compile-state] [:sequential ::new-def]]}
@@ -221,7 +221,7 @@
 ;; every reader/writer sees them registered on a cold boot).
 ;; ---------------------------------------------------------------------------
 
-(schema/register! :seon.ns.require/target :keyword)
+(schema/register! :seon.ns.require/target :symbol)
 (schema/register! :seon.ns.require/alias  :symbol)
 (schema/register! :seon.ns.require/refers [:set :symbol])
 ;; `:refer :all` — never produced by the analyzer (CLJS has no
@@ -264,7 +264,7 @@
           (keep (fn [r]
                   (cond
                     (symbol? r)
-                    {:seon.ns.require/target (keyword (str r))}
+                    {:seon.ns.require/target r}
 
                     (and (vector? r) (symbol? (first r)))
                     (let [tns  (first r)
@@ -273,7 +273,7 @@
                           as   (:as opts)
                           asa  (:as-alias opts)
                           refr (:refer opts)]
-                      (cond-> {:seon.ns.require/target (keyword (str tns))}
+                      (cond-> {:seon.ns.require/target tns}
                         (symbol? as) (assoc :seon.ns.require/alias as)
                         (and (symbol? asa) (not (symbol? as)))
                         (assoc :seon.ns.require/alias asa
@@ -353,7 +353,7 @@
                               {} uses)]
     (into (into #{}
                 (map (fn [t]
-                       (cond-> {:seon.ns.require/target (keyword (str t))}
+                       (cond-> {:seon.ns.require/target t}
                          (alias-of t)  (assoc :seon.ns.require/alias (alias-of t))
                          (refers-of t) (assoc :seon.ns.require/refers (refers-of t)))))
                 targets)
@@ -362,7 +362,7 @@
           ;; its real edge above (the reader alias adds nothing).
           (keep (fn [[a t]]
                   (when-not (contains? targets t)
-                    {:seon.ns.require/target    (keyword (str t))
+                    {:seon.ns.require/target    t
                      :seon.ns.require/alias     a
                      :seon.ns.require/as-alias? true})))
           (or as-aliases {}))))

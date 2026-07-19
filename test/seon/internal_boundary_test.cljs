@@ -20,10 +20,10 @@
 ;; The real framework `.internal` namespaces (each a sibling of a public ns
 ;; whose body it backs). NONE may leak to an agent.
 (def ^:private internal-nses
-  [:seon.db.internal
-   :seon.agent.internal
-   :seon.agent.search.internal
-   :seon.agent.fs.internal])
+  '[seon.db.internal
+    seon.agent.internal
+    seon.agent.search.internal
+    seon.agent.fs.internal])
 
 (def ^:private configuration
   (config/resolve-config-singleton {}))
@@ -41,15 +41,15 @@
   ;; The structural agent-prompt selection rule: .internal is filtered out by
   ;; the suffix alone, while the public parent renders. Falsifies a hollow
   ;; "always false" check by asserting the parent IS included.
-  (doseq [[internal parent] [[:seon.db.internal           :seon.db]
-                             [:seon.agent.search.internal :seon.agent.search]
-                             [:seon.agent.fs.internal     :seon.agent.fs]]]
+  (doseq [[internal parent] '[[seon.db.internal           seon.db]
+                              [seon.agent.search.internal seon.agent.search]
+                              [seon.agent.fs.internal     seon.agent.fs]]]
     (is (false? (ns/included-ns? internal))
         (str internal " is excluded from the agent prompt (.internal suffix)"))
     (is (true? (ns/included-ns? parent))
         (str "the PUBLIC parent " parent " IS included — the boundary is the "
              "suffix, not a blanket exclusion")))
-  ;; String/keyword/symbol tolerance — same answer whatever the caller hands.
+  ;; The source-string boundary and canonical symbol agree.
   (is (false? (ns/included-ns? "seon.db.internal")))
   (is (false? (ns/included-ns? 'seon.db.internal))))
 

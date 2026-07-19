@@ -26,7 +26,7 @@
 ;; A valid agent id (`:seon.agent/id` is a strict shape) and its home ns —
 ;; a fresh agent's current ns falls back to `(home-ns id)`.
 (def ^:private agent-id "tst-2606260000")
-(def ^:private cur-ns :my.agent.tst-2606260000)
+(def ^:private cur-ns 'my.agent.tst-2606260000)
 (def ^:private database {:datahike/commit-id "namespaces" :max-tx 1})
 
 ;; Unique body markers: present ⇒ the fn BODY was rendered (FULL); absent ⇒ the
@@ -46,20 +46,20 @@
    :seon.db/tx 1
    :seon.ns/source
    "(ns my.agent.tst-2606260000 (:require [my.helper :as h])) (defn plan [x] (CUR-BODY x))"
-   :seon.ns/require-edges [{:seon.ns.require/target :my.helper
+   :seon.ns/require-edges [{:seon.ns.require/target 'my.helper
                             :seon.ns.require/refers #{'assist}}]
    :seon.fn/_ns [(dissoc (fn-row "my.agent.tst-2606260000/plan"
                                   cur-ns "CUR-BODY")
                            :seon.fn/ns)]})
 
 (def ^:private eager-helper-row
-  {:seon.ns/name :my.helper
+  {:seon.ns/name 'my.helper
    :seon.db/tx 1
    :seon.ns/source "(ns my.helper)"
    :seon.fn/_ns
    (mapv #(dissoc % :seon.fn/ns)
-         [(fn-row "my.helper/assist" :my.helper "HLP-BODY")
-          (fn-row "my.helper/runtime-helper" :my.helper "RUNTIME-BODY")
+         [(fn-row "my.helper/assist" 'my.helper "HLP-BODY")
+          (fn-row "my.helper/runtime-helper" 'my.helper "RUNTIME-BODY")
           {:seon.fn/sym "my.helper/unspecced"
            :seon.fn/source "(defn unspecced [x] x)"
            :seon.fn/fn-var? true :seon.fn/private? false
@@ -115,7 +115,7 @@
 (deftest remote-acquisition-is-bounded-and-selection-scoped
   (let [initial (@#'nss/initial-acquisition-members agent-id)
         selected (@#'nss/selected-acquisition-members
-                   [:my.agent.tst-2606260000 :my.helper])
+                   ['my.agent.tst-2606260000 'my.helper])
         [pull-member latest-member assignment-member] initial
         [pull-many-member tx-member] selected]
     (testing "initial discovery is one pull plus the bounded latest query"
@@ -137,15 +137,15 @@
     (testing "selected rows use one pull-many and one selected tx query"
       (is (= [protocol/pull-many-operation protocol/query-operation]
              (mapv ::protocol/operation selected)))
-      (is (= [[:seon.ns/name :my.agent.tst-2606260000]
-              [:seon.ns/name :my.helper]]
+      (is (= [[:seon.ns/name 'my.agent.tst-2606260000]
+              [:seon.ns/name 'my.helper]]
              (::protocol/entity-ids pull-many-member)))
       (let [selector-values
             (set (tree-seq coll? seq (::protocol/selector pull-many-member)))]
         (is (contains? selector-values :seon.test/last-passed-at))
         (is (contains? selector-values :seon.test/last-failed-at))
         (is (contains? selector-values :seon.test/last-failure-summary)))
-      (is (= [[:my.agent.tst-2606260000 :my.helper]]
+      (is (= [['my.agent.tst-2606260000 'my.helper]]
              (::protocol/arguments tx-member)))
       (is (not-any? #{'?all-names}
                     (tree-seq coll? seq (::protocol/query-form tx-member)))))))
@@ -199,10 +199,10 @@
             ((deref #'nss/acquire-schema-rows!)
              {::db/db database
               :seon.agent.ctx.namespaces/namespace-rows
-              [{:seon.ns/name :grown.left
+              [{:seon.ns/name 'grown.left
                 :seon.fn/_ns [{:seon.fn/sym "grown.left/run"
                                :seon.fn/spec (spec left-keys)}]}
-               {:seon.ns/name :grown.right
+               {:seon.ns/name 'grown.right
                 :seon.fn/_ns [{:seon.fn/sym "grown.right/run"
                                :seon.fn/spec (spec right-keys)}]}]}))
           (.then
@@ -227,7 +227,7 @@
           rows
           (mapv
             (fn [namespace-index]
-              (let [ns-name (keyword (str "aggregate.n" namespace-index))
+              (let [ns-name (symbol (str "aggregate.n" namespace-index))
                     keys (mapv #(keyword (name ns-name) (str "k" %))
                                (range ctx/referenced-schema-cap))]
                 {:seon.ns/name ns-name
@@ -267,7 +267,7 @@
     (let [initial-keys (mapv #(keyword "z.branch" (str "k" %))
                              (range ctx/referenced-schema-cap))
           earlier-child :a.branch/child
-          row {:seon.ns/name :branch.root
+          row {:seon.ns/name 'branch.root
                :seon.fn/_ns
                [{:seon.fn/sym "branch.root/run"
                  :seon.fn/spec
@@ -293,7 +293,7 @@
             (fn [acquired]
               (let [schema-rows (:seon.agent.ctx/schema-rows acquired)
                     rendered (ctx/render-namespace-ai
-                               {:seon.ns/name :branch.root
+                               {:seon.ns/name 'branch.root
                                 :seon.agent.ctx/namespace-rows [row]
                                 :seon.agent.ctx/schema-rows schema-rows})]
                 (is (= (inc ctx/referenced-schema-cap) (count schema-rows))

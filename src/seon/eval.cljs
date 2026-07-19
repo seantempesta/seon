@@ -103,7 +103,7 @@
 ;; seon.db Malli→Datahike bridge has no :db.type/map entry.
 (schema/register! :seon.eval/error-data :string)
 ;; The namespace the eval ended in. Always populated; never nil.
-(schema/register! :seon.eval/ns :keyword)
+(schema/register! :seon.eval/ns :symbol)
 ;; Optional direct ref to the agent whose scope produced the eval.
 (schema/register! :seon.eval/agent :seon.db/ref)
 ;; ============================================================
@@ -751,7 +751,7 @@
   (boolean (seq (db/query '[:find ?e
                             :in $ ?ns
                             :where [?e :seon.ns/name ?ns]]
-                          db (keyword ns-sym)))))
+                          db ns-sym))))
 
 (declare persisted-require-edges merge-requires-into-ns-source)
 
@@ -759,7 +759,7 @@
   [edges]
   (mapv (fn [{:seon.ns.require/keys [target alias refers refer-all?
                                      as-alias?]}]
-          (cond-> [(symbol (name target))]
+          (cond-> [target]
             (and (symbol? alias) as-alias?) (conj :as-alias alias)
             (and (symbol? alias) (not as-alias?)) (conj :as alias)
             (seq refers) (conj :refer (vec (sort refers)))
@@ -768,10 +768,10 @@
 
 (defn namespace-head
   "Build one namespace form from its persisted ordinary require-edge rows."
-  {:malli/schema [:=> [:cat :keyword [:sequential :map]] :string]}
+  {:malli/schema [:=> [:cat :symbol [:sequential :map]] :string]}
   [ns-kw edges]
   (let [specs (require-specs edges)
-        n (symbol (name ns-kw))]
+        n ns-kw]
     (pr-str (if (seq specs)
               (list 'ns n (apply list :require specs))
               (list 'ns n)))))
@@ -815,7 +815,7 @@
 
 (defn authored-sources
   "Build the loadable namespace source map from ordinary program rows."
-  {:malli/schema [:=> [:cat [:sequential :map]] [:map-of :keyword :string]]}
+  {:malli/schema [:=> [:cat [:sequential :map]] [:map-of :symbol :string]]}
   [namespace-rows]
   (into {}
         (keep (fn [row]
@@ -869,7 +869,7 @@
    the compiler analyzes the requires and loads each transitive dep, in
    dependency order, with cycle detection + load-once — we write no
    ordering code here. `db` is a datahike db value (third-party boundary)."
-  {:malli/schema [:=> [:catn [::db :any] [::ns-kw :keyword]] :string]}
+  {:malli/schema [:=> [:catn [::db :any] [::ns-kw :symbol]] :string]}
   [db ns-kw]
   (let [ns-src (-> (db/query '[:find ?src
                                :in $ ?ns
@@ -968,9 +968,9 @@
             (ns-loaded? nm)
             (cb {:lang :js :source ""})
 
-            (contains? authored-sources (keyword nm))
+            (contains? authored-sources nm)
             (relink-cb {:lang :clj
-                        :source (get authored-sources (keyword nm))})
+                        :source (get authored-sources nm)})
 
             :else
             (throw e)))))))
@@ -1389,12 +1389,12 @@
 
 ;;; `eval` opts (C21) — ::starting-ns is the TARGET ns an eval runs in:
 ;;; a SYMBOL, the input twin of ::ending-ns. Deliberately NOT the
-;;; persisted :keyword attr ::ns (same type-clash reasoning that named
+;;; persisted symbol attr ::ns (same type-clash reasoning that named
 ;;; ::ending-ns).
 (schema/register! ::starting-ns :symbol)
 (schema/register! ::analyze-deps? :boolean)
 (schema/register! ::timeout-ms :int)
-(schema/register! ::authored-sources [:map-of :keyword :string])
+(schema/register! ::authored-sources [:map-of :symbol :string])
 
 (defn ^:async ^:private raw-eval
   "Internal — returns a Promise that resolves with
@@ -2097,8 +2097,8 @@
    `seon.client/index-schemas`. An ENTITY-KIND key (`:my.garden.watering`
    — a `:map {:seon.db/entity true}` registration) is a single-segment
    keyword: `(namespace k)` is nil, and the old unconditional
-   `{:seon.ns/name (keyword nil)}` put a LITERAL nil through Malli
-   (`:seon.ns/name … got nil`), failing the WHOLE record-eval! tx and
+   the old unconditional namespace projection put a literal nil through Malli,
+   failing the whole `record-eval!` transaction and
    silently dropping the tee row (opus run2 live stack,
    open-issues-prd-2026-06-11 — resume-durability loss for every
    agent-authored entity schema)."
@@ -2111,7 +2111,7 @@
       (assoc :seon.db.id/generator
              (:seon.db.id/generator properties))
       (namespace k)
-      (assoc :seon.schema/ns {:seon.ns/name (keyword (namespace k))}))))
+      (assoc :seon.schema/ns {:seon.ns/name (symbol (namespace k))}))))
 
 ;; ============================================================
 ;; Strict persistence policy (#7) — classify on the FORM HEAD.
@@ -2507,7 +2507,7 @@
    (`(:seon.eval/ns eval-entity)`, per STATUS.md heads-up (b)).
 
    Tee-entities reference their owning ns via NESTED-MAP upsert
-   `{:seon.ns/name <kw>}` (identity-attr upsert: merges onto an
+   `{:seon.ns/name <symbol>}` (identity-attr upsert: merges onto an
    existing `:seon.ns` entity or creates a minimal one). NOT a
    lookup-ref — a lookup-ref to a not-yet-existing `:seon.ns` entity
    throws and sinks the WHOLE record-eval! tx (the run-4 silent
@@ -2595,7 +2595,7 @@
                                ;; data-loss class as the :seon.schema/ns run-4
                                ;; bug: a lookup-ref to a missing :seon.ns
                                ;; entity throws and sinks the whole tx.
-                               :seon.fn/ns         {:seon.ns/name (keyword (str ns))}
+                               :seon.fn/ns         {:seon.ns/name ns}
                                :seon.fn/source     source
                                :seon.fn/fn-var?    fn-var?
                                :seon.fn/arglists   arglists
@@ -2618,11 +2618,11 @@
         ;; namespaces (e.g. `:workout/duration-seconds` → keyword-ns
         ;; `:workout`) that have no `(ns …)` form and therefore no
         ;; pre-existing `:seon.ns` entity. A lookup-ref
-        ;; `[:seon.ns/name :workout]` made datahike throw "Nothing
+        ;; `[:seon.ns/name 'workout]` made datahike throw "Nothing
         ;; found for entity id …", failing the WHOLE record-eval! tx
         ;; and silently dropping both the schema row AND the eval row
         ;; (run-4 root cause, e2e-demo-findings-2026-06-08 §Run 4
-        ;; CORRECTION). The nested map `{:seon.ns/name <kw>}` upserts:
+        ;; CORRECTION). The nested map `{:seon.ns/name <symbol>}` upserts:
         ;; identity-attr resolution links to the existing `:seon.ns`
         ;; entity when one exists (core or `(ns …)`-created) and
         ;; creates a minimal one otherwise — so handlers.ns's
@@ -2655,7 +2655,7 @@
                                        (not (defn-form? source)))]
                         {:seon.test/sym        sym
                          ;; nested-map upsert — see :seon.fn/ns note above.
-                         :seon.test/ns         {:seon.ns/name (keyword (str ns))}
+                         :seon.test/ns         {:seon.ns/name ns}
                          :seon.test/source     source
                          :seon.test/created-at at})
         ns-sym      (ns-form-name source)
@@ -2663,7 +2663,7 @@
         ;; program-graph `:seon.ns` row.
         ns-entities (when (and ns-sym
                                (not (contains? transient-ns-syms ns-sym)))
-                      [{:seon.ns/name   (keyword (str ns-sym))
+                      [{:seon.ns/name   ns-sym
                         :seon.ns/source source}])]
     (vec (concat ns-entities fn-entities schema-entities test-entities))))
 
@@ -2804,7 +2804,7 @@
   [edges]
   (reduce
     (fn [acc {:seon.ns.require/keys [target alias refers refer-all? as-alias?]}]
-      (let [tsym (symbol (name target))]
+      (let [tsym target]
         (cond-> acc
           (not as-alias?) (update ::nses conj tsym)
           alias        (assoc-in [::aliases alias] tsym)
@@ -2820,7 +2820,7 @@
    `::analyzer-info/require-edge` shape (refers vector → set, `:db/id`
    dropped) so it compares `=` against a freshly-derived edge set.
    `#{}` when the ns row or the attr is absent. Never throws."
-  {:malli/schema [:=> [:catn [::db :any] [::ns-kw :keyword]]
+  {:malli/schema [:=> [:catn [::db :any] [::ns-kw :symbol]]
                   :seon.analyzer-info/require-edges]}
   [db ns-kw]
   (try
@@ -2857,14 +2857,14 @@
       #{})))
 
 (defn persisted-require-targets
-  "The ns-name keywords `ns-kw`'s persisted require-edges point at, as a set.
+  "The namespace symbols `ns-kw`'s persisted require-edges point at.
 
    The flat \"what does this ns require\" view, DERIVED from the ONE
    persisted representation (`:seon.ns/require-edges` — C36; the parallel
    flat `:seon.ns/requires` attr is deleted). `#{}` when the ns row or
    its edges are absent."
-  {:malli/schema [:=> [:catn [::db :any] [::ns-kw :keyword]]
-                  [:set :keyword]]}
+  {:malli/schema [:=> [:catn [::db :any] [::ns-kw :symbol]]
+                  [:set :symbol]]}
   [db ns-kw]
   (into #{}
         (map :seon.ns.require/target)
@@ -2878,7 +2878,7 @@
    identity. No database read, component-id discovery, or stale diff is
    required."
   {:malli/schema
-   [:=> [:catn [::ns-kw :keyword]
+   [:=> [:catn [::ns-kw :symbol]
          [::new-edges :seon.analyzer-info/require-edges]]
         [:vector :any]]}
   [ns-kw new-edges]
@@ -3218,9 +3218,7 @@
                        :seon.eval/at at
                        :seon.eval/source (or source "")
                        :seon.eval/narration (or narration "")
-                       :seon.eval/ns (if (keyword? starting-ns)
-                                       starting-ns
-                                       (keyword (str starting-ns)))}
+                       :seon.eval/ns starting-ns}
                       aid
                       (assoc :seon.eval/agent [:seon.agent/id aid])))})}
               database (assoc ::db/db database))))]
@@ -3260,9 +3258,7 @@
                  :seon.eval/narration   (or narration "")
                  :seon.eval/source      (or source "")
                  :seon.eval/ok?         (boolean (::ok? result))
-                 :seon.eval/ns          (if (keyword? ns)
-                                          ns
-                                          (keyword (str ns)))}
+                 :seon.eval/ns          ns}
           aid
           (assoc :seon.eval/agent [:seon.agent/id aid])
 
@@ -3657,7 +3653,7 @@
    source (a sourceless ns — the home ns — already persists via its
    require-edges + [[synthesized-ns-head]]), the stored declaration is
    core-seeded, or the merge is a no-op (idempotent)."
-  {:malli/schema [:=> [:catn [::ns-kw :keyword]
+  {:malli/schema [:=> [:catn [::ns-kw :symbol]
                        [::source [:maybe :string]]
                        [::stored-source [:maybe :string]]
                        [::source-process [:maybe :keyword]]]
@@ -3721,7 +3717,7 @@
         namespace (when (and require?
                              (symbol? ending-ns)
                              (not (contains? transient-ns-syms ending-ns)))
-                    (keyword (str ending-ns)))
+                    ending-ns)
         requests (cond-> []
                    (seq function-symbols)
                    (conj [::core-boot-function-symbols
@@ -3792,7 +3788,7 @@
         namespace (when (and (::ok? result)
                              (symbol? ending-ns)
                              (not (contains? transient-ns-syms ending-ns)))
-                    (keyword (str ending-ns)))
+                    ending-ns)
         require-edge-tx
         (when namespace
           (ns-require-edges-tx namespace require-edges))
@@ -4876,7 +4872,7 @@
 
           ;; Known to the accepted program but not loaded → load it through
           ;; the one explicit source-map load function, then move.
-          (contains? authored-sources (keyword target))
+          (contains? authored-sources target)
           (let [r (await (eval compile-state (str "(require '" target ")")
                                {:seon.config/configuration configuration
                                 ::starting-ns @current-ns
@@ -4918,7 +4914,7 @@
 
           (not (or (analyzer-ns-entry? compile-state t)
                    (ns-loaded? t)
-                   (contains? authored-sources (keyword t))))
+                   (contains? authored-sources t)))
           (await (record-form-result!
                    (assoc m ::error
                           (str "No namespace " t " is loaded — nothing to "
@@ -5014,7 +5010,7 @@
               (await
                (retry-repl-form-record!
                 {::repl-operation 'ns-unalias
-                 ::form-namespace (keyword (str ns-arg))}
+                 ::form-namespace ns-arg}
                 m
                 (fn [acquired]
                   {::value nil
@@ -5022,11 +5018,11 @@
                    (vec
                     (concat
                      (unalias-decl-tx
-                      (keyword (str ns-arg)) a
+                      ns-arg a
                       (::stored-source acquired)
                       (::source-process acquired))
                      (ns-require-edges-tx
-                      (keyword (str ns-arg)) require-edges)))})
+                      ns-arg require-edges)))})
                 committed!
                 acquire-repl-form-inputs!
                 record-form-result!))))))))
@@ -5323,7 +5319,7 @@
                   (db/with-tx-context
                     {::db/user [:seon.agent/id agent-id]
                      ::db/process (db.process/lookup-ref ::db.process/repl)
-                     :seon.eval/ns (keyword (str @current-ns))}
+                     :seon.eval/ns @current-ns}
                     (fn ^:async run-with-provenance! []
                       (await (body-fn)))))))))
         append-record!

@@ -64,7 +64,7 @@
    [::content :seon.render.canvas/content]
    [:seon.db/db {:optional true} :seon.db/db]
    [:seon.agent/id {:optional true} :string]
-   [:seon.eval/ns {:optional true} :keyword]])
+   [:seon.eval/ns {:optional true} :symbol]])
 (schema/register! ::show-response :seon.db/transact-response)
 
 (defn- qualify-content

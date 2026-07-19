@@ -86,7 +86,7 @@
                            (js/Promise.resolve nil)))
       (-> (canvas/show! {:my.canvas/content 'mistyped
                          :seon.agent/id "agent-1"
-                         :seon.eval/ns :my.orders
+                         :seon.eval/ns 'my.orders
                          :seon.db/db database})
           (.then
            (fn [result]
@@ -132,7 +132,7 @@
                              :tx-data [] :tempids {} :tx-meta {}})))
       (-> (canvas/show! {:my.canvas/content renderer
                          :seon.agent/id "agent-1"
-                         :seon.eval/ns :my.orders
+                         :seon.eval/ns 'my.orders
                          :seon.db/db database})
           (.then
            (fn [_]

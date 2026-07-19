@@ -1396,8 +1396,8 @@
    home-ns workspace stub ([[seon.agent.ctx.namespaces/cur-ns-workspace-stub]])
    all route through it, so the demarcation is uniform."
   {:malli/schema [:function
-                  [:=> [:catn [::ns-kw [:or :keyword :symbol]] [::body :string]] :string]
-                  [:=> [:catn [::ns-kw [:or :keyword :symbol]] [::body :string]
+                  [:=> [:catn [::ns-kw :symbol] [::body :string]] :string]
+                  [:=> [:catn [::ns-kw :symbol] [::body :string]
                         [::suffix [:maybe :string]]] :string]]}
   ([ns-kw body] (ns-demarc ns-kw body nil))
   ([ns-kw body suffix]

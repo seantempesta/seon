@@ -343,7 +343,7 @@
              (or (:seon.config/repl-mode cluster-config-row) :batch)
              :seon.eval/ns
              (or (::render-fns/current-ns namespace-value)
-                 (keyword (str "my.agent." id)))))))))
+                 (symbol (str "my.agent." id)))))))))
 
 (def ^:private agent-view-members
   [{::protocol/operation protocol/pull-operation

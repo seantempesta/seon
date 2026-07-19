@@ -44,7 +44,7 @@
 
 ;; These load-order schemas remain here because this namespace is the first
 ;; execution-child owner that references them.
-(schema/register! :seon.ns/name [:keyword {:seon.db/identity true}])
+(schema/register! :seon.ns/name [:symbol {:seon.db/identity true}])
 (schema/register!
  :seon.agent/id
  [:and {:seon.db/identity true

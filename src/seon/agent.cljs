@@ -448,8 +448,7 @@
                      namespace namespace-exists? -1 {}))
   ([configuration id purpose default-turn-limit parent existing namespace
     namespace-exists? namespace-tempid model-overrides]
-  (let [namespace     (symbol (str namespace))
-        namespace-name (keyword (str namespace))
+  (let [namespace-name namespace
         namespace-ref (if namespace-exists?
                         [:seon.ns/name namespace-name]
                         namespace-tempid)
@@ -502,7 +501,7 @@
   (let [id (:seon.agent/id agent)
         namespace (home/home-ns id)
         namespace-ref (if home-entity
-                        [:seon.ns/name (keyword (str namespace))]
+                        [:seon.ns/name namespace]
                         namespace-tempid)
         agent-row {:seon.agent/id id
                    :seon.agent/namespace namespace-ref}]
@@ -550,7 +549,7 @@
                ::db/pull-pattern '[*]
                ::db/refs
                [[:seon.agent/id id]
-                [:seon.ns/name (keyword (str (home/home-ns id)))]
+                [:seon.ns/name (home/home-ns id)]
                 configuration-ref]
                ::db/max-results agent-creation-max-results
                ::db/max-result-weight 1048576}))]
@@ -695,7 +694,7 @@
               {::db/db database
                ::db/pull-pattern '[*]
                ::db/refs [[:seon.agent/id "root"]
-                          [:seon.ns/name :my.agent.root]
+                          [:seon.ns/name 'my.agent.root]
                           configuration-ref]
                ::db/max-results agent-creation-max-results
                ::db/max-result-weight 1048576}))
@@ -735,8 +734,7 @@
                        (mapcat
                         (fn [id]
                           [[:seon.agent/id id]
-                           [:seon.ns/name
-                            (keyword (str (home/home-ns id)))]])
+                           [:seon.ns/name (home/home-ns id)]])
                         agents-without-namespace))
                  ::db/max-results agent-creation-max-results
                  ::db/max-result-weight 1048576})))]
@@ -930,7 +928,7 @@
                 configuration
                 (configuration-from-entity configuration-entity)
                 depth (when parent-id (spawn-depth-from parent))
-                namespace-name (some-> namespace str keyword)
+                namespace-name namespace
                 resident-id
                 (when namespace-name
                   (await
@@ -1111,8 +1109,8 @@
       (internal/no-agent-error "delegate!"))))
 
 ;; ============================================================
-;; message! lives in [[seon.agent.message]] (the keyword namespace matches
-;; the code namespace). Re-exported here so `seon.agent/message!` resolves;
+;; message! lives in [[seon.agent.message]]. Re-exported here so
+;; `seon.agent/message!` resolves;
 ;; the agent-facing messaging functions are `seon.agent.message/user` + `/agent`
 ;; via the `message/` alias. Same caveat as the ctx aliases above — a def
 ;; alias captures the fn value at load time (pre-instrumentation); call
@@ -1225,7 +1223,7 @@
   (let [database (await (db/db))]
     (if (error-value? database)
       database
-      (let [namespace-name (keyword (str namespace))
+      (let [namespace-name namespace
             stored-target
             (await
              (db/pull
@@ -1295,7 +1293,7 @@
     namespace-exists? ::namespace-exists?
     target-id :seon.agent/id
     namespace :seon.agent/namespace}]
-  (let [namespace-name (keyword (str namespace))
+  (let [namespace-name namespace
         namespace-ref (if namespace-exists?
                         [:seon.ns/name namespace-name]
                         -1)

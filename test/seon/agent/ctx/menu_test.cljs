@@ -37,15 +37,15 @@
 (defn- responses [policy]
   [{::db/results
     [(member policy)
-     (query-member [[(js/Date. 3000) 13 "(plan/done! {})" :my.agent.menu]
-                    [(js/Date. 2000) 12 "(plan/done! {})" :my.agent.menu]])
-     (query-member [[(js/Date. 3000) 13 "(plan/done! {})" :my.agent.menu]])]}
+     (query-member [[(js/Date. 3000) 13 "(plan/done! {})" 'my.agent.menu]
+                    [(js/Date. 2000) 12 "(plan/done! {})" 'my.agent.menu]])
+     (query-member [[(js/Date. 3000) 13 "(plan/done! {})" 'my.agent.menu]])]}
    {::db/results
-    [(member [{:seon.ns/name :my.agent.menu
+    [(member [{:seon.ns/name 'my.agent.menu
                :seon.ns/require-edges
-               [{:seon.ns.require/target :my.plan
+               [{:seon.ns.require/target 'my.plan
                  :seon.ns.require/alias 'plan}]}
-              {:seon.ns/name :my.plan :seon.ns/require-edges []}])
+              {:seon.ns/name 'my.plan :seon.ns/require-edges []}])
      (query-member [[done-row] [plan-row]])
      (member [done-row])]}])
 

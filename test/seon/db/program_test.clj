@@ -4,21 +4,21 @@
             [seon.db.program :as program]))
 
 (def edge-a
-  {:seon.ns.require/target :my.dep
+  {:seon.ns.require/target 'my.dep
    :seon.ns.require/alias 'dep})
 
 (def edge-b
-  {:seon.ns.require/target :seon.db
+  {:seon.ns.require/target 'seon.db
    :seon.ns.require/refers #{'query 'pull}})
 
 (def namespace-row
-  {:seon.ns/name :my.app
+  {:seon.ns/name 'my.app
    :seon.ns/source "(ns my.app (:require [my.dep :as dep]))"
    :seon.ns/require-edges [edge-a edge-b]})
 
 (def function-row
   {:seon.fn/sym "my.app/run"
-   :seon.fn/ns [:seon.ns/name :my.app]
+   :seon.fn/ns [:seon.ns/name 'my.app]
    :seon.fn/source "(defn run [] (dep/value))"
    :seon.fn/spec "[:=> [:cat] :int]"
    :seon.fn/doc "Run."
@@ -30,7 +30,7 @@
 (def schema-row
   {:seon.schema/key :my.app/value
    :seon.schema/form ":int"
-   :seon.schema/ns [:seon.ns/name :my.app]
+   :seon.schema/ns [:seon.ns/name 'my.app]
    :seon.db.id/generator :seon.db.id.generator/human-readable
    :seon.schema/created-at #inst "2026-07-16T12:00:00.000-00:00"})
 
@@ -49,7 +49,7 @@
   [:my.app/value ":int" :seon.db.id.generator/human-readable])
 
 (def current-namespace
-  [:my.app
+  ['my.app
    "(ns my.app (:require [my.dep :as dep]))"
    {:seon.ns/require-edges
     [(assoc edge-a :db/id 101)
@@ -71,7 +71,7 @@
    :boot-schemas #{:my.app/value}
    :current-namespaces [current-namespace]
    :boot-program-rows
-   [[1 :seon.ns/name :my.app (:seon.ns/source namespace-row)]
+   [[1 :seon.ns/name 'my.app (:seon.ns/source namespace-row)]
     [2 :seon.fn/sym "my.app/run" (:seon.fn/source function-row)]
     [3 :seon.schema/key :my.app/value (:seon.schema/form schema-row)]]
    :agent-ids []})
@@ -121,7 +121,7 @@
     (is (= [(dissoc namespace-row :seon.ns/require-edges)
             (dissoc function-row :seon.fn/created-at)
             (dissoc schema-row :seon.schema/created-at)
-            {:seon.ns/name :my.app
+            {:seon.ns/name 'my.app
              :seon.ns/require-edges [edge-a edge-b]}]
            (compile-program empty-current))))
 
@@ -139,7 +139,7 @@
   (let [desired-function
         (dissoc function-row :seon.fn/spec :seon.fn/agent-facing?)
         desired-schema (dissoc schema-row :seon.db.id/generator)
-        next-edge {:seon.ns.require/target :my.next
+        next-edge {:seon.ns.require/target 'my.next
                    :seon.ns.require/alias 'next}
         desired-namespace
         (assoc namespace-row :seon.ns/require-edges [next-edge])
@@ -149,7 +149,7 @@
             (dissoc desired-schema :seon.schema/created-at)
             [:db/retractEntity 101]
             [:db/retractEntity 102]
-            {:seon.ns/name :my.app
+            {:seon.ns/name 'my.app
              :seon.ns/require-edges [next-edge]}
             [:db/retract [:seon.fn/sym "my.app/run"]
              :seon.fn/spec "[:=> [:cat] :int]"]
@@ -163,10 +163,10 @@
 (deftest stale-boot-entities-retract-but-agent-homes-and-runtime-data-survive
   (let [stale
         [[70 :seon.test/sym "my.old/check" "(deftest check (is true))"]
-         [40 :seon.ns/name :my.old "(ns my.old)"]
+         [40 :seon.ns/name 'my.old "(ns my.old)"]
          [60 :seon.schema/key :my.old/value ":string"]
          [50 :seon.fn/sym "my.old/run" "(defn run [] :old)"]
-         [80 :seon.ns/name :my.agent.root "(ns my.agent.root)"]]
+         [80 :seon.ns/name 'my.agent.root "(ns my.agent.root)"]]
         tx
         (compile-program
          (assoc converged
@@ -214,7 +214,7 @@
 
 (deftest transaction-output-is-independent-of-input-row-order
   (let [stale [[70 :seon.test/sym "my.old/check" "test"]
-               [40 :seon.ns/name :my.old "namespace"]]
+               [40 :seon.ns/name 'my.old "namespace"]]
         current (assoc converged :boot-program-rows stale)
         reversed-current (assoc current :boot-program-rows (vec (reverse stale)))]
     (is (= (compile-program empty-current desired)

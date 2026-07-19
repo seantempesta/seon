@@ -85,12 +85,12 @@
   (let [edges (ai/ns-require-edges (compile-state-with-requires) 'my.probe)]
     (is (m/validate :seon.analyzer-info/require-edges edges)
         "output validates as ::require-edges")
-    (is (= #{{:seon.ns.require/target :seon.db
+    (is (= #{{:seon.ns.require/target 'seon.db
               :seon.ns.require/alias  'db}
-             {:seon.ns.require/target :my.plan
+             {:seon.ns.require/target 'my.plan
               :seon.ns.require/alias  'plan}
-             {:seon.ns.require/target :plain.ns}
-             {:seon.ns.require/target :seon.agent.lifecycle
+             {:seon.ns.require/target 'plain.ns}
+             {:seon.ns.require/target 'seon.agent.lifecycle
               :seon.ns.require/refers #{'wait 'complete}}}
            edges)
         "aliases from :requires keys, refers grouped from :uses, self + macro-only deps excluded")))
@@ -107,16 +107,16 @@
                                         [legacy.all :refer :all]
                                         plain.ns))")]
     (is (m/validate :seon.analyzer-info/require-edges edges))
-    (is (= #{{:seon.ns.require/target :seon.db
+    (is (= #{{:seon.ns.require/target 'seon.db
               :seon.ns.require/alias 'db}
-             {:seon.ns.require/target :seon.agent.lifecycle
+             {:seon.ns.require/target 'seon.agent.lifecycle
               :seon.ns.require/refers #{'wait 'complete}}
-             {:seon.ns.require/target :my.types
+             {:seon.ns.require/target 'my.types
               :seon.ns.require/alias 'types
               :seon.ns.require/as-alias? true}
-             {:seon.ns.require/target :legacy.all
+             {:seon.ns.require/target 'legacy.all
               :seon.ns.require/refer-all? true}
-             {:seon.ns.require/target :plain.ns}}
+             {:seon.ns.require/target 'plain.ns}}
            edges))))
 
 (deftest source-require-edges-fail-soft
@@ -128,7 +128,7 @@
         info (ai/namespace-info-from-source source)]
     (is (= "Owns probe behavior.\n\nMore detail." (:seon.ns/doc info)))
     (is (= "Owns probe behavior." (:seon.ns/summary info)))
-    (is (= #{{:seon.ns.require/target :seon.db
+    (is (= #{{:seon.ns.require/target 'seon.db
               :seon.ns.require/alias 'db}}
            (:seon.ns/require-edges info)))
     (is (m/validate :seon.analyzer-info/namespace-info info))))

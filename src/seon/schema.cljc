@@ -150,10 +150,10 @@
   (update-candidate-forms! merge internal/primitive-schema-forms))
 
 ;; :seon.db/lookup-ref-value — the value position in a lookup-ref. Datahike
-;; accepts strings, uuids, keywords, and ints as unique-attr values.
+;; accepts strings, uuids, keywords, symbols, and ints as unique-attr values.
 (defonce ^:private _lookup-ref-value-type
   (update-candidate-forms! assoc :seon.db/lookup-ref-value
-                           [:or :string :uuid :keyword :int]))
+                           [:or :string :uuid :keyword :symbol :int]))
 
 ;; :seon.db/ref — an intra-DB :db.type/ref. At transact time datahike
 ;; resolves any supported form to an eid: pos-int (existing eid), neg-int

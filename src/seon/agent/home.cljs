@@ -11,13 +11,13 @@
 
 (schema/register! ::agent-id [:string {:min 1}])
 (schema/register! ::id [:maybe ::agent-id])
-(schema/register! ::home-ns [:or :symbol :string :keyword])
+(schema/register! ::home-ns :symbol)
 (schema/register! ::require-spec
   [:cat :symbol [:enum :as :refer] [:or :symbol [:vector :symbol]]])
 (schema/register! ::require-specs [:vector ::require-spec])
 (schema/register! ::require-edge
   [:map
-   [:seon.ns.require/target :keyword]
+   [:seon.ns.require/target :symbol]
    [:seon.ns.require/alias {:optional true} :symbol]
    [:seon.ns.require/refers {:optional true} [:set :symbol]]])
 (schema/register! ::require-edges [:set ::require-edge])
@@ -81,14 +81,12 @@
   [agent-id agent latest-successful-ns namespace-assignment]
   (let [[eval-ns _ eval-tx] latest-successful-ns
         [assigned-ns assignment-tx] namespace-assignment]
-    (keyword
-     (name
-      (cond
-        (and assigned-ns
-             (or (nil? eval-tx) (> assignment-tx eval-tx)))
-        assigned-ns
-        eval-ns eval-ns
-        :else (starting-ns agent-id agent))))))
+    (cond
+      (and assigned-ns
+           (or (nil? eval-tx) (> assignment-tx eval-tx)))
+      assigned-ns
+      eval-ns eval-ns
+      :else (starting-ns agent-id agent))))
 
 (def home-ns-require-specs
   "THE canonical require list every agent's home namespace is wired with —
@@ -201,7 +199,7 @@
   [specs]
   (into #{}
         (map (fn [[target mode value]]
-               (cond-> {:seon.ns.require/target (keyword (str target))}
+               (cond-> {:seon.ns.require/target target}
                  (= :as mode)
                  (assoc :seon.ns.require/alias value)
 
@@ -224,11 +222,11 @@
              [:seon.agent/namespace :symbol]
              [:seon.eval/home-requires ::require-specs]]]]
     [:map
-     [:seon.ns/name :keyword]
+     [:seon.ns/name :symbol]
      [:seon.ns/source :string]
      [:seon.ns/require-edges [:vector ::require-edge]]]]}
   [{namespace :seon.agent/namespace
     :seon.eval/keys [home-requires]}]
-  {:seon.ns/name (keyword (str namespace))
+  {:seon.ns/name namespace
    :seon.ns/source (home-ns-form namespace home-requires)
    :seon.ns/require-edges (vec (require-edges home-requires))})

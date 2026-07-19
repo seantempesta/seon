@@ -39,7 +39,7 @@
    :seon.eval/at (js/Date. 1000)
    :seon.eval/source "(+ 1 2)"
    :seon.eval/narration "check arithmetic"
-   :seon.eval/ns :my.agent.receipt
+   :seon.eval/ns 'my.agent.receipt
    :seon.eval/agent [:seon.agent/id "AGTreceipt0001"]})
 
 (def record-request

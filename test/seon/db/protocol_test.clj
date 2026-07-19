@@ -79,10 +79,10 @@
          "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
          :seon.db/attributes []
          :seon.db/program
-         [{:seon.ns/name :seon.db
+         [{:seon.ns/name 'seon.db
            :seon.ns/source "(ns seon.db)"}
           {:seon.fn/sym "seon.db/query"
-           :seon.fn/ns [:seon.ns/name :seon.db]
+           :seon.fn/ns [:seon.ns/name 'seon.db]
            :seon.fn/source "(defn query [input] input)"}
           {:seon.schema/key :seon.db/db
            :seon.schema/form "[:map [:db-name :string]]"}]

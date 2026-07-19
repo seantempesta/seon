@@ -193,7 +193,7 @@
                  :seon.eval/narration "Read current facts"
                  :seon.eval/ok? true
                  :seon.eval/duration-ms 3
-                 :seon.eval/ns :my.agent.test})))
+                 :seon.eval/ns 'my.agent.test})))
       (-> (transcript/transcript-block-html
             {:seon.agent/id "agent"
              :seon.agent/entity {:db/id 1 :seon.agent/id "agent"}
@@ -238,7 +238,7 @@
                  :seon.eval/output maximum-projection
                  :seon.eval/ok? true
                  :seon.eval/result-edn maximum-projection
-                 :seon.eval/ns :my.agent.test})
+                 :seon.eval/ns 'my.agent.test})
               eval-pairs))
       (-> (transcript/transcript-block
             {:seon.agent/id "agent"
