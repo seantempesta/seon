@@ -324,6 +324,17 @@ adding an ambient-plan abstraction. The child-delivery scenario also remains
 separate because `delegate!` resolves a child ID rather than synchronously
 awaiting the child's report.
 
+The plan interfaces now share that exact current-run selection. Public
+`my.plan/position` resolves the target agent's open run from the same immutable
+database value supplied to the read, then delegates to the plan block's existing
+run-cause query and `cause → active → ready` anchor transform. The function's
+request and response remain unchanged. A focused regression gives the current
+run a message-linked open step while retaining unrelated older active work; both
+the public position and rendered plan select the current-request step, the older
+active remains visibly active, and every database request carries the identical
+database value. `my.plan-test` passes 33 tests and 113 assertions with zero
+compiler warnings.
+
 The same controlled branch also reproduced the one-call release race with the
 writer's exact `database-in-use` response. Pod containment completed cleanly
 and recorded root plus child as unhosted, but selector-owned UDS acquisition

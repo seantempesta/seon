@@ -392,6 +392,66 @@
           (.then (fn [_] (done)))
           (.catch (fn [error] (is false (str error)) (done)))))))
 
+(deftest public-position-and-plan-block-share-the-current-run-cause
+  (async done
+    (let [original-query db/query
+          original-execute-many db/execute-many
+          calls (atom 0)
+          requests (atom [])
+          success (fn [result]
+                    {::protocol/success? true ::protocol/result result})
+          initial
+          {::db/results
+           [(success [["active" "Older work" "" (js/Date. 1) false 10]])
+            (success [["message" "Answer the new request" ""
+                       (js/Date. 2) 77]])
+            (success [])
+            (success {:db/id 1 :seon.agent/id agent-id})
+            (success [["message" "Answer the new request" ""
+                       (js/Date. 2) 77 :open 11]])]}
+          selected
+          {::db/results
+           [(success {:my.plan/id "message"
+                      :my.plan/title "Answer the new request"})
+            (success [[:open 1]])]}]
+      (set! db/query
+            (fn [request]
+              (swap! requests conj request)
+              (js/Promise.resolve "run-from-message")))
+      (set! db/execute-many
+            (fn [request]
+              (swap! requests conj request)
+              (js/Promise.resolve
+               (if (odd? (swap! calls inc)) initial selected))))
+      (-> (plan/position
+           {:seon.db/db database :seon.agent/id agent-id})
+          (.then
+           (fn [position]
+             (is (= "message"
+                    (get-in position [:my.plan/position :my.plan/step])))
+             (is (false?
+                  (get-in position [:my.plan/position :my.plan/active?])))
+             (internal/plan-block
+              {:seon.db/db database
+               :seon.agent/id agent-id
+               :seon.agent.run/id "run-from-message"}
+              nil)))
+          (.then
+           (fn [text]
+             (is (str/includes? text
+                                "next ready: message «Answer the new request»"))
+             (is (and (str/includes? text "; ▶ active [")
+                      (str/includes? text "] Older work"))
+                 "the unrelated active remains visible and active")
+             (is (every? #(= database (::db/db %)) @requests)
+                 "both interfaces read one exact immutable database value")))
+          (.finally
+           (fn []
+             (set! db/query original-query)
+             (set! db/execute-many original-execute-many)))
+          (.then (fn [_] (done)))
+          (.catch (fn [error] (is false (str error)) (done)))))))
+
 (deftest run-cause-selection-authorizes-by-message-not-plan-owner
   (let [where (:where @#'internal/run-cause-step-query)]
     (is (some #{'[?run :seon.agent.run/agent ?agent]} where))

@@ -321,6 +321,15 @@
 (def ^:private agent-exists-query
   '[:find ?agent . :in $ ?agent-id :where [?agent :seon.agent/id ?agent-id]])
 
+(def ^:private current-run-id-query
+  '[:find ?run-id .
+    :in $ ?agent-id
+    :where
+    [?agent :seon.agent/id ?agent-id]
+    [?agent :seon.agent/run ?run]
+    [?run :seon.agent.run/id ?run-id]
+    [?run :seon.agent.run/status :open]])
+
 (def ^:private duplicate-root-query
   '[:find [(pull ?root ?selector) ...]
     :in $ % ?selector ?agent-id ?title
@@ -1084,14 +1093,29 @@
   {:malli/schema [:=> [:cat ::position-request] ::position-response]}
   [{agent-id :seon.agent/id :as request}]
   (if-let [agent (internal/agent-ref agent-id)]
-    (let [acquired (await (acquire-agent-plan-rows request))
+    (let [database (or (::db/db request) (await (db/db)))
+          run-id (when-not (:seon.error/message database)
+                   (await
+                    (db/query
+                     {::db/db database
+                      ::db/query current-run-id-query
+                      ::db/args [agent-id]
+                      :datahike.resource/max-work 100000
+                      :datahike.resource/max-results 8
+                      :datahike.resource/max-result-weight 1024})))
+          acquired (cond
+                     (:seon.error/message database) database
+                     (:seon.error/message run-id) run-id
+                     :else
+                     (await
+                      (internal/acquire-plan-block
+                       (cond-> {::db/db database :seon.agent/id agent-id}
+                         run-id (assoc :seon.agent.run/id run-id)))))
           read-error (acquisition-error "position" acquired)]
       (or read-error
-      (if (::agent-exists? acquired)
+      (if (:seon.agent/entity acquired)
         (if-let [{:my.plan/keys [step chain active? progress]}
-                 (-> (::rows acquired)
-                     (internal/rows-for-agent agent)
-                     internal/anchor-from-rows)]
+                 (::internal/anchor acquired)]
           (let [root (first chain)]
             {::ok? true
              ::position

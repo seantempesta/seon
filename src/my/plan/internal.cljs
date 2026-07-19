@@ -1433,8 +1433,16 @@
                    ::subtree (prune-done (member-result subtree-member))})))))
         {::escalation-text ""}))))
 
-(defn ^:async ^:private acquire-plan-block
+(defn ^:async ^:no-doc acquire-plan-block
   "Acquire the bounded plan prompt data at one immutable database value."
+  {:malli/schema
+   [:=>
+    [:cat
+     [:map
+      [:seon.agent/id :seon.agent/id]
+      [:seon.agent.run/id {:optional true} :seon.agent.run/id]
+      [::db/db {:optional true} :seon.db/db]]]
+    :map]}
   [{agent-id :seon.agent/id run-id :seon.agent.run/id :as input}]
   (let [database (or (::db/db input)
                      (::db/db (db/current-tx-context))
