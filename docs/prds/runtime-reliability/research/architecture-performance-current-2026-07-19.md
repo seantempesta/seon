@@ -34,6 +34,67 @@ millisecond at p50; the uncached Datahike work in this small query is much
 smaller than transport, validation, encoding, and scheduling together, but the
 complete path remains within interactive latency.
 
+The same comparison for ordinary reads was:
+
+| Operation | Direct JVM p50 | Full Bun protocol p50 | Full-path p95 | Full-path maximum |
+|---|---:|---:|---:|---:|
+| Pull selected agent attributes | 0.008 ms | 0.687 ms | 1.743 ms | 7.102 ms |
+| Eager full entity | 0.041 ms | 1.156 ms | 1.814 ms | 3.778 ms |
+| 20-datom AVET index page | 0.002 ms | 0.913 ms | 1.405 ms | 6.213 ms |
+
+Direct samples used 2,000 calls per operation; full-path samples used 300. The
+same roughly one-millisecond transport/validation cost dominates these small
+reads and remains independent of whether the operation is query, pull, entity,
+or native index access.
+
+## Transaction latency
+
+Twenty sequential Bun transactions alternating one existing agent attribute
+measured 172.4 ms mean, 168.6 ms p50, and 242.4 ms maximum. Ten direct bare
+one-datom `d/transact` calls measured 81.0 ms mean and 82.2 ms p50. Calling the
+real Seon writer pipeline without UDS measured 138.7 ms p50, placing the
+remaining Bun/UDS/request-response increment around 30 ms.
+
+A phase probe of ten exact Seon writes localized the writer time:
+
+| Writer phase | Mean | p50 | Maximum |
+|---|---:|---:|---:|
+| Validate, derive schema, coerce, add receipts/metadata | 1.78 ms | 1.88 ms | 2.97 ms |
+| Datahike transaction future and durable commit | 140.07 ms | 137.48 ms | 158.40 ms |
+| Response, cache/feed/embedding handoff | 2.32 ms | 2.30 ms | 3.49 ms |
+
+Maintained source explains the difference. Seon's write adds durable request
+ID/hash/protocol metadata and any tempid receipts before Datahike. With history
+enabled, Datahike persists three current and three temporal indexes, immutable
+commit data, then the mutable branch head. The maintained file Konserve backend
+forces each replacement file and directory. This is storage/durability-bound,
+not evidence of expensive ClojureScript packaging. The ranked experiments are
+fresh-database root fusion, persistent-index diff buffering, and a
+crash-consistent Konserve filesystem multi-write that preserves head-last
+ordering while consolidating directory forces. Disabling sync, history, or the
+commit graph would weaken required semantics and is rejected.
+
+An isolated matched fresh-database experiment then tested maintained Datahike
+creation options without changing the live cluster. Every variant kept history
+and the commit graph, installed Seon-style request metadata, performed five
+warm writes and 40 measured sequential writes, then proved cold reopen, the
+current value, transaction history, and a UUID commit ID.
+
+| Datahike creation options | p50 | p95 | Mean | Files |
+|---|---:|---:|---:|---:|
+| Current defaults | 48.08 ms | 72.36 ms | 52.39 ms | 337 |
+| `:fuse-index-roots? true` | 19.42 ms | 24.79 ms | 20.41 ms | 55 |
+| `:index-config {:diff-buf-size 256}` | 45.03 ms | 53.95 ms | 45.82 ms | 337 |
+| Both options | 18.08 ms | 19.05 ms | 18.15 ms | 55 |
+
+Root fusion is the only decision-grade result from this small shallow database:
+it cut p50 by about 60%, p95 by about 66%, and file count by about 84% while
+preserving required semantics. Diff buffering alone was a small result and the
+extra 1.34 ms from combining it with fusion is not yet meaningful. A replay
+against a realistically grown database is the next falsifier because the live
+database's deeper indexes may retain pending nodes that a fused single-leaf
+root cannot eliminate.
+
 ## Shared JVM query work
 
 The maintained `seon.authority-density-test` compiled its real Bun client and
@@ -88,7 +149,7 @@ RSS values that count mapped pages repeatedly.
 | Process | RSS | Physical footprint | Peak | Relevant retained state |
 |---|---:|---:|---:|---|
 | JVM writer | 849 MiB | 635.8 MiB | 951.5 MiB | G1 heap 337 MiB committed, 149 MiB used, 512 MiB maximum |
-| Bun pod | 936 MiB | 276.4 MiB | 819.5 MiB | UI, sessions, compiler/runtime program state |
+| Bun pod | 936 MiB | 276.4 MiB | 819.5 MiB | 139 MiB JavaScript heap used after explicit GC |
 | Full root execution child | 303 MiB | 166.8 MiB | 236.8 MiB | isolated CLJS execution runtime |
 | Shadow watcher/compiler | 1.82 GiB | 1.7 GiB | 1.8 GiB | development-only compiler, not shipped operation |
 
@@ -109,7 +170,9 @@ The architecture-level wins are confirmed:
 
 The material costs are cold execution-child startup/program acquisition,
 complete root rendering, the large uncompressed root event, and baseline
-writer/pod footprints. Continue measuring transaction propagation, 2/4-client
-query waves, slow-client backpressure, and idle CPU before changing code. Do
-not trade exact ClojureScript semantics or the one-render/one-writer design for
-small bundle or call-site micro-optimizations.
+writer/pod footprints. Durable transaction latency is also material and is now
+localized to file-backed Datahike commit rather than Bun. Continue measuring
+matched safe storage configurations, 2/4-client query waves, slow-client
+backpressure, and idle CPU before changing code. Do not trade exact
+ClojureScript semantics, crash consistency, history, or the
+one-render/one-writer design for small bundle or call-site micro-optimizations.

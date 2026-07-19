@@ -599,6 +599,26 @@ child physical footprints; stopping the child removed its PID completely. The
 packaged writer. Remaining measurements are transaction propagation,
 pull/entity/index, 2/4-client waves, slow-client backpressure, and idle CPU.
 
+The read comparison is now complete too: full-path p50 is 0.687 ms for pull,
+1.156 ms for eager entity, and 0.913 ms for a 20-datom AVET page. Transaction
+latency is the first material database cost: Bun p50 168.6 ms, real writer
+pipeline without UDS 138.7 ms, and a bare direct one-datom Datahike transaction
+82.2 ms. Exact writer phase timing attributes only 1.9 ms to preparation and
+2.3 ms to finish; the durable Datahike future is 137.5 ms p50. Maintained
+Datahike/Konserve source shows six history-preserving persistent indexes plus
+commit and branch-head writes, with per-file and per-directory force in the
+file backend. Safe matched root-fusion/diff-buffer experiments come before any
+implementation. Sync, history, and commit-graph removal are not acceptable
+optimizations.
+
+The first matched fresh-database experiment is complete. Root fusion reduced
+p50 from 48.08 ms to 19.42 ms, p95 from 72.36 ms to 24.79 ms, and file count
+from 337 to 55 while cold reopen, history, and commit IDs remained correct.
+Diff buffering alone reached 45.03 ms p50 and did not reduce file count; its
+small additional gain when combined with fusion is not decision-grade. The
+next transaction falsifier is the same comparison against a realistically
+grown database before any production configuration or migration decision.
+
 The existing remote query surface now exposes its protocol-native historical
 view, closing the only facade gap needed by coordinate-pinned startup birth.
 LLM configuration and brand startup sync also use bounded coordinate-fenced

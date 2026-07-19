@@ -576,7 +576,7 @@ Exit: one exact source revision passes every maintained gate and product journey
 
 ### 8. Architecture-level performance and modest-hardware proof
 
-- [ ] Measure direct JVM reads against Bun→JVM→Bun reads for cold and cached
+- [x] Measure direct JVM reads against Bun→JVM→Bun reads for cold and cached
   query, pull, entity, and index access.
 - [ ] Measure identical queries over one database value from 1/2/4/8 children,
   including shared computation and serialization costs.
@@ -598,8 +598,14 @@ about one millisecond p50, eight concurrent clients compute one identical
 query once, 10/50/100 Datastar views retain one render and serialization, and
 the full execution child reclaims 166.8 MiB physical footprint when stopped.
 The remaining unchecked rows are intentionally broader than this evidence:
-pull/entity/index, 2/4-client waves, transaction/program propagation, private
-retained heap plus idle CPU, and slow-client backpressure still need samples.
+2/4-client waves, complete transaction/program propagation, private retained
+heap plus idle CPU, and slow-client backpressure still need samples.
+
+A matched fresh-database experiment also found that Datahike root fusion
+reduced durable transaction p50 from 48.08 ms to 19.42 ms and file count from
+337 to 55 while preserving cold reopen, history, and commit IDs. That is strong
+enough to justify the next grown-database falsifier, but not yet a production
+setting.
 
 ## Scheduling clock
 
