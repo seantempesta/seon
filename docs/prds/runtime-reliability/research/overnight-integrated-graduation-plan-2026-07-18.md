@@ -119,8 +119,33 @@ missing schema, or silently rendered core failure.
 
 ### 2. One complete restart-safe agent lifecycle
 
-- [ ] Create one agent, deliver a message, and move through `my.units`,
+- [ ] **IN PROGRESS:** create one agent, deliver a message, and move through `my.units`,
   `my.convert`, and its home namespace using normal CLJS namespace operations.
+  Agent `plain-chefs-do` and message `zil4x609qvr4` were persisted, but the
+  first turn exposed an execution-result diagnostic that retained a rejected
+  host map key and therefore made its own bounded agent error invalid for IPC.
+  The interrupted turn `twu48whmx73j` and crashed run `c4wuf8lqotfw` are the
+  durable recovery starting point. The same agent then exposed and survived a
+  second core defect: Datahike's installed-schema map was mistaken for an error
+  merely because it contains the installed `:seon.error/message` attribute.
+  After that fix it ran eight stable turns, revealing that self-host eval
+  callbacks had lost the explicit agent ALS scope: `my.plan/step!` could not
+  inject `:seon.agent/id`. The eval-batch owner now re-establishes that scope;
+  focused home, execution, and eval-receipt proof passes 50 tests/190
+  assertions. A live retry proved the agent scope itself was present—direct
+  `seon.db/current-agent-id` returned `"plain-chefs-do"`—but `my.plan/step!`
+  still received no injection. The execution child had activated the program
+  projection without reconciling its instrumentation wrappers. Program load
+  now performs the same complete wrapper reconciliation as runtime admission;
+  focused program-load, receipt, home, and execution proof passes 57 tests/219
+  assertions. The next live retry proved wrapper injection: the same ordinary
+  `my.plan/step!` advanced past agent resolution, then exposed that `my.plan`
+  placed the database value inside the generated-ID builder instead of on the
+  allocator request. The allocator seam is repaired and focused plan,
+  allocator, program-load, and receipt proof passes 52 tests/214 assertions.
+  Despite that plan-write failure, the same run persisted
+  `my.units/celsius->fahrenheit` and `my.convert/convert-celsius`; the next
+  canonical build retries the plan write and completes data/later-turn proof.
 - [ ] Register schemas, define functions and tests, transact data, and query it
   in a later turn from one immutable database value at a time.
 - [ ] Redefine the function in place and prove a fresh child uses the latest
@@ -236,16 +261,15 @@ modest hardware, with no micro-optimization displacing a correctness boundary.
 
 ## Scheduling clock
 
-- **Ordered spine:** section 1, deterministic schema/program publication and
-  fail-loud process behavior.
+- **Ordered spine:** section 2's first complete live lifecycle, while the
+  remaining section-1 selected-render injection stays an exact package gate.
 - **Integrated proof:** clean cold/restart repetitions plus deterministic fault
   record-before-exit and supervisor recovery.
 - **Dependency-ready parallel portfolio:** Inspect offline harness verification,
   namespace/agent source audit, and browser scenario design may advance without
   editing the section-1 runtime owners.
-- **Next refill:** after section 1 closes, section 2 becomes the implementation
-  spine; the freed evidence lane begins the namespace-targeted lifecycle
-  dependency ledger.
+- **Next refill:** after section 2 closes, section 3 becomes the implementation
+  spine and begins with the namespace-targeted lifecycle dependency ledger.
 - **Final graduation gate:** sections 1–8 are checked against one exact source
   revision, including live Inspect, browser, downstream, package, and measured
   modest-hardware evidence.

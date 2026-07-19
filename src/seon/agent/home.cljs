@@ -51,6 +51,9 @@
     [seon.db :as db]
     [my.plan :as plan]])
 
+(defn- error-value? [value]
+  (and (map? value) (string? (:seon.error/message value))))
+
 (defn ^:async home-requires-for
   "The require specs for agent `id`'s home ns.
 
@@ -84,19 +87,19 @@
    (if-not id
      home-ns-require-specs
      (let [database (await (db/db))]
-       (if (:seon.error/message database)
+       (if (error-value? database)
          database
          (await (home-requires-for database id))))))
   ([database id]
    (if-not id
      home-ns-require-specs
      (let [installed (await (db/installed-schema database))]
-       (if (:seon.error/message installed)
+       (if (error-value? installed)
          installed
          (let [agent
                (when (contains? installed :seon.eval/home-requires)
                  (await (db/entity database [:seon.agent/id id])))]
-           (if (:seon.error/message agent)
+           (if (error-value? agent)
              agent
              (or
               ;; (1) the persisted datom, if the entity carries it (re-arm).

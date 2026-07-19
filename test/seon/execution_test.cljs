@@ -287,6 +287,13 @@
       (is (= [:seon.render/hiccup 1]
              (get-in result [::execution/error :seon.error/data
                              ::execution/value-path])))))
+  (testing "a non-ordinary map key produces an ordinary refusal"
+    (let [result (execution/bounded-result {(js-obj "host" true) :value} 4096)]
+      (is (false? (::execution/ok? result)))
+      (is (= [:map-key]
+             (get-in result [::execution/error :seon.error/data
+                             ::execution/value-path])))
+      (is (protocol/ordinary-wire-value? result))))
   (testing "the caller's smaller byte limit is enforced"
     (let [result (execution/bounded-result {:my.render/value (apply str
                                                                          (repeat 100 "x"))}

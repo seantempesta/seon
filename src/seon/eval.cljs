@@ -64,7 +64,8 @@
             [seon.db.protocol :as db.protocol]
             [seon.db.process :as db.process]
             [seon.diffusion.grammar :as grammar]
-            [seon.error :as error]
+    [seon.error :as error]
+    [seon.instrument :as instrument]
             [seon.eval.bootstrap-cache :as bootstrap-cache]
             [seon.eval.internal :as eval.internal]
             [seon.error.instrument :as einstrument]
@@ -991,13 +992,18 @@
                        :seon.error/kind :core-bug})))
     (doseq [{:seon.ns/keys [require-edges]} namespace-rows]
       (seed-toolkit-refers! compile-state (require-specs require-edges)))
-    (schema/activate-projection!
-     (schema/build-projection
-      (into {} (map (fn [[key form]] [key (reader/read-string form)]))
-            schema-forms)
-      (into {} (map (fn [[sym form]]
-                      [(symbol sym) (reader/read-string form)]))
-            function-contracts)))
+    (let [old-projection (schema/current-projection)
+          projection
+          (schema/build-projection
+           (into {} (map (fn [[key form]] [key (reader/read-string form)]))
+                 schema-forms)
+           (into {} (map (fn [[sym form]]
+                           [(symbol sym) (reader/read-string form)]))
+                 function-contracts))]
+      ;; cljs.js needs the admitted schemas while it analyzes authored source.
+      ;; Wrapper reconciliation follows loading so newly materialized authored
+      ;; vars and bundled toolkit vars share the same complete generation.
+      (schema/activate-projection! projection)
     (loop [remaining target-namespaces]
       (when-let [target-ns (first remaining)]
         (let [namespace-targets
@@ -1018,6 +1024,15 @@
                  (fn [{:keys [error]}]
                    (if error (reject error) (resolve nil))))))))
           (recur (subvec remaining 1)))))
+      (let [stats
+            (instrument/reconcile-projection!
+             {::instrument/old-projection old-projection
+              ::instrument/new-projection projection})]
+        (when (false? (::instrument/ok? stats))
+          (throw
+           (ex-info "Execution child failed complete wrapper reconciliation."
+                    {:seon.instrument/stats stats
+                     :seon.error/kind :core-bug})))))
     (let [unloaded (remove lookup-value function-symbols)]
       (when (seq unloaded)
         (throw (ex-info "Selected authored functions did not load."
@@ -1897,7 +1912,8 @@
                 [::agent-id :any]] :any]}
   [configuration compile-state agent-ns-sym agent-id]
   (let [require-specs (await (home/home-requires-for agent-id))
-        _             (when (:seon.error/message require-specs)
+        _             (when (and (map? require-specs)
+                                 (string? (:seon.error/message require-specs)))
                         (throw
                          (ex-info (:seon.error/message require-specs)
                                   require-specs)))
@@ -5240,12 +5256,19 @@
         run-entry!
         (fn ^:async run-entry! [body-fn]
           (await
-            (db/with-tx-context
-              {::db/user [:seon.agent/id agent-id]
-               ::db/process (db.process/lookup-ref ::db.process/repl)
-               :seon.eval/ns (keyword (str @current-ns))}
-              (fn ^:async run-with-provenance! []
-                (await (body-fn))))))
+            ;; Self-host eval callbacks are a fresh asynchronous boundary.
+            ;; Re-establish the explicit batch owner here instead of assuming
+            ;; a host runtime will retain the parent invocation's ALS scope.
+            (db/with-agent
+              agent-id
+              (fn ^:async run-as-agent! []
+                (await
+                  (db/with-tx-context
+                    {::db/user [:seon.agent/id agent-id]
+                     ::db/process (db.process/lookup-ref ::db.process/repl)
+                     :seon.eval/ns (keyword (str @current-ns))}
+                    (fn ^:async run-with-provenance! []
+                      (await (body-fn)))))))))
         append-record!
         (fn [recorded]
           (when-not (database-error? recorded)

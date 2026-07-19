@@ -212,7 +212,9 @@
 
      (map? value)
      (or (some (fn [[key item]]
-                 (or (first-non-ordinary (conj path [:key key]) key)
+                 ;; The diagnostic must itself remain ordinary data. A bad map
+                 ;; key cannot be embedded in the path that reports that key.
+                 (or (first-non-ordinary (conj path :map-key) key)
                      (first-non-ordinary (conj path key) item)))
                value)
          {::value-path path ::value-type (value-type value)})

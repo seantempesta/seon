@@ -116,6 +116,36 @@
                       (is false (str "home require cleanup rejected: " error))
                       (done))))))))
 
+(deftest installed-error-attribute-is-schema-data-not-an-error-value
+  (async done
+    (let [database {:db-name "home-test"
+                    :t 7
+                    :as-of nil
+                    :since nil
+                    :history false
+                    :datahike/commit-id (random-uuid)}
+          originals (current-home-functions)]
+      (set! db/installed-schema
+            (fn
+              ([] (js/Promise.resolve {}))
+              ([_database]
+               (js/Promise.resolve
+                {:seon.error/message
+                 {:db/ident :seon.error/message
+                  :db/valueType :db.type/string}}))))
+      (-> (home/home-requires-for database "probe")
+          (.then
+           (fn [requires]
+             (is (= home/home-ns-require-specs requires)
+                 "an installed attribute named :seon.error/message is not an error")))
+          (.catch (fn [error]
+                    (is false (str "schema acquisition rejected: " error))))
+          (.finally (fn [] (restore-home-functions! originals)))
+          (.then (fn [_] (done)))
+          (.catch (fn [error]
+                    (is false (str "schema acquisition cleanup rejected: " error))
+                    (done)))))))
+
 (deftest home-requires-propagates-database-errors
   (async done
     (let [error {:seon.error/message "database unavailable"}

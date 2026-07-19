@@ -378,7 +378,8 @@
     (let [original-transact db/transact!
           original-record seval/record-eval!
           original-available admission/available?
-          recorded-request (atom nil)]
+          recorded-request (atom nil)
+          recorded-agent-id (atom nil)]
       (set! admission/available? (constantly true))
       (set! db/transact!
             (fn [& [_request]]
@@ -386,6 +387,7 @@
       (set! seval/record-eval!
             (fn [request]
               (reset! recorded-request request)
+              (reset! recorded-agent-id (db/current-agent-id))
               (js/Promise.resolve
                (assoc transaction-report :seon.eval/id "EVLreceipt0001"))))
       (-> (seval/eval-batch!
@@ -399,6 +401,8 @@
           (.then
            (fn [result]
              (is (= ["EVLreceipt0001"] (:seon.eval/ids result)))
+             (is (= "AGTreceipt0001" @recorded-agent-id)
+                 "each self-host eval callback retains the explicit agent scope")
              (is (not (contains? @recorded-request ::db/db))
                  "each form acquires the current cached database after earlier writes")))
           (.catch (fn [error] (is false (str error))))

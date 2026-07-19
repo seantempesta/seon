@@ -545,6 +545,11 @@
    ::db/expected-db (::db/db acquired)
    ::db/tx-data tx-data})
 
+(defn- expected-allocation-write
+  [acquired tx-data]
+  {::db/expected-db (::db/db acquired)
+   ::db/tx-data tx-data})
+
 (defn- plan-ref-id [ref]
   (cond
     (and (vector? ref) (= ::id (first ref))) (second ref)
@@ -587,13 +592,14 @@
               (when-not (or read-error (seq missing))
                 (await
                   (db.id/allocate!
-                    {::db.id/allocations
+                    {::db/db (::db/db acquired)
+                     ::db.id/allocations
                      [{::db.id/key ::id
                        ::db.id/identity-attr ::id}]
                      ::db.id/transaction-builder
                      (fn [ids]
                        (let [id (get ids ::id)]
-                         (expected-write
+                         (expected-allocation-write
                            acquired
                            [(cond-> {::id id ::title title ::status :open
                                      ::created-at created-at ::agent agent}
@@ -670,7 +676,8 @@
             (let [env
                   (await
                     (db.id/allocate!
-                      {::db.id/allocations
+                      {::db/db (::db/db acquired)
+                       ::db.id/allocations
                        (allocation-declarations
                          (::internal/allocation-keys preview))
                        ::db.id/transaction-builder
@@ -682,7 +689,7 @@
                                (ex-info "plan compilation changed during allocation"
                                         {:my.plan/error compile-error
                                          :seon.error/kind :core-bug})))
-                           (expected-write
+                           (expected-allocation-write
                              acquired
                              (::internal/transaction-data compiled))))}))]
               (if-not (:seon.error/message env)
@@ -952,7 +959,8 @@
                         (if (seq allocation-keys)
                           (await
                             (db.id/allocate!
-                              {::db.id/allocations
+                              {::db/db (::db/db acquired)
+                               ::db.id/allocations
                                (allocation-declarations allocation-keys)
                                ::db.id/transaction-builder
                                (fn [ids]
@@ -967,7 +975,7 @@
                                          "plan reconciliation changed during allocation"
                                          {:my.plan/error compile-error
                                           :seon.error/kind :core-bug})))
-                                   (expected-write
+                                   (expected-allocation-write
                                      acquired
                                      (::internal/transaction-data compiled))))}))
                           (await (db/transact!
