@@ -89,13 +89,18 @@ source lines in this ledger or the owning successor PRD.
   and `my.plan` keeps the database value on the allocation request rather than
   placing it in the pure transaction builder. The combined focused proof
   passes 52 tests/214 assertions.
-- The same persisted agent `plain-chefs-do` now moves through `my.units` and
-  `my.convert`, registers schemas, persists and calls
-  `my.units/celsius->fahrenheit` and `my.convert/convert-celsius` from a fresh
-  execution child, and commits/query-reads conversion facts. Its successful
-  plan step is `yy9b6iocki7j`. Exact later-turn use of the earlier immutable
-  database value, in-place redefinition, and post-pod-restart continuation
-  remain the next integrated proof; they are not inferred from same-turn reads.
+- The same persisted agent `plain-chefs-do` moved through `my.units`,
+  `my.convert`, and its home namespace; registered schemas; persisted and
+  called the conversion functions; committed/query-read conversion facts; and
+  used the exact earlier immutable database value in a later turn. It then
+  redefined `my.units/celsius->fahrenheit` in place, persisted a passing test,
+  and used the replacement from a fresh execution child.
+- After a canonical pod restart, the same agent reconstructed its home
+  namespace and admitted program without replaying historical forms, called
+  `my.units/celsius->fahrenheit`, queried the retained conversion fact, and
+  derived plan `yy9b6iocki7j` as done 1/1. The plan status proof also exposed
+  and repaired a Datahike pull budget that had treated one entity as one pull
+  result node; Datahike charges each pulled attribute and nested result node.
 
 ## Execution ledger
 
@@ -133,7 +138,7 @@ missing schema, or silently rendered core failure.
 
 ### 2. One complete restart-safe agent lifecycle
 
-- [ ] **IN PROGRESS:** create one agent, deliver a message, and move through `my.units`,
+- [x] Create one agent, deliver a message, and move through `my.units`,
   `my.convert`, and its home namespace using normal CLJS namespace operations.
   Agent `plain-chefs-do` and message `zil4x609qvr4` were persisted, but the
   first turn exposed an execution-result diagnostic that retained a rejected
@@ -161,15 +166,13 @@ missing schema, or silently rendered core failure.
   `yy9b6iocki7j`, moved through `my.units` and `my.convert`, registered schemas,
   persisted both conversion functions, called them successfully from a fresh
   execution child, and committed/query-read conversion facts.
-- [ ] **IN PROGRESS:** register schemas, define functions and tests, transact
-  data, and query it in a later turn from one immutable database value at a
-  time. Schema/function/transaction/current-read evidence is green; the exact
-  earlier database-value later-turn read remains deliberately unchecked.
-- [ ] Redefine the function in place and prove a fresh child uses the latest
+- [x] Register schemas, define functions and tests, transact data, and query it
+  in a later turn from the exact earlier immutable database value.
+- [x] Redefine the function in place and prove a fresh child uses the latest
   admitted namespace source without replaying historical forms.
-- [ ] Reject invalid source from the admitted program while retaining its failed
+- [ ] **IN PROGRESS:** reject invalid source from the admitted program while retaining its failed
   eval evidence and a functioning repair path.
-- [ ] Stop the child, restart the pod, resume the same agent, plan, namespace,
+- [x] Stop the child, restart the pod, resume the same agent, plan, namespace,
   messages, and database facts, and continue successfully.
 
 Exit: the live journey and focused tests agree on namespace, program, database,
