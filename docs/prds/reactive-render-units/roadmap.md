@@ -201,6 +201,20 @@ identities, safe inheritance, schema widening, generation close, stale-owner
 fencing, cancellation, and single-flight ownership/waiter cleanup. The CLJS
 gate passes 138 tests and 951 assertions.
 
+Maintained revision `6611de27` additionally closes a query correctness gap for
+schema-valid symbol values. Parsing and scalar `:in` substitution were already
+correct, but planned and relational execution used broad `symbol?` checks and
+could treat an ordinary `:db.type/symbol` value as an unconstrained variable.
+The analyzer now owns free, blank, and ground pattern classification, and each
+query stage consumes that classification according to its grammar role. The
+indexed and non-indexed regression proves known, missing, repeated, planned,
+and relational results agree in persistent-set and hitchhiker-tree profiles.
+The focused query-cache plus planner gate passes 148 tests and 868 assertions;
+the complete CLJS Node gate remains green at 138 tests and 951 assertions.
+[[datahike-query-symbol-values-were-treated-as-variables]] records the live
+failure and correction. The full JVM aggregation and rebuilt Seon live proof
+remain the graduation checks for this revision.
+
 Cache inheritance is demand-driven. A commit updates only attribute revision
 facts and a conservative revision in its cache context; it never walks or
 copies cached result rows. A later demanded read scans the bounded weighted
