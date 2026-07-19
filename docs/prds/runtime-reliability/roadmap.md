@@ -651,6 +651,17 @@ uses the current transaction-report-or-error contract already used by brand
 seeding. Focused proof passes 11 tests/40 assertions; the archived issue records
 the exact database evidence.
 
+The provider blocker is now closed. A one-turn product-door request completed
+through `deepseek-v4-pro` in 12.14 seconds with successful model-transport,
+turn, eval, and database evidence. A coherent DeepSeek reset then logged the
+fixed seed transaction as successful, and an ordinary supervised restart
+preserved database-owned DeepSeek plus `:stream` while returning every process
+descriptor to current. Exact-source Inspect still fails honestly: `:stream`
+removed DeepSeek's fabricated result claims, but namespace discovery omitted
+the required closing `complete`, and root orchestration invented work forbidden
+by its contract. The retained logs and unchanged scorers make model trajectory,
+not provider/runtime infrastructure, the earliest Inspect boundary.
+
 The existing remote query surface now exposes its protocol-native historical
 view, closing the only facade gap needed by coordinate-pinned startup birth.
 LLM configuration and brand startup sync also use bounded coordinate-fenced

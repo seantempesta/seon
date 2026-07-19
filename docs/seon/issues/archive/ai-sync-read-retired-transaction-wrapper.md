@@ -26,4 +26,4 @@ success and logs the complete error value otherwise. Its focused asynchronous
 test returns a real transaction-report shape, so restoring the obsolete wrapper
 would fail the regression. `seon.ai-test` passes 11 tests and 40 assertions.
 
-Commit: `976fcadf` successor commit in the same runtime-reliability branch.
+Commit: `8e5986ff`.

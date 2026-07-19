@@ -499,6 +499,31 @@ prose is supporting evidence only.
   generated variants per scenario; deterministic infrastructure must pass every
   run.
 
+The current DeepSeek credential is now proven through the ordinary product
+door: `deepseek-v4-pro` completed an exact one-turn request in 12.14 seconds,
+with successful provider, endpoint, request-ID, turn, eval, and database-value
+evidence. The default fused cluster was then reset with one coherent DeepSeek
+seed; startup logged one successful AI-row transaction. A normal supervised
+restart restored current process specifications while preserving
+`:seon.ai/provider :deepseek` and `:seon.config/repl-mode :stream` as database
+facts.
+
+Exact-source Inspect remains red for model behavior, not infrastructure. Two
+namespace-discovery runs under the stale Meta-derived `:batch` setting scored
+0.0 after DeepSeek fabricated transcript result lines and followed those
+claims. Switching the existing database dial to the measured DeepSeek
+`:stream` mode eliminated fabricated results. The next run executed discovery,
+namespace movement, unqualified `grants`, and a correct human report, but never
+called the explicitly required `complete`; the scorer correctly rejected
+verification/report. Root orchestration then created the idle child but ignored
+the explicit no-task/query contract and invented an invoice-audit workflow,
+also scoring 0.0. Retained native logs are
+`2026-07-19T10-27-39-00-00_namespace-reachability_VQg3NjiB2VWvUkKPCVtX5m.eval`
+and
+`2026-07-19T10-31-09-00-00_namespace-reachability_9CtDiqNaxhcaW4BbGJiBwU.eval`.
+Do not loosen either scorer; the next design work is reducing trajectory drift
+while preserving the ordinary product context and lifecycle contract.
+
 Exit: Inspect AI drives the real pod door and scores durable facts/evals rather
 than a special harness runtime or transcript regex.
 
