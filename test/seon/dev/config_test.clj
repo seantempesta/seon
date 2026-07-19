@@ -92,7 +92,11 @@
 
 (deftest explicit-launch-selection-is-validated-and-artifact-bound
   (let [configuration (config/load! ".")
-        descriptor (:seon.dev.config/launch-descriptor configuration)]
+        descriptor (:seon.dev.config/launch-descriptor configuration)
+        environment (:seon.dev.config/environment configuration)]
+    (is (= "1" (get environment "SEON_FS_READ_ONLY")))
+    (is (= "1" (get environment "SEON_FS_LOCK"))
+        "a normal agent cannot make the source-checkout grant writable")
     (is (= descriptor
            (:seon.dev.config/launch-descriptor
             (config/select-launch-descriptor configuration descriptor))))

@@ -411,7 +411,8 @@
                       "SEON_WRITER_REPL_PORT_FILE" writer-port-file
                       "SEON_WRITER_PROC_DIR" writer-proc-dir
                       "SEON_FS_ROOT" root
-                      "SEON_FS_READ_ONLY" "1")
+                      "SEON_FS_READ_ONLY" "1"
+                      "SEON_FS_LOCK" "1")
         http-port (parse-long (get environment "SEON_PORT" "7890"))
         launch-descriptor
         (launch/default-descriptor
