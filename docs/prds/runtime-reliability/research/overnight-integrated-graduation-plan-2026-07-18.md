@@ -250,6 +250,18 @@ source lines in this ledger or the owning successor PRD.
   schema in eval `xwlhot0s684z`, and ran its attached test through the one test
   runner in eval `xjbefkcupnu7`. This is cross-child reuse and cross-namespace
   repair in place, not a parallel function.
+- The same fulfillment agent then defined and tested
+  `my.fulfillment/summary`, transacted and query-read
+  `fulfillment-001` as ready, notified both peers through messages
+  `auiwcn4q81l3` and `gyee3abcjuxr`, completed its database-backed plan, and
+  waited. The deliberate source `(js/process.exit 1)` retired child PID 11097
+  and its one automatic replacement PID 18205. Database turns
+  `fazjdpbih5jn` and `nuywq50kf80e` both retain the exact failed eval source
+  with status `:interrupted`; the pod and writer remained responsive. A later
+  human message started a fresh child, whose eval `mk34zokwc12g` called the
+  shared summary with exact result `"Ada Lovelace: 3249 cents"`, eval
+  `qifgkhbcwvqr` read the fulfillment status as ready, and the agent returned
+  to `wait`.
 - [[deterministic-core-fault-boundary-audit-2026-07-19]] finds the older
   six-boundary checkbox stale. Ticker, reload, startup/publication,
   selected-call, and top-level compiled-child paths already have focused and
@@ -358,9 +370,9 @@ namespace while immutable agent IDs preserve history and refs.
 - [x] Agents exchange database-backed messages with explicit from/to refs.
 - [x] One agent uses functions written by another; a different agent finds and
   fixes a defect in that namespace without creating a parallel function.
-- [ ] **IN PROGRESS:** kill one execution child during work, record the failed
+- [x] Kill one execution child during work, record the failed
   turn/eval evidence, replace it once, and continue from database state.
-- [ ] Restart the pod between phases and complete the integrated application.
+- [x] Restart the pod between phases and complete the integrated application.
 
 Exit: database queries prove agent, parent, run, turn, message, namespace,
 function, schema, test, transaction, and resumed-plan relationships; transcript
@@ -435,9 +447,9 @@ modest hardware, with no micro-optimization displacing a correctness boundary.
 
 ## Scheduling clock
 
-- **Ordered spine:** section 4's complete multi-agent application journey; the
-  shared-program and ordinary-data child boundary now have focused and live
-  proof.
+- **Ordered spine:** section 5's fixed live Inspect namespace,
+  database-memory, planning, multi-agent, and failure-recovery scenarios; the
+  complete section 4 journey now has database-derived live proof.
 - **Integrated proof:** three namespace-targeted agents exchange database-backed
   messages, reuse and repair one shared program, survive one child replacement
   and one pod restart, and complete from database state.
@@ -445,8 +457,8 @@ modest hardware, with no micro-optimization displacing a correctness boundary.
   is now green with metric-bearing oracles, and browser-scenario preparation is
   source-grounded. Their live product gates remain independent of section 4's
   agent entities and shared application namespaces.
-- **Next refill:** after section 4 closes, section 5's fixed and generated live
-  Inspect scenarios become the ordered spine while browser proof advances.
+- **Next refill:** after the fixed live Inspect scenarios close, run their
+  generated variants and repeated pass thresholds while browser proof advances.
 - **Final graduation gate:** sections 1–8 are checked against one exact source
   revision, including live Inspect, browser, downstream, package, and measured
   modest-hardware evidence.
