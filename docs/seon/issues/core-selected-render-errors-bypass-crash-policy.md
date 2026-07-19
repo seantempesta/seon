@@ -85,3 +85,17 @@ renderer-specific recording code and tests are deleted. Focused selected-call
 proof passes 28 tests and 108 assertions; execution-runtime proof returns to 13
 tests and 71 assertions. One exact-package repetition on this final seam and
 the parent host-error conversion audit remain before closure.
+
+Final exact package `e131a442…` closes the selected-call seam. An impossible
+core renderer persisted the fault at transaction `536871421` and the task child
+was absent afterward while the pod remained ready. Restoring
+`my.agent.red-apes-reply/control-matrix` and restarting normally produced the
+complete canvas without an error. The recursively read-only package tree stayed
+exactly `9d5b083c…`, and normal `down` reaped writer and pod cleanly.
+
+The remaining audit is narrower than selected calls: failures thrown by the
+top-level compiled composition function itself do not pass through
+`call-selected!`. Those must be separated from an expected supervised child
+exit before deciding whether the child, pod, or neither process should crash.
+This issue remains active until that distinction has an explicit regression;
+selected canvas, prompt-block, and interactive-call failures are closed.

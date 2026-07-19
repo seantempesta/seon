@@ -339,6 +339,16 @@ execution-runtime proof passes 13/71. The next exact package repeats the
 persist-then-exit proof on this final seam, followed by the parent host-error
 conversion audit and the canvas browser matrix.
 
+Final exact package `e131a442…` repeats the simplified boundary successfully:
+the impossible selected core renderer persisted at transaction `536871421`,
+then its task child exited while the pod remained ready. Restoring the qualified
+authored renderer produced the full canvas; the recursively read-only package
+tree stayed exactly `9d5b083c…`, and normal shutdown was clean. The selected
+canvas/prompt/interactive-call contract is therefore closed. The next crash
+policy audit is only the top-level compiled composition function: distinguish
+its own core throw from the expected report of a supervised child exit, then
+resume the canvas browser matrix and complete exact-source gates.
+
 Current-source release application
 `0d8bc9c2ff2088de3103f951d1bd3f94f96d2c80cb4f4ccf6a035aaa9f96197b`
 now passes the source-free runtime boundary from `/Users/sean/seon-release-9df21b23`
