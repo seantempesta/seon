@@ -460,12 +460,12 @@
                         (assoc :seon.agent/default-turn-limit default-turn-limit)
                         (and (not (contains? existing :seon.agent/parent)) parent)
                         (assoc :seon.agent/parent parent))]
-    (cond-> [agent-row]
-      (not namespace-exists?)
-      (conj
-       (home/initial-ns-entity
+    (if namespace-exists?
+      [agent-row]
+      [(home/initial-ns-entity
         {:seon.agent/namespace namespace
-         :seon.eval/home-requires home-requires}))))))
+         :seon.eval/home-requires home-requires})
+       agent-row]))))
 
 (defn ^:async create!
   "Reconcile a known agent entity by its durable id.

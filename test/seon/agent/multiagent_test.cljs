@@ -166,7 +166,7 @@
                   "creation receives the decoded ordinary singleton")
               (is (identical? database (::db/db @transaction)))
               (is (identical? database (::db/expected-db @transaction)))
-              (let [[agent-row home-row] (::db/tx-data @transaction)]
+              (let [[home-row agent-row] (::db/tx-data @transaction)]
                 (is (= configured-requires
                        (:seon.eval/home-requires agent-row)))
                 (is (= [:seon.ns/name :my.agent.created]

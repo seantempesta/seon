@@ -130,6 +130,10 @@ source lines in this ledger or the owning successor PRD.
   budgets on the new resident join and namespace-existence query. Both retain
   scalar output and small result-weight bounds but now admit 64 bounded
   intermediate relation nodes before the live retry.
+- The next retry reached birth and proved the new namespace row must precede
+  the agent's lookup ref within the transaction. Absent-namespace birth now
+  orders namespace, agent, then initial message; existing namespace source is
+  still never rewritten.
 
 ## Execution ledger
 
