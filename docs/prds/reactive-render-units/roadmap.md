@@ -226,13 +226,18 @@ The rebuilt browser proof exposed a separate failure feedback loop: a failed
 render widens correctly to `:all`, but its persisted fault transaction could
 then schedule the same failed render repeatedly. The existing error projection
 is now the recursion fence—no classifier fact or transaction metadata is
-added. While a registration is failed, an error-projection-only transaction is
-suppressed; any mixed or ordinary relevant transaction still schedules repair.
+added. Its first transaction may install the error projection's own Datahike
+schema; those schema datoms count only when their same-report `:db/ident`
+belongs to the closed persisted-error attribute set. While a registration is
+failed, that error-projection-only transaction is suppressed; any mixed or
+ordinary relevant transaction still schedules repair.
 The upgraded failure test begins with exact evidence containing both error and
-domain attributes, proves an error-only commit does not recompute, proves a
-mixed commit with a relevant domain attribute does recompute, then proves exact
-plan narrowing and zero ownership. The focused reactive, Datastar, and remote
-database gate passes 44 tests and 220 assertions. Live deterministic
+domain attributes, uses real five-field transaction-report datoms, covers the
+report arriving before and after failure completion, and proves an ordinary
+schema declaration plus relevant domain datom does recompute. Exact plan
+narrowing and zero ownership follow. The focused reactive gate passes 7 tests /
+49 assertions and Datastar passes 16 / 75; the earlier combined reactive,
+Datastar, and remote database gate passed 44 / 220. Live deterministic
 failure/repair evidence remains before closing
 [[reactive-failed-render-recorded-fault-feedback-loop]].
 

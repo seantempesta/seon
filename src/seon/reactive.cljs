@@ -188,16 +188,34 @@
                          runtime))))
             (when prior-timer (clear-timer! prior-timer))))))))
 
-(def ^:private error-evidence-transaction-attributes
-  (into error/persisted-attributes
-        #{:db/txInstant :seon.db/user :seon.db/process}))
+(def ^:private transaction-metadata-attributes
+  #{:db/txInstant :seon.db/user :seon.db/process})
+
+(def ^:private schema-declaration-attributes
+  #{:db/ident :db/valueType :db/cardinality :db/unique :db/isComponent})
+
+(defn- report-datoms
+  [event]
+  (into [] (filter #(and (vector? %) (= 5 (count %)))) (:tx-data event)))
 
 (defn- error-evidence-event?
   [event]
-  (let [attributes (into #{} (keep #(when (vector? %) (nth % 1 nil)))
-                         (:tx-data event))]
-    (and (contains? attributes :seon.error/fault)
-         (every? error-evidence-transaction-attributes attributes))))
+  (let [datoms (report-datoms event)
+        error-schema-entities
+        (into #{}
+              (keep (fn [[entity attribute value]]
+                      (when (and (= :db/ident attribute)
+                                 (contains? error/persisted-attributes value))
+                        entity)))
+              datoms)]
+    (and (some #(= :seon.error/fault (nth % 1 nil)) datoms)
+         (every?
+          (fn [[entity attribute]]
+            (or (contains? error/persisted-attributes attribute)
+                (contains? transaction-metadata-attributes attribute)
+                (and (contains? error-schema-entities entity)
+                     (contains? schema-declaration-attributes attribute))))
+          datoms))))
 
 (defn- enqueue!
   [key registration-id database event]

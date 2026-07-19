@@ -268,6 +268,24 @@
           listens (atom [])
           computes (atom 0)
           delivered (atom [])
+          error-report
+          (fn [value]
+            (let [transaction (:t value)]
+              {:db-after value
+               :tx-data
+               [[11 :db/ident :seon.error/fault transaction true]
+                [11 :db/valueType :db.type/keyword transaction true]
+                [11 :db/cardinality :db.cardinality/one transaction true]
+                [12 :db/ident :seon.error/frames transaction true]
+                [12 :db/valueType :db.type/ref transaction true]
+                [12 :db/cardinality :db.cardinality/many transaction true]
+                [12 :db/isComponent true transaction true]
+                [1 :seon.error/fault :core transaction true]
+                [1 :seon.error/message "render failed" transaction true]
+                [transaction :db/txInstant
+                 #inst "2026-07-19T00:00:00.000-00:00" transaction true]
+                [transaction :seon.db/user 20 transaction true]
+                [transaction :seon.db/process 21 transaction true]]}))
           repair-evidence
           (fn [value]
             (assoc-in
@@ -283,10 +301,14 @@
                (case attempt
                  1 {::db/value [:main {:id "app-view"} "initial"]
                     ::db/read-evidence (repair-evidence value)}
-                 2 {::db/value [:main {:id "app-view"}
-                                [:div {:id "app-error"} "render failed"]]
-                    ::db/read-evidence :all
-                    ::reactive/failed? true}
+                 2 (let [fault-db (at-t (inc (:t @head)))]
+                     (reset! head fault-db)
+                     ((::db/handler (last @listens))
+                      (error-report fault-db))
+                     {::db/value [:main {:id "app-view"}
+                                  [:div {:id "app-error"} "render failed"]]
+                      ::db/read-evidence :all
+                      ::reactive/failed? true})
                  {::db/value [:main {:id "app-view"} "repaired"]
                   ::db/read-evidence (repair-evidence value)}))))]
       (set! db/db (fn ([] (js/Promise.resolve @head))
@@ -327,16 +349,12 @@
              (is (= "app-error" (get-in (last @delivered) [2 1 :id])))
              (is (= :all (::db/dependency-plan (last @listens)))
                  "failure replaces the prior narrow plan with :all")
+             (is (= 2 @computes)
+                 "an in-flight error report is reconciled by failure finish")
              (let [fault-db (at-t (inc (:t @head)))]
                (reset! head fault-db)
                ((::db/handler (last @listens))
-                {:db-after fault-db
-                 :tx-data [[1 :seon.error/fault :core (:t fault-db) true]
-                           [1 :seon.error/message "render failed"
-                            (:t fault-db) true]
-                           [(:t fault-db) :db/txInstant
-                            #inst "2026-07-19T00:00:00.000-00:00"
-                            (:t fault-db) true]]}))
+                (error-report fault-db)))
              (next-turn)))
           (.then
            (fn [_]
@@ -350,7 +368,13 @@
                (reset! head next-db)
                ((::db/handler (last @listens))
                 {:db-after next-db
-                 :tx-data [[1 :seon.error/fault :core
+                 :tx-data [[13 :db/ident :example/value
+                            (:t next-db) true]
+                           [13 :db/valueType :db.type/keyword
+                            (:t next-db) true]
+                           [13 :db/cardinality :db.cardinality/one
+                            (:t next-db) true]
+                           [1 :seon.error/fault :core
                             (:t next-db) true]
                            [2 :example/value :repaired
                             (:t next-db) true]]})
