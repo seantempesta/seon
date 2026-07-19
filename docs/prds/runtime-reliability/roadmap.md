@@ -258,6 +258,14 @@ derived warning cause disappeared with the same database fact. The complete
 button/input/select/toggle/validation/focus/read-back matrix is again the next
 browser boundary.
 
+That proof also exposed a presentation regression: the complete web-view path
+had bypassed `seon.render.canvas/error-response` and leaked the diagnostic into
+a red card. It now consumes the canonical canvas failure response again. The
+human sees only the calm "Updating this canvas…" placeholder; the error
+envelope and exact repair remain in the agent's canvas and urgent warning
+context. Focused source proof passes; exact live repetition awaits a successful
+host-pressure-cleared build before the control matrix resumes.
+
 As of 2026-07-18, one JVM writer has passed the complete autonomous sibling
 cluster lifecycle: fresh initialization, distinct database values and store
 IDs, concurrent agents and gzip feeds, isolated writes, pod-only restart,

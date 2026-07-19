@@ -166,3 +166,11 @@ while watcher, writer, and pod remain ready. `my.canvas/clear!` then retracted
 the stale selection; the next complete feed contained no absent-program error.
 The inverse stale-authored-reference case is therefore closed without a child
 crash, stored acknowledgement, or second warning path.
+
+The human-facing diagnostic was itself incorrect. Canvas failures already own
+one deliberate split in `seon.render.canvas/error-response`: the human sees a
+calm "Updating this canvas…" placeholder, while the agent twin and error
+envelope retain the cause. `seon.execution.runtime/html-value` now routes failed
+canvas selections through that response instead of the generic red error card;
+other failed surfaces still use the generic card. The urgent derived warning
+continues to carry the qualified function and exact Hiccup repair.

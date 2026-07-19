@@ -51,7 +51,7 @@
                 seon.agent.fs/read-file]]
     (is (fn? (eval/lookup-value sym)) (str sym " is compiled"))))
 
-(deftest absent-canvas-function-renders-exact-repair-guidance
+(deftest absent-canvas-function-keeps-failure-details-from-the-human
   (let [renderer 'my.app/orders
         block {:seon.render.surface/selection "canvas"
                :seon.render/html renderer}
@@ -63,9 +63,10 @@
           :seon.error/kind :agent}}
         hiccup (@#'runtime/html-value "agent-1" block result)
         rendered (pr-str hiccup)]
-    (is (str/includes? rendered "Canvas renderer my.app/orders"))
-    (is (str/includes? rendered "returns Hiccup through my.canvas/view"))
-    (is (str/includes? rendered "my.canvas/show!"))))
+    (is (str/includes? rendered "Updating this canvas"))
+    (is (not (str/includes? rendered "my.app/orders")))
+    (is (not (str/includes? rendered "absent from")))
+    (is (not (str/includes? rendered "error")))))
 
 (defn- call-with-acquired-agent
   ([result request observed]
