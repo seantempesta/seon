@@ -82,6 +82,20 @@ source lines in this ledger or the owning successor PRD.
   operator target degraded, while the retained child continued to report the
   same exact admitted digest. Watched reload therefore never claims to replace
   the execution artifact; `bin/seon up` is the canonical cross-process cut.
+- Commit `bef42a75` repairs four contracts exposed by the first complete live
+  agent lifecycle: bounded execution diagnostics remain ordinary data,
+  Datahike's installed-schema map is not mistaken for a database error,
+  execution children reconcile the admitted Malli instrumentation projection,
+  and `my.plan` keeps the database value on the allocation request rather than
+  placing it in the pure transaction builder. The combined focused proof
+  passes 52 tests/214 assertions.
+- The same persisted agent `plain-chefs-do` now moves through `my.units` and
+  `my.convert`, registers schemas, persists and calls
+  `my.units/celsius->fahrenheit` and `my.convert/convert-celsius` from a fresh
+  execution child, and commits/query-reads conversion facts. Its successful
+  plan step is `yy9b6iocki7j`. Exact later-turn use of the earlier immutable
+  database value, in-place redefinition, and post-pod-restart continuation
+  remain the next integrated proof; they are not inferred from same-turn reads.
 
 ## Execution ledger
 
@@ -143,11 +157,14 @@ missing schema, or silently rendered core failure.
   placed the database value inside the generated-ID builder instead of on the
   allocator request. The allocator seam is repaired and focused plan,
   allocator, program-load, and receipt proof passes 52 tests/214 assertions.
-  Despite that plan-write failure, the same run persisted
-  `my.units/celsius->fahrenheit` and `my.convert/convert-celsius`; the next
-  canonical build retries the plan write and completes data/later-turn proof.
-- [ ] Register schemas, define functions and tests, transact data, and query it
-  in a later turn from one immutable database value at a time.
+  After the canonical build, the same persisted agent completed plan step
+  `yy9b6iocki7j`, moved through `my.units` and `my.convert`, registered schemas,
+  persisted both conversion functions, called them successfully from a fresh
+  execution child, and committed/query-read conversion facts.
+- [ ] **IN PROGRESS:** register schemas, define functions and tests, transact
+  data, and query it in a later turn from one immutable database value at a
+  time. Schema/function/transaction/current-read evidence is green; the exact
+  earlier database-value later-turn read remains deliberately unchecked.
 - [ ] Redefine the function in place and prove a fresh child uses the latest
   admitted namespace source without replaying historical forms.
 - [ ] Reject invalid source from the admitted program while retaining its failed
