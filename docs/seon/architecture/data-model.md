@@ -99,11 +99,11 @@ is a valid `:seon.db/ref` value (the `[:tuple :keyword …]` arm) that datahike
 resolves to the agent's eid, so a write can reference an entity by its natural
 key without first querying its eid.
 
-`:seon.agent/namespace` is additionally a unique identity ref. Datahike first
+`:seon.agent/namespace` is additionally a unique-value ref. Datahike first
 resolves its `[:seon.ns/name ...]` value to the namespace eid, then enforces
 ordinary AVET uniqueness on that eid. Consequently one namespace has at most
 one active resident agent, while messages, runs, plans, and parent refs keep
-pointing at the agent's stable eid. Namespace stewardship is sustained
+pointing at the agent's sole upsert identity and stable eid. Namespace stewardship is sustained
 attention, never exclusive authority over shared code.
 
 ### 2.2 identity / lookup attrs (`{:seon.db/identity true}`)

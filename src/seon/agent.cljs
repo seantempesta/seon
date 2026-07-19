@@ -90,7 +90,7 @@
 ;; namespace while every durable relationship continues to point at the
 ;; stable agent entity.
 (schema/register! :seon.agent/namespace
-                  [:and {:seon.db/identity true} :seon.db/ref])
+                  [:and {:seon.db/unique true} :seon.db/ref])
 ;; Subagent → parent (optional; the atomic spawn transaction sets it and
 ;; `complete` derives its delivery target through it). References the canonical
 ;; ref shape; never inline.

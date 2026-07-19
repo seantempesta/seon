@@ -24,6 +24,10 @@ then initial message. Existing namespaces continue to use ordinary
 `:seon.ns/name` lookup refs and their program declaration is never rewritten.
 The builder selects the next negative integer not already present in its input
 transaction, so combined root-plus-initial-agent birth cannot alias tempids.
+The namespace ref is `:db.unique/value`, not a second upsert identity. This
+lets the generated-ID writer keep `:seon.agent/id` as the agent's sole identity
+while Datahike still enforces one resident per namespace and permits lookup by
+the unique ref.
 
 ## Acceptance
 

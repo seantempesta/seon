@@ -159,14 +159,14 @@
       (is (= :db.type/uuid (:db/valueType attr)))
       (is (= :db.unique/identity (:db/unique attr)))))
 
-  (testing "an identity ref becomes a unique Datahike ref"
+  (testing "a unique-value ref becomes a unique Datahike ref"
     (let [result (dhs/malli-map->datahike-schema
                   [:map
                    [:foo/namespace
-                    [:and {:seon.db/identity true} :seon.db/ref]]])
+                    [:and {:seon.db/unique true} :seon.db/ref]]])
           attr (find-attr result :foo/namespace)]
       (is (= :db.type/ref (:db/valueType attr)))
-      (is (= :db.unique/identity (:db/unique attr)))))
+      (is (= :db.unique/value (:db/unique attr)))))
 
   (testing ":seon.db/unique true -> :db.unique/value"
     (let [result (dhs/malli-map->datahike-schema

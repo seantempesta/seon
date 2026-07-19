@@ -119,7 +119,8 @@ source lines in this ledger or the owning successor PRD.
   extends `start!`/`delegate!` with an optional namespace symbol. Focused
   multi-agent proof passes 8 tests/58 assertions; the Datahike bridge proof
   passes 14/81 and confirms the attribute compiles to
-  `:db.type/ref` plus `:db.unique/identity`.
+  `:db.type/ref` plus `:db.unique/value`; `:seon.agent/id` remains the sole
+  agent upsert identity.
 - The first populated-database migration exposed that the historical
   ordinary-agent existence query budgeted one intermediate result because its
   final result was scalar. Datahike rejected the 13-agent history, and startup
