@@ -255,3 +255,10 @@ intent and idempotent continuation shape, but one invocation does not yet own
 the complete convergence guarantee. Preserve the writer's full failed response
 on the next reproduction, then fix the release/delete owner rather than adding
 an Inspect-only retry loop.
+
+Inspect now retains the operator's complete stderr instead of truncating it to
+the first line. If product execution and release both fail, the product failure
+remains primary and the cleanup failure is attached as an exception note; a
+cleanup-only failure still fails the task. This preserves both facts without a
+private retry or false success. The combined cluster/product slice passes 53
+tests.

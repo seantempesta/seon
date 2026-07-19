@@ -504,7 +504,7 @@ def _operator(arguments: list[str], runner) -> subprocess.CompletedProcess:
                     cwd=REPO_ROOT, text=True, capture_output=True, check=False)
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or "operator failed").strip()
-        raise RuntimeError(detail.splitlines()[0])
+        raise RuntimeError(detail)
     return result
 
 

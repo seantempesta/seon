@@ -320,3 +320,25 @@ def test_native_live_reuse_repair_task_reads_history(monkeypatch):
     assert log.status == "success", log.error
     assert observed[0][0] == "http://pod/agents/run"
     assert observed[0][1]["namespace"] == "my.inspect.repair.nabcdef"
+
+
+def test_live_product_failure_is_not_masked_by_release_failure(monkeypatch):
+    from seon_inspect import cluster, solver as pod_solver
+
+    lease = SimpleNamespace(name="inspect-namespace-failure",
+                            cluster_url="http://pod/agents/run")
+    monkeypatch.setattr(cluster, "acquire_branch_lease", lambda _name: lease)
+    monkeypatch.setattr(
+        cluster, "release_branch_lease",
+        lambda _lease: (_ for _ in ()).throw(RuntimeError("release failed")))
+    monkeypatch.setattr(
+        pod_solver, "pod_run",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("product failed")))
+
+    log = inspect_eval(
+        product_scenario(scenario="namespace", live=True,
+                         _admission={"tree_sha256": "a" * 64}),
+        model="mockllm/model", display="none", log_level="warning")[0]
+    assert log.status == "error"
+    assert "product failed" in str(log.error)
+    assert "release failed" in str(log.error)

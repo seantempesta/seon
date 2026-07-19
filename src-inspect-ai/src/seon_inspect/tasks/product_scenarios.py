@@ -96,6 +96,7 @@ def live_product_solver(scenario: str, timeout_s: int = 300):
 
             branch_prefix = f"inspect-{scenario.replace('_', '-')}"
             lease = acquire_branch_lease(bench_cluster_name(branch_prefix))
+            product_failure = None
             try:
                 if scenario == "namespace":
                     target_namespace = f"my.inspect.n{lease.name.rsplit('-', 1)[-1]}"
@@ -148,8 +149,17 @@ def live_product_solver(scenario: str, timeout_s: int = 300):
                         lease.cluster_url, "root")
                 return {"runs": runs,
                         "database_snapshot": snapshot}
+            except BaseException as exception:
+                product_failure = exception
+                raise
             finally:
-                release_branch_lease(lease)
+                try:
+                    release_branch_lease(lease)
+                except BaseException as cleanup_failure:
+                    if product_failure is None:
+                        raise
+                    product_failure.add_note(
+                        f"branch release also failed: {cleanup_failure}")
 
         result = await anyio.to_thread.run_sync(drive)
         from seon_inspect.solver import (_record_result,

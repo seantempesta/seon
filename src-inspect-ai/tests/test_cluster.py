@@ -208,6 +208,14 @@ def test_cluster_name_validated():
             cl.create_cluster(bad, runner=FakeRunner(), ready=lambda n: 1)
 
 
+def test_operator_failure_preserves_complete_evidence():
+    runner = lambda argv, **kwargs: subprocess.CompletedProcess(
+        argv, 1, stdout="", stderr="failed\n{:writer/response :busy}")
+    with pytest.raises(RuntimeError) as error:
+        cl.acquire_branch_lease("proof", runner=runner)
+    assert str(error.value) == "failed\n{:writer/response :busy}"
+
+
 def test_bench_cluster_names_are_fresh():
     names = {cl.bench_cluster_name() for _ in range(50)}
     assert len(names) == 50
