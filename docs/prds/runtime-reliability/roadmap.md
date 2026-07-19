@@ -94,8 +94,13 @@ to every committed database value, so sibling transaction volume filled one
 idle child's physical-session queue and closed its socket. Protocol version 11
 now separates database acquisition from database-advanced delivery; the pod
 retains delivery and execution children decline it. Real writer and CLJS
-boundary tests pass, but the same three-epoch live run must close the contract
-before the database scorer advances. The real browser/Datastar
+boundary tests pass. The first live retry sustained all three children without
+delivery pressure, then exposed two independent gates: a valid 34-turn provider
+proof exceeded an unrelated render display cap, and Inspect cancellation left
+one execution child alive after its branch pod drained. The provider projection
+is already structurally bounded and now remains complete; the existing process
+containment issue owns the escaped child. The same three-epoch live run must
+close both contracts before the database scorer advances. The real browser/Datastar
 journey is the dependency-ready parallel portfolio; the
 complete live Inspect, browser, package, downstream,
 multi-cluster, and modest-hardware matrix remains the final gate.

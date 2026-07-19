@@ -42,6 +42,15 @@ validated immutable local artifact, endpoint/model agreement, and matching
 successful response identity. A malformed present identity fails closed;
 absence never becomes a fabricated local-artifact claim.
 
+The 2026-07-19 three-epoch retry exposed one more false bound: a valid 34-turn
+run produced 21,999 characters of transport evidence, but the web owner reused
+the 16,384-character database display cap and returned only
+`{:status "oversized"}`. That lost the provider proof and correctly caused
+Inspect to reject the sample. Transport evidence is already bounded by the run
+turn limit, retry limit, a closed projection of attempt attributes, and the
+per-field response-identity and endpoint caps. It now returns that complete
+bounded projection instead of applying an unrelated aggregate display cap.
+
 Native logs retained under `src-inspect-ai/logs/` prove the progression:
 
 - `…GeCsGY69cPQimaKyPuXLGZ.eval` reached 61 successful provider calls before the
@@ -67,6 +76,8 @@ Remote-provider capability runs do not wait for that optional comparison gate.
 
 - A source-admitted remote-provider run with complete transport evidence and no
   local model-server identity reaches its scorer.
+- A maximum-turn run retains every bounded attempt row; a render display cap
+  never truncates formal run evidence.
 - Missing or false historical configuration validation, malformed attempt
   identity, inconsistent retry outcomes, and transport drift fail before
   scoring.

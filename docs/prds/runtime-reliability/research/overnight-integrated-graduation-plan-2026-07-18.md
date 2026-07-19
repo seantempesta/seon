@@ -89,6 +89,16 @@ source lines in this ledger or the owning successor PRD.
   focused writer boundary passes 40 tests/222 assertions and the CLJS session,
   execution-host, and UDS selection passes 40/164. The fix is not graduated
   until a fresh three-epoch live run completes without delivery pressure.
+- The first retry on protocol 11 sustained three concurrent children without
+  database delivery pressure; two completed and one sample scored. It exposed
+  the next independent admission bound: a 34-turn run produced 21,999
+  characters of valid model-transport evidence, but the web owner reused the
+  16,384-character database display cap and returned only `oversized`. The
+  transport projection is already bounded by the run turn limit, retry limit,
+  closed attempt attributes, and per-field identity caps, so the unrelated
+  aggregate display cap is removed. The same cancellation also reproduced the
+  open containment issue: one Bun execution child outlived the drained branch
+  pod and retained its database acquisition until normal full shutdown.
 - The first admitted live namespace battery now reaches the real scorer. Native
   log `…fxN7bWkJXsVehcJBqs9K3B.eval` completed all three samples with two
   passes, zero fabrication, and one `NaN` failure after repeated unquoted
@@ -423,6 +433,8 @@ prose is supporting evidence only.
 - [x] Pass the complete offline `src-inspect-ai` tests and oracle liveness proof.
 - [x] Separate ordinary database acquisition from database-advanced delivery;
   keep the pod subscribed and let execution children decline unconsumed events.
+- [x] Preserve every structurally bounded model-attempt row instead of applying
+  a render display cap to formal Inspect evidence.
 - [ ] Pass the fixed live namespace and later-turn database-memory scenarios.
 - [ ] Pass generated namespace and database variants without adding scorer
   exceptions for model answers.

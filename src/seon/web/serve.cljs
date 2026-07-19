@@ -815,8 +815,8 @@
            attempts))))))
 
 (defn- project-model-transport-rows
-  "Pure bounded projection over rows selected from one final database value."
-  [turn-rows rows pull-row historical-valid? cap]
+  "Pure projection over bounded rows selected from one final database value."
+  [turn-rows rows pull-row historical-valid?]
   (let [attempt-eids-by-turn
         (reduce (fn [grouped [turn-eid attempt-eid]]
                   (update grouped turn-eid conj attempt-eid))
@@ -885,85 +885,71 @@
             content (pr-str projected-turns)
             chars (count content)
             projected-tokens (tokens/estimate content)]
-        (if (> chars cap)
-          {:status "oversized"
-           :chars chars
-           :tokens projected-tokens}
-          {:status "inline"
-           :chars chars
-           :tokens projected-tokens
-           :transport_drift drift?
-           :turns projected-turns})))))
+        {:status "inline"
+         :chars chars
+         :tokens projected-tokens
+         :transport_drift drift?
+         :turns projected-turns}))))
 
 (defn- ^:async project-model-transport-evidence
   "Bounded ordered provider-attempt proof from the run's final database value."
   [database agent-id turn-rows]
-  (let [cluster-row
-        (await
-         (db/pull {::db/db database
-                   ::db/pull-pattern [:seon.config/id
-                                      :seon.config.render/database-edn-cap]
-                   ::db/ref [:seon.config/id config/cluster-config-id]}))
-        turn-eids (mapv first turn-rows)]
-    (if (:seon.error/message cluster-row)
+  (let [turn-eids (mapv first turn-rows)
+        rows (if (seq turn-eids)
+               (await
+                (db/query {::db/db database
+                           ::db/query
+                           '[:find ?turn ?attempt
+                             :in $ [?turn ...] :where
+                             [?turn :seon.agent.turn/llm-attempts ?attempt]]
+                           ::db/args [turn-eids]}))
+               [])]
+    (if (:seon.error/message rows)
       {:status "malformed"}
-      (let [cap (config/database-edn-cap cluster-row)
-            rows (if (seq turn-eids)
-                   (await
-                    (db/query {::db/db database
-                               ::db/query
-                               '[:find ?turn ?attempt
-                                 :in $ [?turn ...] :where
-                                 [?turn :seon.agent.turn/llm-attempts ?attempt]]
-                               ::db/args [turn-eids]}))
-                   [])]
-        (if (:seon.error/message rows)
+      (let [attempt-eids (into [] (distinct) (map second rows))
+            pulled-attempts
+            (if (seq attempt-eids)
+              (await
+               (db/pull-many {::db/db database
+                              ::db/pull-pattern attempt-pull-pattern
+                              ::db/refs attempt-eids}))
+              [])]
+        (if (or (:seon.error/message pulled-attempts)
+                (some :seon.error/message pulled-attempts))
           {:status "malformed"}
-          (let [attempt-eids (into [] (distinct) (map second rows))
-                pulled-attempts
-                (if (seq attempt-eids)
-                  (await
-                   (db/pull-many {::db/db database
-                                  ::db/pull-pattern attempt-pull-pattern
-                                  ::db/refs attempt-eids}))
-                  [])]
-            (if (or (:seon.error/message pulled-attempts)
-                    (some :seon.error/message pulled-attempts))
-              {:status "malformed"}
-              (let [attempts (zipmap attempt-eids pulled-attempts)
-                    attempts-by-turn
-                    (reduce (fn [grouped [turn-eid attempt-eid]]
-                              (update grouped turn-eid conj
-                                      (get attempts attempt-eid)))
-                            {} rows)
-                    rendered-tx-by-turn
-                    (into {} (map (fn [[turn-eid _ _ _ rendered-tx]]
-                                    [turn-eid rendered-tx])) turn-rows)
-                    turn-validity
-                    (into {}
-                          (await
-                           (js/Promise.all
-                            (clj->js
-                             (mapv
-                              (fn [turn-eid]
-                                (-> (historical-turn-valid?
-                                     database agent-id
-                                     (get rendered-tx-by-turn turn-eid)
-                                     (get attempts-by-turn turn-eid []))
-                                    (.then (fn [valid?] [turn-eid valid?]))))
-                              turn-eids)))))
-                    turn-eid-by-attempt
-                    (into {} (map (fn [[turn-eid attempt-eid]]
-                                    [attempt-eid turn-eid])) rows)]
-                (if-let [error (some #(when (:seon.error/message %) %)
-                                     (vals turn-validity))]
-                  error
-                  (project-model-transport-rows
-                   turn-rows rows
-                   #(get attempts %)
-                   #(true? (get turn-validity
-                                (get turn-eid-by-attempt %)))
-                   cap))))))))))
+          (let [attempts (zipmap attempt-eids pulled-attempts)
+                attempts-by-turn
+                (reduce (fn [grouped [turn-eid attempt-eid]]
+                          (update grouped turn-eid conj
+                                  (get attempts attempt-eid)))
+                        {} rows)
+                rendered-tx-by-turn
+                (into {} (map (fn [[turn-eid _ _ _ rendered-tx]]
+                                [turn-eid rendered-tx])) turn-rows)
+                turn-validity
+                (into {}
+                      (await
+                       (js/Promise.all
+                        (clj->js
+                         (mapv
+                          (fn [turn-eid]
+                            (-> (historical-turn-valid?
+                                 database agent-id
+                                 (get rendered-tx-by-turn turn-eid)
+                                 (get attempts-by-turn turn-eid []))
+                                (.then (fn [valid?] [turn-eid valid?]))))
+                          turn-eids)))))
+                turn-eid-by-attempt
+                (into {} (map (fn [[turn-eid attempt-eid]]
+                                [attempt-eid turn-eid])) rows)]
+            (if-let [error (some #(when (:seon.error/message %) %)
+                                 (vals turn-validity))]
+              error
+              (project-model-transport-rows
+               turn-rows rows
+               #(get attempts %)
+               #(true? (get turn-validity
+                            (get turn-eid-by-attempt %)))))))))))
 
 (defn- project-eval-evidence
   "Stable external projection of selected eval rows."

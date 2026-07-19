@@ -58,6 +58,17 @@ this isolated lane; the next operator restart retires each exact live legacy
 leader with one immediate group KILL, observes group absence without another
 signal, and only then starts the anchored replacement.
 
+Two live Inspect cancellations on 2026-07-19 falsified the stronger claim that
+the implemented group boundary already contains demanded Bun execution
+children. After the isolated branch pod drained, execution child PID 82454
+remained alive with parent PID 1 and retained the `default-inspect-fixed`
+database acquisition. `bin/seon branch close` correctly refused deletion with
+`:seon.db.protocol.error/database-in-use`. A normal full `bin/seon down` reaped
+the child; no process was killed directly. The child had already opted out of
+database-advanced events, so this is independent of database delivery pressure.
+The next source audit must determine whether Bun creates a separate process
+group or whether the pod exits before its child-shutdown path completes.
+
 ## Owner
 
 The one managed-process transition in `script/seon/dev/process.clj` and the
@@ -73,6 +84,9 @@ not add another process registry or supervisor.
 
 - Pod workload death with an ordinary or TERM-ignoring child drains the old
   execution group before replacement readiness.
+- Cancelling one of several concurrent `/agents/run` requests and closing its
+  retained branch leaves no execution child reparented to PID 1; branch close
+  releases every database acquisition without stopping the shared writer.
 - Every group signal is issued by the live anchor against its own current
   group. The operator never probes or signals the PGID.
 - The containment owner is addressed by PID plus start instant and publishes a

@@ -411,7 +411,7 @@
         attempts {101 (model-attempt 1)
                   100 (model-attempt 0)}
         proof (project [[10 "turn-a"]] [[10 101] [10 100]]
-                       #(get attempts %) (constantly true) 10000)
+                       #(get attempts %) (constantly true))
         projected (:attempts (first (:turns proof)))
         expected-config
         {:seon.ai.attempt/provider :deepseek
@@ -434,12 +434,12 @@
               :historical_config_valid true}]}
            (project [[10 "turn-a"]] [[10 100]]
                     (fn [_] (model-attempt 1))
-                    (constantly true) 10000))
+                    (constantly true)))
         "a missing ordinal zero fails closed with bounded evidence")
     (is (= "malformed"
            (:status
             (project [[10 "turn-a"]] [[10 100]]
-                     #(get attempts %) (constantly false) 10000)))
+                     #(get attempts %) (constantly false))))
         "a failed historical reconstruction fails closed")
     (is (true? ((deref #'serve/attempt-config-matches?)
                 (model-attempt 0) expected-config)))
@@ -447,13 +447,9 @@
                  (assoc (model-attempt 0)
                         :seon.ai.attempt/max-tokens 1024)
                  expected-config)))
-    (is (= "oversized"
-           (:status
-            (project [[10 "turn-a"]] [[10 100]]
-                     #(get attempts %) (constantly true) 4))))
     (is (= {:status "absent"}
            (project [[10 "turn-a"]] []
-                    (constantly nil) (constantly false) 10000)))))
+                    (constantly nil) (constantly false))))))
 
 (deftest historical-identity-caps-and-config-preserve-absence
   (let [identity-valid? (deref #'serve/response-identity-valid?)
@@ -481,17 +477,14 @@
            (project-config {:seon.ai/provider :deepseek}))
         "absent optional fields remain absent")))
 
-(deftest model-transport-evidence-pulls-the-config-singleton-identity
+(deftest model-transport-evidence-needs-no-render-cap
   (async done
-    (let [pull db/pull
-          request (atom nil)]
+    (let [pull db/pull]
       (set! db/pull
             (fn
               ([value]
-               (reset! request value)
-               (js/Promise.resolve
-                {:seon.config/id "cluster"
-                 :seon.config.render/database-edn-cap 16384}))
+               (js/Promise.reject
+                (js/Error. (str "unexpected pull " value))))
               ([_pattern _ref]
                (js/Promise.reject (js/Error. "unexpected positional pull")))
               ([_database _pattern _ref]
@@ -501,10 +494,7 @@
             database "agent-a" []))
           (.then
            (fn [result]
-             (is (= {:status "absent"} result))
-             (is (= [:seon.config/id
-                     :seon.config.render/database-edn-cap]
-                    (::db/pull-pattern @request)))))
+             (is (= {:status "absent"} result))))
           (.catch (fn [error] (is false (str error))))
           (.finally
            (fn []
