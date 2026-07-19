@@ -272,7 +272,7 @@
                                   :status ["error"]
                                   :seon.dev.mcp/failure :transport})
                      #'mcp/retry-with-fresh-session!
-                     (fn [session-id code timeout]
+                     (fn [session-id code timeout _deadline]
                        (swap! retried conj [session-id code timeout])
                        {:sid "default"
                         :result {:value "42" :ns "cljs.user"
@@ -282,6 +282,80 @@
           (is (not (:isError response)))
           (is (str/includes? (get-in response [:content 0 :text]) "42"))
           (is (= [[nil "(+ 20 22)" 30000]] @retried)))))))
+
+(deftest runtime-pinning-refuses-an-unselected-shadow-session
+  (let [closed (atom [])]
+    (with-redefs-fn
+      {#'mcp/nrepl-clone-session (constantly "unselected")
+       #'mcp/nrepl-eval
+       (constantly {:value ":missing-nrepl-middleware"
+                    :status ["done"]})
+       #'mcp/nrepl-close-session
+       (fn [port session]
+         (swap! closed conj [port session]))}
+      (fn []
+        (is (nil? (#'mcp/pin-session! 41001 ":client" 7)))
+        (is (= [[41001 "unselected"]] @closed))))))
+
+(deftest agent-eval-waits-through-shadow-reconnect-interval
+  (let [clock (atom 0)
+        probes (atom 0)
+        sessions (atom {})
+        runtime {:seon.dev.mcp/port 41001
+                 :seon.dev.runtime-id/cluster "default"
+                 :seon.dev.runtime-id/ids ["root"]
+                 :build ":client"
+                 :client-id 19}]
+    (with-redefs-fn
+      {#'mcp/current-time-ms #(long @clock)
+       #'mcp/sleep-ms! #(swap! clock + %)
+       #'mcp/agent-sessions sessions
+       #'mcp/all-advertisements!
+       (fn []
+         (swap! probes inc)
+         (if (< @clock 5000) [] [runtime]))
+       #'mcp/pin-session! (constantly "replacement")
+       #'mcp/nrepl-eval
+       (constantly {:value "42" :ns "cljs.user" :out "" :err ""
+                    :status ["done"]})}
+      (fn []
+        (let [response (#'mcp/execute-eval
+                        {:code "(+ 20 22)" :agent_id "default/root"})]
+          (is (not (:isError response)))
+          (is (str/includes? (get-in response [:content 0 :text]) "42"))
+          (is (>= @clock 5000))
+          (is (> @probes 20)))))))
+
+(deftest default-eval-waits-through-shadow-reconnect-interval
+  (let [clock (atom 0)
+        sessions (atom {})
+        runtime {:seon.dev.runtime-id/cluster "default"
+                 :build ":client"
+                 :client-id 23}]
+    (with-redefs-fn
+      {#'mcp/current-time-ms #(long @clock)
+       #'mcp/sleep-ms! #(swap! clock + %)
+       #'mcp/sessions sessions
+       #'mcp/require-port! (constantly 41001)
+       #'mcp/probe-advertisements!
+       (fn [_]
+         (if (< @clock 5000) [] [runtime]))
+       #'mcp/create-cljs-session!
+       (fn [port build client-id]
+         (swap! sessions assoc "fresh"
+                {:nrepl-session "replacement" :port port :build build
+                 :client-id client-id})
+         "fresh")
+       #'mcp/nrepl-eval
+       (constantly {:value "42" :ns "cljs.user" :out "" :err ""
+                    :status ["done"]})}
+      (fn []
+        (let [response (#'mcp/execute-eval {:code "(+ 20 22)"})]
+          (is (not (:isError response)))
+          (is (str/includes? (get-in response [:content 0 :text]) "42"))
+          (is (>= @clock 5000))
+          (is (= "replacement"
+                 (get-in @sessions ["default" :nrepl-session]))))))))
 
 (deftest cljs-sentinel-results-are-tool-errors
   (doseq [sentinel [":repl/exception!" ":repl/print-error!"]]

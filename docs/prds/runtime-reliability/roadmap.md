@@ -227,6 +227,17 @@ also reported no owned process, so its old PID-1 Node process was correctly not
 signaled. The focused source and MCP gates remain valid; live proof is recorded
 as blocked by unrelated host pressure rather than misreported as graduated.
 
+An adversarial timing pass then found that eventual Shadow recovery and MCP's
+call deadline disagreed: Shadow waits five seconds before reconnecting while
+MCP stopped after roughly two. The existing eval boundary now uses one bounded
+6.5-second runtime-acquisition deadline for default and agent-targeted calls,
+re-probes current advertisements every 200 milliseconds, fails ambiguity
+immediately, and validates `nrepl-select` before publishing a cloned session.
+Deterministic outage tests advance past 5,000 milliseconds and evaluate once on
+the replacement runtime; failed selection closes the clone. The focused gate
+passes 21 tests/67 assertions. Exact live watcher-outage proof remains pending
+with the same host-pressure build blocker.
+
 The stale-canvas recovery seam is now source-correct and live-safe. A persisted
 selection of absent function `my.agents.canvas-recovery/mistyped` rendered one
 bounded error card while the Datastar feed, Bun pod, and JVM writer remained

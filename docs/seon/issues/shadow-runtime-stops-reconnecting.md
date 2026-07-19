@@ -86,6 +86,15 @@ default and cluster-qualified evals must each evaluate once on that replacement
 ID. A separate selection test must return `nil`, close the cloned nREPL session,
 and publish no cache entry when `nrepl-select` does not return `:selected`.
 
+Those deterministic falsifiers now pass. The one existing eval boundary uses a
+6,500-millisecond runtime-reconnect deadline for default and agent-targeted
+calls, rereads advertisements every 200 milliseconds, and preserves immediate
+ambiguity failure. Named sessions remain one-shot because silently replacing
+one would lose intentional REPL state. `pin-session!` now publishes only after
+Shadow returns `:selected` and otherwise closes its cloned session. Focused
+proof passes 21 tests/67 assertions. Exact watcher-outage/re-advertisement proof
+on the pinned artifact remains before closure.
+
 ## Owner
 
 Shadow owns the runtime websocket lifecycle. Seon's existing MCP adapter owns

@@ -58,6 +58,8 @@
 (def default-build-id ":client")
 (def default-timeout-ms 30000)
 (def connect-timeout-ms 5000)
+(def runtime-reconnect-window-ms 6500)
+(def runtime-retry-interval-ms 200)
 (def default-output-tokens 4000)
 (def max-output-tokens 16000)
 (def min-output-tokens 64)
@@ -90,6 +92,9 @@
 
 (def stdout-lock (Object.))
 (def ^:dynamic *requested-output-tokens* default-output-tokens)
+
+(defn- current-time-ms [] (System/currentTimeMillis))
+(defn- sleep-ms! [milliseconds] (Thread/sleep milliseconds))
 
 (defn- output-token-limit [requested]
   (min max-output-tokens
@@ -356,11 +361,16 @@
    session target ONLY that runtime (never the worker-global default)."
   [port build-id cid]
   (when-let [nrepl-sid (nrepl-clone-session port)]
-    (nrepl-eval port nrepl-sid
-                (str "(require '[shadow.cljs.devtools.api :as shadow]) "
-                     "(shadow/nrepl-select " build-id " {:runtime-id " cid "})")
-                10000)
-    nrepl-sid))
+    (let [pivot (nrepl-eval
+                 port nrepl-sid
+                 (str "(require '[shadow.cljs.devtools.api :as shadow]) "
+                      "(shadow/nrepl-select " build-id " {:runtime-id " cid "})")
+                 10000)]
+      (if (some-> (:value pivot) (str/includes? ":selected"))
+        nrepl-sid
+        (do
+          (nrepl-close-session port nrepl-sid)
+          nil)))))
 
 (def probe-form
   ;; The canonical client derives agent ids from its database on every probe.
@@ -508,7 +518,9 @@
                                  :seon.dev.runtime-id/ids])
                             cands))
                      ". Is the pod up exactly once? bin/seon status")
-                {:cluster own-cluster :matches (count own)})))
+                {:cluster own-cluster
+                 :matches (count own)
+                 :seon.dev.mcp/retry-runtime? (empty? own)})))
             (if-let [new-sid
                      (create-cljs-session! port default-build-id
                                            (:client-id (first own)))]
@@ -521,11 +533,39 @@
                (ex-info
                 (str "failed to create default CLJS session — pivot into "
                      default-build-id " failed (watcher up? build watched?)")
-                {:build default-build-id}))))
+                {:build default-build-id
+                 :seon.dev.mcp/retry-runtime? true}))))
           (throw (ex-info (str "unknown session id: " sid
                                " (it may have been swept after a watcher restart — "
                                "use create_session for a fresh one)")
                           {:sid sid}))))))
+
+(defn- get-session-through-reconnect!
+  "Get the requested session while the default runtime reconnects."
+  [session-id deadline]
+  (if (some? session-id)
+    (get-or-create-session! session-id)
+    (loop []
+      (let [attempt (try
+                      {:seon.dev.mcp/session
+                       (get-or-create-session! nil)}
+                      (catch Throwable throwable
+                        {:seon.dev.mcp/error throwable}))
+            error (:seon.dev.mcp/error attempt)]
+        (cond
+          (:seon.dev.mcp/session attempt)
+          (:seon.dev.mcp/session attempt)
+
+          (not (true? (:seon.dev.mcp/retry-runtime? (ex-data error))))
+          (throw error)
+
+          (>= (current-time-ms) deadline)
+          (throw error)
+
+          :else
+          (do
+            (sleep-ms! runtime-retry-interval-ms)
+            (recur)))))))
 
 (defn- sweep-dead-sessions!
   "Liveness sweep: reap tracked sessions whose nREPL session no longer
@@ -962,14 +1002,15 @@
    With shadow's `:repl {:runtime-select :latest}` set (see shadow-
    cljs.edn), the fresh session will route to whatever runtime is
    currently connected."
-  [session_id code timeout]
+  [session_id code timeout deadline]
   (let [sid (or session_id "default")]
     ;; Close the dead/wedged session server-side too — dropping only the
     ;; local entry leaks the cloned session in the shadow JVM.
     (when-let [old (get @sessions sid)]
       (nrepl-close-session (:port old) (:nrepl-session old)))
     (swap! sessions dissoc sid))
-  (let [{:keys [sid session-info]} (get-or-create-session! session_id)
+  (let [{:keys [sid session-info]}
+        (get-session-through-reconnect! session_id deadline)
         port (:port session-info)
         nrepl-sid (:nrepl-session session-info)
         result (nrepl-eval port nrepl-sid code timeout)]
@@ -1014,8 +1055,9 @@
    reconnect window so a just-respawned agent's websocket has time to
    re-register. No MCP-server or shadow restart is involved."
   [agent-id code timeout]
-  (let [bare (:seon.dev.runtime-id/id (rid/parse-id agent-id))]
-    (loop [tries 0]
+  (let [bare (:seon.dev.runtime-id/id (rid/parse-id agent-id))
+        deadline (+ (current-time-ms) runtime-reconnect-window-ms)]
+    (loop []
       (let [sess (ensure-agent-session! agent-id)]
         (cond
           (:ambiguous sess)
@@ -1024,18 +1066,19 @@
           sess
           (let [{:keys [nrepl-session port client-id cluster]} sess
                 result (nrepl-eval port nrepl-session code timeout)]
-            (if (and (stale-runtime? result) (< tries 10))
+            (if (and (stale-runtime? result)
+                     (< (current-time-ms) deadline))
               (do (nrepl-close-session port nrepl-session)
                   (swap! agent-sessions dissoc agent-id)
-                  (Thread/sleep 200)
-                  (recur (inc tries)))
+                  (sleep-ms! runtime-retry-interval-ms)
+                  (recur))
               (render-eval-result
                 result
                 (str "agent:" (when cluster (str cluster "/")) bare "#" client-id))))
 
           ;; No live runtime for this agent yet — it may be (re)connecting.
-          (< tries 10)
-          (do (Thread/sleep 200) (recur (inc tries)))
+          (< (current-time-ms) deadline)
+          (do (sleep-ms! runtime-retry-interval-ms) (recur))
 
           :else
           (mcp-error (str "No live runtime database contains agent_id '" agent-id "'. "
@@ -1051,10 +1094,12 @@
     (throw (ex-info "A non-default CLJS cluster requires agent_id '<cluster>/<id>'."
                     {:seon.dev.mcp/cluster cluster
                      :seon.dev.mcp/own-cluster own-cluster})))
-  (let [timeout (min 120000 (max 1 (or timeout_ms default-timeout-ms)))]
+  (let [timeout (min 120000 (max 1 (or timeout_ms default-timeout-ms)))
+        reconnect-deadline (+ (current-time-ms) runtime-reconnect-window-ms)]
    (if (and agent_id (not (str/blank? agent_id)))
     (execute-agent-eval agent_id code timeout)
-    (let [{:keys [sid session-info]} (get-or-create-session! session_id)
+    (let [{:keys [sid session-info]}
+          (get-session-through-reconnect! session_id reconnect-deadline)
           port (:port session-info)
           nrepl-sid (:nrepl-session session-info)
         result (nrepl-eval port nrepl-sid code timeout)]
@@ -1062,16 +1107,17 @@
       ;; Self-heal: try with a fresh session. With :runtime-select :latest
       ;; the new session routes to whatever runtime is currently up. If
       ;; the pod is mid-restart, give it a brief window to reconnect.
-      (loop [tries 0]
+      (loop []
         (let [{retry-sid :sid retry-result :result}
-              (retry-with-fresh-session! session_id code timeout)]
+              (retry-with-fresh-session! session_id code timeout
+                                         reconnect-deadline)]
           (cond
             (not (stale-runtime? retry-result))
             (render-eval-result retry-result retry-sid)
 
             ;; Pod might be reconnecting — back off briefly and retry.
-            (< tries 10)
-            (do (Thread/sleep 200) (recur (inc tries)))
+            (< (current-time-ms) reconnect-deadline)
+            (do (sleep-ms! runtime-retry-interval-ms) (recur))
 
             :else
             (mcp-error (diagnose-no-runtime)))))
