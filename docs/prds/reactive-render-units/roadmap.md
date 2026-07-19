@@ -40,8 +40,9 @@ parts of the target:
   backpressure.
 
 Current page invalidation has sustained-import, newest-value convergence,
-browser morph, reconnect, and resource-release proof. The remaining live gap is
-slow-consumer socket convergence under backpressure. The execution child
+browser morph, reconnect, slow-consumer socket convergence, and
+resource-release proof. The remaining live gap is failed-render repair. The
+execution child
 captures the Datahike-owned read evidence from successful query, pull,
 pull-many, entity, schema, index, and mixed `execute-many` operations in one
 fiber-local scope and returns it on the ordinary invocation result. The writer
@@ -68,16 +69,28 @@ retries without reconnecting. The full CLJS gate passed 1,209 tests / 5,420
 assertions; focused transport and remote-contract gates passed 17 / 66 and
 21 / 97.
 
-The rebuilt live retry on the disposable `pressure-sse` cluster completed all
-260 concurrent transactions in 25,123 ms with zero error values. Pod, watcher,
-and writer readiness remained green, `/` remained HTTP 200, and the pod log
-contained no capacity, `:busy`, or core-fault marker. The bounded 256-request
-window therefore throttles excess work without dropping, duplicating,
-reconnecting, or degrading the runtime. The live SSE pressure/convergence gate
-remains separate: two attempts opened independent fast and paused feeds and
-delivered byte-identical 2,105,852-byte initial frames, but unrelated source
-reloads intentionally closed both sockets before pressure writes. Those runs
-prove initial equality and reload cleanup, not slow-consumer convergence.
+The rebuilt live retries on the disposable `pressure-sse` database completed
+all 260 concurrent transactions in 25,123 ms and then 22,077 ms with zero error
+values. Pod, watcher, and writer readiness remained green through each isolated
+run, `/` remained HTTP 200, and the pod logs contained no capacity, `:busy`, or
+core-fault marker. The bounded 256-request window therefore throttles excess
+work without dropping, duplicating, reconnecting, or degrading the runtime.
+
+The current-source slow-consumer retry used the supported isolated named-cluster
+operator coordinates. Independent fast and paused root feeds first delivered
+byte-identical 2,105,848-byte INITIAL frames. With the slow client unread,
+twenty separately completed one-MiB page mutations produced six native socket
+backpressure events and eighteen newest-pending replacements; active and
+pending reactive high-water marks remained one. Both clients then converged to
+the exact same 2,105,844-byte FINAL frame, SHA-256
+`4ea2824865b8bf3e33baf40ae6a3bef461d64950e630feead871b52dde0c27f5`,
+at basis transaction 536871201. Final cancellation returned Datastar view,
+subscription, active-render, and pending-render counts and reactive
+registration, consumer, active, pending, and timer counts to zero. The writer
+committed-report queue was zero before close, and active sources fell from two
+to the default baseline of one after a canonical clean cluster close. This
+closes real slow-socket/fast-socket independence, newest-event replacement,
+byte convergence, and pressure resource cleanup.
 
 Datastar now delegates live page demand to `seon.reactive`. The page computation
 captures parent-process reads, unions execution-child evidence from the ordinary
@@ -144,8 +157,8 @@ appeared through the existing Datastar feed. The morph preserved the identical
 outside the morph, left exactly one `#app-view`, and produced no browser console
 or page errors. A full reload opened a fresh feed and painted the newest marker
 without an intermediate stale view. This closes current-source browser morph
-and sole-connection reconnect correctness. Real slow-socket/fast-socket
-independence and the live failed-render repair remain graduation gates.
+and sole-connection reconnect correctness. Live failed-render repair remains
+the graduation gate.
 
 The integrated Datastar/reactive gate now attaches two equivalent sockets to
 one normalized computation. An equal later event performs one demanded render
