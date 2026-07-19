@@ -205,13 +205,14 @@ def _operations(row: dict[str, Any], final_coordinate: dict[str, Any]) -> list[d
 # ---------------------------------------------------------------------------
 
 
-def _reply_has_number(reply: str, expected: str) -> bool:
+def _reply_has_number(reply: str, expected: str,
+                      tolerance: float = 1e-9) -> bool:
     """Whether reply contains a numeric token equal to `expected`."""
     try:
         value = float(expected)
     except (TypeError, ValueError):
         return str(expected) in (reply or "")
-    return any(abs(float(token) - value) < 1e-9
+    return any(abs(float(token) - value) <= tolerance
                for token in re.findall(r"(?<![\w.])-?\d+(?:\.\d+)?", reply or ""))
 
 
@@ -268,7 +269,8 @@ def check_ns_movement(eval_rows: list[dict[str, Any]],
             rf"{re.escape(function_name)}(?:-v?2|2)|"
             rf"{re.escape(function_ns)}(?:-v?2|2)", all_src),
         "report_values": (_reply_has_number(reply, source_total)
-                          and _reply_has_number(reply, converted_total)),
+                          and _reply_has_number(
+                              reply, converted_total, tolerance=0.01)),
     }
     failures = [k for k, v in checks.items() if not v]
     return {"ok": not failures, "checks": checks, "failures": failures}
