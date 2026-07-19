@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, cljs, health]
 ---
@@ -36,3 +36,16 @@ the failed publication and runs the existing admission/error transition inside
 - The operator replaces only the pod, and a clean build starts ready.
 - Under non-crash policy, the next complete build can still recover the same
   unavailable pod through the existing publication transition.
+
+## Resolution
+
+Commit `a45b8cb4` runs build and publication failures inside the immutable
+database configuration acquired for that occurrence. Focused instrumentation
+proof passes 11 tests/128 assertions.
+
+The exact watched import proof then threw
+`deterministic configured reload crash proof`. Shadow reported the import
+failure, Seon persisted core-fault entity `5923`, logged the configured crash,
+and the pod exited. The watcher and writer stayed alive. Removing the guarded
+probe and running normal `bin/seon up` rebuilt current source and replaced only
+the unexpectedly exited pod; the cluster returned ready.
