@@ -302,7 +302,8 @@ def require_scorable_pod_state(state: TaskState) -> TaskState:
             "pod quiesced during the run; model capability was not scored")
     if "seon_source_admission" in metadata:
         attempts = _require_model_transport_evidence(metadata)
-        _require_model_server_identity(metadata, attempts)
+        if metadata.get("seon_model_server_identity") is not None:
+            _require_model_server_identity(metadata, attempts)
     return state
 
 

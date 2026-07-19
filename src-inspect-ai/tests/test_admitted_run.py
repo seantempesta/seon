@@ -43,14 +43,11 @@ def _model_server_identity():
 def _transport_result():
     identity = _model_server_identity()
     model = identity["artifact"]["request_model"]
-    final = {"database_id": "db-1", "branch": "db",
-             "commit_id": "final", "t": 30}
-    attempt_coordinate = {**final, "commit_id": "attempt", "t": 20}
+    database = {"db_name": "db-1", "commit_id": "final", "t": 30}
     attempt = {
         "turn_id": "turn-1",
         "ordinal": 0,
-        "coordinate": attempt_coordinate,
-        "coordinate_valid": True,
+        "historical_config_valid": True,
         "provider": "deepseek",
         "adapter": "openai-compat",
         "requested_model": model,
@@ -71,7 +68,7 @@ def _transport_result():
         "evals": 1,
         "timed_out": False,
         "closed_reason": ":completed",
-        "database_coordinate": final,
+        "database": database,
         "turn_evidence": [{"turn_id": "turn-1"}],
         "model_transport_evidence": {
             "status": "inline",

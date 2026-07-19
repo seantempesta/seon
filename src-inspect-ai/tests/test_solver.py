@@ -205,7 +205,7 @@ def test_admitted_model_transport_evidence_is_scorable():
 @pytest.mark.parametrize(
     "mutate",
     [
-        lambda metadata: metadata.pop("seon_model_server_identity"),
+        lambda metadata: metadata.update(seon_model_server_identity={}),
         lambda metadata: metadata["seon_model_server_identity"].update(
             endpoint="http://127.0.0.1:9999/v1/chat/completions"),
         lambda metadata: metadata["pod_model_transport_evidence"]["turns"][0][
@@ -227,6 +227,12 @@ def test_admitted_model_server_join_fails_closed(mutate):
         match="model server|model response|model attempt",
     ):
         require_scorable_pod_state(state)
+
+
+def test_remote_provider_run_does_not_claim_local_model_server_identity():
+    state = _admitted_state()
+    state.metadata["seon_model_server_identity"] = None
+    assert require_scorable_pod_state(state) is state
 
 
 def test_externally_mutable_model_identity_is_not_formally_scorable():
