@@ -567,6 +567,9 @@
                            (str (fs/path directory "acme")))
         build-count (atom 0)
         toolchain (atom "toolchain-a")
+        dependency-identity (atom {'org.replikativ/datahike
+                                   {:git/url "https://example.test/datahike"
+                                    :git/sha "revision-a"}})
         run-step
         (fn [_config label _argv]
           (when (= "build canonical database server" label)
@@ -577,35 +580,45 @@
       (spit (str (fs/path directory "build.clj")) "(ns build)")
       (spit (str (fs/path directory "deps.edn")) "{}")
       (spit (str source) "(ns example)")
-      (with-redefs [artifact/capture-command! (fn [_ _] @toolchain)
-                    artifact/run-step! run-step]
-        (let [default-digest (#'artifact/ensure-writer! default-config)
-              acme-digest (#'artifact/ensure-writer! acme-config)]
-          (is (= 1 @build-count)
-              "unchanged downstream build reuses the canonical writer")
-          (is (= default-digest acme-digest)
-              "both target manifests receive one verified writer identity")
-          (is (= default-digest
-                 (:seon.dev.writer-cache/writer-digest
-                   (edn/read-string
-                     (slurp (#'artifact/writer-cache-path acme-config)))))))
+      (with-redefs-fn
+        {#'artifact/capture-command! (fn [_ _] @toolchain)
+         #'artifact/run-step! run-step
+         #'artifact/writer-local-root-identities
+         (fn [_] @dependency-identity)}
+        (fn []
+          (let [default-digest (#'artifact/ensure-writer! default-config)
+                acme-digest (#'artifact/ensure-writer! acme-config)]
+            (is (= 1 @build-count)
+                "unchanged downstream build reuses the canonical writer")
+            (is (= default-digest acme-digest)
+                "both target manifests receive one verified writer identity")
+            (is (= default-digest
+                   (:seon.dev.writer-cache/writer-digest
+                     (edn/read-string
+                       (slurp (#'artifact/writer-cache-path acme-config)))))))
 
-        (spit (str source) "(ns example)\n(def changed true)")
-        (#'artifact/ensure-writer! acme-config)
-        (is (= 2 @build-count) "a local writer input change rebuilds")
+          (swap! dependency-identity assoc-in
+                 ['org.replikativ/datahike :git/sha] "revision-b")
+          (#'artifact/ensure-writer! acme-config)
+          (is (= 2 @build-count)
+              "a selected local-root revision change rebuilds")
 
-        (spit (str (fs/path directory "deps.edn"))
-              "{:aliases {:writer {}}}")
-        (#'artifact/ensure-writer! default-config)
-        (is (= 3 @build-count) "a writer dependency change rebuilds")
+          (spit (str source) "(ns example)\n(def changed true)")
+          (#'artifact/ensure-writer! acme-config)
+          (is (= 3 @build-count) "a local writer input change rebuilds")
 
-        (reset! toolchain "toolchain-b")
-        (#'artifact/ensure-writer! acme-config)
-        (is (= 4 @build-count) "a compiler or runtime change rebuilds")
+          (spit (str (fs/path directory "deps.edn"))
+                "{:aliases {:writer {}}}")
+          (#'artifact/ensure-writer! default-config)
+          (is (= 4 @build-count) "a writer dependency change rebuilds")
 
-        (spit output "not a jar")
-        (#'artifact/ensure-writer! default-config)
-        (is (= 5 @build-count) "a corrupt cached jar rebuilds"))
+          (reset! toolchain "toolchain-b")
+          (#'artifact/ensure-writer! acme-config)
+          (is (= 5 @build-count) "a compiler or runtime change rebuilds")
+
+          (spit output "not a jar")
+          (#'artifact/ensure-writer! default-config)
+          (is (= 6 @build-count) "a corrupt cached jar rebuilds")))
       (finally (fs/delete-tree directory)))))
 
 (deftest sequential-flavors-publish-immutable-runtime-roots

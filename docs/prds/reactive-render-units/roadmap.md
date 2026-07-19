@@ -102,8 +102,14 @@ revision equal to its own commit ID, while preserving full head revisions and
 exact same-snapshot hits. The red ordered/limited plus aggregate regression is
 green in PSS, HHT, and specs; full query-cache plus versioning proof is 156
 tests / 1,107 assertions and Node CLJS remains 138 / 951. The earliest
-unsettled contract is rebuilt live proof that each completed eval appears in
-the immediately following prompt, followed by the final requirement audit.
+rebuild reused a stale canonical writer jar because its input digest did not
+include the Git identity behind the stable Datahike local-root path. The
+artifact owner now includes every writer local root's exact clean Git identity;
+its focused gate is 29 tests / 141 assertions and proves revision-only
+invalidation while preserving cross-flavor reuse. The earliest unsettled
+contract is an exact rebuild proving the writer loaded Datahike `6f256908`,
+then live proof that each completed eval appears in the immediately following
+prompt, followed by the final requirement audit.
 
 `seon.reactive` now implements the general registered-read lifecycle. Each
 registration owns one Datahike writer interest, one active computation, and at

@@ -36,6 +36,21 @@ the materialized database value uses its own commit ID as the conservative
 revision. Exact same-snapshot cache hits remain valid, while cross-commit
 promotion cannot treat missing revisions as unchanged.
 
+The first rebuild did not actually load that maintained revision. Although the
+artifact manifest recorded the new Datahike Git SHA, the canonical writer jar
+reuse key hashed `deps.edn`, the Clojure classpath/tree text, and Seon sources;
+the classpath names a stable `reference-code/datahike` local-root path, so a
+new commit inside that checkout did not change the key. The operator therefore
+reported `reuse canonical database server`, and both the live JVM source and
+the jar still contained the implementation from before `6f256908`.
+
+The canonical writer input digest now includes the exact clean Git identities
+of every local root selected by the `:writer` alias. This strengthens the one
+existing artifact cache: an unchanged dependency revision still reuses the
+verified jar, while a changed Datahike commit invalidates it before artifact
+publication. Uncommitted maintained dependency content remains a fail-loud
+input error rather than an unversioned artifact identity.
+
 The regression caches both an ordered/limited relation and aggregate count at
 one materialized commit, advances the branch head, then reads an intermediate
 materialized commit containing a newly matching entity. Before the correction
@@ -48,6 +63,11 @@ hit the exact snapshot cache entry.
 - The focused regression and full query-cache plus versioning namespaces pass
   under persistent-set, hitchhiker-tree, and specs instrumentation.
 - The maintained Node ClojureScript suite remains green.
+- Changing only a selected writer local-root revision rebuilds the canonical
+  writer jar; unchanged default and downstream artifact flavors still reuse
+  one verified jar.
+- The rebuilt writer's loaded `attached-cache-context` source contains the
+  conservative materialized-commit revision from Datahike `6f256908`.
 - A rebuilt exact-artifact root run sees each preceding eval in the next
   prompt and proceeds from one `my.plan/position` read to delegation without
   changing the repetition guard, plan selector, or transcript renderer.

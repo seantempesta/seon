@@ -61,7 +61,7 @@
 
 (def ^:private writer-cache-schema
   [:map
-   [:seon.dev.writer-cache/version [:= 1]]
+   [:seon.dev.writer-cache/version [:= 2]]
    [:seon.dev.writer-cache/input-digest [:re #"[0-9a-f]{64}"]]
    [:seon.dev.writer-cache/writer-digest [:re #"[0-9a-f]{64}"]]])
 
@@ -710,12 +710,23 @@
 (defn- writer-cache-path [config]
   (str (fs/path (build-lock-directory config) "writer.edn")))
 
+(defn- writer-local-root-identities
+  "Return exact Git identities for local roots selected by the writer alias."
+  [root]
+  (let [dependencies
+        (edn/read-string (slurp (str (fs/path root "deps.edn"))))]
+    (into (sorted-map)
+          (keep (fn [[library coordinate]]
+                  (when-let [local-root (:local/root coordinate)]
+                    [library (local-root-coordinate! root library local-root)])))
+          (get-in dependencies [:aliases :writer :replace-deps]))))
+
 (defn- writer-input-digest [config]
   (let [root (:seon.dev.config/root config)
         environment (:seon.dev.config/environment config)
         java-command (get environment "JAVA_CMD" "java")]
     (digest-values
-      ["writer-cache-version" 1
+      ["writer-cache-version" 2
        "local-inputs"
        (digest-paths root ["build.clj"
                            "deps.edn"
@@ -726,6 +737,8 @@
                                              ["clojure" "-Spath" "-M:writer"])
        "writer-tree" (capture-command! config
                                         ["clojure" "-Stree" "-M:writer"])
+       "writer-local-root-identities"
+       (pr-str (writer-local-root-identities root))
        "java-command" java-command
        "java-runtime" (capture-command! config [java-command "-version"])])))
 
@@ -760,7 +773,7 @@
                               (:seon.dev.config/writer-output config))]
           (state/write-edn!
             (writer-cache-path config)
-            {:seon.dev.writer-cache/version 1
+            {:seon.dev.writer-cache/version 2
              :seon.dev.writer-cache/input-digest input-digest
              :seon.dev.writer-cache/writer-digest writer-digest})
           writer-digest)))))
