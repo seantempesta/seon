@@ -180,9 +180,14 @@ capture.
 
 ## The REPL mode is a datom — and it teaches its own grammar
 
-`:seon.config/repl-mode` selects `:batch` or `:stream` as database state.
-`:batch` preserves the raw reply, attempts every complete parsed form in source
-order, and records each real value or error in its original position. It never
+`:seon.config/repl-mode` selects `:batch` or `:stream` as database state. A
+named launch variant may copy the same attribute onto an agent; the agent value
+wins, so specialized planning can use `:batch` without changing the cluster
+default. `:batch` preserves the raw reply and parses it once. Ordinary forms
+retain source order, while explicit generated namespace sections run in
+derived requirement order with recognized schemas before the remaining forms
+in their namespace. Every attempted form records its real value or error with
+its original source position. It never
 regex-rewrites model output, invents a result for an unattempted form, or treats
 a model-authored claim as execution evidence. `:stream` ends the turn after the
 first complete top-level form and counts attempted forms as work.

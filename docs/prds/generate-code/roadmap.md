@@ -350,6 +350,10 @@ immutable database value used for the prompt. There is no stored phase flag.
 
 The stable teaching prefix demonstrates the correct Seon development grammar:
 
+- own the system design: choose namespace boundaries, data ownership, schemas,
+  behavioral contracts, and the explicit function composition between them;
+- emit the best executable first pass; downstream namespace agents validate
+  and repair localized failures rather than excusing placeholders;
 - emit ordinary ClojureScript with real `(ns ...)` declarations and real
   `:require` aliases;
 - use `schema/register!` and Malli, colocated with the namespace that owns the
@@ -559,7 +563,8 @@ Exit:
 Build database-derived worker selection and the progressive `:generate-code`
 context contract. Reconcile each assigned agent's existing `:namespaces` block
 to the exact full-source set. Workers use the ordinary REPL and affected-test
-surface.
+surface. The detailed instruction audit and exact contradictions are recorded
+in [[research/repl-teaching-audit-2026-07-19]].
 
 Exit:
 
@@ -580,7 +585,9 @@ Add `seon.ai/generate-code!` over the approved root, planner, projection,
 scheduler, and result query. Select planning/execution/repair settings through
 the existing named model variants, whose values are copied onto the new agent
 at birth. The variant mechanism is complete at `0a99a7d9`; this stage consumes
-it without branching on providers.
+it without branching on providers. REPL mode joins the same sparse per-agent
+launch data: planning and generated repair variants select `:batch` even when
+the cluster's ordinary default is `:stream`.
 
 Exit:
 
