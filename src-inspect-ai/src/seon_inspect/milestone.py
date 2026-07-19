@@ -122,52 +122,6 @@ class EvidenceError(ValueError):
     """A bounded door evidence value is absent or structurally invalid."""
 
 
-def _decode_evidence_value(node: Any) -> Any:
-    """Decode the door's lossless tagged JSON tree, failing closed."""
-    if not isinstance(node, dict) or not isinstance(node.get("kind"), str):
-        raise EvidenceError("evidence value is not tagged")
-    kind = node["kind"]
-    if kind in {"keyword", "symbol", "scalar"}:
-        if set(node) != {"kind", "value"}:
-            raise EvidenceError("scalar evidence shape is invalid")
-        return node["value"]
-    if kind in {"vector", "list", "set"}:
-        if set(node) != {"kind", "items"} or not isinstance(node["items"], list):
-            raise EvidenceError("collection evidence shape is invalid")
-        return [_decode_evidence_value(item) for item in node["items"]]
-    if kind == "map":
-        if set(node) != {"kind", "entries"} or not isinstance(node["entries"], list):
-            raise EvidenceError("map evidence shape is invalid")
-        result: dict[Any, Any] = {}
-        for entry in node["entries"]:
-            if not isinstance(entry, dict) or set(entry) != {"key", "value"}:
-                raise EvidenceError("map entry evidence shape is invalid")
-            key = _decode_evidence_value(entry["key"])
-            try:
-                duplicate = key in result
-            except TypeError as exc:
-                raise EvidenceError("map evidence key is not scalar") from exc
-            if duplicate:
-                raise EvidenceError("map evidence contains a duplicate key")
-            result[key] = _decode_evidence_value(entry["value"])
-        return result
-    raise EvidenceError(f"unsupported evidence kind {kind!r}")
-
-
-def _coordinate_at_or_before(point: Any, final: Any) -> bool:
-    keys = ("database_id", "branch", "commit_id", "t")
-    return (isinstance(point, dict) and isinstance(final, dict)
-            and all(k in point and k in final for k in keys)
-            and point["database_id"] == final["database_id"]
-            and point["branch"] == final["branch"]
-            and isinstance(point["commit_id"], str)
-            and bool(point["commit_id"])
-            and isinstance(final["commit_id"], str)
-            and bool(final["commit_id"])
-            and isinstance(point["t"], int) and isinstance(final["t"], int)
-            and point["t"] <= final["t"])
-
-
 def _ordered_proof_rows(eval_rows: list[dict[str, Any]],
                         final_database_value: Any,
                         turn_ids: set[str] | None) -> list[dict[str, Any]]:
@@ -186,24 +140,6 @@ def _ordered_proof_rows(eval_rows: list[dict[str, Any]],
     if ordered and ordered[-1]["eval_transaction"] > final_database_value["t"]:
         raise EvidenceError("eval evidence is newer than the final database value")
     return ordered
-
-
-def _operations(row: dict[str, Any], final_coordinate: dict[str, Any]) -> list[dict[str, Any]]:
-    evidence = row.get("operation_evidence")
-    if not isinstance(evidence, dict) or evidence.get("status") != "inline":
-        raise EvidenceError("operation evidence is absent or not inline")
-    operations = evidence.get("operations")
-    if not isinstance(operations, list):
-        raise EvidenceError("operation vector absent")
-    for position, operation in enumerate(operations):
-        if (not isinstance(operation, dict)
-                or operation.get("position") != position
-                or operation.get("source") != ":seon.db.read.source/captured"
-                or operation.get("coordinate_valid") is not True
-                or not _coordinate_at_or_before(
-                    operation.get("coordinate"), final_coordinate)):
-            raise EvidenceError("operation position/source/coordinate invalid")
-    return operations
 
 
 # ---------------------------------------------------------------------------
@@ -543,7 +479,7 @@ def pod_milestone_driver(
 ) -> dict[str, Any]:
     """Drive one milestone on an explicitly provisioned static cluster.
 
-    P0 is serial. The caller supplies the pod coordinate from the current
+    P0 is serial. The caller supplies the pod URL from the current
     operator status; this function never opens a writer REPL or creates,
     restarts, or releases a cluster. The response's database-derived evidence
     keeps the useful static ACME path live while the ownership-fenced

@@ -2,7 +2,7 @@
 
 The live pod remains the only execution mechanism.  This module scores the
 request-scoped facts that mechanism already retains: exact turn prompts,
-ordered eval rows, captured database operations, and the delivered reply.
+ordered eval rows, the final database value, and the delivered reply.
 It never reconstructs a tool trajectory from narration.
 """
 
@@ -17,9 +17,6 @@ from inspect_ai.solver import TaskState
 
 from seon_inspect.milestone import (
     EvidenceError,
-    _coordinate_at_or_before,
-    _decode_evidence_value,
-    _operations,
     _ordered_proof_rows,
 )
 
@@ -85,64 +82,17 @@ def _prompt(turns: list[dict[str, Any]], index: int) -> str:
     return value if isinstance(value, str) else ""
 
 
-def _text_tree(value: Any) -> str:
-    if isinstance(value, dict):
-        return " ".join(
-            f"{_text_tree(key)} {_text_tree(item)}" for key, item in value.items()
-        )
-    if isinstance(value, (list, tuple, set)):
-        return " ".join(_text_tree(item) for item in value)
-    return str(value)
-
-
-def _maps_in(value: Any):
-    """Yield every mapping nested in one decoded retained value."""
-    if isinstance(value, dict):
-        yield value
-        for item in value.values():
-            yield from _maps_in(item)
-    elif isinstance(value, (list, tuple)):
-        for item in value:
-            yield from _maps_in(item)
-
-
-def _created_root_child(request: Any) -> str:
-    """The sole idle root child created by the retained transaction request."""
-    parent = [":seon.agent/id", "root"]
-    matches = [
-        row for row in _maps_in(request)
-        if row.get(":seon.agent/purpose") == ROOT_PURPOSE
-        and row.get(":seon.agent/parent") == parent
-        and isinstance(row.get(":seon.agent/id"), str)
-    ]
-    if len(matches) != 1 or ":seon.agent/run" in matches[0]:
-        return ""
-    return matches[0][":seon.agent/id"]
-
-
-def _decoded_operations(
-    row: dict[str, Any], final_coordinate: dict[str, Any]
-) -> list[tuple[dict[str, Any], Any, Any]]:
-    decoded = []
-    for operation in _operations(row, final_coordinate):
-        if operation.get("ok") is not True:
-            raise EvidenceError("captured database operation failed")
-        decoded.append(
-            (
-                operation,
-                _decode_evidence_value(operation.get("request")),
-                _decode_evidence_value(operation.get("result")),
-            )
-        )
-    return decoded
-
-
-def _operation(
-    decoded: list[tuple[dict[str, Any], Any, Any]], suffix: str
-) -> tuple[dict[str, Any], Any, Any]:
-    return next(
-        item for item in decoded if str(item[0].get("operation", "")).endswith(suffix)
-    )
+def _child_id_after_start(turns: list[dict[str, Any]],
+                          start_row: dict[str, Any]) -> str:
+    """The one agent ID exposed by database-derived context after start!."""
+    ids = {
+        match
+        for index in _later_prompt_indices(turns, start_row)
+        for match in re.findall(
+            r':seon\.agent/id\s+"([^"]+)"', _prompt(turns, index))
+        if match != "root"
+    }
+    return next(iter(ids)) if len(ids) == 1 else ""
 
 
 def _reports(
@@ -172,18 +122,19 @@ def _reports(
 
 
 def _ordered_evidence(
-    turns: Any, eval_rows: Any, final_coordinate: Any
+    turns: Any, eval_rows: Any, final_database_value: Any
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    if not isinstance(turns, list) or not turns:
+    if (not isinstance(final_database_value, dict)
+            or not isinstance(final_database_value.get("t"), int)
+            or not isinstance(turns, list) or not turns):
         raise EvidenceError("turn evidence is absent")
     if any(
         not isinstance(turn, dict)
         or not isinstance(turn.get("turn_id"), str)
         or not turn["turn_id"]
         or not isinstance(turn.get("prompt"), str)
-        or not _coordinate_at_or_before(
-            turn.get("rendered_coordinate"), final_coordinate
-        )
+        or not isinstance(turn.get("rendered_transaction"), int)
+        or turn["rendered_transaction"] > final_database_value["t"]
         for turn in turns
     ):
         raise EvidenceError("turn evidence is malformed")
@@ -192,7 +143,8 @@ def _ordered_evidence(
         raise EvidenceError("turn ids are not unique")
     if not isinstance(eval_rows, list):
         raise EvidenceError("eval evidence is absent")
-    ordered = _ordered_proof_rows(eval_rows, final_coordinate, set(turn_ids))
+    ordered = _ordered_proof_rows(
+        eval_rows, final_database_value, set(turn_ids))
     return turns, ordered
 
 
@@ -225,35 +177,16 @@ def _root(
         and ROOT_PURPOSE in (rows[starts[0]].get("source") or "")
         and starts[0] < queries[-1]
     )
-    execution = verification = False
-    child_id = ""
-    if selection:
-        try:
-            start_ops = _decoded_operations(rows[starts[0]], final)
-            query_ops = _decoded_operations(rows[queries[-1]], final)
-            tx, tx_request, tx_result = _operation(start_ops, "/transact")
-            query, query_request, query_result = _operation(query_ops, "/query")
-            tx_text = _text_tree(tx_request)
-            query_text = _text_tree(query_request)
-            child_id = _created_root_child(tx_request)
-            execution = (
-                bool(child_id)
-                and ROOT_PURPOSE in tx_text
-                and isinstance(tx_result, dict)
-                and tx_result.get(":seon.db/ok?") is True
-                and tx["coordinate"]["t"] <= query["coordinate"]["t"]
-            )
-            verification = (
-                bool(child_id)
-                and query_result == child_id
-                and child_id in query_text
-                and ROOT_PURPOSE in query_text
-                and ":seon.agent/parent" in query_text
-                and ":seon.agent/purpose" in query_text
-                and ":seon.agent/id" in query_text
-            )
-        except (EvidenceError, KeyError, StopIteration, TypeError, ValueError):
-            pass
+    child_id = _child_id_after_start(turns, rows[starts[0]]) if selection else ""
+    execution = bool(selection and child_id)
+    query_source = rows[queries[-1]].get("source") or "" if queries else ""
+    verification = bool(
+        child_id
+        and child_id in query_source
+        and ROOT_PURPOSE in query_source
+        and ":seon.agent/parent" in query_source
+        and ":seon.agent/purpose" in query_source
+        and ":seon.agent/id" in query_source)
     later = _later_prompt_indices(turns, rows[starts[0]]) if starts else []
     query_turn_index = (
         _turn_index(turns).get(rows[queries[-1]].get("turn_id"), -1)
@@ -321,21 +254,6 @@ def _discovery(
         and moves
         and functions[0] < moves[0]
     )
-    execution = False
-    if selection:
-        try:
-            decoded = _decoded_operations(rows[functions[0]], final)
-            kinds = {str(item[0].get("operation")) for item in decoded}
-            evidence_text = _text_tree([item[1] for item in decoded])
-            execution = (
-                any(kind.endswith("/query") for kind in kinds)
-                and any(kind.endswith("/pull") for kind in kinds)
-                and ":seon.ns/name" in evidence_text
-                and "seon.agent.web" in evidence_text
-                and ":seon.fn/agent-facing?" in evidence_text
-            )
-        except (EvidenceError, KeyError, TypeError, ValueError):
-            pass
     dynamic_prompts = []
     if moves:
         dynamic_prompts = [
@@ -346,6 +264,7 @@ def _discovery(
             )
         ]
     dynamic = bool(dynamic_prompts)
+    execution = bool(selection and dynamic)
     verification = bool(
         dynamic_prompts
         and grants
@@ -389,20 +308,6 @@ def _skills(
         and ":repl" in (rows[unloads[-1]].get("source") or "")
         and lists[0] < loads[0] < unloads[-1]
     )
-    execution = False
-    if selection:
-        try:
-            load_ops = _decoded_operations(rows[loads[0]], final)
-            unload_ops = _decoded_operations(rows[unloads[-1]], final)
-            load_tx, load_request, _ = _operation(load_ops, "/transact")
-            unload_tx, unload_request, _ = _operation(unload_ops, "/transact")
-            execution = (
-                ":skill/repl" in _text_tree(load_request)
-                and ":skill/repl" in _text_tree(unload_request)
-                and load_tx["coordinate"]["t"] <= unload_tx["coordinate"]["t"]
-            )
-        except (EvidenceError, KeyError, StopIteration, TypeError, ValueError):
-            pass
     load_prompts = [
         index for index in (_later_prompt_indices(turns, rows[loads[0]]) if loads else [])
         if REPL_SKILL_MARKER in _prompt(turns, index)
@@ -412,6 +317,7 @@ def _skills(
         if REPL_SKILL_MARKER not in _prompt(turns, index)
     ]
     dynamic = bool(load_prompts and unload_prompts and load_prompts[0] < unload_prompts[-1])
+    execution = bool(selection and dynamic)
     verification = bool(
         dynamic
         and _turn_index(turns).get(rows[unloads[-1]].get("turn_id"), -1) >= load_prompts[0]
@@ -497,17 +403,17 @@ def check_reachability(
     turn_evidence: Any,
     eval_evidence: Any,
     completion: str,
-    final_coordinate: Any,
+    final_database_value: Any,
 ) -> dict[str, Any]:
     """Score one row from retained facts, failing closed on malformed evidence."""
     if row not in _CHECKERS:
         raise ValueError(f"unknown reachability row {row!r}; expected one of {ROWS}")
     try:
         turns, eval_rows = _ordered_evidence(
-            turn_evidence, eval_evidence, final_coordinate
+            turn_evidence, eval_evidence, final_database_value
         )
         checks = _CHECKERS[row](
-            turns, eval_rows, completion or "", final_coordinate
+            turns, eval_rows, completion or "", final_database_value
         )
     except (EvidenceError, KeyError, TypeError, ValueError):
         checks = {name: False for name in (
@@ -529,7 +435,7 @@ def reachability_scorer() -> Scorer:
             metadata.get("pod_turn_evidence"),
             metadata.get("pod_eval_evidence"),
             state.output.completion,
-            metadata.get("pod_database_coordinate"),
+            metadata.get("pod_database_value"),
         )
         return Score(
             value=CORRECT if result["ok"] else INCORRECT,

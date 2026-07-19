@@ -20,50 +20,11 @@ from seon_inspect.tasks import namespace_reachability as task_module
 
 
 FINAL = {
-    "database_id": "db-1",
-    "branch": "db",
+    "db_name": "db-1",
     "commit_id": "final",
     "t": 100,
 }
 ADMISSION = {"schema_version": 2, "bench": {"name": "test"}}
-
-
-def _tag(value):
-    if isinstance(value, dict):
-        return {
-            "kind": "map",
-            "entries": [
-                {"key": _tag(key), "value": _tag(item)}
-                for key, item in value.items()
-            ],
-        }
-    if isinstance(value, list):
-        return {"kind": "vector", "items": [_tag(item) for item in value]}
-    if isinstance(value, str) and value.startswith(":"):
-        return {"kind": "keyword", "value": value}
-    return {"kind": "scalar", "value": value}
-
-
-def _operation(position, name, request, result, t):
-    return {
-        "position": position,
-        "operation": f":seon.db.read.operation/{name}",
-        "ok": True,
-        "source": ":seon.db.read.source/captured",
-        "coordinate_valid": True,
-        "coordinate": {
-            "database_id": "db-1",
-            "branch": "db",
-            "commit_id": f"op-{t}",
-            "t": t,
-        },
-        "request": _tag(request),
-        "result": _tag(result),
-    }
-
-
-def _ops(*operations):
-    return {"status": "inline", "blob_hash": "fixture", "operations": list(operations)}
 
 
 def _home(name, requires):
@@ -83,25 +44,17 @@ def _turn(turn_id, prompt, t):
     return {
         "turn_id": turn_id,
         "prompt": prompt,
-        "rendered_coordinate": {
-            "database_id": "db-1",
-            "branch": "db",
-            "commit_id": f"turn-{t}",
-            "t": t,
-        },
+        "rendered_transaction": t,
     }
 
 
-def _eval(turn_id, tx, source, *, operations=None):
-    row = {
+def _eval(turn_id, tx, source):
+    return {
         "turn_id": turn_id,
         "eval_transaction": tx,
         "source": source,
         "ok": True,
     }
-    if operations is not None:
-        row["operation_evidence"] = operations
-    return row
 
 
 def _root_fixture():
@@ -118,19 +71,6 @@ def _root_fixture():
             "root-1",
             1,
             f'(agent/start! {{:seon.agent/purpose "{ROOT_PURPOSE}"}})',
-            operations=_ops(
-                _operation(
-                    0,
-                    "transact",
-                    {":seon.db/tx-data": [{
-                        ":seon.agent/id": child,
-                        ":seon.agent/purpose": ROOT_PURPOSE,
-                        ":seon.agent/parent": [":seon.agent/id", "root"],
-                    }]},
-                    {":seon.db/ok?": True},
-                    15,
-                )
-            ),
         ),
         _eval(
             "root-2",
@@ -141,23 +81,6 @@ def _root_fixture():
             f'[?child :seon.agent/purpose ?purpose] '
             f'[?child :seon.agent/parent ?parent] '
             f'[?parent :seon.agent/id "root"]] "{child}" "{ROOT_PURPOSE}")',
-            operations=_ops(
-                _operation(
-                    0,
-                    "query",
-                    {
-                        ":seon.db/query": [
-                            ":find", "?id", ".", ":where",
-                            ["?child", ":seon.agent/id", child],
-                            ["?child", ":seon.agent/id", "?id"],
-                            ["?child", ":seon.agent/purpose", ROOT_PURPOSE],
-                            ["?child", ":seon.agent/parent", "?parent"],
-                        ]
-                    },
-                    child,
-                    25,
-                )
-            ),
         ),
         _eval("root-3", 3, f'(message/user "{child}")'),
         _eval("root-3", 4, f'(complete "{child}")'),
@@ -176,30 +99,10 @@ def _discovery_fixture():
         _turn("discover-2", full, 20),
         _turn("discover-3", "; grants result", 30),
     ]
-    read_ops = _ops(
-        _operation(
-            0,
-            "query",
-            {":seon.db/query": [":where", ["?e", ":seon.ns/name", "?n"]],
-             ":seon.db/args": ["seon.agent.web"]},
-            42,
-            12,
-        ),
-        _operation(
-            1,
-            "pull",
-            {":seon.db/pull-pattern": [
-                ":seon.fn/sym", ":seon.fn/agent-facing?"
-            ], ":seon.db/ref": 42},
-            {":seon.fn/sym": "seon.agent.web/grants"},
-            13,
-        ),
-    )
     rows = [
         _eval(
             "discover-1", 1,
             "(my.ns/functions {:my.ns/ns 'seon.agent.web})",
-            operations=read_ops,
         ),
         _eval("discover-1", 2, "(in-ns 'seon.agent.web)"),
         _eval("discover-2", 3, "(grants)"),
@@ -220,22 +123,8 @@ def _skills_fixture():
     ]
     rows = [
         _eval("skill-1", 1, "(my.skills/list)"),
-        _eval(
-            "skill-1", 2, "(my.skills/load :repl)",
-            operations=_ops(_operation(
-                0, "transact",
-                {":seon.db/tx-data": [{":seon.agent.ctx/name": ":skill/repl"}]},
-                {":seon.db/ok?": True}, 15,
-            )),
-        ),
-        _eval(
-            "skill-2", 3, "(my.skills/unload :repl)",
-            operations=_ops(_operation(
-                0, "transact",
-                {":seon.db/tx-data": [[":db/retract", 9, ":seon.agent.ctx/name", ":skill/repl"]]},
-                {":seon.db/ok?": True}, 25,
-            )),
-        ),
+        _eval("skill-1", 2, "(my.skills/load :repl)"),
+        _eval("skill-2", 3, "(my.skills/unload :repl)"),
         _eval("skill-3", 4, '(message/user "repl loaded and unloaded")'),
         _eval("skill-3", 5, '(complete "repl loaded and unloaded")'),
     ]
@@ -358,9 +247,8 @@ def test_root_requires_exactly_one_start_without_delegate_or_child_message():
 def test_root_query_and_dynamic_prompt_must_join_created_child():
     turns, eval_rows, reply = _root_fixture()
     changed = copy.deepcopy(eval_rows)
-    changed[1]["operation_evidence"]["operations"][0]["result"] = _tag(
-        "older-same-purpose-child"
-    )
+    changed[1]["source"] = changed[1]["source"].replace(
+        "quiet-crows-count", "older-same-purpose-child")
     result = check_reachability(
         "root_orchestration", turns, changed, reply, FINAL
     )
@@ -419,18 +307,6 @@ def test_later_dynamic_prompt_is_required(row):
     assert not result["checks"]["dynamic_context"]
 
 
-@pytest.mark.parametrize(
-    "row,eval_index",
-    [("root_orchestration", 0), ("namespace_discovery", 0), ("skill_lifecycle", 1)],
-)
-def test_required_database_operation_evidence_fails_closed(row, eval_index):
-    turns, eval_rows, reply = FIXTURES[row]()
-    changed = copy.deepcopy(eval_rows)
-    changed[eval_index]["operation_evidence"]["status"] = "oversized"
-    result = check_reachability(row, turns, changed, reply, FINAL)
-    assert not result["checks"]["execution"]
-
-
 def test_skill_body_must_be_absent_after_unload():
     turns, eval_rows, reply = _skills_fixture()
     turns[-1]["prompt"] += "\n" + REPL_SKILL_MARKER
@@ -447,21 +323,21 @@ def test_acme_fixture_requires_fail_replacement_surface():
     assert not result["checks"]["surface"]
 
 
-def test_foreign_or_reordered_evidence_fails_closed():
+def test_stale_database_value_or_reordered_evidence_fails_closed():
     turns, eval_rows, reply = _root_fixture()
-    eval_rows[0]["operation_evidence"]["operations"][0]["coordinate"]["database_id"] = "foreign"
-    assert not check_reachability(
-        "root_orchestration", turns, eval_rows, reply, FINAL
-    )["checks"]["execution"]
+    stale = {**FINAL, "t": 2}
+    result = check_reachability(
+        "root_orchestration", turns, eval_rows, reply, stale)
+    assert not result["ok"]
     eval_rows = _root_fixture()[1]
     eval_rows[0], eval_rows[1] = eval_rows[1], eval_rows[0]
     result = check_reachability("root_orchestration", turns, eval_rows, reply, FINAL)
     assert not result["ok"]
 
 
-def test_turn_prompt_coordinate_must_belong_to_final_database():
+def test_turn_rendered_transaction_must_not_exceed_final_database_value():
     turns, eval_rows, reply = _acme_fixture()
-    turns[0]["rendered_coordinate"]["database_id"] = "foreign"
+    turns[0]["rendered_transaction"] = FINAL["t"] + 1
     result = check_reachability("acme_product_tools", turns, eval_rows, reply, FINAL)
     assert not result["ok"]
     assert not any(result["checks"].values())
@@ -524,7 +400,7 @@ def _golden_pod(row):
         state.metadata.update({
             "pod_turn_evidence": turns,
             "pod_eval_evidence": eval_rows,
-            "pod_database_coordinate": FINAL,
+            "pod_database_value": FINAL,
         })
         return state
     return solve

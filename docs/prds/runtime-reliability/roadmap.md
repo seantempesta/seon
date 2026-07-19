@@ -122,7 +122,11 @@ synthetic operation tree and fixtures are gone, with 70 focused tests passing
 and 28 net lines removed. The fixed workflow passes in 48 seconds and a fresh
 seed-3 generated workflow passes in 61 seconds, both with accuracy 1.0 and zero
 fabrication. Reachability still owns the same stale assumptions independently
-and is now the earliest Inspect contract. The real browser/Datastar
+and is now the earliest Inspect contract. Its source now uses the ordinary
+database value, rendered/eval transactions, successful calls, and later
+database-derived prompt transitions; the synthetic operation decoder and
+fixtures are deleted, with 114 combined focused tests passing. One live
+reachability row is the next falsifier. The real browser/Datastar
 journey is the dependency-ready parallel portfolio; the
 complete live Inspect, browser, package, downstream,
 multi-cluster, and modest-hardware matrix remains the final gate.

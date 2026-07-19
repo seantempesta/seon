@@ -126,10 +126,22 @@ reporting; seed 3 proves the simplified contract end to end. The milestone
 database scorer is graduated. Reachability is now the earliest stale evidence
 consumer.
 
+Reachability now consumes the same production evidence. Turn rows require
+`rendered_transaction` at or before the final database value's basis
+transaction; eval rows retain the same order and membership rule. Root child
+creation is proven by a successful `start!`, the one child ID appearing in a
+later database-derived prompt, and a later explicit database query over that
+ID, purpose, and parent. Namespace discovery and skill load/unload are proven
+by their successful calls and the later appearance or disappearance of the
+real function or skill body in context. The scorer-only tagged operation
+decoder, database wrapper, and fixtures are deleted. Combined reachability,
+milestone, and solver proof passes 114 tests, and no banned database wrapper
+vocabulary remains in those owners. A live reachability row is the next
+falsifier.
+
 ## Ordered next boundary
 
-1. Standardize reachability on `pod_database_value`, basis transaction `t`, and
-   `rendered_transaction`.
+1. Run a live reachability row against production evidence.
 2. Run seeded reachability variants against production evidence.
 3. Retain operation evidence only where the database cannot derive the fact;
    do not rebuild a generic parallel event system for the scorer.
