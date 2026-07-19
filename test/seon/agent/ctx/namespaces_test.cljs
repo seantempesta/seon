@@ -155,11 +155,14 @@
   (let [initial (@#'nss/initial-acquisition-members agent-id)
         selected (@#'nss/selected-acquisition-members
                    ['my.agent.tst-2606260000 'my.helper])
-        [pull-member latest-member assignment-member] initial
+        generated-selected (@#'nss/selected-acquisition-members
+                            ['my.agent.tst-2606260000 'my.helper] true)
+        [pull-member latest-member assignment-member
+         generated-assignment-member] initial
         [pull-many-member tx-member] selected]
-    (testing "initial discovery is one pull plus the bounded latest query"
+    (testing "initial discovery batches agent, namespace, and assignment reads"
       (is (= [protocol/pull-operation protocol/query-operation
-              protocol/query-operation]
+              protocol/query-operation protocol/query-operation]
              (mapv ::protocol/operation initial)))
       (is (= 32768 (:datahike.resource/max-results latest-member))
           "the bound admits about 8,000 successful evals before explicit failure")
@@ -172,6 +175,10 @@
       (is (= home/namespace-assignment-query
              (::protocol/query-form assignment-member)))
       (is (= [agent-id] (::protocol/arguments assignment-member)))
+      (is (= [agent-id] (::protocol/arguments generated-assignment-member)))
+      (is (some #{:my.plan/namespace}
+                (tree-seq coll? seq
+                          (::protocol/query-form generated-assignment-member))))
       (is (= [:seon.agent/id agent-id] (::protocol/entity-id pull-member))))
     (testing "selected rows use one pull-many and one selected tx query"
       (is (= [protocol/pull-many-operation protocol/query-operation]
@@ -187,7 +194,15 @@
       (is (= [['my.agent.tst-2606260000 'my.helper]]
              (::protocol/arguments tx-member)))
       (is (not-any? #{'?all-names}
-                    (tree-seq coll? seq (::protocol/query-form tx-member)))))))
+                    (tree-seq coll? seq (::protocol/query-form tx-member)))))
+    (testing "generated selection adds the one summary catalog query"
+      (is (= [protocol/pull-many-operation protocol/query-operation
+              protocol/query-operation]
+             (mapv ::protocol/operation generated-selected)))
+      (is (some #{:seon.ns/summary}
+                (tree-seq coll? seq
+                          (::protocol/query-form
+                           (last generated-selected))))))))
 
 (deftest remote-namespace-failures-keep-member-evidence
   (async done
@@ -200,7 +215,8 @@
                 {::db/results
                  [(member {:seon.agent/id agent-id})
                   (fail-member "latest namespace failed")
-                  (member {})]})))
+                  (member {})
+                  (member nil)]})))
       (-> (nss/namespaces-block {:seon.agent/id agent-id
                                  ::db/db database} nil)
           (.then
@@ -213,6 +229,40 @@
             (fn []
               (set! db/execute-many original-execute-many)
               (done)))))))
+
+(deftest generated-full-source-is-an-additive-current-assignment-overlay
+  (let [block {:seon.agent.ctx.namespaces/full-source #{'my.configured}}
+        effective @#'nss/effective-full-source]
+    (is (= #{'my.configured 'my.alpha 'my.beta}
+           (effective block #{'my.alpha 'my.beta})))
+    (is (= #{'my.configured 'my.next}
+           (effective block #{'my.next}))
+        "a later assignment derives a replacement overlay, not stale union")
+    (is (= #{'my.configured}
+           (effective block #{}))
+        "inactive generation preserves the ordinary stored config exactly")))
+
+(deftest assignment-namespace-selection-derives-from-one-pulled-plan-branch
+  (is (= #{'my.alpha 'my.beta}
+         (@#'nss/assignment-namespaces
+          {:my.plan/parent
+           {:my.plan/_parent
+            [{:my.plan/namespace {:seon.ns/name 'my.alpha}}
+             {:my.plan/namespace {:seon.ns/name 'my.beta}}
+             {:my.plan/title "Non-namespace bookkeeping"}]}}))))
+
+(deftest generated-catalog-lists-production-summaries-as-comments
+  (let [catalog (@#'nss/namespace-catalog-text
+                 [['my.orders "Own order contracts and transitions."]
+                  ['my.orders.internal "Implement private order mechanics."]
+                  ['my.orders-test "Exercise order behavior."]])]
+    (is (str/includes? catalog
+                       "; my.orders — Own order contracts and transitions."))
+    (is (str/includes? catalog "; my.orders.internal — Implement private"))
+    (is (not (str/includes? catalog "my.orders-test")))
+    (is (every? #(or (str/blank? %) (str/starts-with? % ";"))
+                (str/split-lines catalog))
+        "catalog output is inert reader-commented context")))
 
 (deftest grown-schema-frontier-keeps-the-production-cap-and-budgets
   (async done

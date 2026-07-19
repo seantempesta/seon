@@ -258,6 +258,30 @@
                       ::full-source ::with-tests
                       ::current-full? ::current-tests?]}])
 
+(def ^:private generated-assignment-query
+  {:find [(list 'pull '?step
+                '[:my.plan/id :my.plan/title :my.plan/status :my.plan/goal
+                  :my.plan/description :my.plan/expect
+                  {:my.plan/namespace [:seon.ns/name]}
+                  {:my.plan/parent
+                   [:my.plan/id :my.plan/title :my.plan/status :my.plan/goal
+                    :my.plan/description :my.plan/expect
+                    {:my.plan/_parent
+                     [{:my.plan/namespace [:seon.ns/name]}]}]}]) '.]
+   :in ['$ '?agent-id]
+   :where [['?agent :seon.agent/id '?agent-id]
+           ['?run :seon.agent.run/agent '?agent]
+           ['?run :seon.agent.run/status :open]
+           ['?run :seon.agent.run/cause '?message]
+           ['?step :my.plan/message '?message]
+           ['?step :my.plan/namespace '?namespace]]})
+
+(def ^:private namespace-catalog-query
+  '{:find [?name ?summary]
+    :where [[?namespace :seon.ns/name ?name]
+            [(get-else $ ?namespace :seon.ns/summary "") ?summary]]
+    :order-by [?name :asc]})
+
 (defn- initial-acquisition-members
   [id]
   [{::protocol/operation protocol/pull-operation
@@ -279,27 +303,43 @@
     ::protocol/arguments [id]
     :datahike.resource/max-work 100000
     :datahike.resource/max-results 64
-    :datahike.resource/max-result-weight 4096}])
+    :datahike.resource/max-result-weight 4096}
+   {::protocol/operation protocol/query-operation
+    ::protocol/query-form generated-assignment-query
+    ::protocol/arguments [id]
+    :datahike.resource/max-work 1000000
+    :datahike.resource/max-results 64
+    :datahike.resource/max-result-weight 65536}])
 
 (defn- selected-acquisition-members
-  [names]
-  [{::protocol/operation protocol/pull-many-operation
-    ::protocol/selector namespace-selector
-    ::protocol/entity-ids
-    (mapv (fn [nm] [:seon.ns/name nm]) names)
-    :datahike.resource/max-work 2000000
-    :datahike.resource/max-results 50000
-    :datahike.resource/max-result-weight 3145728}
-   {::protocol/operation protocol/query-operation
-    ::protocol/query-form
-    '[:find ?name ?tx
-      :in $ [?name ...]
-      :where
-      [?namespace :seon.ns/name ?name ?tx]]
-    ::protocol/arguments [names]
-    :datahike.resource/max-work 500000
-    :datahike.resource/max-results 256
-    :datahike.resource/max-result-weight 8192}])
+  ([names] (selected-acquisition-members names false))
+  ([names include-catalog?]
+   (cond->
+    [{::protocol/operation protocol/pull-many-operation
+      ::protocol/selector namespace-selector
+      ::protocol/entity-ids
+      (mapv (fn [nm] [:seon.ns/name nm]) names)
+      :datahike.resource/max-work 2000000
+      :datahike.resource/max-results 50000
+      :datahike.resource/max-result-weight 3145728}
+     {::protocol/operation protocol/query-operation
+      ::protocol/query-form
+      '[:find ?name ?tx
+        :in $ [?name ...]
+        :where
+        [?namespace :seon.ns/name ?name ?tx]]
+      ::protocol/arguments [names]
+      :datahike.resource/max-work 500000
+      :datahike.resource/max-results 256
+      :datahike.resource/max-result-weight 8192}]
+     include-catalog?
+     (conj
+      {::protocol/operation protocol/query-operation
+       ::protocol/query-form namespace-catalog-query
+       ::protocol/arguments []
+       :datahike.resource/max-work 2000000
+       :datahike.resource/max-results 8192
+       :datahike.resource/max-result-weight 524288}))))
 
 (defn- member-result
   [member]
@@ -312,6 +352,19 @@
   {:seon.error/message (str "Namespace " stage " failed.")
    :seon.error/data value
    :seon.error/kind :core-bug})
+
+(defn- effective-full-source
+  "Stored namespace policy plus this active generated assignment's siblings."
+  [block generated-namespaces]
+  (into (set (resolve-cfg block ::full-source #{}))
+        generated-namespaces))
+
+(defn- assignment-namespaces
+  "Namespace symbols of every namespace-bearing sibling in an assignment."
+  [assignment]
+  (into #{}
+        (keep #(get-in % [:my.plan/namespace :seon.ns/name]))
+        (get-in assignment [:my.plan/parent :my.plan/_parent])))
 
 (defn ^:async ^:private acquire-namespace-rows!
   "Acquire namespace rows at one database value."
@@ -327,14 +380,16 @@
                             ::db/max-result-weight 786432})))]
     (if (:seon.error/message initial)
       (acquisition-error "initial acquisition" initial)
-      (let [[agent-member eval-ns-member assignment-member]
+      (let [[agent-member eval-ns-member assignment-member
+             generated-assignment-member]
             (::db/results initial)
             agent (member-result agent-member)
             latest-successful-ns (some-> (member-result eval-ns-member) first)
             namespace-assignment (some-> (member-result assignment-member) first)]
         (if-not (and (true? (::protocol/success? agent-member))
                      (true? (::protocol/success? eval-ns-member))
-                     (true? (::protocol/success? assignment-member)))
+                     (true? (::protocol/success? assignment-member))
+                     (true? (::protocol/success? generated-assignment-member)))
           (acquisition-error "initial member" (::db/results initial))
           (let [cur-ns (home/current-ns id agent latest-successful-ns
                                         namespace-assignment)
@@ -354,8 +409,12 @@
                                            (:seon.agent.ctx/name candidate))
                                     candidate))
                                 (:seon.agent/ctx agent))
+                    generated-assignment
+                    (member-result generated-assignment-member)
+                    generated-full-source
+                    (assignment-namespaces generated-assignment)
                     full-source-cfg
-                    (set (resolve-cfg block ::full-source #{}))
+                    (effective-full-source block generated-full-source)
                     with-tests-cfg
                     (set (resolve-cfg block ::with-tests #{}))
                     current-full?
@@ -374,13 +433,18 @@
                     selected
                     (await (db/execute-many
                              {::db/db database
-                              ::db/members (selected-acquisition-members names)
+                              ::db/members
+                              (selected-acquisition-members
+                               names (some? generated-assignment))
                               ;; Leave 448 KiB beneath the 4 MiB frame ceiling
                               ;; for the protocol response.
                               ::db/max-result-weight 3735552}))
-                    [rows-member tx-member] (::db/results selected)]
+                    [rows-member tx-member catalog-member]
+                    (::db/results selected)]
                 (if-not (and (true? (::protocol/success? rows-member))
-                             (true? (::protocol/success? tx-member)))
+                             (true? (::protocol/success? tx-member))
+                             (or (nil? generated-assignment)
+                                 (true? (::protocol/success? catalog-member))))
                   (acquisition-error "selected member" (::db/results selected))
                   (let [rows (member-result rows-member)
                         txs (into {} (member-result tx-member))]
@@ -391,6 +455,8 @@
                      ::with-tests with-tests-cfg
                      ::current-full? current-full?
                      ::current-tests? current-tests?
+                     ::generated-assignment generated-assignment
+                     ::catalog-rows (vec (member-result catalog-member))
                      ::namespace-rows
                      (mapv (fn [nm row]
                              (cond-> (or row {:seon.ns/name nm})
@@ -640,6 +706,24 @@
                   (str/includes? card "(not in db"))
       card)))
 
+(defn- namespace-catalog-text
+  "Generate-code-only namespace symbols with their indexed one-line summaries."
+  [catalog-rows]
+  (when-let [lines
+             (seq
+              (into []
+                    (comp
+                     (remove (fn [[name _summary]] (test-ns-name? name)))
+                     (map (fn [[name summary]]
+                            (str "; " name
+                                 (when-not (str/blank? summary)
+                                   (str " — " summary))))))
+                    catalog-rows))]
+    (str ";;; AVAILABLE PRODUCTION NAMESPACES\n"
+         "; These are names, not pseudo-definitions. Inspect compact public\n"
+         "; contracts with (my.ns/functions {:my.ns/ns 'the.namespace}).\n"
+         (str/join "\n" lines))))
+
 (defn ^:async namespaces-block
   "Acquire and render namespaces at the active database value."
   {:malli/schema [:=> [:cat :seon.render/section-request :any] :map]}
@@ -703,7 +787,10 @@
    forms a stable prefix and the current ns sits nearest the tail.
 
    NEVER a render-time file read — the boot indexer is the one reader; both the
-   full renderer and the compact card read only indexed rows."
+   full renderer and the compact card read only indexed rows. During an active
+   generated-code assignment the same block prepends the complete indexed
+   production namespace catalog (symbol + `:seon.ns/summary`); ordinary agents
+   never pay that catalog cost."
   [input]
   (if-let [error (or (::error input) (database-error input))]
       (str "[namespaces] render failed: " (pr-str error))
@@ -768,9 +855,12 @@
             body-rows   (filterv (fn [[_ _ _ phase _]] (= phase :body)) selected)
             prefix-blocks (keep render-row prefix-rows)
             body-blocks   (keep render-row body-rows)
-            blocks        (concat prefix-blocks body-blocks)]
+            blocks        (concat prefix-blocks body-blocks)
+            catalog       (namespace-catalog-text (::catalog-rows input))]
     (if (seq blocks)
-      (str namespaces-header "\n\n" (str/join "\n\n" blocks))
+      (str namespaces-header
+           (when catalog (str "\n\n" catalog))
+           "\n\n" (str/join "\n\n" blocks))
       ""))))
 
 ;; ============================================================

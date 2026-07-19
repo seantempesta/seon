@@ -31,9 +31,10 @@ the existing model reply, eval/program facts, plan steps, messages, and runs.
 Completion is derived from eval and behavioral-test evidence; never recognize
 an agent's prose marker as completion.
 
-The specialized developer teaching is one progressive `:generate-code` block
-that derives its view from assignment/eval/test facts and renders nothing when
-inactive. Full code remains the responsibility of the existing `:namespaces`
-block by reconciling its `:seon.agent.ctx.namespaces/full-source` set. Model
-selection extends the existing database-owned provider resolution with named
-profiles; never branch on provider at the `generate-code!` call site.
+Specialized developer teaching stays in the existing `:plan` block through an
+alternate AI renderer that reuses the same plan acquisition and formatting and
+falls back to ordinary plan context when inactive. Full code remains the
+responsibility of the existing `:namespaces` block by reconciling its
+`:seon.agent.ctx.namespaces/full-source` set. Model selection extends the
+existing database-owned provider resolution with named profiles; never branch
+on provider at the `generate-code!` call site.

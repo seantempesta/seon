@@ -103,9 +103,10 @@ one parser/evaluator path; generation orchestration consumes its ordinary data.
   does.
 - The full original plan reply and durable steps remain available for recovery;
   the small caller receives a compact derived result.
-- One progressive `:generate-code` block teaches and reports the active
-  development assignment. It derives its current view from database facts and
-  disappears when the agent has no generation work.
+- The existing `:plan` block teaches and reports the active development
+  assignment through a specialized AI renderer over the same acquisition and
+  windowing path. It derives its view from database facts and falls back to
+  ordinary plan context when the agent has no generation work.
 - Full source selection continues through the existing `:namespaces` block;
   code generation does not add another namespace renderer or allowlist.
 - Kimi K3 is an explicit, high-latency planning option. It is not the default
@@ -342,11 +343,12 @@ adding namespace summaries to the existing embedding corpus.
 
 ## Progressive developer context
 
-Specialized planning and namespace-repair agents receive one additional
-`:generate-code` context block. It is not part of ordinary agent context. Its
-renderer follows the agent's current run cause to the assignment message, plan
-step, and generation root, then derives the appropriate view from the same
-immutable database value used for the prompt. There is no stored phase flag.
+Specialized planning and namespace-repair agents retain the existing `:plan`
+block. Its specialized AI renderer reuses the ordinary plan acquisition and
+formatter, follows the current run cause to the assignment message, plan step,
+and generation root, and prepends development guidance only for that active
+cause. The block's name, priority, HTML twin, and ordinary idle rendering do
+not change. There is no stored phase flag or second context acquisition path.
 
 The stable teaching prefix demonstrates the correct Seon development grammar:
 
@@ -393,6 +395,46 @@ retrieved contracts, and a few full owners so it can design the whole change.
 A namespace worker sees the complete root contract and sibling DAG for
 orientation, but full source and error evidence only for its owned unit and
 dependencies. The compact caller receives only the final derived result.
+
+## Settled context and correction decisions
+
+These are required follow-on contracts, not optional ideas:
+
+- **One code surface:** the `:namespaces` block alone renders namespace names,
+  compact function/schema contracts, and full source. The `:plan` block owns
+  the goal, acceptance contract, current assignment, and development method;
+  the transcript remains the one universal parser/evaluator interface.
+- **Semantic preload through the existing index:** encode the plan goal,
+  description, and expectation through the one optional `seon.embed` path;
+  search existing indexed `:seon.fn/source` rows; group ranked functions by
+  `:seon.fn/ns`; and use those results only to augment the deterministic
+  namespace catalog and compact/full selections. Disabled, unavailable, or
+  failed embedding search degrades to deterministic catalog context and never
+  creates a second corpus, renderer, or execution path.
+- **Agent-directed expansion:** repair the stale `my.ns/functions` guidance
+  and add agent-facing full/compact operations that update the existing
+  `:namespaces` block through `seon.agent.ctx/install!`. They preserve every
+  other namespace dial, replace exact presence-set values idempotently, and
+  cause the next derived context to reveal or compact that source. They do not
+  return a second ad hoc source rendering.
+- **Last-successful definition display:** runtime and indexed program facts
+  already use last-accepted-value semantics; a failed redefinition restores
+  the prior working function. Add an AI-only transcript projection that hides
+  superseded attempts once a later accepted definition for the same identity
+  exists, while an unresolved final error remains visible. Raw eval rows,
+  Datahike history, HTML/debug transcript, messages, namespace movement,
+  transactions, tests, and other side-effecting forms remain complete. Derive
+  the eval-to-definition connection from the ordinary evaluator/tee boundary;
+  never reparse source or delete evidence to obtain the compact view.
+- **Valid examples only:** generated-development context contains valid
+  ClojureScript or inert single-semicolon commentary. Mechanical repair may
+  salvage model input for execution, but malformed output never becomes a
+  standing example in plan or namespace context.
+
+Graduation evidence for these contracts includes deterministic retrieval with
+embeddings both enabled and disabled, exact full/compact replacement across a
+warm-agent reassignment, last-successful AI projection with raw debug history
+unchanged, and a multi-namespace reply evaluated by the ordinary batch path.
 
 ## Model roles
 
@@ -569,8 +611,8 @@ Exit:
 
 ### Stage 6 — warm namespace repair
 
-Build database-derived worker selection and the progressive `:generate-code`
-context contract. Reconcile each assigned agent's existing `:namespaces` block
+Build database-derived worker selection and the progressive `:plan` rendering
+contract. Reconcile each assigned agent's existing `:namespaces` block
 to the exact full-source set. Workers use the ordinary REPL and affected-test
 surface. The detailed instruction audit and exact contradictions are recorded
 in [[research/repl-teaching-audit-2026-07-19]].
@@ -591,7 +633,7 @@ Exit:
 - a failed unit receives exact original plan, accepted prefix, errors, target
   source, `.internal` source, neighbor contracts, and sibling status;
 - a later request reuses an idle successful namespace worker;
-- an inactive worker renders no generate-code block and retains ordinary
+- an inactive worker's plan block renders ordinary plan context and retains
   transcript continuity for a later assignment;
 - reassignment replaces, rather than unions, the namespaces block's previous
   full-source set;
@@ -646,13 +688,21 @@ Exit:
 
 ## Next implementation boundary
 
-Stage 6 progressive repair context is the dependency-ready boundary. Add the
-single `:generate-code` block, derive its phase from the assignment message and
-plan/eval/test connections, and reconcile the existing `:namespaces` block's
-full-source set for the target namespace, selected owners, and their `.internal`
-descendants. Prove an initial planner sees broad summaries and selected source,
-a repair resident sees only its exact durable assignment evidence plus relevant
-full source, reassignment replaces stale source selection, and an inactive
-resident renders no generation block. The scheduler and named execution variant
-are settled inputs; this stage must not add another registry, parser, or worker
-selection path.
+Stage 6 progressive repair context is the dependency-ready boundary. Finish
+assignment-time reconciliation of the resident's existing `:plan` and
+`:namespaces` blocks. The plan renderer derives its development view from the
+cause-linked assignment even when the namespace step remains owned by the
+coordinator. The namespaces renderer owns the complete production catalog and
+the exact full-source set for the target, selected owners, and their explicit
+`.internal` descendants. Prove an initial planner sees broad summaries and
+selected source, a repair resident sees its exact durable contract plus
+relevant full source, reassignment replaces stale selection, and an inactive
+resident returns to ordinary plan rendering. The scheduler and named execution
+variant are settled inputs; this stage must not add another context block,
+registry, parser, or worker-selection path.
+
+After that assignment-time reconciliation lands, the next two bounded Stage 6
+slices are the `my.ns` full/compact operations plus stale-guidance repair, then
+embedding-ranked namespace augmentation. The AI-only effective-definition
+transcript projection follows as its own evidence slice because it touches
+history acquisition and must prove the HTML/debug transcript remains raw.

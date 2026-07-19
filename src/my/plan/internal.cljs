@@ -1180,22 +1180,25 @@
    :limit recent-done-limit})
 
 (def ^:private run-cause-step-query
-  {:find '[?id ?title ?expect ?created ?message ?status ?status-tx]
+  {:find '[?id ?title ?expect ?created ?message ?status ?status-tx ?namespace]
    :in '[$ ?agent-id ?run-id]
    :where '[[?agent :seon.agent/id ?agent-id]
             [?run :seon.agent.run/id ?run-id]
+            [?run :seon.agent.run/agent ?agent]
             [?run :seon.agent.run/cause ?message]
-            [?step :my.plan/agent ?agent]
             [?step :my.plan/message ?message]
             [?step :my.plan/status ?status ?status-tx]
             [?step :my.plan/id ?id]
             [?step :my.plan/title ?title]
             [?step :my.plan/created-at ?created]
-            [(get-else $ ?step :my.plan/expect "") ?expect]]
+            [(get-else $ ?step :my.plan/expect "") ?expect]
+            [(get-else $ ?step :my.plan/namespace false) ?namespace]]
    :limit 1})
 
 (def ^:private ancestor-selector
   '[:my.plan/id :my.plan/title :my.plan/goal :my.plan/pace
+    :my.plan/description :my.plan/expect
+    {:my.plan/namespace [:seon.ns/name]}
     {:my.plan/parent ...}])
 
 (def ^:private root-rollup-query
@@ -1341,9 +1344,10 @@
     active-tx (assoc :seon.db/tx active-tx)))
 
 (defn- run-cause-step-row
-  [[id title expect created message status status-tx]]
+  [[id title expect created message status status-tx namespace]]
   (cond-> (assoc (step-row [id title expect created message])
                  :my.plan/status status)
+    namespace (assoc :my.plan/namespace namespace)
     (= :active status) (assoc :seon.db/tx status-tx)))
 
 (defn- ancestor-chain-from-pull
@@ -1501,6 +1505,7 @@
                               escalation
                               {::db/db database
                                :seon.agent/entity agent
+                               ::cause-step? (some? cause-step)
                                ::anchor
                                {:my.plan/step step
                                 :my.plan/chain
@@ -1617,10 +1622,39 @@
        "; UNDER the plan: (my.plan/step! {:my.plan/title \"…\"\n"
        ";                                 :my.plan/parent [:my.plan/id \"<id>\"]})."))
 
+(def development-teaching
+  "Generate-code guidance rendered by the existing plan block.
+
+   Every line is reader-commented. The namespaces block remains the sole owner
+   of namespace catalogs, compact contracts, and full source."
+  (str "; ── generated-code development ──\n"
+       "; Start with the data model and behavioral contracts. Register schemas\n"
+       "; beside the namespace that owns the data, then choose namespace\n"
+       "; boundaries, dependency direction, real requires, and function\n"
+       "; composition before filling in implementations. The namespaces section\n"
+       "; is the code authority: inspect its production catalog, compact public\n"
+       "; contracts, and selected full sources before naming or redefining code.\n"
+       "; Emit ordinary valid ClojureScript forms. One reply may contain several\n"
+       "; real namespace declarations; the batch evaluator derives require order,\n"
+       "; promotes registered schemas, awaits top-level Promises, and preserves\n"
+       "; independent namespaces when another fails. A successful redefinition\n"
+       "; replaces the prior function; a failed one restores the last working\n"
+       "; definition. Write behavioral tests and satisfy the plan expectation.\n"
+       "; Repair subagents can localize honest residual failures, but the first\n"
+       "; pass must still be complete—never leave placeholders or knowingly bad\n"
+       "; examples. Put explanations in single-semicolon comments."))
+
 (defn- format-plan-body
-  [{::keys [anchor actives readies dones escalation-text]}]
+  [{::keys [anchor actives readies dones escalation-text cause-step?]}
+   specialized?]
   (let [body (str/join "\n" (remove str/blank?
-                                      [(anchor-section anchor)
+                                      [(when (and cause-step?
+                                                  (or specialized?
+                                                      (some? (get-in anchor
+                                                                     [:my.plan/step
+                                                                      :my.plan/namespace]))))
+                                         development-teaching)
+                                       (anchor-section anchor)
                                        escalation-text
                                        (frontier-section actives readies)
                                        (done-section dones)]))]
@@ -1635,7 +1669,19 @@
   (let [acquired (await (acquire-plan-block input))]
     (if-let [error (:seon.error/message acquired)]
       (str "[plan] render failed: " (pr-str acquired))
-      (format-plan-body acquired))))
+      (format-plan-body acquired false))))
+
+(defn ^:async ^:no-doc generate-code-plan-block
+  "Render the ordinary plan plus cause-scoped generated-development guidance.
+
+   Specialized residents install this symbol on their existing `:plan` block;
+   acquisition, windowing, and HTML remain the one ordinary plan mechanism."
+  {:malli/schema [:=> [:cat :seon.render/section-request :any] :string]}
+  [input _invoke-selected!]
+  (let [acquired (await (acquire-plan-block input))]
+    (if-let [error (:seon.error/message acquired)]
+      (str "[plan] render failed: " (pr-str acquired))
+      (format-plan-body acquired true))))
 
 ;; --- The `:seon.render/html` twin — the human's live plan surface. --------
 ;; --- Colocated with [[plan-block]] (the transcript precedent). Zero prompt

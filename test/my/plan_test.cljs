@@ -392,6 +392,50 @@
           (.then (fn [_] (done)))
           (.catch (fn [error] (is false (str error)) (done)))))))
 
+(deftest run-cause-selection-authorizes-by-message-not-plan-owner
+  (let [where (:where @#'internal/run-cause-step-query)]
+    (is (some #{'[?run :seon.agent.run/agent ?agent]} where))
+    (is (some #{'[?run :seon.agent.run/cause ?message]} where))
+    (is (some #{'[?step :my.plan/message ?message]} where))
+    (is (not-any? #{'[?step :my.plan/agent ?agent]} where)
+        "generated namespace leaves remain owned by their coordinator")))
+
+(deftest generated-development-guidance-stays-in-the-plan-block
+  (let [anchor {:my.plan/step
+                {:my.plan/id "orders"
+                 :my.plan/title "Implement orders"
+                 :my.plan/namespace 404}
+                :my.plan/chain
+                [{:my.plan/id "root" :my.plan/title "Ship orders"
+                  :my.plan/goal "Working order flow"}]
+                :my.plan/active? false
+                :my.plan/progress
+                {:my.plan/done 0 :my.plan/total 1 :my.plan/done? false}}
+        base {:my.plan.internal/anchor anchor
+              :my.plan.internal/actives []
+              :my.plan.internal/readies []
+              :my.plan.internal/dones []
+              :my.plan.internal/escalation-text ""}
+        ordinary (@#'internal/format-plan-body
+                  (assoc base :my.plan.internal/cause-step? false) false)
+        repair (@#'internal/format-plan-body
+                (assoc base :my.plan.internal/cause-step? true) false)
+        planner (@#'internal/format-plan-body
+                 (assoc base
+                        :my.plan.internal/cause-step? true
+                        :my.plan.internal/anchor
+                        (update anchor :my.plan/step dissoc
+                                :my.plan/namespace))
+                 true)]
+    (is (not (str/includes? ordinary "generated-code development")))
+    (is (str/includes? repair "generated-code development"))
+    (is (str/includes? repair "namespaces section"))
+    (is (str/includes? planner "generated-code development")
+        "the specialized plan renderer marks the initial planner root")
+    (is (every? #(or (str/blank? %) (str/starts-with? % ";"))
+                (str/split-lines internal/development-teaching))
+        "developer teaching is valid inert Clojure commentary")))
+
 (deftest completed-current-run-cause-remains-the-position-anchor
   (async done
     (let [original db/execute-many
