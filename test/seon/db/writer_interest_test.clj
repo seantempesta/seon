@@ -84,11 +84,18 @@
          ::writer/acquisitions (atom #{})
          ::writer/database-advanced-acquisitions (atom #{})
          ::writer/interests (atom {})
+         ::writer/event-state
+         (atom {::writer/pending-order [] ::writer/pending {}})
          ::writer/close! #(deliver closed true)
          ::writer/send!
-         (fn [message]
-           (swap! sent conj message)
-           {::uds/send-status uds/send-accepted})}]
+         (fn
+           ([message]
+            (swap! sent conj message)
+            {::uds/send-status uds/send-accepted})
+           ([message callback]
+            (swap! sent conj message)
+            (callback uds/send-accepted)
+            {::uds/send-status uds/send-accepted}))}]
     connection))
 
 (deftest database-advanced-delivery-requires-explicit-acquisition
@@ -433,7 +440,7 @@
           (d/release connection)
           (d/delete-database configuration))))))
 
-(deftest authority-pressure-closes-only-the-addressed-physical-session
+(deftest transient-event-pressure-does-not-close-the-physical-session
   (let [closed (promise)
         owner (Object.)
         connection
@@ -442,11 +449,15 @@
          ::writer/closing? (AtomicBoolean. false)
          ::writer/interests
          (atom {"pressure/listen" {::writer/owner owner}})
+         ::writer/event-state
+         (atom {::writer/pending-order [] ::writer/pending {}})
          ::writer/close! #(deliver closed true)
          ::writer/send!
-         (fn [_message]
-           {::uds/send-status uds/send-authority-full})}]
-    (is (= uds/send-authority-full
+         (fn
+           ([_message] {::uds/send-status uds/send-authority-full})
+           ([_message _callback]
+            {::uds/send-status uds/send-authority-full}))}]
+    (is (= uds/send-accepted
            (#'writer/send-interest-event!
            connection "pressure/listen" owner
             {::protocol/event protocol/resynchronization-event
@@ -458,8 +469,82 @@
               :since nil
               :history false
               :datahike/commit-id (random-uuid)}})))
-    (is (true? (deref closed 1000 false)))
-    (is (.get ^AtomicBoolean (::writer/closing? connection)))))
+    (is (false? (deref closed 25 false)))
+    (is (false? (.get ^AtomicBoolean (::writer/closing? connection))))
+    (is (= [[::writer/interest "pressure/listen"]]
+           (::writer/pending-order @(::writer/event-state connection))))))
+
+(deftest repeated-interest-events-collapse-to-one-newest-resynchronization
+  (let [sent (atom [])
+        owner (Object.)
+        connection
+        {::writer/connection-lock (Object.)
+         ::writer/closed? (atom false)
+         ::writer/closing? (AtomicBoolean. false)
+         ::writer/database-advanced-acquisitions (atom #{})
+         ::writer/interests
+         (atom {"coalesce/listen" {::writer/owner owner}})
+         ::writer/event-state
+         (atom {::writer/pending-order [] ::writer/pending {}})
+         ::writer/close! (fn [] nil)
+         ::writer/send!
+         (fn [_message _callback]
+           (swap! sent conj [_message _callback])
+           {::uds/send-status uds/send-accepted})}
+        event
+        (fn [t]
+          {::protocol/event protocol/datoms-event
+           ::protocol/request-id "coalesce/listen"
+           :db-after {:db-name "coalesce" :t t}})]
+    (doseq [t [1 2 3]]
+      (is (= uds/send-accepted
+             (#'writer/send-interest-event!
+              connection "coalesce/listen" owner (event t)))))
+    (is (= 1 (count @sent)) "only one physical event is in flight")
+    (is (= [[::writer/interest "coalesce/listen"]]
+           (::writer/pending-order @(::writer/event-state connection))))
+    (let [[_first-event first-complete!] (first @sent)]
+      (first-complete! uds/send-accepted))
+    (is (= 2 (count @sent)))
+    (is (= {::protocol/event protocol/resynchronization-event
+            ::protocol/request-id "coalesce/listen"
+            :db-after {:db-name "coalesce" :t 3}}
+           (first (second @sent))))
+    (let [[_resynchronization second-complete!] (second @sent)]
+      (second-complete! uds/send-accepted))
+    (is (= {::writer/pending-order [] ::writer/pending {}}
+           @(::writer/event-state connection)))))
+
+(deftest database-advanced-events-retain-only-the-newest-database-value
+  (let [sent (atom [])
+        acquisition ["advance" [:advance :main]]
+        connection
+        {::writer/connection-lock (Object.)
+         ::writer/closed? (atom false)
+         ::writer/closing? (AtomicBoolean. false)
+         ::writer/database-advanced-acquisitions (atom #{acquisition})
+         ::writer/interests (atom {})
+         ::writer/event-state
+         (atom {::writer/pending-order [] ::writer/pending {}})
+         ::writer/close! (fn [] nil)
+         ::writer/send!
+         (fn [message callback]
+           (swap! sent conj [message callback])
+           {::uds/send-status uds/send-accepted})}
+        event (fn [t]
+                {::protocol/event protocol/database-advanced-event
+                 :db-after {:db-name "advance" :t t}})]
+    (doseq [t [1 3 2]]
+      (is (= uds/send-accepted
+             (#'writer/send-database-event!
+              connection (first acquisition) (second acquisition) (event t)))))
+    (is (= 1 (count @sent)))
+    ((second (first @sent)) uds/send-accepted)
+    (is (= 2 (count @sent)))
+    (is (= (event 3) (first (second @sent))))
+    ((second (second @sent)) uds/send-accepted)
+    (is (= {::writer/pending-order [] ::writer/pending {}}
+           @(::writer/event-state connection)))))
 
 (deftest one-exact-pattern-addresses-one-of-one-thousand-interests
   (let [configuration {:store {:backend :memory :id (random-uuid)}

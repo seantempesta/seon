@@ -1677,7 +1677,15 @@
       (swap! (::acquisitions transport-connection)
              disj [database-name (::registry/connection-id route)])
       (swap! (::database-advanced-acquisitions transport-connection)
-             disj [database-name (::registry/connection-id route)]))
+             disj [database-name (::registry/connection-id route)])
+      (let [event-key [::database-advanced database-name
+                       (::registry/connection-id route)]]
+        (swap! (::event-state transport-connection)
+               (fn [state]
+                 (-> state
+                     (update ::pending dissoc event-key)
+                     (update ::pending-order
+                             #(into [] (remove #{event-key}) %)))))))
     (protocol/success
      {::protocol/released? (boolean (::registry/released? result))})))
 
@@ -2175,6 +2183,12 @@
           next-entry (when entry
                        (remove-interest-from-entry entry reference interest))]
       (swap! (::interests transport-connection) dissoc request-id)
+      (swap! (::event-state transport-connection)
+             (fn [state]
+               (-> state
+                   (update ::pending dissoc [::interest request-id])
+                   (update ::pending-order
+                           #(into [] (remove #{[::interest request-id]}) %)))))
       (if (and next-entry (pos? (::interest-count next-entry)))
         (reset! state-atom (assoc-in state [::by-scope scope] next-entry))
         (do
@@ -2352,14 +2366,124 @@
   (let [interest (get @(::interests transport-connection) request-id)]
     (when (and interest (identical? owner (::owner interest))) interest)))
 
-(defn- close-pressured-connection!
+(defn- close-failed-event-connection!
   [transport-connection status request-id]
-  (log/warn "database event session closed after delivery pressure"
+  (log/warn "database event session closed after terminal delivery failure"
             {::protocol/request-id request-id
              ::uds/send-status status})
   (when (.compareAndSet ^java.util.concurrent.atomic.AtomicBoolean
                         (::closing? transport-connection) false true)
     ((::close! transport-connection))))
+
+(defn- newer-event
+  [left right]
+  (if (> (:t (:db-after right)) (:t (:db-after left))) right left))
+
+(defn- coalesce-event
+  [prior entry]
+  (if-not prior
+    entry
+    (let [event (::event entry)
+          prior-event (::event prior)
+          newest (newer-event prior-event event)]
+      (assoc entry ::event
+             (if (= protocol/database-advanced-event
+                    (::protocol/event event))
+               newest
+               {::protocol/event protocol/resynchronization-event
+                ::protocol/request-id (::protocol/request-id event)
+                :db-after (:db-after newest)})))))
+
+(defn- current-event?
+  [transport-connection entry]
+  (case (::event-kind entry)
+    ::interest
+    (some? (current-interest transport-connection
+                             (::protocol/request-id entry)
+                             (::owner entry)))
+
+    ::database-advanced
+    (contains? @(::database-advanced-acquisitions transport-connection)
+               [(::database-name entry) (::connection-id entry)])
+
+    false))
+
+(declare drain-events! restore-event!)
+
+(defn- event-completed!
+  [transport-connection entry status]
+  (locking (::connection-lock transport-connection)
+    (when (identical? entry (::in-flight @(::event-state transport-connection)))
+      (cond
+        (= uds/send-accepted status)
+        (do
+          (swap! (::event-state transport-connection) dissoc ::in-flight)
+          (drain-events! transport-connection))
+
+        :else
+        (close-failed-event-connection!
+         transport-connection status (::protocol/request-id entry))))))
+
+(defn- restore-event!
+  [transport-connection entry]
+  (swap! (::event-state transport-connection)
+         (fn [state]
+           (-> state
+               (dissoc ::in-flight)
+               (update ::pending-order
+                       #(if (some #{(::event-key entry)} %) %
+                          (into [(::event-key entry)] %)))
+               (update-in [::pending (::event-key entry)]
+                          #(coalesce-event % entry))))))
+
+(defn- drain-events!
+  [transport-connection]
+  (loop []
+    (let [state @(::event-state transport-connection)]
+      (when (and (not @(::closed? transport-connection))
+                 (not (.get ^java.util.concurrent.atomic.AtomicBoolean
+                            (::closing? transport-connection)))
+                 (nil? (::in-flight state))
+                 (seq (::pending-order state)))
+        (let [key (first (::pending-order state))
+              entry (get-in state [::pending key])]
+          (swap! (::event-state transport-connection)
+                 (fn [current]
+                   (-> current
+                       (assoc ::in-flight entry)
+                       (update ::pending-order subvec 1)
+                       (update ::pending dissoc key))))
+          (if-not (current-event? transport-connection entry)
+            (do
+              (swap! (::event-state transport-connection) dissoc ::in-flight)
+              (recur))
+            (let [result
+                  ((::send! transport-connection)
+                   (::event entry)
+                   #(event-completed! transport-connection entry %))
+                  status (::uds/send-status result)]
+              (when-not (= uds/send-accepted status)
+                (if (contains? #{uds/send-session-full uds/send-authority-full}
+                               status)
+                  (restore-event! transport-connection entry)
+                  (close-failed-event-connection!
+                   transport-connection status (::protocol/request-id entry)))))))))))
+
+(defn- enqueue-event!
+  [transport-connection entry]
+  (let [key (::event-key entry)]
+    (swap! (::event-state transport-connection)
+           (fn [state]
+             (let [prior (or (get-in state [::pending key])
+                             (when (= key (get-in state [::in-flight
+                                                        ::event-key]))
+                               (::in-flight state)))]
+               (cond-> (assoc-in state [::pending key]
+                                 (coalesce-event prior entry))
+                 (not (contains? (::pending state) key))
+                 (update ::pending-order conj key)))))
+    (drain-events! transport-connection)
+    uds/send-accepted))
 
 (defn- send-interest-event!
   [transport-connection request-id owner event]
@@ -2368,11 +2492,13 @@
                (not (.get ^java.util.concurrent.atomic.AtomicBoolean
                           (::closing? transport-connection)))
                (current-interest transport-connection request-id owner))
-      (let [result ((::send! transport-connection) event)
-            status (::uds/send-status result)]
-        (when-not (= uds/send-accepted status)
-          (close-pressured-connection! transport-connection status request-id))
-        status))))
+      (enqueue-event!
+       transport-connection
+       {::event-key [::interest request-id]
+        ::event-kind ::interest
+        ::protocol/request-id request-id
+        ::owner owner
+        ::event event}))))
 
 (defn- send-database-event!
   [transport-connection database-name connection-id event]
@@ -2383,11 +2509,13 @@
                (contains? @(::database-advanced-acquisitions
                             transport-connection)
                           [database-name connection-id]))
-      (let [result ((::send! transport-connection) event)
-            status (::uds/send-status result)]
-        (when-not (= uds/send-accepted status)
-          (close-pressured-connection! transport-connection status nil))
-        status))))
+      (enqueue-event!
+       transport-connection
+       {::event-key [::database-advanced database-name connection-id]
+        ::event-kind ::database-advanced
+        ::database-name database-name
+        ::connection-id connection-id
+        ::event event}))))
 
 (defn- deliver-database-advanced!
   [origin connection-id database]
@@ -2577,6 +2705,7 @@
    ::acquisitions (atom #{})
    ::database-advanced-acquisitions (atom #{})
    ::interests (atom {})
+   ::event-state (atom {::pending-order [] ::pending {}})
    ::close! close!
    ::send! send!})
 
@@ -3637,6 +3766,8 @@
           (when-not @(::closed? transport-connection)
             (reset! (::closed? transport-connection) true)
             (remove-connection-interests! runtime transport-connection)
+            (reset! (::event-state transport-connection)
+                    {::pending-order [] ::pending {}})
             (let [active (::active-requests runtime)
                   requests
                   (locking active

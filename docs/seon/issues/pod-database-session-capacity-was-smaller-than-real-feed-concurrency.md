@@ -63,6 +63,27 @@ event-response slots close the session while the child is doing synchronous
 CLJS work. Raising the cap would only postpone the same broadcast failure and
 retain more database values.
 
+The source-frozen five-feed fanout run at Seon `623f4650` found the remaining
+pod-side form of the defect. Five gzip SSE feeds and five stable execution
+children remained live while 65 separate root-purpose transactions committed
+from basis transaction 536870925 through 536870997. Reactive work converged to
+the newest database value with a global active/pending high-water mark of five,
+but the writer logged eight
+`:seon.db.transport.uds.send/session-full` closures. The pod then recorded
+`Database authority ended the session` and native socket-write core faults;
+automatic reconnect eventually hid the transport loss.
+
+The maintained transport source establishes the cause. JVM `send!` reserves a
+response slot for every server-initiated protocol event, even though the event
+is one-way. The slot remains owned through encoding and socket output and is
+released only after the complete frame is written. Reserving the 65th slot
+returns `send-session-full`, and `send!` immediately schedules closure of that
+session. `writer/send-interest-event!` also treats every non-accepted status as
+terminal and closes the connection. The CLJS transport already coalesces
+received events by interest, replacing repeated datom events with one
+resynchronization event, but that bounded mechanism runs only after the JVM has
+admitted and written each physical frame and cannot protect writer admission.
+
 ## Expected owner
 
 `seon.db.transport.uds` owns one bounded per-session pending-request map. Its
@@ -82,6 +103,25 @@ work. Listener registration already returns a resynchronization database value,
 so an opted-in listener never relies on replaying an unbounded sequence of
 intermediate database-advanced events.
 
+The correction must strengthen that existing event mechanism before
+response-slot admission. A full event path is transient backpressure, not a
+terminal socket condition. At most one newest pending event per interest (and
+one newest database-advanced event per database) may be retained; repetition
+conservatively becomes the protocol's existing resynchronization event.
+Ordinary request responses retain their exact identity and current
+response-slot semantics. There is no larger numeric cap and no second
+committed-transaction truth queue.
+
+The event caller is not Datahike's commit-serialization thread. A committed
+report wakes `run-readiness!`, which submits `:delivery` work through
+`seon.db.executor/try-submit!`; `execute-delivery!` and `deliver-report!` then
+run on one of the bounded `seon-database-cpu-*` workers. Datahike transaction
+execution is separately admitted as the executor's `:mutation` class and is
+dispatched through its virtual-thread executor. Therefore the codec executor's
+rejection fallback encodes the one already-bounded event on a delivery worker,
+not on the transaction commit owner. It is work-conserving backpressure and
+cannot serialize subsequent commits behind socket output.
+
 ## Acceptance
 
 - The transport test fills the selected capacity with timed-out physical work
@@ -90,6 +130,10 @@ intermediate database-advanced events.
 - A transaction that meets transient busy admission retries the byte-identical
   request on the same session and commits once capacity returns.
 - A sustained real-agent run with five feeds does not exhaust session capacity.
+- With the per-session response-slot limit set below an event burst, one-way
+  events remain bounded by event key, repetition becomes one newest
+  resynchronization/database-advanced event, the session remains open, and an
+  ordinary request response is admitted when capacity returns.
 - Pending requests retire after the JVM completes or cancels physical work;
   capacity does not leak across the recovery proof.
 - Three concurrent execution children can remain busy while sibling
@@ -100,3 +144,11 @@ intermediate database-advanced events.
   resynchronization value after reconnect.
 - The maintained Bun contract treats write `0` as backpressure and `-1` as a
   closed socket; no retry writes through a terminal session.
+- The exact five-feed, five-child, 65-commit run has no writer session-pressure
+  closure or pod database core fault, converges every feed to the newest basis
+  transaction, keeps reactive active/pending ownership bounded, and closes with
+  zero registrations, consumers, views, subscriptions, or execution children.
+- Under the paused-read 10,000-commit stress, pending writer events remain
+  bounded by installed interest and acquired-database keys rather than commit
+  count, while ordinary query and transaction latency remains bounded and
+  returns to its pre-pressure range after the reader resumes.

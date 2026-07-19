@@ -40,7 +40,9 @@
 (schema/register! ::send-completion 'some?)
 (schema/register!
  ::connection-control
- [:map {:closed true} [::close! ::close!] [::send! ::send!]])
+ [:map {:closed true}
+  [::close! ::close!]
+  [::send! ::send!]])
 (schema/register! ::shutdown-timeout-ms [:int {:min 1}])
 (schema/register! ::maximum-input-bytes [:int {:min 1}])
 (schema/register! ::maximum-response-slots [:int {:min 1}])
@@ -311,25 +313,36 @@
             (reset! (::input-reservation session) reservation)
             reservation))))))
 
+(declare wake-paused-events!)
+
+(defn- release-output-reservation!
+  [session reservation]
+  (let [released?
+        (and reservation
+             (not (.get ^AtomicReference (::encoding? reservation)))
+             (.compareAndSet ^AtomicReference (::released? reservation)
+                             false true))]
+    (when released?
+      (let [authority-output-bytes (::authority-output-bytes session)
+            output-reservation (::output-reservation reservation)]
+        (locking authority-output-bytes
+          (let [reserved @output-reservation]
+            (when (pos? reserved)
+              (swap! authority-output-bytes - reserved)
+              (swap! (::session-output-bytes session) - reserved)
+              (reset! output-reservation 0)))))
+      (wake-paused-reads! session)
+      (wake-paused-events! (::paused-event-sessions session)))
+    released?))
+
 (defn- release-response-slot!
   [session slot]
-  (when (and slot
-             (not (.get ^AtomicReference (::encoding? slot)))
-             (.compareAndSet ^AtomicReference (::released? slot) false true))
-    (let [authority-output-bytes (::authority-output-bytes session)
-          output-reservation (::output-reservation slot)]
-      (locking authority-output-bytes
-        (let [reserved @output-reservation]
-          (when (pos? reserved)
-            (swap! authority-output-bytes - reserved)
-            (swap! (::session-output-bytes session) - reserved)
-            (reset! output-reservation 0)))))
+  (when (release-output-reservation! session slot)
     (let [authority-count (::authority-response-slot-count session)]
       (locking authority-count
         (swap! (::response-slots session) disj slot)
         (swap! authority-count dec)
-        (swap! (::outstanding session) dec)))
-    (wake-paused-reads! session))
+        (swap! (::outstanding session) dec))))
   nil)
 
 (defn- reserve-response-slot-result!
@@ -471,7 +484,7 @@
     (notify-connection-close! connections close-connection! session))
   nil)
 
-(declare abandon-pending-encodes!)
+(declare abandon-pending-encodes! finish-event!)
 
 (defn- close-session!
   [connections workers close-connection! session]
@@ -485,6 +498,8 @@
     (reset! (::input-reservation session) nil)
     (locking (::send-lock session)
       (abandon-pending-encodes! session send-closed))
+    (when-let [pending (::pending @(::event-state session))]
+      (finish-event! session pending send-closed))
     (run! #(release-response-slot! session %)
           (vec @(::response-slots session)))
     (.clear ^ArrayDeque (::outputs session))
@@ -498,7 +513,8 @@
   [session]
   (and (zero? @(::outstanding session))
        (not @(::decoding? session))
-       (.isEmpty ^ArrayDeque (::outputs session))))
+       (.isEmpty ^ArrayDeque (::outputs session))
+       (nil? @(::event-state session))))
 
 (defn- close-drained-session!
   [connections workers close-connection! shutting-down? session]
@@ -524,7 +540,117 @@
   [pending status]
   (when-let [completion (::send-completion pending)]
     (deliver completion status))
+  (when-let [callback (::send-callback pending)]
+    (try
+      (callback status)
+      (catch Throwable throwable
+        (log/error throwable "UDS event completion callback failed"))))
   nil)
+
+(defn- event-output-reservation []
+  {::released? (AtomicReference. false)
+   ::encoding? (AtomicReference. false)
+   ::output-reservation (atom 0)})
+
+(defn- finish-event!
+  [session pending status]
+  (when (identical? pending (::pending @(::event-state session)))
+    (swap! (::paused-event-sessions session) disj session)
+    (reset! (::event-state session) nil)
+    (release-output-reservation! session (::output pending))
+    (complete-send! pending status))
+  nil)
+
+(defn- select-encoded-event!
+  [connections workers close-connection! shutting-down? session pending frame]
+  (when (identical? pending (::pending @(::event-state session)))
+    (if (.get ^AtomicReference (::closed? session))
+      (finish-event! session pending send-closed)
+      (let [slot (::output pending)
+            reservation (reserve-encoded-output-result!
+                         session slot (.remaining ^ByteBuffer frame))
+            status (::send-status reservation)]
+        (if (= send-accepted status)
+          (do
+            (reset! (::event-state session)
+                    {::phase ::output ::pending pending ::frame frame})
+            (swap! (::queued-output-bytes session)
+                   + (.remaining ^ByteBuffer frame))
+            (key-interests! session op-write 0))
+          (do
+            (reset! (::event-state session)
+                    {::phase ::blocked ::pending pending ::frame frame})
+            (swap! (::paused-event-sessions session) conj session))))))
+  (close-drained-session! connections workers close-connection!
+                          shutting-down? session))
+
+(defn- resume-blocked-event!
+  [session]
+  (when-let [{::keys [phase pending frame]} @(::event-state session)]
+    (when (and (= ::blocked phase)
+               (not (.get ^AtomicReference (::closed? session))))
+      (let [slot (::output pending)
+            reservation (reserve-encoded-output-result!
+                         session slot (.remaining ^ByteBuffer frame))]
+        (when (= send-accepted (::send-status reservation))
+          (swap! (::paused-event-sessions session) disj session)
+          (reset! (::event-state session)
+                  {::phase ::output ::pending pending ::frame frame})
+          (swap! (::queued-output-bytes session)
+                 + (.remaining ^ByteBuffer frame))
+          (key-interests! session op-write 0))))))
+
+(defn- wake-paused-events!
+  [paused-sessions]
+  (doseq [session (vec @paused-sessions)]
+    (enqueue-selector! (::selector session) (::commands session)
+                       #(resume-blocked-event! session)))
+  nil)
+
+(defn- admit-event!
+  [connections ^ThreadPoolExecutor workers close-connection! shutting-down?
+   session message callback]
+  (if (some? @(::event-state session))
+    {::send-status send-session-full}
+    (let [completion (promise)
+          slot (event-output-reservation)
+          pending {::message message
+                   ::output slot
+                   ::send-completion completion
+                   ::send-callback callback}
+          encode!
+          (fn []
+            (.set ^AtomicReference (::encoding? slot) true)
+            (let [encoded
+                  (try
+                    {::frame (message-frame message)}
+                    (catch Throwable throwable
+                      {::encode-error throwable}))]
+              (.set ^AtomicReference (::encoding? slot) false)
+              (if-let [^ByteBuffer frame (::frame encoded)]
+                (enqueue-selector!
+                 (::selector session) (::commands session)
+                 #(select-encoded-event!
+                   connections workers close-connection! shutting-down?
+                   session pending frame))
+                (do
+                  (finish-event! session pending send-encode-failed)
+                  (enqueue-selector!
+                   (::selector session) (::commands session)
+                   #(close-session! connections workers close-connection!
+                                    session))))))]
+      (reset! (::event-state session) {::phase ::encoding ::pending pending})
+      (try
+        (.execute workers ^Runnable encode!)
+        {::send-status send-accepted ::send-completion completion}
+        (catch Throwable throwable
+          (if (rejected-execution? throwable)
+            (do
+              (encode!)
+              {::send-status send-accepted ::send-completion completion})
+            (do
+              (finish-event! session pending send-encode-failed)
+              {::send-status send-encode-failed})))))))
 
 (defn- abandon-pending-encodes!
   [session status]
@@ -756,14 +882,21 @@
   (let [^SocketChannel channel (::channel session)
         ^ArrayDeque outputs (::outputs session)]
     (loop []
-      (if-let [{::keys [frame response-slot]} (.peekFirst outputs)]
+      (if-let [{::keys [frame response-slot pending] :as output}
+               (or (.peekFirst outputs)
+                   (when (= ::output (::phase @(::event-state session)))
+                     @(::event-state session)))]
         (do
           (.write channel ^ByteBuffer frame)
           (when-not (.hasRemaining ^ByteBuffer frame)
-            (.removeFirst outputs)
+            (if (identical? output (.peekFirst outputs))
+              (.removeFirst outputs)
+              nil)
             (swap! (::queued-output-bytes session)
                    - (.limit ^ByteBuffer frame))
-            (release-response-slot! session response-slot)
+            (if pending
+              (finish-event! session pending send-accepted)
+              (release-response-slot! session response-slot))
             (remove-finished-session! connections session)
             (recur)))
         (do
@@ -791,33 +924,21 @@
                        selector commands
                        #(close-session! connections workers close-connection!
                                         session))))))
-              send!
-              (fn [message]
+              send-event!
+              (fn [message callback]
                 (if-let [session @session-holder]
                   (locking (::send-lock session)
                     (if (or (.get ^AtomicReference (::closing? session))
                             (.get ^AtomicReference (::closed? session))
                             @shutting-down?)
                       {::send-status send-closed}
-                      (let [slot-result (reserve-response-slot-result! session)
-                            status (::send-status slot-result)]
-                        (if (= send-accepted status)
-                          (let [completion (promise)
-                                result
-                                (admit-response!
-                                 connections workers close-connection!
-                                 shutting-down? session message
-                                 (::response-slot slot-result) completion false)]
-                            (when (= send-session-full (::send-status result))
-                              (close-session-after-admission-failure!
-                               connections workers close-connection! session))
-                            result)
-                          (do
-                            (when (= send-session-full status)
-                              (close-session-after-admission-failure!
-                               connections workers close-connection! session))
-                            {::send-status status})))))
+                      (admit-event! connections workers close-connection!
+                                    shutting-down? session message callback)))
                   {::send-status send-closed}))
+              send!
+              (fn
+                ([message] (send-event! message nil))
+                ([message callback] (send-event! message callback)))
               session
               {::channel channel
                ::selector selector
@@ -849,6 +970,9 @@
                ::pending-encodes (ArrayDeque.)
                ::encoding-active? (AtomicReference. false)
                ::outputs (ArrayDeque.)
+               ::event-state (atom nil)
+               ::paused-event-sessions
+               (::paused-event-sessions server-capacity)
                ::queued-output-bytes (atom 0)
                ::decoding? (atom false)
                ::outstanding (atom 0)
@@ -972,6 +1096,7 @@
         server-capacity
         {::authority-input-bytes (atom 0)
          ::paused-read-sessions (atom #{})
+         ::paused-event-sessions (atom #{})
          ::maximum-input-bytes maximum-input-bytes
          ::authority-response-slot-count (atom 0)
          ::maximum-response-slots maximum-response-slots

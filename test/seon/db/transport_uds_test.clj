@@ -589,7 +589,7 @@
         (uds/close-request-server! server)
         (.delete (File. path))))))
 
-(deftest physical-session-send-uses-bounded-response-delivery
+(deftest physical-session-send-owns-one-event-until-full-write
   (let [path (socket-path "transport-addressed-send")
         control (promise)
         server
@@ -606,13 +606,21 @@
         {close! ::uds/close! send! ::uds/send!}
         (deref control 2000 ::not-opened)]
     (try
-      (is (= uds/send-accepted
-             (::uds/send-status (send! {::event 1}))))
-      (is (= uds/send-accepted
-             (::uds/send-status (send! {::event 2}))))
-      (let [input (Channels/newInputStream channel)]
-        (is (= [{::event 1} {::event 2}]
-               [(uds/read-frame input) (uds/read-frame input)])))
+      (let [first-result (send! {::event 1})]
+        (is (= uds/send-accepted (::uds/send-status first-result)))
+        (is (= uds/send-session-full
+               (::uds/send-status (send! {::event 2}))))
+        (let [input (Channels/newInputStream channel)]
+          (is (= {::event 1} (uds/read-frame input)))
+          (is (= uds/send-accepted
+                 (deref (::uds/send-completion first-result)
+                        2000 ::not-complete)))
+          (let [second-result (send! {::event 2})]
+            (is (= uds/send-accepted (::uds/send-status second-result)))
+            (is (= {::event 2} (uds/read-frame input)))
+            (is (= uds/send-accepted
+                   (deref (::uds/send-completion second-result)
+                          2000 ::not-complete))))))
       (wait-until! "addressed response slots"
                    #(zero? @(::uds/authority-response-slot-count server)))
       (close!)
@@ -667,7 +675,7 @@
         (uds/close-request-server! server)
         (.delete (File. path))))))
 
-(deftest addressed-send-admits-without-encoding-and-preserves-session-order
+(deftest addressed-send-bounds-one-physical-event-and-preserves-order
   (let [path (socket-path "transport-send-admission-order")
         control (promise)
         first-entered (promise)
@@ -711,22 +719,25 @@
                                  (deref first-entered 2000 ::not-encoding)))
                 "the caller admits while a codec worker performs Transit")
             (let [second-result (send! {::event :second})]
-              (is (= uds/send-accepted (::uds/send-status second-result)))
+              (is (= uds/send-session-full
+                     (::uds/send-status second-result)))
               (is (= ::not-yet
                      (deref second-entered 50 ::not-yet))
-                  "one session never starts a second concurrent encode")
+                  "a refused second event is never encoded")
               (.countDown release-first)
-              (is (not= ::not-encoding
-                        (deref second-entered 2000 ::not-encoding)))
               (let [input (Channels/newInputStream channel)]
-                (is (= [{::event :first} {::event :second}]
-                       [(uds/read-frame input) (uds/read-frame input)])))
-              (is (= uds/send-accepted
-                     (deref (::uds/send-completion first-result)
-                            2000 ::not-complete)))
-              (is (= uds/send-accepted
-                     (deref (::uds/send-completion second-result)
-                            2000 ::not-complete)))))))
+                (is (= {::event :first} (uds/read-frame input)))
+                (is (= uds/send-accepted
+                       (deref (::uds/send-completion first-result)
+                              2000 ::not-complete)))
+                (let [retried (send! {::event :second})]
+                  (is (= uds/send-accepted (::uds/send-status retried)))
+                  (is (not= ::not-encoding
+                            (deref second-entered 2000 ::not-encoding)))
+                  (is (= {::event :second} (uds/read-frame input)))
+                  (is (= uds/send-accepted
+                         (deref (::uds/send-completion retried)
+                                2000 ::not-complete)))))))))
       (finally
         (.countDown release-first)
         (.close channel)
@@ -898,15 +909,15 @@
     (try
       (wait-until! "two exact-pressure sessions" #(= 2 (count @controls)))
       (let [[oversized healthy] @controls
-            [_oversized-channel healthy-channel] channels
+            [oversized-channel healthy-channel] channels
             oversized-result
             ((::uds/send! oversized) {::event (apply str (repeat 1024 "x"))})]
         (is (= uds/send-accepted (::uds/send-status oversized-result)))
-        (is (= uds/send-session-full
+        (is (= ::not-complete
                (deref (::uds/send-completion oversized-result)
-                      2000 ::not-complete)))
-        (wait-until! "oversized session cleanup" #(= 1 (count @closed)))
-        (is (= #{(::connection-id oversized)} (set @closed)))
+                      50 ::not-complete))
+            "encoded event waits instead of closing under output pressure")
+        (is (empty? @closed))
         (let [healthy-result ((::uds/send! healthy) {::event :healthy})]
           (is (= uds/send-accepted (::uds/send-status healthy-result)))
           (is (= {::event :healthy}
@@ -914,6 +925,12 @@
           (is (= uds/send-accepted
                  (deref (::uds/send-completion healthy-result)
                         2000 ::not-complete))))
+        (.close ^SocketChannel oversized-channel)
+        (is (= uds/send-closed
+               (deref (::uds/send-completion oversized-result)
+                      2000 ::not-complete)))
+        (wait-until! "only explicitly closed session cleanup"
+                     #(= #{(::connection-id oversized)} (set @closed)))
         (wait-until! "exact output byte release"
                      #(zero? @(::uds/authority-output-bytes server))))
       (finally
@@ -921,7 +938,7 @@
         (uds/close-request-server! server)
         (.delete (File. path))))))
 
-(deftest session-pressure-closes-only-that-session
+(deftest unsolicited-event-pressure-is-bounded-without-response-slots
   (let [path (socket-path "transport-session-pressure")
         controls (atom [])
         closed (atom [])
@@ -958,30 +975,41 @@
                    (::uds/send-status ((::uds/send! slow)
                                        {::event :slow}))))
             (is (= true (deref slow-entered 2000 ::not-entered)))
-            (is (= uds/send-session-full
-                   (::uds/send-status ((::uds/send! slow)
-                                       {::event :too-many}))))
+            (is (every?
+                 #(= uds/send-session-full (::uds/send-status %))
+                 (repeatedly
+                  64
+                  #((::uds/send! slow) {::event :too-many}))))
+            (is (zero? @(::uds/authority-response-slot-count server))
+                "one-way events never occupy request-response slots")
             (is (= uds/send-accepted
                    (::uds/send-status ((::uds/send! healthy)
                                        {::event :healthy}))))
             (is (= {::event :healthy}
                    (uds/read-frame (Channels/newInputStream healthy-channel))))
-            (wait-until! "only slow owner cleanup" #(= 1 (count @closed)))
-            (is (= #{(::connection-id slow)} (set @closed)))
+            (Thread/sleep 25)
+            (is (empty? @closed))
             (is (= uds/send-accepted
                    (::uds/send-status ((::uds/send! healthy)
                                        {::event :still-healthy}))))
             (is (= {::event :still-healthy}
                    (uds/read-frame (Channels/newInputStream healthy-channel))))
             (.countDown release-slow)
-            (try (.close ^SocketChannel slow-channel) (catch Throwable _)))))
+            (is (= {::event :slow}
+                   (uds/read-frame (Channels/newInputStream slow-channel))))
+            (wait-until! "slow event capacity release"
+                         #(= uds/send-accepted
+                             (::uds/send-status
+                              ((::uds/send! slow) {::event :after-pressure}))))
+            (is (= {::event :after-pressure}
+                   (uds/read-frame (Channels/newInputStream slow-channel)))))))
       (finally
         (.countDown release-slow)
         (run! #(try (.close ^SocketChannel %) (catch Throwable _)) channels)
         (uds/close-request-server! server)
         (.delete (File. path))))))
 
-(deftest authority-pressure-does-not-close-the-current-session
+(deftest unsolicited-events-do-not-share-response-slot-authority
   (let [path (socket-path "transport-authority-pressure")
         controls (atom [])
         closed (atom 0)
@@ -1019,22 +1047,28 @@
                     ((::uds/send! first-control)
                      {::event :occupies-authority}))))
             (is (= true (deref first-entered 2000 ::not-entered)))
-            (is (= uds/send-authority-full
-                   (::uds/send-status
-                    ((::uds/send! current-control) {::event :deferred}))))
+            (let [deferred
+                  ((::uds/send! current-control) {::event :deferred})]
+              (is (= uds/send-accepted (::uds/send-status deferred)))
+              (is (zero? @(::uds/authority-response-slot-count server)))
+              (is (= {::event :deferred}
+                     (uds/read-frame
+                      (Channels/newInputStream current-channel))))
+              (is (= uds/send-accepted
+                     (deref (::uds/send-completion deferred)
+                            2000 ::not-complete))))
             (Thread/sleep 25)
             (is (zero? @closed))
             (is (= 2 (count @(::uds/connections server))))
             (.countDown release-first)
             (is (= {::event :occupies-authority}
                    (uds/read-frame (Channels/newInputStream first-channel))))
-            (wait-until! "authority response slot release"
-                         #(zero? @(::uds/authority-response-slot-count server)))
             (is (= uds/send-accepted
                    (::uds/send-status
                     ((::uds/send! current-control) {::event :retried}))))
             (is (= {::event :retried}
-                   (uds/read-frame (Channels/newInputStream current-channel)))))))
+                   (uds/read-frame
+                    (Channels/newInputStream current-channel)))))))
       (finally
         (.countDown release-first)
         (run! #(try (.close ^SocketChannel %) (catch Throwable _)) channels)
@@ -1073,6 +1107,42 @@
                    #(and (empty? @(::uds/connections server))
                          (zero? @(::uds/authority-response-slot-count server))
                          (zero? @(::uds/authority-output-bytes server))))
+      (finally
+        (.close channel)
+        (uds/close-request-server! server)
+        (.delete (File. path))))))
+
+(deftest rejected-event-codec-admission-encodes-inline-once
+  (let [path (socket-path "event-inline")
+        control (promise)
+        callbacks (atom 0)
+        server
+        (uds/start-request-server!
+         {::uds/socket-path path
+          ::uds/open-connection!
+          (fn [connection-control]
+            (deliver control connection-control)
+            (Object.))
+          ::uds/close-connection! (constantly nil)
+          ::uds/handler
+          (fn [_owner _request _frame-bytes _complete!] nil)})
+        channel (uds/connect! path)
+        {send! ::uds/send!} (deref control 2000 ::not-opened)]
+    (try
+      (.shutdownNow ^java.util.concurrent.ThreadPoolExecutor (::uds/workers server))
+      (let [result
+            (send! {::event :inline}
+                   (fn [status]
+                     (when (= uds/send-accepted status)
+                       (swap! callbacks inc))))]
+        (is (= uds/send-accepted (::uds/send-status result)))
+        (is (= {::event :inline}
+               (uds/read-frame (Channels/newInputStream channel))))
+        (is (= uds/send-accepted
+               (deref (::uds/send-completion result) 2000 ::not-complete)))
+        (is (= 1 @callbacks))
+        (is (zero? @(::uds/authority-response-slot-count server)))
+        (is (zero? @(::uds/authority-output-bytes server))))
       (finally
         (.close channel)
         (uds/close-request-server! server)

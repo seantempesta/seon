@@ -51,6 +51,28 @@ can interpret and union that source-positioned evidence directly when
 installing a committed-report interest. Datastar now consumes that evidence;
 analyzer-derived `:seon.fn/read-attrs` is no longer an invalidation authority.
 
+The source-frozen five-feed fanout falsifier at Seon `623f4650` committed all
+65 transactions and converged reactive work to basis transaction 536870997,
+but it is not accepted: the writer filled the pod session's 64 shared
+response-slot admissions with one-way interest events and closed the session.
+Reconnect hid the loss behind eventual convergence. The earliest unsettled
+contract is writer-side bounded event backpressure: retain at most the newest
+pending event per existing protocol event key, turn repeated interest delivery
+into the existing resynchronization event, preserve exact request responses,
+and never close a healthy session merely because event encoding/output is
+temporarily full. No capacity increase is admissible.
+
+The implemented boundary keeps two independently owned data states rather than
+two coupled retry machines. UDS owns one opaque physical event through encode,
+bounded output wait, and full write; ordinary response output is always chosen
+first and keeps its existing response-slot accounting. The writer owns one
+in-flight semantic event plus one newest pending event per interest or acquired
+database. Repeated interest reports become the existing resynchronization
+event, and repeated database-advanced events retain the newest database value.
+Full-write completion alone advances writer delivery. Codec-executor rejection
+runs that one encode task inline on the bounded `:delivery` worker; the caller
+is not Datahike's transaction commit thread.
+
 `seon.reactive` now implements the general registered-read lifecycle. Each
 registration owns one Datahike writer interest, one active computation, and at
 most one newest pending database value. Independent registrations start
