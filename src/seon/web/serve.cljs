@@ -1192,16 +1192,10 @@
 
       :else
       (let [minted (when-not reuse? (await (agent/start! {})))
-            aid (or agent-id (:seon.agent/id minted))
-            resumed (when (and reuse? aid)
-                      (await
-                       (agent-runtime/resume!
-                        {:seon.agent/id aid})))]
+            aid (or agent-id (:seon.agent/id minted))]
         (if (or (:seon.error/message minted)
-                (false? (::agent-runtime/resumed? resumed))
                 (nil? aid))
           {:error (or (:seon.error/message minted)
-                      (::agent-runtime/error resumed)
                       (:seon.agent.runtime/error minted)
                       "agent task could not host its durable agent")}
           (let [start (js/Date.now)
@@ -1214,14 +1208,22 @@
                    :seon.agent.message/content input}))]
             (if (:seon.error/message message-result)
               {:error (:seon.error/message message-result)}
-              (do
-                (log/info-console! "seon.web.serve" "POST /agents/run — task in"
-                                   {:agent aid :reused reuse?
-                                    :tokens (tokens/estimate (str input))})
-                (loop []
-                  (await (js/Promise. (fn [resolve]
-                                       (js/setTimeout resolve 1500))))
-                  (let [database (await (db/db))
+              (let [resumed (when reuse?
+                              (await
+                               (agent-runtime/resume!
+                                {:seon.agent/id aid})))]
+                (if (false? (::agent-runtime/resumed? resumed))
+                  {:error (or (::agent-runtime/error resumed)
+                              "agent task could not host its durable agent")}
+                  (do
+                    (log/info-console! "seon.web.serve"
+                                       "POST /agents/run — task in"
+                                       {:agent aid :reused reuse?
+                                        :tokens (tokens/estimate (str input))})
+                    (loop []
+                      (await (js/Promise. (fn [resolve]
+                                           (js/setTimeout resolve 1500))))
+                      (let [database (await (db/db))
                         observations
                         (when-not (:seon.error/message database)
                           (await
@@ -1270,7 +1272,7 @@
                               (await
                                (final-agent-task-result
                                 final-database aid injected-at elapsed
-                                timeout?)))))))))))))))))
+                                timeout?)))))))))))))))))))
 
 (defn- handle-agent-run! [req res]
   (-> (read-body req)

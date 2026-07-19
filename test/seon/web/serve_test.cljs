@@ -35,7 +35,7 @@
    :history false
    :datahike/commit-id #uuid "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"})
 
-(deftest explicit-agent-task-hosts-the-durable-agent-before-intake
+(deftest explicit-agent-task-persists-input-before-hosting-the-durable-agent
   (async done
     (let [run-task (deref #'serve/run-agent-task!)
           original-db db/db
@@ -61,7 +61,12 @@
           (.then
            (fn [result]
              (is (= {:error "host refused"} result))
-             (is (= [[:resume {:seon.agent/id "root"}]] @calls))))
+             (is (= [[:message
+                      {:seon.agent.message/from agent/user-ref
+                       :seon.agent.message/to [[:seon.agent/id "root"]]
+                       :seon.agent.message/content "work"}]
+                     [:resume {:seon.agent/id "root"}]]
+                    @calls))))
           (.catch
            (fn [error]
              (is false (str "task hosting rejected: " error))))
