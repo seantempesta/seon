@@ -126,16 +126,30 @@ def live_product_solver(scenario: str, timeout_s: int = 300):
                         "(seon.test.runner/run! "
                         f"{{:seon.test.runner/vars '[{test_namespace}/{test_name}] "
                         ":seon.test.runner/record? true})")
+                    producer_task = (
+                        f"Evaluate exactly `{initial_source}`, then "
+                        "`(complete \"published\")`.")
+                    consumer_task = (
+                        f"Evaluate exactly `{consumer_source}` without defining "
+                        "that function, then `(complete \"reused\")`.")
+                    repair_task = (
+                        f"Evaluate exactly `{repair_source}`, then exactly "
+                        f"`{test_ns_source}`, then exactly `{test_source}`, then "
+                        f"exactly `{run_test_source}`, then "
+                        "`(complete \"repaired and tested\")`. Do not create a "
+                        "suffixed or replacement function name.")
                     prompts = (
-                        f"Send namespace {target_namespace} a task to evaluate "
-                        f"exactly `{initial_source}`. After it completes, send "
-                        f"namespace {consumer_namespace} a separate task to evaluate "
-                        f"exactly `{consumer_source}` without defining that function.",
-                        f"Send a new peer agent into namespace {target_namespace} to "
-                        f"evaluate exactly `{repair_source}`, then exactly "
-                        f"`{test_ns_source}`, then exactly "
-                        f"`{test_source}`, then exactly `{run_test_source}`. Do not "
-                        "create a suffixed or replacement function name.")
+                        "Use one `agent/delegate!` form at a time and read each "
+                        "child's real completion before continuing. First delegate "
+                        f"namespace `{target_namespace}` this task: {producer_task} "
+                        "Then delegate "
+                        f"namespace `{consumer_namespace}` this separate task: "
+                        f"{consumer_task} After both reports arrive, "
+                        "`(complete \"producer and consumer finished\")`.",
+                        "Use one `agent/delegate!` form to delegate a fresh peer in "
+                        f"namespace `{target_namespace}` this task: {repair_task} "
+                        "After its real completion arrives, "
+                        "`(complete \"repair finished\")`.")
                 else:
                     target_namespace = None
                     prompts = PHASES[scenario]
@@ -146,12 +160,21 @@ def live_product_solver(scenario: str, timeout_s: int = 300):
                     snapshot = read_namespace_evidence(
                         lease.cluster_url, target_namespace)
                 elif scenario == "reuse_repair":
-                    snapshot = read_reuse_repair_evidence(
-                        lease.cluster_url, namespace=target_namespace,
-                        function_name=function_name,
-                        consumer_source=consumer_source,
-                        repair_source=repair_source,
-                        test_namespace=test_namespace, test_name=test_name)
+                    try:
+                        snapshot = read_reuse_repair_evidence(
+                            lease.cluster_url, namespace=target_namespace,
+                            function_name=function_name,
+                            consumer_source=consumer_source,
+                            repair_source=repair_source,
+                            test_namespace=test_namespace, test_name=test_name)
+                    except BaseException as evidence_failure:
+                        evidence_failure.add_note(
+                            "pod phases: " + repr([
+                                {key: run.get(key) for key in
+                                 ("agent_id", "turns", "evals", "timed_out",
+                                  "closed_reason", "reply")}
+                                for run in runs]))
+                        raise
                 else:
                     snapshot = read_child_recovery_evidence(
                         lease.cluster_url, "root")

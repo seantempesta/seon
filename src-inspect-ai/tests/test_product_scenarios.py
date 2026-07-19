@@ -302,10 +302,11 @@ def test_native_live_reuse_repair_task_reads_history(monkeypatch):
                             cluster_url="http://pod/agents/run")
     monkeypatch.setattr(cluster, "acquire_branch_lease", lambda _name: lease)
     monkeypatch.setattr(cluster, "release_branch_lease", lambda _lease: None)
+    prompts = []
     monkeypatch.setattr(
         pod_solver, "pod_run",
         lambda prompt, timeout, url, *, agent_id:
-        {"reply": "done", "agent_id": agent_id})
+        prompts.append(prompt) or {"reply": "done", "agent_id": agent_id})
     monkeypatch.setattr(pod_solver, "require_scorable_pod_state",
                         lambda state: state)
     observed = []
@@ -321,6 +322,10 @@ def test_native_live_reuse_repair_task_reads_history(monkeypatch):
     assert log.status == "success", log.error
     assert observed[0][0] == "http://pod/agents/run"
     assert observed[0][1]["namespace"] == "my.inspect.repair.nabcdef"
+    assert len(prompts) == 2
+    assert all("agent/delegate!" in prompt for prompt in prompts)
+    assert "my.inspect.consumer.nabcdef" in prompts[0]
+    assert "my.inspect.repair.nabcdef-test" in prompts[1]
 
 
 def test_live_product_failure_is_not_masked_by_release_failure(monkeypatch):
