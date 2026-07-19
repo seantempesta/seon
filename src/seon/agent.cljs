@@ -301,6 +301,7 @@
     {:optional true} :seon.agent.ctx/escape-clipping?]
    [:seon.agent.ctx/cache-breakpoint
     {:optional true} :seon.agent.ctx/cache-breakpoint]
+   [:seon.config/repl-mode         {:optional true} :seon.config/repl-mode]
    [:seon.agent.runtime/wake?      {:optional true} :seon.agent.runtime/wake?]
    [:seon.eval/home-requires       {:optional true} :seon.eval/home-requires]
    [:seon.render/ai   {:optional true} :seon.render/ai]

@@ -207,6 +207,7 @@
   (into
    '[:db/id
      :seon.agent.ctx/cache-breakpoint
+     :seon.config/repl-mode
      :seon.render/ai
      {:seon.agent/ctx [*]}]
    (ai/agent-config-pull-pattern)))
@@ -340,7 +341,10 @@
              :seon.ai/system-prompt system-prompt
              :seon.ai/config-resolution config-resolution
              :seon.config/repl-mode
-             (or (:seon.config/repl-mode cluster-config-row) :batch)
+             (let [agent-mode (:seon.config/repl-mode entity)]
+               (if (contains? #{:batch :stream} agent-mode)
+                 agent-mode
+                 (or (:seon.config/repl-mode cluster-config-row) :batch)))
              :seon.eval/ns
              (or (::render-fns/current-ns namespace-value)
                  (symbol (str "my.agent." id)))))))))

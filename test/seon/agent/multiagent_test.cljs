@@ -263,6 +263,7 @@
           received-override (atom nil)
           configured-requires '[[seon.db :as configured-db]]
           configured-model {:seon.ai/agent-provider :openai-compat
+                            :seon.config/repl-mode :batch
                             :seon.ai/agent-model "kimi-k3"
                             :seon.ai/agent-timeout-ms 180000
                             :seon.ai/agent-base-url "https://api.moonshot.ai/v1"

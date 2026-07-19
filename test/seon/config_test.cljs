@@ -213,6 +213,7 @@
 (deftest named-model-variants-are-sparse-closed-launch-overrides
   (let [planning
         {:seon.ai/agent-provider :openai-compat
+         :seon.config/repl-mode :batch
          :seon.ai/agent-model "kimi-k3"
          :seon.ai/agent-max-tokens 16384
          :seon.ai/agent-timeout-ms 180000
@@ -229,6 +230,8 @@
     (is (= {} (config/model-variants
                (config/resolve-config-singleton {}))))
     (is (= "kimi-k3" (:seon.ai/agent-model resolved)))
+    (is (= :batch (:seon.config/repl-mode resolved))
+        "a named planning variant selects multi-namespace batch grammar")
     (is (= "false" (:seon.ai/agent-thinking resolved))
         "a sparse variant inherits ordinary agent-context values")
     (is (= 2 (:seon.ai/agent-max-retries resolved)))

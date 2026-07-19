@@ -242,7 +242,12 @@
    [:seon.ai/agent-extra-body-edn
     {:optional true} [:or [:enum :inherit] [:string {:min 1}]]]
    [:seon.ai/agent-max-retries
-    {:optional true} [:or [:enum :inherit] [:int {:min 0}]]]])
+    {:optional true} [:or [:enum :inherit] [:int {:min 0}]]]
+   ;; Turn grammar is launch-role data too. A planning or generated repair
+   ;; agent must be able to consume one multi-namespace batch without changing
+   ;; the cluster default used by ordinary agents.
+   [:seon.config/repl-mode
+    {:optional true} [:or [:enum :inherit] :seon.config/repl-mode]]])
 
 (def ^:private agent-model-config-schema
   (into [:map {:closed true}] agent-model-config-entries))

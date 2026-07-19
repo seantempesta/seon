@@ -98,7 +98,8 @@
                  [{::protocol/success? true ::protocol/result result}
                   {::protocol/success? true
                    ::protocol/result
-                   {:seon.config/system-text "frozen system"}}
+                   {:seon.config/system-text "frozen system"
+                    :seon.config/repl-mode :batch}}
                   {::protocol/success? true
                    ::protocol/result {:seon.ai/model "frozen-model"}}]}))))
      (-> (db/with-tx-context
@@ -111,6 +112,7 @@
     (let [observed (atom nil)
           entity {:db/id 1
                   :seon.agent/id "agent-1"
+                  :seon.config/repl-mode :stream
                   :seon.render/ai (pr-str "literal whole prompt")}]
       (-> (call-with-acquired-agent
            entity {:seon.agent/id "agent-1"} observed)
@@ -118,6 +120,8 @@
            (fn [rendered]
              (is (= "literal whole prompt" (:seon.render/text rendered)))
              (is (= "frozen system" (:seon.ai/system-prompt rendered)))
+             (is (= :stream (:seon.config/repl-mode rendered))
+                 "the agent's launch grammar overrides the cluster singleton")
              (is (= :deepseek
                     (get-in rendered [:seon.ai/config-resolution
                                       :seon.ai/resolved-config
@@ -140,6 +144,10 @@
                             [:seon.execution.runtime-test/request ::db/members
                              0 ::protocol/entity-id])))
              (is (some #(= '{:seon.agent/ctx [*]} %)
+                       (get-in @observed
+                               [:seon.execution.runtime-test/request ::db/members
+                                0 ::protocol/selector])))
+             (is (some #{:seon.config/repl-mode}
                        (get-in @observed
                                [:seon.execution.runtime-test/request ::db/members
                                 0 ::protocol/selector])))

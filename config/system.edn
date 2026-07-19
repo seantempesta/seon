@@ -253,6 +253,7 @@
  :seon.config/model-variants
  {:planning
   {:seon.ai/agent-provider :openai-compat
+   :seon.config/repl-mode :batch
    :seon.ai/agent-model "kimi-k3"
    :seon.ai/agent-max-tokens 16384
    :seon.ai/agent-timeout-ms 300000
@@ -263,6 +264,7 @@
    :seon.ai/agent-max-retries 1}
   :execution
   {:seon.ai/agent-provider :deepseek
+   :seon.config/repl-mode :batch
    :seon.ai/agent-model "deepseek-v4-flash"
    :seon.ai/agent-thinking "false"
    :seon.ai/agent-max-tokens 8192

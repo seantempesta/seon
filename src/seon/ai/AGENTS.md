@@ -26,7 +26,10 @@ LLM call sits in the turn), `observability.md` (what of the request/response
   Each absent or `:inherit` value falls through to the cluster row. Secrets
   remain in the named process environment variable. This is how independent
   agents use different providers and compatible gateways; never add
-  call-site provider conditionals.
+  call-site provider conditionals. Named launch variants may also carry the
+  existing `:seon.config/repl-mode`; prompt acquisition resolves the agent's
+  value before the cluster singleton so planning/repair agents can use
+  `:batch` without changing ordinary agents.
 - **`::max-tokens` is the OUTPUT cap** — a context-window limit is a
   separate concern; don't conflate them.
 - **`tokens.cljs` owns the one token estimator** (`chars/4`). Every size
