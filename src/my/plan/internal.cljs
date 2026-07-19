@@ -711,6 +711,143 @@
   [agent root ids now]
   (compile-reconcile [] "plan!" agent [root] ids now))
 
+;; --- Generated namespace DAG ---------------------------------------------
+
+(defn- namespace-allocation-key
+  "Stable request-local allocation key for generated namespace `index`."
+  [index]
+  (keyword "my.plan.namespace" (str "id-" index)))
+
+(defn row-namespace-name
+  "Canonical namespace symbol connected to a generated plan row."
+  [row]
+  (get-in row [:my.plan/namespace :seon.ns/name]))
+
+(defn compile-namespace-dag
+  "Reconcile one parsed-program projection into `root-id`'s namespace leaves.
+
+   This is the generated-code specialization of the existing durable plan,
+   not a second task model. Only direct children carrying
+   `:my.plan/namespace` participate. Completed leaves are immutable evidence;
+   unfinished leaves are upserted/dropped to match the projection and their
+   `:my.plan/needs` edges are replaced from generated require edges.
+
+   `ids` maps the returned allocation keys to durable step ids. The first
+   pass may omit them to discover allocations; the second pass supplies every
+   value. Identical input against its reconciled rows returns an empty flat
+   transaction."
+  [rows root-id projection ids now]
+  (let [namespaces (:seon.repl/namespaces projection)
+        ordered-names (:seon.repl/namespace-order projection)
+        errors (:seon.repl/errors projection)
+        root (get (rows-by-id rows) root-id)
+        root-agent (:my.plan/agent root)
+        projected-by-name (into {} (map (juxt :seon.ns/name identity)) namespaces)
+        ordered-set (set ordered-names)
+        generated-rows
+        (filterv #(and (= root-id (row-parent-id %))
+                       (some? (row-namespace-name %)))
+                 rows)
+        rows-by-name (group-by row-namespace-name generated-rows)
+        duplicate-name (some (fn [[name matches]]
+                               (when (< 1 (count matches)) name))
+                             rows-by-name)]
+    (cond
+      (seq errors)
+      {::error (str "compile-namespace-dag: parsed program has structural "
+                    "errors; refuse to publish a partial dependency DAG.")}
+
+      (nil? root-agent)
+      {::error (str "compile-namespace-dag: no owned plan root "
+                    (pr-str root-id) ".")}
+
+      (not= ordered-set (set (keys projected-by-name)))
+      {::error (str "compile-namespace-dag: namespace order does not name "
+                    "every projected namespace exactly once.")}
+
+      (some #(not (symbol? %)) ordered-names)
+      {::error (str "compile-namespace-dag: every :seon.ns/name must be a "
+                    "namespace symbol.")}
+
+      duplicate-name
+      {::error (str "compile-namespace-dag: namespace " (pr-str duplicate-name)
+                    " already has more than one generated plan leaf.")}
+
+      :else
+      (let [existing-by-name (into {} (map (fn [[name matches]]
+                                             [name (first matches)]))
+                                   rows-by-name)
+            new-names (into [] (remove existing-by-name) ordered-names)
+            allocation-keys (mapv (comp namespace-allocation-key first)
+                                  (map-indexed vector new-names))
+            new-ids (into {}
+                          (map-indexed
+                            (fn [index name]
+                              [name (get ids (namespace-allocation-key index))]))
+                          new-names)
+            step-id (fn [name]
+                      (or (some-> (existing-by-name name) row-id)
+                          (new-ids name)))
+            generated-needs
+            (fn [name]
+              (->> (:seon.ns/require-edges (projected-by-name name))
+                   (filter ordered-set)
+                   (sort-by str)
+                   (mapv step-id)))
+            namespace-ref (fn [name] [:seon.ns/name name])
+            step-ref (fn [id] [:my.plan/id id])
+            namespace-upserts (mapv (fn [name] {:seon.ns/name name}) new-names)
+            additions
+            (mapv
+              (fn [name]
+                (let [id (step-id name)
+                      needs (generated-needs name)]
+                  (cond-> {:my.plan/id id
+                           :my.plan/title (str name)
+                           :my.plan/status :open
+                           :my.plan/agent root-agent
+                           :my.plan/parent (step-ref root-id)
+                           :my.plan/namespace (namespace-ref name)
+                           :my.plan/created-at now}
+                    (seq needs) (assoc :my.plan/needs (mapv step-ref needs)))))
+              new-names)
+            updates
+            (vec
+              (mapcat
+                (fn [name]
+                  (let [row (existing-by-name name)]
+                    (when (and row (not= :done (:my.plan/status row)))
+                      (let [id (row-id row)
+                            have (row-need-ids row)
+                            want (set (generated-needs name))]
+                        (concat
+                          (when (not= (str name) (:my.plan/title row))
+                            [{:my.plan/id id :my.plan/title (str name)}])
+                          (map (fn [need-id]
+                                 [:db/add (step-ref id) :my.plan/needs
+                                  (step-ref need-id)])
+                               (sort (remove have want)))
+                          (map (fn [need-id]
+                                 [:db/retract (step-ref id) :my.plan/needs
+                                  (step-ref need-id)])
+                               (sort (remove want have))))))))
+                ordered-names))
+            drops
+            (into []
+                  (keep (fn [row]
+                          (when (and (not= :done (:my.plan/status row))
+                                     (not (ordered-set (row-namespace-name row))))
+                            [:db.fn/retractEntity (step-ref (row-id row))])))
+                  generated-rows)
+            tx (-> namespace-upserts (into additions) (into updates) (into drops))]
+        {::transaction-data tx
+         ::allocation-keys allocation-keys
+         ::namespace-ids (into {} (map (fn [name] [name (step-id name)]))
+                               ordered-names)
+         ::diff {:my.plan/added (count additions)
+                 :my.plan/dropped (count drops)
+                 :my.plan/updated (count updates)}}))))
+
 ;; --- Tree pull (the structural read behind my.plan/tree). -----------------
 
 (def tree-pattern

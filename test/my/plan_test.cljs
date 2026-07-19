@@ -56,6 +56,15 @@
          {:my.plan/ok? false :my.plan/error "status read failed"})
         "database failures remain valid agent-facing values")))
 
+(deftest generation-step-attributes-have-one-canonical-database-shape
+  (is (= [{:db/ident :my.plan/namespace
+           :db/valueType :db.type/ref
+           :db/cardinality :db.cardinality/one}
+          {:db/ident :my.plan/claim
+           :db/valueType :db.type/string
+           :db/cardinality :db.cardinality/one}]
+         (db/malli->datahike-schema [:my.plan/namespace :my.plan/claim]))))
+
 (deftest html-renderer-matches-the-dynamic-render-interface
   (async done
     (let [original-query db/query]
@@ -104,6 +113,54 @@
           (.then (fn [_] (done)))
           (.catch (fn [error] (is false (str error)) (done)))))))
 
+(deftest blocked-retains-evidence-and-reopen-releases-the-claim
+  (async done
+    (let [requests (atom [])
+          status (atom :active)
+          original-pull db/pull
+          original-transact db/transact!
+          pull-stub
+          (fn [_database _selector _lookup-ref]
+            (js/Promise.resolve
+             {:my.plan/id "ready"
+              :my.plan/title "Verify"
+              :my.plan/status @status
+              :my.plan/claim "assignment-message"
+              :my.plan/created-at (js/Date. 3)
+              :my.plan/agent {:seon.agent/id agent-id}}))]
+      (set! (.-cljs$core$IFn$_invoke$arity$3 pull-stub) pull-stub)
+      (set! db/pull pull-stub)
+      (set! db/transact!
+            (fn [& values]
+              (let [request (first values)]
+                (swap! requests conj request)
+                (reset! status
+                        (get-in request [::db/tx-data 0 :my.plan/status]))
+                (js/Promise.resolve
+                 {:db-before database :db-after database
+                  :tx-data (::db/tx-data request) :tempids {} :tx-meta {}}))))
+      (-> (plan/blocked! {:my.plan/id "ready" :seon.db/db database})
+          (.then
+           (fn [result]
+             (is (true? (:my.plan/ok? result)))
+             (is (= [{:my.plan/id "ready" :my.plan/status :blocked}]
+                    (::db/tx-data (first @requests))))
+             (plan/reopen! {:my.plan/id "ready" :seon.db/db database})))
+          (.then
+           (fn [result]
+             (is (true? (:my.plan/ok? result)))
+             (is (= [{:my.plan/id "ready" :my.plan/status :open}
+                     [:db/retract [:my.plan/id "ready"]
+                      :my.plan/completed-at]
+                     [:db/retract [:my.plan/id "ready"] :my.plan/claim]]
+                    (::db/tx-data (second @requests))))))
+          (.finally
+           (fn []
+             (set! db/pull original-pull)
+             (set! db/transact! original-transact)))
+          (.then (fn [_] (done)))
+          (.catch (fn [error] (is false (str error)) (done)))))))
+
 (deftest reconcile-compiler-is-pure-over-ordinary-rows
   (let [document [{:my.plan/id "root" :my.plan/title "Ship"
                    :my.plan/goal "working release"
@@ -141,6 +198,70 @@
     (internal/compile-reconcile
       existing "reconcile!" [:seon.agent/id agent-id]
       document ids (js/Date. 10))))
+
+(defn- compile-namespace-dag-with-generated-ids
+  [existing projection]
+  (let [preview (internal/compile-namespace-dag
+                  existing "root" projection {} (js/Date. 11))
+        ids (into {}
+                  (map-indexed
+                    (fn [index allocation-key]
+                      [allocation-key (str "namespace-step-" index)]))
+                  (:my.plan.internal/allocation-keys preview))]
+    (internal/compile-namespace-dag
+      existing "root" projection ids (js/Date. 11))))
+
+(def ^:private namespace-projection
+  {:seon.repl/namespaces
+   [{:seon.ns/name 'my.generated.model :seon.ns/require-edges #{}}
+    {:seon.ns/name 'my.generated.service
+     :seon.ns/require-edges #{'my.generated.model 'seon.schema}}]
+   :seon.repl/namespace-order ['my.generated.model 'my.generated.service]
+   :seon.repl/errors []})
+
+(deftest namespace-dag-compiler-authors-dependency-leaves-and-is-idempotent
+  (let [compiled (compile-namespace-dag-with-generated-ids
+                   [(first rows)] namespace-projection)
+        tx (:my.plan.internal/transaction-data compiled)
+        model (some #(when (= "my.generated.model" (:my.plan/title %)) %) tx)
+        service (some #(when (= "my.generated.service" (:my.plan/title %)) %) tx)
+        reconciled
+        [(first rows)
+         (row (:my.plan/id model) "my.generated.model" :open 11
+              :my.plan/parent {:my.plan/id "root"}
+              :my.plan/namespace {:seon.ns/name 'my.generated.model})
+         (row (:my.plan/id service) "my.generated.service" :open 11
+              :my.plan/parent {:my.plan/id "root"}
+              :my.plan/namespace {:seon.ns/name 'my.generated.service}
+              :my.plan/needs [{:my.plan/id (:my.plan/id model)}])]
+        repeated (internal/compile-namespace-dag
+                   reconciled "root" namespace-projection {} (js/Date. 12))]
+    (is (= {:my.plan/added 2 :my.plan/dropped 0 :my.plan/updated 0}
+           (:my.plan.internal/diff compiled)))
+    (is (= [[:my.plan/id (:my.plan/id model)]] (:my.plan/needs service)))
+    (is (empty? (:my.plan.internal/transaction-data repeated)))
+    (is (= {:my.plan/added 0 :my.plan/dropped 0 :my.plan/updated 0}
+           (:my.plan.internal/diff repeated)))))
+
+(deftest namespace-dag-compiler-preserves-done-and-drops-only-unfinished-leaves
+  (let [existing
+        [(first rows)
+         (row "model" "my.generated.model" :done 11
+              :my.plan/parent {:my.plan/id "root"}
+              :my.plan/namespace {:seon.ns/name 'my.generated.model})
+         (row "old" "my.generated.old" :open 11
+              :my.plan/parent {:my.plan/id "root"}
+              :my.plan/namespace {:seon.ns/name 'my.generated.old})]
+        empty-projection {:seon.repl/namespaces []
+                          :seon.repl/namespace-order []
+                          :seon.repl/errors []}
+        compiled (internal/compile-namespace-dag
+                   existing "root" empty-projection {} (js/Date. 12))
+        tx (:my.plan.internal/transaction-data compiled)]
+    (is (not-any? #(= [:db.fn/retractEntity [:my.plan/id "model"]] %) tx))
+    (is (some #(= [:db.fn/retractEntity [:my.plan/id "old"]] %) tx))
+    (is (= {:my.plan/added 0 :my.plan/dropped 1 :my.plan/updated 0}
+           (:my.plan.internal/diff compiled)))))
 
 (deftest row-derivations-preserve-dependency-semantics
   (let [graph [(row "root" "Root" :open 0)

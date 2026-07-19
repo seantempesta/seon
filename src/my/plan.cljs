@@ -31,6 +31,8 @@
 (schema/register! ::agent :seon.db/ref)   ; SCOPE ref — the agent this step belongs to
 (schema/register! ::from :seon.db/ref)     ; who asked
 (schema/register! ::message :seon.db/ref)  ; the inbound message an address-step tracks
+(schema/register! ::namespace :seon.db/ref) ; generated code's owning namespace
+(schema/register! ::claim :string)          ; assignment message id used as CAS fence
 (schema/register! ::parent :seon.db/ref)             ; TREE edge — plain ref, no cascade
 (schema/register! ::needs [:vector :seon.db/ref])    ; DAG edges — ready only when all :done
 (schema/register! ::goal :string)    ; root-level WHY — outlives the transcript window
@@ -222,6 +224,8 @@
    [::pace         {:optional true} ::pace]
    [::from         {:optional true} ::from]
    [::message      {:optional true} ::message]
+   [::namespace    {:optional true} ::namespace]
+   [::claim        {:optional true} ::claim]
    [::parent       {:optional true} ::parent]
    [::needs        {:optional true} ::needs]
    [::completed-at {:optional true} ::completed-at]])
@@ -281,8 +285,9 @@
 
 (def ^:private plan-row-selector
   [:db/id ::id ::title ::description ::status ::created-at ::completed-at
-   ::goal ::expect ::pace ::from ::message
+   ::goal ::expect ::pace ::from ::message ::claim
    {::agent [:seon.agent/id]}
+   {::namespace [:seon.ns/name]}
    {::parent [::id]}
    {::needs [::id]}])
 
@@ -752,10 +757,38 @@
                      [{::id id ::status :done ::completed-at (js/Date.)}])))
                (internal/write-result "done!" id)))))))
 
+(defn ^{:async true :seon.fn/agent-facing? true} blocked!
+  "Mark a plan step blocked while retaining its assignment evidence.
+
+   Use this only when the expected outcome cannot currently be satisfied, not
+   for an ordinary failed attempt. The stored `:blocked` status preserves the
+   claim, assignment message, evals, and run evidence for diagnosis. `reopen!`
+   returns the step to the ready frontier and clears its old claim."
+  {:malli/schema [:=> [:cat ::id-request] ::write-response]}
+  [{::keys [id] :as request}]
+  (or
+   (internal/check-request-keys "blocked!" request ::id-request)
+   (let [acquired (await (acquire-selected-step request))
+         read-error (acquisition-error "blocked!" acquired)
+         row (::row acquired)]
+     (or
+      read-error
+      (case (::status row)
+        nil (internal/fail (str "blocked!: no step " (pr-str id)
+                                " — (my.plan/tree {}) lists every step id."))
+        :done (internal/fail (str "blocked!: " (pr-str id)
+                                  " is :done — reopen! it first."))
+        :blocked {::ok? true ::id id}
+        (->> (await
+              (db/transact!
+               (expected-write acquired [{::id id ::status :blocked}])))
+             (internal/write-result "blocked!" id)))))))
+
 (defn ^{:async true :seon.fn/agent-facing? true} reopen!
   "Flip a done/blocked step back to open; retract its `::completed-at`.
 
-   Absent means absent — nil is never stored."
+   Absent means absent — nil is never stored. A claimed namespace step also
+   retracts its old assignment fence so the ready frontier may claim it again."
   {:malli/schema [:=> [:cat ::id-request] ::write-response]}
   [{::keys [id] :as request}]
   (or
@@ -775,7 +808,8 @@
                    (expected-write
                      acquired
                      [{::id id ::status :open}
-                      [:db/retract [::id id] ::completed-at]])))
+                      [:db/retract [::id id] ::completed-at]
+                      [:db/retract [::id id] ::claim]])))
                (internal/write-result "reopen!" id)))))))
 
 (defn ^{:async true :seon.fn/agent-facing? true} needs!
