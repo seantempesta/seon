@@ -762,7 +762,10 @@
       {:my.plan/id root-id
        :my.plan/status (:my.plan/status root)
        :my.plan/progress (plan-rollup-from-rows rows root-id)
-       :my.plan/blocked? (blocked-from-rows? rows root-id)
+       :my.plan/blocked?
+       (boolean
+        (or (blocked-from-rows? rows root-id)
+            (some #(= :blocked (:my.plan/status %)) namespace-steps)))
        ::namespace-steps namespace-steps
        ::ready-steps (namespace-ready-frontier-from-rows rows root-id)})))
 

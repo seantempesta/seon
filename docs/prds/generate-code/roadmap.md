@@ -23,7 +23,12 @@ REPL output, schema-first evaluation, evidence-derived completion, and a
 progressive developer context on 2026-07-19. The source audit, executable
 probes, context measurements, and paid Kimi K3 results live in
 [[research/design-seam-audit-2026-07-19]]. This roadmap is the implementation
-ledger; none of the target workflow is current behavior yet.
+ledger for the staged implementation below.
+
+Stages 1–4 and the first Stage 5 scheduler boundary are now source-complete.
+The remaining workflow is not yet public or end-to-end: startup recovery,
+progressive repair context, evidence-derived completion, the public wrapper,
+and live graduation remain open.
 
 The preparatory context cleanup is complete at `e205dc9e`: namespace rendering
 has one configuration owner, the `:namespaces` block. Cluster
@@ -70,14 +75,12 @@ global latest-test timestamps or storing a second generation result. The
 affected gate passed 610 tests/2,791 assertions; live current-artifact proof
 remains part of the Stage 3 checkpoint.
 
-Ordinary agent replies already pass through `parse-forms` once and
-`eval-batch!` evaluates entries sequentially. Each whole top-level Promise is
-awaited before the next entry, successful `(ns ...)` forms change the active
-namespace for later entries, failures do not discard later independent forms,
-and the return already carries ordered `:seon.eval/ids`. Ordinary replies do
-not yet derive namespace units or dependency order. The pure projection and
-ordered namespace executor below strengthen that one path; they are not a
-second parser or evaluator.
+Ordinary agent replies pass through `parse-forms` once and `eval-batch!`
+consumes the shared multi-namespace execution projection. Each whole top-level
+Promise is awaited before the next entry, successful `(ns ...)` forms change
+the active namespace for later entries, failures do not discard later
+independent forms, and the return carries ordered `:seon.eval/ids`. This is the
+one parser/evaluator path; generation orchestration consumes its ordinary data.
 
 ## Settled design from the audit
 
@@ -518,9 +521,24 @@ Exit:
 
 ### Stage 5 — reactive scheduler and atomic assignment
 
+**In progress 2026-07-19.** The stable root observer, atomic claim transaction,
+and namespace-resident scheduling callback are implemented. One transaction
+contains the claim CAS, ordinary addressed assignment message, and plan-message
+connection. Competing claim attempts reread the committed claim to classify a
+benign loss without parsing writer errors. The namespace's unique resident is
+ensured idle before assignment; only the winning addressed message starts work.
+New residents copy the named execution model variant, while an existing or
+concurrently won resident retains its committed model attributes.
+
+Focused proof passes 183 tests/916 assertions. It covers one committed message
+under competing claims, concurrent ready-unit dispatch, stable root observation,
+blocked-leaf terminal propagation, and deferred observer release. Startup
+observer restoration remains the unsettled Stage 5 contract.
+
 Register one root-frontier computation. Compose identity allocation, claim CAS,
 assignment message, and step-message link in one writer transaction. Ensure the
-worker only after commit.
+idle namespace resident before assignment; the atomic message commit is the
+only work wake.
 
 Exit:
 
@@ -597,11 +615,13 @@ Exit:
 
 ## Next implementation boundary
 
-Stage 5 is the dependency-ready boundary. Add one root-scoped reactive
-computation over the stable Stage 4 projection, then compose the existing
-message transaction, generated identity allocation, claim CAS, and plan-message
-connection into one writer transaction. Prove a competing callback leaves one
-claim/message, prerequisite completion exposes its dependent once without
-polling, and terminal roots release their observer. Namespace-resident reuse
-and progressive repair context remain Stage 6 consumers of that settled claim
-contract.
+Stage 5 startup recovery is the dependency-ready boundary. After every durable
+agent runtime and addressed-message listener resumes, query roots that directly
+parent namespace steps and reinstall one stable observer for each nonterminal
+root before readiness. Claimed open work remains recoverable and must not be
+reassigned; blocked namespace descendants are terminal even when the root row
+itself remains open. Hot reload must explicitly replace the root consumer so a
+stale process-local observer closure cannot survive publication. Prove restart
+restores one observer, creates no second claim/message, exposes the next
+dependency once, and releases the observer at terminal state. Progressive repair
+context remains the following Stage 6 consumer of this settled scheduler.

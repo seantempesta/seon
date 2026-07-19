@@ -6,6 +6,7 @@
    this layer never branches on a provider."
   (:require
     [my.plan :as plan]
+    [seon.agent :as agent]
     [seon.agent.message :as message]
     [seon.db :as db]
     [seon.db.id :as db.id]
@@ -37,6 +38,19 @@
   [:or :my.plan/id [:map [:seon.error/message :string]]])
 (schema/register! ::unobserve-request
   [:map {:closed true} [:my.plan/id :my.plan/id]])
+(schema/register! ::root-state :my.plan/generated-root-state)
+(schema/register! ::dispatch-request
+  [:map {:closed true}
+   [:seon.agent/id :seon.agent/id]
+   [::root-state ::root-state]
+   [:seon.config/model-variant {:optional true} :seon.config/model-variant]])
+(schema/register! ::dispatch-response [:vector ::claim-response])
+(schema/register! ::scheduler-request
+  [:map {:closed true}
+   [::db/db :seon.db/db]
+   [:my.plan/id :my.plan/id]
+   [:seon.agent/id :seon.agent/id]
+   [:seon.config/model-variant {:optional true} :seon.config/model-variant]])
 
 (defn- root-key [root-id]
   [::root root-id])
@@ -132,3 +146,88 @@
    (reactive/unobserve!
     {::reactive/key (root-key root-id)
      ::reactive/consumer-key root-id})))
+
+(defn- assignment-content
+  [root-id {:my.plan/keys [id] namespace :seon.ns/name}]
+  (str "Implement and verify generated-code namespace " namespace
+       " for plan " (pr-str root-id) ". The durable assignment step is "
+       (pr-str id) "; use its current generated-code context and ordinary "
+       "REPL forms."))
+
+(defn ^:async ^:private ensure-and-claim!
+  [coordinator-id root-id model-variant step]
+  (let [worker
+        (await
+         (agent/ensure-namespace-agent!
+          (cond->
+           {:seon.agent/id coordinator-id
+            :seon.agent/namespace (:seon.ns/name step)
+            :seon.agent/purpose
+            (str "Implement and verify " (:seon.ns/name step))}
+            model-variant
+            (assoc :seon.config/model-variant model-variant))))]
+    (if (:seon.error/message worker)
+      worker
+      (let [database (await (db/db))]
+        (if (:seon.error/message database)
+          database
+          (await
+           (claim-namespace-step!
+            {::db/db database
+             :my.plan/id (:my.plan/id step)
+             :seon.agent/id (:seon.agent/id worker)
+             :seon.agent.message/from [:seon.agent/id coordinator-id]
+             :seon.agent.message/content
+             (assignment-content root-id step)})))))))
+
+(defn ^:async ^:no-doc dispatch-root-state!
+  "Ensure and atomically assign every namespace in one ready frontier."
+  {:malli/schema [:=> [:cat ::dispatch-request] ::dispatch-response]}
+  [{coordinator-id :seon.agent/id
+    root-state ::root-state
+    model-variant :seon.config/model-variant}]
+  (let [root-id (:my.plan/id root-state)
+        promises
+        (mapv #(ensure-and-claim! coordinator-id root-id model-variant %)
+              (:my.plan.internal/ready-steps root-state))]
+    (if (seq promises)
+      (vec (await (js/Promise.all (into-array promises))))
+      [])))
+
+(defn- terminal-root?
+  [root-state]
+  (or (true? (get-in root-state [:my.plan/progress :my.plan/done?]))
+      (true? (:my.plan/blocked? root-state))))
+
+(defn- root-notify
+  [coordinator-id model-variant root-state]
+  (cond
+    (:seon.error/message root-state)
+    (js/Promise.resolve root-state)
+
+    (terminal-root? root-state)
+    (-> (js/Promise.resolve nil)
+        (.then
+         (fn [_]
+           (unobserve-root! {:my.plan/id (:my.plan/id root-state)}))))
+
+    :else
+    (dispatch-root-state!
+     (cond->
+      {:seon.agent/id coordinator-id
+       ::root-state root-state}
+       model-variant
+       (assoc :seon.config/model-variant model-variant)))))
+
+(defn ^:async ^:no-doc start-root-scheduler!
+  "Install one root-scoped generated-code scheduler observer."
+  {:malli/schema [:=> [:cat ::scheduler-request] ::observe-response]}
+  [{database ::db/db
+    root-id :my.plan/id
+    coordinator-id :seon.agent/id
+    model-variant :seon.config/model-variant}]
+  (await
+   (observe-root!
+    {::db/db database
+     :my.plan/id root-id
+     ::notify #(root-notify coordinator-id model-variant %)})))

@@ -210,7 +210,14 @@
                  (assoc % :my.plan/status :done)
                  %)
               claimed-rows)
-        done-state (internal/namespace-root-state-from-rows done-rows "root")]
+        done-state (internal/namespace-root-state-from-rows done-rows "root")
+        blocked-state
+        (internal/namespace-root-state-from-rows
+         (mapv #(if (= "a-service" (:my.plan/id %))
+                  (assoc % :my.plan/status :blocked)
+                  %)
+               claimed-rows)
+         "root")]
     (is (= [{:my.plan/id "a-service"
              :seon.ns/name 'my.generated.a-service}]
            (:my.plan.internal/ready-steps initial)))
@@ -225,7 +232,9 @@
            (:my.plan/progress done-state)))
     (is (= :done
            (-> done-state :my.plan.internal/namespace-steps first
-               :my.plan/status)))))
+               :my.plan/status)))
+    (is (:my.plan/blocked? blocked-state)
+        "a blocked generated leaf makes its root terminal for scheduling")))
 
 (defn- compile-with-generated-ids
   [existing document]
