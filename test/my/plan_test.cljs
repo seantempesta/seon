@@ -181,6 +181,45 @@
     (is (= ["root" "active"]
            (mapv :my.plan/id (:my.plan/chain anchor))))))
 
+(deftest current-run-cause-step-anchors-over-stale-authored-work
+  (async done
+    (let [original db/execute-many
+          calls (atom 0)
+          success (fn [result]
+                    {::protocol/success? true ::protocol/result result})]
+      (set! db/execute-many
+            (fn [_]
+              (js/Promise.resolve
+               (case (swap! calls inc)
+                 1 {::db/results
+                    [(success [["active" "Older work" "" (js/Date. 1)
+                                false 10]])
+                     (success [["message" "Answer the new request" ""
+                                (js/Date. 2) 77]])
+                     (success [])
+                     (success {:db/id 1 :seon.agent/id agent-id})
+                     (success [["message" "Answer the new request" ""
+                                (js/Date. 2) 77 :open 11]])]}
+                 2 {::db/results
+                    [(success {:my.plan/id "message"
+                               :my.plan/title "Answer the new request"})
+                     (success [[:open 1]])]}))))
+      (-> (internal/plan-block
+           {:seon.db/db database
+            :seon.agent/id agent-id
+            :seon.agent.run/id "run-from-message"}
+           nil)
+          (.then
+           (fn [text]
+             (is (str/includes? text
+                                "next ready: message «Answer the new request»"))
+             (is (and (str/includes? text "; ▶ active [")
+                      (str/includes? text "] Older work"))
+                 "existing authored work remains visible without displacing the current request")))
+          (.finally (fn [] (set! db/execute-many original)))
+          (.then (fn [_] (done)))
+          (.catch (fn [error] (is false (str error)) (done)))))))
+
 (deftest tree-assembly-is-cycle-safe-and-agent-scoped
   (let [other (assoc (row "other" "Other" :open 4)
                      :my.plan/agent {:seon.agent/id "agent-b"})

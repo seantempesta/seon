@@ -303,7 +303,9 @@
   ([agent-id database profile run-id]
    (let [request (cond-> {:seon.agent/id agent-id}
                    (seq profile)
-                   (assoc :seon.agent.ctx/profile (vec profile)))
+                   (assoc :seon.agent.ctx/profile (vec profile))
+                   run-id
+                   (assoc :seon.agent.run/id run-id))
          response
          (await
            (apply execution.host/invoke-compiled!

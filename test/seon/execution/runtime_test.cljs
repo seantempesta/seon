@@ -392,6 +392,32 @@
              (is false (str "empty/missing render rejected: " error))
              (done)))))))
 
+(deftest prompt-block-receives-the-current-run-id
+  (async done
+    (let [observed (atom nil)
+          entity {:db/id 1
+                  :seon.agent/id "agent-1"
+                  :seon.agent/ctx
+                  [{:seon.agent.ctx/name :plan
+                    :seon.agent.ctx/priority 50
+                    :seon.render/ai 'my.plan.internal/plan-block}]}]
+      (-> (call-with-acquired-agent
+           entity
+           {:seon.agent/id "agent-1" :seon.agent.run/id "run-1"}
+           observed
+           (fn [calls]
+             (reset! observed calls)
+             (js/Promise.resolve
+              [{::execution/ok? true ::execution/value "plan"}])))
+          (.then
+           (fn [_]
+             (is (= "run-1"
+                    (get-in @observed
+                            [0 ::execution/arguments 0
+                             :seon.agent.run/id])))))
+          (.then (fn [_] (done)))
+          (.catch (fn [error] (is false (str error)) (done)))))))
+
 (deftest absent-system-config-uses-the-shipped-system-text
   (async done
     (let [original db/execute-many]

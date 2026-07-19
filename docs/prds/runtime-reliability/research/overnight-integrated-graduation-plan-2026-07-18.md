@@ -524,6 +524,19 @@ and
 Do not loosen either scorer; the next design work is reducing trajectory drift
 while preserving the ordinary product context and lifecycle contract.
 
+The latest live `reuse_repair` rerun closed the retired HTTP-422 evidence
+boundary: the typed product-evidence request returned normally. It still failed
+because root did not perform the requested reuse/repair before one child exit
+and the later timeout. A separate direct human-message probe proved run
+supersession and fresh admission, but the newly opened run initially followed
+older authored plan work instead of its cause message. The existing run ID now
+flows through the compiled prompt section request, and the plan block derives
+the message-linked step from `:seon.agent.run/cause`; that step anchors the
+current run while older authored work remains visible in the ordinary open
+frontier. Focused compile proof is green; the exact live acceptance is an
+immediate response to a new human message followed by a passing `reuse_repair`
+scenario, without scorer exceptions or another priority mechanism.
+
 Exit: Inspect AI drives the real pod door and scores durable facts/evals rather
 than a special harness runtime or transcript regex.
 
@@ -710,6 +723,18 @@ the full execution child reclaims 166.8 MiB physical footprint when stopped.
 The remaining unchecked rows are intentionally broader than this evidence:
 2/4-client waves, complete transaction/program propagation, private retained
 heap plus idle CPU, and slow-client backpressure still need samples.
+
+The maintained Datahike query cache now inherits entries lazily at read demand
+instead of copying cached rows on every transaction. The failing
+characterization grew one demanded snapshot to 64 and retained weight from 9
+to 576 after 100 unrelated write-only commits. The corrected path leaves count
+and weight unchanged, records only the changed attribute revision, and answers
+the later unaffected demand as a zero-work hit while creating one demanded
+child row. Focused JVM proof passes 162 tests/990 assertions across cache
+profiles, and a live Bun→JVM probe returned the same 11 agent IDs after an
+unrelated human-message transaction with cache outcome `hit` and resource work
+zero. This is primarily the required correctness and memory-shape repair; a
+matched latency comparison remains part of the broader performance gate.
 
 A matched fresh-database experiment also found that Datahike root fusion
 reduced durable transaction p50 from 48.08 ms to 19.42 ms and file count from

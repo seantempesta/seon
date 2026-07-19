@@ -996,6 +996,22 @@
    :order-by '[?completed :desc ?id :asc]
    :limit recent-done-limit})
 
+(def ^:private run-cause-step-query
+  {:find '[?id ?title ?expect ?created ?message ?status ?status-tx]
+   :in '[$ ?agent-id ?run-id]
+   :where '[[?agent :seon.agent/id ?agent-id]
+            [?run :seon.agent.run/id ?run-id]
+            [?run :seon.agent.run/cause ?message]
+            [?step :my.plan/agent ?agent]
+            [?step :my.plan/message ?message]
+            [?step :my.plan/status ?status ?status-tx]
+            [(not= ?status :done)]
+            [?step :my.plan/id ?id]
+            [?step :my.plan/title ?title]
+            [?step :my.plan/created-at ?created]
+            [(get-else $ ?step :my.plan/expect "") ?expect]]
+   :limit 1})
+
 (def ^:private ancestor-selector
   '[:my.plan/id :my.plan/title :my.plan/goal :my.plan/pace
     {:my.plan/parent ...}])
@@ -1066,19 +1082,23 @@
    :datahike.resource/max-result-weight max-result-weight})
 
 (defn- initial-acquisition-members
-  [agent-id]
-  [(query-member active-query [agent-id]
-                 2000000 2000000 65536)
-   (query-member ready-query [rules agent-id]
-                 5000000 5000000 131072)
-   (query-member recent-done-query [agent-id]
-                 2000000 2000000 65536)
-   {::protocol/operation protocol/pull-operation
-    ::protocol/selector [:db/id :seon.agent/id]
-    ::protocol/entity-id [:seon.agent/id agent-id]
-    :datahike.resource/max-work 10000
-    :datahike.resource/max-results 8
-    :datahike.resource/max-result-weight 1024}])
+  [agent-id run-id]
+  (cond->
+    [(query-member active-query [agent-id]
+                   2000000 2000000 65536)
+     (query-member ready-query [rules agent-id]
+                   5000000 5000000 131072)
+     (query-member recent-done-query [agent-id]
+                   2000000 2000000 65536)
+     {::protocol/operation protocol/pull-operation
+      ::protocol/selector [:db/id :seon.agent/id]
+      ::protocol/entity-id [:seon.agent/id agent-id]
+      :datahike.resource/max-work 10000
+      :datahike.resource/max-results 8
+      :datahike.resource/max-result-weight 1024}]
+    run-id
+    (conj (query-member run-cause-step-query [agent-id run-id]
+                        100000 100000 4096))))
 
 (defn- selected-acquisition-members
   ([step-id] (selected-acquisition-members step-id nil nil))
@@ -1137,6 +1157,11 @@
     (seq expect) (assoc :my.plan/expect expect)
     message (assoc :my.plan/message message)
     active-tx (assoc :seon.db/tx active-tx)))
+
+(defn- run-cause-step-row
+  [[id title expect created message status status-tx]]
+  (cond-> (step-row [id title expect created message])
+    (= :active status) (assoc :seon.db/tx status-tx)))
 
 (defn- ancestor-chain-from-pull
   [selected]
@@ -1223,7 +1248,7 @@
 
 (defn ^:async ^:private acquire-plan-block
   "Acquire the bounded plan prompt data at one immutable database value."
-  [{agent-id :seon.agent/id :as input}]
+  [{agent-id :seon.agent/id run-id :seon.agent.run/id :as input}]
   (let [database (or (::db/db input)
                      (::db/db (db/current-tx-context))
                      (await (db/db)))]
@@ -1232,14 +1257,17 @@
       (let [initial (await (db/execute-many
                              {::db/db database
                               ::db/members
-                              (initial-acquisition-members agent-id)
+                              (initial-acquisition-members agent-id run-id)
                               ::db/max-result-weight 262144}))]
         (if (:seon.error/message initial)
           (acquisition-error "initial read" initial)
-          (let [[active-member ready-member done-member agent-member]
+          (let [[active-member ready-member done-member agent-member
+                 cause-step-member]
                 (::db/results initial)]
             (if-not (every? #(true? (::protocol/success? %))
-                            [active-member ready-member done-member agent-member])
+                            (cond-> [active-member ready-member done-member
+                                     agent-member]
+                              cause-step-member (conj cause-step-member)))
               (acquisition-error "initial member" (::db/results initial))
               (let [agent (member-result agent-member)
                     actives (mapv step-row (member-result active-member))
@@ -1250,7 +1278,10 @@
                                    :my.plan/completed-at completed-at})
                                 (member-result done-member))
                     active (first actives)
-                    step (or active (first readies))]
+                    cause-step (some-> cause-step-member member-result first
+                                       run-cause-step-row)
+                    step (or cause-step active (first readies))
+                    selected-active? (contains? step :seon.db/tx)]
                 (if-not step
                   {::db/db database
                    :seon.agent/entity agent
@@ -1265,9 +1296,9 @@
                                    (selected-acquisition-members
                                     (:my.plan/id step)
                                     agent-id
-                                    (:seon.db/tx active))
+                                    (:seon.db/tx step))
                                   ::db/max-result-weight
-                                  (if active 2359296 131072)}))]
+                                  (if selected-active? 2359296 131072)}))]
                     (if (:seon.error/message selected)
                       (acquisition-error "selected read" selected)
                       (let [[ancestor-member rollup-member eval-member]
@@ -1275,12 +1306,14 @@
                         (if-not (every?
                                   #(true? (::protocol/success? %))
                                   (cond-> [ancestor-member rollup-member]
-                                    active (conj eval-member)))
+                                    selected-active? (conj eval-member)))
                           (acquisition-error "selected member"
                                              (::db/results selected))
                           (let [escalation
                                 (await (acquire-escalation-text
-                                         database agent-id active eval-member))]
+                                         database agent-id
+                                         (when selected-active? step)
+                                         eval-member))]
                             (if (:seon.error/message escalation)
                               escalation
                               {::db/db database
@@ -1290,7 +1323,7 @@
                                 :my.plan/chain
                                 (ancestor-chain-from-pull
                                   (member-result ancestor-member))
-                                :my.plan/active? (some? active)
+                                :my.plan/active? selected-active?
                                 :my.plan/progress
                                 (rollup-from-rows
                                   (member-result rollup-member))}

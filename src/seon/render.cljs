@@ -130,6 +130,7 @@
   [:map
    [:seon.db/db     {:optional true} :seon.db/db]
    [:seon.agent/id  {:optional true} :seon.agent/id]
+   [:seon.agent.run/id {:optional true} :seon.agent.run/id]
    [:seon.render/at {:optional true} :seon.render/at]])
 
 (schema/register! :seon.render/children

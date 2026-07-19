@@ -48,6 +48,7 @@
 (schema/register! ::render-prompt-request
   [:map {:closed true}
    [:seon.agent/id :string]
+   [:seon.agent.run/id {:optional true} :seon.agent.run/id]
    [:seon.agent.ctx/profile
     {:optional true}
     :seon.agent.ctx/profile]])
@@ -127,24 +128,26 @@
         (selected-error-message result)}))))
 
 (defn- block-call
-  [id entity configuration block]
+  [id entity configuration block run-id]
   {::execution/function-symbol (:seon.render/ai block)
    ::execution/invoke-selected? true
    ::execution/arguments
-   [{:seon.agent/id id
-     :seon.agent/entity entity
-     :seon.config/configuration configuration
-     :seon.render/node block}]})
+   [(cond-> {:seon.agent/id id
+             :seon.agent/entity entity
+             :seon.config/configuration configuration
+             :seon.render/node block}
+      run-id (assoc :seon.agent.run/id run-id))]})
 
 (defn ^:async ^:private resolve-blocks!
-  [id entity configuration blocks invoke-selected!]
+  [id entity configuration blocks run-id invoke-selected!]
   (let [targets (->> blocks
                      (keep-indexed
                        (fn [index block]
                          (when (symbol? (:seon.render/ai block))
                            {:index index
                             :block block
-                            :call (block-call id entity configuration block)})))
+                            :call (block-call id entity configuration block
+                                              run-id)})))
                      vec)]
     (if (empty? targets)
       {:seon.execution.runtime/blocks blocks
@@ -186,7 +189,7 @@
          ::render-fns/pinned-syms (into stored-pins canvas-pins)}))))
 
 (defn ^:async ^:private resolve-whole-prompt!
-  [id entity configuration value invoke-selected!]
+  [id entity configuration value run-id invoke-selected!]
   (if-not (symbol? value)
     value
     (let [block {:seon.agent.ctx/name :prompt
@@ -194,7 +197,8 @@
                  :seon.render/ai value}
           result (first
                    (await (invoke-selected!
-                           [(block-call id entity configuration block)])))]
+                           [(block-call id entity configuration block
+                                        run-id)])))]
       (if (::execution/ok? result)
         (ai-value (::execution/value result))
         (block-error-text block result)))))
@@ -261,7 +265,9 @@
   "Acquire and invoke selected prompt blocks at the active database value."
   {:malli/schema [:=> [:cat ::render-prompt-request :any]
                   [:or :seon.agent.ctx/rendered-context ::prompt-error]]}
-  [{:seon.agent/keys [id] profile :seon.agent.ctx/profile} invoke-selected!]
+  [{:seon.agent/keys [id]
+    run-id :seon.agent.run/id
+    profile :seon.agent.ctx/profile} invoke-selected!]
   (let [members (assoc-in prompt-acquisition-members
                           [0 ::protocol/entity-id]
                           [:seon.agent/id id])
@@ -295,7 +301,7 @@
             (await (error/with-configuration
                      cluster-config-row
                      #(resolve-blocks! id entity cluster-config-row blocks
-                                       invoke-selected!)))
+                                       run-id invoke-selected!)))
             namespace-value
             (namespace-value (:seon.execution.runtime/values
                               stored-resolution))
@@ -308,7 +314,7 @@
             (await (error/with-configuration
                      cluster-config-row
                      #(resolve-blocks! id entity cluster-config-row
-                                       (vec derived) invoke-selected!)))
+                                       (vec derived) run-id invoke-selected!)))
             resolved-blocks
             (->> (concat stored-blocks
                          (:seon.execution.runtime/blocks derived-resolution))
@@ -320,7 +326,7 @@
               (await (error/with-configuration
                        cluster-config-row
                        #(resolve-whole-prompt! id entity cluster-config-row
-                                               whole-prompt
+                                               whole-prompt run-id
                                                invoke-selected!))))]
         (error/with-configuration
           cluster-config-row
