@@ -279,6 +279,16 @@ exact execution artifact cannot yet be rebuilt because the separately owned
 Datahike reactive-read lane has coherent work in progress; no live result is
 claimed from the stale artifact.
 
+The dependency lane then committed Datahike `6a0386d2` and root pointer
+`dc0a9f99`, allowing a clean integration build. Writer and bootstrap succeeded,
+but initial agent birth failed closed: Datahike's query result now carries
+`:datahike.read/dependency-plan`, while Seon's closed typed query-response
+schema still names only result, attribute dependencies, cache evidence, and
+resource evidence. The writer rejected its own otherwise-successful response
+and the pod exited without a fallback. The reactive owner has the exact writer
+log and must advance that one protocol contract plus its boundary test; no
+database reset or Inspect workaround is appropriate.
+
 The development-tool reconnect defect is source-grounded in the maintained
 Shadow runtime rather than Seon's database advertisement. Shadow commit
 `615430b3` permanently stopped reconnecting after more than three websocket
