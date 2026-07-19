@@ -75,6 +75,7 @@
                 :person/database-shaped-data other-db}
         response (protocol/success
                   {::protocol/request-id "pull/nested"
+                   :datahike.read/dependency-plan :all
                    ::protocol/result result})]
     (is (protocol/valid-response? response))
     (is (= result (::protocol/result response)))))

@@ -149,6 +149,7 @@
                   ::protocol/cursor datom})
         response (protocol/success
                   {::protocol/request-id "index/page"
+                   :datahike.read/dependency-plan :all
                    :datahike.index-page/datoms [datom]
                    :datahike.index-page/complete? false
                    :datahike.index-page/cursor datom})]

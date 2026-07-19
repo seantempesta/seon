@@ -96,10 +96,12 @@
                         :datahike.query/resource-evidence {}})
 
       :seon.db.protocol.operation/pull
-      (success request {::protocol/result {:example/id 1}})
+      (success request {::protocol/result {:example/id 1}
+                        :datahike.read/dependency-plan :all})
 
       :seon.db.protocol.operation/pull-many
-      (success request {::protocol/result [{:example/id 1} nil]})
+      (success request {::protocol/result [{:example/id 1} nil]
+                        :datahike.read/dependency-plan :all})
 
       :seon.db.protocol.operation/execute-many
       (success request
@@ -119,7 +121,8 @@
 
       :seon.db.protocol.operation/index-page
       (success request
-               {:datahike.index-page/datoms [[1 :example/id "one"
+               {:datahike.read/dependency-plan :all
+                :datahike.index-page/datoms [[1 :example/id "one"
                                                536870913 true]]
                 :datahike.index-page/complete? true})
 

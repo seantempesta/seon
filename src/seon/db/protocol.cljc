@@ -748,18 +748,21 @@
  [:map {:closed true}
   [::success? [:= true]]
   [::request-id ::request-id]
+  [:datahike.read/dependency-plan :datahike.read/dependency-plan]
   [::result ::result]])
 (schema/register!
  ::schema-response
  [:map {:closed true}
   [::success? [:= true]]
   [::request-id ::request-id]
+  [:datahike.read/dependency-plan :datahike.read/dependency-plan]
   [::schema ::schema]])
 (schema/register!
  ::index-page-response
  [:map {:closed true}
   [::success? [:= true]]
   [::request-id ::request-id]
+  [:datahike.read/dependency-plan :datahike.read/dependency-plan]
   [:datahike.index-page/datoms :datahike.index-page/datoms]
   [:datahike.index-page/complete? :datahike.index-page/complete?]
   [:datahike.index-page/cursor {:optional true}

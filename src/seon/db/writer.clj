@@ -863,26 +863,36 @@
   (let [options (resource-options request)]
     (case (::protocol/operation request)
       :seon.db.protocol.operation/pull
-      {::protocol/result
-       (materialize-result
-        (d/pull db-value
-                (merge {:selector (::protocol/selector request)
-                        :eid (::protocol/entity-id request)}
-                       options)))}
+      (let [evidence
+            (d/pull-with-evidence
+             db-value
+             (merge {:selector (::protocol/selector request)
+                     :eid (::protocol/entity-id request)}
+                    options))]
+        {::protocol/result
+         (materialize-result (:datahike.pull/result evidence))
+         :datahike.read/dependency-plan
+         (:datahike.read/dependency-plan evidence)})
 
       :seon.db.protocol.operation/pull-many
-      {::protocol/result
-       (materialize-result
-        (d/pull-many db-value
-                     (merge {:selector (::protocol/selector request)
-                             :eids (::protocol/entity-ids request)}
-                            options)))}
+      (let [evidence
+            (d/pull-many-with-evidence
+             db-value
+             (merge {:selector (::protocol/selector request)
+                     :eids (::protocol/entity-ids request)}
+                    options))]
+        {::protocol/result
+         (materialize-result (:datahike.pull-many/result evidence))
+         :datahike.read/dependency-plan
+         (:datahike.read/dependency-plan evidence)})
 
       :seon.db.protocol.operation/schema
-      {::protocol/schema (materialize-result (d/schema db-value))}
+      {::protocol/schema (materialize-result (d/schema db-value))
+       :datahike.read/dependency-plan :all}
 
       :seon.db.protocol.operation/index-page
-      (materialize-result (index-page db-value request)))))
+      (assoc (materialize-result (index-page db-value request))
+             :datahike.read/dependency-plan :all))))
 
 (defn- query-arguments
   [arguments request caller-id]

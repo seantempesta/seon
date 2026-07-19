@@ -71,8 +71,10 @@
   ([value]
    {::db/results
     [{::protocol/success? true
+      :datahike.read/dependency-plan :all
       ::protocol/schema installed-schema}
      {::protocol/success? true
+      :datahike.read/dependency-plan :all
       ::protocol/result value}
      {::protocol/success? true
       :datahike.query/result

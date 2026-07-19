@@ -87,6 +87,7 @@
 (defn- response-message [request-id value]
   {::protocol/request-id request-id
    ::protocol/success? true
+   :datahike.read/dependency-plan :all
    ::protocol/result value})
 
 (defn- fake-bun [accepted-counts]
