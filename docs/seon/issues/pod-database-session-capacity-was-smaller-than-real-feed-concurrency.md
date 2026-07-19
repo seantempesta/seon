@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 tags: [database, issue, pod, web]
 ---
 
@@ -152,3 +152,28 @@ cannot serialize subsequent commits behind socket output.
   bounded by installed interest and acquired-database keys rather than commit
   count, while ordinary query and transaction latency remains bounded and
   returns to its pre-pressure range after the reader resumes.
+
+## Resolution
+
+Seon `c75efad8` separates one-way event delivery from request-response slots.
+UDS owns one opaque physical event from encoding through full-frame write,
+always selecting response output first. The writer owns one in-flight event
+and one newest pending value per semantic key; completion alone advances the
+next event. Transient output pressure neither grows a per-commit queue nor
+closes the session.
+
+The rebuilt five-feed, five-child, 65-commit acceptance completed all 325
+expected reactive evaluations and converged every feed without a session-full,
+session-close, socket, or core-fault marker. Reactive and Datastar ownership
+returned to zero after canonical close.
+
+The opt-in real-SocketChannel regression committed at `2f42b339` then held one
+listener unread through 10,000 transactions and 100 queries. Committed reports
+were offered=delivered=10,000 with queued=0 and overflowed=0; semantic pending
+high-water was one; transaction p95 was 2.708 ms and query p95 was 1.981 ms.
+After the listener resumed, it received the exact newest basis transaction and
+writer pending order, UDS event state/output, request connections, and writer
+interests all returned to zero. The stress gate passed 14 tests / 10,326
+assertions in 26.18 seconds, while its normal non-stress form passed 14 / 84.
+This closes every acceptance item without capacity inflation, a second socket,
+per-event acknowledgements, or another replay queue.

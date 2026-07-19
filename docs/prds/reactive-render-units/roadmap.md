@@ -42,8 +42,7 @@ parts of the target:
 Current page invalidation has sustained-import, newest-value convergence,
 browser morph, reconnect, slow-consumer socket convergence, and
 resource-release proof. Failed-render repair is also live-proven below. The
-remaining program gates are the capacity fanout acceptance and final
-current-artifact browser/test graduation. The execution child
+remaining program gate is final current-artifact browser/test graduation. The execution child
 captures the Datahike-owned read evidence from successful query, pull,
 pull-many, entity, schema, index, and mixed `execute-many` operations in one
 fiber-local scope and returns it on the ordinary invocation result. The writer
@@ -51,16 +50,17 @@ can interpret and union that source-positioned evidence directly when
 installing a committed-report interest. Datastar now consumes that evidence;
 analyzer-derived `:seon.fn/read-attrs` is no longer an invalidation authority.
 
-The source-frozen five-feed fanout falsifier at Seon `623f4650` committed all
-65 transactions and converged reactive work to basis transaction 536870997,
-but it is not accepted: the writer filled the pod session's 64 shared
-response-slot admissions with one-way interest events and closed the session.
-Reconnect hid the loss behind eventual convergence. The earliest unsettled
-contract is writer-side bounded event backpressure: retain at most the newest
-pending event per existing protocol event key, turn repeated interest delivery
-into the existing resynchronization event, preserve exact request responses,
-and never close a healthy session merely because event encoding/output is
-temporarily full. No capacity increase is admissible.
+The original source-frozen five-feed fanout falsifier at Seon `623f4650`
+committed all 65 transactions and converged reactive work, but filled the pod
+session's 64 shared response-slot admissions with one-way interest events and
+closed the session. Reconnect hid the loss behind eventual convergence. The
+bounded event-delivery correction at `c75efad8` removed that response-slot
+fiction without increasing capacity. Its rebuilt acceptance run kept five
+feeds and five stable execution children live through 65 distinct commits,
+completed all 325 expected reactive evaluations, and converged every feed to
+the newest basis transaction. Writer and pod logs contained no session-full,
+session-close, socket, or core-fault marker; reactive and Datastar ownership
+returned to zero after canonical cluster close.
 
 The implemented boundary keeps two independently owned data states rather than
 two coupled retry machines. UDS owns one opaque physical event through encode,
@@ -72,6 +72,21 @@ event, and repeated database-advanced events retain the newest database value.
 Full-write completion alone advances writer delivery. Codec-executor rejection
 runs that one encode task inline on the bounded `:delivery` worker; the caller
 is not Datahike's transaction commit thread.
+
+The opt-in deterministic paused-reader stress gate at `2f42b339` uses the real
+SocketChannel writer boundary. A listener acknowledged its interest and then
+stopped reading while a healthy peer completed 10,000 transactions and 100
+queries. Committed-report accounting was offered=delivered=10,000 with no
+queued or overflowed report; the delivery executor converged with no queued,
+running, or rejected work; semantic pending high-water was one. Transaction
+p50/p95/p99/max latency was 1.352/2.708/6.485/14.372 ms and query latency was
+1.202/1.981/6.351/8.607 ms. After reading resumed, the listener received the
+newest resynchronization at exact basis transaction 536880915; writer pending
+order, UDS event phase, queued output, request connections, and installed
+interests all returned to zero. The stress gate passed 14 tests / 10,326
+assertions in 26.18 seconds; the ordinary non-stress gate remained 14 / 84.
+The earliest unsettled contract is therefore final current-artifact browser
+and complete relevant suite graduation, not transport capacity.
 
 `seon.reactive` now implements the general registered-read lifecycle. Each
 registration owns one Datahike writer interest, one active computation, and at
