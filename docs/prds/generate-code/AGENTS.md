@@ -12,12 +12,12 @@ specialized planning agent answers through the ordinary Seon REPL; namespace
 requirements derive dependency order; and database-driven scheduling delegates
 only dependency-ready repair work.
 
-The current phase is research and design review. Do not implement the public
-function, migrate namespace-name values, or add orchestration attributes until
-the owner approves [[roadmap]]. Record executable probes and source evidence in
-`research/`. Reuse `my.plan`, `seon.agent` messages/runs, `seon.repl.internal`,
-`seon.eval/eval-batch!`, and `seon.reactive/observe!`; do not create a parallel
-plan language, parser, task registry, event bus, or worker lifecycle.
+The current phase is the approved namespace-symbol foundation in Stage 1 of
+[[roadmap]]. Record executable probes and source evidence in `research/` before
+each implementation boundary. Reuse `my.plan`, `seon.agent` messages/runs,
+`seon.repl.internal`, `seon.eval/eval-batch!`, `seon.reactive/observe!`, and the
+existing `:namespaces` context block; do not create a parallel plan language,
+parser, task registry, event bus, worker lifecycle, or namespace renderer.
 
 Namespace names in the target model are complete symbols such as
 `my.library.model` (Malli `:symbol`, not `:qualified-symbol`, which implies a
@@ -30,3 +30,10 @@ The source-fenced projection is invocation-local ordinary data. Persist only
 the existing model reply, eval/program facts, plan steps, messages, and runs.
 Completion is derived from eval and behavioral-test evidence; never recognize
 an agent's prose marker as completion.
+
+The specialized developer teaching is one progressive `:generate-code` block
+that derives its view from assignment/eval/test facts and renders nothing when
+inactive. Full code remains the responsibility of the existing `:namespaces`
+block by reconciling its `:seon.agent.ctx.namespaces/full-source` set. Model
+selection extends the existing database-owned provider resolution with named
+profiles; never branch on provider at the `generate-code!` call site.

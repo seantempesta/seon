@@ -31,6 +31,13 @@ one `seon.reactive/observe!` registration derives the ready frontier. There is
 no second plan syntax, code registry, parser, evaluator, event bus, or worker
 lifecycle.
 
+Owner review on 2026-07-19 approved this direction and added one context
+constraint: development guidance is a progressive `:generate-code` block,
+while full code selection remains exclusively on the existing `:namespaces`
+block. Preparatory cleanup `e205dc9e` removed the duplicate agent-level and
+cluster-level namespace render controls, leaving cluster namespace config as
+source storage only.
+
 ## Dependency ledger
 
 | Mechanism | Selected source | Existing Seon owner |
@@ -212,6 +219,33 @@ At the user-supplied K3 cache-miss input price of $3 per million tokens, the
 complete production namespace catalog costs about $0.009 per uncached call.
 The catalog is therefore cheap and should be a stable prefix. Full source, not
 the catalog, is the material input-cost risk.
+
+### Existing context and model configuration seams
+
+The configuration audit found one viable namespace mechanism after
+`e205dc9e`: a block entity named `:namespaces` owns `full-source`, `with-tests`,
+`current-full?`, and `current-tests?`. `:seon.config/namespaces` now owns only
+the framework full-source storage superset. Code generation should reconcile
+the block's existing `full-source` set for each assignment; it should not add a
+second dynamic renderer.
+
+The LLM audit found global database-owned provider, model, temperature, output
+cap, thinking, timeout, base URL, credential-variable name, backend, and extra
+body fields. Agent entities already override provider, model, temperature,
+output cap, thinking, and retry count. Missing pieces are named model profiles,
+per-agent timeout, and per-agent compatible-gateway base URL/credential
+selection. Therefore planning/execution specialization belongs as one extra
+precedence layer in `seon.ai`'s existing resolution, not in `generate-code!`
+dispatch. Until gateway selection is isolated, Muse and Kimi comparisons need
+separate clusters.
+
+The progressive developer renderer should derive four states without storing a
+phase: initial planning from the root assignment, namespace repair from failed
+eval/test evidence, verification from remaining acceptance failures, and empty
+output when no generation assignment is active. The namespaces block supplies
+full source for selected owners, the target, and their `.internal` descendants;
+the generate-code block supplies instructions, root contract, original reply,
+unit evidence, and sibling DAG orientation.
 
 ### Retrieval
 
