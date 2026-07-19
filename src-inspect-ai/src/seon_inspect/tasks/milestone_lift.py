@@ -182,9 +182,14 @@ def milestone_solver(milestone: str, endpoint: str,
             res = await anyio.to_thread.run_sync(
                 lambda: pod_milestone_driver(
                     state.input_text, milestone,
-                    cluster_url=cluster_url))
+                    cluster_url=cluster_url,
+                    oracle=state.metadata.get("oracle")))
             require_scorable_pod_state(_record_result(state, res["run"]))
             state.metadata["eval_rows"] = res["eval_rows"]
+            if "database_value" in res:
+                state.metadata["pod_database_value"] = res["database_value"]
+                state.metadata["milestone_database_snapshot"] = res[
+                    "database_snapshot"]
             state.metadata["milestone_run"] = {
                 "cluster": res.get("cluster"), "agent_id": res.get("agent_id"),
                 "fabrication": res["fabrication"]}

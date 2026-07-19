@@ -57,12 +57,12 @@ median turn count drops, interface teaching was the primary cost. A later
 profiling pass should compare saved prompt blocks for the observed
 26k→9k→26k swing before changing context selection.
 
-## Stale database assumptions in Inspect
+## Database scorer correction
 
 The pod's `/agents/run` response emits `database`, an ordinary database value
 with `db_name`, basis transaction `t`, temporal flags, and commit ID.
-`seon_inspect.solver` now retains that as `pod_database_value`. The next live
-database scorer is still incompatible:
+`seon_inspect.solver` retains that as `pod_database_value`. The milestone
+database scorer previously remained incompatible:
 
 - `milestone.py` and `reachability.py` read the nonexistent
   `pod_database_coordinate` key;
@@ -74,7 +74,7 @@ database scorer is still incompatible:
   source, and narration. Production emits no per-eval `operation_evidence`,
   tagged request/result tree, or `coordinate_valid` field.
 
-The current typed product seam is already sufficient for durable facts:
+The current typed product seam is sufficient for durable facts:
 `POST /_seon/operator/product-evidence` evaluates one typed query against one
 immutable database value and returns both the database value and result. The
 minimal correction is to compare eval and rendered transactions with the
@@ -83,13 +83,23 @@ and delete the test-only operation wrapper assumptions. Only add operation
 capture if a future scorer truly needs ephemeral arguments or results that are
 not durable database facts.
 
+The milestone path now implements that correction. It retains ordered eval
+rows only to prove the successful schema/transact/query/report/complete
+sequence, requires each eval transaction to be at or before the final database
+value's basis transaction, and calls the typed product-evidence endpoint once
+to read the actual identity/measure pairs. The scorer compares those final
+facts and their thresholded total with the generated oracle. The synthetic
+operation request/result tree and its test fixtures are deleted. Focused
+milestone/solver proof passes 70 tests, and the change removes 28 net source
+and test lines. Live database proof remains required before the issue closes.
+Reachability still owns the same stale wrapper vocabulary independently and is
+the next source correction after this live milestone falsifier.
+
 ## Ordered next boundary
 
-1. Prove the clarified fixed namespace contract for three consecutive live
-   samples.
-2. Standardize milestone and reachability scorers on `pod_database_value`,
-   basis transaction `t`, and `rendered_transaction`.
-3. Wire the fixed database scenario to scenario-specific Datahike queries
-   through the existing typed product-evidence endpoint.
+1. Run the corrected fixed database scenario against its final typed query.
+2. Standardize reachability on `pod_database_value`, basis transaction `t`, and
+   `rendered_transaction`.
+3. Run seeded database and reachability variants against production evidence.
 4. Retain operation evidence only where the database cannot derive the fact;
    do not rebuild a generic parallel event system for the scorer.

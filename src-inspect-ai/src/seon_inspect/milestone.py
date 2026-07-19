@@ -170,10 +170,12 @@ def _coordinate_at_or_before(point: Any, final: Any) -> bool:
 
 
 def _ordered_proof_rows(eval_rows: list[dict[str, Any]],
-                        final_coordinate: Any,
+                        final_database_value: Any,
                         turn_ids: set[str] | None) -> list[dict[str, Any]]:
-    if not isinstance(final_coordinate, dict) or not turn_ids:
-        raise EvidenceError("final coordinate or request turn membership absent")
+    if (not isinstance(final_database_value, dict)
+            or not isinstance(final_database_value.get("t"), int)
+            or not turn_ids):
+        raise EvidenceError("final database value or request turn membership absent")
     if any(not isinstance(row.get("eval_transaction"), int)
            or row.get("turn_id") not in turn_ids for row in eval_rows):
         raise EvidenceError("eval order or request turn membership invalid")
@@ -182,6 +184,8 @@ def _ordered_proof_rows(eval_rows: list[dict[str, Any]],
         raise EvidenceError("eval transaction order is not unique")
     if ordered != eval_rows:
         raise EvidenceError("eval evidence is not in transaction order")
+    if ordered and ordered[-1]["eval_transaction"] > final_database_value["t"]:
+        raise EvidenceError("eval evidence is newer than the final database value")
     return ordered
 
 
@@ -286,7 +290,8 @@ def check_ns_movement(eval_rows: list[dict[str, Any]],
 def check_store_recall(eval_rows: list[dict[str, Any]],
                        reply: str,
                        oracle: dict[str, Any] | None = None,
-                       final_coordinate: dict[str, Any] | None = None,
+                       final_database_value: dict[str, Any] | None = None,
+                       database_snapshot: list[list[Any]] | None = None,
                        turn_ids: set[str] | None = None) -> dict[str, Any]:
     """The `db` milestone oracle: store, then RECALL it in a later eval.
 
@@ -373,62 +378,40 @@ def check_store_recall(eval_rows: list[dict[str, Any]],
     ])
     answer = _reply_has_number(reply, expected)
 
-    operation_proof = not proof_required
+    database_readback = not proof_required
     if proof_required:
         try:
-            ordered = _ordered_proof_rows(
-                eval_rows, final_coordinate, turn_ids)
-            tx_row = ordered[transact_idx] if transact_idx is not None else None
-            query_row = ordered[query_idx] if query_idx is not None else None
-            if tx_row is None or query_row is None:
+            ordered = _ordered_proof_rows(eval_rows, final_database_value, turn_ids)
+            if transact_idx is None or query_idx is None:
                 raise EvidenceError("source workflow rows absent")
-            tx_ops = _operations(tx_row, final_coordinate or {})
-            query_ops = _operations(query_row, final_coordinate or {})
-            tx_op = next(
-                operation for operation in tx_ops
-                if operation.get("operation") ==
-                ":seon.db.read.operation/transact")
-            query_op = next(
-                operation for operation in query_ops
-                if operation.get("operation") ==
-                ":seon.db.read.operation/query")
-            tx_request = _decode_evidence_value(tx_op.get("request"))
-            tx_result = _decode_evidence_value(tx_op.get("result"))
-            query_request = _decode_evidence_value(query_op.get("request"))
-            query_result = _decode_evidence_value(query_op.get("result"))
-            tx_rows = tx_request.get(":seon.db/tx-data", [])
             expected_pairs = {
                 (str(record["identity"]), record["measure"])
                 for record in records
             }
+            if not isinstance(database_snapshot, list):
+                raise EvidenceError("final database query result absent")
             actual_pairs = {
-                (str(row.get(identity_attr)), row.get(measure_attr))
-                for row in tx_rows if isinstance(row, dict)
+                (str(row[0]), row[1])
+                for row in database_snapshot
+                if isinstance(row, list) and len(row) == 2
             }
-            query_form = query_request.get(":seon.db/query", [])
-            query_text = " ".join(str(item) for item in query_form)
-            operation_proof = (
-                tx_op.get("ok") is True
-                and isinstance(tx_result, dict)
-                and tx_result.get(":seon.db/ok?") is True
-                and len(tx_rows) == len(records)
-                and actual_pairs == expected_pairs
-                and query_op.get("ok") is True
-                and measure_attr in query_text
-                and ">" in query_text
-                and _reply_has_number(query_text, threshold)
-                and query_result == expected
-                and tx_op["coordinate"]["t"]
-                <= query_op["coordinate"]["t"]
-                and tx_row["eval_transaction"]
-                < query_row["eval_transaction"])
-        except (EvidenceError, KeyError, StopIteration, TypeError, ValueError):
-            operation_proof = False
+            selected_total = sum(
+                measure for _, measure in actual_pairs
+                if isinstance(measure, (int, float))
+                and not isinstance(measure, bool)
+                and measure > float(threshold))
+            database_readback = (
+                actual_pairs == expected_pairs
+                and abs(float(selected_total) - float(expected)) <= 1e-9
+                and ordered[transact_idx]["eval_transaction"]
+                < ordered[query_idx]["eval_transaction"])
+        except (EvidenceError, KeyError, TypeError, ValueError):
+            database_readback = False
 
     checks = {"schema_register": schema_before,
               "transact": transact_idx is not None,
               "query_later": query_idx is not None,
-              "operation_evidence": operation_proof,
+              "database_readback": database_readback,
               "report_human": bool(report_indices),
               "complete": bool(complete_indices),
               "answer": answer}
@@ -449,7 +432,8 @@ MILESTONE_ORACLES: dict[
 def check_milestone(milestone: str, eval_rows: list[dict[str, Any]],
                     reply: str,
                     oracle: dict[str, Any] | None = None,
-                    final_coordinate: dict[str, Any] | None = None,
+                    final_database_value: dict[str, Any] | None = None,
+                    database_snapshot: list[list[Any]] | None = None,
                     turn_ids: set[str] | None = None) -> dict[str, Any]:
     """Score a milestone by id; raises on an unknown id (never a silent pass)."""
     try:
@@ -461,7 +445,8 @@ def check_milestone(milestone: str, eval_rows: list[dict[str, Any]],
             "seon_inspect.planning)")
     if milestone == "db":
         return oracle_fn(eval_rows, reply, oracle=oracle,
-                         final_coordinate=final_coordinate,
+                         final_database_value=final_database_value,
+                         database_snapshot=database_snapshot,
                          turn_ids=turn_ids)
     return oracle_fn(eval_rows, reply, oracle=oracle)
 
@@ -554,6 +539,7 @@ def pod_milestone_driver(
     milestone: str,
     *,
     cluster_url: str,
+    oracle: dict[str, Any] | None = None,
     timeout_ms: int | None = None,
 ) -> dict[str, Any]:
     """Drive one milestone on an explicitly provisioned static cluster.
@@ -575,8 +561,19 @@ def pod_milestone_driver(
                 "pod response omitted database-derived eval_evidence")
         return rows
 
-    return run_milestone_sample(contract, milestone,
-                                run=run, fetch_evals=fetch)
+    result = run_milestone_sample(contract, milestone,
+                                  run=run, fetch_evals=fetch)
+    if milestone == "db":
+        from seon_inspect.product_scenarios import query_product_evidence
+
+        proof = oracle or {}
+        identity_attr = proof.get("identity_attr", ":my.cache/name")
+        measure_attr = proof.get("measure_attr", ":my.cache/weight-kg")
+        query = (f"[:find ?identity ?measure :where "
+                 f"[?e {identity_attr} ?identity] "
+                 f"[?e {measure_attr} ?measure]]")
+        result.update(query_product_evidence(cluster_url, query))
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -605,7 +602,8 @@ def milestone_scorer() -> Scorer:
                     if isinstance(turns, list) else None)
         res = check_milestone(
             meta["milestone"], meta["eval_rows"], state.output.completion,
-            meta.get("oracle"), meta.get("pod_database_coordinate"), turn_ids)
+            meta.get("oracle"), meta.get("pod_database_value"),
+            meta.get("milestone_database_snapshot"), turn_ids)
         fab = count_fabrication(state.output.completion)
         return Score(
             value=CORRECT if res["ok"] else INCORRECT,

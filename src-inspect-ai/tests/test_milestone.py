@@ -24,28 +24,6 @@ def _ev(*sources_ok):
     return [{"source": s, "ok": ok} for s, ok in sources_ok]
 
 
-def _tag(value):
-    if isinstance(value, dict):
-        return {"kind": "map", "entries": [
-            {"key": _tag(key), "value": _tag(item)}
-            for key, item in value.items()]}
-    if isinstance(value, list):
-        return {"kind": "vector", "items": [_tag(item) for item in value]}
-    if isinstance(value, str) and value.startswith(":"):
-        return {"kind": "keyword", "value": value}
-    return {"kind": "scalar", "value": value}
-
-
-def _operation(position, operation, request, result, t, *, ok=True,
-               coordinate_valid=True):
-    return {"position": position, "operation": operation, "ok": ok,
-            "source": ":seon.db.read.source/captured", "replayable": False,
-            "coordinate_valid": coordinate_valid,
-            "coordinate": {"database_id": "db", "branch": "db",
-                           "commit_id": f"operation-{t}", "t": t},
-            "request": _tag(request), "result": _tag(result)}
-
-
 def _generated_db_proof_rows(oracle):
     identity = oracle["identity_attr"]
     measure = oracle["measure_attr"]
@@ -65,22 +43,12 @@ def _generated_db_proof_rows(oracle):
     for index, row in enumerate(rows):
         row.update(turn_id="store" if index <= 2 else "recall",
                    eval_transaction=100 + index)
-    tx_data = [{identity: record["identity"], measure: record["measure"]}
-               for record in oracle["records"]]
-    rows[2]["operation_evidence"] = {
-        "status": "inline", "blob_hash": "tx", "operations": [
-            _operation(
-                0, ":seon.db.read.operation/transact",
-                {":seon.db/tx-data": tx_data}, {":seon.db/ok?": True}, 10)]}
-    rows[3]["operation_evidence"] = {
-        "status": "inline", "blob_hash": "query", "operations": [
-            _operation(
-                0, ":seon.db.read.operation/query",
-                {":seon.db/query": [":find", ["sum", "?v"], ".",
-                                     ":where", ["?e", measure, "?v"],
-                                     [">", "?v", oracle["threshold"]]]},
-                oracle["answer"], 20)]}
     return rows
+
+
+def _database_snapshot(oracle):
+    return [[record["identity"], record["measure"]]
+            for record in oracle["records"]]
 
 
 # ---------------------------------------------------------------------------
@@ -243,10 +211,10 @@ def test_generated_database_workflow_uses_structured_oracle():
     sample = generate_rows("database_workflow", 1, 1)[0]
     oracle = sample["metadata"]["oracle"]
     rows = _generated_db_proof_rows(oracle)
-    final = {"database_id": "db", "branch": "db",
-             "commit_id": "final", "t": 30}
+    final = {"db_name": "db", "commit_id": "final", "t": 200}
     result = check_milestone(
-        "db", rows, oracle["answer"], oracle, final, {"store", "recall"})
+        "db", rows, oracle["answer"], oracle, final,
+        _database_snapshot(oracle), {"store", "recall"})
     assert result["ok"], result["failures"]
     assert all(result["checks"].values())
     assert "schema_register" in result["checks"]
@@ -255,23 +223,11 @@ def test_generated_database_workflow_uses_structured_oracle():
 @pytest.mark.parametrize(
     "mutate",
     [
-        lambda rows: rows[3].pop("operation_evidence"),
-        lambda rows: rows[2]["operation_evidence"].update(status="malformed"),
-        lambda rows: rows[3]["operation_evidence"].update(status="oversized"),
-        lambda rows: rows[2]["operation_evidence"]["operations"][0].update(ok=False),
-        lambda rows: rows[2]["operation_evidence"]["operations"][0][
-            "result"]["entries"][0].update(value=_tag(False)),
-        lambda rows: rows[3]["operation_evidence"]["operations"][0].update(
-            coordinate_valid=False),
-        lambda rows: rows[3]["operation_evidence"]["operations"][0][
-            "coordinate"].update(t=31),
-        lambda rows: rows[3]["operation_evidence"]["operations"][0][
-            "coordinate"].pop("commit_id"),
-        lambda rows: rows[3]["operation_evidence"]["operations"][0][
-            "coordinate"].update(database_id="foreign"),
-        lambda rows: rows[3].update(turn_id="foreign-turn"),
-        lambda rows: rows[3]["operation_evidence"]["operations"][0].update(
-            result=_tag(-1)),
+        lambda proof: proof.update(snapshot=None),
+        lambda proof: proof["snapshot"].pop(),
+        lambda proof: proof["snapshot"][0].__setitem__(1, -1),
+        lambda proof: proof["database"].update(t=102),
+        lambda proof: proof["rows"][3].update(turn_id="foreign-turn"),
     ],
 )
 def test_generated_database_workflow_fails_closed_without_exact_proof(mutate):
@@ -280,14 +236,15 @@ def test_generated_database_workflow_fails_closed_without_exact_proof(mutate):
     from seon_inspect.generators import generate_rows
 
     oracle = generate_rows("database_workflow", 1, 1)[0]["metadata"]["oracle"]
-    rows = copy.deepcopy(_generated_db_proof_rows(oracle))
-    mutate(rows)
-    final = {"database_id": "db", "branch": "db",
-             "commit_id": "final", "t": 30}
+    proof = {"rows": copy.deepcopy(_generated_db_proof_rows(oracle)),
+             "database": {"db_name": "db", "commit_id": "final", "t": 200},
+             "snapshot": _database_snapshot(oracle)}
+    mutate(proof)
     result = check_milestone(
-        "db", rows, oracle["answer"], oracle, final, {"store", "recall"})
+        "db", proof["rows"], oracle["answer"], oracle, proof["database"],
+        proof["snapshot"], {"store", "recall"})
     assert not result["ok"]
-    assert "operation_evidence" in result["failures"]
+    assert "database_readback" in result["failures"]
 
 
 def test_generated_namespace_workflow_uses_structured_oracle():
@@ -379,7 +336,7 @@ def test_run_milestone_sample_wires_effects():
     assert check_store_recall(res["eval_rows"], res["reply"])["ok"]
 
 
-def test_pod_driver_uses_explicit_static_coordinate_and_response_evidence(
+def test_pod_driver_uses_explicit_static_url_and_database_readback(
     monkeypatch
 ):
     calls = {}
@@ -390,6 +347,12 @@ def test_pod_driver_uses_explicit_static_coordinate_and_response_evidence(
                 "eval_evidence": _DB_GOOD_ROWS}
 
     monkeypatch.setattr("seon_inspect.solver.pod_run", fake_run)
+    monkeypatch.setattr(
+        "seon_inspect.product_scenarios.query_product_evidence",
+        lambda url, query: {
+            "database_value": {"db_name": "db", "t": 200},
+            "database_snapshot": [["KESTREL", 42.5]],
+        })
     result = pod_milestone_driver(
         DB_MEMORY_CONTRACT, "db",
         cluster_url="http://127.0.0.1:7994/agents/run",
@@ -398,6 +361,7 @@ def test_pod_driver_uses_explicit_static_coordinate_and_response_evidence(
     assert calls["run"] == (DB_MEMORY_CONTRACT, 1234,
                             "http://127.0.0.1:7994/agents/run")
     assert result["eval_rows"] == _DB_GOOD_ROWS
+    assert result["database_value"]["t"] == 200
 
 
 def test_pod_driver_rejects_missing_response_evidence(monkeypatch):
@@ -417,6 +381,11 @@ def test_pod_driver_preserves_absent_database_owned_timeout(monkeypatch):
         calls.append((text, timeout_ms, url))
         return {"reply": _DB_GOOD_REPLY, "agent_id": "a-static",
                 "eval_evidence": _DB_GOOD_ROWS}
+
+    monkeypatch.setattr(
+        "seon_inspect.product_scenarios.query_product_evidence",
+        lambda *_: {"database_value": {"db_name": "db", "t": 200},
+                    "database_snapshot": []})
 
     monkeypatch.setattr("seon_inspect.solver.pod_run", fake_run)
     pod_milestone_driver(

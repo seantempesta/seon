@@ -115,7 +115,12 @@ deletion, and left the shared writer ready. The fixed namespace run now passes
 all three concurrent epochs with accuracy
 and `pass_at_3` 1.0, zero fabrication, and no infrastructure failure in 5:13.
 The database scorer's stale database-value assumptions are therefore the next
-ordered contract. The real browser/Datastar
+ordered contract. The milestone scorer now consumes the ordinary database
+value, checks eval transactions against its basis transaction, and reads the
+actual stored pairs once through the typed product-evidence query; the
+synthetic operation tree and fixtures are gone, with 70 focused tests passing
+and 28 net lines removed. Live fixed-database proof is next, while reachability
+still owns the same stale assumptions independently. The real browser/Datastar
 journey is the dependency-ready parallel portfolio; the
 complete live Inspect, browser, package, downstream,
 multi-cluster, and modest-hardware matrix remains the final gate.
