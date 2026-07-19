@@ -289,6 +289,17 @@ three-turn bound with `:no-forms`. Live current-artifact Inspect proof remains
 after rebuild, including the separate fact that `delegate!` returns a child id
 rather than synchronously awaiting the child's report.
 
+The rebuilt live default at `0879d756` closes the loop half of that acceptance.
+A 90-second bounded `/agents/run` request completed in 31,867 ms with five
+turns and five successful evals. The sources were `plan/list-open`, one
+state-changing `plan/active!`, then three consecutive `plan/status` reads. The
+third read hit the existing no-progress bound and closed the run at
+`:no-forms`; the prior representative consumed 37 turns and timed out. The
+model did not invoke `delegate!`, so this is not evidence of child-result
+delivery. The next Inspect namespace scenario must wait on the existing child
+message/eval facts after delegation rather than infer synchronous completion
+from the returned child id.
+
 The same controlled branch also reproduced the one-call release race with the
 writer's exact `database-in-use` response. Pod containment completed cleanly
 and recorded root plus child as unhosted, but selector-owned UDS acquisition

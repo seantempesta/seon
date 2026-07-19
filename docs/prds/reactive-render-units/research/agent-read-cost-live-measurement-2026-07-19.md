@@ -80,6 +80,17 @@ The durable consumer is the existing turn record and
 of that evidence. No profiler registry, log scraper, or debug-only database is
 needed.
 
+## Progress-accounting prerequisite
+
+Commit `0879d756` removed the loop instability before attribution work resumes.
+The execution scope now records positive eval progress only for a transaction
+committed during the raw form or an accepted program/schema declaration;
+derived namespace-edge receipt operations do not count. On the rebuilt default,
+the same class of task completed in 31,867 ms after one plan write and three
+read-only status calls closed the existing no-progress bound. This makes a
+future per-turn aggregate meaningful: repeated reads can no longer extend the
+measurement window indefinitely by masquerading as work.
+
 ## Required contract
 
 The selected configuration owns one mode with a launch-time environment

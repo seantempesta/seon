@@ -195,6 +195,14 @@ the existing `:no-forms` bound. The next integrated exit is a rebuilt Inspect
 namespace run that parks the root without polling and waits for existing child
 message/eval facts between driver phases.
 
+The exact `0879d756` rebuild proves the parking half live. A bounded default
+request completed in 31,867 ms after five turns: `plan/list-open`, one real
+`plan/active!` write, and three `plan/status` reads. Those three reads advanced
+the unchanged no-progress bound and closed at `:no-forms`, replacing the prior
+37-turn/211-second timeout. The model never delegated, so child completion is
+still an Inspect scenario gate; `delegate!` returning an id is not treated as a
+synchronous child report.
+
 The gate now also exercises the real timer rather than only the `due-at`
 arithmetic. With a 1,000 ms moving settle edge and 20 ms maximum latency, a
 120 ms continuous event stream completes repeatedly before the producer stops,
