@@ -193,7 +193,14 @@
                    :db/cardinality :db.cardinality/one}
             secondary-only? (assoc :db.secondary/only true))
           (let [inner-attr (schema->attr-partial attr-key nil inner)]
-            (merge inner-attr
+            ;; A collection's child schema determines only the stored VALUE
+            ;; type. Attribute properties such as identity, uniqueness,
+            ;; indexing, and component ownership belong to the collection
+            ;; attribute itself. Propagating them from a referenced child
+            ;; turns `[:vector :some/identity-attr]` into a globally unique
+            ;; cardinality-many column and prevents two entities from sharing
+            ;; the same ordinary value.
+            (merge (select-keys inner-attr [:db/valueType])
                    {:db/cardinality :db.cardinality/many}
                    combined-seon-props))))
 

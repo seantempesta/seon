@@ -44,6 +44,21 @@
 (schema/register! ::current-tests? [:boolean {:default true}])           ; …and its current ns shows its tests
 (schema/register! ::home-requires :seon.agent.home/require-specs)
 
+;; A namespaces block is stored as one component entity in
+;; `:seon.agent/ctx`. The generic `:seon.agent.ctx/block` schema validates the
+;; shared block surface; this stored specialization declares the additional
+;; attributes this block family persists and queries. The writer derives their
+;; Datahike declarations from this entity form during cold initialization and
+;; reopen publication. Keep these fields here—not on `:seon.agent`—because
+;; configuration belongs exclusively to the component block.
+(schema/register! ::block
+  [:map {:seon.db/entity true}
+   [:seon.agent.ctx/name :seon.agent.ctx/name]
+   [::full-source {:optional true} ::full-source]
+   [::with-tests {:optional true} ::with-tests]
+   [::current-full? {:optional true} ::current-full?]
+   [::current-tests? {:optional true} ::current-tests?]])
+
 ;; ============================================================
 ;; The namespace-display rules. Two SEPARATE concerns, both pure
 ;; string/symbol boundary fns (no dependency on anything in `seon.agent.ctx`):

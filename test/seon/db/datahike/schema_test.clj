@@ -307,6 +307,8 @@
                 [:and :string [:re "^[a-z][a-z0-9]{11}$"]]]
                :example/name :string
                :example/names [:set :example/name]
+               :example/namespace [:symbol {:seon.db/identity true}]
+               :example/namespaces [:vector :example/namespace]
                :example/id [:uuid {:seon.db/identity true}]
                :example/generated-id
                [:and {:seon.db/identity true
@@ -321,6 +323,12 @@
             :db/cardinality :db.cardinality/many}
            (dhs/malli-form->datahike-attribute
             forms :example/names (:example/names forms))))
+    (is (= {:db/ident :example/namespaces
+            :db/valueType :db.type/symbol
+            :db/cardinality :db.cardinality/many}
+           (dhs/malli-form->datahike-attribute
+            forms :example/namespaces (:example/namespaces forms)))
+        "collection values do not inherit identity from a referenced child schema")
     (is (= {:db/ident :example/id
             :db/valueType :db.type/uuid
             :db/cardinality :db.cardinality/one

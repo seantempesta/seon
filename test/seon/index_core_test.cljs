@@ -391,6 +391,34 @@
                    :seon.agent.ctx.namespaces/current-tests?])
         "namespace render settings live only on the namespaces block")))
 
+(deftest namespaces-block-declares-its-stored-configuration-attributes
+  (let [block-form (schema/schema-definition
+                    :seon.agent.ctx.namespaces/block)
+        properties (second block-form)
+        attributes (into #{} (map first) (drop 2 block-form))
+        installed-idents
+        (into #{}
+              (map :db/ident)
+              (db/malli->datahike-schema attributes))]
+    (is (true? (:seon.db/entity properties))
+        "the specialized component block participates in cold schema publication")
+    (is (= #{:seon.agent.ctx/name
+             :seon.agent.ctx.namespaces/full-source
+             :seon.agent.ctx.namespaces/with-tests
+             :seon.agent.ctx.namespaces/current-full?
+             :seon.agent.ctx.namespaces/current-tests?}
+           attributes)
+        "the one namespaces block owns every persisted render dial")
+    (is (= attributes installed-idents)
+        "every attribute queried from a namespaces block has a Datahike declaration")
+    (doseq [attribute [:seon.agent.ctx.namespaces/full-source
+                       :seon.agent.ctx.namespaces/with-tests]]
+      (let [declaration (first (db/malli->datahike-schema [attribute]))]
+        (is (= :db.cardinality/many (:db/cardinality declaration)))
+        (is (= :db.type/symbol (:db/valueType declaration)))
+        (is (not (contains? declaration :db/unique))
+            "namespace selections are ordinary shared symbols, not identities")))))
+
 (deftest namespace-entities-declare-structural-require-edges
   (let [namespace-attributes
         (into #{}

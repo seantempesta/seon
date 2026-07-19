@@ -262,8 +262,27 @@
                       "[:and {:seon.db/identity true} :string]"}
                      {:seon.schema/key :example/entity
                       :seon.schema/form
-                      "[:map {:seon.db/entity true} [:example/id :example/id]]"}])
-            (assoc :seon.db/initial-data [{:example/id "singleton"}]))]
+                      "[:map {:seon.db/entity true} [:example/id :example/id]]"}
+                     {:seon.schema/key :example/namespace
+                      :seon.schema/form
+                      "[:symbol {:seon.db/identity true}]"}
+                     {:seon.schema/key :example/block-name
+                      :seon.schema/form
+                      "[:keyword {:seon.db/identity true}]"}
+                     {:seon.schema/key :example/full-source
+                      :seon.schema/form
+                      "[:vector :example/namespace]"}
+                     {:seon.schema/key :example/block
+                      :seon.schema/form
+                      (str "[:map {:seon.db/entity true} "
+                           "[:example/block-name :example/block-name] "
+                           "[:example/full-source {:optional true} :example/full-source]]")}])
+            (assoc :seon.db/initial-data
+                   [{:example/id "singleton"}
+                    {:example/block-name :first
+                     :example/full-source ['my.shared]}
+                    {:example/block-name :second
+                     :example/full-source ['my.shared]}]))]
     (try
       (let [response
             (writer/handle-request
@@ -280,6 +299,17 @@
         (is (::protocol/success? response) (pr-str response))
         (is (= :db.unique/identity
                (get-in db-value [:schema :example/id :db/unique])))
+        (is (= {:db/valueType :db.type/symbol
+                :db/cardinality :db.cardinality/many}
+               (select-keys (get-in db-value [:schema :example/full-source])
+                            [:db/valueType :db/cardinality :db/unique])))
+        (is (= 2
+               (count
+                (d/q '[:find ?block
+                       :in $ ?namespace
+                       :where [?block :example/full-source ?namespace]]
+                     db-value 'my.shared)))
+            "two stored blocks may select the same namespace symbol")
         (is (= "singleton" (:example/id (d/entity db-value
                                                    [:example/id "singleton"])))))
       (finally
