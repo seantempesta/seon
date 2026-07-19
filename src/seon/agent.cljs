@@ -956,7 +956,7 @@
                      ::db/max-results 64
                      ::db/max-result-weight 4096})))
                 namespace-eid
-                (when (and namespace-name (not (error-value? resident-id)))
+                (when (and namespace-name (nil? resident-id))
                   (await
                    (db/query
                     {::db/db database
