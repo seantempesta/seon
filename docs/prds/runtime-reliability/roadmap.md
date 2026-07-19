@@ -158,6 +158,21 @@ all emitted `datastar-patch-elements`. The remaining browser boundary is the
 complete control/validation/read-back matrix, gzip remote-mode proof, shared
 render computation, and slow-client isolation.
 
+The rebuilt browser boundary after the Datahike ordinary-symbol correction also
+passes agent creation without raising the original 64-result budget. The visible
+root form created `bumpy-brooms-pay` for `my.browser.ui-proof`, the root feed
+added it without reload, its addressed message appeared, its agent page ran, and
+the root, agent, and data views remained console-clean. All three server-side
+feeds returned immediate `datastar-patch-elements` frames. That drive exposed a
+separate cold-schema defect before this evidence can graduate the namespace
+context: the `namespaces` block queries its registered
+`:seon.agent.ctx.namespaces/full-source` attribute, but that attribute is absent
+from the installed Datahike schema. The error boundary kept the pod and feed
+alive and reported a core bug. The one namespace-block entity declaration and
+schema-delta installation path must install every attribute in its selector;
+the acceptance proof is a fresh/reopened database plus a successfully rendered
+block, never an omission guard or query workaround.
+
 The deterministic namespace browser cut now also passes against the fused
 default database. Root created `dirty-places-sniff` for
 `:my.agents.browser-resident` with one initial message; the live root view
