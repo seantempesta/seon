@@ -10,12 +10,13 @@
    `::max-tokens`, `::thinking`, `::timeout-ms`, `::base-url`,
    `::api-key-env`, `::dg-backend`, and `::extra-body-edn`. The execution
    boundary pulls ordinary config and agent maps from one immutable database
-   database value and calls [[resolved-config-from-rows]]. Provider requests carry
-   that `::config-resolution`; adapters never read a local database.
+   value and calls [[resolved-config-from-rows]]. Provider requests carry that
+   `::config-resolution`; adapters never read a local database.
 
-   ENV/CONFIG SEEDS ONCE → THE DB OWNS THE ROW. [[sync!]] (called from
-   `seon.client/start-agent!` at boot) SEEDS the row from the `SEON_AI_*`
-   env vars ONLY when it is unconfigured (a fresh store). Once seeded the
+   ENV/CONFIG SEEDS ONCE → THE DB OWNS THE ROW. [[sync!]] (called by
+   `seon.client/start-runtime!` for an autonomous runtime) SEEDS the row from
+   the `SEON_AI_*` env vars ONLY when it is unconfigured (a fresh database).
+   Once seeded the
    DB is authoritative: a later boot does NOT re-sync, so a runtime
    transact against the row (a model/provider switch) PERSISTS across
    reboots. Env is the INITIAL config source, not the row's owner — to

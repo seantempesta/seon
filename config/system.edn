@@ -258,7 +258,9 @@
    :seon.ai/agent-timeout-ms 300000
    :seon.ai/agent-base-url "https://api.moonshot.ai/v1"
    :seon.ai/agent-api-key-env "MOONSHOT_API_KEY"
-   :seon.ai/agent-max-retries 0}
+   ;; One retry only for the transient 429/5xx/transport class. This follows
+   ;; Kimi's reliability guidance while bounding an expensive planning call.
+   :seon.ai/agent-max-retries 1}
   :execution
   {:seon.ai/agent-provider :deepseek
    :seon.ai/agent-model "deepseek-v4-flash"

@@ -789,6 +789,13 @@ not a root-only documentation system.
   pod establishes the safe runtime projection from that same committed
   transaction. The child does no work until it receives a trigger; to make it
   work, root (or anyone) sends it a message—that message opens run #1.
+- **Named model selection is birth data, not runtime dispatch state.**
+  `create!`, `mint!`, `start!`, and `delegate!` accept the optional request-only
+  `:seon.config/model-variant` keyword. The chosen sparse
+  `:seon.ai/agent-*` map is copied onto a newly created agent in the same birth
+  transaction. Unknown names allocate nothing. Existing complete IDs remain
+  idempotent, while a namespace-resident start/delegate with a selector returns
+  a user error rather than silently ignoring or mutating the selection.
 - **`seon.agent/delegate!` is the atomic birth-plus-first-message operation.**
   It accepts the same optional namespace. An existing resident receives the
   message directly; an absent resident, its namespace assignment, and the

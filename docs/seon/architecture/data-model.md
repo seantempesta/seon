@@ -535,6 +535,16 @@ family (skills, render caps, ctx blocks, capability sets): agent attrs are
 the override point, one chain, absent = inherit — new families add an attr
 pair to the resolver's data map, never a second mechanism.
 
+The configuration singleton may hold
+`:seon.config/model-variants`, a cardinality-one EDN map from a role keyword to
+a closed sparse map of those same agent attributes. Agent-birth calls accept
+the request-only `:seon.config/model-variant` selector. They resolve it from the
+configuration acquired at that immutable database value and copy the selected
+attributes onto the new agent in the birth transaction. The selector is not an
+agent fact, does not identify an entity class, and cannot retune an existing
+namespace resident. A stale write reacquires configuration and resolves the
+name again before retrying.
+
 ### 4.5 crash recovery — `:seon.runtime.recovery/*`
 
 Crash recovery writes one small anchor in the same deterministic transaction as
@@ -1001,6 +1011,7 @@ concern = ONE `:seon.config/<section>` schema + one resolver fn + one key here:
    [:seon.config/spawn-depth-cap  {:optional true} :seon.config/spawn-depth-cap]
    [:seon.config/watchdog         {:optional true} :seon.config/watchdog]
    [:seon.config/schedule-breaker {:optional true} :seon.config/schedule-breaker]
+   [:seon.config/model-variants   {:optional true} :seon.config/model-variants-spec] ; named sparse birth-time agent model attrs
    [:seon.config/agent-context    {:optional true} :seon.config/agent-context]     ; the per-agent block tree + dials
    [:seon.config/skills           {:optional true} :seon.config/skills]            ; importable SKILL.md corpus input
    [:seon.config/root-context     {:optional true} :seon.config/root-context]])    ; root block reconciliation + complete home-require scalar

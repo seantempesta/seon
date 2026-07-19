@@ -20,21 +20,22 @@ read back per-turn usage.
 | `seon.ai.anthropic` | `@anthropic-ai/sdk` (^0.104) | `:anthropic` | Anthropic Messages |
 
 Both are vendored as read-only source under `reference-code/openai-node` and
-`reference-code/anthropic-sdk-typescript`. The active provider is chosen by
-`SEON_AI_PROVIDER` (see below); `seon.client/current-llm-fn` dispatches to the
-matching adapter, falling back to a stub llm-fn when no API key resolves.
+`reference-code/anthropic-sdk-typescript`. The active provider is chosen by the
+resolved database configuration; `seon.ai.dispatch/llm-fn` dispatches to the
+matching adapter, falling back to a stub function when no API key resolves.
 
 The adapter contract never changed across the migration:
 
 ```text
-agent-adapter → (fn [ctx-text] → Promise< {:text "…" :seon.ai/raw <resp>}
-                                          | {:text "" :seon.ai/error <envelope>} >)
+agent-adapter → (fn [:seon.ai/request]
+                 → Promise< {:seon.ai/text "…" :seon.ai/raw <resp>}
+                            | {:seon.ai/text "" :seon.ai/error <envelope>} >)
 ```
 
 ## Configuration surface
 
 Every setting can come from an **environment variable** OR from the
-`:seon.ai/config` singleton row in the store. **Env SEEDS, the DB OWNS**
+`:seon.ai/config` singleton row in the database. **Env SEEDS, the DB OWNS**
 (seed-once): at boot `seon.ai/sync!` writes the row from the `SEON_AI_*`
 vars ONLY when the row is unconfigured (nil/`{}`); a row with ≥1 config
 attr is left untouched — env is ignored and runtime switches persist
@@ -54,9 +55,9 @@ nothing after first boot.
 | `SEON_AI_MAX_TOKENS` | `:seon.ai/max-tokens` | int | all | |
 | `SEON_AI_TIMEOUT_MS` | `:seon.ai/timeout-ms` | int | all | wall-clock; default `60000` |
 | `SEON_AI_THINKING` | `:seon.ai/thinking` | `false`\|`true`\|`high`\|`max`\|… | all | see Thinking |
-| `SEON_AI_TEMPERATURE` | `:seon.ai/temperature` | double | openai-compat only | **ignored by anthropic** (sampling params 400 on Opus 4.7+/Fable) |
+| `SEON_AI_TEMPERATURE` | `:seon.ai/temperature` | double | deepseek, openai-compat | **ignored by anthropic** (sampling params 400 on Opus 4.7+/Fable) |
 | `SEON_AI_BASE_URL` | `:seon.ai/base-url` | string | openai-compat | the `/v1` ROOT (preferred) — see baseURL |
-| `SEON_AI_API_KEY_ENV` | `:seon.ai/api-key-env` | string | all | NAME of the env var holding the key |
+| `SEON_AI_API_KEY_ENV` | `:seon.ai/api-key-env` | string | deepseek, openai-compat | NAME of the env var holding the key |
 | `SEON_AI_EXTRA_BODY` | `:seon.ai/extra-body-edn` | EDN-map string | all | extra request fields for the agent loop — see Extra request fields |
 | `SEON_AI_API_KEY` | — (never stored) | string | all | direct key fallback |
 | `DEEPSEEK_API_KEY` | — (never stored) | string | deepseek | shipped deepseek default key |
@@ -129,8 +130,10 @@ This catalog tracks every model Seon actively recommends, defaults to, or uses
 as a maintained specialist. It deliberately does not mirror every vendor SKU:
 adding a row means Seon has a concrete role and configuration for that model.
 Each tracked entry must retain model id, provider/adapter, current price,
-context, reasoning/latency behavior, verification status, recommendation,
-primary refresh link, and checked date.
+context, maximum output, reasoning/latency behavior, verification status,
+recommendation, primary refresh link, and checked date. “Vendor” below means a
+public primary source; “Seon” means a dated local measurement. An unverified
+price never silently becomes a vendor fact.
 
 Prices are snapshots, not configuration truth. Each hosted-provider section
 carries a primary pricing link and an “as of” date; refresh the number from
@@ -143,21 +146,26 @@ scorecard whenever model behavior or pricing changes.
 USD per one million tokens. Input columns distinguish automatic prefix-cache
 hits where the provider publishes a separate rate.
 
-| Model | Cache-hit input | Cache-miss input | Output | Context | Reasoning / speed | Seon role |
-|---|---:|---:|---:|---:|---|---|
-| `deepseek-v4-flash` | $0.0028 | $0.14 | $0.28 | 1M | Thinking selectable; ~68 tok/s measured | Cheapest fast worker / routine turns |
-| `deepseek-v4-pro` | $0.003625 | $0.435 | $0.87 | 1M | Thinking selectable; ~43 tok/s measured | Default quality/cost baseline |
-| `muse-spark-1.1` | $0.15 | $1.25 | $4.25 | 1M | Always reasons; `minimal` measured at ~900–1,060 tok/s | Fast daily agent and iterative implementation |
-| `kimi-k3` | $0.30 | $3.00 | $15.00 | 1M | Always reasons; only `max`, no live Seon speed yet | Selective long-horizon planning, research, and difficult coding |
-| `claude-haiku-4-5` | $0.10 | $1.00 | $5.00 | 200K | Fast tier; not live-verified in Seon | Quick specialist calls when Anthropic behavior matters |
-| `claude-sonnet-5` | $0.20 | $2.00 | $10.00 | 1M | Adaptive reasoning; new tokenizer | Coding/agentic alternative through 2026-08-31 intro pricing |
-| `claude-opus-4-8` | $0.50 | $5.00 | $25.00 | 1M | Adaptive reasoning; optional premium fast mode | Hard cross-boundary coding and judgment |
-| `claude-fable-5` | $1.00 | $10.00 | $50.00 | 1M | Thinking always on | Rarest hardest long-horizon work only |
-| `Qwen/Qwen3.6-35B-A3B` | local | local | local | server-dependent | Thinking selectable with correct parser | Self-hosted OpenAI-compatible baseline |
-| DiffusionGemma | local / RunPod | local / RunPod | local / RunPod | backend-dependent | Diffusion generation; ~120 tok/s measured on M-series | Experimental local specialist, opt-in only |
+| Model | Cache hit in | Cache miss in | Output | Context | Max output | Evidence | Seon role |
+|---|---:|---:|---:|---:|---:|---|---|
+| `deepseek-v4-flash` | $0.0028 | $0.14 | $0.28 | 1M | 384K | Vendor price/limits; Seon ~68 tok/s | Cheapest fast worker / routine turns |
+| `deepseek-v4-pro` | $0.003625 | $0.435 | $0.87 | 1M | 384K | Vendor price/limits; Seon ~43 tok/s | Default quality/cost baseline |
+| `muse-spark-1.1` | unpublished | $1.25* | $4.25* | 1M | unpublished | Vendor existence/context; Seon transport | Experimental fast specialist pending task-success evaluation |
+| `kimi-k3` | $0.30 | $3.00 | $15.00 | 1M | 1,048,576 | Vendor price/limits; two paid Seon calls | Selective long-horizon planning escalation |
+| `claude-haiku-4-5` | $0.10 | $1.00 | $5.00 | 200K | see vendor | Vendor; not live in Seon | Quick specialist when Anthropic behavior matters |
+| `claude-sonnet-5` | $0.20 | $2.00 | $10.00 | 1M | see vendor | Vendor; not live in Seon | Coding alternative during introductory pricing |
+| `claude-opus-4-8` | $0.50 | $5.00 | $25.00 | 1M | see vendor | Vendor; not live in Seon | Hard cross-boundary coding and judgment |
+| `claude-fable-5` | $1.00 | $10.00 | $50.00 | 1M | see vendor | Vendor; not live in Seon | Rarest hardest long-horizon work only |
+| `Qwen/Qwen3.6-35B-A3B` | local | local | local | server-dependent | server-dependent | Configuration recipe | Self-hosted OpenAI-compatible baseline |
+| DiffusionGemma | local / RunPod | local / RunPod | local / RunPod | backend-dependent | backend-dependent | Seon experimental measurements | Experimental local specialist, opt-in only |
+
+`*` Muse Spark's $1.25/$4.25 preview rates came from the dated Seon research
+capture's secondary source, not Meta's public announcement. Treat them as an
+unverified budgeting estimate until an authenticated official pricing page is
+captured.
 
 At these rates, K3 costs about 6.9×/17.2× DeepSeek V4 Pro on uncached
-input/output, 21.4×/53.6× V4 Flash, and 2.4×/3.5× Muse Spark. Cache behavior,
+input/output and 21.4×/53.6× V4 Flash. Cache behavior,
 reasoning-token volume, retries, and task success can dominate sticker price,
 so compare cost per successful task in `evals/scorecard.jsonl`, not only cost
 per token.
@@ -169,8 +177,8 @@ checked 2026-07-19.
 
 | Model | In/out $/M (cache-hit in) | Notes |
 |---|---|---|
-| ✔ `deepseek-v4-pro` (default) | $0.435 / $0.87 ($0.0036) | ~43 tok/s decode, TTFT ~1.3s (thinking off — our default config). `SEON_AI_THINKING=true|high` for reasoning (slow; watch the 60s timeout). |
-| ✔ `deepseek-v4-flash` | $0.14 / $0.28 ($0.0028) | ~68 tok/s, TTFT ~1.0s, fastest wall-clock of the cheap tier. |
+| ✔ `deepseek-v4-pro` (default) | $0.435 / $0.87 ($0.0036) | 1M context, 384K maximum output. Seon measured ~43 tok/s decode and TTFT ~1.3s on 2026-07-10 with thinking off. `SEON_AI_THINKING=true\|high` enables reasoning. |
+| ✔ `deepseek-v4-flash` | $0.14 / $0.28 ($0.0028) | 1M context, 384K maximum output. Seon measured ~68 tok/s and TTFT ~1.0s on 2026-07-10. |
 
 ```bash
 SEON_AI_PROVIDER=deepseek        # endpoint + DEEPSEEK_API_KEY defaults apply
@@ -178,20 +186,19 @@ DEEPSEEK_API_KEY=<key>
 # SEON_AI_MODEL=deepseek-v4-flash   # optional; omit -> deepseek-v4-pro
 ```
 
-- **Deprecated 2026-07-24:** `deepseek-chat` / `deepseek-reasoner` (legacy
-  slugs for v4-flash non-thinking/thinking). Don't use them anywhere.
-- Peak pricing 2× during UTC 1–4 & 6–10 from mid-July 2026 (US overnight!)
-  — schedule batch drives off-peak.
+- **Scheduled to retire 2026-07-24 15:59 UTC:** `deepseek-chat` and
+  `deepseek-reasoner`, the legacy v4-flash slugs. Do not add new uses.
 
 ### Meta Model API (`:openai-compat`) — Muse Spark 1.1
 
 Release source: [Meta's Muse Spark 1.1 announcement](https://ai.meta.com/blog/introducing-muse-spark-meta-model-api/).
-The public-preview prices below were checked 2026-07-19 against the provider
-recipe/evidence linked after the table; recheck during preview.
+Meta's public announcement establishes the model, preview, 1M context, and
+agentic role, but does not publish its API slug, output limit, effort values, or
+prices. The remaining values below are dated Seon transport evidence.
 
 | Model | In/out $/M | Notes |
 |---|---|---|
-| ✔ `muse-spark-1.1` | $1.25 / $4.25 (reasoning bills as output) | ~900–1,060 tok/s decode (≈20× v4-pro); hidden reasoning has NO off-switch — ALWAYS dial `SEON_AI_THINKING=minimal` (TTFT 3.9s, wall 7.7s, beats v4-flash). 1M ctx, multimodal in. Public preview. |
+| ✔ `muse-spark-1.1` | $1.25 / $4.25, secondary-source estimate | Seon discovered the slug and endpoint live and measured ~900–1,060 tok/s, 3.9s TTFT, and 7.7s wall time at `minimal`. Two of three driven runs still ended with no forms, so this remains an experimental fast specialist rather than a proven daily executor. |
 
 Full recipe, measured tables, gotchas:
 `docs/prds/agent-ctx/research/meta-model-api-muse-spark-2026-07-10.md`.
@@ -202,9 +209,9 @@ Price source: [Kimi K3 pricing](https://platform.kimi.ai/docs/pricing/chat-k3),
 checked 2026-07-19. Capability/config source:
 [Kimi K3 quickstart](https://platform.kimi.ai/docs/guide/kimi-k3-quickstart).
 
-| Model | Context | Notes |
-|---|---|---|
-| ◇ `kimi-k3` | 1M | Flagship long-horizon coding/knowledge model. Thinking is always enabled; as of 2026-07-19, `reasoning_effort` accepts only `max` (also the default). Sampling values are fixed, so omit temperature/top-p rather than sending them. Automatic prefix caching is available. |
+| Model | Context | Completion limit | Notes |
+|---|---:|---:|---|
+| ✔ `kimi-k3` | 1M | 131,072 default; 1,048,576 max | Flagship long-horizon coding/knowledge model. Thinking is always enabled; as of 2026-07-19, `reasoning_effort` accepts only `max` (also the default). Sampling values are fixed, so omit temperature/top-p rather than sending them. Automatic prefix caching is available. The check means live single-response transport, not full task-quality graduation. |
 
 Kimi uses the conventional `MOONSHOT_API_KEY` name and the existing generic
 adapter; no Kimi-specific provider or retry path is needed:
@@ -225,27 +232,45 @@ there is currently no supported K3 dial that trades quality for lower latency.
 For ordinary low-latency turns, keep a faster model as the cluster default and
 route only long-horizon agents to K3.
 
+Seon's paid 2026-07-19 planning probes establish the actual latency/headroom
+tradeoff. A 4,096-token cap took 107.17 seconds, spent 4,093 reasoning tokens,
+returned no visible answer, and cost about $0.062. An 8,192-token cap took
+47.18 seconds, used 975 reasoning plus 1,106 visible tokens, stopped normally,
+and cost about $0.017. The second answer was useful but still invented an
+unavailable namespace and misplaced tests. K3 therefore needs at least 8K
+completion headroom, retrieved real contracts, behavioral verification, and a
+per-run cost ceiling; it is not a blind execution model. Full evidence lives in
+`docs/prds/generate-code/research/design-seam-audit-2026-07-19.md`.
+
+The current adapter sends the deprecated-but-accepted OpenAI `max_tokens`
+field, while K3 documents `max_completion_tokens`. This is recorded
+compatibility debt, not a reason to change the shared field blindly because
+DeepSeek still consumes `max_tokens`. K3 also requires the complete assistant
+message, including reasoning content, for tool-call continuation. Seon's
+single-response path is verified, but the generic adapter intentionally drops
+reasoning content from agent-visible text and the agent loop does not yet prove
+K3 multi-turn tool continuation. Do not claim that stronger compatibility from
+the send/parse-only tool tests.
+
 The useful mixed-cost topology in one cluster is therefore **DeepSeek globally,
-Kimi for selected planning agents**. Keep the global row on DeepSeek and attach
-the complete Moonshot config to the planning agent:
+Kimi for selected planning agents**. The shipped manifest names this sparse
+variant once, and every birth function accepts the request-only selector:
 
 ```clojure
-(seon.db/transact!
-  {:seon.db/tx-data
-   [{:seon.agent/id "planner"
-     :seon.ai/agent-provider :openai-compat
-     :seon.ai/agent-model "kimi-k3"
-     :seon.ai/agent-max-tokens 16384
-     :seon.ai/agent-thinking "false"
-     :seon.ai/agent-timeout-ms 180000
-     :seon.ai/agent-base-url "https://api.moonshot.ai/v1"
-     :seon.ai/agent-api-key-env "MOONSHOT_API_KEY"}]})
+(seon.agent/delegate!
+  {:seon.config/model-variant :planning
+   :seon.agent/purpose "Plan a cross-namespace implementation."
+   :seon.agent.message/content "Produce the implementation plan and code."})
 ```
 
-The database stores only `MOONSHOT_API_KEY`, the variable's name. The adapter
-reads that variable's secret from the process environment at call time. A Muse
-agent can simultaneously carry its own Meta endpoint, model, and credential
-variable; neither agent changes the other or the global default.
+The selector is not stored. Its ordinary `:seon.ai/agent-*` values are copied
+onto the new agent in the atomic birth transaction. Unknown names allocate
+nothing, and a selector cannot silently retune an existing namespace resident.
+The database stores only `MOONSHOT_API_KEY`, the variable's name; the adapter
+reads its secret from the process environment at call time. A Muse agent can
+simultaneously carry its own endpoint, model, and credential variable; neither
+agent changes the other or the global default. Directly transacting those
+ordinary attributes remains the explicit way to retune an existing agent.
 
 ### Anthropic (`:anthropic`)
 
@@ -283,7 +308,23 @@ Every non-secret provider field has a per-agent mirror:
 turn retry policy. Absent or `:inherit` values fall through to the global row.
 These attributes can be transacted onto an existing agent, supplied through
 the manifest's ordinary/root agent context for atomic birth, or included in a
-per-mint context override.
+per-mint context override. Prefer named birth variants when the same role is
+reused:
+
+```clojure
+:seon.config/model-variants
+{:planning {:seon.ai/agent-provider :openai-compat
+            :seon.ai/agent-model "kimi-k3"
+            :seon.ai/agent-base-url "https://api.moonshot.ai/v1"
+            :seon.ai/agent-api-key-env "MOONSHOT_API_KEY"}
+ :execution {:seon.ai/agent-provider :deepseek
+             :seon.ai/agent-model "deepseek-v4-flash"
+             :seon.ai/agent-thinking "false"}}
+```
+
+Pass `:seon.config/model-variant :planning` to `create!`, `mint!`, `start!`, or
+`delegate!`. The name is resolved from the same acquired configuration on each
+stale-database retry, while only the selected agent attributes persist.
 
 ## Serving Qwen3.6-35B-A3B (or any OpenAI-compatible server)
 
