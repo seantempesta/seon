@@ -127,6 +127,14 @@
                         :seon.fn/agent-facing?))
         "a public implementation function remains indexed but unmarked")))
 
+(deftest instrumentation-coverage-indexes-with-its-real-contract
+  (let [coverage (by-sym @core-tx "seon.instrument/coverage-gaps")]
+    (is (some? coverage))
+    (is (some? (:seon.fn/spec coverage))
+        "the native Datahike relation contract resolves as pure Malli data")
+    (is (str/includes? (:seon.fn/spec coverage)
+                       "[:set [:tuple :string :string]]"))))
+
 (deftest protected-tool-inventory-is-explicit
   (let [tx @core-tx]
     (is (= #{"seon.db/current-agent-id"

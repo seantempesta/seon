@@ -1099,7 +1099,7 @@
       objects; it stores no registry or dirty flag. Rows with no live var are
       not gaps. Every live canonical contract is wrapped or appears here as an
       unwrapped, unreadable, or currently unresolvable contract."
-     {:malli/schema [:=> [:cat [:coll [:tuple :string :string]]]
+     {:malli/schema [:=> [:cat [:set [:tuple :string :string]]]
                      [:vector [:map
                                [::sym :string]
                                [::reason :keyword]]]]}
