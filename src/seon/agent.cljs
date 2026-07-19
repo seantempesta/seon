@@ -379,6 +379,7 @@
 (schema/register! ::create-request
   [:map
    [:seon.agent/id                  :seon.agent/id]
+   [:seon.config/model-variant      {:optional true} :seon.config/model-variant]
    [:seon.agent/purpose             {:optional true} :seon.agent/purpose]
    [:seon.agent/default-turn-limit  {:optional true}
     :seon.agent/default-turn-limit]])
@@ -409,6 +410,20 @@
 (def ^:private agent-creation-max-results
   4096)
 
+(defn- model-variant-overrides
+  [configuration variant]
+  (let [variants (config/model-variants configuration)]
+    (cond
+      (nil? variant) {}
+      (contains? variants variant) (get variants variant)
+      :else
+      {:seon.error/message
+       (str "Unknown :seon.config/model-variant " (pr-str variant) ".")
+       :seon.error/data
+       {:seon.config/model-variant variant
+        :seon.config/available-model-variants
+        (vec (sort (keys variants)))}})))
+
 (defn- configuration-from-entity
   [entity]
   (if entity
@@ -426,21 +441,24 @@
    provenance-genesis stub: facts already present are preserved, never reset."
   ([configuration id purpose default-turn-limit parent existing]
    (initial-agent-tx configuration id purpose default-turn-limit parent existing
-                     (home/home-ns id) false -1))
+                     (home/home-ns id) false -1 {}))
   ([configuration id purpose default-turn-limit parent existing namespace
     namespace-exists?]
    (initial-agent-tx configuration id purpose default-turn-limit parent existing
-                     namespace namespace-exists? -1))
+                     namespace namespace-exists? -1 {}))
   ([configuration id purpose default-turn-limit parent existing namespace
-    namespace-exists? namespace-tempid]
+    namespace-exists? namespace-tempid model-overrides]
   (let [namespace     (symbol (str namespace))
         namespace-name (keyword (str namespace))
         namespace-ref (if namespace-exists?
                         [:seon.ns/name namespace-name]
                         namespace-tempid)
         context       (ctx/initial-agent-context
-                       {:seon.agent/id id
-                        :seon.config/configuration configuration})
+                       (cond->
+                        {:seon.agent/id id
+                         :seon.config/configuration configuration}
+                         (seq model-overrides)
+                         (assoc :seon.agent.ctx/override model-overrides)))
         home-requires (or (:seon.eval/home-requires existing)
                           (:seon.eval/home-requires context)
                           home/home-ns-require-specs)
@@ -520,7 +538,8 @@
    an ordinary `:seon.error/message` value. A failed create means NO agent
    entity; callers must branch instead of chasing a ghost."
   {:malli/schema [:=> [:cat ::create-request] ::create-response]}
-  [{:seon.agent/keys [id purpose default-turn-limit]}]
+  [{:seon.agent/keys [id purpose default-turn-limit]
+    model-variant :seon.config/model-variant}]
   (let [database (await (db/db))]
     (if (error-value? database)
       database
@@ -543,22 +562,30 @@
               configuration
               (let [complete? (and entity
                                    (or (not= "root" id)
-                                       (string? (:seon.ns/source home-entity))))]
+                                       (string? (:seon.ns/source home-entity))))
+                    model-overrides
+                    (when-not complete?
+                      (model-variant-overrides configuration model-variant))]
                 (if complete?
                   {:seon.agent/id id}
-                  (let [res
-                        (await
-                         (db/transact!
-                          {::db/db database
-                           ::db/expected-db database
-                           ::db/tx-data
-                           (initial-agent-tx
-                            configuration id purpose default-turn-limit nil entity)}))]
-                    (if (error-value? res) res {:seon.agent/id id})))))))))))
+                  (if (error-value? model-overrides)
+                    model-overrides
+                    (let [res
+                          (await
+                           (db/transact!
+                            {::db/db database
+                             ::db/expected-db database
+                             ::db/tx-data
+                             (initial-agent-tx
+                              configuration id purpose default-turn-limit nil
+                              entity (home/home-ns id) false -1
+                              model-overrides)}))]
+                      (if (error-value? res) res {:seon.agent/id id}))))))))))))
 
 (schema/register!
   ::mint-request
   [:map
+   [:seon.config/model-variant     {:optional true} :seon.config/model-variant]
    [:seon.agent/purpose            {:optional true} :seon.agent/purpose]
    [:seon.agent/default-turn-limit {:optional true}
     :seon.agent/default-turn-limit]
@@ -570,6 +597,7 @@
     namespace-exists? ::namespace-exists?
     :seon.db/keys [db tx-data expected-db]
     initial-message-transaction ::initial-message-transaction
+    model-overrides ::model-overrides
     configuration :seon.config/configuration
     ::db.id/keys [generator-policies]}]
   (await
@@ -598,7 +626,8 @@
                          configuration id purpose default-turn-limit parent nil
                          (or namespace (home/home-ns id))
                          (boolean namespace-exists?)
-                         (next-transaction-tempid tx-data)))
+                         (next-transaction-tempid tx-data)
+                         (or model-overrides {})))
                   message-rows)}
             expected-db
             (assoc ::db/expected-db expected-db))))}
@@ -613,7 +642,8 @@
    agent and home-namespace facts. Known-id reconciliation remains [[create!]] and is intentionally
    separate."
   {:malli/schema [:=> [:cat ::mint-request] ::create-response]}
-  [{:seon.agent/keys [purpose default-turn-limit parent]}]
+  [{:seon.agent/keys [purpose default-turn-limit parent]
+    model-variant :seon.config/model-variant}]
   (let [database (await (db/db))]
     (if (error-value? database)
       database
@@ -625,18 +655,23 @@
                 (configuration-from-entity configuration-entity)]
             (if (error-value? configuration)
               configuration
-              (let [env
-                    (await
-                     (allocate-agent!
-                      {::db/db database
-                       :seon.config/configuration configuration
-                       :seon.agent/purpose purpose
-                       :seon.agent/default-turn-limit default-turn-limit
-                       :seon.agent/parent parent}))
-                    id (get-in env [::db.id/ids :seon.agent/id])]
-                (if (error-value? env)
-                  env
-                  {:seon.agent/id id})))))))))
+              (let [model-overrides
+                    (model-variant-overrides configuration model-variant)]
+                (if (error-value? model-overrides)
+                  model-overrides
+                  (let [env
+                        (await
+                         (allocate-agent!
+                          {::db/db database
+                           :seon.config/configuration configuration
+                           ::model-overrides model-overrides
+                           :seon.agent/purpose purpose
+                           :seon.agent/default-turn-limit default-turn-limit
+                           :seon.agent/parent parent}))
+                        id (get-in env [::db.id/ids :seon.agent/id])]
+                    (if (error-value? env)
+                      env
+                      {:seon.agent/id id})))))))))))
 
 (defn ^:async ensure-initial-agent!
   "Ensure the root and initial ordinary agent.
@@ -833,6 +868,7 @@
 ;; `create!` (which REQUIRES the id, so nothing resolves into it).
 (schema/register! ::start-request
   [:map
+   [:seon.config/model-variant      {:optional true} :seon.config/model-variant]
    [:seon.agent/namespace           {:optional true} :symbol]
    [:seon.agent/purpose             {:optional true} :seon.agent/purpose]
    [:seon.agent/default-turn-limit  {:optional true}
@@ -842,7 +878,7 @@
 
 (defn ^:async ^:private spawn-child!
   "Commit one child birth; the pod hosts it from the committed transaction."
-  [database configuration purpose default-turn-limit parent-id
+  [database configuration model-overrides purpose default-turn-limit parent-id
    initial-message-transaction namespace namespace-exists?]
   (let [res
         (await
@@ -851,6 +887,7 @@
            {::db/db database
             ::db/expected-db database
             :seon.config/configuration configuration
+            ::model-overrides model-overrides
             ::initial-message-transaction initial-message-transaction}
             namespace
             (assoc :seon.agent/namespace namespace
@@ -941,8 +978,8 @@
      (get-in value [:seon.error/data ::protocol/error-kind])))
 
 (defn ^:async ^:private spawn-child-with-retry!
-  [function-name parent-id purpose default-turn-limit initial-message-content
-   namespace]
+  [function-name parent-id model-variant purpose default-turn-limit
+   initial-message-content namespace]
   (loop [attempt 1]
     (let [acquisition
           (await (acquire-spawn-database function-name parent-id namespace))]
@@ -951,14 +988,28 @@
         (let [database (::db/db acquisition)
               configuration (:seon.config/configuration acquisition)
               resident-id (::resident-id acquisition)
+              model-overrides
+              (model-variant-overrides configuration model-variant)
               initial-message-transaction
-              (when (and initial-message-content (nil? resident-id))
+              (when (and initial-message-content
+                         (nil? resident-id)
+                         (not (error-value? model-overrides)))
                 (await
                  (msg/initial-agent-transaction
                   database [:seon.agent/id parent-id]
                   initial-message-content)))
               result
               (cond
+                (error-value? model-overrides)
+                model-overrides
+
+                (and resident-id model-variant)
+                {:seon.error/message
+                 (str function-name ": model variant " (pr-str model-variant)
+                      " applies only when launching a new agent; namespace "
+                      (pr-str namespace) " is already owned by "
+                      (pr-str resident-id) ".")}
+
                 resident-id
                 (if initial-message-content
                   (let [message-result
@@ -978,7 +1029,8 @@
                 :else
                 (await
                  (spawn-child!
-                  database configuration purpose default-turn-limit parent-id
+                  database configuration model-overrides purpose
+                  default-turn-limit parent-id
                   initial-message-transaction namespace
                   (::namespace-exists? acquisition))))]
           (if (and (stale-database-error? result)
@@ -1001,12 +1053,14 @@
    Resolves to `{:seon.agent/id child-id}`. Called outside an agent scope, the
    child is created parentless, matching `create!`."
   {:malli/schema [:=> [:cat ::start-request] ::start-response]}
-  [{:seon.agent/keys [namespace purpose default-turn-limit]}]
+  [{:seon.agent/keys [namespace purpose default-turn-limit]
+    model-variant :seon.config/model-variant}]
   (if-not (admission/available?)
     (unavailable-response)
     (await
      (spawn-child-with-retry!
-      "start!" (db/current-agent-id) purpose default-turn-limit nil namespace))))
+      "start!" (db/current-agent-id) model-variant purpose default-turn-limit
+      nil namespace))))
 
 ;; ============================================================
 ;; delegate! — the one atomic child-birth plus initial-task transition.
@@ -1017,6 +1071,7 @@
 (schema/register! ::delegate-request
   [:map
    [:seon.agent.message/content     :string]
+   [:seon.config/model-variant      {:optional true} :seon.config/model-variant]
    [:seon.agent/namespace           {:optional true} :symbol]
    [:seon.agent/purpose             {:optional true} :seon.agent/purpose]
    [:seon.agent/default-turn-limit  {:optional true}
@@ -1033,7 +1088,7 @@
      (delegate! {:seon.agent/purpose \"research DuckDB for embedded analytics\"
                  :seon.agent.message/content
                  \"Research DuckDB for an embedded analytics app. Store findings
-                  as my.kb.* data, then (complete \\\"<pointer>\\\") to report back.\"})
+                  as my.kb.* data, then (seon.agent.lifecycle/complete \\\"<pointer>\\\") to report back.\"})
 
    `:seon.agent/purpose` is the child's stated reason-for-being (shown to your
    human verbatim); `:seon.agent.message/content` is the actual task you hand
@@ -1044,13 +1099,15 @@
    task. The pod hosts the committed child from the same database event."
   {:malli/schema [:=> [:cat ::delegate-request] ::delegate-response]}
   [{:seon.agent/keys [namespace purpose default-turn-limit]
-    content :seon.agent.message/content}]
+    content :seon.agent.message/content
+    model-variant :seon.config/model-variant}]
   (if-not (admission/available?)
     (unavailable-response)
     (if-let [parent-id (db/current-agent-id)]
       (await
        (spawn-child-with-retry!
-        "delegate!" parent-id purpose default-turn-limit content namespace))
+        "delegate!" parent-id model-variant purpose default-turn-limit content
+        namespace))
       (internal/no-agent-error "delegate!"))))
 
 ;; ============================================================

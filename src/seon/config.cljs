@@ -245,6 +245,14 @@
    [:seon.ai/agent-max-retries
     {:optional true} [:or [:enum :inherit] [:int {:min 0}]]]])
 
+(def ^:private agent-model-config-schema
+  (into [:map {:closed true}] agent-model-config-entries))
+
+(schema/register! :seon.config/model-variant :keyword)
+(schema/register! :seon.config/model-variants-spec
+                  [:map-of :seon.config/model-variant
+                   agent-model-config-schema])
+
 (schema/register! :seon.config/agent-context
   [:or
    (into
@@ -432,6 +440,10 @@
 ;; EDN-slot bridged (mixed `:or`, the ::home-requires pattern).
 (schema/register! :seon.config/context-profiles
   [:or [:map-of :keyword [:vector :map]] :nil])
+;; Named launch-time model configurations. The selected map is copied onto the
+;; new agent entity; the selector itself is not persisted on that agent.
+(schema/register! :seon.config/model-variants
+  [:or :seon.config/model-variants-spec :nil])
 
 ;; The singleton entity schema — every knob optional (a `{}` manifest seeds the
 ;; resolved defaults; `:seon.config/id` is the only required key).
@@ -452,6 +464,7 @@
    [:seon.config/always             {:optional true} :seon.config/always]
    [:seon.config/system-text        {:optional true} :seon.config/system-text]
    [:seon.config/context-profiles   {:optional true} :seon.config/context-profiles]
+   [:seon.config/model-variants     {:optional true} :seon.config/model-variants]
    [:seon.config/agent-context      {:optional true} :seon.config/agent-context]
    [:seon.config/root-context       {:optional true} :seon.config/root-context]
    [:seon.config.render/database-edn-cap   {:optional true} :seon.config/cap]
@@ -506,6 +519,7 @@
    [:seon.config/render        {:optional true} :seon.config/render]
    [:seon.config/system-text   {:optional true} :seon.config/system-text]
    [:seon.config/context-profiles {:optional true} :seon.config/context-profiles]
+   [:seon.config/model-variants {:optional true} :seon.config/model-variants-spec]
    [:seon.config/on-core-error {:optional true} :seon.config/on-core-error]
    [:seon.config/web           {:optional true} :seon.config/web-spec]
    [:seon.config/repair        {:optional true} :seon.config/repair]
@@ -841,6 +855,8 @@
              (:seon.config.model-transport/endpoint-cap transport))
       (contains? manifest :seon.config/context-profiles)
       (assoc :seon.config/context-profiles (:seon.config/context-profiles manifest))
+      (contains? manifest :seon.config/model-variants)
+      (assoc :seon.config/model-variants (:seon.config/model-variants manifest))
       (contains? manifest :seon.config/skills)
       (assoc :seon.config/skills (:seon.config/skills manifest))
       (contains? manifest :seon.config/agent-context)
@@ -1480,3 +1496,10 @@
   [id override configuration]
   (let [merged (merge (context-config-for id configuration) override)]
     (m/decode :seon.config/agent-context merged ctx-default-transformer)))
+
+(defn model-variants
+  "The named launch-time model attribute maps in `configuration`."
+  {:malli/schema [:=> [:cat :seon.config/singleton]
+                  :seon.config/model-variants-spec]}
+  [configuration]
+  (or (:seon.config/model-variants configuration) {}))

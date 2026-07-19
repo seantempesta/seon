@@ -260,12 +260,20 @@
           pull-request (atom nil)
           transaction (atom nil)
           received-configuration (atom nil)
+          received-override (atom nil)
           configured-requires '[[seon.db :as configured-db]]
           configured-model {:seon.ai/agent-provider :openai-compat
                             :seon.ai/agent-model "kimi-k3"
                             :seon.ai/agent-timeout-ms 180000
                             :seon.ai/agent-base-url "https://api.moonshot.ai/v1"
-                            :seon.ai/agent-api-key-env "MOONSHOT_API_KEY"}]
+                            :seon.ai/agent-api-key-env "MOONSHOT_API_KEY"}
+          configured-singleton
+          (assoc configuration
+                 :seon.config/model-variants {:planning configured-model})
+          stored-configured-singleton
+          (assoc stored-configuration
+                 :seon.config/model-variants
+                 (pr-str {:planning configured-model}))]
       (set! db/db
             (fn
               ([] (js/Promise.resolve database))
@@ -274,14 +282,15 @@
             (fn
               ([request]
                (reset! pull-request request)
-               (js/Promise.resolve [nil nil stored-configuration]))
+               (js/Promise.resolve [nil nil stored-configured-singleton]))
               ([_ _] (js/Promise.reject (js/Error. "unexpected pull-many arity")))
               ([_ _ _] (js/Promise.reject (js/Error. "unexpected pull-many arity")))))
       (set! ctx/initial-agent-context
             (fn [request]
               (reset! received-configuration
                       (:seon.config/configuration request))
-              (assoc configured-model
+              (reset! received-override (:seon.agent.ctx/override request))
+              (assoc (:seon.agent.ctx/override request)
                      :seon.eval/home-requires configured-requires)))
       (set! db/transact!
             (fn [& call-args]
@@ -293,7 +302,8 @@
                   :tx-data (::db/tx-data request)
                   :tempids {}}))))
       (finish!
-       (-> (agent/create! {:seon.agent/id "created"})
+       (-> (agent/create! {:seon.agent/id "created"
+                           :seon.config/model-variant :planning})
            (.then
             (fn [result]
               (is (= {:seon.agent/id "created"} result))
@@ -303,8 +313,10 @@
                       [:seon.config/id config/cluster-config-id]]
                      (::db/refs @pull-request)))
               (is (= 4096 (::db/max-results @pull-request)))
-              (is (= configuration @received-configuration)
+              (is (= configured-singleton @received-configuration)
                   "creation receives the decoded ordinary singleton")
+              (is (= configured-model @received-override)
+                  "the selected variant is the birth-context override")
               (is (identical? database (::db/db @transaction)))
               (is (identical? database (::db/expected-db @transaction)))
               (let [[home-row agent-row] (::db/tx-data @transaction)]
@@ -461,10 +473,13 @@
           current-agent-id db/current-agent-id
           db! db/db
           pull-many db/pull-many
+          initial-agent-context ctx/initial-agent-context
           allocate! db.id/allocate!
           databases [database database-after latest-database]
+          variant-models ["planner-a" "planner-b" "planner-c"]
           db-calls (atom 0)
           acquired (atom [])
+          selected-models (atom [])
           allocations (atom 0)]
       (set! admission/available? (constantly true))
       (set! db/current-agent-id (constantly nil))
@@ -478,12 +493,26 @@
             (fn
               ([request]
                (swap! acquired conj (::db/db request))
-               (js/Promise.resolve [stored-configuration]))
+               (let [model (nth variant-models (dec @db-calls))]
+                 (js/Promise.resolve
+                  [(assoc stored-configuration
+                          :seon.config/model-variants
+                          (pr-str {:planning
+                                   {:seon.ai/agent-provider :openai-compat
+                                    :seon.ai/agent-model model}}))])))
               ([_ _] (js/Promise.reject (js/Error. "unexpected pull-many arity")))
               ([_ _ _] (js/Promise.reject (js/Error. "unexpected pull-many arity")))))
+      (set! ctx/initial-agent-context
+            (fn [request]
+              (swap! selected-models conj
+                     (get-in request
+                             [:seon.agent.ctx/override :seon.ai/agent-model]))
+              (:seon.agent.ctx/override request)))
       (set! db.id/allocate!
             (fn [request]
               (let [attempt (swap! allocations inc)]
+                ((::db.id/transaction-builder request)
+                 {:seon.agent/id "child"})
                 (if (< attempt 3)
                   (js/Promise.resolve
                    {:seon.error/message "The database changed before commit."
@@ -497,20 +526,62 @@
                     :tempids {}
                     ::db.id/ids {:seon.agent/id "child"}})))))
       (finish!
-       (-> (agent/start! {})
+       (-> (agent/start! {:seon.config/model-variant :planning})
            (.then
             (fn [result]
               (is (= {:seon.agent/id "child"} result))
               (is (= databases @acquired)
                   "each stale transaction reacquires all database-derived input")
               (is (= 3 @db-calls))
-              (is (= 3 @allocations)))))
+              (is (= 3 @allocations))
+              (is (= variant-models @selected-models)
+                  "the selector resolves against each reacquired singleton"))))
        done
        [[#(set! admission/available? %) available?]
         [#(set! db/current-agent-id %) current-agent-id]
         [#(set! db/db %) db!]
         [#(set! db/pull-many %) pull-many]
-       [#(set! db.id/allocate! %) allocate!]]))))
+        [#(set! ctx/initial-agent-context %) initial-agent-context]
+        [#(set! db.id/allocate! %) allocate!]]))))
+
+(deftest unknown-model-variant-does-not-allocate
+  (async done
+    (let [available? admission/available?
+          current-agent-id db/current-agent-id
+          db! db/db
+          pull-many db/pull-many
+          allocate! db.id/allocate!
+          allocations (atom 0)]
+      (set! admission/available? (constantly true))
+      (set! db/current-agent-id (constantly nil))
+      (set! db/db
+            (fn
+              ([] (js/Promise.resolve database))
+              ([_] (js/Promise.resolve database))))
+      (set! db/pull-many
+            (fn
+              ([request]
+               (is (identical? database (::db/db request)))
+               (js/Promise.resolve [stored-configuration]))
+              ([_ _] (js/Promise.reject (js/Error. "unexpected pull-many arity")))
+              ([_ _ _] (js/Promise.reject (js/Error. "unexpected pull-many arity")))))
+      (set! db.id/allocate!
+            (fn [_]
+              (swap! allocations inc)
+              (js/Promise.resolve {:seon.error/message "must not allocate"})))
+      (finish!
+       (-> (agent/start! {:seon.config/model-variant :missing})
+           (.then
+            (fn [result]
+              (is (str/includes? (:seon.error/message result)
+                                 "Unknown :seon.config/model-variant"))
+              (is (zero? @allocations)))))
+       done
+       [[#(set! admission/available? %) available?]
+        [#(set! db/current-agent-id %) current-agent-id]
+        [#(set! db/db %) db!]
+        [#(set! db/pull-many %) pull-many]
+        [#(set! db.id/allocate! %) allocate!]]))))
 
 (deftest delegate-to-namespace-messages-existing-resident-without-birth
   (async done

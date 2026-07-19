@@ -235,11 +235,37 @@
 ; (def x ...) and every atom's VALUE are lost — state that must outlive
 ; a restart belongs in the db.
 ; Errors come back as data — read the error map; nothing throws at you.
-; (message/user \"...\") reaches your human. (complete \"...\") ends the
-; task. (wait) parks until something new arrives.
+; The runtime awaits a Promise returned by one WHOLE top-level form. Nested
+; async calls inside let/do remain Promises: use separate top-level forms and
+; result/<id>, or await each dependency inside a ^:async function.
+; (message/user \"...\") reaches your human.
+; (seon.agent.lifecycle/complete \"...\") ends the task.
+; (seon.agent.lifecycle/wait \"...\") parks until something new arrives.
 ; A reply with NO form runs nothing, and several formless replies in a
 ; row end your run — deliver every result through (message/user \"...\")
-; or (complete \"...\"), never as bare prose."
+; or (seon.agent.lifecycle/complete \"...\"), never as bare prose."
+
+ ;; ── NAMED MODEL VARIANTS — launch-time sparse overrides. start!, delegate!,
+ ;; mint!, and create! accept :seon.config/model-variant; the selected ordinary
+ ;; :seon.ai/agent-* values are copied onto the new agent in its birth
+ ;; transaction. The selector itself is not stored, and selecting a variant
+ ;; never changes the cluster default or an existing namespace resident.
+ :seon.config/model-variants
+ {:planning
+  {:seon.ai/agent-provider :openai-compat
+   :seon.ai/agent-model "kimi-k3"
+   :seon.ai/agent-max-tokens 16384
+   :seon.ai/agent-timeout-ms 300000
+   :seon.ai/agent-base-url "https://api.moonshot.ai/v1"
+   :seon.ai/agent-api-key-env "MOONSHOT_API_KEY"
+   :seon.ai/agent-max-retries 0}
+  :execution
+  {:seon.ai/agent-provider :deepseek
+   :seon.ai/agent-model "deepseek-v4-flash"
+   :seon.ai/agent-thinking "false"
+   :seon.ai/agent-max-tokens 8192
+   :seon.ai/agent-timeout-ms 120000
+   :seon.ai/agent-max-retries 1}}
 
  ;; ── THE CONTEXT TREE — the evidenced minimal base (owner cutover
  ;; 2026-07-11: untested legacy blocks deprecated OUT; ideas return as

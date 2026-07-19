@@ -39,6 +39,12 @@
                      :seon.config/model-transport
                      {:seon.config.model-transport/response-identity-cap 53
                       :seon.config.model-transport/endpoint-cap 257}
+                     :seon.config/model-variants
+                     {:planning
+                      {:seon.ai/agent-provider :openai-compat
+                       :seon.ai/agent-model "kimi-k3"
+                       :seon.ai/agent-base-url "https://api.moonshot.ai/v1"
+                       :seon.ai/agent-api-key-env "MOONSHOT_API_KEY"}}
                      :seon.config/agent-context
                      {:seon.agent/ctx [{:seon.agent.ctx/name :transcript
                                         :seon.agent.ctx/priority 100}]}})))
@@ -78,7 +84,12 @@
             :db/cardinality :db.cardinality/many}
            (first (db/malli->datahike-schema
                     [:seon.agent.web/allowed-domains])))
-        "the existing web allowlist remains cardinality-many strings")))
+        "the existing web allowlist remains cardinality-many strings"))
+  (is (= {:db/ident :seon.config/model-variants
+          :db/valueType :db.type/string
+          :db/cardinality :db.cardinality/one}
+         (first (db/malli->datahike-schema [:seon.config/model-variants])))
+      "named model maps use the existing cardinality-one EDN slot bridge"))
 
 (deftest config-absent-is-identity
   (testing "the {} manifest leaves the route seed untouched"
@@ -198,6 +209,34 @@
             (config/resolve-agent-context
              "worker-x" {:seon.ai/agent-model "kimi-k3"} configuration)))
         "per-mint model attributes use the same resolver")))
+
+(deftest named-model-variants-are-sparse-closed-launch-overrides
+  (let [planning
+        {:seon.ai/agent-provider :openai-compat
+         :seon.ai/agent-model "kimi-k3"
+         :seon.ai/agent-max-tokens 16384
+         :seon.ai/agent-timeout-ms 180000
+         :seon.ai/agent-base-url "https://api.moonshot.ai/v1"
+         :seon.ai/agent-api-key-env "MOONSHOT_API_KEY"}
+        manifest {:seon.config/agent-context
+                  {:seon.ai/agent-thinking "false"
+                   :seon.ai/agent-max-retries 2}
+                  :seon.config/model-variants {:planning planning}}
+        configuration (config/resolve-config-singleton manifest)
+        selected (get (config/model-variants configuration) :planning)
+        resolved (config/resolve-agent-context "planner" selected configuration)]
+    (is (= {:planning planning} (config/model-variants configuration)))
+    (is (= {} (config/model-variants
+               (config/resolve-config-singleton {}))))
+    (is (= "kimi-k3" (:seon.ai/agent-model resolved)))
+    (is (= "false" (:seon.ai/agent-thinking resolved))
+        "a sparse variant inherits ordinary agent-context values")
+    (is (= 2 (:seon.ai/agent-max-retries resolved)))
+    (is (not (m/validate
+              :seon.config/manifest
+              {:seon.config/model-variants
+               {:planning (assoc planning :unrelated/value true)}}))
+        "variant maps reject attributes outside the existing agent model surface")))
 
 ;;; Block-override MERGES by name — a manifest overriding a block need only name
 ;;; the sub-keys it changes; the default block's other attrs survive (the
