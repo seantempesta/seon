@@ -19,7 +19,7 @@ same invalid assumption.
 
 Both point lookups retain one scalar final result and a 4 KiB result-weight
 limit, while allowing 64 bounded intermediate result nodes. Focused
-multi-agent proof passes 7 tests/56 assertions and covers the absent-resident
+multi-agent proof passes 8 tests/58 assertions and covers the absent-resident
 and existing-resident branches;
 the live namespace-targeted call supplies the cold-path regression.
 

@@ -433,12 +433,15 @@
    provenance-genesis stub: facts already present are preserved, never reset."
   ([configuration id purpose default-turn-limit parent existing]
    (initial-agent-tx configuration id purpose default-turn-limit parent existing
-                     (home/home-ns id) false))
+                     (home/home-ns id) false -1))
   ([configuration id purpose default-turn-limit parent existing namespace
     namespace-exists?]
+   (initial-agent-tx configuration id purpose default-turn-limit parent existing
+                     namespace namespace-exists? -1))
+  ([configuration id purpose default-turn-limit parent existing namespace
+    namespace-exists? namespace-tempid]
   (let [namespace     (symbol (str namespace))
         namespace-name (keyword (str namespace))
-        namespace-tempid (str "seon.agent.namespace/" namespace)
         namespace-ref (if namespace-exists?
                         [:seon.ns/name namespace-name]
                         namespace-tempid)
@@ -472,6 +475,13 @@
           :seon.eval/home-requires home-requires})
         :db/id namespace-tempid)
        agent-row]))))
+
+(defn- next-transaction-tempid
+  [transaction-data]
+  (dec
+   (reduce min 0
+           (filter #(and (integer? %) (neg? %))
+                   (tree-seq coll? seq transaction-data)))))
 
 (defn ^:async create!
   "Reconcile a known agent entity by its durable id.
@@ -571,7 +581,8 @@
                         (initial-agent-tx
                          configuration id purpose default-turn-limit parent nil
                          (or namespace (home/home-ns id))
-                         (boolean namespace-exists?)))
+                         (boolean namespace-exists?)
+                         (next-transaction-tempid tx-data)))
                   message-rows)}
             expected-db
             (assoc ::db/expected-db expected-db))))}

@@ -17,10 +17,13 @@ namespace row before the agent row did not change lookup-ref resolution.
 
 ## Resolution
 
-An absent namespace row now carries a transaction-local string tempid, and the
+An absent namespace row now carries a transaction-local negative integer
+tempid, and the
 new agent's ref uses that same tempid. The transaction orders namespace, agent,
 then initial message. Existing namespaces continue to use ordinary
 `:seon.ns/name` lookup refs and their program declaration is never rewritten.
+The builder selects the next negative integer not already present in its input
+transaction, so combined root-plus-initial-agent birth cannot alias tempids.
 
 ## Acceptance
 

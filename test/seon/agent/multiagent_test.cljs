@@ -47,6 +47,11 @@
            (restore value))
          (done)))))
 
+(deftest namespace-tempids-do-not-alias-existing-transaction-data
+  (is (= -1 (#'agent/next-transaction-tempid [])))
+  (is (= -3 (#'agent/next-transaction-tempid
+             [{:db/id -1 :seon.agent/namespace -2}]))))
+
 (deftest agent-id-readers-use-one-ordinary-database-value
   (async done
     (let [db! db/db
