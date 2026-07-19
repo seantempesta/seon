@@ -177,8 +177,10 @@
               :seon.ai/agent-model "kimi-k3"
               :seon.ai/agent-temperature :inherit
               :seon.ai/agent-max-tokens 16384
+              :seon.ai/agent-completion-limit-field :max-completion-tokens
               :seon.ai/agent-thinking "false"
               :seon.ai/agent-timeout-ms 180000
+              :seon.ai/agent-attempt-timeout-ms 240000
               :seon.ai/agent-base-url "https://api.moonshot.ai/v1"
               :seon.ai/agent-api-key-env "MOONSHOT_API_KEY"
               :seon.ai/agent-dg-backend :inherit
@@ -216,7 +218,9 @@
          :seon.config/repl-mode :batch
          :seon.ai/agent-model "kimi-k3"
          :seon.ai/agent-max-tokens 16384
+         :seon.ai/agent-completion-limit-field :max-completion-tokens
          :seon.ai/agent-timeout-ms 180000
+         :seon.ai/agent-attempt-timeout-ms 240000
          :seon.ai/agent-base-url "https://api.moonshot.ai/v1"
          :seon.ai/agent-api-key-env "MOONSHOT_API_KEY"}
         manifest {:seon.config/agent-context
@@ -230,6 +234,9 @@
     (is (= {} (config/model-variants
                (config/resolve-config-singleton {}))))
     (is (= "kimi-k3" (:seon.ai/agent-model resolved)))
+    (is (= :max-completion-tokens
+           (:seon.ai/agent-completion-limit-field resolved)))
+    (is (= 240000 (:seon.ai/agent-attempt-timeout-ms resolved)))
     (is (= :batch (:seon.config/repl-mode resolved))
         "a named planning variant selects multi-namespace batch grammar")
     (is (= "false" (:seon.ai/agent-thinking resolved))

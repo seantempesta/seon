@@ -245,7 +245,10 @@
           ::ai/agent-provider (pr-str :openai-compat)
           ::ai/agent-model (pr-str "agent-model")
           ::ai/agent-temperature (pr-str 0.0)
+          ::ai/agent-completion-limit-field
+          (pr-str :max-completion-tokens)
           ::ai/agent-timeout-ms (pr-str 2222)
+          ::ai/agent-attempt-timeout-ms (pr-str 3333)
           ::ai/agent-base-url (pr-str "https://agent.example/v1")
           ::ai/agent-api-key-env (pr-str "AGENT_API_KEY")
           ::ai/agent-dg-backend (pr-str :vllm)
@@ -259,7 +262,9 @@
     (is (= :openai-compat (::ai/provider config)))
     (is (= "agent-model" (::ai/model config)))
     (is (= 0.0 (::ai/temperature config)))
+    (is (= :max-completion-tokens (::ai/completion-limit-field config)))
     (is (= 2222 (::ai/timeout-ms config)))
+    (is (= 3333 (::ai/agent-attempt-timeout-ms resolution)))
     (is (= "https://agent.example/v1" (::ai/base-url config)))
     (is (= "AGENT_API_KEY" (::ai/api-key-env config)))
     (is (= :vllm (::ai/dg-backend config)))
@@ -268,7 +273,8 @@
     (is (= 2 (::ai/agent-max-retries resolution)))
     (is (= 31
            (:seon.config.model-transport/response-identity-cap config)))
-    (doseq [attr [::ai/provider ::ai/model ::ai/temperature ::ai/timeout-ms
+    (doseq [attr [::ai/provider ::ai/model ::ai/temperature
+                  ::ai/completion-limit-field ::ai/timeout-ms
                   ::ai/base-url ::ai/api-key-env ::ai/dg-backend
                   ::ai/extra-body-digest]]
       (is (= :agent-override (get-in resolution [::ai/provenance attr]))
@@ -285,9 +291,12 @@
                global
                {::ai/agent-provider (pr-str :openai-compat)
                 ::ai/agent-model (pr-str "kimi-k3")
+                ::ai/agent-completion-limit-field
+                (pr-str :max-completion-tokens)
                 ::ai/agent-base-url (pr-str "https://api.moonshot.ai/v1")
                 ::ai/agent-api-key-env (pr-str "MOONSHOT_API_KEY")
-                ::ai/agent-timeout-ms (pr-str 180000)})
+                ::ai/agent-timeout-ms (pr-str 180000)
+                ::ai/agent-attempt-timeout-ms (pr-str 240000)})
         muse (ai/resolved-config-from-rows
                global
                {::ai/agent-provider (pr-str :openai-compat)
@@ -298,9 +307,11 @@
         kimi-config (::ai/resolved-config kimi)
         muse-config (::ai/resolved-config muse)]
     (is (= ["kimi-k3" "https://api.moonshot.ai/v1"
-            "MOONSHOT_API_KEY" 180000]
+            "MOONSHOT_API_KEY" 180000 :max-completion-tokens]
            (mapv kimi-config
-                 [::ai/model ::ai/base-url ::ai/api-key-env ::ai/timeout-ms])))
+                 [::ai/model ::ai/base-url ::ai/api-key-env ::ai/timeout-ms
+                  ::ai/completion-limit-field])))
+    (is (= 240000 (::ai/agent-attempt-timeout-ms kimi)))
     (is (= ["muse-spark-1.1" "https://api.meta.ai/v1"
             "META_API_KEY" "minimal"]
            (mapv muse-config

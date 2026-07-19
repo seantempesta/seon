@@ -36,7 +36,6 @@
                      {:role "user" :content "the ctx"}]
           :temperature 0.7
           :max_tokens 4096
-          :stream_options {:include_usage true}
           :thinking {:type "disabled"}}
          (params {:seon.ai/ctx "the ctx" :seon.ai/system-prompt "sys"}))))
 
@@ -78,8 +77,12 @@
   (let [body (params {:seon.ai/ctx "hi"}
                      (resolution {:seon.ai/provider :openai-compat
                                   :seon.ai/base-url "https://api.moonshot.ai/v1"
-                                  :seon.ai/model "kimi-k3"}))]
+                                  :seon.ai/model "kimi-k3"
+                                  :seon.ai/completion-limit-field
+                                  :max-completion-tokens}))]
     (is (= "kimi-k3" (:model body)))
+    (is (= 4096 (:max_completion_tokens body)))
+    (is (not (contains? body :max_tokens)))
     (is (not (contains? body :temperature))
         "fixed-sampling gateways must not inherit DeepSeek's temperature")
     (is (not (contains? body :reasoning_effort))
@@ -118,6 +121,28 @@
     (is (= [{:id "t1"}] (:seon.ai/tool-calls response)))
     (is (= {:vendor_field "preserved"}
            (:seon.ai/provider-fields response)))))
+
+(deftest completion-limit-exhaustion-is-explicit-and-keeps-usage
+  (let [usage {:prompt_tokens 3 :completion_tokens 4093 :total_tokens 4096}
+        empty-response
+        (openai/parse-completion
+         (clj->js {:choices [{:message {:content ""
+                                         :reasoning_content "private reasoning"}
+                              :finish_reason "length"}]
+                   :usage usage})
+         evidence-resolution)
+        visible-response
+        (openai/parse-completion
+         (clj->js {:choices [{:message {:content "(+ 20 22)"}
+                              :finish_reason "length"}]
+                   :usage usage})
+         evidence-resolution)]
+    (is (true? (:seon.ai/truncated? empty-response)))
+    (is (some? (:seon.ai/error empty-response)))
+    (is (= usage (:seon.ai/usage empty-response)))
+    (is (true? (:seon.ai/truncated? visible-response)))
+    (is (not (contains? visible-response :seon.ai/error)))
+    (is (= "(+ 20 22)" (:seon.ai/text visible-response)))))
 
 (deftest oversized-response-data-does-not-discard-the-completion
   (let [oversized (apply str (repeat (inc response-cap) "m"))
@@ -211,6 +236,45 @@
                    #js{:status 200
                        :headers #js{"content-type" "text/event-stream"}}))))
 
+(defn- json-fetch [captured completion]
+  (fn [url init]
+    (reset! captured
+            {:url url
+             :auth (some-> init .-headers (.get "authorization"))
+             :signal (.-signal init)
+             :body (js->clj (.parse js/JSON (.-body init))
+                            :keywordize-keys true)})
+    (js/Promise.resolve
+     (js/Response. (.stringify js/JSON (clj->js completion))
+                   #js{:status 200
+                       :headers #js{"content-type" "application/json"}}))))
+
+(deftest complete-batch-uses-one-nonstreaming-response
+  (async done
+    (let [captured (atom nil)
+          completion
+          {:id "batch-1"
+           :model "kimi-k3"
+           :choices [{:message {:role "assistant"
+                                :reasoning_content "reason first"
+                                :content "(+ 20 22)"}
+                      :finish_reason "stop"}]
+           :usage usage-fixture}]
+      (-> (with-stubbed
+            (json-fetch captured completion)
+            (fn []
+              (complete {:seon.ai/ctx "hi"
+                         :seon.ai/system-prompt "sys"})))
+          (.then (fn [response]
+                   (is (= "(+ 20 22)" (:seon.ai/text response)))
+                   (is (= usage-fixture (:seon.ai/usage response)))
+                   (is (= "stop"
+                          (:seon.ai.openai-compat/finish-reason response)))
+                   (is (not (contains? (:body @captured) :stream)))
+                   (is (not (contains? (:body @captured) :stream_options)))))
+          (.then (fn [_] (done)))
+          (.catch (fn [error] (is false (str "threw — " error)) (done)))))))
+
 (deftest complete-streams-text-usage-and-extra-body
   (async done
     (let [captured (atom nil)]
@@ -219,6 +283,7 @@
             (fn []
               (complete {:seon.ai/ctx "hi"
                          :seon.ai/system-prompt "sys"
+                         :seon.ai/stream? true
                          :seon.ai/extra-body
                          {:chat_template_kwargs {:enable_thinking false}}})))
           (.then (fn [response]
@@ -253,7 +318,9 @@
               (with-fetch (streaming-fetch captured
                                            (sse-completion {:model "response-a"}
                                                            nil))
-                (fn [] (complete {:seon.ai/ctx "frozen"} frozen)))))
+                (fn [] (complete {:seon.ai/ctx "frozen"
+                                  :seon.ai/stream? true}
+                                 frozen)))))
           (.then (fn [response]
                    (is (= "https://a.example/v1/chat/completions"
                           (:url @captured)))

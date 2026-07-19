@@ -44,13 +44,10 @@
    AGENTS.md) rides the user-message CONTEXT as file-sections
    (`seon.agent.ctx/file-block`), decoupled from the system message.
 
-   Streaming: we ASK for a stream (`.stream` + `.finalChatCompletion`)
-   and the SDK buffers it into one assembled ChatCompletion object —
-   the agent loop parses complete Clojure forms downstream, so this is
-   a transport/robustness change, not consumer streaming. Native tool
+   `:batch` uses one ordinary nonstreaming ChatCompletion. `:stream` uses
+   the SDK stream and stops at the first complete form. Native tool
    calling and a generic `:extra-body` (e.g. Qwen's
-   `chat_template_kwargs`) ride through when the caller opts in;
-   default off → byte-equivalent behavior to the pre-SDK adapter."
+   `chat_template_kwargs`) ride through when the caller opts in."
   (:require [clojure.string :as str]
             ["openai" :as OpenAI]
             [seon.ai :as ai]
@@ -88,6 +85,7 @@
    [:seon.ai/text                       :string]
    [:seon.ai/error                      {:optional true} :seon.ai/error]
    [:seon.ai.openai-compat/finish-reason {:optional true} :string]
+   [:seon.ai/truncated?                 {:optional true} :seon.ai/truncated?]
    [:seon.ai/usage                      {:optional true} :seon.ai/usage]
    [:seon.ai/estimated?                 {:optional true} :seon.ai/estimated?]
    [:seon.ai/tool-calls                 {:optional true} :seon.ai/tool-calls]
@@ -159,10 +157,10 @@
    here — [[complete]] merges it into these params (the SDK's 2nd-arg
    `:body` would REPLACE the body, dropping model/messages).
 
-   Explicit request opts win over the resolved value. We always request a stream (no `:stream false`)
-   and ask for usage on the final chunk via
+   Explicit request opts win over the resolved value. Only `:stream` mode
+   requests a stream and terminal usage via
    `:stream_options {:include_usage true}`. `:tools` / `:tool_choice`
-   are included ONLY when present (request opt > config row). Public so
+   are included ONLY when present as direct request options. Public so
    tests and live debugging can inspect exactly what goes over the
    wire."
   {:malli/schema
@@ -170,20 +168,27 @@
                 :seon.ai.openai-compat/complete-request]
                [:seon.ai/config-resolution :seon.ai/config-resolution]]
     :map]}
-  [{:seon.ai/keys [ctx model temperature max-tokens tools tool-choice] :as request}
+  [{:seon.ai/keys [ctx model temperature max-tokens tools tool-choice stream?]
+    :as request}
    resolution]
   (let [cfg      (:seon.ai/resolved-config resolution)
         thinking (ai/thinking-mode cfg)
         compat?  (openai-compat? resolution)
         temperature* (or temperature (:seon.ai/temperature cfg))
         tools*   (or tools (:seon.ai/tools cfg))
-        choice*  (or tool-choice (:seon.ai/tool-choice cfg))]
+        choice*  (or tool-choice (:seon.ai/tool-choice cfg))
+        completion-limit-key
+        (case (:seon.ai/completion-limit-field cfg)
+          :max-completion-tokens :max_completion_tokens
+          :max_tokens)]
     (cond->
       {:model          (or model (:seon.ai/model cfg))
        :messages       [{:role "system" :content (ai/effective-system-prompt request)}
-                        {:role "user"   :content ctx}]
-       :max_tokens     (or max-tokens (:seon.ai/max-tokens cfg))
-       :stream_options {:include_usage true}}
+                        {:role "user"   :content ctx}]}
+      (some? (or max-tokens (:seon.ai/max-tokens cfg)))
+      (assoc completion-limit-key (or max-tokens (:seon.ai/max-tokens cfg)))
+      stream? (assoc :stream true
+                     :stream_options {:include_usage true})
       (some? temperature*) (assoc :temperature temperature*)
       ;; :deepseek always sends the vendor :thinking toggle (that API
       ;; defaults to enabled); :openai-compat never sends it — only the
@@ -248,6 +253,8 @@
         msg        (:content message)
         reasoning  (:reasoning_content message)
         tool-calls (:tool_calls message)
+        finish-reason (:finish_reason choice)
+        truncated? (= "length" finish-reason)
         model-result
         (response-identity-result resolution :seon.ai/response-model
                                   "model identity" (:model body))
@@ -277,7 +284,12 @@
              " tokens) — thinking-mode tokens landed in the reasoning"
              " field; dropping it (parsed as before)")))
     (cond-> {:seon.ai/text                        (or msg "")
-             :seon.ai.openai-compat/finish-reason (:finish_reason choice)}
+             :seon.ai.openai-compat/finish-reason finish-reason}
+      truncated? (assoc :seon.ai/truncated? true)
+      (and truncated? (str/blank? (or msg "")))
+      (assoc :seon.ai/error
+             {:seon.ai/msg
+              "Provider exhausted the configured completion limit before returning visible text."})
       (some? (:usage body)) (assoc :seon.ai/usage (:usage body))
       (seq tool-calls)      (assoc :seon.ai/tool-calls tool-calls)
       response-model (assoc :seon.ai/response-model response-model)
@@ -501,13 +513,15 @@
               ^js completions (.. client -chat -completions)
               stream?  (boolean (:seon.ai/stream? request))
               signal   (:seon.ai/abort-signal request)
-              ^js stream (if signal
-                           (.stream completions params #js{:signal signal})
-                           (.stream completions params))]
+              options  (when signal #js{:signal signal})]
           (if stream?
             ;; repl-mode :stream — consume deltas, abort at the first
             ;; complete top-level form (one form per turn).
-            (let [{::keys [text aborted? error]} (await (stream-until-form! stream))]
+            (let [^js stream (if options
+                               (.stream completions params options)
+                               (.stream completions params))
+                  {::keys [text aborted? error]}
+                  (await (stream-until-form! stream))]
               (cond
                 ;; The consumer captured an SDK failure as a VALUE (it
                 ;; never rejects — see its docstring); re-raise into
@@ -527,8 +541,11 @@
                 (assoc (parse-completion (await (.finalChatCompletion stream))
                                          resolution)
                        :seon.ai/config-evidence evidence)))
-            ;; repl-mode :batch — buffer to the assembled completion.
-            (let [completion (await (.finalChatCompletion stream))
+            ;; repl-mode :batch — one complete nonstreaming response preserves
+            ;; the provider's complete assistant message as delivered.
+            (let [completion (if options
+                               (await (.create completions params options))
+                               (await (.create completions params)))
                   result     (assoc (parse-completion completion resolution)
                                     :seon.ai/config-evidence evidence)]
               (when-let [err (:seon.ai/error result)]

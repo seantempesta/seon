@@ -256,7 +256,11 @@
    :seon.config/repl-mode :batch
    :seon.ai/agent-model "kimi-k3"
    :seon.ai/agent-max-tokens 16384
+   :seon.ai/agent-completion-limit-field :max-completion-tokens
    :seon.ai/agent-timeout-ms 300000
+   ;; The outer attempt fence is separately observable and gives the SDK
+   ;; adapter deadline room to settle as a provider result.
+   :seon.ai/agent-attempt-timeout-ms 360000
    :seon.ai/agent-base-url "https://api.moonshot.ai/v1"
    :seon.ai/agent-api-key-env "MOONSHOT_API_KEY"
    ;; One retry only for the transient 429/5xx/transport class. This follows

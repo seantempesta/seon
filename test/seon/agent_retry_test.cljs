@@ -19,6 +19,7 @@
    {:seon.ai/provider :openai-compat
     :seon.ai/model "model-a"
     :seon.ai/temperature 0.0
+    :seon.ai/completion-limit-field :max-completion-tokens
     :seon.ai/base-url "https://user:secret@a.example/v1?sig=hide#frag"
     :seon.ai/timeout-ms 1111
     :seon.config.model-transport/response-identity-cap 80
@@ -172,7 +173,9 @@
               (js/Promise. (fn [_resolve _reject]))))]
       (aset env "SEON_LLM_ATTEMPT_TIMEOUT_MS" "30")
       (-> (invoke-turn! llm-fn
-                        (assoc base-resolution :seon.ai/agent-max-retries 3))
+                        (assoc base-resolution
+                               :seon.ai/agent-max-retries 3
+                               :seon.ai/agent-attempt-timeout-ms 45))
           (.then
            (fn [result]
              (is (= 1 (count @calls)))
@@ -181,11 +184,42 @@
              (is (not (contains? result :seon.agent.turn/llm-retries)))
              (is (= :outer-timeout
                     (-> result :seon.agent.turn/llm-attempts first
-                        :seon.ai.attempt/outcome)))))
+                        :seon.ai.attempt/outcome)))
+             (is (= 45
+                    (-> result :seon.agent.turn/llm-attempts first
+                        :seon.ai.attempt/outer-timeout-ms)))))
           (.finally
            (fn []
              (if (some? saved)
                (aset env "SEON_LLM_ATTEMPT_TIMEOUT_MS" saved)
                (js-delete env "SEON_LLM_ATTEMPT_TIMEOUT_MS"))))
+          (.then (fn [_] (done)))
+          (.catch (fn [error] (is false (str error)) (done)))))))
+
+(deftest provider-error-retains-truncation-and-usage-evidence
+  (async done
+    (let [usage {:prompt_tokens 3 :completion_tokens 4093 :total_tokens 4096}
+          response
+          {:text ""
+           :seon.ai/error {:seon.ai/msg "completion limit exhausted"}
+           :seon.ai/raw
+           {:seon.ai/text ""
+            :seon.ai/error {:seon.ai/msg "completion limit exhausted"}
+            :seon.ai.openai-compat/finish-reason "length"
+            :seon.ai/truncated? true
+            :seon.ai/usage usage}}]
+      (-> (invoke-turn! (response-fn (atom []) [response])
+                        (assoc base-resolution :seon.ai/agent-max-retries 0))
+          (.then
+           (fn [result]
+             (is (= :error (:seon.agent.turn/status result)))
+             (is (= (pr-str usage) (:seon.agent.turn/llm-usage result)))
+             (let [attempt (first (:seon.agent.turn/llm-attempts result))]
+               (is (= :provider-error (:seon.ai.attempt/outcome attempt)))
+               (is (= "length" (:seon.ai.attempt/finish-reason attempt)))
+               (is (true? (:seon.ai.attempt/truncated? attempt)))
+               (is (= (pr-str usage) (:seon.ai.attempt/usage attempt)))
+               (is (= :max-completion-tokens
+                      (:seon.ai.attempt/completion-limit-field attempt))))))
           (.then (fn [_] (done)))
           (.catch (fn [error] (is false (str error)) (done)))))))

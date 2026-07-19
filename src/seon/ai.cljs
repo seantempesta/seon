@@ -71,6 +71,8 @@
 (schema/register! ::endpoint [:string {:min 1}])
 (schema/register! ::temperature :double)
 (schema/register! ::max-tokens :int)
+(schema/register! ::completion-limit-field
+                  [:enum :max-tokens :max-completion-tokens])
 (schema/register! ::system-prompt :string)
 (schema/register! ::ctx :string)
 (schema/register! ::usage :map)
@@ -116,6 +118,7 @@
 ;; estimates, not provider-reported.
 (schema/register! ::stream?    :boolean)
 (schema/register! ::estimated? :boolean)
+(schema/register! ::truncated? :boolean)
 ;; Process-local host cancellation capability. AbortSignal is a third-party JS
 ;; object and is never persisted; :any is intentional at this boundary.
 (schema/register! ::abort-signal :any)
@@ -268,12 +271,11 @@
 ;; OpenAI-compatible serving endpoint (reuses seon.ai.openai-compat).
 ;; Only consulted when ::provider is :diffusiongemma; default :control.
 (schema/register! ::dg-backend [:enum :vllm :control])
-;; The FULL chat-completions URL of an OpenAI-compatible gateway
-;; (e.g. "https://gw.example.com/v1/chat/completions") — NOT a prefix
-;; the adapter appends a path to. One semantic: what you set is what
-;; js/fetch POSTs to. Required when ::provider is :openai-compat
-;; (no shipped default endpoint — missing = legible error at call
-;; time). Env: SEON_AI_BASE_URL.
+;; The `/v1` ROOT of an OpenAI-compatible gateway. The SDK appends
+;; `/chat/completions`; [[openai-sdk-base-url]] also accepts the historical
+;; full-URL spelling and strips that suffix. Required when ::provider is
+;; :openai-compat (no shipped default endpoint — missing = legible error at
+;; call time). Env: SEON_AI_BASE_URL.
 (schema/register! ::base-url [:string {:min 1}])
 ;; The NAME of the env var holding the bearer API key — never the key
 ;; itself (keys are read at call time from process.env, never
@@ -317,6 +319,7 @@
    [::model       {:optional true} ::model]
    [::temperature {:optional true} ::temperature]
    [::max-tokens  {:optional true} ::max-tokens]
+   [::completion-limit-field {:optional true} ::completion-limit-field]
    [::thinking    {:optional true} ::thinking]
    [::timeout-ms  {:optional true} ::timeout-ms]
    [::base-url    {:optional true} ::base-url]
@@ -340,10 +343,12 @@
   "Per-provider shipped defaults for the `:seon.ai/resolved-config` keys."
   {:deepseek       {::model "deepseek-v4-pro" ::temperature 0.7
                     ::max-tokens 4096 ::thinking "false"
+                    ::completion-limit-field :max-tokens
                     ::timeout-ms 60000
                     ::base-url "https://api.deepseek.com/v1"}
    :openai-compat  {::model "deepseek-v4-pro"
                     ::max-tokens 4096 ::thinking "false"
+                    ::completion-limit-field :max-tokens
                     ::timeout-ms 60000}
    :anthropic      {::model "claude-opus-4-8" ::max-tokens 16000
                     ::thinking "false" ::timeout-ms 60000}
@@ -369,6 +374,7 @@
    [::model      {:optional true} ::model]
    [::temperature {:optional true} ::temperature]
    [::max-tokens {:optional true} ::max-tokens]
+   [::completion-limit-field {:optional true} ::completion-limit-field]
    [::thinking   {:optional true} ::thinking]
    [::timeout-ms {:optional true} ::timeout-ms]
    [::base-url    {:optional true} ::base-url]
@@ -383,6 +389,7 @@
    [::model       {:optional true} ::model]
    [::temperature {:optional true} ::temperature]
    [::max-tokens  {:optional true} ::max-tokens]
+   [::completion-limit-field {:optional true} ::completion-limit-field]
    [::thinking    {:optional true} ::thinking]
    [::timeout-ms  {:optional true} ::timeout-ms]
    [::base-url    {:optional true} ::base-url]
@@ -414,6 +421,10 @@
 (schema/register! ::agent-model       [:or {:default :inherit} [:enum :inherit] ::model])
 (schema/register! ::agent-temperature [:or {:default :inherit} [:enum :inherit] ::temperature])
 (schema/register! ::agent-max-tokens  [:or {:default :inherit} [:enum :inherit] ::max-tokens])  ; OUTPUT cap
+(schema/register! ::agent-completion-limit-field
+                  [:or {:default :inherit}
+                   [:enum :inherit]
+                   ::completion-limit-field])
 (schema/register! ::agent-thinking    [:or {:default :inherit} [:enum :inherit] ::thinking])
 (schema/register! ::agent-timeout-ms  [:or {:default :inherit} [:enum :inherit] ::timeout-ms])
 (schema/register! ::agent-base-url    [:or {:default :inherit} [:enum :inherit] ::base-url])
@@ -422,6 +433,8 @@
 (schema/register! ::agent-extra-body-edn
                   [:or {:default :inherit} [:enum :inherit] ::extra-body-edn])
 (schema/register! ::agent-max-retries [:or {:default :inherit} [:enum :inherit] [:int {:min 0}]])
+(schema/register! ::agent-attempt-timeout-ms
+                  [:or {:default :inherit} [:enum :inherit] ::timeout-ms])
 (schema/register!
  ::agent-config
  [:map {:seon.db/entity true}
@@ -430,19 +443,22 @@
   [::agent-model {:optional true} ::agent-model]
   [::agent-temperature {:optional true} ::agent-temperature]
   [::agent-max-tokens {:optional true} ::agent-max-tokens]
+  [::agent-completion-limit-field {:optional true} ::agent-completion-limit-field]
   [::agent-thinking {:optional true} ::agent-thinking]
   [::agent-timeout-ms {:optional true} ::agent-timeout-ms]
   [::agent-base-url {:optional true} ::agent-base-url]
   [::agent-api-key-env {:optional true} ::agent-api-key-env]
   [::agent-dg-backend {:optional true} ::agent-dg-backend]
   [::agent-extra-body-edn {:optional true} ::agent-extra-body-edn]
-  [::agent-max-retries {:optional true} ::agent-max-retries]])
+  [::agent-max-retries {:optional true} ::agent-max-retries]
+  [::agent-attempt-timeout-ms {:optional true} ::agent-attempt-timeout-ms]])
 ;; PARKED (decision 21): ::agent-context-window — a NEW input budget,
 ;; nothing enforces it today. Deferred to phase 2.
 
 ;; The attr order is the sync + row-read iteration order.
 (def ^:private config-attrs
-  [::provider ::model ::temperature ::max-tokens ::thinking ::timeout-ms
+  [::provider ::model ::temperature ::max-tokens ::completion-limit-field
+   ::thinking ::timeout-ms
    ::base-url ::api-key-env ::dg-backend ::extra-body-edn])
 
 (def ^:private config-pull-max-work 100000)
@@ -478,6 +494,13 @@
     "vllm"    :vllm
     nil))
 
+(defn- parse-completion-limit-field
+  [s]
+  (case s
+    "max-tokens" :max-tokens
+    "max-completion-tokens" :max-completion-tokens
+    nil))
+
 (defn- parse-extra-body-edn
   "Validate SEON_AI_EXTRA_BODY: it must read as an EDN MAP. Returns the
    raw string (stored verbatim — [[config-extra-body]] re-reads it) when
@@ -496,6 +519,8 @@
    ::model       ["SEON_AI_MODEL"       identity]
    ::temperature ["SEON_AI_TEMPERATURE" parse-double*]
    ::max-tokens  ["SEON_AI_MAX_TOKENS"  parse-int*]
+   ::completion-limit-field
+   ["SEON_AI_COMPLETION_LIMIT_FIELD" parse-completion-limit-field]
    ::thinking    ["SEON_AI_THINKING"    identity]
    ::timeout-ms  ["SEON_AI_TIMEOUT_MS"  parse-int*]
    ::base-url    ["SEON_AI_BASE_URL"    identity]
@@ -533,6 +558,7 @@
    ::agent-model       ::model
    ::agent-temperature ::temperature
    ::agent-max-tokens  ::max-tokens
+   ::agent-completion-limit-field ::completion-limit-field
    ::agent-thinking    ::thinking
    ::agent-timeout-ms  ::timeout-ms
    ::agent-base-url    ::base-url
@@ -544,7 +570,8 @@
   "Pull pattern for one agent's ordinary LLM override values."
   {:malli/schema [:=> [:cat] [:vector :keyword]]}
   []
-  (into [:seon.agent/id ::agent-max-retries] (keys agent-override-attrs)))
+  (into [:seon.agent/id ::agent-max-retries ::agent-attempt-timeout-ms]
+        (keys agent-override-attrs)))
 
 (defn- decode-agent-override
   [value]
@@ -569,6 +596,12 @@
   (let [value (some-> (::agent-max-retries agent) decode-agent-override)]
     (when (int? value) value)))
 
+(defn- agent-row-attempt-timeout-ms
+  [agent]
+  (let [value (some-> (::agent-attempt-timeout-ms agent)
+                      decode-agent-override)]
+    (when (int? value) value)))
+
 (schema/register! ::agent-id [:string {:min 1}])
 
 ;; WHERE a resolved value came from — provenance by DERIVATION (the
@@ -581,6 +614,7 @@
    [::model       {:optional true} ::source]
    [::temperature {:optional true} ::source]
    [::max-tokens  {:optional true} ::source]
+   [::completion-limit-field {:optional true} ::source]
    [::thinking    {:optional true} ::source]
    [::timeout-ms  {:optional true} ::source]
    [::base-url    {:optional true} ::source]
@@ -594,6 +628,7 @@
    [::resolved-config ::resolved-config]
    [::provenance      ::provenance]
    [::agent-max-retries {:optional true} ::agent-max-retries]
+   [::agent-attempt-timeout-ms {:optional true} ::agent-attempt-timeout-ms]
    [::extra-body      {:optional true} ::extra-body]])
 (schema/register! ::config-resolution ::resolved-config-response)
 (schema/register! ::request
@@ -653,7 +688,8 @@
              acc))
          {::resolved-config {::provider prov}
           ::provenance      {::provider prov-src}}
-         [::model ::temperature ::max-tokens ::thinking ::timeout-ms
+         [::model ::temperature ::max-tokens ::completion-limit-field
+          ::thinking ::timeout-ms
           ::base-url ::api-key-env ::dg-backend])
         resolved
         (reduce-kv
@@ -692,7 +728,10 @@
                     [attr [(get config-row attr) :config-row]])))
           model-transport-cap-attrs))
     (some? (agent-row-max-retries agent-row))
-    (assoc ::agent-max-retries (agent-row-max-retries agent-row))))
+    (assoc ::agent-max-retries (agent-row-max-retries agent-row))
+    (some? (agent-row-attempt-timeout-ms agent-row))
+    (assoc ::agent-attempt-timeout-ms
+           (agent-row-attempt-timeout-ms agent-row))))
 
 (defn bounded-evidence-error
   "Bound an evidence error using one resolved positive cap."

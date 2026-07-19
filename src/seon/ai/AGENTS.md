@@ -21,7 +21,8 @@ LLM call sits in the turn), `observability.md` (what of the request/response
   known remote job id. Never reuse an aborted signal across retries.
 - **Per-agent provider routing** is a complete non-secret overlay on the agent
   entity: `:seon.ai/agent-provider`, `/agent-model`, `/agent-temperature`,
-  `/agent-max-tokens`, `/agent-thinking`, `/agent-timeout-ms`, `/agent-base-url`,
+  `/agent-max-tokens`, `/agent-completion-limit-field`, `/agent-thinking`,
+  `/agent-timeout-ms`, `/agent-attempt-timeout-ms`, `/agent-base-url`,
   `/agent-api-key-env`, `/agent-dg-backend`, and `/agent-extra-body-edn`.
   Each absent or `:inherit` value falls through to the cluster row. Secrets
   remain in the named process environment variable. This is how independent
@@ -30,6 +31,11 @@ LLM call sits in the turn), `observability.md` (what of the request/response
   existing `:seon.config/repl-mode`; prompt acquisition resolves the agent's
   value before the cluster singleton so planning/repair agents can use
   `:batch` without changing ordinary agents.
+- OpenAI-compatible completion limits are capability data, never model-name
+  branches. `:seon.ai/completion-limit-field` selects `max_tokens` or
+  `max_completion_tokens`; the Kimi planning variant selects the latter.
+  `:batch` uses one nonstreaming ChatCompletion so the provider's complete
+  assistant message is not reconstructed from vendor-specific deltas.
 - **`::max-tokens` is the OUTPUT cap** — a context-window limit is a
   separate concern; don't conflate them.
 - **`tokens.cljs` owns the one token estimator** (`chars/4`). Every size

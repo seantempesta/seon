@@ -229,6 +229,10 @@
     {:optional true} [:or [:enum :inherit] :double]]
    [:seon.ai/agent-max-tokens
     {:optional true} [:or [:enum :inherit] :int]]
+   [:seon.ai/agent-completion-limit-field
+    {:optional true}
+    [:or [:enum :inherit]
+     [:enum :max-tokens :max-completion-tokens]]]
    [:seon.ai/agent-thinking
     {:optional true} [:or [:enum :inherit] [:string {:min 1}]]]
    [:seon.ai/agent-timeout-ms
@@ -243,6 +247,8 @@
     {:optional true} [:or [:enum :inherit] [:string {:min 1}]]]
    [:seon.ai/agent-max-retries
     {:optional true} [:or [:enum :inherit] [:int {:min 0}]]]
+   [:seon.ai/agent-attempt-timeout-ms
+    {:optional true} [:or [:enum :inherit] :int]]
    ;; Turn grammar is launch-role data too. A planning or generated repair
    ;; agent must be able to consume one multi-namespace batch without changing
    ;; the cluster default used by ordinary agents.

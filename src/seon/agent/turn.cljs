@@ -104,6 +104,8 @@
 (schema/register! :seon.ai.attempt/requested-model :seon.ai/model)
 (schema/register! :seon.ai.attempt/temperature :seon.ai/temperature)
 (schema/register! :seon.ai.attempt/max-tokens :seon.ai/max-tokens)
+(schema/register! :seon.ai.attempt/completion-limit-field
+                  :seon.ai/completion-limit-field)
 (schema/register! :seon.ai.attempt/thinking :seon.ai/thinking)
 (schema/register! :seon.ai.attempt/endpoint :seon.ai/endpoint)
 (schema/register! :seon.ai.attempt/adapter-timeout-ms :seon.ai/timeout-ms)
@@ -120,6 +122,9 @@
 (schema/register! :seon.ai.attempt/system-fingerprint :seon.ai/system-fingerprint)
 (schema/register! :seon.ai.attempt/request-id :seon.ai/request-id)
 (schema/register! :seon.ai.attempt/evidence-error [:string {:min 1}])
+(schema/register! :seon.ai.attempt/finish-reason [:string {:min 1}])
+(schema/register! :seon.ai.attempt/truncated? :boolean)
+(schema/register! :seon.ai.attempt/usage :string)
 (schema/register! :seon.ai.attempt/entity
   [:map {:seon.db/entity true}
    [:seon.ai.attempt/ordinal :seon.ai.attempt/ordinal]
@@ -128,6 +133,8 @@
    [:seon.ai.attempt/requested-model {:optional true} :seon.ai.attempt/requested-model]
    [:seon.ai.attempt/temperature {:optional true} :seon.ai.attempt/temperature]
    [:seon.ai.attempt/max-tokens {:optional true} :seon.ai.attempt/max-tokens]
+   [:seon.ai.attempt/completion-limit-field
+    {:optional true} :seon.ai.attempt/completion-limit-field]
    [:seon.ai.attempt/thinking {:optional true} :seon.ai.attempt/thinking]
    [:seon.ai.attempt/endpoint {:optional true} :seon.ai.attempt/endpoint]
    [:seon.ai.attempt/adapter-timeout-ms {:optional true} :seon.ai.attempt/adapter-timeout-ms]
@@ -142,7 +149,10 @@
    [:seon.ai.attempt/response-model {:optional true} :seon.ai.attempt/response-model]
    [:seon.ai.attempt/system-fingerprint {:optional true} :seon.ai.attempt/system-fingerprint]
    [:seon.ai.attempt/request-id {:optional true} :seon.ai.attempt/request-id]
-   [:seon.ai.attempt/evidence-error {:optional true} :seon.ai.attempt/evidence-error]])
+   [:seon.ai.attempt/evidence-error {:optional true} :seon.ai.attempt/evidence-error]
+   [:seon.ai.attempt/finish-reason {:optional true} :seon.ai.attempt/finish-reason]
+   [:seon.ai.attempt/truncated? {:optional true} :seon.ai.attempt/truncated?]
+   [:seon.ai.attempt/usage {:optional true} :seon.ai.attempt/usage]])
 
 ;; Entity shape. NB: seon.db validates per-ATTRIBUTE, not entity-level, so the
 ;; non-:optional entries below are documentation, not an enforced required-key
@@ -683,7 +693,9 @@
                       (get-in response [:seon.ai/error :seon.ai/evidence-error]))
                   (ai/bounded-evidence-error response-identity-cap)))
         adapter (or (:seon.ai/adapter response) (ai/resolved-adapter config))
-        status (get-in response [:seon.ai/error :seon.ai/status])]
+        status (get-in response [:seon.ai/error :seon.ai/status])
+        finish-reason (:seon.ai.openai-compat/finish-reason raw)
+        usage (:seon.ai/usage raw)]
     (cond->
       {:seon.ai.attempt/ordinal ordinal
        :seon.ai.attempt/provider (:seon.ai/provider config)
@@ -697,6 +709,9 @@
       (assoc :seon.ai.attempt/temperature (:seon.ai/temperature config))
       (:seon.ai/max-tokens config)
       (assoc :seon.ai.attempt/max-tokens (:seon.ai/max-tokens config))
+      (:seon.ai/completion-limit-field config)
+      (assoc :seon.ai.attempt/completion-limit-field
+             (:seon.ai/completion-limit-field config))
       (contains? config :seon.ai/thinking)
       (assoc :seon.ai.attempt/thinking (:seon.ai/thinking config))
       (string? endpoint-result)
@@ -723,14 +738,27 @@
       (assoc :seon.ai.attempt/system-fingerprint
              (:seon.ai/system-fingerprint raw))
       (:seon.ai/request-id raw)
-      (assoc :seon.ai.attempt/request-id (:seon.ai/request-id raw)))))
+      (assoc :seon.ai.attempt/request-id (:seon.ai/request-id raw))
+      finish-reason
+      (assoc :seon.ai.attempt/finish-reason finish-reason)
+      (:seon.ai/truncated? raw)
+      (assoc :seon.ai.attempt/truncated? true)
+      (seq usage)
+      (assoc :seon.ai.attempt/usage (pr-str usage)))))
+
+(defn- effective-llm-attempt-timeout-ms
+  "The launch-selected outer attempt fence, else the process default."
+  [resolution]
+  (or (:seon.ai/agent-attempt-timeout-ms resolution)
+      (config/llm-attempt-timeout-ms)))
 
 (defn ^:async ^:private bounded-llm-attempt!
   "ONE adapter attempt under the per-attempt wall-clock cap.
 
    Races one signal-bearing request against
-   [[seon.config/llm-attempt-timeout-ms]]
-   (`SEON_LLM_ATTEMPT_TIMEOUT_MS`, default 2 min) via the ONE racer
+   the launch-selected `:seon.ai/agent-attempt-timeout-ms`, falling back to
+   [[seon.config/llm-attempt-timeout-ms]] (`SEON_LLM_ATTEMPT_TIMEOUT_MS`,
+   default 2 min), via the ONE racer
    ([[seon.eval/race-timeout]]) — the inner bound that keeps a single attempt
    from parking the turn when the adapter's own `:seon.ai/timeout-ms` is
    unset/huge. A timed-out attempt resolves to a `:seon.ai/error` VALUE
@@ -744,7 +772,7 @@
    the adapter to consume the SDK stream and stop it at the first complete
    form. Every retry gets a fresh controller."
   [id ordinal resolution llm-fn prompt-text system-prompt stream?]
-  (let [ms         (config/llm-attempt-timeout-ms)
+  (let [ms         (effective-llm-attempt-timeout-ms resolution)
         controller (js/AbortController.)
         signal     (.-signal controller)
         arg        (cond-> {:seon.ai/ctx          prompt-text
@@ -762,8 +790,7 @@
           (if outer-timeout?
             {:seon.ai/error
              {:seon.ai/msg      (str "LLM attempt exceeded the per-attempt "
-                                     "cap (" ms "ms, SEON_LLM_ATTEMPT_"
-                                     "TIMEOUT_MS) — provider request cancelled")
+                                     "cap (" ms "ms) — provider request cancelled")
               :seon.ai/timeout? true}}
             v)]
       (assoc response ::attempt-row
@@ -848,7 +875,10 @@
            ;; depend on turn success (observability.md).
            :seon.agent.turn/error  (turn-error-str err)
            :seon.agent.turn/llm-attempts attempts}
-          retries (assoc :seon.agent.turn/llm-retries retries)))
+          retries (assoc :seon.agent.turn/llm-retries retries)
+          (seq usage) (assoc :seon.agent.turn/llm-usage (pr-str usage))
+          estimated? (assoc :seon.agent.turn/usage-estimated? true)
+          (seq pfields) (assoc :seon.agent.turn/llm-meta (pr-str pfields))))
       (cond-> (await (ask-and-eval-reply! resp id id-of-turn run-id
                                           (boolean stream?) start-ns database))
         true        (assoc :seon.agent.turn/llm-attempts attempts)
