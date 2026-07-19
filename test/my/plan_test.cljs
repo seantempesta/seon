@@ -3,6 +3,7 @@
   (:require
     [cljs.test :refer [async deftest is testing]]
     [clojure.string :as str]
+    [malli.core :as m]
     [my.plan :as plan]
     [my.plan.internal :as internal]
     [seon.db :as db]
@@ -43,6 +44,17 @@
            (mapv :my.plan/id
                  (:my.plan/_parent
                    (internal/subtree-from-rows rows "root")))))))
+
+(deftest status-contract-bounds-pull-nodes-and-preserves-read-errors
+  (let [pull-member ((deref #'plan/pull-member)
+                     [:my.plan/id :my.plan/title :my.plan/status]
+                     [:my.plan/id "root"])]
+    (is (= 4096 (:datahike.resource/max-results pull-member))
+        "a pull budget counts attribute/ref nodes, not one entity")
+    (is (m/validate
+         (schema/schema-definition :my.plan/status-response)
+         {:my.plan/ok? false :my.plan/error "status read failed"})
+        "database failures remain valid agent-facing values")))
 
 (deftest html-renderer-matches-the-dynamic-render-interface
   (async done

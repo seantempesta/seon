@@ -150,12 +150,16 @@
    [::error    {:optional true} ::error]])
 
 (schema/register! ::status-response
-  [:map
-   [::id       ::id]
-   [::done?    ::done?]
-   [::blocked? ::blocked?]
-   [::ready?   ::ready?]
-   [::progress ::progress]])
+  [:or
+   [:map
+    [::id       ::id]
+    [::done?    ::done?]
+    [::blocked? ::blocked?]
+    [::ready?   ::ready?]
+    [::progress ::progress]]
+   [:map
+    [::ok? [:= false]]
+    [::error ::error]]])
 
 (schema/register! ::step-ref
   [:map [::id ::id] [::title ::title] [::created-at ::created-at]])
@@ -349,7 +353,9 @@
    ::protocol/selector selector
    ::protocol/entity-id eid
    :datahike.resource/max-work 250000
-   :datahike.resource/max-results 1
+   ;; Datahike charges one result node per pulled attribute/ref node, not one
+   ;; per pulled entity. Weight remains the tighter payload bound.
+   :datahike.resource/max-results 4096
    :datahike.resource/max-result-weight 131072})
 
 (defn- member-result [member]
