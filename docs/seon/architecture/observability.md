@@ -76,9 +76,10 @@ flag:
   do not copy database identity. Projection re-derives the adapter and stream
   mode at that same historical value. Evidence-size
   policy is read from the config singleton in the final immutable response
-  value, once per projection. The process-owned outer attempt bound is retained
-  as the exact applied value; admission rejects drift within a run and binds
-  cross-run comparison to the admitted process environment. An absent policy
+  value, once per projection. The outer attempt bound is retained as the exact
+  applied value: normally the admitted process default, or the explicit sparse
+  launch override copied onto that agent. Admission rejects drift within a run
+  and binds cross-run comparison to that ordinary birth/process evidence. An absent policy
   or rejected optional identity makes formal evidence
   incomplete without changing the provider request, model output, usage, or
   successful outcome; rejected bytes never enter an error value.

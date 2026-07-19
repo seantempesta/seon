@@ -817,6 +817,10 @@ not a root-only documentation system.
   transaction. Unknown names allocate nothing. Existing complete IDs remain
   idempotent, while a namespace-resident start/delegate with a selector returns
   a user error rather than silently ignoring or mutating the selection.
+  Output-limit wire spelling and the outer attempt fence are ordinary sparse
+  birth attributes too, so a high-latency compatible model can select
+  `max_completion_tokens` and a longer process fence without a model-name
+  branch or a cluster-wide timeout change.
 - **`seon.agent/delegate!` is the atomic birth-plus-first-message operation.**
   It accepts the same optional namespace. An existing resident receives the
   message directly; an absent resident, its namespace assignment, and the

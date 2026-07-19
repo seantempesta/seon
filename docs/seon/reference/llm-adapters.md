@@ -57,6 +57,7 @@ backend, and retry policy—are database-owned and resolve agent entity override
 | `SEON_AI_PROVIDER` | `:seon.ai/provider` | `deepseek`\|`anthropic`\|`openai-compat` | all | default `deepseek` |
 | `SEON_AI_MODEL` | `:seon.ai/model` | string | all | per-provider default below |
 | `SEON_AI_MAX_TOKENS` | `:seon.ai/max-tokens` | int | all | |
+| `SEON_AI_COMPLETION_LIMIT_FIELD` | `:seon.ai/completion-limit-field` | `max-tokens`\|`max-completion-tokens` | openai-compat | wire name for the output cap; default `max-tokens` |
 | `SEON_AI_TIMEOUT_MS` | `:seon.ai/timeout-ms` | int | all | wall-clock; default `60000` |
 | `SEON_AI_THINKING` | `:seon.ai/thinking` | `false`\|`true`\|`high`\|`max`\|… | all | see Thinking |
 | `SEON_AI_TEMPERATURE` | `:seon.ai/temperature` | double | deepseek, openai-compat | **ignored by anthropic** (sampling params 400 on Opus 4.7+/Fable) |
@@ -106,6 +107,7 @@ accepted — the adapter strips a trailing `/chat/completions` (or
 | endpoint | `https://api.deepseek.com/v1` | `https://api.anthropic.com/v1/messages` (SDK-owned) |
 | temperature | `0.7` | n/a (never sent) |
 | max_tokens | `4096` | `16000` |
+| completion-limit-field | `max-tokens` | n/a |
 | timeout-ms | `60000` | `60000` |
 | thinking | disabled unless turned on | adaptive when truthy |
 
@@ -265,15 +267,14 @@ cache-miss cost was $0.0055. This establishes the low-complexity floor, not a
 planning-task latency promise: K3 may still spend substantial reasoning tokens
 on difficult requests, as the two planning probes above demonstrate.
 
-The current adapter sends the deprecated-but-accepted OpenAI `max_tokens`
-field, while K3 documents `max_completion_tokens`. This is recorded
-compatibility debt, not a reason to change the shared field blindly because
-DeepSeek still consumes `max_tokens`. K3 also requires the complete assistant
-message, including reasoning content, for tool-call continuation. Seon's
-single-response path is verified, but the generic adapter intentionally drops
-reasoning content from agent-visible text and the agent loop does not yet prove
-K3 multi-turn tool continuation. Do not claim that stronger compatibility from
-the send/parse-only tool tests.
+The planning variant selects `:max-completion-tokens` as ordinary model
+capability data, so K3 receives `max_completion_tokens` while DeepSeek retains
+`max_tokens`; there is no model-name branch. K3 also requires the complete
+assistant message, including reasoning content, for tool-call continuation.
+Seon's single-response path is verified, but the generic adapter intentionally
+drops reasoning content from agent-visible text and the agent loop does not yet
+prove K3 multi-turn tool continuation. Do not claim that stronger compatibility
+from the send/parse-only tool tests.
 
 The useful mixed-cost topology in one cluster is therefore **DeepSeek globally,
 Kimi for selected planning agents**. The shipped manifest names this sparse
@@ -326,9 +327,11 @@ ANTHROPIC_API_KEY=<key>
 
 Every non-secret provider field has a per-agent mirror:
 `agent-provider`, `agent-model`, `agent-temperature`, `agent-max-tokens`,
-`agent-thinking`, `agent-timeout-ms`, `agent-base-url`, `agent-api-key-env`,
-`agent-dg-backend`, and `agent-extra-body-edn`; `agent-max-retries` controls the
-turn retry policy. Absent or `:inherit` values fall through to the global row.
+`agent-completion-limit-field`, `agent-thinking`, `agent-timeout-ms`,
+`agent-base-url`, `agent-api-key-env`, `agent-dg-backend`, and
+`agent-extra-body-edn`; `agent-max-retries` controls retries and
+`agent-attempt-timeout-ms` optionally replaces the process-default outer bound.
+Absent or `:inherit` values fall through to the global row or process default.
 These attributes can be transacted onto an existing agent, supplied through
 the manifest's ordinary/root agent context for atomic birth, or included in a
 per-mint context override. Prefer named birth variants when the same role is
@@ -338,8 +341,11 @@ reused:
 :seon.config/model-variants
 {:planning {:seon.ai/agent-provider :openai-compat
             :seon.ai/agent-model "kimi-k3"
+            :seon.ai/agent-completion-limit-field :max-completion-tokens
             :seon.ai/agent-base-url "https://api.moonshot.ai/v1"
-            :seon.ai/agent-api-key-env "MOONSHOT_API_KEY"}
+            :seon.ai/agent-api-key-env "MOONSHOT_API_KEY"
+            :seon.ai/agent-timeout-ms 300000
+            :seon.ai/agent-attempt-timeout-ms 360000}
  :execution {:seon.ai/agent-provider :deepseek
              :seon.ai/agent-model "deepseek-v4-flash"
              :seon.ai/agent-thinking "false"}}
@@ -451,13 +457,14 @@ Two ways to set it:
 > which drops `model`/`messages` and 400s every call. The Node passthrough is
 > inlining into params, not the Python `extra_body` and not `options.body`.
 
-## Streaming
+## Batch and streaming
 
-Both adapters **request a stream** (`stream_options:{include_usage:true}` for
-openai-compat) and the SDK assembles it into one structured object before the
-adapter returns. This is a transport/robustness change — the agent loop still
-receives one complete `{:text …}` and parses whole forms. There is no
-token-by-token surface to consumers.
+OpenAI-compatible `:batch` turns request one ordinary nonstreaming Chat
+Completion. This preserves the provider's complete assistant message without
+asking the SDK to reconstruct vendor-specific reasoning deltas. `:stream` is
+the only mode that requests a stream with terminal usage; it aborts after the
+first complete top-level form. Neither mode exposes token-by-token output to
+the agent loop.
 
 ## Provider metadata (#25)
 
@@ -473,6 +480,11 @@ These are also **persisted per turn** on the turn entity:
 - `:seon.agent.turn/llm-meta` (EDN string of the provider-fields)
 
 so spend/metadata is queryable as datoms.
+
+Each `:seon.ai.attempt/*` component also retains its finish reason, explicit
+truncation marker, provider usage EDN, configured completion-limit field, and
+both applied timeout layers. Failed/truncated calls therefore remain visible
+as cost and deadline evidence rather than disappearing from the turn.
 
 ## Result + error contract
 
@@ -491,10 +503,11 @@ The envelope:
 | `:seon.ai/transport?` | `true` when the connection failed before any status — the **one retryable class** |
 | `:seon.ai/raw-body` | raw body when a response couldn't be parsed |
 
-The agent loop (`seon.agent/call-llm!`) retries **once** on a `:transport?`
-error and records `:seon.agent.turn/llm-retries`. The SDK clients are
-constructed with `maxRetries: 0`, so the agent loop is the single retry
-authority. Anthropic refusals (`stop_reason "refusal"`) become a legible
+The agent loop applies its bounded retry policy to transient transport, 429,
+and 5xx failures and records `:seon.agent.turn/llm-retries`. Named variants can
+lower that cap; the shipped planning/execution variants use one retry. The SDK
+clients are constructed with `maxRetries: 0`, so the agent loop is the single
+retry authority. Anthropic refusals (`stop_reason "refusal"`) become a legible
 `:seon.ai/error` envelope.
 
 ## Direct calls (REPL / debugging)
@@ -513,10 +526,9 @@ the same ordinary value explicitly:
      :seon.ai/api-key-env "MOONSHOT_API_KEY"}
     {}))
 
-(await
-  (seon.ai.openai-compat/complete
-    {:seon.ai/ctx "Return one Clojure form that adds 20 and 22."
-     :seon.ai/config-resolution resolution}))
+(seon.ai.openai-compat/complete
+  {:seon.ai/ctx "Return one Clojure form that adds 20 and 22."
+   :seon.ai/config-resolution resolution})
 
 ;; Inspect exactly what goes over the wire without calling:
 (seon.ai.openai-compat/request-params
@@ -526,7 +538,9 @@ the same ordinary value explicitly:
 
 This literal construction is only a probe seam. Production turns use the
 database rows captured by the execution runtime; do not replace that authority
-with an environment-reading or process-local config cache.
+with an environment-reading or process-local config cache. Agent-facing batch
+evaluation awaits the whole returned Promise automatically; do not write a
+bare top-level `(await ...)`, which is invalid outside a `^:async` function.
 
 Override per call with any of `:seon.ai/model`, `:seon.ai/temperature`
 (openai-compat), `:seon.ai/max-tokens`, `:seon.ai/system-prompt`,
@@ -547,11 +561,11 @@ Override per call with any of `:seon.ai/model`, `:seon.ai/temperature`
 5. Run the explicit adapter probe above or, preferably, launch one bounded
    agent turn and inspect its persisted `:seon.ai.attempt/*` evidence.
    → `{:seon.ai/text "…" :seon.ai/usage {…}}`, no `:seon.ai/error`.
-4. Qwen extra-body: confirm the server log shows `chat_template_kwargs` and
+6. Qwen extra-body: confirm the server log shows `chat_template_kwargs` and
    reasoning is suppressed when you set `{:enable_thinking false}`.
-5. Tool-calling: send a `:seon.ai/tools` request → `:seon.ai/tool-calls` on the
+7. Tool-calling: send a `:seon.ai/tools` request → `:seon.ai/tool-calls` on the
    result.
-6. Induced timeout: `SEON_AI_TIMEOUT_MS=1` → `:seon.ai/error` with
+8. Induced timeout: `SEON_AI_TIMEOUT_MS=1` → `:seon.ai/error` with
    `:seon.ai/timeout? true`. Unreachable host → `:seon.ai/transport? true`.
-7. Per-turn metadata: run a real turn, then pull the turn entity →
+9. Per-turn metadata: run a real turn, then pull the turn entity →
    `:seon.agent.turn/llm-usage` populated, `:seon.agent.turn/llm-meta` readable EDN.

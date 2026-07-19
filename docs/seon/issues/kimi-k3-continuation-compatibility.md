@@ -12,31 +12,31 @@ tags: [issue, agent, capability]
 Kimi K3's OpenAI-compatible single-response path works, but its completion,
 deadline, evidence, and continuation contracts are incomplete.
 
-- K3 documents `max_completion_tokens` and deprecates `max_tokens`.
-  `seon.ai.openai-compat/request-params` currently sends `max_tokens`, which K3
-  accepts today. Replacing it globally would be wrong because DeepSeek still
-  consumes that field.
+Commit `003251ef` closes the one-shot completion, deadline, and evidence
+portion in source. The issue remains open for exact-artifact live K3 validation
+and any future provider-native tool continuation.
+
+- K3 documents `max_completion_tokens` and deprecates `max_tokens`. The named
+  planning variant now selects that field as ordinary capability data while
+  DeepSeek retains `max_tokens`.
 - K3 requires the complete assistant message, including reasoning content, on
   a later tool-call turn. The adapter deliberately excludes
   `reasoning_content` from agent-visible text and Seon's agent loop does not
   currently execute a provider-native continuation loop. Existing tool tests
   prove only request emission and response parsing.
-- The shipped `:planning` variant carries a 300-second adapter timeout, while
-  `seon.agent.turn/bounded-llm-attempt!` races every provider against the
-  cluster's 120-second outer attempt timeout. The paid 107-second K3 probe
-  barely fit; harder planning is aborted before its selected variant deadline.
+- The shipped `:planning` variant now carries a 300-second adapter timeout and
+  a distinct 360-second outer attempt fence; ordinary agents retain the
+  process-default outer bound.
 - A response with `finish_reason="length"`, empty visible content, and only
-  reasoning content currently returns success. The paid 4,096-token probe
+  reasoning content previously returned success. The paid 4,096-token probe
   demonstrated exactly this shape: 4,093 completion/reasoning tokens, no code.
   The turn then records no evals and can spend more turns on the ordinary
   no-form stop path instead of returning a truncation error.
-- Finish reason and truncation are not persisted on attempt facts. Provider
-  usage is also discarded when a provider response is converted into an error,
-  hiding the cost of failed or truncated work.
-- `:batch` still asks openai-node for a stream and calls
-  `finalChatCompletion`. The SDK concatenates visible `content` but does not
-  preserve arbitrary reasoning deltas as one complete assistant message.
-  Single-response visible text works; K3 continuation does not.
+- Finish reason, truncation, completion-limit field, usage, and both timeout
+  layers now persist on attempt facts, including provider-returned failures.
+- `:batch` now uses one nonstreaming Chat Completion. `:stream` alone uses the
+  SDK stream. Single-response visible text works; K3 continuation remains
+  unimplemented.
 
 ## Evidence
 
