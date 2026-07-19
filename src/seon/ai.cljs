@@ -875,19 +875,19 @@
                              (some? existing) (assoc ::row existing)))]
       (if (empty? tx)
         {::synced? false}
-        (let [{ok?   :seon.db/ok?
-               error :seon.db/error}
+        (let [report
               (await
-                (db/transact!
-                  {::db/tx-data tx
-                   ::db/expected-db (::db/db acquired)}))]
-          (if ok?
+               (db/transact!
+                {::db/tx-data tx
+                 ::db/expected-db (::db/db acquired)}))
+              succeeded? (not (:seon.error/message report))]
+          (if succeeded?
             (log/info-console! "seon.ai" "LLM config row seeded from env (DB owns it now)"
                                {:tx-ops (count tx)})
             (log/error-console! "seon.ai"
                                 "LLM config env seed transact FAILED — adapters use the default config"
-                                error))
-          {::synced? (boolean ok?)})))
+                                report))
+          {::synced? succeeded?})))
     (catch :default e
       (log/error-console! "seon.ai" "LLM config env sync threw" e)
       {::synced? false})))

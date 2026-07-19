@@ -644,6 +644,13 @@ Current charged physical footprints were 596.7 MiB writer, 274.6 MiB pod, and
 of unavailable Linux PSS, and the 1.7 GiB Shadow compiler remains explicitly
 development-only. Event-loop delay and a natural idle-timeout sample remain.
 
+The first fused default-cluster reset then exposed a stale startup consumer:
+the environment-derived AI row committed successfully, but `seon.ai/sync!`
+looked for the removed `:seon.db/ok?` wrapper and logged a false failure. It now
+uses the current transaction-report-or-error contract already used by brand
+seeding. Focused proof passes 11 tests/40 assertions; the archived issue records
+the exact database evidence.
+
 The existing remote query surface now exposes its protocol-native historical
 view, closing the only facade gap needed by coordinate-pinned startup birth.
 LLM configuration and brand startup sync also use bounded coordinate-fenced

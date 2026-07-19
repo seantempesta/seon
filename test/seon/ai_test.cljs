@@ -73,7 +73,9 @@
       (set! db/transact!
             (fn [& [request]]
               (swap! calls conj [:transact request])
-              (js/Promise.resolve {::db/ok? true})))
+              (js/Promise.resolve
+               {:db-before database
+                :db-after (assoc database :t 536870913)})))
       (set! ai/env-row (constantly {::ai/thinking "true"}))
       (-> (ai/sync!)
           (.then
