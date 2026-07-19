@@ -571,6 +571,19 @@ two owned processes. This closes current independent-cluster restart/isolation;
 the provider-backed downstream agent journey remains coupled to the live
 Inspect credential gate.
 
+Execution-child containment is current rather than inferred. A root feed
+demand created detached execution child PID `42029` beneath Bun pod PID
+`62042`. Killing the actual Bun pod with `SIGKILL` removed both PIDs
+immediately even though the child owned a distinct process group, directly
+proving the vendored Bun no-orphans parent-death path. Status classified the
+pod generation as drained while the writer and watcher remained ready;
+ordinary `bin/seon up` recovered it and reported the prior
+`unexpected-exit`. Focused execution-host proof passes 18 tests/83 assertions
+and operator process proof passes 61/314. The earlier audit's proposed source
+changes were already present: runtime drain awaits `execution.host/stop!`, IPC
+disconnect invokes child shutdown, and only the pod receives
+`BUN_FEATURE_FLAG_NO_ORPHANS=1`.
+
 The existing remote query surface now exposes its protocol-native historical
 view, closing the only facade gap needed by coordinate-pinned startup birth.
 LLM configuration and brand startup sync also use bounded coordinate-fenced

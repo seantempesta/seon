@@ -110,7 +110,13 @@ source lines in this ledger or the owning successor PRD.
   61/314. A retained branch then closed normally while owning two execution
   children, including one retained across an earlier provider failure; both
   child PIDs and the pod PID were gone and the writer stayed ready. Abnormal
-  parent loss remains unchecked.
+  parent loss is now checked on current source too. A demanded root render
+  created execution child PID `42029` under Bun pod PID `62042`; direct
+  `SIGKILL` of the pod removed both PIDs immediately despite their distinct
+  process groups. Operator status classified the pod generation as `drained`,
+  retained the ready writer and watcher, and ordinary `bin/seon up` recovered
+  the pod with explicit `unexpected-exit` evidence. Focused execution-host
+  proof passes 18 tests/83 assertions and operator process proof passes 61/314.
 - The first post-fix namespace sample exposed persisted provider truth rather
   than a runtime failure. The source branch inherited `:openai-compat` with the
   Meta endpoint and `muse-spark-1.1`; that provider returned HTTP 402. The
