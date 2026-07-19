@@ -86,8 +86,10 @@ source lines in this ledger or the owning successor PRD.
 - [ ] Make schema and program publication atomic: ready with the complete
   admitted program or recorded core fault plus process exit. Maintained Shadow
   now reports caught Node import failures truthfully, and admission permits the
-  next build to recover from `:unavailable`; the watched failed-import/repair
-  run remains.
+  next build to recover from `:unavailable`. Live proof rejected a guarded
+  `seon.log` import, performed no rehost/ticker install, then committed all 754
+  functions and returned the same pod to ready on the repaired next build.
+  Exact execution-child artifact admission remains.
 - [ ] **IN PROGRESS:** apply the database-selected core-fault policy
   consistently at ticker, reload, publication, render, selected-call, and
   top-level child boundaries. The ticker now retains the already-acquired

@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, agent, schema]
 ---
@@ -89,5 +89,9 @@ regression proving the rejected generation records once and recovery adds no
 duplicate fault.
 
 Focused proof passes client initialization 8 tests/26 assertions and runtime
-admission 17/100. A watched two-namespace failed-import and repair run remains
-before resolution.
+admission 17/100. Live watched proof then set a guarded top-level import failure
+in `seon.log`. Shadow logged the exact import error, emitted the failure path,
+and Seon stayed alive but unavailable without rehosting agents or reinstalling
+the ticker. Removing the failure produced the next build; the same pod committed
+one complete 754-function publication, rehosted every runtime, reinstalled the
+single ticker, and returned ready without a process restart.
