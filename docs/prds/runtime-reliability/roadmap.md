@@ -159,7 +159,7 @@ complete control/validation/read-back matrix, gzip remote-mode proof, shared
 render computation, and slow-client isolation.
 
 The current-source complete local correctness checkpoint now passes CLJS 1,179
-tests/5,254 assertions, JVM writer 221/1,833, operator 280/1,582, and offline
+tests/5,254 assertions, JVM writer 222/1,836, operator 281/1,583, and offline
 Inspect 521 tests with eight environment-gated skips. The first writer run
 removed two stale v10 listener assumptions rather than restoring implicit
 broadcasts. The first Inspect run removed one retired database wrapper fixture

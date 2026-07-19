@@ -579,7 +579,9 @@ render/feed mechanism.
   preserve compatibility mechanisms.
 
 Current-source complete correctness evidence is CLJS 1,179 tests/5,254
-assertions, JVM writer 221/1,833, and operator 280/1,582. The complete offline
+assertions, JVM writer 222/1,836, and operator 281/1,583. This exact-source
+checkpoint includes the fused Datahike index-root creation contract and the
+current transaction-report-shaped AI startup seed result. The complete offline
 Inspect gate passes 521 tests with eight environment-gated skips. Its one first
 run failure was a stale frozen-tool fixture using retired database wrapper
 fields; the current ordinary database-value and model-transport contract now
