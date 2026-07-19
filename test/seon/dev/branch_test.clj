@@ -438,6 +438,7 @@
         branch-exists? (atom false)
         create-attempts (atom 0)
         create-mode (atom :drop)
+        release-busy-attempts (atom 0)
         requests (atom [])
         process-events (atom [])
         stop-classification (atom :seon.dev.process.classification/absent)
@@ -516,8 +517,16 @@
                  ::protocol/adopted? (= :adopt @create-mode)}))
 
             :seon.db.protocol.operation/release-database
-            {::protocol/success? true
-             ::protocol/released? false}
+            (if (pos? @release-busy-attempts)
+              (do
+                (swap! release-busy-attempts dec)
+                {::protocol/success? false
+                 ::protocol/error-kind
+                 :seon.db.protocol.error/database-in-use
+                 ::protocol/error
+                 "The target database is still acquired by live connections."})
+              {::protocol/success? true
+               ::protocol/released? false})
 
             :seon.db.protocol.operation/delete-branch
             (do
@@ -820,6 +829,7 @@
                  @process-events)))
         (reset! stop-classification
                 :seon.dev.process.classification/forced)
+        (reset! release-busy-attempts 2)
         (let [closed
               (branch/close!
                {::branch/configuration source-config
@@ -847,6 +857,8 @@
                   protocol/ensure-database-operation
                   protocol/ensure-database-operation
                   protocol/ensure-database-operation
+                  protocol/release-database-operation
+                  protocol/release-database-operation
                   protocol/release-database-operation
                   protocol/delete-branch-operation]
                  (mapv ::protocol/operation @requests))))

@@ -192,6 +192,30 @@
   (validate! schema-key response
              "The database writer returned an invalid lifecycle response."))
 
+(def ^:private release-drain-timeout-ms 5000)
+(def ^:private release-drain-poll-ms 10)
+
+(defn- release-after-transport-drain!
+  "Release a stopped branch database after its pod and execution-child UDS
+   acquisitions disappear from the writer. Pod containment proves the
+   processes are absent before this function runs, but selector-owned socket
+   cleanup is asynchronous. Only that exact transient database-in-use result
+   is retried; every other writer response remains terminal."
+  [descriptor release-request]
+  (let [deadline (+ (System/nanoTime)
+                    (* release-drain-timeout-ms 1000000))]
+    (loop []
+      (let [response (writer-call! descriptor release-request)]
+        (if (and (not (::protocol/success? response))
+                 (= :seon.db.protocol.error/database-in-use
+                    (::protocol/error-kind response))
+                 (< (System/nanoTime) deadline))
+          (do
+            (Thread/sleep release-drain-poll-ms)
+            (recur))
+          (require-success! ::protocol/release-database-response
+                            response))))))
+
 (defn- source-manifest!
   [configuration]
   (let [manifest (artifact/read-manifest configuration)]
@@ -721,9 +745,7 @@
                {::protocol/request-id (str (random-uuid))
                 :seon.db/db (:seon.db/db ensured)})
               release-response
-              (require-success!
-               ::protocol/release-database-response
-               (writer-call! descriptor release-request))
+              (release-after-transport-drain! descriptor release-request)
               delete-request
               (protocol/delete-branch-request
                {::protocol/request-id (str (random-uuid))

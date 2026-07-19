@@ -262,3 +262,30 @@ remains primary and the cleanup failure is attached as an exception note; a
 cleanup-only failure still fails the task. This preserves both facts without a
 private retry or false success. The combined cluster/product slice passes 53
 tests.
+
+The current-artifact namespace scenario reproduced two independent unstable
+states on 2026-07-19. Its admitted Python request ended as
+`RemoteDisconnected`, while the retained branch pod stayed ready and kept
+opening root turns. A controlled 30-second request preserved the response and
+made the behavior inspectable: five successful evals were `message/user`,
+`my.plan/active!`, `plan/status`, `seon.agent/delegate!`, and another
+`my.plan/active!`; the door timed out truthfully, but the delegated child kept
+running. An independent representative run then consumed 37 turns in 211.126
+seconds, including 27 successful `my.plan/active!` calls. The loop currently
+resets its no-progress streak for every successful eval, so read-only status
+polling is indistinguishable from task progress. The agent-loop issue owns that
+semantic correction; lowering the 100-turn work budget or adding an Inspect
+watchdog would only hide it.
+
+The same controlled branch also reproduced the one-call release race with the
+writer's exact `database-in-use` response. Pod containment completed cleanly
+and recorded root plus child as unhosted, but selector-owned UDS acquisition
+cleanup had not reached the writer registry before `release-database`. The
+first close left the durable record at desired state `closed` and phase
+`stopping-pod`; a second close seconds later released and deleted it without
+rerunning containment. The branch operator now waits for that already-proved
+process shutdown to reach the writer by retrying only the exact transient
+`database-in-use` release response for a bounded interval. Every other writer
+failure remains terminal. A focused regression forces two such responses and
+proves one invocation converges; live current-source proof remains after the
+next coherent watcher build.
