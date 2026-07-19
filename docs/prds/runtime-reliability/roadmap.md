@@ -72,6 +72,22 @@ measured bottlenecks; then finish the Bun-native and downstream packaging cut.
 The older unit table remains a coverage ledger, not six independent runtime
 tracks and not a requirement to preserve obsolete intermediate mechanisms.
 
+### 2026-07-18 integrated overnight graduation ledger
+
+[[research/overnight-integrated-graduation-plan-2026-07-18]] is the active
+checkbox and evidence ledger for restoring the running system and graduating
+real namespace-moving, namespace-targeted, restart-safe agents through Inspect
+AI and the browser. It does not replace the ten-unit program ledger or unit 9's
+final admission gate; it projects the currently dependency-ready path through
+them. Its earliest unsettled contract is deterministic schema/program
+publication and fail-loud process behavior after the latest pod lost
+`:seon.db/db` schema readiness during reload. The next integrated proof is three
+clean cold starts, three pod restarts, and deterministic record-before-exit
+fault cuts. Inspect offline verification, namespace/agent source grounding, and
+browser-scenario design are the safe parallel portfolio; the complete live
+Inspect, browser, package, downstream, multi-cluster, and modest-hardware matrix
+remains the final gate.
+
 As of 2026-07-18, one JVM writer has passed the complete autonomous sibling
 cluster lifecycle: fresh initialization, distinct database values and store
 IDs, concurrent agents and gzip feeds, isolated writes, pod-only restart,
