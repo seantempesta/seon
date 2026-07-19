@@ -93,9 +93,17 @@ byte-identical 8,704-byte frames, and the real browser retained one app view and
 feed opener with no console or page error. The maintained Datahike aggregate at
 `6611de27` passes 2,602 tests / 13,678 assertions across its three JVM profiles
 plus 138 / 951 in Node CLJS; the current Seon writer gate passes 231 / 1,891.
-The earliest unsettled contract is now the final requirement-by-requirement
-graduation audit and closure of stale issue evidence, not a missing runtime
-behavioral gate.
+The later exact-artifact root delegation proof exposed one correctness gap in
+materialized database values: their attached cache context retained generation
+identity but lost the selected commit's revision boundary, allowing two absent
+attribute revisions to compare unchanged. Maintained Datahike `6f256908` gives
+a materialized commit with unavailable exact revision history a conservative
+revision equal to its own commit ID, while preserving full head revisions and
+exact same-snapshot hits. The red ordered/limited plus aggregate regression is
+green in PSS, HHT, and specs; full query-cache plus versioning proof is 156
+tests / 1,107 assertions and Node CLJS remains 138 / 951. The earliest
+unsettled contract is rebuilt live proof that each completed eval appears in
+the immediately following prompt, followed by the final requirement audit.
 
 `seon.reactive` now implements the general registered-read lifecycle. Each
 registration owns one Datahike writer interest, one active computation, and at
