@@ -113,7 +113,7 @@
         (swap-vals!
           !state
           (fn [{::keys [status] :as current}]
-            (if (#{:starting :available} status)
+            (if (#{:starting :available :unavailable} status)
               (cond->
                 {::status :publishing
                  ::previous-projection (schema/current-projection)}

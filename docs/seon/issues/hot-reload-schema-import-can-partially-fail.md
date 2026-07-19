@@ -76,3 +76,18 @@ complete generation atomically.
   cannot reopen admission or rehost agents/tickers.
 - A hot-reload test proves dependent namespace order, failed publication, and
   successful recovery without a process restart.
+
+## Implementation evidence
+
+Maintained Shadow commit `615430b3` moves the Node custom notification behind
+`do-js-reload`'s existing completion and failure callbacks. A caught JavaScript
+import rejection now emits `:build-failure` with the reload error instead of a
+false `:build-complete`. The first-party integration test directly exercises
+both callback outcomes. `seon.runtime.admission/begin-publication!` now permits
+the next build to acquire a fresh transition from `:unavailable`, with a
+regression proving the rejected generation records once and recovery adds no
+duplicate fault.
+
+Focused proof passes client initialization 8 tests/26 assertions and runtime
+admission 17/100. A watched two-namespace failed-import and repair run remains
+before resolution.

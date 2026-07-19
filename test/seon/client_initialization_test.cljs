@@ -12,7 +12,9 @@
    [seon.launch :as launch]
    [seon.runtime.admission :as admission]
    [seon.runtime.recovery :as recovery]
-   [seon.state :as state]))
+   [seon.state :as state]
+   [shadow.cljs.devtools.client.env :as shadow-env]
+   [shadow.cljs.devtools.client.node :as shadow-node]))
 
 (def ^:private digest
   "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
@@ -22,6 +24,39 @@
 
 (def ^:private configuration
   (config/resolve-config-singleton {}))
+
+(deftest shadow-node-reload-notification-reflects-javascript-import
+  (let [original-autoload shadow-env/autoload
+        original-import shadow-node/closure-import
+        effects (atom [])
+        message {:info {:sources [{:ns 'example.reload
+                                   :resource-id "example.cljs"
+                                   :output-name "example.js"}]
+                        :compiled #{"example.cljs"}
+                        :warnings []}
+                 :reload-info {:never-load #{} :always-load #{}}}]
+    (try
+      (set! shadow-env/autoload true)
+      (set! shadow-node/closure-import
+            (fn [_] (throw (js/Error. "import failed"))))
+      (shadow-node/handle-build-complete
+       nil message
+       #(swap! effects conj [:complete %])
+       #(swap! effects conj [:failure %]))
+      (is (= [:failure] (mapv first @effects)))
+      (is (= "Error: import failed"
+             (::shadow-node/reload-error (second (first @effects)))))
+
+      (reset! effects [])
+      (set! shadow-node/closure-import (fn [_] true))
+      (shadow-node/handle-build-complete
+       nil message
+       #(swap! effects conj [:complete %])
+       #(swap! effects conj [:failure %]))
+      (is (= [[:complete message]] @effects))
+      (finally
+        (set! shadow-env/autoload original-autoload)
+        (set! shadow-node/closure-import original-import)))))
 
 (defn- with-program-builders
   [core schemas body]

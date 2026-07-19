@@ -22,7 +22,8 @@ stored projection that duplicates derivable database facts.
 
 ## Dependency ledger
 
-- ClojureScript `1.12.145` and shadow-cljs `3.4.10`; runtime compilation and
+- ClojureScript `1.12.145`, the shadow-cljs npm `3.4.10` CLI shim, and maintained
+  Shadow source commit `615430b3`; runtime compilation and
   namespace movement are owned by `reference-code/clojurescript/`,
   `reference-code/shadow-cljs/`, `src/seon/eval.cljs`, and
   `src/seon/agent/turn.cljs`.
@@ -83,7 +84,10 @@ source lines in this ledger or the owning successor PRD.
   process-local schema projection; prove the supported cold/reload path retains
   the schema.
 - [ ] Make schema and program publication atomic: ready with the complete
-  admitted program or recorded core fault plus process exit.
+  admitted program or recorded core fault plus process exit. Maintained Shadow
+  now reports caught Node import failures truthfully, and admission permits the
+  next build to recover from `:unavailable`; the watched failed-import/repair
+  run remains.
 - [ ] **IN PROGRESS:** apply the database-selected core-fault policy
   consistently at ticker, reload, publication, render, selected-call, and
   top-level child boundaries. The ticker now retains the already-acquired

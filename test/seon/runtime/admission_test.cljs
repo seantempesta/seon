@@ -56,6 +56,21 @@
              (get-in (admission/unavailable)
                      [:seon/error :seon.error/kind]))))))
 
+(deftest next-build-can-recover-an-unavailable-publication
+  (let [!recorded (atom [])]
+    (with-redefs [error/record! #(swap! !recorded conj %)]
+      (is (true? (admission/begin-publication!)))
+      (is (true?
+            (admission/mark-unavailable!
+              {:seon.error/raw (js/Error. "import failed")
+               ::admission/reason "JavaScript import failed"})))
+      (is (= :unavailable (::admission/status (admission/state))))
+      (is (true? (admission/begin-publication!))
+          "the next build owns a fresh recovery publication")
+      (is (= :publishing (::admission/status (admission/state))))
+      (is (= 1 (count @!recorded))
+          "recovery does not duplicate the rejected generation's fault"))))
+
 (deftest planned-quiesce-has-one-owner-and-preserves-generation
   (restore-test-admission!)
   (is (true? (admission/begin-quiesce!)))
