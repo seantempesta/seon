@@ -9,9 +9,9 @@ tags: [issue, pod, health, web]
 
 ## Problem
 
-The operator can report the pod as alive and ready after the Bun workload has
-exited and its configured web port refuses connections. During the reactive
-Datastar migration, a Malli input failure in
+The operator can report the pod as alive and ready while its configured web
+port refuses connections. During the reactive Datastar migration, a Malli
+input failure in
 `seon.web.datastar/observe-connection!` first exposed the problem. A later
 retry fixed that input, opened and closed one root feed, and then reproduced
 the same stale status without logging an application exception.
@@ -34,10 +34,14 @@ alive/ready, but `curl http://127.0.0.1:7890/agents/run` failed twice with
 connection refused.
 
 After that request-shape defect was fixed, the pod again published readiness,
-opened and closed one feed, and stopped accepting connections. Process-group
-inspection showed only containment owner PID `75309`; descriptor workload PID
-`75311` was absent. `result.json.adopted` still contained only
-`{"status":"adopted"}`, and `bin/seon status` classified the containment owner
-as the live pod. The Datastar migration owns the workload exit if it proves to
-be application-caused; this issue owns the stale operator classification and
-missing exit evidence either way.
+opened and closed one feed, and stopped accepting connections. An initial
+process check incorrectly inspected containment owner process group `75309`
+rather than descriptor anchor group `75310`; it therefore did not establish
+that workload PID `75311` had exited.
+
+The source-frozen checkpoint at `b6961bac` did not reproduce the loss. Bun
+workload PID `59340` remained alive and listening after feed open/close,
+`/_seon/ready` returned HTTP 200, and both Datastar and reactive registrations
+returned to zero. This issue therefore owns only the observed stale readiness
+classification when the listener was unavailable; no Bun workload-exit claim
+is retained without correct anchor-group or workload-identity evidence.
