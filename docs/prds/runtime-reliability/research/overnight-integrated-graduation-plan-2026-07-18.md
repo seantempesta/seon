@@ -620,7 +620,9 @@ interrupted day-old `bin/test-writer` left a 478 MiB JVM orphan. Tailwind's Bun
 process exited 137 under that pressure. Normal release shutdown plus TERM of
 the stale test JVM made the identical CSS build finish in 71 ms and the cluster
 reach ready. [[interrupted-writer-test-can-outlive-its-runner]]
-owns the missing test-runner cleanup.
+is now resolved: `bin/test-writer` forwards TERM/INT/HUP, waits ten seconds,
+forces only after that grace, reaps the JVM, and returns the signal-derived
+status. The real-shell focused operator proof passes 39 tests/104 assertions.
 
 Exit: the real browser journey and server-side gzip client agree on one reactive
 render/feed mechanism.

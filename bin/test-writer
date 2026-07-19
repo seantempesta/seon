@@ -52,5 +52,42 @@ RUNNER='(let [log-fn-var (requiring-resolve (quote taoensso.trove/*log-fn*))
               (shutdown-agents)
               (System/exit exit-code))))'
 
+writer_pid=""
+
+stop_writer_test() {
+  local signal="$1"
+  trap - TERM INT HUP
+  if [[ -n "$writer_pid" ]] && kill -0 "$writer_pid" 2>/dev/null; then
+    kill -"$signal" "$writer_pid" 2>/dev/null || true
+    remaining=100
+    while kill -0 "$writer_pid" 2>/dev/null && (( remaining > 0 )); do
+      sleep 0.1
+      remaining=$((remaining - 1))
+    done
+    if kill -0 "$writer_pid" 2>/dev/null; then
+      kill -KILL "$writer_pid" 2>/dev/null || true
+    fi
+    wait "$writer_pid" 2>/dev/null || true
+  fi
+  case "$signal" in
+    INT) exit 130 ;;
+    HUP) exit 129 ;;
+    *)   exit 143 ;;
+  esac
+}
+
+trap 'stop_writer_test TERM' TERM
+trap 'stop_writer_test INT' INT
+trap 'stop_writer_test HUP' HUP
+
 SEON_WRITER_TEST_NAMESPACES="$WRITER_TEST_LIST" \
-  clojure -M:writer:writer-test -e "$RUNNER"
+  clojure -M:writer:writer-test -e "$RUNNER" &
+writer_pid=$!
+
+set +e
+wait "$writer_pid"
+status=$?
+set -e
+writer_pid=""
+trap - TERM INT HUP
+exit "$status"

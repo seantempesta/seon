@@ -1,6 +1,6 @@
 ---
 type: issue
-status: active
+status: resolved
 tags: [issue, cljs, flow, health]
 ---
 
@@ -26,3 +26,15 @@ that can consume resources or report against later source. A focused operator
 test must interrupt the real shell/JVM shape and prove both processes exit.
 Uncatchable SIGKILL remains an external limitation, repaired by explicit stale
 process discovery rather than a second test runner.
+
+## Resolution
+
+`bin/test-writer` now launches its JVM as an explicitly owned child. TERM, INT,
+and HUP forward to that child, wait up to ten seconds for normal shutdown,
+force it only if that grace expires, reap it, and return the signal-derived
+shell status. Normal completion preserves the JVM's original exit status.
+
+The focused operator regression replaces only `bb` and `clojure` through PATH,
+runs the real `bin/test-writer`, observes its owned child, terminates the shell,
+and proves the child is absent before the shell returns exit 143. The complete
+`seon.dev.cli-test` namespace passes 39 tests and 104 assertions.

@@ -42,6 +42,61 @@
            :seon.dev.process.containment.trigger/requested
           :seon.dev.process.containment/anchor-exit -9})))
 
+(defn- executable-script! [path source]
+  (spit (str path) source)
+  (fs/set-posix-file-permissions path "rwxr-xr-x")
+  path)
+
+(defn- await-file! [path]
+  (loop [remaining 500]
+    (cond
+      (fs/exists? path) true
+      (pos? remaining) (do (Thread/sleep 10) (recur (dec remaining)))
+      :else false)))
+
+(defn- process-alive? [pid]
+  (let [handle (java.lang.ProcessHandle/of (long pid))]
+    (and (.isPresent handle) (.isAlive (.get handle)))))
+
+(deftest interrupted-writer-test-reaps-its-jvm-child
+  (let [root (fs/canonicalize (System/getProperty "user.dir"))
+        directory (fs/create-temp-dir {:prefix "seon-writer-interrupt-"})
+        child-pid-path (fs/path directory "child.pid")
+        fake-bb (fs/path directory "bb")
+        fake-clojure (fs/path directory "clojure")
+        path (str directory ":" (System/getenv "PATH"))]
+    (try
+      (executable-script! fake-bb "#!/usr/bin/env bash\nexit 0\n")
+      (executable-script!
+       fake-clojure
+       (str "#!/usr/bin/env bash\n"
+            "echo \"$$\" > \"$SEON_WRITER_TEST_CHILD_PID\"\n"
+            "trap 'exit 0' TERM INT HUP\n"
+            "while true; do sleep 1; done\n"))
+      (let [owner
+            (shell/process
+             {:dir (str root)
+              :env (assoc (into {} (System/getenv))
+                          "PATH" path
+                          "SEON_WRITER_TEST_CHILD_PID" (str child-pid-path))
+              :out :string
+              :err :string
+              :cmd [(str (fs/path root "bin/test-writer"))]})]
+        (is (await-file! child-pid-path) "the fake JVM child started")
+        (let [child-pid (parse-long (str/trim (slurp (str child-pid-path))))]
+          (is (process-alive? child-pid))
+          (.destroy ^Process (:proc owner))
+          (let [{:keys [exit]} @owner]
+            (is (= 143 exit) "TERM is reported by the writer-test owner"))
+          (loop [remaining 500]
+            (when (and (pos? remaining) (process-alive? child-pid))
+              (Thread/sleep 10)
+              (recur (dec remaining))))
+          (is (not (process-alive? child-pid))
+              "the owned JVM child exits before the shell returns")))
+      (finally
+        (fs/delete-tree directory {:force true})))))
+
 (deftest doctor-requires-bun-identity-without-node-or-npm
   (with-redefs-fn
     {#'cli/command-available? (constantly true)
