@@ -87,7 +87,30 @@ basis transactions. They retain no event history, database values, results,
 functions, or sockets. The reactive gate drives 100 newer transactions while
 one computation is blocked and proves active/pending high-water marks of one,
 99 obsolete pending replacements, and next computation only at the newest
-basis transaction. It passes 5 tests and 28 assertions.
+basis transaction. That blocked-burst characterization remains part of the
+focused gate.
+
+The gate now also exercises the real timer rather than only the `due-at`
+arithmetic. With a 1,000 ms moving settle edge and 20 ms maximum latency, a
+120 ms continuous event stream completes repeatedly before the producer stops,
+collapses obsolete database values, converges to the newest basis transaction,
+and releases its registration. The focused reactive gate passes 6 tests and 36
+assertions.
+
+A disposable live `reactive-latency` cluster then resolved its policy from
+database configuration seeded through environment overrides: 1,000 ms ordinary
+and structural settle, 500 ms maximum latency. With a real root SSE feed open,
+100 separately committed transactions ran for 7.3 seconds. Fourteen page
+evaluations advanced at approximately the configured 500 ms deadline while the
+producer remained active, 88 obsolete pending database values were replaced,
+active and pending high-water marks stayed at one, and the final completed basis
+transaction exactly equaled the newest committed `t`. After the feed closed,
+reactive registration, consumer, active, pending, and timer counts; Datastar
+view, subscription, active-render, and pending-render counts; and writer
+interest references and committed-report queue depth all returned to zero.
+This closes sustained-import, configured maximum-latency, newest convergence,
+and pressure cleanup. Current-source real-browser morph/reconnect evidence and
+the live failed-render repair remain graduation gates.
 
 The integrated Datastar/reactive gate now attaches two equivalent sockets to
 one normalized computation. An equal later event performs one demanded render

@@ -44,6 +44,98 @@
       (finally
         (reactive/configure! prior)))))
 
+(deftest maximum-latency-delivers-progress-during-a-continuous-stream
+  (async done
+    (let [original-db db/db
+          original-listen db/listen!
+          original-unlisten db/unlisten!
+          head (atom database)
+          listens (atom [])
+          delivered (atom [])
+          latest-t (atom (:t database))
+          completed-before-stop (atom nil)
+          compute (fn [value]
+                    (js/Promise.resolve
+                     {::db/value (:t value)
+                      ::db/read-evidence (evidence value)}))]
+      (set! db/db (fn ([] (js/Promise.resolve @head))
+                    ([_] (js/Promise.resolve @head))))
+      (set! db/listen!
+            (fn
+              ([request]
+               (swap! listens conj request)
+               (js/Promise.resolve (::db/key request)))
+              ([key handler]
+               (db/listen! {::db/key key ::db/handler handler}))
+              ([value key handler]
+               (db/listen! {::db/db value ::db/key key
+                            ::db/handler handler}))))
+      (set! db/unlisten! (fn [_] (js/Promise.resolve true)))
+      (reactive/configure!
+       {:seon.config/reactive-settle-ms 1000
+        :seon.config/reactive-structural-settle-ms 1000
+        :seon.config/reactive-max-latency-ms 20})
+      (reactive/reset-measurements!)
+      (-> (reactive/observe!
+           {::reactive/key :maximum-latency-stream
+            ::reactive/consumer-key :consumer
+            ::reactive/compute compute
+            ::reactive/notify #(swap! delivered conj %)})
+          (.then
+           (fn [_]
+             (js/Promise.
+              (fn [resolve _]
+                (let [next-t (atom (:t database))
+                      timer
+                      (js/setInterval
+                       (fn []
+                         (let [next-db (at-t (swap! next-t inc))]
+                           (reset! latest-t (:t next-db))
+                           (reset! head next-db)
+                           ((::db/handler (last @listens))
+                            {:db-after next-db})))
+                       4)]
+                  (js/setTimeout
+                   (fn []
+                     (js/clearInterval timer)
+                     (reset! completed-before-stop
+                             (::reactive/evaluations-completed
+                              (reactive/measurements)))
+                     (resolve nil))
+                   120))))))
+          (.then (fn [_]
+                   (js/Promise.
+                    (fn [resolve _] (js/setTimeout resolve 60)))))
+          (.then
+           (fn [_]
+             (let [measurements (reactive/measurements)]
+               (is (>= @completed-before-stop 3)
+                   "maximum latency makes repeated progress before writes stop")
+               (is (< (::reactive/evaluations-completed measurements)
+                      (dec (- @latest-t (:t database))))
+                   "continuous writes collapse obsolete database values")
+               (is (= 1 (::reactive/active-high-water measurements)))
+               (is (= 1 (::reactive/pending-high-water measurements)))
+               (is (pos? (::reactive/newest-pending-replacements measurements)))
+               (is (= @latest-t (::reactive/last-completed-t measurements)))
+               (is (= @latest-t (last @delivered))))
+             (reactive/unobserve!
+              {::reactive/key :maximum-latency-stream
+               ::reactive/consumer-key :consumer})))
+          (.then
+           (fn [_]
+             (is (= 0 (::reactive/registration-count
+                       (reactive/measurements))))))
+          (.catch (fn [exception] (is false (str exception))))
+          (.finally
+           (fn []
+             (set! db/db original-db)
+             (set! db/listen! original-listen)
+             (set! db/unlisten! original-unlisten)
+             (reset! @#'reactive/!runtime
+                     {::reactive/registrations {}})
+             (done)))))))
+
 (deftest registration-delivers-first-suppresses-equal-and-releases
   (async done
     (let [original-db db/db
