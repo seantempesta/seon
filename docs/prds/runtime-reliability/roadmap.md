@@ -201,6 +201,15 @@ ready. Datahike reverse pull from the eval returned the exact recovery fields
 used by the transcript. The repeated identical pre-success crash/root-notice
 live gate remains before resolving the owning issue.
 
+The repeated-crash breaker now also passes current source. Deterministic agent
+`five-facts-hear` crashed PID `85953`, opened exactly one recovery run, then
+crashed replacement PID `85961` on identical source before any successful turn.
+Both runs are closed crashed, both evals/turns are interrupted, two recovery
+anchors retain independent evidence, no third run or task child exists, and root
+received one database message naming recovery `qlme850pqh8g` and its diagnostic
+blob. Pod and writer remained ready. The recovery-evidence issue is resolved;
+the next product-level recovery gate is its Inspect AI scenario.
+
 As of 2026-07-18, one JVM writer has passed the complete autonomous sibling
 cluster lifecycle: fresh initialization, distinct database values and store
 IDs, concurrent agents and gzip feeds, isolated writes, pod-only restart,

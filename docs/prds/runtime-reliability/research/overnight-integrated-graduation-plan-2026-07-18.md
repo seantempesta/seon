@@ -614,6 +614,16 @@ Pod and writer stayed ready; normal cleanup reclaimed all three previously
 warm execution children. The remaining breaker gate is a current-source
 second identical pre-success crash and derived root message.
 
+That breaker now passes deterministically through the ordinary message wake.
+Agent `five-facts-hear` used one injected test LLM function returning exact
+source `(js/process.exit 17)`. Child PID `85953` crashed, exactly one recovery
+run opened, and replacement PID `85961` crashed on the same source before a
+successful turn. Both runs are closed crashed, both evals and turns are
+interrupted, two recovery anchors retain their independent diagnostic blobs,
+and no third run or task child exists. Root received one ordinary database
+message naming recovery `qlme850pqh8g` and blob `288730e8…`. Pod and writer
+remained ready. The owning recovery-evidence issue is resolved and archived.
+
 The first restart attempt also exposed unrelated host pressure rather than a
 CSS defect. A retained release cluster held roughly 3.8 GiB RSS and an
 interrupted day-old `bin/test-writer` left a 478 MiB JVM orphan. Tailwind's Bun
@@ -726,8 +736,9 @@ to repeat the already-proven five-minute idle-timeout reclamation.
 
 - **Ordered spine:** section 5's fixed live Inspect namespace,
   database-memory, planning, multi-agent, and failure-recovery scenarios. The
-  immediate falsifier is the current-source exact-artifact child exit after the
-  orchestration-wrapper evidence repair. The complete section 4 journey already
+  recovery boundary is now current-source live-green through the two-crash
+  breaker and root notice. The next ordered falsifier is the remaining fixed
+  live Inspect failure-recovery scenario. The complete section 4 journey already
   has database-derived live proof.
 - **Integrated proof:** three namespace-targeted agents exchange database-backed
   messages, reuse and repair one shared program, survive one child replacement

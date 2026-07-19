@@ -1,6 +1,6 @@
 ---
 type: issue
-status: active
+status: resolved
 tags: [issue, agent, cljs, health, pod]
 ---
 
@@ -58,7 +58,15 @@ ID, detail, and blob hash used by the transcript renderer. The pod and writer
 remained ready throughout, and normal child stop reclaimed every execution
 child afterward.
 
-The issue remains active only for a current-source live proof of the second
-identical pre-success crash producing no third run and one derived root notice;
-focused policy proof and an earlier immutable-package two-crash drive already
-cover that breaker.
+The current-source breaker proof then used the ordinary message wake and one
+deterministic LLM function returning `(js/process.exit 17)`. Agent
+`five-facts-hear` crashed child PID `85953`, opened exactly one recovery run,
+then crashed replacement PID `85961` on the identical source before completing
+a turn. Runs `fmpewjpqdxzr` and `ozhlqruhg2hd` are both closed `:crashed`; evals
+`wqkyuad8t2so` and `bbd2bkim0yqy` and their turns are `:interrupted`. Recovery
+anchors `f44y9sg0u11n` and `qlme850pqh8g` retain separate process evidence and
+diagnostic blobs. No third run or task child exists. Root received exactly one
+ordinary database message naming the stopped automatic recovery, the second
+recovery ID, and evidence blob `288730e8e0c6207e8bbfc20eaa5ca515112850e236dd8151ee525d112634f0e6`.
+The pod and writer stayed ready. All acceptance criteria are satisfied and the
+issue is closed.
