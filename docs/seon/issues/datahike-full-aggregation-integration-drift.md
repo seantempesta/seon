@@ -24,8 +24,8 @@ planner selectors pass: four tests and twelve assertions in total. The focused
 weighted-LRU and query-cache profiles pass 162 tests and 990 assertions, and
 the CLJS gate passes 138 tests and 951 assertions.
 
-The remaining named failures were reproduced and repaired at maintained
-revision `107bc8f6`. Purge index surgery omitted its attribute retractions from
+The remaining named failures were reproduced and repaired through maintained
+revision `d664dce7`. Purge index surgery omitted its attribute retractions from
 the committed transaction report, which let a cached query inherit a stale
 pre-purge value; the purge primitive now records effective retractions and its
 existing behavioral test asserts the report. Stratum selected only an
@@ -34,8 +34,20 @@ window dropped unchanged attributes; it now selects the latest predecessor
 whose valid start does not follow the new row. Java and raw HTTP JSON fixtures
 also release their live connections before database deletion. The combined
 named gate passes 14 tests and 196 assertions across both maintained index
-profiles. The unfiltered complete aggregation is the sole remaining acceptance
-step.
+profiles.
+
+The first unfiltered aggregation then ran 2,599 tests / 13,527 assertions and
+reduced the remaining result to 18 errors / 3 failures. Focused reproduction
+showed three independent fixture/serialization owners: API documentation and
+schema tests reused fixed stores without deterministic release; the HTTP
+writer decoded remote transaction-report database values with the local
+mapper; and `upsert-history` retained its connection across profile reuse.
+Revisions `d45ee18b`, `eedea005`, and `d664dce7` repair those owners. Their
+focused PSS/HHT proofs pass 8 tests / 74 assertions, 4 tests / 18 assertions,
+and 2 tests / 26 assertions respectively. The planner as-of selector also
+passes independently in both profiles (2 tests / 4 assertions), confirming its
+aggregate failure was shared-fixture interference. One final unfiltered rerun
+is the sole remaining acceptance step.
 
 ## Acceptance criteria
 
