@@ -63,7 +63,10 @@ nothing after first boot.
 | `DEEPSEEK_API_KEY` | — (never stored) | string | deepseek | shipped deepseek default key |
 | `ANTHROPIC_API_KEY` | — (never stored) | string | anthropic | the anthropic key |
 
-API keys are **read from `process.env` at call time and never transacted.**
+API keys are **read from `process.env` at call time and never transacted.** If
+a local `.env` or shell startup file contains a live key, keep that file
+owner-only (`chmod 600 <file>`); repository examples contain names and
+placeholders only.
 
 Three settings have no env var and are per-call / runtime-transact only (they
 also accept a config-row default): `:seon.ai/tools`, `:seon.ai/tool-choice`,
