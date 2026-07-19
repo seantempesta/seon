@@ -687,15 +687,24 @@
     turns ::turns
     messages ::messages
     previous-ns ::previous-ns
-    events ::events}]
+    events ::events
+    :as input}]
   (if events
     events
     (let [my-eid (:db/id entity)
+        turn-count (::turn-count input)
+        run-cause-eid (get-in entity [:seon.agent/run
+                                      :seon.agent.run/cause :db/id])
+        current-turn-idx (max 0 (dec turn-count))
         turn-ats (mapv :seon.agent.turn/at turns)
         msgs (->> messages
                   (keep #(message->event my-eid id %))
-                  (mapv #(assoc % ::turn-idx
-                                (turn-index-at turn-ats (::at %)))))
+                  (mapv (fn [event]
+                          (assoc event ::turn-idx
+                                 (if (= run-cause-eid
+                                        (get-in event [::entity :db/id]))
+                                   current-turn-idx
+                                   (turn-index-at turn-ats (::at event)))))))
         evs  (vec
                (for [{turn-idx ::turn-idx :as turn} turns
                      e (sort-by (juxt :seon.eval/at :db/id)

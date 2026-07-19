@@ -350,7 +350,9 @@
     ::protocol/selector
     '[:db/id :seon.agent/id :seon.agent/terminated-at
       :seon.render.canvas/content
-      {:seon.agent/run [:seon.agent.run/status :seon.agent.run/paused-at]}
+      {:seon.agent/run
+       [:seon.agent.run/id :seon.agent.run/status :seon.agent.run/paused-at
+        {:seon.agent.run/cause [:db/id :seon.agent.message/id]}]}
       {:seon.agent/ctx [*]}]
     ::protocol/entity-id nil
     :datahike.resource/max-work 5000000

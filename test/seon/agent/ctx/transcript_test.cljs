@@ -84,6 +84,39 @@
   (is (= 25 (transcript/turn-window-cutoff 74 50 25)))
   (is (= 50 (transcript/turn-window-cutoff 75 50 25))))
 
+(deftest current-run-cause-survives-transcript-window-rotation
+  (let [cause-eid 300
+        turns (mapv (fn [turn-idx]
+                      {:seon.agent.ctx.transcript/turn-idx turn-idx
+                       :seon.agent.turn/at (js/Date. (+ 1000 turn-idx))
+                       :seon.agent.turn/evals []})
+                    (range 25 50))
+        cause {:db/id cause-eid
+               :seon.agent.message/id "current-request"
+               :seon.agent.message/content "Do the current work"
+               :seon.agent.message/at (js/Date. 1)
+               :seon.agent.message/hops 0
+               :seon.agent.message/origin :human
+               :seon.agent.message/from {:db/id 2 :seon.user/id "user"}
+               :seon.agent.message/to [{:db/id 1 :seon.agent/id "agent"}]}
+        input {:seon.agent/id "agent"
+               :seon.agent/entity
+               {:db/id 1
+                :seon.agent/id "agent"
+                :seon.agent/run
+                {:seon.agent.run/id "current-run"
+                 :seon.agent.run/status :open
+                 :seon.agent.run/cause {:db/id cause-eid}}}
+               :seon.agent.ctx.transcript/turn-count 50
+               :seon.agent.ctx.transcript/turns turns
+               :seon.agent.ctx.transcript/messages [cause]}
+        events (@#'transcript/ordered-events input)
+        retained (transcript/clip-events-by-turn-window 50 50 25 events)]
+    (is (= ["current-request"]
+           (mapv :seon.agent.ctx.transcript/id retained)))
+    (is (= 49
+           (:seon.agent.ctx.transcript/turn-idx (first retained))))))
+
 (deftest recent-html-window-bounds-message-only-history
   (let [events [{:seon.agent.ctx.transcript/at (js/Date. 100)}
                 {:seon.agent.ctx.transcript/at (js/Date. 200)}

@@ -42,3 +42,14 @@ in stale eval history. The current repair makes the bounded message query admit
 the exact `:seon.agent.run/cause` independently of that timestamp cutoff. Focused
 transcript proof passes 7 tests/27 assertions; rebuilt live task-priority proof
 remains the acceptance gate.
+
+The rebuilt request proved the query repair alone was insufficient. The exact
+cause message was present in the bounded query result, then
+`ordered-events` associated its old timestamp with turn zero and the ordinary
+50/25 transcript rotation removed it. Prompt acquisition now pulls the current
+run's existing `:seon.agent.run/cause` ref. The event projection associates
+that exact message with the current turn before the shared clipping and settled
+budget passes, without retaining another message list or bypassing transcript
+bounds. Focused transcript and compiled-prompt gates pass 8 tests/29 assertions
+and 15 tests/77 assertions. Rebuilt live task-priority proof remains the final
+acceptance gate.
