@@ -57,6 +57,15 @@ flag:
   the run opener because a run can absorb later messages.
 - The existing projections: prompt size (tokens at display), `llm-usage` /
   `llm-meta`, the `:seon.eval` component refs, status, retries.
+- **Optional bounded turn measurements** — selected database configuration
+  chooses `:off`, `:aggregate`, or bounded diagnostic `:trace` capture, with a
+  launch-time environment override resolved into that configuration. Aggregate
+  capture attributes context construction, typed database operations,
+  Datahike cache/resource evidence, model calls, eval, and reactive publication
+  to the exact turn. `:off` performs no clock, counter, IPC expansion, or
+  measurement write. Detailed spans belong in one bounded diagnostic blob;
+  ordinary turn datoms retain only the compact aggregate. Missing evidence is
+  rendered as unmeasured, never as zero.
 - **Provider attempts as facts** — every retry attempt connects to the turn
   with its ordinal, resolved non-secret
   transport projection, adapter and outer timeout layers, outcome, and present
@@ -140,6 +149,12 @@ Three functions make a turn a first-class object of study:
   constructs that request value from the selected database plus the turn's
   rendered transaction. Exact cross-lineage branch work resolves a retained
   commit at the authority rather than guessing one from a transaction number.
+
+The agent debug page renders the same turn measurement projection as a compact
+waterfall and operation/cache totals. It does not sample process-global
+counters and assign them to whichever agent happens to be open. Datahike's
+cache outcome, work, result count, result weight, and dependency-plan names stay
+intact; Seon request duration is a separate boundary measurement.
 
 Search runs at two ends, one door each, and nothing in between:
 

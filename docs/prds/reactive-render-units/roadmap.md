@@ -85,8 +85,17 @@ newest resynchronization at exact basis transaction 536880915; writer pending
 order, UDS event phase, queued output, request connections, and installed
 interests all returned to zero. The stress gate passed 14 tests / 10,326
 assertions in 26.18 seconds; the ordinary non-stress gate remained 14 / 84.
-The earliest unsettled contract is therefore final current-artifact browser
-and complete relevant suite graduation, not transport capacity.
+The transport-capacity contract is settled. The exact current-artifact browser
+and complete relevant suite graduation also passed at Seon `15acdaf9`: the full
+CLJS gate reported 1,251 tests / 5,635 assertions, the canonical restart made
+watcher, writer, and pod ready, two independent/reconnecting root feeds emitted
+byte-identical 8,704-byte frames, and the real browser retained one app view and
+feed opener with no console or page error. The maintained Datahike aggregate at
+`6611de27` passes 2,602 tests / 13,678 assertions across its three JVM profiles
+plus 138 / 951 in Node CLJS; the current Seon writer gate passes 231 / 1,891.
+The earliest unsettled contract is now the final requirement-by-requirement
+graduation audit and closure of stale issue evidence, not a missing runtime
+behavioral gate.
 
 `seon.reactive` now implements the general registered-read lifecycle. Each
 registration owns one Datahike writer interest, one active computation, and at
@@ -161,6 +170,18 @@ one computation is blocked and proves active/pending high-water marks of one,
 99 obsolete pending replacements, and next computation only at the newest
 basis transaction. That blocked-burst characterization remains part of the
 focused gate.
+
+Those process-local reactive diagnostics are deliberately not attributed to an
+agent turn. A representative current-artifact agent run showed why attribution
+must instead follow the existing execution-child read-evidence and durable turn
+boundary: it timed out after 211,126 ms with 37 turns, 36 evals, roughly 28k
+context tokens per turn, and 27 repeated `my.plan/active!` evals. Explicit eval
+source undercounts composed database work. The source-grounded follow-on
+contract and falsifier are recorded in
+[[research/agent-read-cost-live-measurement-2026-07-19]] and
+[[../../seon/issues/agent-turns-lack-database-read-cost-attribution]]. This is
+an observability/optimization unit; it does not weaken the already-proven
+reactive invalidation or transport graduation.
 
 The gate now also exercises the real timer rather than only the `due-at`
 arithmetic. With a 1,000 ms moving settle edge and 20 ms maximum latency, a
