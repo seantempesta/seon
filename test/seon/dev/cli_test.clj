@@ -249,6 +249,8 @@
        #'process/stop!
        (fn [& _]
          (throw (ex-info "ordinary reconcile bypassed the coordinator" {})))
+       #'cli/live-managed-process?
+       (fn [_ id] (= process/writer-id id))
        #'artifact/build! (fn [_ _] manifest)
        #'process/admit-watcher-artifact! (fn [& _] nil)
        #'process/specs (fn [& _] {})
@@ -266,6 +268,38 @@
               #{process/pod-id process/watcher-id}]
             [:seon.dev.process.operation/rebuild-writer
               #{process/writer-id}]]
+           (mapv (juxt :seon.dev.process/operation
+                       :seon.dev.process/targets)
+                 @requests)))))
+
+(deftest reconcile-never-stops-an-external-writer-after-artifact-publication
+  (let [configuration {:seon.dev.config/cluster-dir "/cluster"}
+        requests (atom [])
+        manifest {:seon.dev.artifact/client-digest (apply str (repeat 64 "a"))
+                  :seon.dev.artifact/application-digest
+                  (apply str (repeat 64 "b"))
+                  :seon.dev.artifact/changed #{:seon.dev.artifact/writer}}]
+    (with-redefs-fn
+      {#'cli/assert-current-database-layout! identity
+       #'cli/recover-dead-processes! (constantly nil)
+       #'cli/live-managed-process? (constantly false)
+       #'process/with-startup-ownership
+       (fn [_ transition]
+         (transition (fn [_ acquire!] (acquire!))))
+       #'process/clean-or-force!
+       (fn [{:seon.dev.process/keys [operation targets] :as request}]
+         (swap! requests conj request)
+         (stop-result operation targets))
+       #'artifact/build! (fn [_ _] manifest)
+       #'process/admit-watcher-artifact! (fn [& _] nil)
+       #'process/specs (fn [& _] {})
+       #'process/start-order (fn [_] [])
+       #'process/status
+       (fn [& _]
+         {:seon.dev.target/status :seon.dev.target.status/ready})}
+      (fn [] (#'cli/reconcile-development! configuration)))
+    (is (= [[:seon.dev.process.operation/rebuild-readers
+             #{process/pod-id process/watcher-id}]]
            (mapv (juxt :seon.dev.process/operation
                        :seon.dev.process/targets)
                  @requests)))))

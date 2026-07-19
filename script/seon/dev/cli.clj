@@ -172,6 +172,7 @@
               writer-stop
               (when (and
                      (contains? changed :seon.dev.artifact/writer)
+                     (live-managed-process? configuration process/writer-id)
                      (not (contains? stopped-after-readers process/writer-id)))
                 (stop-processes!
                  configuration
