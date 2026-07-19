@@ -298,6 +298,9 @@
 [submodule "reference-code/persistent-sorted-set"]
 	path = reference-code/persistent-sorted-set
 	url = https://github.com/replikativ/persistent-sorted-set.git
+[submodule "reference-code/datalog-parser"]
+	path = reference-code/datalog-parser
+	url = https://github.com/replikativ/datalog-parser.git
 [submodule "reference-code/babashka"]
 	path = reference-code/babashka
 	url = https://github.com/babashka/babashka.git

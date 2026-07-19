@@ -458,29 +458,32 @@ implements the `view = f(db)` model through `seon.web.datastar`.
   backpressured connection retains only its newest derived event and resumes
   after Bun's `flush(true)` drain boundary; stale UI states never form an
   unbounded write queue.
-- **Selective interest, complete rendering.** Each renderer declares the
-  attributes that can affect its complete projection. The one database interest
-  is the union across live subscriptions; native transaction `:tx-data`
-  supplies conservative changed-attribute evidence and `:db-after` supplies the
-  exact immutable value to render. Intersecting attributes enqueue the semantic
-  subscription once, while unrelated commits merely advance its accepted
-  database value. Missing evidence fails open. Identical serialized output is
-  suppressed. Coalescing has a bounded maximum wait, so continuous structural
-  writes cannot starve a view.
+- **Datahike reactive reads, complete rendering.** Datahike derives a
+  source-scoped dependency plan from each parsed eager read and its actual
+  inputs. A page projection unions the plans from reads that actually execute.
+  Committed transaction reports select registered reactive computations through
+  Datahike's reverse attribute interest index; matching commits mark a
+  registration dirty and advance its one pending target to the newest database
+  value without updating cached rows. Evaluation occurs lazily after settling
+  or at the configured maximum latency, so continuous writes cannot starve a
+  consumer. Missing evidence is `:all`.
 - **Declared renderer reads are database facts.** The analyzer tee persists
   qualified keyword reads as `:seon.fn/read-attrs`; focus/recency and an optional
   cold-start hint consume those facts. They never regex-scan function source as
   a compatibility path. The declared set is non-transitive through helper
-  calls, so it can never exclude a runtime-observed dependency or veto exact
-  replay. The declared set narrows wakeups but never changes result semantics.
-- **Caching is automatic at the subscription boundary.** Core and agent-authored
-  renderers do not call `memoize`. One semantic subscription retains the
-  database value that proved its last complete serialized event and shares that
-  event across equivalent sockets and reconnects. Unaffected commits advance
-  the proof value without recomputation; affected commits replace the complete
-  event only after the latest render finishes. A source or projection-input
-  change selects a different semantic subscription. Eviction affects
-  performance only.
+  calls, so it can never exclude a Datahike read dependency or veto committed-
+  report selection. The declared set is discovery metadata, not invalidation
+  authority.
+- **Caching and equality are automatic at the reactive-read boundary.** Core
+  and agent-authored renderers do not call `memoize`. Datahike's bounded
+  weighted cache retains immutable eager results at exact database source
+  identities and computes a later result only on demand. A reactive
+  registration compares its completed Clojure value with its last delivered
+  value using `=`; equal values suppress established-consumer notification,
+  while a new consumer always receives its first current value. Hashes may
+  accelerate comparison but never decide equality. A page subscription then
+  retains the last complete serialized event for equivalent sockets. Eviction
+  affects performance only.
 - **One generic transition engine.** Root, ordinary-agent, canvas, context,
   debug, and `/data` layouts use the same
   acquire/select/enqueue/render/serialize transition. Page namespaces define
