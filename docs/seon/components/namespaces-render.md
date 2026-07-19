@@ -7,8 +7,9 @@ tags: [component, agent, flow]
 # Namespaces context render (CLJS pod)
 
 > The `:namespaces` context section — THE BODY of an agent's prompt. Renders the
-> agent's CURRENT ns FULL, its `:require`s as COMPACT CARDS, and DROPS everything
-> else. Config-driven and third-party override-proven. SHIPPED 2026-07-02.
+> agent's CURRENT ns FULL, real requirements and explicit compact selections as
+> COMPACT CARDS, explicit full selections in full, and DROPS everything else.
+> Config-driven and third-party override-proven. SHIPPED 2026-07-02.
 
 This is the active namespace-context feature. The former JVM context and
 namespace-lifecycle mechanisms are archived; they are not alternate paths.
@@ -23,7 +24,7 @@ Wired into the composer as the `:namespaces` block (priority 20,
 `:seon.render/ai seon.agent.ctx.namespaces/namespaces-block`), seed-copied into
 each agent's `:seon.agent/ctx`.
 
-## The three rules
+## The selection rules
 
 `namespaces-block` renders each INCLUDED ns at one of two detail levels; every
 other indexed ns is dropped:
@@ -31,26 +32,29 @@ other indexed ns is dropped:
 - **FULL** — the agent's CURRENT ns plus any ns in the per-agent `::full-source`
   presence-set. Real full file source, unclipped. `full? ⇔ (nm = current-ns ∧
   ::current-full?) ∨ (nm ∈ ::full-source)` — ONE rule, no second full control.
-- **COMPACT CARD** — every ns the CURRENT ns `:require`s (`required-ns-set`), via
-  `render-one-ns-compact`: reader-commented schema records + every public fn as
-  one inert `fn full.ns/name [args] — "doc." — :malli/schema …` signature.
-  There are no pseudo-definitions or fake body tokens for an agent to echo as
-  code, and runtime predicate objects become readable placeholders. ~3–5×
-  smaller than full.
+- **COMPACT CARD** — every namespace the current namespace really requires plus
+  every symbol explicitly present in `::compact`, unless full selection wins.
+  `render-one-ns-compact` emits reader-commented schema records plus every
+  public function as one inert `fn full.ns/name [args] — "doc." —
+  :malli/schema …` signature. There are no pseudo-definitions or fake body
+  tokens for an agent to echo as code, and runtime predicate objects become
+  readable placeholders. Cards are about 3–5× smaller than full source.
 - **DROPPED** — everything else. Still indexed (`:seon.ns/name` + `:seon.fn` /
-  `:seon.schema` rows), grep-able, and full on demand via
-  `seon.agent.ctx/render-namespace` — just not resident in the section.
+  `:seon.schema` rows), queryable through `my.ns/functions`, and selectable
+  through `my.ns/full!` or `my.ns/compact!`—just not resident in the section.
 
-`*.internal` / `*-test` nses are excluded outright (`included-ns?`); empty cards
-are dropped.
+`*-test` namespaces are always excluded. `.internal` namespaces stay hidden
+from compact selection but may be revealed by an exact full pin; selecting a
+parent never broadens to its internal descendants.
 
-## Inclusion = `:require`, driven by config
+## Inclusion is database data
 
-The include set is `current ns ∪ its :requires ∪ ::full-source pins`. There is
-**no `:always` allow-list, no `compact-worthy?` predicate, and no hardcoded
-`my.*` pinning** in the render (all retired). Write a real `(:require [x …])` on
-the current ns and `x` joins as a card; drop the require and it vanishes —
-self-healing on the `:seon.ns/require-edges` rows.
+The include set is `current ns ∪ its :requires ∪ ::compact ∪ ::full-source`.
+Full selection wins if a symbol appears in both presence-sets. There is no
+`:always` render allow-list, `compact-worthy?` predicate, namespace-to-density
+map, or hardcoded `my.*` pinning. Write a real `(:require [x …])` and `x` joins
+as a card; drop the require and it vanishes unless explicitly selected. This is
+self-healing on real `:seon.ns/require-edges` without fake dependencies.
 
 The DEFAULT function surface is therefore a CONFIG concern:
 `:seon.eval/home-requires` in the manifest (`config/system.edn`
@@ -62,16 +66,19 @@ agent's home ns requires, so it IS what renders as cards. Root additionally gets
 
 ## Per-agent dials (config-driven-agent-init)
 
-Four attrs on the `:namespaces` BLOCK entity, read reactively via `resolve-cfg`
+Five attrs on the `:namespaces` BLOCK entity, read reactively via `resolve-cfg`
 (block → Malli default; a `db/transact!` re-derives next render):
 
+- `::compact` (`[:vector :seon.ns/name]`, default `[]`) — keep a namespace's
+  public schema/function card visible without bodies.
 - `::full-source` (`[:vector :seon.ns/name]`, default `[]`) — force a ns FULL.
 - `::with-tests` (same) — append the ns's indexed `:seon.test/source`.
 - `::current-full?` (`:boolean`, default true) — whether the current ns renders full.
 - `::current-tests?` (`:boolean`, default true) — whether it shows its tests.
 
-Presence = config; compact = absence. No `:compact` token exists, so the
-`#{:full :compact}` conflict is unrepresentable. Cluster
+Presence = config. Ordinary operations keep `::compact` and `::full-source`
+disjoint; direct conflicting data remains deterministic because full wins.
+Cluster
 `:seon.config/namespaces` has one distinct storage option,
 `:seon.config/always`: it makes complete framework source available for later
 selection but never decides what renders.

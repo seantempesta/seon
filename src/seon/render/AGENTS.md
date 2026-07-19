@@ -23,8 +23,11 @@ Skills: `ui-canvas` (the agent-facing canvas how-to), `datastar-web-ui`.
   stay in sync — agents guess from the docstring.
 - **Render-prominence law**: a COMPOSITION function's value is its worked
   example — compact/signature renders are for simple-call functions only.
-  Compact namespace cards select by presence-sets (`::full-source` /
-  `::with-tests`), never a map-of/density enum.
+  Namespace detail uses flat presence-sets (`::compact`, `::full-source`, and
+  `::with-tests`), never a map-of/density enum. Selection is current namespace
+  plus real requirements plus explicit compact/full values; full wins when a
+  value appears in both sets. Tests remain excluded and `.internal` requires
+  an exact full pin.
 - Sizes rendered anywhere are TOKENS (`seon.ai.tokens/estimate`).
 
 `sci.cljs` runs agent-authored render fns inside the cage — agent renders

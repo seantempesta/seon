@@ -172,9 +172,13 @@ the cluster; no inventory projection or stored entity kind is required.
 
 ### `my.ns`
 
-`my.ns` derives compact namespace and function cards from committed program
-facts. It helps an agent choose code to inspect without copying the program
-graph into a second registry or permanently rendering every namespace.
+`my.ns` derives compact function cards from committed program facts and updates
+the one namespaces context block's explicit detail selections. `functions`
+inspects one namespace without changing context; `full!` selects its complete
+indexed source and `compact!` keeps its public schema/function card visible
+without bodies. Both selection operations preserve every other block dial and
+return errors for unknown or stale program rows. No operation copies the
+program graph into a second registry or renderer.
 
 ### `my.canvas` and `my.ui`
 

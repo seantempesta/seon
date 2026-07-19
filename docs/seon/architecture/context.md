@@ -451,10 +451,12 @@ learned order improves real reuse. The bands are:
 
 1. **minimal fixed blocks** — the concise role, canvas, plan, and other
    deliberately installed anchors whose queries currently produce a value.
-2. **the agent's code namespaces** — current `ns` full source plus its
-   home-required namespaces as compact cards and the schemas those fns reference, sorted by
-   last-modified so rarely-touched code sits earliest and edit churn sinks to
-   this group's end.
+2. **the agent's code namespaces** — current `ns` full source, real requirements
+   and explicitly selected namespaces as compact cards, and explicit full
+   selections. Cards carry the schemas their functions reference. The group is
+   sorted by last-modified so rarely touched code sits earliest and edit churn
+   sinks to its end. Generated development reconciles exact compact/full
+   selections on this same block; it does not add another code surface.
 3. **the current `ns`'s render fns** — the twins above; they *follow* the
    stable code they belong to. Their output moves with the db, so this is
    where the cache prefix ends.
@@ -520,8 +522,8 @@ same derived views.
 
 ## Configuration
 
-Every effective dial is database data (`:seon.config/*`): which namespaces render full,
-the presence-set pins, the transcript band schedule + decay, render caps, the
+Every effective dial is database data (`:seon.config/*`): the namespace compact
+and full presence-set pins, the transcript band schedule + decay, render caps, the
 predicted-relevance token cap, per-agent overrides in agent scope. A manifest is
 an optional desired-state input explicitly selected for one startup/apply
 operation; no selection preserves DB facts and never falls back to
