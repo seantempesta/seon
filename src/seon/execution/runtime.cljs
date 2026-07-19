@@ -573,18 +573,21 @@
                                        starting-ns agent-id))]
     (error/with-configuration
       configuration
-      #(db/with-tx-context
-         {::db/db nil
-          :seon.config/configuration configuration}
-         (fn ^:async run-with-current-database! []
-           (await
-            (apply eval/eval-batch!
-                   [compile-state parsed starting-ns agent-id turn-id run-id
-                    {::eval/authored-sources
-                     (eval/authored-sources
-                      (::execution/namespace-rows program))
-                     :seon.config/configuration configuration
-                     ::db/db database}])))))))
+      #(db/with-agent
+         agent-id
+         (fn []
+           (db/with-tx-context
+            {::db/db nil
+             :seon.config/configuration configuration}
+            (fn ^:async run-with-current-database! []
+              (await
+               (apply eval/eval-batch!
+                      [compile-state parsed starting-ns agent-id turn-id run-id
+                       {::eval/authored-sources
+                        (eval/authored-sources
+                         (::execution/namespace-rows program))
+                        :seon.config/configuration configuration
+                        ::db/db database}])))))))))
 
 (def compiled-functions
   "Trusted functions directly reachable through this exact execution artifact."

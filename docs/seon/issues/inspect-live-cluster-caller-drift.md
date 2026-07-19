@@ -245,3 +245,13 @@ scenario separator to a hyphen before minting the branch name. The combined
 cluster/product proof passes 51 tests. A corrected retry then reached the next
 truthful prerequisite: the source watcher and writer were absent, so no branch
 was opened and no product result is claimed.
+
+The next exact run opened a real branch and later exposed a release race. The
+first canonical `branch close` retained desired state `closed`, reaped the pod,
+then received a failed writer lifecycle response. That exception masked the
+earlier product failure in Inspect. A second identical `branch close` converged
+and deleted the retained branch. The operator therefore has the right durable
+intent and idempotent continuation shape, but one invocation does not yet own
+the complete convergence guarantee. Preserve the writer's full failed response
+on the next reproduction, then fix the release/delete owner rather than adding
+an Inspect-only retry loop.

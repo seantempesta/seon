@@ -50,6 +50,24 @@ namespace per branch, the unique active `:seon.agent/namespace` ref, two
 `:seon.agent.message/from` root messages, and the earliest `:seon.eval/ns` by
 transaction. It no longer depends on a fixed `my.taxes` database fixture.
 
+The first exact function-repair row reached the real product and found an
+earlier runtime fault. A delegated agent passed the unresolved Promise from
+`seon.db/db` as the explicit database argument to `seon.db/pull`. Malli's input
+error was agent-authored, but the compiled execution adapter had relied on the
+outer invocation's AsyncLocalStorage scope surviving every program-preparation
+hop. The propagated input error was recorded as `:core`, so development crash
+policy retired the child; root then consumed 40+ turns retrying until the
+request bound. The adapter now re-establishes its already-captured agent ID at
+the immediate self-host evaluation boundary. Focused runtime and a repeated
+live row must prove the Malli error remains an ordinary failed eval and never
+retires the child before this issue can close.
+
+The same run exposed cleanup convergence evidence: its first `branch close`
+was rejected after retaining closed intent, the cleanup exception masked the
+product error, and the second identical operator close completed. Release must
+be idempotent and preserve the original failure when cleanup also fails; this
+remains part of the live-cluster issue rather than a scorer workaround.
+
 ## Acceptance
 
 - The live repair scorer consumes real history datoms and their transaction

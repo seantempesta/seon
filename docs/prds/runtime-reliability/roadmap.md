@@ -258,6 +258,19 @@ restart/database read-back follows on the same lease boundary, and complete
 Inspect, browser, downstream, package, multi-cluster, performance, and resource
 proof remain the final graduation portfolio.
 
+The first exact live repair row opened the isolated branch and found two
+earlier runtime contracts. A delegated agent passed the unresolved Promise from
+`seon.db/db` to `seon.db/pull`; Malli correctly rejected the input, but the
+propagated error lost its invocation population and development crash policy
+retired the child as a core fault. The execution adapter now re-establishes its
+already-captured agent ID immediately around self-host evaluation, with 14
+focused tests/76 assertions passing. Root also kept retrying for more than 40
+turns until the request bound, and the first branch close retained closed intent
+but returned a failed writer lifecycle response; the identical second close
+converged. Exact live replay, bounded root termination, and one-call branch
+release are now the ordered proof gate before the repair scorer itself can
+graduate.
+
 The development-tool reconnect defect is source-grounded in the maintained
 Shadow runtime rather than Seon's database advertisement. Shadow commit
 `615430b3` permanently stopped reconnecting after more than three websocket

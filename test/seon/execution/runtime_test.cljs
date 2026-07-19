@@ -480,6 +480,8 @@
             (fn [& arguments]
               (reset! observed
                       {:seon.execution.runtime-test/arguments arguments
+                       :seon.execution.runtime-test/agent-id
+                       (db/current-agent-id)
                        :seon.execution.runtime-test/context
                        (db/current-tx-context)})
               (js/Promise.resolve {:seon.eval/n-ok 1
@@ -504,6 +506,9 @@
                      'my.agent.agent-1 "agent-1"]
                     @setup)
                  "the child installs the promised home requires before eval")
+             (is (= "agent-1"
+                    (:seon.execution.runtime-test/agent-id @observed))
+                 "self-hosted evaluation re-establishes the invocation agent scope")
              (is (= [compile-state
                      (:seon.eval/parsed request)
                      'my.agent.agent-1
