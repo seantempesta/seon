@@ -145,7 +145,7 @@ tests and 1,849 assertions. The writer aggregation exposed two stale fixtures
 that still redefined `datahike.api/pull`; both now exercise the maintained
 `pull-with-evidence` result and dependency-plan shape.
 
-Maintained Datahike revision `2241df17` passes the focused weighted-LRU and
+Maintained Datahike revision `3af6e46e` passes the focused weighted-LRU and
 query-cache suites in all persistent-set, spec-instrumented, and
 hitchhiker-tree profiles: 162 tests and 990 assertions. This directly covers
 count/weight eviction, overlarge-result rejection, exact immutable database
@@ -165,7 +165,7 @@ demanded child snapshot. An affected transaction misses and recomputes while a
 held parent database value remains immutable and exact.
 
 Datahike `main` now exposes an execution-aware, source-scoped query dependency
-plan at maintained revision `2241df17`. It folds the typed parsed query and
+plan at maintained revision `3af6e46e`. It folds the typed parsed query and
 PullSpec representations, resolves scalar `:in` bindings and supplied rules,
 canonicalizes reverse pull attributes, and widens unknown behavior to `:all`.
 The query cache stores and reuses that same plan; propagation selects only the
