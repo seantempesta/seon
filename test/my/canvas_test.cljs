@@ -90,6 +90,9 @@
              (is (= {:my.demo/count 3} value))
              (is (= database (:seon.db/db @request)))
              (is (= [:seon.agent/id "agent-1"] (:seon.db/ref @request)))
-             (done)))
-          (.catch (fn [exception] (is false (str exception)) (done)))
-          (.finally (fn [] (set! db/pull original)))))))
+             true))
+          (.catch (fn [exception] (is false (str exception))))
+          (.finally
+           (fn []
+             (set! db/pull original)
+             (done)))))))
