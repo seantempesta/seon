@@ -129,9 +129,9 @@ fixtures are deleted, with 114 combined focused tests passing. One live
 namespace-discovery row passes in 41 seconds. Root orchestration then exposed
 that `/agents/run` did not process-host an explicit inherited agent on a
 non-autonomous branch; a direct `agent.runtime/resume!` immediately woke the
-queued message. The one task boundary now resumes explicit durable agents
-before message intake and before its timeout clock, with 22 web tests/87
-assertions passing. A fresh root row is the next falsifier. The real browser/Datastar
+queued message. The one task boundary now persists the message before ensuring
+the explicit durable agent's runtime host, with 24 web tests/93 assertions
+passing. A fresh root row is the next falsifier. The real browser/Datastar
 journey is the dependency-ready parallel portfolio; the
 complete live Inspect, browser, package, downstream,
 multi-cluster, and modest-hardware matrix remains the final gate.
@@ -284,6 +284,15 @@ follows on the same lease boundary, and complete Inspect, browser, downstream,
 package, multi-cluster, performance, and resource proof remain the final
 graduation portfolio.
 
+Retaining the exact evaluated forms then made the unchanged trajectory
+falsifiable. Root never called `agent/delegate!`; it spent both phases querying
+three agents belonging to its previous plan. `/agents/run` resumed inherited
+root before it committed the requested message, allowing a run to open from the
+branch's durable prior state. The task door now commits input first and then
+idempotently ensures the runtime host. A failed host attempt leaves the task
+durable rather than silently discarding it. Commit `6f005b1c` passes 24 web
+tests/93 assertions; the exact rebuilt live row is the next proof.
+
 The first exact live repair row opened the isolated branch and found two
 earlier runtime contracts. A delegated agent passed the unresolved Promise from
 `seon.db/db` to `seon.db/pull`; Malli correctly rejected the input, but the
@@ -298,7 +307,7 @@ release are now the ordered proof gate before the repair scorer itself can
 graduate.
 
 The corresponding complete offline Inspect checkpoint passes 531 tests with
-eight intentional environment-gated skips in 21.25 seconds. Product and
+eight intentional environment-gated skips in 25.25 seconds. Product and
 cleanup failures now remain independently visible, and operator stderr retains
 the writer response required to diagnose the next release reproduction. The
 exact execution artifact cannot yet be rebuilt because the separately owned
