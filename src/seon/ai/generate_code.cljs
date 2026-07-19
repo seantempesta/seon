@@ -206,25 +206,106 @@
       (true? (get-in root-state [:my.plan/progress :my.plan/done?]))
       (true? (:my.plan/blocked? root-state))))
 
-(defn- root-notify
-  [coordinator-id model-variant root-state]
+(defn- compact-failure
+  [failure]
+  (when failure
+    (let [handles
+          (select-keys
+           (:seon.error/data failure)
+           [:my.plan/id :seon.agent/id :seon.agent.message/id
+            :seon.agent.run/id :seon.agent.turn/id :seon.eval/ids])]
+      (cond-> {:seon.error/message
+               (or (:seon.error/message failure) (pr-str failure))}
+        (:seon.error/kind failure)
+        (assoc :seon.error/kind (:seon.error/kind failure))
+        (seq handles) (assoc :seon.error/data handles)))))
+
+(defn- terminal-result-content
+  [root-id terminal-status root-state failure]
+  (pr-str
+   (cond->
+    {:my.plan/id root-id
+     :my.plan/status terminal-status
+     :my.plan/progress
+     (or (:my.plan/progress root-state)
+         {:my.plan/done 0 :my.plan/total 0})
+     :my.plan/steps
+     (mapv #(select-keys % [:my.plan/id :seon.ns/name :my.plan/status])
+           (:my.plan.internal/namespace-steps root-state))}
+     failure
+     (assoc :my.plan/error (:seon.error/message failure)
+            :seon.error/data (compact-failure failure)))))
+
+(defn ^:async ^:private finish-root!
+  [{root-id :my.plan/id
+    root-state ::root-state
+    terminal-status :my.plan/status
+    failure :seon.error/data}]
+  (let [database (await (db/db))]
+    (if (:seon.error/message database)
+      database
+      (await
+       (plan/commit-generated-terminal!
+        {::db/db database
+         :my.plan/id root-id
+         :my.plan/status terminal-status
+         :seon.agent.message/content
+         (terminal-result-content root-id terminal-status
+                                  root-state failure)})))))
+
+(defn ^:async ^:private finish-and-release!
+  [root-id terminal-status root-state failure]
+  (let [result
+        (await
+         (finish-root!
+          (cond-> {:my.plan/id root-id
+                   ::root-state root-state
+                   :my.plan/status terminal-status}
+            failure (assoc :seon.error/data failure))))]
+    (if (or (:seon.error/message result)
+            (false? (:my.plan/ok? result)))
+      result
+      (do
+        (await (unobserve-root! {:my.plan/id root-id}))
+        result))))
+
+(defn ^:async ^:private root-notify
+  [root-id coordinator-id model-variant root-state]
   (cond
     (:seon.error/message root-state)
-    (js/Promise.resolve root-state)
+    (await (finish-and-release! root-id :blocked root-state root-state))
 
     (terminal-root? root-state)
-    (-> (js/Promise.resolve nil)
-        (.then
-         (fn [_]
-           (unobserve-root! {:my.plan/id (:my.plan/id root-state)}))))
+    (await
+     (finish-and-release!
+      root-id
+      (if (or (= :blocked (:my.plan/status root-state))
+              (:my.plan/blocked? root-state))
+        :blocked
+        :done)
+      root-state nil))
 
     :else
-    (dispatch-root-state!
-     (cond->
-      {:seon.agent/id coordinator-id
-       ::root-state root-state}
-       model-variant
-       (assoc :seon.config/model-variant model-variant)))))
+    (try
+      (let [dispatched
+            (await
+             (dispatch-root-state!
+              (cond->
+               {:seon.agent/id coordinator-id
+                ::root-state root-state}
+                model-variant
+                (assoc :seon.config/model-variant model-variant))))
+            failure (some :seon.error/message dispatched)
+            failure-row (some #(when (:seon.error/message %) %) dispatched)]
+        (if failure
+          (await
+           (finish-and-release! root-id :blocked root-state failure-row))
+          dispatched))
+      (catch :default error
+        (await
+         (finish-and-release!
+          root-id :blocked root-state
+          {:seon.error/message (or (ex-message error) (str error))}))))))
 
 (defn ^:async ^:no-doc start-root-scheduler!
   "Install one root-scoped generated-code scheduler observer."
@@ -237,32 +318,20 @@
    (observe-root!
     {::db/db database
      :my.plan/id root-id
-     ::notify #(root-notify coordinator-id model-variant %)})))
+     ::notify #(root-notify root-id coordinator-id model-variant %)})))
 
 (defn ^:async ^:no-doc restore-root-schedulers!
   "Replace process-local observers for every durable generated-code root."
   {:malli/schema [:=> [:cat ::restore-schedulers-request]
                   ::restore-schedulers-response]}
   [{database ::db/db model-variant :seon.config/model-variant}]
-  (let [candidates
-        (await
-         (db/query
-          {::db/db database
-           ::db/query
-           '[:find ?root-id ?coordinator-id
-             :where
-             [?step :my.plan/namespace _]
-             [?step :my.plan/parent ?root]
-             [?root :my.plan/id ?root-id]
-             [?root :my.plan/agent ?coordinator]
-             [?coordinator :seon.agent/id ?coordinator-id]]
-           ::db/max-results 10000
-           ::db/max-result-weight 1048576}))]
+  (let [candidates (await (plan/generated-root-candidates {::db/db database}))]
     (if (:seon.error/message candidates)
       candidates
-      (loop [remaining (sort-by first candidates)
+      (loop [remaining candidates
              restored []]
-        (if-let [[root-id coordinator-id] (first remaining)]
+        (if-let [{root-id :my.plan/id
+                  coordinator-id :seon.agent/id} (first remaining)]
           (let [root-state
                 (await
                  (plan/generated-root-state

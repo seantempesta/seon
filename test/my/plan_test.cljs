@@ -6,6 +6,7 @@
     [malli.core :as m]
     [my.plan :as plan]
     [my.plan.internal :as internal]
+    [seon.agent.message :as message]
     [seon.db :as db]
     [seon.db.id :as db.id]
     [seon.db.protocol :as protocol]
@@ -316,6 +317,184 @@
           (.then (fn [_] (done)))
           (.catch (fn [error] (is false (str error)) (done)))))))
 
+(deftest generated-root-candidates-do-not-require-a-namespace-child
+  (async done
+    (let [original-query db/query
+          observed (atom nil)]
+      (set! db/query
+            (fn [request]
+              (reset! observed request)
+              (js/Promise.resolve
+               [["root-only" "coordinator"]
+                ["with-children" "coordinator"]])))
+      (-> (plan/generated-root-candidates {::db/db database})
+          (.then
+           (fn [candidates]
+             (is (= [{:my.plan/id "root-only"
+                      :seon.agent/id "coordinator"}
+                     {:my.plan/id "with-children"
+                      :seon.agent/id "coordinator"}]
+                    candidates))
+             (is (= database (::db/db @observed)))
+             (is (not-any? #{:my.plan/namespace}
+                           (tree-seq coll? seq (::db/query @observed))))
+             (is (some #{:my.plan/claim}
+                       (tree-seq coll? seq (::db/args @observed))))
+             (is (some #{:my.plan/message}
+                       (tree-seq coll? seq (::db/args @observed))))))
+          (.finally (fn [] (set! db/query original-query)))
+          (.then (fn [_] (done)))
+          (.catch (fn [error] (is false (str error)) (done)))))))
+
+(deftest generated-terminal-commits-status-and-addressed-message-once
+  (async done
+    (let [original-pull db/pull
+          original-message message/message-transaction-for
+          original-allocate db.id/allocate!
+          status (atom :open)
+          allocations (atom 0)
+          writes (atom [])
+          message-request (atom nil)]
+      (set! db/pull
+            (fn
+              ([request]
+               (is (= database (::db/db request)))
+               (js/Promise.resolve
+                {:my.plan/id "root"
+                 :my.plan/status @status
+                 :my.plan/agent {:seon.agent/id "coordinator"}
+                 :my.plan/from {:seon.agent/id "caller"}}))
+              ([_ _] (js/Promise.reject (js/Error. "unexpected pull arity")))
+              ([_ _ _] (js/Promise.reject (js/Error. "unexpected pull arity")))))
+      (set! message/message-transaction-for
+            (fn [current request]
+              (is (= database current))
+              (reset! message-request request)
+              (js/Promise.resolve
+               {:seon.agent.message/allocations
+                [{::db.id/key :seon.agent.message/id
+                  ::db.id/identity-attr :seon.agent.message/id}]
+                :seon.agent.message/transaction-builder
+                (fn [ids]
+                  {::db/tx-data
+                   [{:seon.agent.message/id
+                     (:seon.agent.message/id ids)
+                     :seon.agent.message/content
+                     (:seon.agent.message/content request)}]})})))
+      (set! db.id/allocate!
+            (fn [request]
+              (swap! allocations inc)
+              (let [ids {:seon.agent.message/id "terminal-message"}
+                    write ((::db.id/transaction-builder request) ids)]
+                (swap! writes conj write)
+                (reset! status :done)
+                (js/Promise.resolve {::db.id/ids ids}))))
+      (-> (plan/commit-generated-terminal!
+           {::db/db database
+            :my.plan/id "root"
+            :my.plan/status :done
+            :seon.agent.message/content "{:my.plan/id \"root\"}"})
+          (.then
+           (fn [first-result]
+             (is (= {:my.plan/ok? true
+                     :my.plan/id "root"
+                     :my.plan/status :done
+                     :seon.agent.message/id "terminal-message"}
+                    first-result))
+             (is (= [:seon.agent/id "coordinator"]
+                    (:seon.agent.message/from @message-request)))
+             (is (= [[:seon.agent/id "caller"]]
+                    (:seon.agent.message/to @message-request)))
+             (let [write (first @writes)]
+               (is (= database (::db/expected-db write)))
+               (is (= [:db.fn/cas [:my.plan/id "root"]
+                       :my.plan/status :open :done]
+                      (first (::db/tx-data write))))
+               (is (some #(= "terminal-message"
+                             (:seon.agent.message/id %))
+                         (::db/tx-data write))))
+             (plan/commit-generated-terminal!
+              {::db/db database
+               :my.plan/id "root"
+               :my.plan/status :done
+               :seon.agent.message/content "repeat"})))
+          (.then
+           (fn [repeated]
+             (is (= {:my.plan/ok? true
+                     :my.plan/id "root"
+                     :my.plan/status :done}
+                    repeated))
+             (is (= 1 @allocations))
+             (is (= 1 (count @writes)))))
+          (.finally
+           (fn []
+             (set! db/pull original-pull)
+             (set! message/message-transaction-for original-message)
+             (set! db.id/allocate! original-allocate)))
+          (.then (fn [_] (done)))
+          (.catch (fn [error] (is false (str error)) (done)))))))
+
+(deftest generated-terminal-cas-race-rereads-committed-status
+  (async done
+    (let [original-db db/db
+          original-pull db/pull
+          original-message message/message-transaction-for
+          original-allocate db.id/allocate!
+          status (atom :open)
+          current-reads (atom 0)
+          pulls (atom 0)]
+      (set! db/db
+            (fn
+              ([] (js/Promise.reject (js/Error. "database name required")))
+              ([request]
+               (is (= {::db/database-name "plan-test"} request))
+               (swap! current-reads inc)
+               (js/Promise.resolve database))))
+      (set! db/pull
+            (fn
+              ([_]
+               (swap! pulls inc)
+               (js/Promise.resolve
+                {:my.plan/id "root"
+                 :my.plan/status @status
+                 :my.plan/agent {:seon.agent/id "coordinator"}
+                 :my.plan/from {:seon.agent/id "caller"}}))
+              ([_ _] (js/Promise.reject (js/Error. "unexpected pull arity")))
+              ([_ _ _] (js/Promise.reject (js/Error. "unexpected pull arity")))))
+      (set! message/message-transaction-for
+            (fn [_ _]
+              (js/Promise.resolve
+               {:seon.agent.message/allocations
+                [{::db.id/key :seon.agent.message/id
+                  ::db.id/identity-attr :seon.agent.message/id}]
+                :seon.agent.message/transaction-builder
+                (fn [_] {::db/tx-data []})})))
+      (set! db.id/allocate!
+            (fn [_]
+              (reset! status :done)
+              (js/Promise.resolve {:seon.error/message "CAS lost"})))
+      (-> (plan/commit-generated-terminal!
+           {::db/db database
+            :my.plan/id "root"
+            :my.plan/status :done
+            :seon.agent.message/content "done"})
+          (.then
+           (fn [result]
+             (is (= {:my.plan/ok? true
+                     :my.plan/id "root"
+                     :my.plan/status :done}
+                    result))
+             (is (= 1 @current-reads))
+             (is (= 2 @pulls))))
+          (.finally
+           (fn []
+             (set! db/db original-db)
+             (set! db/pull original-pull)
+             (set! message/message-transaction-for original-message)
+             (set! db.id/allocate! original-allocate)))
+          (.then (fn [_] (done)))
+          (.catch (fn [error] (is false (str error)) (done)))))))
+
 (deftest generated-program-publication-reuses-ordered-evals-and-expected-db
   (async done
     (let [original-db db/db
@@ -384,6 +563,60 @@
              (set! db/query original-query)
              (set! db/execute-many original-execute-many)
              (set! db.id/allocate! original-allocate)))
+          (.then (fn [_] (done)))
+          (.catch (fn [error] (is false (str error)) (done)))))))
+
+(deftest generated-program-failure-uses-the-one-terminal-owner
+  (async done
+    (let [original-db db/db
+          original-query db/query
+          original-execute-many db/execute-many
+          original-terminal plan/commit-generated-terminal!
+          current-db (update database :t inc)
+          terminal-request (atom nil)
+          success (fn [result]
+                    {::protocol/success? true ::protocol/result result})]
+      (set! db/db
+            (fn
+              ([] (js/Promise.reject (js/Error. "database name required")))
+              ([_] (js/Promise.resolve current-db))))
+      (set! db/query (fn [_] (js/Promise.resolve "root")))
+      (set! db/execute-many
+            (fn [_]
+              (js/Promise.resolve
+               {::db/results [(success (first rows)) (success [])]})))
+      (set! plan/commit-generated-terminal!
+            (fn [request]
+              (reset! terminal-request request)
+              (js/Promise.resolve
+               {:my.plan/ok? true
+                :my.plan/id "root"
+                :my.plan/status :blocked
+                :seon.agent.message/id "blocked-message"})))
+      (-> (plan/publish-generated-program!
+           {:seon.agent.run/id "planner-run"
+            :seon.agent.turn/id "turn-1"
+            ::db/db database
+            :my.plan/program namespace-projection
+            :my.plan/eval-batch
+            {:seon.eval/ids []
+             :seon.eval/n-ok 0
+             :seon.eval/n-fail 0
+             :seon.eval/fenced? true}})
+          (.then
+           (fn [result]
+             (is (false? (:my.plan/ok? result)))
+             (is (= "root" (:my.plan/root result)))
+             (is (= current-db (::db/db @terminal-request)))
+             (is (= :blocked (:my.plan/status @terminal-request)))
+             (is (re-find #"lost its run fence"
+                          (:seon.agent.message/content @terminal-request)))))
+          (.finally
+           (fn []
+             (set! db/db original-db)
+             (set! db/query original-query)
+             (set! db/execute-many original-execute-many)
+             (set! plan/commit-generated-terminal! original-terminal)))
           (.then (fn [_] (done)))
           (.catch (fn [error] (is false (str error)) (done)))))))
 

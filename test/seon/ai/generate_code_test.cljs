@@ -1,6 +1,7 @@
 (ns seon.ai.generate-code-test
   "Focused contracts for generated-code claims and reactive roots."
   (:require
+    [cljs.reader :as reader]
     [cljs.test :refer [async deftest is]]
     [my.plan :as plan]
     [seon.agent :as agent]
@@ -9,6 +10,14 @@
     [seon.db :as db]
     [seon.db.id :as db.id]
     [seon.reactive :as reactive]))
+
+(defn- finish-root-promise [request]
+  ((deref #'generate/finish-root!) request))
+
+(defn- root-notify-promise
+  [root-id coordinator-id model-variant root-state]
+  ((deref #'generate/root-notify)
+   root-id coordinator-id model-variant root-state))
 
 (def ^:private database
   {:db-name "generate-code-test"
@@ -252,7 +261,7 @@
           (.then (fn [_] (done)))
           (.catch (fn [error] (is false (str error)) (done)))))))
 
-(deftest root-notify-defers-terminal-release-and-dispatches-ready-work
+(deftest root-notify-dispatches-ready-work
   (async done
     (let [original-observe generate/observe-root!
           original-dispatch generate/dispatch-root-state!
@@ -264,8 +273,7 @@
            :my.plan/progress {:my.plan/done? false}
            :my.plan/blocked? false
            :my.plan.internal/ready-steps []}
-          done-state
-          (assoc open-state :my.plan/progress {:my.plan/done? true})]
+          ]
       (set! generate/dispatch-root-state!
             (fn [request]
               (swap! events conj [:dispatch request])
@@ -290,15 +298,7 @@
           (.then
            (fn [_]
              (is (= :dispatch (ffirst @events)))
-             (reset! events [])
-             (let [released
-                   ((:seon.ai.generate-code/notify @observer) done-state)]
-               (is (empty? @events)
-                   "terminal release is deferred beyond observer delivery")
-               released)))
-          (.then
-           (fn [_]
-             (is (= [[:unobserve {:my.plan/id "root"}]] @events))))
+             (is (not-any? #(= :unobserve (first %)) @events))))
           (.finally
            (fn []
              (set! generate/observe-root! original-observe)
@@ -309,15 +309,23 @@
 
 (deftest restore-replaces-observers-for-durable-nonterminal-roots
   (async done
-    (let [original-query db/query
+    (let [original-candidates plan/generated-root-candidates
           original-state plan/generated-root-state
           original-start generate/start-root-scheduler!
           original-unobserve generate/unobserve-root!
-          queried (atom nil)
+          candidate-request (atom nil)
           started (atom [])
           released (atom [])
           state-for
-          {"claimed-open"
+          {"root-only"
+           {:my.plan/id "root-only"
+            :my.plan/status :open
+            :my.plan/progress
+            {:my.plan/done 0 :my.plan/total 1 :my.plan/done? false}
+            :my.plan/blocked? false
+            :my.plan.internal/namespace-steps []
+            :my.plan.internal/ready-steps []}
+           "claimed-open"
            {:my.plan/id "claimed-open"
             :my.plan/status :open
             :my.plan/progress
@@ -340,12 +348,15 @@
               :seon.ns/name 'my.blocked
               :my.plan/status :blocked}]
             :my.plan.internal/ready-steps []}}]
-      (set! db/query
+      (set! plan/generated-root-candidates
             (fn [request]
-              (reset! queried request)
+              (reset! candidate-request request)
               (js/Promise.resolve
-               [["claimed-open" "coordinator"]
-                ["blocked" "coordinator"]])))
+               [{:my.plan/id "blocked" :seon.agent/id "coordinator"}
+                {:my.plan/id "claimed-open"
+                 :seon.agent/id "coordinator"}
+                {:my.plan/id "root-only"
+                 :seon.agent/id "coordinator"}])))
       (set! plan/generated-root-state
             (fn [{root-id :my.plan/id}]
               (js/Promise.resolve (get state-for root-id))))
@@ -361,20 +372,131 @@
            {::db/db database :seon.config/model-variant :execution})
           (.then
            (fn [restored]
-             (is (= ["claimed-open"] restored))
-             (is (= ["blocked" "claimed-open"] @released)
+             (is (= ["claimed-open" "root-only"] restored))
+             (is (= ["blocked" "claimed-open" "root-only"] @released)
                  "hot reload drops every prior root observer before classifying")
-             (is (= ["claimed-open"] (mapv :my.plan/id @started)))
+             (is (= ["claimed-open" "root-only"]
+                    (mapv :my.plan/id @started)))
              (is (= :execution
                     (:seon.config/model-variant (first @started))))
-             (is (= database (::db/db @queried)))
-             (is (some #{:my.plan/namespace}
-                       (tree-seq coll? seq (::db/query @queried))))))
+             (is (= database (::db/db @candidate-request)))))
           (.finally
            (fn []
-             (set! db/query original-query)
+             (set! plan/generated-root-candidates original-candidates)
              (set! plan/generated-root-state original-state)
              (set! generate/start-root-scheduler! original-start)
+             (set! generate/unobserve-root! original-unobserve)))
+          (.then (fn [_] (done)))
+          (.catch (fn [error] (is false (str error)) (done)))))))
+
+(deftest terminal-result-content-is-committed-through-the-plan-owner
+  (async done
+    (let [original-db db/db
+          original-commit plan/commit-generated-terminal!
+          request (atom nil)
+          root-state
+          {:my.plan/id "root"
+           :my.plan/status :open
+           :my.plan/progress
+           {:my.plan/done 2 :my.plan/total 2 :my.plan/done? true}
+           :my.plan/blocked? false
+           :my.plan.internal/namespace-steps
+           [{:my.plan/id "model-step"
+             :seon.ns/name 'my.generated.model
+             :my.plan/status :done}
+            {:my.plan/id "service-step"
+             :seon.ns/name 'my.generated.service
+             :my.plan/status :done}]
+           :my.plan.internal/ready-steps []}]
+      (set! db/db
+            (fn
+              ([] (js/Promise.resolve database))
+              ([_] (js/Promise.resolve database))))
+      (set! plan/commit-generated-terminal!
+            (fn [value]
+              (reset! request value)
+              (js/Promise.resolve
+               {:my.plan/ok? true
+                :my.plan/id "root"
+                :my.plan/status :done
+                :seon.agent.message/id "terminal-message"})))
+      (-> (finish-root-promise
+           {:my.plan/id "root"
+            :seon.ai.generate-code/root-state root-state
+            :my.plan/status :done})
+          (.then
+           (fn [result]
+             (is (true? (:my.plan/ok? result)))
+             (is (= database (::db/db @request)))
+             (is (= :done (:my.plan/status @request)))
+             (let [content
+                   (reader/read-string
+                    (:seon.agent.message/content @request))]
+               (is (= "root" (:my.plan/id content)))
+               (is (= :done (:my.plan/status content)))
+               (is (= ['my.generated.model 'my.generated.service]
+                      (mapv :seon.ns/name (:my.plan/steps content)))))))
+          (.finally
+           (fn []
+             (set! db/db original-db)
+             (set! plan/commit-generated-terminal! original-commit)))
+          (.then (fn [_] (done)))
+          (.catch (fn [error] (is false (str error)) (done)))))))
+
+(deftest dispatch-member-error-blocks-root-and-addresses-the-caller
+  (async done
+    (let [original-db db/db
+          original-commit plan/commit-generated-terminal!
+          original-dispatch generate/dispatch-root-state!
+          original-unobserve generate/unobserve-root!
+          terminal-request (atom nil)
+          released (atom [])
+          root-state
+          {:my.plan/id "root"
+           :my.plan/status :open
+           :my.plan/progress
+           {:my.plan/done 0 :my.plan/total 1 :my.plan/done? false}
+           :my.plan/blocked? false
+           :my.plan.internal/namespace-steps []
+           :my.plan.internal/ready-steps
+           [{:my.plan/id "step" :seon.ns/name 'my.failed}]}]
+      (set! db/db
+            (fn
+              ([] (js/Promise.resolve database))
+              ([_] (js/Promise.resolve database))))
+      (set! plan/commit-generated-terminal!
+            (fn [request]
+              (reset! terminal-request request)
+              (js/Promise.resolve
+               {:my.plan/ok? true
+                :my.plan/id "root"
+                :my.plan/status :blocked
+                :seon.agent.message/id "blocked-message"})))
+      (set! generate/dispatch-root-state!
+            (fn [_]
+              (js/Promise.resolve
+               [{:seon.error/message "resident unavailable"
+                 :my.plan/id "step"}])))
+      (set! generate/unobserve-root!
+            (fn [request]
+              (swap! released conj (:my.plan/id request))
+              (js/Promise.resolve true)))
+      (-> (root-notify-promise "root" "coordinator" :execution root-state)
+          (.then
+           (fn [result]
+             (is (true? (:my.plan/ok? result)))
+             (is (= :blocked (:my.plan/status @terminal-request)))
+             (is (= database (::db/db @terminal-request)))
+             (is (= "resident unavailable"
+                    (:my.plan/error
+                     (reader/read-string
+                      (:seon.agent.message/content @terminal-request)))))
+             (is (= ["root"] @released))))
+          (.finally
+           (fn []
+             (set! db/db original-db)
+             (set! plan/commit-generated-terminal! original-commit)
+             (set! generate/dispatch-root-state! original-dispatch)
              (set! generate/unobserve-root! original-unobserve)))
           (.then (fn [_] (done)))
           (.catch (fn [error] (is false (str error)) (done)))))))

@@ -10,6 +10,7 @@
     [clojure.string :as str]
     [my.plan.internal :as internal]
     [seon.agent]   ; load-order: request schemas reference :seon.agent/id
+    [seon.agent.message :as message]
     [seon.db :as db]
     [seon.db.id :as db.id]
     [seon.db.protocol :as protocol]
@@ -77,6 +78,14 @@
    [::blocked? ::blocked?]
    [:my.plan.internal/namespace-steps [:vector ::namespace-step-state]]
    [:my.plan.internal/ready-steps [:vector ::ready-namespace-state]]])
+(schema/register! ::generated-root-candidate
+  [:map
+   [::id ::id]
+   [:seon.agent/id :seon.agent/id]])
+(schema/register! ::generated-root-candidates-request
+  [:map {:closed true} [::db/db :seon.db/db]])
+(schema/register! ::generated-root-candidates-response
+  [:or [:vector ::generated-root-candidate] ::direct-error])
 
 (schema/register! ::write-response
   [:map
@@ -222,6 +231,24 @@
     [::ok? [:= false]]
     [::root {:optional true} ::id]
     [::error ::error]]])
+(schema/register! ::generated-terminal-request
+  [:map {:closed true}
+   [::db/db :seon.db/db]
+   [::id ::id]
+   [::status [:enum :done :blocked]]
+   [:seon.agent.message/content :seon.agent.message/content]])
+(schema/register! ::generated-terminal-response
+  [:or
+   [:map
+    [::ok? [:= true]]
+    [::id ::id]
+    [::status ::status]
+    [:seon.agent.message/id
+     {:optional true} :seon.agent.message/id]]
+   [:map
+    [::ok? [:= false]]
+    [::id {:optional true} ::id]
+    [::error ::error]]])
 
 ;; ::tree stays structurally permissive at the boundary — a malformed
 ;; document is EXPECTED input (hand-authored or model edits) and must come
@@ -363,18 +390,31 @@
     (unfinished ?root)
     (not-join [?root] [?root :my.plan/parent _])])
 
+(def ^:private generated-root-rules
+  '[[(generated-root ?root ?message)
+     [?root :my.plan/message ?message]
+     [?message :seon.agent.message/id ?message-id]
+     [?root :my.plan/claim ?message-id]
+     [?root :my.plan/goal _]
+     (not-join [?root] [?root :my.plan/parent _])]])
+
 (def ^:private generated-root-for-run-query
   '[:find ?root-id .
-    :in $ ?run-id
+    :in $ % ?run-id
     :where
     [?run :seon.agent.run/id ?run-id]
     [?run :seon.agent.run/cause ?message]
-    [?message :seon.agent.message/id ?message-id]
-    [?root :my.plan/message ?message]
-    [?root :my.plan/claim ?message-id]
-    [?root :my.plan/goal _]
-    (not-join [?root] [?root :my.plan/parent _])
+    (generated-root ?root ?message)
     [?root :my.plan/id ?root-id]])
+
+(def ^:private generated-root-candidates-query
+  '[:find ?root-id ?coordinator-id
+    :in $ %
+    :where
+    (generated-root ?root ?message)
+    [?root :my.plan/id ?root-id]
+    [?root :my.plan/agent ?coordinator]
+    [?coordinator :seon.agent/id ?coordinator-id]])
 
 (declare plan-ref-id)
 
@@ -466,7 +506,7 @@
          (db/query
           {::db/db database
            ::db/query generated-root-for-run-query
-           ::db/args [run-id]
+           ::db/args [generated-root-rules run-id]
            ::db/max-work 250000
            ::db/max-results 1
            ::db/max-result-weight 4096}))]
@@ -483,6 +523,31 @@
             (if (:seon.error/message acquired)
               (assoc acquired ::db/db current ::root root-id)
               (assoc acquired ::root root-id))))))))
+
+(defn ^:async ^:no-doc generated-root-candidates
+  "Find every durable generated root from its own assignment marker.
+
+   Namespace children are deliberately irrelevant: a root remains observable
+   between planner assignment and namespace-DAG publication."
+  {:malli/schema [:=> [:cat ::generated-root-candidates-request]
+                  ::generated-root-candidates-response]}
+  [{database ::db/db}]
+  (let [rows
+        (await
+         (db/query
+          {::db/db database
+           ::db/query generated-root-candidates-query
+           ::db/args [generated-root-rules]
+           ::db/max-work 1000000
+           ::db/max-results 10000
+           ::db/max-result-weight 1048576}))]
+    (if (:seon.error/message rows)
+      rows
+      (->> rows
+           (map (fn [[root-id coordinator-id]]
+                  {::id root-id :seon.agent/id coordinator-id}))
+           (sort-by (juxt ::id :seon.agent/id))
+           vec))))
 
 (defn ^:async ^:no-doc generated-root-state
   "Derive stable scheduler state for one generated-code plan root."
@@ -790,21 +855,158 @@
                   (str "plan!: store failed — "
                        (:seon.error/message env)))))))))))
 
+(def ^:private generated-terminal-root-selector
+  '[::id ::status
+    {::agent [:seon.agent/id]}
+    {::from [:seon.agent/id :seon.user/id]}])
+
+(defn- participant-ref
+  [participant]
+  (cond
+    (:seon.agent/id participant)
+    [:seon.agent/id (:seon.agent/id participant)]
+
+    (:seon.user/id participant)
+    [:seon.user/id (:seon.user/id participant)]))
+
+(defn- generated-terminal-transaction-builder
+  [database message-transaction root-id terminal-status completed-at]
+  (let [build-message
+        (:seon.agent.message/transaction-builder message-transaction)]
+    (fn [ids]
+      (let [message-request (build-message ids)]
+        (-> message-request
+            (assoc ::db/expected-db database)
+            (update
+             ::db/tx-data
+             (fn [message-data]
+               (into
+                [[:db.fn/cas [::id root-id]
+                  ::status :open terminal-status]]
+                (concat
+                 (when (= :done terminal-status)
+                   [{::id root-id ::completed-at completed-at}])
+                 message-data)))))))))
+
+(defn ^:async ^:private generated-terminal-race-result
+  [database root-id allocation-error]
+  (let [current
+        (await (db/db {::db/database-name (:db-name database)}))]
+    (if (:seon.error/message current)
+      allocation-error
+      (let [root
+            (await
+             (db/pull
+              {::db/db current
+               ::db/pull-pattern [::status]
+               ::db/ref [::id root-id]}))
+            status (::status root)]
+        (if (contains? #{:done :blocked} status)
+          {::ok? true ::id root-id ::status status}
+          allocation-error)))))
+
+(defn ^:async ^:no-doc commit-generated-terminal!
+  "Atomically close one generated root and address its caller.
+
+   Root status is the delivery fence. The ordinary message row and the
+   `:open` to terminal CAS share one expected-database allocation transaction,
+   so a committed terminal status always means its result message committed."
+  {:malli/schema [:=> [:cat ::generated-terminal-request]
+                  ::generated-terminal-response]}
+  [{database ::db/db
+    root-id ::id
+    terminal-status ::status
+    content :seon.agent.message/content}]
+  (let [root
+        (await
+         (db/pull
+          {::db/db database
+           ::db/pull-pattern generated-terminal-root-selector
+           ::db/ref [::id root-id]}))
+        current-status (::status root)
+        sender (participant-ref (::agent root))
+        recipient (participant-ref (::from root))]
+    (cond
+      (:seon.error/message root)
+      (assoc (internal/fail (:seon.error/message root)) ::id root-id)
+
+      (contains? #{:done :blocked} current-status)
+      {::ok? true ::id root-id ::status current-status}
+
+      (not= :open current-status)
+      (assoc
+       (internal/fail
+        (str "commit-generated-terminal!: root " (pr-str root-id)
+             " has no open terminal-delivery fence."))
+       ::id root-id)
+
+      (nil? sender)
+      (assoc
+       (internal/fail
+        (str "commit-generated-terminal!: root " (pr-str root-id)
+             " has no coordinator identity in :my.plan/agent."))
+       ::id root-id)
+
+      (nil? recipient)
+      (assoc
+       (internal/fail
+        (str "commit-generated-terminal!: root " (pr-str root-id)
+             " has no caller identity in required :my.plan/from."))
+       ::id root-id)
+
+      :else
+      (let [message-transaction
+            (await
+             (message/message-transaction-for
+              database
+              {:seon.agent.message/from sender
+               :seon.agent.message/to [recipient]
+               :seon.agent.message/content content}))]
+        (if (:seon.error/message message-transaction)
+          (assoc (internal/fail (:seon.error/message message-transaction))
+                 ::id root-id)
+          (let [allocation
+                (await
+                 (db.id/allocate!
+                  {::db/db database
+                   ::db.id/allocations
+                   (:seon.agent.message/allocations message-transaction)
+                   ::db.id/transaction-builder
+                   (generated-terminal-transaction-builder
+                    database message-transaction root-id terminal-status
+                    (js/Date.))}))]
+            (if (:seon.error/message allocation)
+              (await
+               (generated-terminal-race-result
+                database root-id
+                (assoc
+                 (internal/fail (:seon.error/message allocation))
+                 ::id root-id)))
+              {::ok? true
+               ::id root-id
+               ::status terminal-status
+               :seon.agent.message/id
+               (get-in allocation [::db.id/ids
+                                   :seon.agent.message/id])})))))))
+
 (defn ^:async ^:private block-generated-root!
-  [database root-id message]
+  [database root-id error-message]
   (let [blocked
         (await
-         (db/transact!
+         (commit-generated-terminal!
           {::db/db database
-           ::db/expected-db database
-           ::db/tx-data
-           [{::id root-id ::status :blocked}]}))]
+           ::id root-id
+           ::status :blocked
+           :seon.agent.message/content
+           (pr-str {::id root-id
+                    ::status :blocked
+                    ::error error-message})}))]
     (assoc
      (internal/fail
-      (str message
-           (when (:seon.error/message blocked)
-             (str " The generation root could not be marked blocked: "
-                  (:seon.error/message blocked)))))
+      (str error-message
+           (when-not (::ok? blocked)
+             (str " The generation root could not be closed and addressed: "
+                  (::error blocked)))))
      ::root root-id)))
 
 (defn ^:async ^:no-doc publish-generated-program!
