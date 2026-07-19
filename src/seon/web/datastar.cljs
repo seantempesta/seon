@@ -27,6 +27,7 @@
     ["node:zlib" :as zlib]
     [clojure.set :as set]
     [clojure.string :as str]
+    [seon.config :as config]
     [seon.db :as db]
     [seon.db.branch :as db.branch]
     [seon.execution :as execution]
@@ -669,15 +670,21 @@
 ;; commits may move the trailing edge toward it, but never beyond it.
 ;; ============================================================
 
-(def ^:private normal-settle-ms 16)
-(def ^:private structural-settle-ms 300)
-(def ^:private maximum-coalesce-ms 500)
-
 (def ^:private empty-coalescer {})
 
 (defonce ^{:private true
            :doc "One pending Datastar broadcast and its optional timer."}
   !coalescer (atom empty-coalescer))
+
+(defonce ^{:private true
+           :doc "Reactive timing policy acquired from database configuration."}
+  !reactive-policy
+  (atom config/default-reactive-policy))
+
+(defn configure!
+  "Install the database-acquired reactive timing policy."
+  [policy]
+  (reset! !reactive-policy policy))
 
 (defn- monotonic-ms [] (.now js/performance))
 
@@ -713,8 +720,14 @@
 
 (defn- broadcast-due-at
   [enqueued-at now structural?]
-  (min (+ enqueued-at maximum-coalesce-ms)
-       (+ now (if structural? structural-settle-ms normal-settle-ms))))
+  (let [{:seon.config/keys [reactive-settle-ms
+                            reactive-structural-settle-ms
+                            reactive-max-latency-ms]}
+        @!reactive-policy]
+    (min (+ enqueued-at reactive-max-latency-ms)
+         (+ now (if structural?
+                  reactive-structural-settle-ms
+                  reactive-settle-ms)))))
 
 (declare drain-coalescer!)
 

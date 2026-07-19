@@ -1675,9 +1675,11 @@
 
 (schema/register! ::readiness-only? :boolean)
 (schema/register! ::restore-completion-result ::db.restore/record-success)
+(schema/register! ::configuration :seon.config/singleton)
 (schema/register! ::start-request
                   [:map {:closed true}
                    [::readiness-only? {:optional true} ::readiness-only?]
+                   [::configuration ::configuration]
                    [::restore-completion-result
                     {:optional true} ::restore-completion-result]])
 
@@ -1703,7 +1705,7 @@
    the expected behavior for a dev pod (only one instance at a time).
    To run multiple pods, set SEON_PORT=0 for ephemeral allocation."
   {:malli/schema [:=> [:cat ::start-request] :any]}
-  [{::keys [readiness-only? restore-completion-result]}]
+  [{::keys [readiness-only? restore-completion-result configuration]}]
   (when-not (= (boolean readiness-only?)
                (boolean restore-completion-result))
     (throw
@@ -1714,6 +1716,7 @@
   ;; The authority acknowledges the selective route interest at one immutable
   ;; database value. Compile that exact projection before HTTP admission so request
   ;; dispatch never performs a database read.
+  (datastar/configure! (config/reactive-policy configuration))
   (when-not readiness-only?
     (await (router/attach!)))
   (await

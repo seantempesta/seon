@@ -157,6 +157,9 @@
 (schema/register! :seon.config.breaker/crash-count  :seon.config/cap)
 (schema/register! :seon.config.breaker/window-ms    :seon.config/cap)
 (schema/register! :seon.config.root/recent-limit    :seon.config/cap)
+(schema/register! :seon.config/reactive-settle-ms :seon.config/cap)
+(schema/register! :seon.config/reactive-structural-settle-ms :seon.config/cap)
+(schema/register! :seon.config/reactive-max-latency-ms :seon.config/cap)
 
 ;;; RENDER BOUNDS — the GLOBAL, cluster-wide render/value display caps (#46).
 ;;; These are NOT per-agent: they bound the value/eval/message renderers for
@@ -311,6 +314,14 @@
   [:map
    [:seon.config.root/recent-limit
     {:optional true} :seon.config.root/recent-limit]])
+(schema/register! :seon.config/reactive
+  [:map {:closed true}
+   [:seon.config/reactive-settle-ms
+    {:optional true} :seon.config/reactive-settle-ms]
+   [:seon.config/reactive-structural-settle-ms
+    {:optional true} :seon.config/reactive-structural-settle-ms]
+   [:seon.config/reactive-max-latency-ms
+    {:optional true} :seon.config/reactive-max-latency-ms]])
 
 ;;; REPL MODE (repl-mode Phase 1) — how the agent's REPL turn resolves a
 ;;; form's result. The DEFAULT is per-MODEL ([[default-repl-mode]]); an
@@ -448,7 +459,13 @@
    [:seon.config.watchdog/stale-ms   {:optional true} :seon.config/cap]
    [:seon.config.breaker/crash-count {:optional true} :seon.config/cap]
    [:seon.config.breaker/window-ms   {:optional true} :seon.config/cap]
-   [:seon.config.root/recent-limit   {:optional true} :seon.config/cap]])
+   [:seon.config.root/recent-limit   {:optional true} :seon.config/cap]
+   [:seon.config/reactive-settle-ms
+    {:optional true} :seon.config/reactive-settle-ms]
+   [:seon.config/reactive-structural-settle-ms
+    {:optional true} :seon.config/reactive-structural-settle-ms]
+   [:seon.config/reactive-max-latency-ms
+    {:optional true} :seon.config/reactive-max-latency-ms]])
 
 (schema/register! :seon.config/manifest
   [:map
@@ -468,6 +485,7 @@
    [:seon.config/watchdog          {:optional true} :seon.config/watchdog]
    [:seon.config/schedule-breaker  {:optional true} :seon.config/schedule-breaker]
    [:seon.config/root              {:optional true} :seon.config/root]
+   [:seon.config/reactive          {:optional true} :seon.config/reactive]
    [:seon.config/agent-context {:optional true} :seon.config/agent-context]
    [:seon.config/root-context  {:optional true} :seon.config/root-context]])
 
@@ -701,6 +719,12 @@
       :stream
       :batch)))
 
+(def default-reactive-policy
+  "Reactive timing used when an older persisted configuration has no policy."
+  {:seon.config/reactive-settle-ms 16
+   :seon.config/reactive-structural-settle-ms 300
+   :seon.config/reactive-max-latency-ms 500})
+
 (defn resolve-config-singleton
   "The FLAT `:seon.config` singleton entity map for `manifest`.
 
@@ -718,6 +742,7 @@
         rep (get manifest :seon.config/repair {})
         web (get manifest :seon.config/web {})
         root (get manifest :seon.config/root {})
+        reactive (get manifest :seon.config/reactive {})
         nsp (resolve-namespaces manifest)]
     (cond-> {:seon.config/id cluster-config-id
              :seon.config/repl-mode
@@ -773,7 +798,16 @@
              :seon.config.breaker/window-ms
              (get-in manifest [:seon.config/schedule-breaker :seon.config.breaker/window-ms] 1800000)
              :seon.config.root/recent-limit
-             (get root :seon.config.root/recent-limit 12)}
+             (get root :seon.config.root/recent-limit 12)
+             :seon.config/reactive-settle-ms
+             (get reactive :seon.config/reactive-settle-ms
+                  (:seon.config/reactive-settle-ms default-reactive-policy))
+             :seon.config/reactive-structural-settle-ms
+             (get reactive :seon.config/reactive-structural-settle-ms
+                  (:seon.config/reactive-structural-settle-ms default-reactive-policy))
+             :seon.config/reactive-max-latency-ms
+             (get reactive :seon.config/reactive-max-latency-ms
+                  (:seon.config/reactive-max-latency-ms default-reactive-policy))}
       (contains? manifest :seon.config/system-text)
       (assoc :seon.config/system-text (:seon.config/system-text manifest))
       (contains? transport :seon.config.model-transport/response-identity-cap)
@@ -790,6 +824,14 @@
       (assoc :seon.config/agent-context (:seon.config/agent-context manifest))
       (contains? manifest :seon.config/root-context)
       (assoc :seon.config/root-context (:seon.config/root-context manifest)))))
+
+(defn reactive-policy
+  "Returns the reactive-read timing policy from ordinary singleton data."
+  {:malli/schema [:=> [:cat :seon.config/singleton]
+                  :seon.config/reactive]}
+  [configuration]
+  (merge default-reactive-policy
+         (select-keys configuration (keys default-reactive-policy))))
 
 (defn namespaces-policy
   "The resolved namespaces render policy from ordinary singleton data.

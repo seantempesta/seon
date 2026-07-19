@@ -177,6 +177,20 @@
           #{:seon.message/text :seon.agent/id})))
   (is (= :all (@#'datastar/dependencies-plan :all))))
 
+(deftest reactive-timing-comes-from-the-database-configuration-policy
+  (let [prior @@#'datastar/!reactive-policy]
+    (try
+      (datastar/configure!
+       {:seon.config/reactive-settle-ms 7
+        :seon.config/reactive-structural-settle-ms 70
+        :seon.config/reactive-max-latency-ms 100})
+      (is (= 17 (@#'datastar/broadcast-due-at 10 10 false)))
+      (is (= 80 (@#'datastar/broadcast-due-at 10 10 true)))
+      (is (= 110 (@#'datastar/broadcast-due-at 10 500 false))
+          "sustained writes cannot move work beyond the first max deadline")
+      (finally
+        (datastar/configure! prior)))))
+
 (deftest complete-render-bytes-follow-the-database-that-proved-them
   (let [next-database (assoc database :t 43)
         registry {::datastar/subscriptions

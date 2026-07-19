@@ -379,6 +379,39 @@
       ;; an unset key in a present section still falls back to the literal
       (is (= 3 (config/value-max-depth configuration))))))
 
+(deftest reactive-policy-is-resolved-into-the-config-singleton
+  (let [defaults (config/resolve-config-singleton {})
+        configured
+        (config/resolve-config-singleton
+         {:seon.config/reactive
+          {:seon.config/reactive-settle-ms 7
+           :seon.config/reactive-structural-settle-ms 70
+           :seon.config/reactive-max-latency-ms 700}})]
+    (is (= {:seon.config/reactive-settle-ms 16
+            :seon.config/reactive-structural-settle-ms 300
+            :seon.config/reactive-max-latency-ms 500}
+           (config/reactive-policy defaults)))
+    (is (= {:seon.config/reactive-settle-ms 7
+            :seon.config/reactive-structural-settle-ms 70
+            :seon.config/reactive-max-latency-ms 700}
+           (config/reactive-policy configured)))))
+
+(deftest reactive-environment-overrides-resolve-before-database-seeding
+  (with-env
+    "SEON_REACTIVE_SETTLE_MS" "8"
+    (fn []
+      (with-env
+        "SEON_REACTIVE_STRUCTURAL_SETTLE_MS" "80"
+        (fn []
+          (with-env
+            "SEON_REACTIVE_MAX_LATENCY_MS" "800"
+            (fn []
+              (let [manifest (manifest-via-config "config/system.edn")]
+                (is (= {:seon.config/reactive-settle-ms 8
+                        :seon.config/reactive-structural-settle-ms 80
+                        :seon.config/reactive-max-latency-ms 800}
+                       (:seon.config/reactive manifest)))))))))))
+
 ;;; ENV KNOBS — the few knobs that stay env-only (launch/process). These tests
 ;;; pin the COERCION + the :seon.config/dirs precedence, not live env values.
 ;;; ([[with-env]] is defined above with the soul-block tests.)
@@ -441,6 +474,9 @@
       (is (= 1         (:seon.config/spawn-depth-cap s)))
       (is (= 1200000   (:seon.config.watchdog/stale-ms s)))
       (is (= 12        (:seon.config.root/recent-limit s)))
+      (is (= 16        (:seon.config/reactive-settle-ms s)))
+      (is (= 300       (:seon.config/reactive-structural-settle-ms s)))
+      (is (= 500       (:seon.config/reactive-max-latency-ms s)))
       (is (= {}        (:seon.config.repair/classes s)))
       (is (= []        (:seon.agent.web/allowed-domains s)))
       (is (= :full     (:seon.config/current-ns s)))

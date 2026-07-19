@@ -2077,6 +2077,7 @@
                 restore-completion-claim
                 (::restore-completion-result @!state))))
             available-ids (await (acquire-resumable-agent-ids!))
+            configuration (await (acquire-configuration!))
             resumed-ids (if autonomous? available-ids [])
             primary (or (first (remove #{"root"} available-ids))
                         (first available-ids)
@@ -2086,9 +2087,10 @@
               (web.serve/start!
                 (if restore-startup
                   {::web.serve/readiness-only? true
+                   ::web.serve/configuration configuration
                    ::web.serve/restore-completion-result
                    restore-completion-result}
-                  {})))]
+                  {::web.serve/configuration configuration})))]
         {:seon.agent/id primary
          ::autonomous? autonomous?
          :seon.client/resumed-ids resumed-ids
@@ -2237,8 +2239,10 @@
                  (if restore-startup
                    (web.serve/start!
                      {::web.serve/readiness-only? true
+                      ::web.serve/configuration configuration
                       ::web.serve/restore-completion-result completion-result})
-                   (web.serve/start! {})))]
+                   (web.serve/start!
+                    {::web.serve/configuration configuration})))]
             (when autonomous?
               (await (ai/sync!))
               (await (web.brand/sync!))

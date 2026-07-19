@@ -66,6 +66,17 @@
  {:seon.config.root/recent-limit
   #long #or [#env SEON_ROOT_RECENT_LIMIT 12]}
 
+ ;; ── REACTIVE READ SCHEDULING — burst settling and bounded progress.
+ ;; Aero resolves launch-time overrides before these values become singleton
+ ;; datoms. Runtime scheduling reads only the acquired database configuration.
+ :seon.config/reactive
+ {:seon.config/reactive-settle-ms
+  #long #or [#env SEON_REACTIVE_SETTLE_MS 16]
+  :seon.config/reactive-structural-settle-ms
+  #long #or [#env SEON_REACTIVE_STRUCTURAL_SETTLE_MS 300]
+  :seon.config/reactive-max-latency-ms
+  #long #or [#env SEON_REACTIVE_MAX_LATENCY_MS 500]}
+
  ;; ── MODEL-TRANSPORT EVIDENCE BOUNDS — immutable cluster policy.
  ;; These cap non-secret provider identities and normalized endpoint evidence;
  ;; they do not limit model output or alter provider request bytes. Aero owns
