@@ -33,7 +33,12 @@
     (mapv edn/read-string (fs/read-all-lines path))))
 
 (def manifest
-  {:seon.dev.test.artifact/test-namespaces
+  {:seon.dev.test.artifact/path "out/test/artifacts/example/test.js"
+   :seon.dev.test.artifact/program-source-path
+   "out/test/artifacts/example/program-sources.edn"
+   :seon.dev.test.artifact/program-source-digest
+   "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+   :seon.dev.test.artifact/test-namespaces
    ['example.alpha-test 'example.beta-test 'unrelated-test]
    :seon.dev.test.artifact/resources
    [{:seon.dev.test.resource/path "src/example/alpha.cljs"
@@ -85,15 +90,36 @@
 
 (deftest bun-test-environment-matches-the-canonical-runner
   (is (= {"SEON_CONFIG" "config/test.edn"
-          "SEON_RENDER_STRICT" "1"}
-         (changed/test-process-environment {})))
-  (is (= {"SEON_CONFIG" "config/custom.edn"
-          "SEON_RENDER_STRICT" "0"}
+          "SEON_RENDER_STRICT" "1"
+          "SEON_PROGRAM_SOURCE_PATH"
+          "root/out/test/artifacts/example/program-sources.edn"
+          "SEON_PROGRAM_SOURCE_DIGEST"
+          "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}
          (changed/test-process-environment
-           {:seon.dev.config/environment
+          {:seon.dev.config/root "root"} manifest)))
+  (is (= {"SEON_CONFIG" "config/custom.edn"
+          "SEON_RENDER_STRICT" "0"
+          "SEON_PROGRAM_SOURCE_PATH"
+          "root/out/test/artifacts/example/program-sources.edn"
+          "SEON_PROGRAM_SOURCE_DIGEST"
+          "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}
+         (changed/test-process-environment
+           {:seon.dev.config/root "root"
+            :seon.dev.config/environment
             {"SEON_CONFIG" "config/custom.edn"
-             "SEON_RENDER_STRICT" "0"}}))
+             "SEON_RENDER_STRICT" "0"
+             "SEON_PROGRAM_SOURCE_PATH" "/stale/source.edn"
+             "SEON_PROGRAM_SOURCE_DIGEST" "stale"}}
+           manifest))
       "an explicit caller selection still wins, as it does in bin/test-cljs"))
+
+(deftest bun-test-environment-rejects-an-unbound-artifact
+  (is (thrown-with-msg?
+       clojure.lang.ExceptionInfo
+       #"no program-source identity"
+       (changed/test-process-environment
+        {:seon.dev.config/root "root"}
+        (dissoc manifest :seon.dev.test.artifact/program-source-digest)))))
 
 (deftest full-javascript-command-does-not-filter-shadow-test-data
   (let [artifact {:seon.dev.test.artifact/path "out/test/artifact/test.js"}]

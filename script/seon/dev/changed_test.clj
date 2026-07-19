@@ -514,11 +514,30 @@
         (recur (rest lines) excerpts)))))
 
 (defn test-process-environment
-  "Return the canonical Bun test environment, preserving explicit overrides."
-  [configuration]
-  (let [environment (:seon.dev.config/environment configuration)]
-    {"SEON_CONFIG" (get environment "SEON_CONFIG" "config/test.edn")
-     "SEON_RENDER_STRICT" (get environment "SEON_RENDER_STRICT" "1")}))
+  "Return the canonical Bun environment for one admitted test artifact."
+  [configuration manifest]
+  (let [environment (:seon.dev.config/environment configuration)
+        base {"SEON_CONFIG" (get environment "SEON_CONFIG" "config/test.edn")
+              "SEON_RENDER_STRICT"
+              (get environment "SEON_RENDER_STRICT" "1")}]
+    (if-not manifest
+      base
+      (let [root (:seon.dev.config/root configuration)
+            path (:seon.dev.test.artifact/program-source-path manifest)
+            digest (:seon.dev.test.artifact/program-source-digest manifest)]
+        (when-not (and (string? root)
+                       (string? path)
+                       (string? digest)
+                       (re-matches #"[0-9a-f]{64}" digest))
+          (throw
+           (ex-info
+            "The admitted test artifact has no program-source identity."
+            {:seon.dev.config/root root
+             :seon.dev.test.artifact/program-source-path path
+             :seon.dev.test.artifact/program-source-digest digest})))
+        (assoc base
+               "SEON_PROGRAM_SOURCE_PATH" (str (fs/path root path))
+               "SEON_PROGRAM_SOURCE_DIGEST" digest)))))
 
 (defn- run-command! [root boundary argv environment]
   (let [log-dir (fs/path root "tmp/test-changed")
@@ -597,7 +616,7 @@
     (assoc (run-command! root :pod
                          (javascript-argv bun-executable root manifest
                                           test-namespaces)
-                         (test-process-environment configuration))
+                         (test-process-environment configuration manifest))
            :seon.dev.changed-test/test-namespaces test-namespaces)))
 
 (defn- run-operator! [root test-namespaces]
@@ -618,7 +637,7 @@
 (defn- run-pod-fallback! [configuration]
   (let [root (:seon.dev.config/root configuration)]
     (assoc (run-command! root :pod [(str (fs/path root "bin/test-cljs"))]
-                         (test-process-environment configuration))
+                         (test-process-environment configuration nil))
          :seon.dev.changed-test/test-namespaces :all
          :seon.dev.changed-test/reason
          "The managed Shadow manifest was unavailable; ran the full one-shot pod gate.")))
