@@ -4717,6 +4717,7 @@
                         (fn ^:async run-auto-tests! []
                           (await (test-runner/run!
                                    {:seon.test.runner/vars    (vec targets)
+                                    :seon.test.runner/eval-id eval-id
                                     :seon.test.runner/record? true
                                     :seon.test.runner/trigger
                                     :seon.test.runner/on-test-definition})))))

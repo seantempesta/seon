@@ -253,6 +253,44 @@
                   (is false (str "threw — " e))
                   (done)))))))
 
+(deftest record-run-links-the-exact-summary-and-tests-to-its-eval
+  (async done
+    (let [original-transact db/transact!
+          !request (atom nil)
+          eval-id "eval-evidence-1"
+          selected '[seon.test.runner-probes/probe-passing-test]
+          run-result {:seon.test.runner/events
+                      [{:type :pass
+                        :var (first selected)
+                        :expected "true"
+                        :actual "true"}]
+                      :seon.test.runner/summary
+                      {:test 1 :pass 1 :fail 0 :error 0}
+                      :seon.test.runner/selected-vars selected}]
+      (set! db/transact!
+            (fn [& [request]]
+              (reset! !request request)
+              (js/Promise.resolve (transaction-report))))
+      (-> (r/record-run! {:seon.test.runner/run-result run-result
+                          :seon.test.runner/eval-id eval-id})
+          (.then
+            (fn [_]
+              (let [eval-row (first (:seon.db/tx-data @!request))]
+                (is (= {:seon.eval/id eval-id
+                        :seon.test.runner/test 1
+                        :seon.test.runner/pass 1
+                        :seon.test.runner/fail 0
+                        :seon.test.runner/error 0
+                        :seon.test.runner/tests
+                        [[:seon.test/sym (str (first selected))]]}
+                       eval-row)
+                    "the eval carries its exact cljs.test summary and selected tests"))))
+          (.finally (fn [] (set! db/transact! original-transact)))
+          (.then (fn [_] (done)))
+          (.catch (fn [e]
+                    (is false (str "threw — " e))
+                    (done)))))))
+
 (deftest no-outcome-recording-is-a-structural-no-op
   (async done
     (let [run-result {:seon.test.runner/events []

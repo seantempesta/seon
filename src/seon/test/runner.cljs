@@ -59,6 +59,7 @@
 (schema/register! ::vars [:vector :symbol])
 (schema/register! ::ns   :symbol)
 (schema/register! ::record? :boolean)
+(schema/register! ::eval-id :string)
 (schema/register! ::trigger
   [:enum ::manual ::on-test-definition ::pre-victory ::cli])
 
@@ -76,10 +77,12 @@
   [:or
    [:map
     [::vars ::vars]
-    [::ns   {:optional true} ::ns]]
+    [::ns   {:optional true} ::ns]
+    [::eval-id {:optional true} ::eval-id]]
    [:map
     [::ns   ::ns]
-    [::vars {:optional true} ::vars]]])
+    [::vars {:optional true} ::vars]
+    [::eval-id {:optional true} ::eval-id]]])
 
 (schema/register! ::run-request
   [:and
@@ -106,7 +109,9 @@
      [:seon.error/message :seon.error/message]]]])
 
 (schema/register! ::record-request
-  [:map [::run-result ::run-result]])
+  [:map
+   [::run-result ::run-result]
+   [::eval-id {:optional true} ::eval-id]])
 
 (schema/register! ::record-tx-response
                   [:or ::db/transact-response ::db/error])
@@ -137,6 +142,17 @@
 (schema/register! :seon.test/source :string)
 (schema/register! :seon.test/ns :seon.db/ref)
 (schema/register! :seon.test/created-at :inst)
+
+;; Exact behavioral evidence is stored on the immutable eval that caused the
+;; run. These names deliberately mirror cljs.test's summary counters; the refs
+;; name the selected :seon.test rows. The eval already belongs to a turn, so
+;; this one connection makes the evidence reachable from turn/run/message/plan
+;; without a second test-run entity or timestamp inference.
+(schema/register! ::tests [:vector :seon.db/ref])
+(schema/register! ::test :int)
+(schema/register! ::pass :int)
+(schema/register! ::fail :int)
+(schema/register! ::error :int)
 
 ;; Entity-kind `:map` schema — promotes `:seon.test` to a real renderable
 ;; KIND (mirrors the `:seon.fn` / `:seon.schema` registrations in
@@ -635,20 +651,32 @@
    Returns the full result with structural recording fields plus the compact
    database transaction envelope."
   {:malli/schema [:=> [:cat ::record-request] ::record-response]}
-  [{::keys [run-result]}]
+  [{::keys [run-result eval-id]}]
   (let [now     (js/Date.)
         events  (::events run-result)
+        summary (::summary run-result)
+        selected (vec (::selected-vars run-result))
         per-var (group-by :var (filter #(some? (:var %)) events))
-        tx-data
-        (vec
-          (for [[var-sym evts] per-var
-                :let [outcome (last (filter #(#{:pass :fail :error} (:type %)) evts))]
-                :when outcome
-                :let [failed? (#{:fail :error} (:type outcome))]]
-            (cond-> {:seon.test/sym (str var-sym)}
-              failed?       (assoc :seon.test/last-failed-at        now
-                                   :seon.test/last-failure-summary  (failure-summary outcome))
-              (not failed?) (assoc :seon.test/last-passed-at now))))
+        test-rows
+        (for [[var-sym evts] per-var
+              :let [outcome (last (filter #(#{:pass :fail :error} (:type %)) evts))]
+              :when outcome
+              :let [failed? (#{:fail :error} (:type outcome))]]
+          (cond-> {:seon.test/sym (str var-sym)}
+            failed?       (assoc :seon.test/last-failed-at        now
+                                 :seon.test/last-failure-summary  (failure-summary outcome))
+            (not failed?) (assoc :seon.test/last-passed-at now)))
+        eval-row
+        (when eval-id
+          (cond-> {:seon.eval/id eval-id
+                   ::test  (:test summary)
+                   ::pass  (:pass summary)
+                   ::fail  (:fail summary)
+                   ::error (:error summary)}
+            (seq selected)
+            (assoc ::tests
+                   (mapv (fn [sym] [:seon.test/sym (str sym)]) selected))))
+        tx-data (vec (concat (when eval-row [eval-row]) test-rows))
         tx-report (when (seq tx-data)
                     (await (db/transact! {:seon.db/tx-data tx-data})))
         ok?       (or (nil? tx-report)
@@ -763,7 +791,7 @@
    `::recorded?` / `::recorded-syms` when `::record? true`, and `::trigger`
    propagated through."
   {:malli/schema [:=> [:cat ::run-request] ::run-result]}
-  [{::keys [record? trigger] :as req}]
+  [{::keys [record? trigger eval-id] :as req}]
   (cond
     (and (some? (::vars req)) (some? (::ns req)))
     (selector-error (str "Ambiguous selector — provide exactly one of "
@@ -781,7 +809,8 @@
           base     (cond-> (assoc result ::selected-vars selected)
                      trigger (assoc ::trigger trigger))]
       (if record?
-        (::run-result (await (record-run! {::run-result base})))
+        (::run-result (await (record-run! (cond-> {::run-result base}
+                                            eval-id (assoc ::eval-id eval-id)))))
         base))))
 
 (defn ^:async run-ns!

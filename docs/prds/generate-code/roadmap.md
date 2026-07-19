@@ -44,6 +44,15 @@ The final source-generation gate passed 1,223 tests/5,485 assertions; focused
 parser/eval/turn proof passed 77 tests/476 assertions. Current-artifact live
 proof is the remaining Stage 3 exit before orchestration consumes the seam.
 
+Canonical behavioral-test evidence now follows the same eval seam. The test
+runner writes its native summary counters and selected `:seon.test` refs onto
+the exact `:seon.eval` entity that caused the automatic run. Because that eval
+already belongs to a turn and the turn belongs to a run, generation completion
+can follow the existing run/message/plan connections without inferring from
+global latest-test timestamps or storing a second generation result. The
+affected gate passed 610 tests/2,791 assertions; live current-artifact proof
+remains part of the Stage 3 checkpoint.
+
 Ordinary agent replies already pass through `parse-forms` once and
 `eval-batch!` evaluates entries sequentially. Each whole top-level Promise is
 awaited before the next entry, successful `(ns ...)` forms change the active
