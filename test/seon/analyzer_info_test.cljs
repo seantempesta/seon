@@ -123,6 +123,26 @@
   (is (= #{} (ai/require-edges-from-source "not an ns form")))
   (is (= #{} (ai/require-edges-from-source "(ns broken"))))
 
+(deftest namespace-info-derives-documentation-and-edges-once
+  (let [source "(ns my.probe\n  \"Owns probe behavior.\\n\\nMore detail.\"\n  (:require [seon.db :as db]))"
+        info (ai/namespace-info-from-source source)]
+    (is (= "Owns probe behavior.\n\nMore detail." (:seon.ns/doc info)))
+    (is (= "Owns probe behavior." (:seon.ns/summary info)))
+    (is (= #{{:seon.ns.require/target :seon.db
+              :seon.ns.require/alias 'db}}
+           (:seon.ns/require-edges info)))
+    (is (m/validate :seon.analyzer-info/namespace-info info))))
+
+(deftest namespace-info-remains-fail-soft-for-doc-quality
+  (let [long-summary (apply str (repeat 120 "x"))
+        info (ai/namespace-info-from-source
+               (str "(ns my.long-doc \"" long-summary "\")"))]
+    (is (= long-summary (:seon.ns/summary info))
+        "style warnings never make namespace indexing fail")
+    (is (m/validate :seon.analyzer-info/namespace-info info)))
+  (is (= {:seon.ns/require-edges #{}}
+         (ai/namespace-info-from-source "(ns broken"))))
+
 ;; ---------------------------------------------------------------------------
 ;; var-projection — owner-ns keys (C34): the projection map speaks
 ;; :seon.analyzer-info/* like every internal envelope, and validates
