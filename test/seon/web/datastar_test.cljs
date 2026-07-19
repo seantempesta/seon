@@ -167,12 +167,15 @@
                 {:history {::datastar/live? false
                            ::datastar/dependencies :all}}})))))
 
-(deftest listener-query-declares-the-exact-attribute-union
-  (is (= '[:find (count ?e) . :where
-           [?e :seon.agent/id _]
-           [?e :seon.message/text _]]
-         (@#'datastar/dependencies-query
-          #{:seon.message/text :seon.agent/id}))))
+(deftest listener-plan-declares-the-exact-attribute-union
+  (is (= {:datahike.query.dependency/sources
+          [{:datahike.query.source/symbol '$
+            :datahike.query.source/argument-position 0
+            :datahike.query.source/attributes
+            #{:seon.agent/id :seon.message/text}}]}
+         (@#'datastar/dependencies-plan
+          #{:seon.message/text :seon.agent/id})))
+  (is (= :all (@#'datastar/dependencies-plan :all))))
 
 (deftest complete-render-bytes-follow-the-database-that-proved-them
   (let [next-database (assoc database :t 43)

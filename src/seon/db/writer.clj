@@ -2195,8 +2195,15 @@
 (defn- listen-interest
   [request scope]
   (let [dependencies
-        (when-let [query-form (::protocol/query-form request)]
-          (d/query-attribute-dependencies query-form))]
+        (cond
+          (contains? request :datahike.read/dependency-plan)
+          (d/dependency-plan-attributes
+           (:datahike.read/dependency-plan request) 0)
+
+          (::protocol/query-form request)
+          (d/query-attribute-dependencies (::protocol/query-form request))
+
+          :else nil)]
     (when (and (set? dependencies) (empty? dependencies))
       (throw
        (ex-info "A query interest must depend on a database attribute."

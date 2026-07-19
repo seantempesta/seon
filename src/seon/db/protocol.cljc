@@ -587,6 +587,13 @@
   [:seon.db/db :seon.db/db]
   [::query-form ::query-form]])
 (schema/register!
+ ::dependency-plan-listen-request
+ [:map {:closed true}
+  [::operation [:= listen-operation]]
+  [::request-id ::request-id]
+  [:seon.db/db :seon.db/db]
+  [:datahike.read/dependency-plan :datahike.read/dependency-plan]])
+(schema/register!
  ::datom-listen-request
  [:map {:closed true}
   [::operation [:= listen-operation]]
@@ -594,7 +601,8 @@
   [:seon.db/db :seon.db/db]
   [::datom-patterns ::datom-patterns]])
 (schema/register! ::listen-request
-                  [:or ::query-listen-request ::datom-listen-request])
+                  [:or ::dependency-plan-listen-request
+                   ::query-listen-request ::datom-listen-request])
 (schema/register!
  ::unlisten-request
  [:map {:closed true}
@@ -1036,13 +1044,20 @@
   [:seon.db/db :seon.db/db]
   [::query-form ::query-form]])
 (schema/register!
+ ::dependency-plan-listen-request-input
+ [:map {:closed true}
+  [::request-id ::request-id]
+  [:seon.db/db :seon.db/db]
+  [:datahike.read/dependency-plan :datahike.read/dependency-plan]])
+(schema/register!
  ::datom-listen-request-input
  [:map {:closed true}
   [::request-id ::request-id]
   [:seon.db/db :seon.db/db]
   [::datom-patterns ::datom-patterns]])
 (schema/register! ::listen-request-input
-                  [:or ::query-listen-request-input
+                  [:or ::dependency-plan-listen-request-input
+                   ::query-listen-request-input
                    ::datom-listen-request-input])
 (schema/register!
  ::unlisten-request-input

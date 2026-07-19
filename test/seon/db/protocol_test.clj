@@ -256,6 +256,22 @@
                    (assoc listen :seon.db/db
                           (assoc db :since 536870928))))))))
 
+(deftest listeners-accept-datahikes-dependency-plan-directly
+  (let [plan {:datahike.query.dependency/sources
+              [{:datahike.query.source/symbol '$
+                :datahike.query.source/argument-position 0
+                :datahike.query.source/attributes #{:person/name}}]}
+        request
+        (protocol/listen-request
+         {::protocol/request-id "listen/dependency-plan"
+          :seon.db/db db
+          :datahike.read/dependency-plan plan})]
+    (is (protocol/valid-request? request))
+    (is (= request (transit-roundtrip request)))
+    (is (false? (protocol/valid-request?
+                 (assoc request ::protocol/query-form
+                        '[:find ?e :where [?e :person/name]]))))))
+
 (deftest release-selects-an-acquired-database-by-ordinary-value
   (let [request (protocol/release-database-request
                  {::protocol/request-id "release/research"

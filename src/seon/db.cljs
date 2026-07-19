@@ -148,6 +148,7 @@
   [::db {:optional true} :seon.db/db]
   [::key {:optional true} ::key]
   [::query {:optional true} ::query-form]
+  [::dependency-plan {:optional true} :datahike.read/dependency-plan]
   [::datom-patterns {:optional true} ::datom-patterns]])
 (schema/register! ::unlisten-request [:map {:closed true} [::key ::key]])
 (schema/register! ::unlisten-response :boolean)
@@ -1096,10 +1097,8 @@
 
 ;;; Transaction interests
 
-(def ^:private all-datoms-query
-  '[:find ?e :where [?e ?attribute ?value]])
-
-(defn- ^:async listen-request! [{::keys [handler key query datom-patterns]
+(defn- ^:async listen-request! [{::keys [handler key query dependency-plan
+                                         datom-patterns]
                                  :as input}]
   (if-let [{::keys [session]} (active-session)]
     (let [database (await (read-db! input))]
@@ -1114,8 +1113,12 @@
                         ::db database}
                  datom-patterns
                  (assoc ::protocol/datom-patterns datom-patterns)
-                 (not datom-patterns)
-                 (assoc ::protocol/query-form (or query all-datoms-query))))]
+                 (and (not datom-patterns) dependency-plan)
+                 (assoc :datahike.read/dependency-plan dependency-plan)
+                 (and (not datom-patterns) (not dependency-plan) query)
+                 (assoc ::protocol/query-form query)
+                 (and (not datom-patterns) (not dependency-plan) (not query))
+                 (assoc :datahike.read/dependency-plan :all)))]
           (swap! !session assoc-in [::interest-handlers request-id]
                  {::owner owner
                   ::handler handler

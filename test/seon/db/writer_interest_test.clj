@@ -296,8 +296,11 @@
                    (protocol/listen-request
                     {::protocol/request-id listen-a-id
                      :seon.db/db (:db-after schema-report)
-                     ::protocol/query-form
-                     '[:find ?value :where [_ :interest/a ?value]]}))
+                     :datahike.read/dependency-plan
+                     {:datahike.query.dependency/sources
+                      [{:datahike.query.source/symbol '$
+                        :datahike.query.source/argument-position 0
+                        :datahike.query.source/attributes #{:interest/a}}]}}))
             listen-b
             (call! b
                    (protocol/listen-request
@@ -322,6 +325,10 @@
         (is (= (:db-after schema-report) (:db-after listen-a)))
         (is (= (:db-after listen-a) (:db-after listen-b)))
         (is (= (:seon.db/db acquired-a) (:seon.db/db acquired-b)))
+        (is (= #{:interest/a}
+               (get-in @(::writer/interests (interest-connection server
+                                                                 listen-a-id))
+                       [listen-a-id ::writer/dependencies])))
         (is (= protocol/datoms-event (::protocol/event event-a)))
         (is (= listen-a-id (::protocol/request-id event-a)))
         (is (some #(= :interest/a (nth % 1)) (:tx-data event-a)))

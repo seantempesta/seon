@@ -771,9 +771,6 @@
 ;; Lifecycle — db/listen! IS the refresh signal.
 ;; ============================================================
 
-(def ^:private all-datoms-query
-  '[:find (count ?e) . :where [?e ?a ?v]])
-
 (defonce ^{:private true
            :doc "Serialized updates to the one authority database interest."}
   !listener-updates (atom (js/Promise.resolve nil)))
@@ -796,14 +793,15 @@
       (some #{:all ::unknown} dependencies) :all
       :else (not-empty (apply set/union #{} dependencies)))))
 
-(defn- dependencies-query
-  "Datalog query whose analyzed attributes equal `dependencies`."
+(defn- dependencies-plan
+  "One default-source dependency plan for the live page union."
   [dependencies]
   (if (= :all dependencies)
-    all-datoms-query
-    (into '[:find (count ?e) . :where]
-          (map (fn [attribute] ['?e attribute '_]))
-          (sort dependencies))))
+    :all
+    {:datahike.query.dependency/sources
+     [{:datahike.query.source/symbol '$
+       :datahike.query.source/argument-position 0
+       :datahike.query.source/attributes dependencies}]}))
 
 (defn- advance-full-events
   "Invalidate affected renders and advance unchanged renders to the commit."
@@ -863,7 +861,7 @@
   (-> (db/listen!
        {::db/key ::views
         ::db/handler on-tx
-        ::db/query (dependencies-query dependencies)})
+        ::db/dependency-plan (dependencies-plan dependencies)})
       (.then
        (fn [result]
          (cond
