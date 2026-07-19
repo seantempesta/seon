@@ -758,18 +758,22 @@
 
 (declare persisted-require-edges)
 
+(defn- require-specs
+  [edges]
+  (mapv (fn [{:seon.ns.require/keys [target alias refers refer-all?
+                                     as-alias?]}]
+          (cond-> [(symbol (name target))]
+            (and (symbol? alias) as-alias?) (conj :as-alias alias)
+            (and (symbol? alias) (not as-alias?)) (conj :as alias)
+            (seq refers) (conj :refer (vec (sort refers)))
+            refer-all? (conj :refer :all)))
+        (sort-by :seon.ns.require/target edges)))
+
 (defn namespace-head
   "Build one namespace form from its persisted ordinary require-edge rows."
   {:malli/schema [:=> [:cat :keyword [:sequential :map]] :string]}
   [ns-kw edges]
-  (let [specs (map (fn [{:seon.ns.require/keys [target alias refers refer-all?
-                                                as-alias?]}]
-                     (cond-> [(symbol (name target))]
-                       (and (symbol? alias) as-alias?) (conj :as-alias alias)
-                       (and (symbol? alias) (not as-alias?)) (conj :as alias)
-                       (seq refers) (conj :refer (vec (sort refers)))
-                       refer-all? (conj :refer :all)))
-                   (sort-by :seon.ns.require/target edges))
+  (let [specs (require-specs edges)
         n (symbol (name ns-kw))]
     (pr-str (if (seq specs)
               (list 'ns n (apply list :require specs))
@@ -985,6 +989,8 @@
       (throw (ex-info "Selected authored functions have no namespace source."
                       {:seon.execution/function-symbols missing
                        :seon.error/kind :core-bug})))
+    (doseq [{:seon.ns/keys [require-edges]} namespace-rows]
+      (seed-toolkit-refers! compile-state (require-specs require-edges)))
     (schema/activate-projection!
      (schema/build-projection
       (into {} (map (fn [[key form]] [key (reader/read-string form)]))

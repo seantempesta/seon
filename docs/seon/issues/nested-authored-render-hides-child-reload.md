@@ -43,3 +43,20 @@ renderer, or user-visible recovery instruction.
   actions work in a real browser without an intermediate error surface.
 - A second retry is impossible and ordinary authored compile/call errors remain
   ordinary render error values.
+
+## 2026-07-18 follow-on trace
+
+Commit `a803c26c` preserved the nested reload signal. The rebuilt read-only
+package no longer displayed the stale-program error and replaced the child,
+then exposed the next cold-load fault: `Could not parse ns form
+my.agent.red-apes-reply`, followed by a selected-function-not-loaded fallback.
+
+The persisted `:seon.ns/source` is a valid home namespace form, and its
+`:seon.ns/require-edges` name the lifecycle `:refer` members. ClojureScript's
+`cljs.js/ns-side-effects` wraps analyzer `check-uses` failures with the
+misleading parse message. A fresh self-host compiler has no analyzer definitions
+for host-compiled `wait`, `complete`, `pause`, `resume`, and `terminate`.
+`setup-agent-ns!` already projected those live referred vars before analyzing
+the same namespace form; `load-authored-program!` did not. The correction is to
+derive the require specs from the existing persisted edges and seed the same
+analyzer definitions before cold authored-program loading.

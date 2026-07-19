@@ -4178,3 +4178,13 @@ and form actions complete through a real browser. This correctness boundary
 precedes the remaining current 1/2/4-agent and five-minute private-memory
 measurements; performance evidence from a package that cannot refresh authored
 render source is not graduation evidence.
+
+The first `a803c26c` package rerun proved the nested reload signal now reaches
+the host: the stale-program error disappeared and the child was replaced. The
+fresh child then exposed a second core fault before loading the selected
+renderer. Its persisted home namespace source is valid, but
+`load-authored-program!` did not project host-compiled lifecycle `:refer`
+members into the fresh self-host analyzer before ClojureScript's `check-uses`.
+`setup-agent-ns!` already performs that projection. The same persisted
+`:seon.ns/require-edges` must drive both paths; the integration gate remains
+the unchanged real canvas journey after a second exact package build.

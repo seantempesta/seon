@@ -1,6 +1,7 @@
 (ns seon.execution-test
   (:require
    [cljs.test :refer [async deftest is testing]]
+   [seon.agent.lifecycle :as lifecycle]
    [seon.db :as db]
    [seon.db.protocol :as protocol]
    [seon.eval :as seval]
@@ -431,6 +432,39 @@
            (is false (str "multi-target load rejected: " error))))
           (.finally
            (fn []
+             (schema/restore-state! schema-state)
+             (done)))))))
+
+(deftest authored-loader-seeds-persisted-referred-host-functions
+  (async done
+    (let [schema-state (schema/snapshot-state)
+          sym 'my.execution.referred/run]
+      (is (fn? lifecycle/complete)
+          "the referred lifecycle namespace is host compiled")
+      (-> (seval/load-authored-program!
+           {:seon.execution/schema-forms []
+            :seon.execution/function-contracts []
+            :seon.execution/namespace-rows
+            [{:seon.ns/name :my.execution.referred
+              :seon.ns/source
+              (str "(ns my.execution.referred\n"
+                   "  (:require [seon.agent.lifecycle :refer [complete]]))")
+              :seon.ns/require-edges
+              [{:seon.ns.require/target :seon.agent.lifecycle
+                :seon.ns.require/refers #{'complete}}]
+              :seon.fn/_ns
+              [{:seon.fn/sym sym
+                :seon.fn/source "(defn run [] (fn? complete))"}]
+              :seon.test/_ns []}]
+            :seon.execution/function-symbols [sym]})
+          (.then
+           (fn [_]
+             (is (true? ((seval/lookup-value sym))))
+             (schema/restore-state! schema-state)
+             (done)))
+          (.catch
+           (fn [error]
+             (is false (str "persisted :refer failed to load: " error))
              (schema/restore-state! schema-state)
              (done)))))))
 
