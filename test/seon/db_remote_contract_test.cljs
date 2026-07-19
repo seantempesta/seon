@@ -466,6 +466,52 @@
                           "\n" (.-stack error)))
            (done))))))
 
+(deftest transaction-backpressures-through-a-busy-session
+  (async done
+    (-> (with-recording-authority
+          {}
+          (fn [{::keys [requests connect-count]}]
+            (-> (open!)
+                (.then
+                 (fn [_]
+                   (let [transaction-attempts (atom 0)
+                         tx-data [{:example/id "busy-transaction"
+                                   :example/value "eventually committed"}]]
+                     (set! uds/request!
+                           (fn [{::uds/keys [message]}]
+                             (swap! requests conj message)
+                             (if (and (= protocol/transact-operation
+                                         (::protocol/operation message))
+                                      (<= (swap! transaction-attempts inc) 3))
+                               (js/Promise.reject
+                                (ex-info
+                                 "request window is full"
+                                 {::uds/failure
+                                  :seon.db.transport.uds.failure/busy}))
+                               (js/Promise.resolve
+                                (response-for message {})))))
+                     (-> ((deref #'db/submit-transaction!)
+                          {::db/db database}
+                          tx-data {})
+                         (.then
+                          (fn [report]
+                            (let [transactions
+                                  (operation-requests
+                                   @requests protocol/transact-operation)]
+                              (is (= 4 (count transactions)))
+                              (is (apply = transactions)
+                                  "capacity waits retry one frozen request")
+                              (is (= 4 @transaction-attempts))
+                              (is (= 1 @connect-count)
+                                  "busy capacity does not reconnect the session")
+                              (is (= database (:db-after report)))))))))))))
+        (.then (fn [_] (done)))
+        (.catch
+         (fn [error]
+           (is false (str "busy transaction backpressure failed: " error
+                          "\n" (.-stack error)))
+           (done))))))
+
 (deftest owner-close-stops-transaction-recovery-during-reconnect
   (async done
     (-> (with-recording-authority

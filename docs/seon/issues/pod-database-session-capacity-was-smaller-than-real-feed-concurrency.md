@@ -29,6 +29,14 @@ socket is closed or shutting down, not ordinary backpressure. The child
 persisted a core fault and exited, then the automatic recovery transaction
 failed. Sibling agents and the pod remained alive.
 
+A later reactive slow/fast-socket pressure probe submitted 300 independent
+transactions concurrently. The 256-entry pod request window correctly refused
+the excess with `:seon.db.transport.uds.failure/busy`, but
+`seon.db/submit-transaction!` did not classify that transient admission result
+with its existing exact-request delivery recovery. The ordinary overload then
+escaped as hundreds of core faults, filled the bounded pending-error buffer,
+and degraded the disposable pod before socket pressure could be measured.
+
 The writer currently adds every connection that performs database work to
 `::acquisitions`, then `deliver-database-advanced!` sends every committed
 database value to every acquired connection. An execution child therefore
@@ -43,7 +51,10 @@ retain more database values.
 `seon.db.transport.uds` owns one bounded per-session pending-request map. Its
 capacity permits ordinary concurrent feeds and agent work while still bounding
 memory and preserving request identity until physical completion. It does not
-discard timed-out request IDs or add retries.
+discard timed-out request IDs or add retries. The transaction owner already
+retries one frozen idempotent request through ambiguous delivery failures; it
+also waits through transient local `:busy` admission with the same bounded
+exponential delay instead of reconnecting or exposing a core fault.
 
 The database protocol separately owns delivery of
 `:seon.db.protocol.event/database-advanced`. The pod opts into those updates so
@@ -58,6 +69,8 @@ intermediate database-advanced events.
 
 - The transport test fills the selected capacity with timed-out physical work
   and proves that one more request receives the existing busy error.
+- A transaction that meets transient busy admission retries the byte-identical
+  request on the same session and commits once capacity returns.
 - A sustained real-agent run with five feeds does not exhaust session capacity.
 - Pending requests retire after the JVM completes or cancels physical work;
   capacity does not leak across the recovery proof.

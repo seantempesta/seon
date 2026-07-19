@@ -194,7 +194,8 @@
 (defn- recoverable-transaction-delivery? [value]
   (let [failure-data (transport-failure-data value)
         transport-failure (::uds/failure failure-data)]
-    (or (and (contains? #{:seon.db.transport.uds.failure/closed
+    (or (and (contains? #{:seon.db.transport.uds.failure/busy
+                          :seon.db.transport.uds.failure/closed
                           :seon.db.transport.uds.failure/write
                           :seon.db.transport.uds.failure/timeout}
                         transport-failure)
