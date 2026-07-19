@@ -361,7 +361,8 @@
       (set! db/query
             (fn [request]
               (is (identical? database (::db/db request)))
-              (is (= 64 (::db/max-results request)))
+              (is (= 4096 (::db/max-results request))
+                  "namespace reads use the existing agent-creation budget")
               (let [read (swap! namespace-reads inc)]
                 (js/Promise.resolve (when (= 2 read) 7000)))))
       (set! db/pull-many
@@ -611,7 +612,8 @@
               ([_ _ _] (js/Promise.reject (js/Error. "unexpected pull-many arity")))))
       (set! db/query
             (fn [request]
-              (is (= 64 (::db/max-results request)))
+              (is (= 4096 (::db/max-results request))
+                  "resident lookup uses the existing agent-creation budget")
               (js/Promise.resolve
                (if (= 1 (swap! query-count inc)) "tax-resident" 7000))))
       (set! message/message!
