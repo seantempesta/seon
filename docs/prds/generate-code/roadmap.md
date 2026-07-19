@@ -434,6 +434,12 @@ selection are part of each agent's derived configuration.
 
 ### Stage 1 — namespace symbol foundation
 
+**Graduated 2026-07-19 at `bbbdd8b8`, live-proven at `f0d6ba59`.** The
+canonical namespace identity, require target, and eval namespace are symbols
+through the one schema/index/eval/context path. A fresh database installed the
+symbol schema, and a cold execution child reconstructed and ran a persisted
+cross-namespace alias after restart without a compatibility conversion.
+
 Change `:seon.ns/name` and `:seon.ns.require/target` from keyword values to
 symbols through the one indexing, config, render, eval, query, and test path.
 Rebuild a disposable database; prove idempotent boot indexing and namespace
@@ -468,10 +474,13 @@ Exit:
 
 ### Stage 3 — schema-first evaluator composition
 
-**Source-complete at `c292ee2d`; current-artifact live proof pending.** The
+**Graduated 2026-07-19 at `f0d6ba59`.** The
 ordinary batch turn consumes `:seon.repl/eval-entries` and the existing
 `eval-batch!` owns all evaluation, Promise resolution, analyzer publication,
 program facts, and ordered eval IDs. No second compiler or recorder exists.
+The live gate evaluated dependency-ordered namespaces, awaited the top-level
+Promise, preserved a real alias through bare namespace re-entry, and returned
+the same result from a newly created execution child after restart.
 
 Compose the existing per-form evaluator over a namespace unit: declaration,
 schemas, remaining forms, affected tests. Do not add another compiler state or
@@ -486,6 +495,15 @@ Exit:
 - all accepted forms appear once in the canonical program facts.
 
 ### Stage 4 — durable root and namespace steps
+
+**Source-complete 2026-07-19 at `02324bcb`, with the bootstrap and stable
+scheduler projection gate passing 178 tests/896 assertions.** Namespace and
+claim attributes, `blocked!`, claim-clearing `reopen!`, and the idempotent
+namespace DAG compiler reuse the existing plan graph. Fresh initialization now
+installs both optional generated-step attributes before an empty frontier is
+queried. The stable root projection includes namespace status/claim facts plus
+the rollup, so a claimed final step's done/blocked transition cannot disappear
+behind reactive equality suppression.
 
 Extend `my.plan` with namespace and claim, add `blocked!`, and idempotently
 reconcile the generated namespace DAG beneath one root.
@@ -579,11 +597,11 @@ Exit:
 
 ## Next implementation boundary
 
-Stage 1 remains the persistence-critical boundary: migrate namespace values to
-symbols through the single analyzer/index/config/context/query path, wipe and
-rebuild an isolated database, and prove the second index pass is a no-op. The
-completed Stage 2 projection allows Stage 3's invocation-local evaluator
-composition to proceed independently. Stage 4 database reconciliation and all
-later orchestration must not assume symbol identities until Stage 1 passes its
-live rebuild gate. Named model variants are available now; their isolated Kimi
-compatibility proof can also proceed without touching namespace persistence.
+Stage 5 is the dependency-ready boundary. Add one root-scoped reactive
+computation over the stable Stage 4 projection, then compose the existing
+message transaction, generated identity allocation, claim CAS, and plan-message
+connection into one writer transaction. Prove a competing callback leaves one
+claim/message, prerequisite completion exposes its dependent once without
+polling, and terminal roots release their observer. Namespace-resident reuse
+and progressive repair context remain Stage 6 consumers of that settled claim
+contract.

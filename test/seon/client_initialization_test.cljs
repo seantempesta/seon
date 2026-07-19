@@ -125,6 +125,9 @@
     (is (= forward reverse))
     (is (= digest (:seon.execution/artifact-digest forward)))
     (is (= client/agent-bootstrap-attrs (:seon.db/attributes forward)))
+    (is (every? (set (:seon.db/attributes forward))
+                [:my.plan/namespace :my.plan/claim])
+        "fresh clusters install generated-plan query attrs before first use")
     (is (some #{:seon.render/full?} (:seon.db/attributes forward)))
     (is (= [:seon.ns/name :seon.fn/sym :seon.schema/key]
            (mapv (fn [row]

@@ -723,6 +723,49 @@
   [row]
   (get-in row [:my.plan/namespace :seon.ns/name]))
 
+(defn namespace-ready-frontier-from-rows
+  "Ready unclaimed namespace steps beneath one plan root."
+  [rows root-id]
+  (let [descendants (set (descendant-ids-from-rows rows root-id))]
+    (->> rows
+         (filter (fn [row]
+                   (let [id (row-id row)]
+                     (and (descendants id)
+                          (some? (row-namespace-name row))
+                          (nil? (:my.plan/claim row))
+                          (ready-from-rows? rows id)))))
+         (sort-by (juxt (comp str row-namespace-name) row-id))
+         (mapv (fn [row]
+                 {:my.plan/id (row-id row)
+                  :seon.ns/name (row-namespace-name row)})))))
+
+(defn namespace-root-state-from-rows
+  "Stable scheduler state for one generated-code plan root."
+  [rows root-id]
+  (let [by-id (rows-by-id rows)
+        root (by-id root-id)
+        descendants (set (descendant-ids-from-rows rows root-id))
+        namespace-steps
+        (->> rows
+             (filter (fn [row]
+                       (and (descendants (row-id row))
+                            (some? (row-namespace-name row)))))
+             (sort-by (juxt (comp str row-namespace-name) row-id))
+             (mapv (fn [row]
+                     (cond->
+                       {:my.plan/id (row-id row)
+                        :seon.ns/name (row-namespace-name row)
+                        :my.plan/status (:my.plan/status row)}
+                       (:my.plan/claim row)
+                       (assoc :my.plan/claim (:my.plan/claim row))))))]
+    (when root
+      {:my.plan/id root-id
+       :my.plan/status (:my.plan/status root)
+       :my.plan/progress (plan-rollup-from-rows rows root-id)
+       :my.plan/blocked? (blocked-from-rows? rows root-id)
+       ::namespace-steps namespace-steps
+       ::ready-steps (namespace-ready-frontier-from-rows rows root-id)})))
+
 (defn compile-namespace-dag
   "Reconcile one parsed-program projection into `root-id`'s namespace leaves.
 

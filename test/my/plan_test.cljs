@@ -185,6 +185,48 @@
           :my.plan/agent {:seon.agent/id agent-id}}
          attributes))
 
+(deftest generated-namespace-state-retains-terminal-transitions
+  (let [generated
+        [(first rows)
+         (row "z-model" "my.generated.z-model" :done 11
+              :my.plan/parent {:my.plan/id "root"}
+              :my.plan/namespace {:seon.ns/name 'my.generated.z-model}
+              :my.plan/claim "model-message")
+         (row "a-service" "my.generated.a-service" :open 12
+              :my.plan/parent {:my.plan/id "root"}
+              :my.plan/namespace {:seon.ns/name 'my.generated.a-service}
+              :my.plan/needs [{:my.plan/id "z-model"}])
+         (row "other" "my.generated.other" :open 13
+              :my.plan/namespace {:seon.ns/name 'my.generated.other})]
+        initial (internal/namespace-root-state-from-rows generated "root")
+        claimed-rows
+        (mapv #(if (= "a-service" (:my.plan/id %))
+                 (assoc % :my.plan/claim "service-message")
+                 %)
+              generated)
+        claimed (internal/namespace-root-state-from-rows claimed-rows "root")
+        done-rows
+        (mapv #(if (= "a-service" (:my.plan/id %))
+                 (assoc % :my.plan/status :done)
+                 %)
+              claimed-rows)
+        done-state (internal/namespace-root-state-from-rows done-rows "root")]
+    (is (= [{:my.plan/id "a-service"
+             :seon.ns/name 'my.generated.a-service}]
+           (:my.plan.internal/ready-steps initial)))
+    (is (= ['my.generated.a-service 'my.generated.z-model]
+           (mapv :seon.ns/name
+                 (:my.plan.internal/namespace-steps initial)))
+        "frontier and status projections sort by namespace, not transaction order")
+    (is (empty? (:my.plan.internal/ready-steps claimed)))
+    (is (not= claimed done-state)
+        "a claimed final leaf still changes the observed value when it closes")
+    (is (= {:my.plan/done 2 :my.plan/total 2 :my.plan/done? true}
+           (:my.plan/progress done-state)))
+    (is (= :done
+           (-> done-state :my.plan.internal/namespace-steps first
+               :my.plan/status)))))
+
 (defn- compile-with-generated-ids
   [existing document]
   (let [preview (internal/compile-reconcile

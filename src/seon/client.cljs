@@ -869,6 +869,12 @@
    ;; Back-ref to the inbound :human message an address-step tracks
    ;; (auto-minted in message!; the render half links id+age+title).
    :my.plan/message
+   ;; Generated-code leaves connect to their canonical namespace and fence one
+   ;; assignment through its preallocated message id. Install both eagerly so
+   ;; a fresh root observer can query an empty frontier before the first
+   ;; generated leaf transaction.
+   :my.plan/namespace
+   :my.plan/claim
    ;; The plan TREE edge (parent, plain ref) + the dependency DAG edges
    ;; (needs, plain cardinality-many ref). Boot-installed so the derived
    ;; work-queue rules (next/blocked/ready) query them before any tx has
