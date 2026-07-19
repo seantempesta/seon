@@ -31,6 +31,19 @@ assertions, including attempts well beyond the former cutoff. Seon's MCP
 regression proves that an agent session re-resolves and pins the replacement
 Shadow client ID; the focused MCP gate passes 18 tests and 57 assertions.
 
+Seon commit `6cf70cc7` pins that maintained source. The exact-source live build
+could not graduate on 2026-07-19 because the host killed Tailwind CSS twice
+with signal 9/exit 137: first during `bin/seon restart`, then during the single
+allowed `bin/seon up` continuation. Both attempts had already prepared the new
+CLJS dependency and compiled the self-host bootstrap. The supervisor left the
+default watcher, writer, and pod cleanly absent. `bin/acme status --edn` also
+reported its managed processes absent, so an old PID-1
+`node out-acme/client/main.js` process was not supervisor-owned and was not
+touched. Host RSS at the failure included unrelated 2.7–3.1 GB desktop,
+virtualization, and backup processes. This is a host-resource blocker, not a
+Shadow compile or focused-test failure; live preserved-pod re-advertisement
+remains open.
+
 ## Owner
 
 Shadow owns the runtime websocket lifecycle. Seon's existing MCP adapter owns

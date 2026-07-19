@@ -219,7 +219,13 @@ five-second retry bounded per attempt but removes the terminal retry count;
 its Node gate passes 2 tests/6 assertions. Seon's existing MCP discovery
 already re-resolves replacement client IDs, now covered by a focused regression
 in the 18-test/57-assertion MCP gate. Exact pinned-dependency restart and live
-watcher-outage/re-advertisement proof remain before resolving the issue.
+watcher-outage/re-advertisement proof remain before resolving the issue. The
+first exact-source restart and its one allowed `up` continuation both reached
+the newly pinned CLJS dependency, then the host SIGKILLed Tailwind CSS with exit
+137. The operator left the default processes cleanly absent. ACME's operator
+also reported no owned process, so its old PID-1 Node process was correctly not
+signaled. The focused source and MCP gates remain valid; live proof is recorded
+as blocked by unrelated host pressure rather than misreported as graduated.
 
 The stale-canvas recovery seam is now source-correct and live-safe. A persisted
 selection of absent function `my.agents.canvas-recovery/mistyped` rendered one
