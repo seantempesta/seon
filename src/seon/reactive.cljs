@@ -32,7 +32,7 @@
   [::key ::key]
   [::consumer-key ::consumer-key]])
 
-(def ^:private empty-runtime {::registrations {}})
+(def ^:private empty-runtime {::registrations {} ::measurements {}})
 
 (defonce ^{:private true
            :doc "Process-local owners for demanded reactive computations."}
@@ -41,6 +41,33 @@
 (defonce ^{:private true
            :doc "Reactive timing acquired from database configuration."}
   !policy (atom config/default-reactive-policy))
+
+(defn- registration-gauges [runtime]
+  (let [registrations (vals (::registrations runtime))]
+    {::registration-count (count registrations)
+     ::active-count (count (filter ::active registrations))
+     ::pending-count (count (filter ::pending-db registrations))
+     ::timer-count (count (filter ::timer registrations))
+     ::consumer-count (reduce + 0 (map (comp count ::consumers)
+                                       registrations))}))
+
+(defn- record-count! [measurement amount]
+  (swap! !runtime update-in [::measurements measurement] (fnil + 0) amount))
+
+(defn- record-basis! [measurement database]
+  (when-let [basis-transaction (:t database)]
+    (swap! !runtime assoc-in [::measurements measurement] basis-transaction)))
+
+(defn- record-high-water! []
+  (swap! !runtime
+         (fn [runtime]
+           (let [{::keys [active-count pending-count]}
+                 (registration-gauges runtime)]
+             (-> runtime
+                 (update-in [::measurements ::active-high-water]
+                            (fnil max 0) active-count)
+                 (update-in [::measurements ::pending-high-water]
+                            (fnil max 0) pending-count))))))
 
 (defn configure!
   "Install the database-acquired reactive timing policy."
@@ -107,8 +134,10 @@
                           "reactive consumer threw" exception))))
 
 (defn- notify-consumers! [registration value]
-  (doseq [notify (vals (::consumers registration))]
-    (notify-one! notify value)))
+  (let [consumers (vals (::consumers registration))]
+    (doseq [notify consumers]
+      (notify-one! notify value))
+    (record-count! ::notifications-delivered (count consumers))))
 
 (declare enqueue! install-interest! start-evaluation!)
 
@@ -154,7 +183,7 @@
 (defn- enqueue!
   [key registration-id database event]
   (let [now (monotonic-ms)
-        [_ after]
+        [before after]
         (swap-vals!
          !runtime
          (fn [runtime]
@@ -172,7 +201,12 @@
                            (max (or (::pending-settle-ms registration) 0)
                                 (settle-delay registration event)))))
                runtime))))
+        prior (get-in before [::registrations key])
         registration (get-in after [::registrations key])]
+    (when (and (::pending-db prior)
+               (> (:t database) (:t (::pending-db prior))))
+      (record-count! ::newest-pending-replacements 1))
+    (record-high-water!)
     (when (and (= registration-id (::registration-id registration))
                (nil? (::active registration)))
       (arm! key registration-id))))
@@ -234,6 +268,7 @@
                                             ::installed-signature signature
                                             ::interest-db ack-db))
                            runtime))))
+              (record-basis! ::last-installed-interest-t ack-db)
               (if initial?
                 (do
                   (enqueue! key registration-id ack-db nil)
@@ -318,9 +353,12 @@
                         (= evaluation-id
                            (get-in prior [::active ::evaluation-id])))]
     (when completed?
-      (when (or (not (::delivered? prior))
-                (not= (::value prior) value))
-        (notify-consumers! registration value))
+      (record-count! ::evaluations-completed 1)
+      (record-basis! ::last-completed-t basis-db)
+      (if (or (not (::delivered? prior))
+              (not= (::value prior) value))
+        (notify-consumers! registration value)
+        (record-count! ::equal-notifications-suppressed 1))
       (resolve-ready! registration value)
       (swap! !runtime update-in [::registrations key]
              dissoc ::resolve-ready)
@@ -357,6 +395,8 @@
         active (::active registration)]
     (when (and (= registration-id (::registration-id registration))
                (= evaluation-id (::evaluation-id active)))
+      (record-count! ::evaluations-started 1)
+      (record-high-water!)
       (when-let [timer (::timer prior)] (clear-timer! timer))
       (let [database (::db active)]
         (-> (js/Promise.resolve nil)
@@ -406,7 +446,8 @@
         (if prior
           (do
             (when (::delivered? registration)
-              (notify-one! notify (::value registration)))
+              (notify-one! notify (::value registration))
+              (record-count! ::notifications-delivered 1))
             (when-not (::delivered? registration)
               (await (::ready registration)))
             consumer-key)
@@ -468,10 +509,12 @@
   "Return bounded ownership counts for tests and runtime diagnostics."
   {:malli/schema [:=> [:cat] :map]}
   []
-  (let [registrations (vals (::registrations @!runtime))]
-    {::registration-count (count registrations)
-     ::active-count (count (filter ::active registrations))
-     ::pending-count (count (filter ::pending-db registrations))
-     ::timer-count (count (filter ::timer registrations))
-     ::consumer-count (reduce + 0 (map (comp count ::consumers)
-                                       registrations))}))
+  (merge (::measurements @!runtime)
+         (registration-gauges @!runtime)))
+
+(defn reset-measurements!
+  "Reset bounded reactive totals without changing registrations or work."
+  {:malli/schema [:=> [:cat] :map]}
+  []
+  (swap! !runtime assoc ::measurements {})
+  (measurements))

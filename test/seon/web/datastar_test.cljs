@@ -76,6 +76,12 @@
     ::db/source-argument-position 0
     :datahike.read/dependency-plan :all}])
 
+(defn- at-t [t]
+  (assoc database :t t :datahike/commit-id (random-uuid)))
+
+(defn- next-turn []
+  (js/Promise. (fn [resolve _] (js/setTimeout resolve 5))))
+
 (deftest complete-render-returns-event-value-and-child-read-evidence
   (async done
     (let [seen (atom nil)]
@@ -205,6 +211,138 @@
               (fn [_]))]
     (is (= subscription-key (::datastar/subscription-key conn))
         "the close callback can always release its exact reactive consumer")))
+
+(deftest equivalent-sockets-share-compute-suppress-equal-and-deliver-fresh
+  (async done
+    (let [original-db db/db
+          original-listen db/listen!
+          original-unlisten db/unlisten!
+          feeds @#'datastar/!feeds
+          original-feeds @feeds
+          head (atom database)
+          listens (atom [])
+          output (atom "same")
+          render-count (atom 0)
+          writes (atom {})
+          subscription-key [:seon.web.feed/agent "root"]
+          make-conn
+          (fn [view-id feed-id]
+            {::datastar/view-id view-id
+             ::datastar/subscription-key subscription-key
+             :seon.web.feed/id feed-id
+             :seon.web.feed/closed? (atom false)
+             :seon.web.feed/pending-event (atom nil)
+             :seon.web.feed/draining? (atom false)
+             :seon.web.feed/backpressured-at (atom nil)
+             :seon.web.feed/write!
+             (fn [event]
+               (swap! writes update view-id (fnil conj []) event)
+               1)
+             :seon.web.feed/close! (fn [_])})
+          left (make-conn "left" #uuid "10000000-0000-4000-8000-000000000001")
+          right (make-conn "right" #uuid "10000000-0000-4000-8000-000000000002")
+          fresh (make-conn "fresh" #uuid "10000000-0000-4000-8000-000000000003")
+          subscription
+          {::datastar/live? true
+           ::datastar/consumer-view-ids #{"left" "right"}
+           ::datastar/render
+           (fn [value]
+             (swap! render-count inc)
+             {::datastar/element
+              [:main {:id "app-view"} @output]
+              ::db/read-evidence
+              [(assoc (first read-evidence) ::db/db value)]})}]
+      (set! db/db (fn ([] (js/Promise.resolve @head))
+                    ([_] (js/Promise.resolve @head))))
+      (set! db/listen!
+            (fn
+              ([request]
+               (swap! listens conj request)
+               (js/Promise.resolve (::db/key request)))
+              ([key handler]
+               (db/listen! {::db/key key ::db/handler handler}))
+              ([value key handler]
+               (db/listen! {::db/db value ::db/key key
+                            ::db/handler handler}))))
+      (set! db/unlisten! (fn [_] (js/Promise.resolve true)))
+      (reactive/configure!
+       {:seon.config/reactive-settle-ms 0
+        :seon.config/reactive-structural-settle-ms 0
+        :seon.config/reactive-max-latency-ms 20})
+      (reset! feeds
+              {::datastar/views {"left" left "right" right}
+               ::datastar/subscriptions {subscription-key subscription}
+               ::datastar/measurements {}})
+      (-> (js/Promise.all
+           #js [(js/Promise.resolve (@#'datastar/observe-connection! left))
+                (js/Promise.resolve (@#'datastar/observe-connection! right))])
+          (.then
+           (fn [_]
+             (is (= 1 @render-count))
+             (is (= 1 (count (get @writes "left"))))
+             (is (= (get @writes "left") (get @writes "right")))
+             (datastar/reset-performance!)
+             (reactive/reset-measurements!)
+             (let [next-db (at-t 43)]
+               (reset! head next-db)
+               ((::db/handler (last @listens)) {:db-after next-db})
+               (next-turn))))
+          (.then
+           (fn [_]
+             (is (= 2 @render-count))
+             (is (= 1 (::reactive/equal-notifications-suppressed
+                       (reactive/measurements))))
+             (is (= 1 (get-in (datastar/performance-snapshot)
+                              [::datastar/measurements
+                               ::datastar/render-completed])))
+             (is (= 1 (count (get @writes "left")))
+                 "equal serialized output performs no SSE write")
+             (reset! output "changed")
+             (let [next-db (at-t 44)]
+               (reset! head next-db)
+               ((::db/handler (last @listens)) {:db-after next-db})
+               (next-turn))))
+          (.then
+           (fn [_]
+             (is (= 3 @render-count))
+             (is (= 2 (count (get @writes "left"))))
+             (is (= (last (get @writes "left"))
+                    (last (get @writes "right")))
+                 "one changed value fans byte-identically")
+             (swap! feeds
+                    (fn [registry]
+                      (-> registry
+                          (assoc-in [::datastar/views "fresh"] fresh)
+                          (update-in [::datastar/subscriptions subscription-key
+                                      ::datastar/consumer-view-ids]
+                                     conj "fresh"))))
+             (js/Promise.resolve (@#'datastar/observe-connection! fresh))))
+          (.then
+           (fn [_]
+             (is (= 3 @render-count)
+                 "a fresh socket receives the established value without work")
+             (is (= [(last (get @writes "left"))]
+                    (get @writes "fresh")))
+             (js/Promise.all
+              #js [(@#'datastar/unobserve-connection! left)
+                   (@#'datastar/unobserve-connection! right)
+                   (@#'datastar/unobserve-connection! fresh)])))
+          (.then
+           (fn [_]
+             (is (= 0 (::reactive/registration-count
+                       (reactive/measurements))))
+             (is (= 0 (::reactive/consumer-count
+                       (reactive/measurements))))))
+          (.catch (fn [error] (is false (str error))))
+          (.finally
+           (fn []
+             (set! db/db original-db)
+             (set! db/listen! original-listen)
+             (set! db/unlisten! original-unlisten)
+             (reset! feeds original-feeds)
+             (reset! @#'reactive/!runtime
+                     {::reactive/registrations {}})
+             (done)))))))
 
 (deftest direct-stream-backpressure-keeps-only-the-newest-event
   (async done

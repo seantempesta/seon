@@ -144,7 +144,17 @@
                      ::reactive/pending-count 0
                      ::reactive/timer-count 0
                      ::reactive/consumer-count 0}
-                    (reactive/measurements)))
+                    (select-keys
+                     (reactive/measurements)
+                     [::reactive/registration-count
+                      ::reactive/active-count
+                      ::reactive/pending-count
+                      ::reactive/timer-count
+                      ::reactive/consumer-count])))
+             (is (= 3 (::reactive/evaluations-completed
+                       (reactive/measurements))))
+             (is (= 1 (::reactive/equal-notifications-suppressed
+                       (reactive/measurements))))
              (is (= [{::db/key [::reactive/registration :example]}]
                     @unlistens))))
           (.catch (fn [exception] (is false (str exception))))
@@ -209,7 +219,7 @@
            (fn [_]
              (is (= [536870913 536870914] @computed-ts))
              (is (fn? @resolve-slow))
-             (doseq [t [536870915 536870916]]
+             (doseq [t (range 536870915 536871015)]
                (let [next-db (at-t t)]
                  (reset! head next-db)
                  ((::db/handler (last @listens)) {:db-after next-db})))
@@ -219,11 +229,19 @@
              (next-turn)))
           (.then
            (fn [_]
-             (is (= [536870913 536870914 536870916] @computed-ts)
+             (is (= [536870913 536870914 536871014] @computed-ts)
                  "the obsolete middle database value never computes")
-             (is (= [536870913 536870914 536870916] @delivered-ts))
+             (is (= [536870913 536870914 536871014] @delivered-ts))
              (is (= 0 (::reactive/pending-count
                        (reactive/measurements))))
+             (is (= 1 (::reactive/active-high-water
+                       (reactive/measurements))))
+             (is (= 1 (::reactive/pending-high-water
+                       (reactive/measurements))))
+             (is (= 99 (::reactive/newest-pending-replacements
+                        (reactive/measurements))))
+             (is (= 536871014 (::reactive/last-completed-t
+                               (reactive/measurements))))
              (reactive/unobserve!
               {::reactive/key :newest
                ::reactive/consumer-key :consumer})))

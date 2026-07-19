@@ -68,12 +68,34 @@ latest-wins transport consumer keyed by its feed ID; equivalent sockets share
 the normalized reactive computation and a fresh socket receives its established
 value. Historical feeds still render once without installing an interest.
 
-Focused Datastar proof is currently 13 tests and 53 assertions. A live root-feed
-probe exposed and fixed two lifecycle defects: the live observer sent an
+Live root-feed probes exposed and fixed two lifecycle defects: the live
+observer sent an
 invalid explicit nil database value, and the pre-registry socket descriptor
 lacked the normalized registration key needed by final-consumer release. The
-next coordinated rebuild must still prove that the Bun workload and listener
-remain alive across root-feed open/close before this boundary is counted live.
+source-frozen rebuild at commit `b6961bac` then kept the actual Bun workload
+alive and port 7890 bound across a three-second server-side root feed. External
+readiness remained HTTP 200 after close; the final reactive registration,
+consumer, active, pending, timer, Datastar view, and subscription counts were
+all zero. The feed sent 31,722 bytes. Its cold render took 1,568.3 ms and the
+later render took 39.6 ms; those diagnostic samples establish lifecycle truth,
+not final latency graduation.
+
+Bounded diagnostics now expose cumulative evaluation starts/completions,
+delivered and equality-suppressed notifications, newest-pending replacements,
+active/pending high-water marks, and only the numeric last completed/installed
+basis transactions. They retain no event history, database values, results,
+functions, or sockets. The reactive gate drives 100 newer transactions while
+one computation is blocked and proves active/pending high-water marks of one,
+99 obsolete pending replacements, and next computation only at the newest
+basis transaction. It passes 5 tests and 28 assertions.
+
+The integrated Datastar/reactive gate now attaches two equivalent sockets to
+one normalized computation. An equal later event performs one demanded render
+and serialization but increments equality suppression and performs zero socket
+writes; a changed event computes once and reaches both sockets byte-identically;
+a fresh third socket receives the established event without recomputation; and
+final release returns reactive registration/consumer counts to zero. The
+focused Datastar gate now passes 14 tests and 67 assertions.
 
 Datahike `main` now exposes an execution-aware, source-scoped query dependency
 plan at maintained revision `2e6c7bcf`. It folds the typed parsed query and
@@ -371,7 +393,7 @@ None is required for correctness.
 | Unrelated commit | zero page acquisition, selected renderer, serialization, and SSE work |
 | Affected commit | one normalized page rerender at exact `db-after`; cache evidence is truthful |
 | Error recovery | failed render widens and later repair transaction rerenders it |
-| Output | equal bytes emit nothing; unequal complete event reaches every equivalent socket |
+| Output | equal bytes require one comparison serialization but emit nothing; unequal complete event reaches every equivalent socket |
 | Scheduling | independent reads/subscriptions/agents/sockets progress independently; one subscription stays coherent |
 | Sustained import | bounded active/pending state, configured maximum-latency progress, no entry per row/transaction, final newest-value convergence |
 | Equality | `=` suppresses established-consumer notification while advancing basis/dependencies; a fresh consumer receives once |
