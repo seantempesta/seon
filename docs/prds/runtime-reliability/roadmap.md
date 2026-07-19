@@ -191,6 +191,16 @@ schemas, and tests reload in the fresh child. Focused proof passes 80 tests/318
 assertions; deliberate exact-artifact child-exit and repeated-crash live proof
 is the next gate.
 
+The first deliberate current-source exit now passes. Exact eval
+`(js/process.exit 17)` exited child PID `40970` with status 17. The database
+contains interrupted eval `g53gfroqzp2c`, interrupted turn `vekljag8n96v`,
+crashed run `oqnfelffmex6`, and recovery `ce96f93hun3y` with the eval ref,
+artifact digest, bounded process evidence, and diagnostic blob. The fresh
+recovery run read the blob and avoided the crashing form; pod and writer stayed
+ready. Datahike reverse pull from the eval returned the exact recovery fields
+used by the transcript. The repeated identical pre-success crash/root-notice
+live gate remains before resolving the owning issue.
+
 As of 2026-07-18, one JVM writer has passed the complete autonomous sibling
 cluster lifecycle: fresh initialization, distinct database values and store
 IDs, concurrent agents and gzip feeds, isolated writes, pod-only restart,

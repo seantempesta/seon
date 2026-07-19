@@ -602,6 +602,26 @@ The next exact-artifact gate is a deliberate child exit proving the recovery
 transaction, one replacement, repeated-crash breaker/root notice, transcript,
 and healthy pod/writer together.
 
+That first current-source exact-artifact exit now passes. Agent
+`legal-meteors-wink` committed exact eval `(js/process.exit 17)`; child PID
+`40970` exited 17 after 1,891 ms. One transaction marked the eval and turn
+interrupted, closed its run crashed, and asserted recovery `ce96f93hun3y` with
+the eval ref, artifact digest, process resource facts, and diagnostic blob
+`e4e0968b…`. The fresh recovery run read that evidence and did not repeat the
+crashing form. Pulling backward from the eval through Datahike's reverse ref
+returned the exact recovery/detail/blob projection used by the transcript.
+Pod and writer stayed ready; normal cleanup reclaimed all three previously
+warm execution children. The remaining breaker gate is a current-source
+second identical pre-success crash and derived root message.
+
+The first restart attempt also exposed unrelated host pressure rather than a
+CSS defect. A retained release cluster held roughly 3.8 GiB RSS and an
+interrupted day-old `bin/test-writer` left a 478 MiB JVM orphan. Tailwind's Bun
+process exited 137 under that pressure. Normal release shutdown plus TERM of
+the stale test JVM made the identical CSS build finish in 71 ms and the cluster
+reach ready. [[interrupted-writer-test-can-outlive-its-runner]]
+owns the missing test-runner cleanup.
+
 Exit: the real browser journey and server-side gzip client agree on one reactive
 render/feed mechanism.
 

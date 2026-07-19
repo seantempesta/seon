@@ -42,3 +42,23 @@ and preserves the committed turn ID and child-retired flag at both catch
 sites. Focused `seon.agent.turn-test` passes 9 tests and 23 assertions,
 including an explicit nested orchestration-wrapper regression. The required
 live interrupted-eval and recovery-anchor proof remains before resolution.
+
+The current-source live proof now closes the lost-evidence regression. Agent
+`legal-meteors-wink` committed eval `g53gfroqzp2c` with exact source
+`(js/process.exit 17)`. Child PID `40970` exited 17; the same recovery
+transaction marked that eval and turn `vekljag8n96v` `:interrupted`, closed run
+`oqnfelffmex6` `:crashed`, and asserted recovery `ce96f93hun3y`. The anchor
+retains the exact eval ref, artifact digest, 1,891 ms elapsed time, process CPU
+and RSS facts, and diagnostic blob
+`e4e0968b3c9e5975e5b00cbed2f4aa78fa9a4de48f13f05c379bc85247c157d4`.
+The fresh child opened recovery run `nimyjaj21lqw`, read that evidence blob,
+and continued without repeating the crashing form. A direct pull from the
+interrupted eval through `:seon.runtime.recovery/_eval` returned the recovery
+ID, detail, and blob hash used by the transcript renderer. The pod and writer
+remained ready throughout, and normal child stop reclaimed every execution
+child afterward.
+
+The issue remains active only for a current-source live proof of the second
+identical pre-success crash producing no third run and one derived root notice;
+focused policy proof and an earlier immutable-package two-crash drive already
+cover that breaker.
