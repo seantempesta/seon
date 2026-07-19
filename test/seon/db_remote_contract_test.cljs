@@ -217,7 +217,7 @@
                     {::db/on-commit! #(swap! reports conj %)}
                     #(db/transact!
                       {::db/db database
-                       ::db/tx-data [{:seon.agent/id "AGTreceipt0001"}]}))))
+                       ::db/tx-data [{::db/key "observed"}]}))))
                 (.then
                  (fn [report]
                    (is (= [report] @reports))

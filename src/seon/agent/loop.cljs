@@ -110,6 +110,36 @@
    turn-limit cap."
   3)
 
+(def ^:private eval-observation-keys
+  [:seon.eval/source
+   :seon.eval/status
+   :seon.eval/ok?
+   :seon.eval/result-edn
+   :seon.eval/output
+   :seon.eval/error
+   :seon.eval/error-data
+   :seon.eval/ns])
+
+(defn- turn-observation
+  "Return ordered stable knowledge from one turn's already-persisted evals."
+  [turn]
+  (when (contains? turn :seon.agent.turn/evals)
+    (mapv #(select-keys % eval-observation-keys)
+          (:seon.agent.turn/evals turn))))
+
+(defn- next-observation-state
+  "Fold durable progress or repeated ordinary eval knowledge into loop state."
+  [turn streak prior-observation]
+  (if-let [observation (turn-observation turn)]
+    (if (some :seon.eval/progress? (:seon.agent.turn/evals turn))
+      [0 nil]
+      [(if (= observation prior-observation) (inc streak) 1) observation])
+    ;; Synthetic/older turn projections without eval rows retain the historical
+    ;; eval-count behavior. Runtime turns always carry the ordered eval vector.
+    (if (pos? (or (:seon.agent/eval-count turn) 0))
+      [0 nil]
+      [(inc streak) nil])))
+
 (def ^:private current-run-query
   '[:find ?run-id .
     :in $ ?agent-id
@@ -356,10 +386,12 @@
    + runs a turn; the loop closes the run on the bounds it owns (:turn-limit /
    :deadline / :error / :no-forms); function closes (:wait/:complete/:terminate)
    and :superseded are already settled (no re-close). The consecutive empty-turn
-   STREAK is folded alongside the state: a turn with zero actionable forms
-   increments it, a productive turn resets it, and [[no-forms-streak-limit]]
-   empty turns close the run :no-forms (an unresponsive/looping LLM never spins
-   to the turn-limit). Every await in the body rides [[await-bounded]] (the
+   STREAK is folded alongside the prior ordered eval observation: durable
+   progress resets both; a distinct read-only source/result observation starts
+   a new streak at one; only an identical observation increments it. Thus
+   repeated polling and truly formless turns close at [[no-forms-streak-limit]]
+   without treating new read knowledge as emptiness. Every await in the body
+   rides [[await-bounded]] (the
    per-turn INNER bound; the run deadline stays the outer one), so a hung
    turn/write fails the run :error instead of parking the loop. Returns the
    final FSM state. Errors are values — never throws into the trigger."
@@ -373,7 +405,7 @@
                     [:seon/error :map]]]]}
   [{:seon.agent/keys [id] :as input} run-id]
   (await
-    (loop [state :running streak 0]
+    (loop [state :running streak 0 prior-observation nil]
       (case (admission-event)
         :quiesce (await (close-quiescing-run! id run-id state))
         :unavailable (admission/unavailable)
@@ -468,15 +500,11 @@
                         "plan/maybe-consult!"
                         (plan-internal/maybe-consult!
                          {:seon.agent/id id})))
-                      (recur (transition state :turn-ok)
-                             (if-not
-                              (if (contains? r :seon.agent.turn/evals)
-                                (boolean
-                                 (some :seon.eval/progress?
-                                       (:seon.agent.turn/evals r)))
-                                (pos? (or (:seon.agent/eval-count r) 0)))
-                               (inc streak)
-                               0)))))))))
+                      (let [[next-streak next-observation]
+                            (next-observation-state r streak prior-observation)]
+                        (recur (transition state :turn-ok)
+                               next-streak
+                               next-observation)))))))))
 
           (= :error event)
           (do (log id "halt" "database read failed → close run :error")

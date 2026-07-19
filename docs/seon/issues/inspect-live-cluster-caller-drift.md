@@ -289,16 +289,19 @@ three-turn bound with `:no-forms`. Live current-artifact Inspect proof remains
 after rebuild, including the separate fact that `delegate!` returns a child id
 rather than synchronously awaiting the child's report.
 
-The rebuilt live default at `0879d756` closes the loop half of that acceptance.
-A 90-second bounded `/agents/run` request completed in 31,867 ms with five
-turns and five successful evals. The sources were `plan/list-open`, one
-state-changing `plan/active!`, then three consecutive `plan/status` reads. The
-third read hit the existing no-progress bound and closed the run at
-`:no-forms`; the prior representative consumed 37 turns and timed out. The
-model did not invoke `delegate!`, so this is not evidence of child-result
-delivery. The next Inspect namespace scenario must wait on the existing child
-message/eval facts after delegation rather than infer synchronous completion
-from the returned child id.
+The rebuilt live default invalidated the first correction while proving its
+boundedness. One request completed in 31,867 ms after an initial plan read, one
+write, and three repeated status reads. A second prior-style namespace request
+returned HTTP 200 in 24,274 ms after only three turns, but those evals were
+three distinct useful reads: `plan/position`, the whole plan tree, then one
+root subtree. Closing that run at `:no-forms` discarded newly acquired
+knowledge. The replacement loop fold therefore compares the ordered stable
+eval observations already persisted on each turn—source, status/ok, result,
+output/error, and ending namespace. Durable writes reset the repetition state;
+a distinct observation starts at one; only the identical observation increments
+the bound. No source parsing, digest, watchdog, or work-budget change is added.
+The child-delivery scenario remains separate because neither live model invoked
+`delegate!`.
 
 The same controlled branch also reproduced the one-call release race with the
 writer's exact `database-in-use` response. Pod containment completed cleanly

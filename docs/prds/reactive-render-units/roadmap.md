@@ -195,13 +195,16 @@ the existing `:no-forms` bound. The next integrated exit is a rebuilt Inspect
 namespace run that parks the root without polling and waits for existing child
 message/eval facts between driver phases.
 
-The exact `0879d756` rebuild proves the parking half live. A bounded default
-request completed in 31,867 ms after five turns: `plan/list-open`, one real
-`plan/active!` write, and three `plan/status` reads. Those three reads advanced
-the unchanged no-progress bound and closed at `:no-forms`, replacing the prior
-37-turn/211-second timeout. The model never delegated, so child completion is
-still an Inspect scenario gate; `delegate!` returning an id is not treated as a
-synchronous child report.
+The exact `0879d756` rebuild proved boundedness but falsified the coarse
+read-only rule. One request replaced the prior 37-turn timeout with a bounded
+five-turn closure, but a second HTTP-200 namespace request closed after three
+distinct useful reads (`plan/position`, whole tree, root subtree) before acting.
+The reopened contract folds the ordered stable source/result/error/namespace
+projection already stored on eval rows: durable writes reset repetition,
+distinct observations remain knowledge, and only an identical observation
+increments the existing three-turn bound. Focused loop regressions cover both
+branches without parsing source or changing the watchdog/work budget. Live
+current-artifact proof and child completion remain pending.
 
 The gate now also exercises the real timer rather than only the `due-at`
 arithmetic. With a 1,000 ms moving settle edge and 20 ms maximum latency, a

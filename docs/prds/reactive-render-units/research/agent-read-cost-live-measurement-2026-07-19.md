@@ -82,14 +82,13 @@ needed.
 
 ## Progress-accounting prerequisite
 
-Commit `0879d756` removed the loop instability before attribution work resumes.
-The execution scope now records positive eval progress only for a transaction
-committed during the raw form or an accepted program/schema declaration;
-derived namespace-edge receipt operations do not count. On the rebuilt default,
-the same class of task completed in 31,867 ms after one plan write and three
-read-only status calls closed the existing no-progress bound. This makes a
-future per-turn aggregate meaningful: repeated reads can no longer extend the
-measurement window indefinitely by masquerading as work.
+Commit `0879d756` removed the unbounded reset but its first live rule was too
+coarse. A second rebuilt request closed after three different read-only plan
+queries, before acting. The replacement uses the stable ordered source/result/
+error/namespace fields already persisted on eval rows: a different observation
+is newly acquired knowledge, while an identical observation repeated across
+turns advances the existing bound. Attribution work remains paused until that
+replacement passes current-artifact live proof.
 
 ## Required contract
 
