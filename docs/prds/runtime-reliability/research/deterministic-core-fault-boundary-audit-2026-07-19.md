@@ -81,3 +81,21 @@ rewritten as complete rather than retaining six already-closed items as one
 open checkbox. The final graduation gate remains the complete current-source
 CLJS/writer/operator checkpoint plus browser and exact-package journeys in the
 active roadmap.
+
+## Prepared focused fixture
+
+The prepared focused change adds
+`core-render-failure-uses-the-operation-policy-and-database-hook` to
+`test/seon/render_test.cljs`. It throws from the generic value renderer below
+`seon.render/block`, enters through the real `with-configuration` operation
+scope, and asserts both the selected `:gate` policy and exactly one core-fault
+transaction through the ordinary late-bound database hook. It deliberately
+does not stub `process.exit` or add a production fault switch.
+
+For the coordinated exact-artifact run, use the same fault at that same seam
+as a temporary source injection in `seon.render.value/render-ai`, build one
+digest-verified artifact, invoke the compiled prompt path with database policy
+`:crash`, and collect the five ordered observations above. Revert the temporary
+injection before rebuilding the graduation artifact. This proves the real
+persist-before-exit behavior without retaining test vocabulary or a dormant
+fault branch in production.

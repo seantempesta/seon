@@ -71,3 +71,38 @@
           (is (not= ::no-throw caught))
           (is (str/includes? (ex-message caught) "projection failed"))
           (is (true? (:seon.render/strict? (ex-data caught)))))))))
+
+(deftest core-render-failure-uses-the-operation-policy-and-database-hook
+  (let [transactions (atom [])
+        policies (atom [])
+        configuration (assoc configuration :seon.config/on-core-error :gate)
+        original-policy config/on-core-error]
+    (try
+      (error/set-db-hooks!
+       {:seon.error/transact!
+        (fn [transaction-data]
+          (swap! transactions conj transaction-data)
+          (js/Promise.resolve {:seon.db/ok? true}))})
+      (set! config/on-core-error
+            (fn [selected]
+              (swap! policies conj (:seon.config/on-core-error selected))
+              (original-policy selected)))
+      (with-redefs [config/render-strict? (constantly false)
+                    value/render-ai
+                    (fn [& _] (throw (js/Error. "generic render fixture")))]
+        (let [rendered
+              (error/with-configuration
+               configuration
+               #(render/block :ai configuration {:seon.test/value 42}))
+              faults (->> @transactions
+                          (mapcat identity)
+                          (filter #(= "generic render fixture"
+                                      (:seon.error/message %))))]
+          (is (str/includes? rendered "generic render fixture"))
+          (is (= [:gate] @policies)
+              "the guard applies the operation's database-selected policy")
+          (is (= [:core] (mapv :seon.error/fault faults))
+              "the ordinary database hook receives exactly one core fault")))
+      (finally
+        (set! config/on-core-error original-policy)
+        (error/set-db-hooks! {})))))
