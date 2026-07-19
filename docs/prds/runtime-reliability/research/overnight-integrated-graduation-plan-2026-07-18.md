@@ -69,7 +69,10 @@ source lines in this ledger or the owning successor PRD.
   `:seon.db/db` schema resolvable.
 - Focused ticker/configuration proof passes agent-loop 17 tests/71 assertions,
   client initialization 7/23, runtime admission 16/94, and instrumentation
-  delta 11/129. Exact live crash/persist/restart proof remains.
+  delta 11/129. A deterministic live watchdog rejection persisted error entity
+  `5907` with `:seon.error/fault :core` before the pod exited. The operator
+  retained the watcher and writer and restored only the unexpectedly drained
+  pod through the normal `up` path.
 
 ## Execution ledger
 
@@ -84,8 +87,7 @@ source lines in this ledger or the owning successor PRD.
 - [ ] **IN PROGRESS:** apply the database-selected core-fault policy
   consistently at ticker, reload, publication, render, selected-call, and
   top-level child boundaries. The ticker now retains the already-acquired
-  configuration and records unexpected rejections through `seon.error`; live
-  persist-before-exit proof is next.
+  configuration and has exact persist-before-exit and pod-only recovery proof.
 - [x] Prove three cold starts and three pod restarts against the same database.
 - [ ] Inject one deterministic core failure at each affected process boundary;
   prove the database record precedes exit and the supervisor restores only the

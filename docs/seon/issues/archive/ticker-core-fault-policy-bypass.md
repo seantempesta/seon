@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, agent, cljs, health]
 ---
@@ -39,3 +39,12 @@ policy and persistence owner.
   same failure while alive, and normal schedule/watchdog behavior still works.
 - `:gate` and `:log` retain their existing single-policy semantics without a
   ticker-specific switch or configuration read per tick.
+
+## Resolution
+
+Commit `3f45c4cc` passes agent-loop 17 tests/71 assertions, client
+initialization 7/23, runtime admission 16/94, and instrumentation delta 11/129.
+A deterministic live watchdog rejection under the database's `:crash` policy
+persisted error entity `5907` with `:seon.error/fault :core` and the exact
+message before the pod exited. The operator reported an unexpected drained pod,
+kept watcher and writer alive, and restored only the pod through normal `up`.
