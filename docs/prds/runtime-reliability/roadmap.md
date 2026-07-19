@@ -126,7 +126,12 @@ and is now the earliest Inspect contract. Its source now uses the ordinary
 database value, rendered/eval transactions, successful calls, and later
 database-derived prompt transitions; the synthetic operation decoder and
 fixtures are deleted, with 114 combined focused tests passing. One live
-reachability row is the next falsifier. The real browser/Datastar
+namespace-discovery row passes in 41 seconds. Root orchestration then exposed
+that `/agents/run` did not process-host an explicit inherited agent on a
+non-autonomous branch; a direct `agent.runtime/resume!` immediately woke the
+queued message. The one task boundary now resumes explicit durable agents
+before message intake and before its timeout clock, with 22 web tests/87
+assertions passing. A fresh root row is the next falsifier. The real browser/Datastar
 journey is the dependency-ready parallel portfolio; the
 complete live Inspect, browser, package, downstream,
 multi-cluster, and modest-hardware matrix remains the final gate.

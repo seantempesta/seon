@@ -139,6 +139,16 @@ milestone, and solver proof passes 114 tests, and no banned database wrapper
 vocabulary remains in those owners. A live reachability row is the next
 falsifier.
 
+The first root-orchestration live attempt exposed one runtime gap outside the
+scorer. A retained branch is intentionally non-autonomous, so inherited root
+was durable but not process-hosted. `/agents/run` validated explicit root and
+committed its message without calling the existing `agent.runtime/resume!`;
+the request waited with no open run until a direct REPL resume proved the
+queued message immediately wakes and executes. The task boundary now resumes
+an explicit durable agent before injecting its message and before starting the
+request timeout clock. Focused web proof passes 22 tests/87 assertions. A fresh
+root-orchestration run is required.
+
 ## Ordered next boundary
 
 1. Run a live reachability row against production evidence.

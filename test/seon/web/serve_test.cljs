@@ -13,6 +13,7 @@
     [goog.object :as gobj]
     [seon.agent :as agent]
     [seon.agent.debug :as agent-debug]
+    [seon.agent.runtime :as agent-runtime]
     [seon.agent.run :as run]
     [seon.ai :as ai]
     [seon.db :as db]
@@ -32,6 +33,44 @@
    :since nil
    :history false
    :datahike/commit-id #uuid "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"})
+
+(deftest explicit-agent-task-hosts-the-durable-agent-before-intake
+  (async done
+    (let [run-task (deref #'serve/run-agent-task!)
+          original-db db/db
+          original-query db/query
+          original-resume agent-runtime/resume!
+          original-message agent/message!
+          calls (atom [])]
+      (set! db/db (fn ([] (js/Promise.resolve database))
+                    ([_] (js/Promise.resolve database))))
+      (set! db/query (fn [_] (js/Promise.resolve 42)))
+      (set! agent-runtime/resume!
+            (fn [request]
+              (swap! calls conj [:resume request])
+              (js/Promise.resolve
+               {:seon.agent/id "root"
+                ::agent-runtime/resumed? false
+                ::agent-runtime/error "host refused"})))
+      (set! agent/message!
+            (fn [request]
+              (swap! calls conj [:message request])
+              (js/Promise.resolve {})))
+      (-> (run-task "root" "work" 1000)
+          (.then
+           (fn [result]
+             (is (= {:error "host refused"} result))
+             (is (= [[:resume {:seon.agent/id "root"}]] @calls))))
+          (.catch
+           (fn [error]
+             (is false (str "task hosting rejected: " error))))
+          (.finally
+           (fn []
+             (set! db/db original-db)
+             (set! db/query original-query)
+             (set! agent-runtime/resume! original-resume)
+             (set! agent/message! original-message)
+             (done)))))))
 
 (deftest agent-creation-form-preserves-lifecycle-data
   (let [parse (deref #'serve/agent-creation-request)]

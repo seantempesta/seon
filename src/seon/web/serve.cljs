@@ -32,6 +32,7 @@
     [seon.ai.tokens :as tokens]
     [seon.agent.debug :as agent-debug]
     [seon.agent.lifecycle :as lifecycle]
+    [seon.agent.runtime :as agent-runtime]
     [seon.agent.run :as run]
     [seon.config :as config]
     [seon.db :as db]
@@ -1159,11 +1160,18 @@
 
       :else
       (let [minted (when-not reuse? (await (agent/start! {})))
-            aid (or agent-id (:seon.agent/id minted))]
-        (if (or (:seon.error/message minted) (nil? aid))
+            aid (or agent-id (:seon.agent/id minted))
+            resumed (when (and reuse? aid)
+                      (await
+                       (agent-runtime/resume!
+                        {:seon.agent/id aid})))]
+        (if (or (:seon.error/message minted)
+                (false? (::agent-runtime/resumed? resumed))
+                (nil? aid))
           {:error (or (:seon.error/message minted)
+                      (::agent-runtime/error resumed)
                       (:seon.agent.runtime/error minted)
-                      "agent mint returned no id")}
+                      "agent task could not host its durable agent")}
           (let [start (js/Date.now)
                 injected-at start
                 message-result
