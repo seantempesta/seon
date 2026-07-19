@@ -169,8 +169,10 @@
               (let [[home-row agent-row] (::db/tx-data @transaction)]
                 (is (= configured-requires
                        (:seon.eval/home-requires agent-row)))
-                (is (= [:seon.ns/name :my.agent.created]
-                       (:seon.agent/namespace agent-row)))
+                (is (= (:db/id home-row)
+                       (:seon.agent/namespace agent-row))
+                    "a new namespace and its agent share one transaction tempid")
+                (is (= :my.agent.created (:seon.ns/name home-row)))
                 (is (str/includes? (:seon.ns/source home-row)
                                    "[seon.db :as configured-db]"))))))
        done

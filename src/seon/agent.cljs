@@ -437,7 +437,11 @@
   ([configuration id purpose default-turn-limit parent existing namespace
     namespace-exists?]
   (let [namespace     (symbol (str namespace))
-        namespace-ref [:seon.ns/name (keyword (str namespace))]
+        namespace-name (keyword (str namespace))
+        namespace-tempid (str "seon.agent.namespace/" namespace)
+        namespace-ref (if namespace-exists?
+                        [:seon.ns/name namespace-name]
+                        namespace-tempid)
         context       (ctx/initial-agent-context
                        {:seon.agent/id id
                         :seon.config/configuration configuration})
@@ -462,9 +466,11 @@
                         (assoc :seon.agent/parent parent))]
     (if namespace-exists?
       [agent-row]
-      [(home/initial-ns-entity
-        {:seon.agent/namespace namespace
-         :seon.eval/home-requires home-requires})
+      [(assoc
+        (home/initial-ns-entity
+         {:seon.agent/namespace namespace
+          :seon.eval/home-requires home-requires})
+        :db/id namespace-tempid)
        agent-row]))))
 
 (defn ^:async create!

@@ -117,7 +117,7 @@ source lines in this ledger or the owning successor PRD.
   `:seon.agent/namespace`, reconciles existing agents to their generated home
   namespace, selects that database ref as the pre-eval starting namespace, and
   extends `start!`/`delegate!` with an optional namespace symbol. Focused
-  multi-agent proof passes 7 tests/55 assertions; the Datahike bridge proof
+  multi-agent proof passes 7 tests/56 assertions; the Datahike bridge proof
   passes 14/81 and confirms the attribute compiles to
   `:db.type/ref` plus `:db.unique/identity`.
 - The first populated-database migration exposed that the historical
@@ -130,10 +130,11 @@ source lines in this ledger or the owning successor PRD.
   budgets on the new resident join and namespace-existence query. Both retain
   scalar output and small result-weight bounds but now admit 64 bounded
   intermediate relation nodes before the live retry.
-- The next retry reached birth and proved the new namespace row must precede
-  the agent's lookup ref within the transaction. Absent-namespace birth now
-  orders namespace, agent, then initial message; existing namespace source is
-  still never rewritten.
+- The next retries reached birth and proved that ordering does not let a lookup
+  ref see an entity introduced in the same transaction: Datahike resolves it
+  against `db-before`. Absent-namespace birth now shares one transaction-local
+  tempid between the namespace row and agent ref, ordered namespace, agent,
+  then initial message. Existing namespace source is still never rewritten.
 
 ## Execution ledger
 
