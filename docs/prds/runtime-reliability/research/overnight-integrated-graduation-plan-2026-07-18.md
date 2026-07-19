@@ -136,6 +136,17 @@ source lines in this ledger or the owning successor PRD.
   against `db-before`. Absent-namespace birth now shares one transaction-local
   negative integer tempid between the namespace row and agent ref, ordered namespace, agent,
   then initial message. Existing namespace source is still never rewritten.
+- Fresh-database live proof created agent `blue-banks-swim` for
+  `my.graduation.orders`. Its first completed turn evaluated `(str *ns*)` in
+  `my.graduation.orders` and then entered the ordinary database-backed wait
+  state. A second namespace-addressed `delegate!` returned the same immutable
+  agent ID and delivered its second message rather than allocating an agent.
+- Two simultaneous `delegate!` calls for the previously absent
+  `my.graduation.concurrent` namespace both returned agent
+  `violet-emus-create`. A database query found exactly one namespace resident
+  and both distinct messages addressed to it. The stale-database-value retry
+  therefore closes the concurrent create race through Datahike uniqueness
+  rather than a process-local lock.
 
 ## Execution ledger
 
@@ -218,13 +229,13 @@ and recovery semantics.
 - [x] Source-ground the smallest database representation connecting an agent to
   the `:seon.ns/name` it is asked to steward. Do not rename `:seon.agent/id` or
   treat stewardship as code ownership.
-- [ ] **IN PROGRESS:** extend the existing `start!` and `delegate!` lifecycle requests with the
+- [x] Extend the existing `start!` and `delegate!` lifecycle requests with the
   optional namespace through one atomic child-birth/message transaction.
-- [ ] Resolve a message addressed to a namespace to its active steward; when no
+- [x] Resolve a message addressed to a namespace to its active steward; when no
   steward exists, atomically create one and deliver the message.
-- [ ] Prove two concurrent assignments produce one active steward, while every
+- [x] Prove two concurrent assignments produce one active steward, while every
   agent remains free to inspect and repair every namespace.
-- [ ] Prove reassignment changes ordinary database facts without duplicating
+- [ ] **IN PROGRESS:** prove reassignment changes ordinary database facts without duplicating
   agents, program entities, runs, turns, plans, or messages.
 - [ ] Prove newly committed functions, schemas, and tests become available to
   every relevant fresh child through the one program mechanism.
