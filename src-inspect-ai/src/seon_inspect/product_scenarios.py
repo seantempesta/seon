@@ -188,6 +188,20 @@ def query_product_evidence(cluster_url: str, query: str,
             "database_snapshot": result.get("seon.db/result")}
 
 
+def query_execution_processes(cluster_url: str, *,
+                              opener=urllib.request.urlopen) -> list[dict]:
+    """Read one demanded parent-host execution-process snapshot."""
+    endpoint = cluster_url.removesuffix("/agents/run") + \
+        "/_seon/operator/processes"
+    with opener(endpoint) as response:
+        result = json.loads(response.read().decode())
+    processes = result.get("seon.execution.host/processes")
+    if not isinstance(processes, list) or not all(
+            isinstance(process, dict) for process in processes):
+        raise RuntimeError("operator process response omitted its process vector")
+    return processes
+
+
 @scorer(metrics=[accuracy()])
 def product_scenario_scorer() -> Scorer:
     async def score(state: TaskState, target: Target) -> Score:

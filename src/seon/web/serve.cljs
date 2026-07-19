@@ -40,6 +40,7 @@
     [seon.db.restore :as db.restore]
     [seon.derive :as derive]
     [seon.eval :as seval]
+    [seon.execution.host :as execution-host]
     [seon.log :as log]
     [seon.platform :as platform]
     [seon.repl :as repl]
@@ -613,6 +614,22 @@
           (js/JSON.stringify
            #js {"seon.db/ok?" false
                 "seon.db/error" (or (.-message error) (str error))}))))))
+
+(defn- handle-operator-processes!
+  "Return one demanded snapshot of the parent-owned execution children."
+  [_req res]
+  (try
+    (write-status!
+     res 200 "application/json; charset=utf-8"
+     (js/JSON.stringify
+      (clj->js
+       (product-evidence-json-value
+        {:seon.execution.host/processes (execution-host/processes)}))))
+    (catch :default error
+      (write-status!
+       res 500 "application/json; charset=utf-8"
+       (js/JSON.stringify
+        #js {"seon.error/message" (or (.-message error) (str error))})))))
 
 (defn- turn-evidence-row
   "Stable external projection of captured turn prompts and raw replies."
@@ -1615,6 +1632,7 @@
    :seon.web.router/config-apply  handle-config-apply!
    :seon.web.router/operator-quiesce handle-operator-quiesce!
    :seon.web.router/operator-blobs handle-operator-blobs!
+   :seon.web.router/operator-processes handle-operator-processes!
    :seon.web.router/product-evidence handle-product-evidence!
    :seon.web.router/same-origin?  same-origin?
    :seon.web.router/loopback-peer? loopback-peer?})

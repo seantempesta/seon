@@ -20,6 +20,7 @@
     [seon.db.branch :as branch]
     [seon.db.restore :as restore]
     [seon.eval :as seval]
+    [seon.execution.host :as execution-host]
     [seon.render.system :as system]
     [seon.runtime.admission :as admission]
     [seon.web.debug :as debug]
@@ -702,6 +703,32 @@
           (.finally (fn []
                       (set! db/db original-db)
                       (set! db/query original-query)
+                      (done)))))))
+
+(deftest operator-processes-reads-the-parent-host-on-demand
+  (async done
+    (let [original-processes execution-host/processes
+          handler (deref #'serve/handle-operator-processes!)]
+      (set! execution-host/processes
+            (fn [] [{:seon.execution/agent-id "root"
+                     :seon.execution.host/pid 41001
+                     :seon.execution.host/artifact-digest
+                     (apply str (repeat 64 "a"))
+                     :seon.execution.host/ready? true
+                     :seon.execution.host/retiring? false
+                     :seon.execution.host/stdout-tail ""
+                     :seon.execution.host/stderr-tail ""}]))
+      (-> (js/Promise.resolve (handler nil nil))
+          (.then (fn [response]
+                   (is (= 200 (.-status response)))
+                   (.json response)))
+          (.then (fn [body]
+                   (is (= 41001
+                          (aget body "seon.execution.host/processes" 0
+                                "seon.execution.host/pid")))))
+          (.catch (fn [error] (is false (str error))))
+          (.finally (fn []
+                      (set! execution-host/processes original-processes)
                       (done)))))))
 
 (deftest restore-readiness-serves-only-the-exact-closed-completion-head

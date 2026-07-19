@@ -101,7 +101,10 @@ capability instead of ad-hoc log files:
 
 Execution-child telemetry follows the same storage law. Bun process handles,
 active invocation timers, and demanded live CPU/RSS samples remain transient in
-the parent execution host. Healthy sampling does not write transactions. On
+the parent execution host. A loopback operator read returns one demanded
+ordinary-data `seon.execution.host/processes` snapshot for root tooling and
+Inspect without asking child event loops to cooperate. Healthy sampling does
+not write transactions. On
 deadline, exit, or explicit forensic capture, one bounded terminal snapshot
 becomes queryable recovery datoms and the complete structured report becomes one
 `:diagnostic` blob. The blob contains sample history, raw or source-mapped stack

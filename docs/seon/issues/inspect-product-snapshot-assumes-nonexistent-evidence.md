@@ -28,6 +28,12 @@ gap without teaching the harness another history implementation. Focused
 Python proof passes 18 tests; the complete current CLJS gate passes 1,186
 tests/5,297 assertions.
 
+The parent host now exposes its existing demanded `processes` value through a
+loopback-only read. It samples Bun-owned process handles synchronously, writes
+no healthy telemetry to the database, and asks no child event loop to
+cooperate. This is the real second owner the live recovery scorer must join;
+it is not another durable process registry.
+
 ## Acceptance
 
 - The live repair scorer consumes real history datoms and their transaction

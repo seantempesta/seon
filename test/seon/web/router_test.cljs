@@ -207,6 +207,24 @@
         (finally
           (reset! @#'admission/!state prior))))))
 
+(deftest execution-process-snapshot-is-loopback-only
+  (let [!invocations (atom 0)
+        handler (fn [_request _response]
+                  (swap! !invocations inc)
+                  (js/Response. "{}" #js {:status 200}))]
+    (router/install!
+      {:seon.web.router/operator-processes handler
+       :seon.web.router/loopback-peer? (constantly false)})
+    (is (= 403 (.-status
+                (request! "GET" "/_seon/operator/processes"))))
+    (is (zero? @!invocations))
+    (router/install!
+      {:seon.web.router/operator-processes handler
+       :seon.web.router/loopback-peer? (constantly true)})
+    (is (= 200 (.-status
+                (request! "GET" "/_seon/operator/processes"))))
+    (is (= 1 @!invocations))))
+
 (deftest closed-admission-refuses-post-before-the-domain-handler
   (let [!invocations (atom 0)
         prior (admission/state)]

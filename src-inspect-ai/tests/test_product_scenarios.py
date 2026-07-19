@@ -5,6 +5,7 @@ import pytest
 from inspect_ai import eval as inspect_eval
 
 from seon_inspect.product_scenarios import (CHECKS, SCENARIOS,
+                                            query_execution_processes,
                                             query_product_evidence,
                                             run_product_scenario)
 from seon_inspect.tasks.product_scenarios import GOOD, bad_snapshot, product_scenario
@@ -129,3 +130,23 @@ def test_typed_product_evidence_requests_datahike_history():
     payload = json.loads(requests[0].data.decode())
     assert payload["seon.db/history?"] is True
     assert result["database_value"]["history"] is True
+
+
+def test_execution_process_reader_uses_the_parent_host_endpoint():
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return None
+
+        def read(self):
+            return (b'{"seon.execution.host/processes":['
+                    b'{"seon.execution.host/pid":41001}]}')
+
+    urls = []
+    processes = query_execution_processes(
+        "http://127.0.0.1:41000/agents/run",
+        opener=lambda url: urls.append(url) or Response())
+    assert urls == ["http://127.0.0.1:41000/_seon/operator/processes"]
+    assert processes == [{"seon.execution.host/pid": 41001}]
