@@ -679,6 +679,18 @@
       (catch :default error
         (is (identical? reload error))))))
 
+(deftest missing-authored-function-is-a-core-fault
+  (let [selected-error (deref #'execution/selected-call-error)
+        recorded (atom [])
+        exception (ex-info "The selected function is not loaded."
+                           {:seon.error/kind :core-bug})]
+    (with-redefs [error/record! #(swap! recorded conj %)]
+      (is (false? (::execution/ok?
+                   (selected-error 'my.orders/view exception :core))))
+      (is (= 1 (count @recorded)))
+      (is (= :core (get-in @recorded [0 ::error/fault])))
+      (is (identical? exception (get-in @recorded [0 ::error/raw]))))))
+
 (deftest ordinary-namespace-source-preserves-one-compile-unit
   (let [source (seval/namespace-source
                 {:seon.ns/name :my.render

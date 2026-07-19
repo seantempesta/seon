@@ -367,6 +367,17 @@ shows async renderers and awaited handler reads. Focused proof passes 6 tests
 and 22 assertions. [[../../seon/issues/canvas-state-returned-a-promise-as-render-data]]
 owns the remaining exact self-host load and browser control matrix.
 
+The exact self-host load then exposed a classification bug rather than a
+ClojureScript async limitation. Direct `cljs.js` and authored-program probes
+both publish and invoke async functions correctly, but an absent runtime value
+for a valid selected `my.*` function was being classified from the function's
+namespace and downgraded to an agent fault despite originating in Seon's loader.
+That impossible post-load state now explicitly records a core fault and follows
+the configured development crash policy; ordinary exceptions thrown by the
+authored function remain agent faults. Focused execution proof passes 30 tests
+and 118 assertions. The ordered gate is exact persist-then-exit and recovery
+proof for this authored-function case, then the browser control matrix.
+
 Current-source release application
 `0d8bc9c2ff2088de3103f951d1bd3f94f96d2c80cb4f4ccf6a035aaa9f96197b`
 now passes the source-free runtime boundary from `/Users/sean/seon-release-9df21b23`

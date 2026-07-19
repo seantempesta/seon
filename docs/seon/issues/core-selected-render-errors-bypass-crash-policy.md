@@ -109,3 +109,13 @@ process exit as supervised evidence and does not crash the pod a second time.
 Focused execution proof passes 29 tests and 114 assertions, including the
 agent/core split and observation of the database's `:crash` policy at the exact
 recording boundary.
+
+The subsequent authored-canvas load exposed one final misclassification in
+that boundary. `call-selected!` constructed its missing-runtime-function error
+as `:seon.error/kind :core-bug`, then `selected-call-error` discarded that fact
+and inferred the fault solely from the selected `my.*` symbol. A valid authored
+function that Seon's loader failed to publish was therefore reported as an
+agent mistake. The missing-function branch now explicitly records `:core`;
+ordinary exceptions thrown by an invoked `my.*` function remain agent faults.
+Focused execution proof passes 30 tests and 118 assertions. Exact child-exit,
+durable-datom, and recovery proof remains required before this issue closes.

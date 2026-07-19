@@ -682,11 +682,13 @@
       load-error (assoc ::program-load-error load-error))))
 
 (defn- selected-call-error
-  [function-symbol exception]
-  (let [fault (error/fault-for function-symbol)]
-    (when (= :core fault)
-      (error/record! {::error/raw exception ::error/fault :core}))
-    {::ok? false ::error (exception-value exception)}))
+  ([function-symbol exception]
+   (selected-call-error function-symbol exception
+                        (error/fault-for function-symbol)))
+  ([function-symbol exception fault]
+   (when (= :core fault)
+     (error/record! {::error/raw exception ::error/fault :core}))
+   {::ok? false ::error (exception-value exception)}))
 
 (defn- ^:async record-top-level-call-error!
   "Record a top-level core composition failure with the database's current
@@ -744,7 +746,7 @@
                    {:seon.error/kind :core-bug
                     ::function-symbol function-symbol})]
       (js/Promise.resolve
-       (selected-call-error function-symbol exception)))))
+       (selected-call-error function-symbol exception :core)))))
 
 (defn- ^:async invoke-selected!
   "Invoke selected compiled or authored functions inside the active child."
