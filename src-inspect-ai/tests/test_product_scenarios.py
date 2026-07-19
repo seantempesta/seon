@@ -207,13 +207,13 @@ def test_reuse_repair_evidence_uses_history_and_peer_authors():
     rows = [
         ["(defn rate [amount] (* amount 2))", 10, "producer",
          "consumer-eval", 15, "consumer", "repair-eval", 20, "repair",
-         "my.inspect.repair.ntest/rate-test", "2026-07-19T12:00:00Z",
+         "my.inspect.repair.ntest-test/rate-test", "2026-07-19T12:00:00Z",
          "my.inspect.repair.ntest/rate"],
         ["(defn rate [amount] (* amount 3))", 20, "repair",
          "consumer-eval", 15, "consumer", "repair-eval", 20, "repair",
-         "my.inspect.repair.ntest/rate-test",
+         "my.inspect.repair.ntest-test/rate-test",
          "2026-07-19T12:00:00Z",
-         "my.inspect.repair.ntest/rate-test"],
+         "my.inspect.repair.ntest/rate"],
     ]
 
     def reader(url, query, args, *, history):
@@ -226,6 +226,7 @@ def test_reuse_repair_evidence_uses_history_and_peer_authors():
         function_name="rate",
         consumer_source="(my.inspect.repair.ntest/rate 21)",
         repair_source="(defn rate [amount] (* amount 3))",
+        test_namespace="my.inspect.repair.ntest-test",
         test_name="rate-test", product_reader=reader)
     assert calls[0][2] is True
     assert [row["source_transaction"] for row in snapshot["functions"]] == [10, 20]

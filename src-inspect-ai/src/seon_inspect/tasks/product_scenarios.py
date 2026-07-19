@@ -109,16 +109,22 @@ def live_product_solver(scenario: str, timeout_s: int = 300):
                     suffix = lease.name.rsplit('-', 1)[-1]
                     target_namespace = f"my.inspect.repair.n{suffix}"
                     consumer_namespace = f"my.inspect.consumer.n{suffix}"
+                    test_namespace = f"{target_namespace}-test"
                     function_name = "rate"
                     test_name = "validates-rate"
                     initial_source = "(defn rate [amount] (* amount 2))"
                     consumer_source = f"({target_namespace}/rate 21)"
                     repair_source = "(defn rate [amount] (* amount 3))"
-                    test_source = ("(cljs.test/deftest validates-rate "
-                                   "(cljs.test/is (= 63 (rate 21))))")
+                    test_ns_source = (
+                        f"(ns {test_namespace} "
+                        f"(:require [cljs.test :refer [deftest is]] "
+                        f"[{target_namespace}]))")
+                    test_source = (
+                        "(deftest validates-rate "
+                        f"(is (= 63 ({target_namespace}/rate 21))))")
                     run_test_source = (
                         "(seon.test.runner/run! "
-                        f"{{:seon.test.runner/vars '[{target_namespace}/{test_name}] "
+                        f"{{:seon.test.runner/vars '[{test_namespace}/{test_name}] "
                         ":seon.test.runner/record? true})")
                     prompts = (
                         f"Send namespace {target_namespace} a task to evaluate "
@@ -127,6 +133,7 @@ def live_product_solver(scenario: str, timeout_s: int = 300):
                         f"exactly `{consumer_source}` without defining that function.",
                         f"Send a new peer agent into namespace {target_namespace} to "
                         f"evaluate exactly `{repair_source}`, then exactly "
+                        f"`{test_ns_source}`, then exactly "
                         f"`{test_source}`, then exactly `{run_test_source}`. Do not "
                         "create a suffixed or replacement function name.")
                 else:
@@ -143,7 +150,8 @@ def live_product_solver(scenario: str, timeout_s: int = 300):
                         lease.cluster_url, namespace=target_namespace,
                         function_name=function_name,
                         consumer_source=consumer_source,
-                        repair_source=repair_source, test_name=test_name)
+                        repair_source=repair_source,
+                        test_namespace=test_namespace, test_name=test_name)
                 else:
                     snapshot = read_child_recovery_evidence(
                         lease.cluster_url, "root")

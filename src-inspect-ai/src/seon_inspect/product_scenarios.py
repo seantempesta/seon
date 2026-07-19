@@ -356,11 +356,12 @@ def read_namespace_evidence(cluster_url: str, target_namespace: str, *,
 
 def read_reuse_repair_evidence(cluster_url: str, *, namespace: str,
                                function_name: str, consumer_source: str,
-                               repair_source: str, test_name: str,
+                               repair_source: str, test_namespace: str,
+                               test_name: str,
                                product_reader=query_product_evidence) -> dict:
     """Project cross-agent function repair from Datahike history."""
     qualified = f"{namespace}/{function_name}"
-    test_qualified = f"{namespace}/{test_name}"
+    test_qualified = f"{test_namespace}/{test_name}"
     evidence = product_reader(
         cluster_url, REUSE_REPAIR_QUERY,
         [qualified, consumer_source, repair_source, test_qualified, namespace],
