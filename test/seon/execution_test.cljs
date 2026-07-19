@@ -671,17 +671,16 @@
                (is (= :core (get-in @recorded [:request ::error/fault])))
                (is (identical? core-error
                                (get-in @recorded [:request ::error/raw])))
-               (is (= :crash (:policy @recorded)))
-               (done)))
+               (is (= :crash (:policy @recorded)))))
             (.catch
              (fn [exception]
-               (is false (str exception))
-               (done)))
+               (is false (str exception))))
             (.finally
              (fn []
                (set! db/db original-db)
                (set! db/entity original-entity)
-               (set! error/record! original-record!))))
+               (set! error/record! original-record!)
+               (done))))
         (catch :default exception
           (set! db/db original-db)
           (set! db/entity original-entity)

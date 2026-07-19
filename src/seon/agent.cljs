@@ -448,7 +448,8 @@
         context       (ctx/initial-agent-context
                        {:seon.agent/id id
                         :seon.config/configuration configuration})
-        home-requires (or (:seon.eval/home-requires context)
+        home-requires (or (:seon.eval/home-requires existing)
+                          (:seon.eval/home-requires context)
                           home/home-ns-require-specs)
         missing-context
         (reduce-kv (fn [m k v]
@@ -482,6 +483,28 @@
    (reduce min 0
            (filter #(and (integer? %) (neg? %))
                    (tree-seq coll? seq transaction-data)))))
+
+(defn- missing-namespace-tx
+  "Connect one historical agent to its home namespace, recreating that
+   namespace in the same transaction when its entity is absent."
+  [agent home-entity namespace-tempid]
+  (let [id (:seon.agent/id agent)
+        namespace (home/home-ns id)
+        namespace-ref (if home-entity
+                        [:seon.ns/name (keyword (str namespace))]
+                        namespace-tempid)
+        agent-row {:seon.agent/id id
+                   :seon.agent/namespace namespace-ref}]
+    (if home-entity
+      [agent-row]
+      [(assoc
+        (home/initial-ns-entity
+         {:seon.agent/namespace namespace
+          :seon.eval/home-requires
+          (or (:seon.eval/home-requires agent)
+              home/home-ns-require-specs)})
+        :db/id namespace-tempid)
+       agent-row])))
 
 (defn ^:async create!
   "Reconcile a known agent entity by its durable id.
@@ -671,11 +694,29 @@
                    [?agent :seon.agent/id ?id]
                    (not [?agent :seon.agent/namespace _])]
                  ::db/max-results 4096
-                 ::db/max-result-weight 262144})))]
+                 ::db/max-result-weight 262144})))
+            missing-namespace-entities
+            (when (and (not (error-value? agents-without-namespace))
+                       (seq agents-without-namespace))
+              (await
+               (db/pull-many
+                {::db/db database
+                 ::db/pull-pattern '[*]
+                 ::db/refs
+                 (into []
+                       (mapcat
+                        (fn [id]
+                          [[:seon.agent/id id]
+                           [:seon.ns/name
+                            (keyword (str (home/home-ns id)))]])
+                        agents-without-namespace))
+                 ::db/max-results agent-creation-max-results
+                 ::db/max-result-weight 1048576})))]
         (cond
           (error-value? root-data) root-data
           (error-value? ordinary-born) ordinary-born
           (error-value? agents-without-namespace) agents-without-namespace
+          (error-value? missing-namespace-entities) missing-namespace-entities
           :else
           (let [[root root-home configuration-entity] root-data
                 configuration (configuration-from-entity configuration-entity)]
@@ -690,16 +731,18 @@
                               (initial-agent-tx
                                configuration "root" nil nil nil root))
                     namespace-tx
-                    (into []
-                          (comp
-                           (remove #{"root"})
-                           (map
-                            (fn [id]
-                              {:seon.agent/id id
-                               :seon.agent/namespace
-                               [:seon.ns/name
-                                (keyword (str (home/home-ns id)))]})))
-                          agents-without-namespace)
+                    (loop [pairs (seq (partition 2 missing-namespace-entities))
+                           tempid (next-transaction-tempid root-tx)
+                           tx []]
+                      (if-let [[agent home-entity] (first pairs)]
+                        (if (= "root" (:seon.agent/id agent))
+                          (recur (next pairs) tempid tx)
+                          (let [rows (missing-namespace-tx
+                                      agent home-entity tempid)]
+                            (recur (next pairs)
+                                   (if home-entity tempid (dec tempid))
+                                   (into tx rows))))
+                        tx))
                     reconciliation-tx (into root-tx namespace-tx)]
                 (cond
                   (and root-complete? ordinary-born? (empty? namespace-tx))

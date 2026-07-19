@@ -33,5 +33,11 @@ functions or requests.
 ## Resolution
 
 Commit `671e1777` moves `done` into `.finally` after restoring `seon.db/pull`.
+The same race later appeared in
+`top-level-core-failure-loads-the-database-crash-policy-only-on-error`: it
+called `done` before `.finally` restored `seon.error/record!`, causing the next
+render-policy test to observe the stub and fail only in the complete suite.
+The regression was repaired at the same owner by restoring all three globals
+before calling `done`.
 The complete gate passes 1,152 tests and 5,118 assertions with zero failures or
 errors.

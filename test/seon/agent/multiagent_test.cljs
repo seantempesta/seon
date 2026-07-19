@@ -52,6 +52,28 @@
   (is (= -3 (#'agent/next-transaction-tempid
              [{:db/id -1 :seon.agent/namespace -2}]))))
 
+(deftest missing-agent-home-namespace-is-recreated-in-the-repair-transaction
+  (let [[namespace-row agent-row]
+        (#'agent/missing-namespace-tx
+         {:seon.agent/id "historical"
+          :seon.eval/home-requires '[[seon.db :as database]]}
+         nil
+         -7)]
+    (is (= -7 (:db/id namespace-row)))
+    (is (= :my.agent.historical (:seon.ns/name namespace-row)))
+    (is (str/includes? (:seon.ns/source namespace-row)
+                       "[seon.db :as database]"))
+    (is (= {:seon.agent/id "historical"
+            :seon.agent/namespace -7}
+           agent-row)))
+  (is (= [{:seon.agent/id "historical"
+           :seon.agent/namespace
+           [:seon.ns/name :my.agent.historical]}]
+         (#'agent/missing-namespace-tx
+          {:seon.agent/id "historical"}
+          {:seon.ns/name :my.agent.historical}
+          -7))))
+
 (deftest namespace-assignment-transaction-reuses-existing-namespace
   (is (= [[:db.fn/retractAttribute
            [:seon.agent/id "child"]
