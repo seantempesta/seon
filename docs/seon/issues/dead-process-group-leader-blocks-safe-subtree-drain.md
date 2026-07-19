@@ -66,8 +66,23 @@ database acquisition. `bin/seon branch close` correctly refused deletion with
 `:seon.db.protocol.error/database-in-use`. A normal full `bin/seon down` reaped
 the child; no process was killed directly. The child had already opted out of
 database-advanced events, so this is independent of database delivery pressure.
-The next source audit must determine whether Bun creates a separate process
-group or whether the pod exits before its child-shutdown path completes.
+The maintained-source audit closed that uncertainty. `seon.subprocess/start!`
+sets Bun's `detached` option, and Bun implements it with `setsid()`, so every
+execution child deliberately owns a separate process group. That isolation is
+required because Seon terminates a child's complete descendant group through
+its negative PID; removing it would weaken noncooperative cleanup. The pod's
+normal drain also never called `seon.execution.host/stop!`, and that function
+scheduled termination without awaiting the retained exit promises.
+
+The one lifecycle now closes both sides. Normal runtime drain awaits every
+execution child exit before advertisement/admission detach and database-session
+close. An IPC disconnect reuses the child's existing shutdown owner as a
+cooperative backstop. The pod launch selects vendored Bun's exact
+`BUN_FEATURE_FLAG_NO_ORPHANS=1` mechanism, included in the managed environment
+digest, so abnormal parent loss kills descendants even though their sessions
+are detached. Focused host/execution/client compilation passes 54 tests/223
+assertions, and operator process selection passes 61/314. Retained-branch close
+and abnormal TERM/KILL remain the live graduation proof.
 
 ## Owner
 

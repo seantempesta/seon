@@ -2378,6 +2378,7 @@
                             execution-digest)
             specs (process/specs selected manifest)
             watcher (get specs process/watcher-id)
+            writer (get specs process/writer-id)
             pod (get specs process/pod-id)
             descriptor
             (edn/read-string
@@ -2385,6 +2386,12 @@
                           "SEON_LAUNCH_DESCRIPTOR"]))]
         (is (nil? (get-in watcher [:seon.dev.process/environment
                                    "SEON_RUNTIME_ROOT"])))
+        (is (= "1" (get-in pod [:seon.dev.process/environment
+                                "BUN_FEATURE_FLAG_NO_ORPHANS"])))
+        (is (nil? (get-in watcher [:seon.dev.process/environment
+                                   "BUN_FEATURE_FLAG_NO_ORPHANS"])))
+        (is (nil? (get-in writer [:seon.dev.process/environment
+                                  "BUN_FEATURE_FLAG_NO_ORPHANS"])))
         (is (= (str runtime-root)
                (get-in pod [:seon.dev.process/environment
                             "SEON_RUNTIME_ROOT"])))

@@ -122,7 +122,8 @@
    "DEEPSEEK_"])
 
 (def ^:private managed-environment-keys
-  #{"HOME" "PATH" "JAVA_HOME" "JAVA_CMD" "NODE_PATH" "TMPDIR"})
+  #{"HOME" "PATH" "JAVA_HOME" "JAVA_CMD" "NODE_PATH" "TMPDIR"
+    "BUN_FEATURE_FLAG_NO_ORPHANS"})
 
 (def ^:private operation-environment-keys
   #{"SEON_CONFIG"})
@@ -452,7 +453,8 @@
                            "SEON_PORT"
                            (str (::launch/http-port descriptor-process))
                            "SEON_PORT_FILE"
-                           (::launch/http-port-file descriptor-process))
+                           (::launch/http-port-file descriptor-process)
+                           "BUN_FEATURE_FLAG_NO_ORPHANS" "1")
                           runtime-root (assoc "SEON_RUNTIME_ROOT" runtime-root)
                           program-source-path
                           (assoc "SEON_PROGRAM_SOURCE_PATH"

@@ -99,6 +99,15 @@ source lines in this ledger or the owning successor PRD.
   aggregate display cap is removed. The same cancellation also reproduced the
   open containment issue: one Bun execution child outlived the drained branch
   pod and retained its database acquisition until normal full shutdown.
+- Maintained Seon and Bun source establish the containment cause and the one
+  correction. Seon deliberately launches subprocesses detached, which Bun maps
+  to `setsid()`; this preserves per-child descendant-group termination but
+  places children outside the pod's operator group. Normal runtime drain now
+  awaits every retained execution-child exit before database detach, IPC
+  disconnect reuses child shutdown, and the descriptor-derived pod environment
+  enables Bun's existing no-orphans parent-death/descendant cleanup. Focused
+  CLJS proof passes 54 tests/223 assertions and operator process proof passes
+  61/314. Live branch close plus abnormal parent loss remain unchecked.
 - The first admitted live namespace battery now reaches the real scorer. Native
   log `…fxN7bWkJXsVehcJBqs9K3B.eval` completed all three samples with two
   passes, zero fabrication, and one `NaN` failure after repeated unquoted
@@ -435,6 +444,9 @@ prose is supporting evidence only.
   keep the pod subscribed and let execution children decline unconsumed events.
 - [x] Preserve every structurally bounded model-attempt row instead of applying
   a render display cap to formal Inspect evidence.
+- [ ] Prove normal retained-branch close and abnormal pod TERM/KILL leave no
+  execution child, descendant, or database acquisition after the awaited host
+  drain plus Bun no-orphans correction.
 - [ ] Pass the fixed live namespace and later-turn database-memory scenarios.
 - [ ] Pass generated namespace and database variants without adding scorer
   exceptions for model answers.

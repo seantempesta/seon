@@ -2487,6 +2487,7 @@
         _ (swap! !state update ::quiesce-progress
                  merge-quiesce-progress
                  {::agent-runtime/unhosted-ids host-ids})
+        _ (await (execution.host/stop!))
         _ (await (detach-runtime-advertisement!))]
     (let [progress (::quiesce-progress @!state)]
       (let [detached (admission/detach!)]

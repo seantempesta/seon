@@ -745,10 +745,15 @@
       true)
     false))
 
-(defn stop!
+(defn ^:async stop!
   "Stop every supervised execution child."
   {:malli/schema [:=> [:cat] :int]}
   []
-  (let [agent-ids (keys (::children @!host))]
+  (let [children (::children @!host)
+        agent-ids (keys children)]
     (doseq [agent-id agent-ids] (stop-child! agent-id))
+    (await
+     (js/Promise.all
+      (clj->js
+       (mapv #(get-in % [::exit ::promise]) (vals children)))))
     (count agent-ids)))

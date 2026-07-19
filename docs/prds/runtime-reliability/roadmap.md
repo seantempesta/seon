@@ -99,7 +99,12 @@ delivery pressure, then exposed two independent gates: a valid 34-turn provider
 proof exceeded an unrelated render display cap, and Inspect cancellation left
 one execution child alive after its branch pod drained. The provider projection
 is already structurally bounded and now remains complete; the existing process
-containment issue owns the escaped child. The same three-epoch live run must
+containment issue owns the escaped child. Source proves detached Bun children
+occupy separate sessions while normal pod drain never awaited them. The one
+runtime inverse now awaits child exits, installs an IPC-disconnect backstop,
+and selects vendored Bun's no-orphans parent-death cleanup in the pod's managed
+environment. Focused CLJS and operator proof passes; retained-branch close and
+abnormal parent-loss proof remain. The same three-epoch live run must
 close both contracts before the database scorer advances. The real browser/Datastar
 journey is the dependency-ready parallel portfolio; the
 complete live Inspect, browser, package, downstream,

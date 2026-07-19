@@ -987,8 +987,9 @@
                                             ::invocation-id])]
     (cancel-active! state invocation-id send-message!))
   (db/close-session!)
-  (send! send-message!
-         {::message stopped-message ::protocol-version protocol-version})
+  (when send-message!
+    (send! send-message!
+           {::message stopped-message ::protocol-version protocol-version}))
   (exit! 0))
 
 (defn- receive!
@@ -1025,7 +1026,7 @@
               ::error (exception-value exception)}))))
 
 (defn- start-child!
-  [compiled-functions startup send-message! on-message! exit!]
+  [compiled-functions startup send-message! on-message! on-disconnect! exit!]
   (let [state (atom {::startup startup
                      ::compiled-functions compiled-functions})]
     (-> (db/open-session! (::database-selection startup))
@@ -1057,6 +1058,7 @@
                    (fn [encoded]
                      (receive! state encoded send-message! exit!
                                (.now js/Date))))
+                  (on-disconnect! #(shutdown! state nil exit!))
                   state))))))))
 
 (defn- valid-compiled-functions?
@@ -1073,6 +1075,7 @@
   (let [encoded-startup (aget (.-argv js/process) 2)
         send-message! (fn [encoded] (.send js/process encoded))
         on-message! (fn [handler] (.on js/process "message" handler))
+        on-disconnect! (fn [handler] (.on js/process "disconnect" handler))
         ;; Give Bun's IPC queue one event-loop turn to flush the terminal
         ;; stopped/error value before ending the child.
         exit! (fn [status]
@@ -1099,7 +1102,7 @@
                           ::actual-artifact-digest actual-artifact-digest
                           :seon.error/kind :core-bug})))
              (start-child! compiled-functions startup
-                           send-message! on-message! exit!)))
+                           send-message! on-message! on-disconnect! exit!)))
           (.catch
            (fn [exception]
              (send! send-message!

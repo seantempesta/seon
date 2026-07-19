@@ -53,14 +53,16 @@
     ::execution/deadline-ms 9999999999999
     ::execution/result-limit-bytes 4096}))
 
-(defn ready-message []
-  {::execution/message execution/ready-message
-   ::execution/protocol-version execution/protocol-version
-   ::execution/agent-id "agent-1"
-   ::execution/bun-version "1.2.0"
-   ::execution/shadow-build-id "execution"
-   ::execution/artifact-digest digest
-   :seon.db/db database})
+(defn ready-message
+  ([] (ready-message "agent-1"))
+  ([agent-id]
+   {::execution/message execution/ready-message
+    ::execution/protocol-version execution/protocol-version
+    ::execution/agent-id agent-id
+    ::execution/bun-version "1.2.0"
+    ::execution/shadow-build-id "execution"
+    ::execution/artifact-digest digest
+    :seon.db/db database}))
 
 (defn result-message [invocation-id value]
   {::execution/message execution/result-message
@@ -188,6 +190,53 @@
            (fn [error]
              (is false (str "unexpected host failure: " error))
              (done)))))))
+
+(deftest stop-awaits-every-execution-child-exit
+  (async done
+    (let [options (atom [])
+          children [(fake-process 111) (fake-process 112)]
+          next-child (atom children)
+          _ (configure
+             (fn [value]
+               (swap! options conj value)
+               (let [child (first @next-child)]
+                 (swap! next-child subvec 1)
+                 (:process child))))
+          _ (host/invoke! (invocation "agent-a" "invoke-a"))
+          _ (host/invoke! (invocation "agent-b" "invoke-b"))]
+      (feed! (first @options) (:process (first children))
+             (ready-message "agent-a"))
+      (feed! (second @options) (:process (second children))
+             (ready-message "agent-b"))
+      (let [settled? (atom false)
+            stopped (-> (host/stop!)
+                        (.then (fn [count]
+                                 (reset! settled? true)
+                                 count)))]
+        (-> (js/Promise.resolve nil)
+            (.then
+             (fn [_]
+               (is (false? @settled?))
+               (is (every?
+                    #(= execution/shutdown-message
+                        (::execution/message (last @(:sent %))))
+                    children))
+               ((:resolve-exit! (first children)) 0)))
+            (.then
+             (fn [_]
+               (is (false? @settled?)
+                   "one child exit cannot complete the host drain")
+               ((:resolve-exit! (second children)) 0)
+               stopped))
+            (.then
+             (fn [count]
+               (is (= 2 count))
+               (is (empty? (host/processes)))
+               (done)))
+            (.catch
+             (fn [error]
+               (is false (str "unexpected stop failure: " error))
+               (done))))))))
 
 (deftest process-snapshot-samples-the-child-without-child-cooperation
   (async done

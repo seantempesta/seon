@@ -186,9 +186,14 @@
   (async done
     (let [events (atom [])
           messages (atom [])
+          disconnect-handler (atom nil)
+          closed (atom 0)
+          exits (atom [])
+          original-close db/close-session!
           publication {::admission/published? true
                        ::admission/recovered? false
                        ::admission/generation 42}]
+      (set! db/close-session! #(swap! closed inc))
       (with-redefs [db/open-session!
                     (fn [_]
                       (swap! events conj :session-opened)
@@ -213,18 +218,29 @@
                 (swap! events conj :ready-sent)
                 ((decoded-sender messages) encoded))
               (fn [_] (swap! events conj :receiver-installed))
-              (fn [_])))
+              (fn [handler]
+                (reset! disconnect-handler handler)
+                (swap! events conj :disconnect-installed))
+              #(swap! exits conj %)))
             (.then
              (fn [_]
                (is (= [:session-opened :publication-started :ready-sent
-                       :receiver-installed]
+                       :receiver-installed :disconnect-installed]
                       @events))
                (is (= execution/ready-message
                       (::execution/message (first @messages))))
-               (done)))
+               (@disconnect-handler)
+               (is (= 1 @closed))
+               (is (= [0] @exits))
+               (is (= 1 (count @messages))
+                   "an IPC disconnect cannot send on the closed channel")
+               nil))
             (.catch
              (fn [error]
-               (is false (str "child startup rejected: " error))
+               (is false (str "child startup rejected: " error))))
+            (.finally
+             (fn []
+               (set! db/close-session! original-close)
                (done))))))))
 
 (deftest unpinned-compiled-dispatch-can-read-the-moving-authority-head
