@@ -271,6 +271,14 @@ converged. Exact live replay, bounded root termination, and one-call branch
 release are now the ordered proof gate before the repair scorer itself can
 graduate.
 
+The corresponding complete offline Inspect checkpoint passes 531 tests with
+eight intentional environment-gated skips in 21.25 seconds. Product and
+cleanup failures now remain independently visible, and operator stderr retains
+the writer response required to diagnose the next release reproduction. The
+exact execution artifact cannot yet be rebuilt because the separately owned
+Datahike reactive-read lane has coherent work in progress; no live result is
+claimed from the stale artifact.
+
 The development-tool reconnect defect is source-grounded in the maintained
 Shadow runtime rather than Seon's database advertisement. Shadow commit
 `615430b3` permanently stopped reconnecting after more than three websocket
