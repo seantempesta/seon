@@ -635,9 +635,13 @@
             (when-not (error-value? root-data)
               (await
                (db/query
-                {::db/db (db/history database)
+                 {::db/db (db/history database)
                  ::db/query ordinary-agent-ever-born-query
-                 ::db/max-results 1
+                 ;; Datahike charges intermediate relation rows before the
+                 ;; scalar find/limit is applied. Admit a bounded historical
+                 ;; agent population rather than confusing one returned value
+                 ;; with one query-result node.
+                 ::db/max-results 4096
                  ::db/max-result-weight 4096})))
             agents-without-namespace
             (when (and (not (error-value? root-data))

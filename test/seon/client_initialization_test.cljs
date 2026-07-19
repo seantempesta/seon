@@ -25,6 +25,13 @@
 (def ^:private configuration
   (config/resolve-config-singleton {}))
 
+(deftest initial-agent-errors-fail-startup
+  (is (true? (#'client/initial-agent-failure?
+              {:seon.error/message "database read failed"})))
+  (is (true? (#'client/initial-agent-failure? {:seon.db/ok? false})))
+  (is (false? (#'client/initial-agent-failure?
+               {:seon.agent/initial-created? false}))))
+
 (deftest shadow-node-reload-notification-reflects-javascript-import
   (let [original-autoload shadow-env/autoload
         original-import shadow-node/closure-import

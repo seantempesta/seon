@@ -120,6 +120,12 @@ source lines in this ledger or the owning successor PRD.
   multi-agent proof passes 7 tests/51 assertions; the Datahike bridge proof
   passes 14/81 and confirms the attribute compiles to
   `:db.type/ref` plus `:db.unique/identity`.
+- The first populated-database migration exposed that the historical
+  ordinary-agent existence query budgeted one intermediate result because its
+  final result was scalar. Datahike rejected the 13-agent history, and startup
+  had accepted the resulting error value. The query now has a bounded 4,096
+  node allowance and autonomous startup fails on either database error values
+  or explicit failed responses; focused client initialization passes 9/29.
 
 ## Execution ledger
 

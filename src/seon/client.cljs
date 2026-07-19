@@ -2032,6 +2032,11 @@
   (when (some? selected-manifest)
     (config/resolve-config-singleton selected-manifest)))
 
+(defn- initial-agent-failure?
+  [result]
+  (or (string? (:seon.error/message result))
+      (false? (:seon.db/ok? result))))
+
 (defn- ^:async start-runtime-impl!
   "Cold-start the cluster process or refresh attached read-surface readiness.
 
@@ -2136,7 +2141,7 @@
                   (fn [] (agent/ensure-initial-agent! {})))))
               _ (when (and autonomous?
                            (nil? restore-startup)
-                           (false? (:seon.db/ok? initial-result)))
+                           (initial-agent-failure? initial-result))
                   (throw (ex-info "start-runtime!: initial agent birth failed"
                                   initial-result)))
               initial-id (when (and autonomous?
