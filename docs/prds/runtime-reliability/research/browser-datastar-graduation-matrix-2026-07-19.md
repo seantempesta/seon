@@ -159,6 +159,23 @@ corresponding product claim honestly.
    attributes where they exist. Add a minimal `data-*` evidence marker to the
    existing renderer only when text would be ambiguous; never create a test UI.
 
+### Implementation evidence after the audit
+
+Commit evidence following this source snapshot strengthens the existing
+`POST /agents` handler to accept optional `namespace`, `purpose`, and `message`
+form fields. It parses `namespace` as one unqualified ClojureScript symbol,
+returns 422 before lifecycle work for malformed input, and runs the action in
+root's agent scope. A request without `message` uses `seon.agent/start!`; one
+with `message` uses `seon.agent/delegate!`, preserving its atomic
+create-or-reuse plus initial-task transaction. Focused `seon.web.serve-test`
+proof covers exact field preservation, lifecycle selection, root scope, and
+invalid-input refusal.
+
+This closes the HTTP contract identified in precondition 1. The current root
+shim still has no dedicated namespace-creation form, so B1 must continue to
+use root chat until that ordinary human control is added outside the morphed
+`#app-view`. Do not describe the backend contract alone as browser graduation.
+
 ## Isolated graduation setup
 
 The owner should source-freeze the exact revision, then launch a named isolated

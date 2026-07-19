@@ -11,6 +11,7 @@
     [cljs.test :refer [async deftest is testing]]
     [clojure.string :as str]
     [goog.object :as gobj]
+    [seon.agent :as agent]
     [seon.agent.debug :as agent-debug]
     [seon.agent.run :as run]
     [seon.ai :as ai]
@@ -31,6 +32,112 @@
    :since nil
    :history false
    :datahike/commit-id #uuid "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"})
+
+(deftest agent-creation-form-preserves-lifecycle-data
+  (let [parse (deref #'serve/agent-creation-request)]
+    (is (= {:seon.agent/namespace 'my.tax
+            :seon.agent/purpose "maintain tax records"
+            :seon.agent.message/content "Review the latest return"}
+           (parse {"namespace" "  my.tax  "
+                   "purpose" "  maintain tax records  "
+                   "message" "  Review the latest return  "})))
+    (is (= {}
+           (parse {"namespace" " " "purpose" "" "message" "  "})))
+    (doseq [invalid ["my.tax/worker" "(my.tax)" "my.tax other" ":my.tax"]]
+      (is (= :user-input
+             (:seon.error/kind (parse {"namespace" invalid})))
+          (str "refuses invalid namespace field " (pr-str invalid))))))
+
+(defn- agent-creation-request [body]
+  (js/Request.
+   "http://127.0.0.1/agents"
+   #js {:method "POST"
+        :headers #js {"Content-Type" "application/x-www-form-urlencoded"}
+        :body body}))
+
+(deftest agents-post-selects-start-or-atomic-delegation
+  (async done
+    (let [original-start agent/start!
+          original-delegate agent/delegate!
+          original-available admission/available?
+          calls (atom [])]
+      (set! admission/available? (constantly true))
+      (set! agent/start!
+            (fn [request]
+              (swap! calls conj [:start (db/current-agent-id) request])
+              (js/Promise.resolve {:seon.agent/id "idle-child"})))
+      (set! agent/delegate!
+            (fn [request]
+              (swap! calls conj [:delegate (db/current-agent-id) request])
+              (js/Promise.resolve {:seon.agent/id "tax-resident"})))
+      (-> (serve/create-agent!
+           {:seon.http/request
+            (agent-creation-request
+             "namespace=my.idle&purpose=wait")})
+          (.then
+           (fn [response]
+             (is (= 200 (.-status response)))
+             (.text response)))
+          (.then
+           (fn [body]
+             (is (= "idle-child" body))
+             (serve/create-agent!
+              {:seon.http/request
+               (agent-creation-request
+                "namespace=my.tax&purpose=taxes&message=Review+the+return")})))
+          (.then
+           (fn [response]
+             (is (= 200 (.-status response)))
+             (.text response)))
+          (.then
+           (fn [body]
+             (is (= "tax-resident" body))
+             (is (= [[:start "root"
+                      {:seon.agent/namespace 'my.idle
+                       :seon.agent/purpose "wait"}]
+                     [:delegate "root"
+                      {:seon.agent/namespace 'my.tax
+                       :seon.agent/purpose "taxes"
+                       :seon.agent.message/content "Review the return"}]]
+                    @calls))))
+          (.catch (fn [error] (is false (str error))))
+          (.finally
+           (fn []
+             (set! agent/start! original-start)
+             (set! agent/delegate! original-delegate)
+             (set! admission/available? original-available)
+             (done)))))))
+
+(deftest agents-post-refuses-an-invalid-namespace-before-lifecycle
+  (async done
+    (let [original-start agent/start!
+          original-delegate agent/delegate!
+          original-available admission/available?
+          calls (atom 0)
+          called (fn [_]
+                   (swap! calls inc)
+                   (js/Promise.resolve {:seon.agent/id "unexpected"}))]
+      (set! admission/available? (constantly true))
+      (set! agent/start! called)
+      (set! agent/delegate! called)
+      (-> (serve/create-agent!
+           {:seon.http/request
+            (agent-creation-request "namespace=my.tax%2Fworker")})
+          (.then
+           (fn [response]
+             (is (= 422 (.-status response)))
+             (.text response)))
+          (.then
+           (fn [body]
+             (is (str/includes? body "valid unqualified ClojureScript symbol"))
+             (is (zero? @calls))))
+          (.catch (fn [error] (is false (str error))))
+          (.finally
+           (fn []
+             (set! agent/start! original-start)
+             (set! agent/delegate! original-delegate)
+             (set! admission/available? original-available)
+             (done)))))))
 
 (deftest database-view-uses-the-public-index-page-fields
   (async done

@@ -333,22 +333,58 @@
              (write-status! res 500 "text/plain; charset=utf-8"
                             (str error))))))))
 
-(defn- handle-create-agent!
-  "POST /agents — atomically mint, commit, and resume one live agent.
+(defn- parse-agent-namespace
+  "Parse one optional form field as a ClojureScript namespace symbol."
+  [value]
+  (when-let [source (some-> value str/trim not-empty)]
+    (try
+      (let [parsed (reader/read-string source)]
+        (if (and (simple-symbol? parsed)
+                 (= source (str parsed)))
+          parsed
+          {:seon.error/message
+           "namespace must be one valid unqualified ClojureScript symbol"
+           :seon.error/kind :user-input}))
+      (catch :default _
+        {:seon.error/message
+         "namespace must be one valid unqualified ClojureScript symbol"
+         :seon.error/kind :user-input}))))
 
-   Responds 200 with the new id as plain text. This transition does no cluster
-   seed, program replay, or global instrumentation, so concurrent requests rely
-   on the sole writer's allocator serialization rather than a web-process lock."
+(defn- agent-creation-request
+  "Translate `/agents` form fields into the existing lifecycle request."
+  [fields]
+  (let [namespace (parse-agent-namespace (get fields "namespace"))
+        purpose (some-> (get fields "purpose") str/trim not-empty)
+        message (some-> (get fields "message") str/trim not-empty)]
+    (if (:seon.error/message namespace)
+      namespace
+      (cond-> {}
+        namespace (assoc :seon.agent/namespace namespace)
+        purpose (assoc :seon.agent/purpose purpose)
+        message (assoc :seon.agent.message/content message)))))
+
+(defn- handle-create-agent!
+  "POST /agents — start or delegate to one namespace-selected agent.
+
+   Responds 200 with the selected agent id as plain text. With an initial
+   message, `delegate!` commits birth and task atomically; without one, `start!`
+   leaves a newly created child idle. Both run as root because this browser
+   action belongs to root's cluster view."
   [req res]
   (log/info-console! "seon.web.serve" "POST /agents — creating agent" {})
   (-> (read-body req)
       (.then
         (fn [body]
-          (let [purpose (some-> (get (parse-urlencoded (or body "")) "purpose")
-                                str/trim
-                                not-empty)]
-            (agent/start! (cond-> {}
-                            purpose (assoc :seon.agent/purpose purpose))))))
+          (let [request (agent-creation-request
+                         (parse-urlencoded (or body "")))]
+            (if (:seon.error/message request)
+              request
+              (db/with-agent
+                "root"
+                (fn []
+                  (if (:seon.agent.message/content request)
+                    (agent/delegate! request)
+                    (agent/start! request))))))))
       (.then
         (fn [{id :seon.agent/id :as result}]
           (if (and id (not= false (:seon.agent.runtime/resumed? result)))
@@ -360,7 +396,11 @@
                               (:seon.agent.runtime/error result)
                               "agent creation returned no id")]
               (log/error-console! "seon.web.serve" "POST /agents refused" message)
-              (write-status! res 500 "text/plain; charset=utf-8" message)))))
+              (write-status! res
+                             (if (= :user-input (:seon.error/kind result))
+                               422
+                               500)
+                             "text/plain; charset=utf-8" message)))))
       (.catch
         (fn [err]
           (log/error-console! "seon.web.serve" "POST /agents failed" err)
