@@ -12,7 +12,8 @@ from seon_inspect import source_admission
 from seon_inspect.product_scenarios import (PHASES, SCENARIOS,
                                             product_scenario_scorer,
                                             read_child_recovery_evidence,
-                                            read_namespace_evidence)
+                                            read_namespace_evidence,
+                                            read_reuse_repair_evidence)
 
 
 GOOD = {
@@ -28,6 +29,7 @@ GOOD = {
         "functions": [
             {"qualified_name": "my.tax/rate", "source_transaction": 10},
             {"qualified_name": "my.tax/rate", "source_transaction": 20}],
+        "namespace_functions": ["my.tax/rate"],
         "consumer_eval": {"ok": True, "called": "my.tax/rate",
                           "defined": False},
         "repair_eval": {"ok": True, "qualified_name": "my.tax/rate"},
@@ -63,8 +65,7 @@ def bad_snapshot(scenario: str) -> dict:
     if scenario == "namespace":
         snapshot["agents"].append(deepcopy(snapshot["agents"][0]))
     elif scenario == "reuse_repair":
-        snapshot["functions"].append(
-            {"qualified_name": "my.tax/rate-v2", "source_transaction": 21})
+        snapshot["namespace_functions"].append("my.tax/rate-v2")
     elif scenario == "child_recovery":
         snapshot["processes"][0]["seon.execution.host/artifact-digest"] = "b" * 64
     else:
@@ -102,17 +103,48 @@ def live_product_solver(scenario: str, timeout_s: int = 300):
                         "to evaluate (+ 1 1) and report the result.",
                         f"Send a second message to namespace {target_namespace} "
                         "asking it to evaluate (+ 20 22). Reuse its resident.")
+                elif scenario == "reuse_repair":
+                    suffix = lease.name.rsplit('-', 1)[-1]
+                    target_namespace = f"my.inspect.repair.n{suffix}"
+                    consumer_namespace = f"my.inspect.consumer.n{suffix}"
+                    function_name = "rate"
+                    test_name = "validates-rate"
+                    initial_source = "(defn rate [amount] (* amount 2))"
+                    consumer_source = f"({target_namespace}/rate 21)"
+                    repair_source = "(defn rate [amount] (* amount 3))"
+                    test_source = ("(cljs.test/deftest validates-rate "
+                                   "(cljs.test/is (= 63 (rate 21))))")
+                    run_test_source = (
+                        "(seon.test.runner/run! "
+                        f"{{:seon.test.runner/vars '[{target_namespace}/{test_name}] "
+                        ":seon.test.runner/record? true})")
+                    prompts = (
+                        f"Send namespace {target_namespace} a task to evaluate "
+                        f"exactly `{initial_source}`. After it completes, send "
+                        f"namespace {consumer_namespace} a separate task to evaluate "
+                        f"exactly `{consumer_source}` without defining that function.",
+                        f"Send a new peer agent into namespace {target_namespace} to "
+                        f"evaluate exactly `{repair_source}`, then exactly "
+                        f"`{test_source}`, then exactly `{run_test_source}`. Do not "
+                        "create a suffixed or replacement function name.")
                 else:
                     target_namespace = None
                     prompts = PHASES[scenario]
                 runs = [pod_run(prompt, timeout_s * 1000, lease.cluster_url,
                                 agent_id="root")
                         for prompt in prompts]
-                snapshot = (read_namespace_evidence(
-                                lease.cluster_url, target_namespace)
-                            if scenario == "namespace"
-                            else read_child_recovery_evidence(
-                                lease.cluster_url, "root"))
+                if scenario == "namespace":
+                    snapshot = read_namespace_evidence(
+                        lease.cluster_url, target_namespace)
+                elif scenario == "reuse_repair":
+                    snapshot = read_reuse_repair_evidence(
+                        lease.cluster_url, namespace=target_namespace,
+                        function_name=function_name,
+                        consumer_source=consumer_source,
+                        repair_source=repair_source, test_name=test_name)
+                else:
+                    snapshot = read_child_recovery_evidence(
+                        lease.cluster_url, "root")
                 return {"runs": runs,
                         "database_snapshot": snapshot}
             finally:
@@ -146,8 +178,9 @@ def product_scenario(scenario: str = "namespace", outcome: str = "good",
         raise ValueError(f"unknown scenario {scenario!r}")
     if outcome not in {"good", "bad"}:
         raise ValueError("outcome must be 'good' or 'bad'")
-    if live and scenario not in {"namespace", "child_recovery"}:
-        raise ValueError("live product rows are namespace and child_recovery")
+    if live and scenario not in {"namespace", "reuse_repair", "child_recovery"}:
+        raise ValueError(
+            "live product rows are namespace, reuse_repair, and child_recovery")
     admission = (_admission or source_admission.verify_sources(_identity(scenario))
                  if live else None)
     sample = Sample(id=scenario, input=f"Prove {scenario}", target="correct",

@@ -245,6 +245,19 @@ one resident, stable reuse, explicit routing, and starting in the requested
 namespace. The expanded product slice passes 23 tests; the exact live namespace
 and recovery rows share the same branch/pod/admission/log mechanism.
 
+The next product row now drives cross-agent function reuse and repair through
+that same mechanism. One namespace publishes an exact qualified function, a
+different namespace calls it without redefining it, and a peer repairs the
+original symbol and records its test from a fresh execution child. The scorer
+joins `:seon.fn/source` history and transaction `:seon.db/user` facts with the
+successful eval rows, `:seon.test/last-passed-at`, and the namespace's current
+`:seon.fn/sym` facts. It therefore rejects a suffixed replacement without a
+second code registry or model-narrated evidence. The product slice passes 25
+tests. Its exact isolated-branch live row is the next Inspect falsifier; pod
+restart/database read-back follows on the same lease boundary, and complete
+Inspect, browser, downstream, package, multi-cluster, performance, and resource
+proof remain the final graduation portfolio.
+
 The development-tool reconnect defect is source-grounded in the maintained
 Shadow runtime rather than Seon's database advertisement. Shadow commit
 `615430b3` permanently stopped reconnecting after more than three websocket

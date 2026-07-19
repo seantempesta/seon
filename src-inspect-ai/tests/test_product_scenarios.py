@@ -9,6 +9,7 @@ from seon_inspect.product_scenarios import (CHECKS, SCENARIOS,
                                             CHILD_RECOVERY_SOURCE,
                                             read_child_recovery_evidence,
                                             read_namespace_evidence,
+                                            read_reuse_repair_evidence,
                                             query_execution_processes,
                                             query_product_evidence,
                                             run_product_scenario)
@@ -201,6 +202,38 @@ def test_namespace_evidence_derives_first_eval_and_two_root_messages():
     assert CHECKS["namespace"](snapshot)["ok"]
 
 
+def test_reuse_repair_evidence_uses_history_and_peer_authors():
+    calls = []
+    rows = [
+        ["(defn rate [amount] (* amount 2))", 10, "producer",
+         "consumer-eval", 15, "consumer", "repair-eval", 20, "repair",
+         "my.inspect.repair.ntest/rate-test", "2026-07-19T12:00:00Z",
+         "my.inspect.repair.ntest/rate"],
+        ["(defn rate [amount] (* amount 3))", 20, "repair",
+         "consumer-eval", 15, "consumer", "repair-eval", 20, "repair",
+         "my.inspect.repair.ntest/rate-test",
+         "2026-07-19T12:00:00Z",
+         "my.inspect.repair.ntest/rate-test"],
+    ]
+
+    def reader(url, query, args, *, history):
+        calls.append((url, args, history))
+        return {"database_value": {"t": 42, "history": True},
+                "database_snapshot": rows}
+
+    snapshot = read_reuse_repair_evidence(
+        "http://pod/agents/run", namespace="my.inspect.repair.ntest",
+        function_name="rate",
+        consumer_source="(my.inspect.repair.ntest/rate 21)",
+        repair_source="(defn rate [amount] (* amount 3))",
+        test_name="rate-test", product_reader=reader)
+    assert calls[0][2] is True
+    assert [row["source_transaction"] for row in snapshot["functions"]] == [10, 20]
+    assert snapshot["consumer_eval"]["author_agent_id"] == "consumer"
+    assert snapshot["repair_eval"]["author_agent_id"] == "repair"
+    assert CHECKS["reuse_repair"](snapshot)["ok"]
+
+
 def test_native_live_recovery_task_owns_and_releases_its_branch(monkeypatch):
     from seon_inspect import cluster, solver as pod_solver
 
@@ -259,3 +292,31 @@ def test_native_live_namespace_task_uses_one_resident_snapshot(monkeypatch):
         model="mockllm/model", display="none", log_level="warning")[0]
     assert log.status == "success", log.error
     assert observed == [("http://pod/agents/run", "my.inspect.nabcdef")]
+
+
+def test_native_live_reuse_repair_task_reads_history(monkeypatch):
+    from seon_inspect import cluster, solver as pod_solver
+
+    lease = SimpleNamespace(name="inspect-reuse_repair-abcdef",
+                            cluster_url="http://pod/agents/run")
+    monkeypatch.setattr(cluster, "acquire_branch_lease", lambda _name: lease)
+    monkeypatch.setattr(cluster, "release_branch_lease", lambda _lease: None)
+    monkeypatch.setattr(
+        pod_solver, "pod_run",
+        lambda prompt, timeout, url, *, agent_id:
+        {"reply": "done", "agent_id": agent_id})
+    monkeypatch.setattr(pod_solver, "require_scorable_pod_state",
+                        lambda state: state)
+    observed = []
+    monkeypatch.setattr(
+        product_tasks, "read_reuse_repair_evidence",
+        lambda url, **kwargs:
+        observed.append((url, kwargs)) or copy.deepcopy(GOOD["reuse_repair"]))
+
+    log = inspect_eval(
+        product_scenario(scenario="reuse_repair", live=True,
+                         _admission={"tree_sha256": "a" * 64}),
+        model="mockllm/model", display="none", log_level="warning")[0]
+    assert log.status == "success", log.error
+    assert observed[0][0] == "http://pod/agents/run"
+    assert observed[0][1]["namespace"] == "my.inspect.repair.nabcdef"

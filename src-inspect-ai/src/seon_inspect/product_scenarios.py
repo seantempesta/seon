@@ -64,6 +64,32 @@ CHILD_RECOVERY_QUERY = """[:find ?eval-id ?turn-id ?recovery-id ?pid ?digest
    [?duplicate :seon.eval/agent ?agent _ true]
    [?duplicate :seon.eval/source ?source _ true]
    [(not= ?duplicate ?failed)])]"""
+REUSE_REPAIR_QUERY = """[:find ?source ?source-tx ?author-id
+                                 ?consumer-eval ?consumer-tx ?consumer-author-id
+                                 ?repair-eval ?repair-tx ?repair-author-id
+                                 ?test-sym ?passed-at ?namespace-sym
+ :in $ ?qualified ?consumer-source ?repair-source ?test-qualified ?namespace
+ :where
+ [?function :seon.fn/sym ?qualified _ true]
+ [?function :seon.fn/source ?source ?source-tx true]
+ [?source-tx :seon.db/user ?author]
+ [?author :seon.agent/id ?author-id]
+ [?consumer :seon.eval/source ?consumer-source ?consumer-tx true]
+ [?consumer :seon.eval/id ?consumer-eval _ true]
+ [?consumer :seon.eval/ok? true _ true]
+ [?consumer-tx :seon.db/user ?consumer-author]
+ [?consumer-author :seon.agent/id ?consumer-author-id]
+ [?repair :seon.eval/source ?repair-source ?repair-tx true]
+ [?repair :seon.eval/id ?repair-eval _ true]
+ [?repair :seon.eval/ok? true _ true]
+ [?repair-tx :seon.db/user ?repair-author]
+ [?repair-author :seon.agent/id ?repair-author-id]
+ [?test :seon.test/sym ?test-qualified _ true]
+ [?test :seon.test/sym ?test-sym _ true]
+ [?test :seon.test/last-passed-at ?passed-at _ true]
+ [?namespace-entity :seon.ns/name ?namespace _ true]
+ [?namespace-function :seon.fn/ns ?namespace-entity _ true]
+ [?namespace-function :seon.fn/sym ?namespace-sym _ true]]"""
 
 
 def _exactly_one(rows: list[dict], **attrs: Any) -> dict | None:
@@ -97,9 +123,10 @@ def check_reuse_repair(snapshot: dict) -> dict:
         [row for row in snapshot.get("functions", [])
          if row.get("qualified_name") == qualified],
         key=lambda row: row.get("source_transaction", -1))
-    parallel = [row for row in snapshot.get("functions", [])
-                if row.get("qualified_name") != qualified
-                and qualified and row.get("qualified_name", "").startswith(qualified)]
+    test_qualified = snapshot.get("fresh_test", {}).get("qualified_name")
+    parallel = [name for name in snapshot.get("namespace_functions", [])
+                if name not in {qualified, test_qualified}
+                and qualified and name.startswith(qualified)]
     consumer = snapshot.get("consumer_eval", {})
     repair = snapshot.get("repair_eval", {})
     checks = {
@@ -324,6 +351,54 @@ def read_namespace_evidence(cluster_url: str, target_namespace: str, *,
         "messages": [{"message_id": message_id,
                       "from_agent_id": "root", "to_agent_id": agent_id}
                      for message_id in messages],
+    }
+
+
+def read_reuse_repair_evidence(cluster_url: str, *, namespace: str,
+                               function_name: str, consumer_source: str,
+                               repair_source: str, test_name: str,
+                               product_reader=query_product_evidence) -> dict:
+    """Project cross-agent function repair from Datahike history."""
+    qualified = f"{namespace}/{function_name}"
+    test_qualified = f"{namespace}/{test_name}"
+    evidence = product_reader(
+        cluster_url, REUSE_REPAIR_QUERY,
+        [qualified, consumer_source, repair_source, test_qualified, namespace],
+        history=True)
+    rows = evidence.get("database_snapshot")
+    if not isinstance(rows, list) or not rows:
+        raise RuntimeError("reuse and repair query returned no complete evidence")
+    valid = [row for row in rows if isinstance(row, list) and len(row) == 12]
+    if len(valid) != len(rows):
+        raise RuntimeError("reuse and repair query returned an invalid row")
+
+    versions = sorted(
+        {(row[0], row[1], row[2]) for row in valid}, key=lambda row: row[1])
+    consumer = {(row[3], row[4], row[5]) for row in valid}
+    repair = {(row[6], row[7], row[8]) for row in valid}
+    tests = {(row[9], row[10]) for row in valid}
+    namespace_symbols = {_name(row[11]) for row in valid}
+    if len(consumer) != 1 or len(repair) != 1 or not tests:
+        raise RuntimeError("reuse and repair query returned ambiguous evidence")
+    consumer_eval, _consumer_tx, consumer_author = next(iter(consumer))
+    repair_eval, _repair_tx, repair_author = next(iter(repair))
+    if consumer_author == repair_author:
+        raise RuntimeError("reuse and repair were not performed by peer agents")
+    return {
+        "database_value": evidence.get("database_value"),
+        "qualified_function": qualified,
+        "functions": [
+            {"qualified_name": qualified, "source": source,
+             "source_transaction": source_tx, "author_agent_id": author_id}
+            for source, source_tx, author_id in versions],
+        "namespace_functions": sorted(namespace_symbols),
+        "consumer_eval": {"id": consumer_eval, "ok": True,
+                          "called": qualified, "defined": False,
+                          "author_agent_id": consumer_author},
+        "repair_eval": {"id": repair_eval, "ok": True,
+                        "qualified_name": qualified,
+                        "author_agent_id": repair_author},
+        "fresh_test": {"qualified_name": test_qualified, "status": "pass"},
     }
 
 
