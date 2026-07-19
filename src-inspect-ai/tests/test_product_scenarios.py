@@ -328,6 +328,29 @@ def test_native_live_reuse_repair_task_reads_history(monkeypatch):
     assert "my.inspect.repair.nabcdef-test" in prompts[1]
 
 
+def test_live_product_phase_summary_preserves_eval_actions():
+    run = {
+        "agent_id": "root", "turns": 2, "evals": 2,
+        "timed_out": True, "closed_reason": "timeout", "reply": "",
+        "database": {"t": 42},
+        "eval_evidence": [
+            {"turn_id": "turn-1", "eval_id": "eval-1", "ok": True,
+             "source": "(agent/delegate! {...})", "eval_transaction": 41},
+            {"turn_id": "turn-2", "eval_id": "eval-2", "ok": False,
+             "source": "(broken)", "narration": "repairing"}],
+    }
+
+    assert product_tasks._pod_phase_summary(run) == {
+        "agent_id": "root", "turns": 2, "evals": 2,
+        "timed_out": True, "closed_reason": "timeout", "reply": "",
+        "eval_evidence": [
+            {"turn_id": "turn-1", "eval_id": "eval-1", "ok": True,
+             "source": "(agent/delegate! {...})"},
+            {"turn_id": "turn-2", "eval_id": "eval-2", "ok": False,
+             "source": "(broken)", "narration": "repairing"}],
+    }
+
+
 def test_live_product_failure_is_not_masked_by_release_failure(monkeypatch):
     from seon_inspect import cluster, solver as pod_solver
 

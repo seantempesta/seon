@@ -60,6 +60,21 @@ GOOD = {
 }
 
 
+def _pod_phase_summary(run: dict) -> dict:
+    """Retain bounded action evidence when a live product read fails."""
+    summary = {key: run.get(key) for key in
+               ("agent_id", "turns", "evals", "timed_out",
+                "closed_reason", "reply")}
+    evidence = run.get("eval_evidence")
+    if isinstance(evidence, list):
+        summary["eval_evidence"] = [
+            {key: row.get(key) for key in
+             ("turn_id", "eval_id", "ok", "source", "narration")
+             if key in row}
+            for row in evidence if isinstance(row, dict)]
+    return summary
+
+
 def bad_snapshot(scenario: str) -> dict:
     snapshot = deepcopy(GOOD[scenario])
     if scenario == "namespace":
@@ -170,10 +185,7 @@ def live_product_solver(scenario: str, timeout_s: int = 300):
                     except BaseException as evidence_failure:
                         evidence_failure.add_note(
                             "pod phases: " + repr([
-                                {key: run.get(key) for key in
-                                 ("agent_id", "turns", "evals", "timed_out",
-                                  "closed_reason", "reply")}
-                                for run in runs]))
+                                _pod_phase_summary(run) for run in runs]))
                         raise
                 else:
                     snapshot = read_child_recovery_evidence(
