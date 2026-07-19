@@ -70,6 +70,22 @@
            :seon.fn/arglists "([x])"
            :seon.fn/spec "[:=> [:cat :int] :int]"}])})
 
+(def ^:private eager-internal-row
+  {:seon.ns/name 'my.helper.internal
+   :seon.db/tx 1
+   :seon.ns/source
+   "(ns my.helper.internal) (defn implementation [x] (INTERNAL-BODY x))"
+   :seon.fn/_ns
+   [(dissoc (fn-row "my.helper.internal/implementation"
+                    'my.helper.internal "INTERNAL-BODY")
+            :seon.fn/ns)]})
+
+(def ^:private eager-test-row
+  {:seon.ns/name 'my.helper-test
+   :seon.db/tx 1
+   :seon.ns/source
+   "(ns my.helper-test) (defn behavioral-test [] (TEST-NS-BODY))"})
+
 (defn- eager-input []
   {:seon.agent/id agent-id
    :seon.agent.ctx.render-fns/current-ns cur-ns
@@ -111,6 +127,29 @@
         (set! db/query original-query)
         (set! db/pull original-pull)
         (set! db/entity original-entity)))))
+
+(deftest exact-full-source-pin-may-reveal-internal-but-never-tests
+  (let [base (update (eager-input)
+                     :seon.agent.ctx.namespaces/namespace-rows
+                     into [eager-internal-row eager-test-row])
+        ordinary (@#'nss/format-namespaces-block base)
+        prefix-only (@#'nss/format-namespaces-block
+                     (assoc base
+                            :seon.agent.ctx.namespaces/full-source
+                            #{'my.helper}))
+        explicitly-pinned
+        (@#'nss/format-namespaces-block
+         (assoc base
+                :seon.agent.ctx.namespaces/full-source
+                #{'my.helper.internal 'my.helper-test}))]
+    (is (not (str/includes? ordinary "INTERNAL-BODY"))
+        "ordinary agents do not see internal implementation source")
+    (is (not (str/includes? prefix-only "INTERNAL-BODY"))
+        "selecting a parent never broadens to internal descendants")
+    (is (str/includes? explicitly-pinned "INTERNAL-BODY")
+        "an exact generated-development pin exposes the implementation")
+    (is (not (str/includes? explicitly-pinned "TEST-NS-BODY"))
+        "test namespaces remain excluded even under an exact pin")))
 
 (deftest remote-acquisition-is-bounded-and-selection-scoped
   (let [initial (@#'nss/initial-acquisition-members agent-id)

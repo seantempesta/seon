@@ -75,10 +75,12 @@
 ;; ============================================================
 
 (defn hidden-ns-name?
-  "Rule 1: a `*.internal` namespace is indexed but never rendered.
+  "Rule 1: a `*.internal` namespace is indexed but ordinarily hidden.
 
    Applies to the ns or any of its children — the naming convention IS
-   the filter. Source strings convert only at the database boundary."
+   the default filter. An exact per-block `::full-source` pin may reveal it
+   for a generated-development assignment; incidental prefix matches never
+   do. Source strings convert only at the database boundary."
   {:malli/schema [:=> [:cat [:or :string :symbol]] :boolean]}
   [ns-name]
   (let [s (str ns-name)]
@@ -108,7 +110,7 @@
     (str/ends-with? s "-test")))
 
 (defn included-ns?
-  "The ONE selection rule for the namespace sections.
+  "The ordinary selection rule for namespace sections.
 
    EVERY indexed :seon.ns row renders EXCEPT *.internal (hidden-ns-name?) and *-test
    (test-ns-name?) ones — both STRUCTURAL naming conventions that apply
@@ -120,6 +122,18 @@
   (let [s (str ns-name)]
     (boolean (and (not (hidden-ns-name? s))
                   (not (test-ns-name? s))))))
+
+(defn- selected-ns?
+  "True when `ns-name` may enter this block's exact selection.
+
+   Ordinary namespaces follow [[included-ns?]]. A namespace hidden only by
+   the `.internal` convention may enter when its exact symbol is present in
+   `full-source`; test namespaces remain excluded even when explicitly pinned.
+   This is the narrow generated-development override, not prefix expansion."
+  [full-source ns-name]
+  (and (not (test-ns-name? ns-name))
+       (or (included-ns? ns-name)
+           (contains? full-source ns-name))))
 
 (defn- base-ns-name
   "The ns name with a trailing `-test` stripped — the SUBJECT ns a test
@@ -354,7 +368,7 @@
                     names (->> (cond-> (into (set (keys required))
                                                full-source-cfg)
                                  cur-ns (conj cur-ns))
-                               (filter included-ns?)
+                               (filter #(selected-ns? full-source-cfg %))
                                (sort-by name)
                                vec)
                     selected
@@ -669,8 +683,8 @@
        The whole card is reader-commented, so echoing it cannot enqueue evals.
        Self-healing on the `:seon.ns/require-edges` rows.
      - DROPPED — everything else remains reachable via indexed search.
-       (`*.internal` / `*-test` excluded
-       outright, [[included-ns?]]; empty cards dropped.)
+       `*.internal` is hidden unless its exact symbol is explicitly pinned in
+       `::full-source`; `*-test` is always excluded. Empty cards are dropped.
 
    DRIVEN BY THE PER-AGENT CONFIG DIALS, read reactively from the agent's one
    `:namespaces` BLOCK entity, then the Malli default ([[resolve-cfg]] — a
@@ -715,7 +729,7 @@
             scanned         (->> namespace-rows
                      (filter (fn [row]
                                (let [nm (:seon.ns/name row)]
-                                 (and (included-ns? nm)
+                                 (and (selected-ns? full-source-cfg nm)
                                       (contains? include-set nm)))))
                      (sort-by (fn [row]
                                 [(or (:seon.db/tx row)
