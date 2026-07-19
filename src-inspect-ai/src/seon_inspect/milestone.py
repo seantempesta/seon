@@ -301,7 +301,12 @@ def check_store_recall(eval_rows: list[dict[str, Any]],
     oracle = oracle or {}
     identity_attr = oracle.get("identity_attr", ":my.cache/name")
     measure_attr = oracle.get("measure_attr", ":my.cache/weight-kg")
-    measure_type = oracle.get("measure_type", ":double")
+    measure_type = oracle.get(
+        "measure_type",
+        ":int" if oracle and all(
+            isinstance(record.get("measure"), int)
+            and not isinstance(record.get("measure"), bool)
+            for record in oracle.get("records", [])) else ":double")
     records = oracle.get("records", [
         {"identity": "KESTREL", "measure": 42.5},
         {"identity": "MARMOT", "measure": 17.0},

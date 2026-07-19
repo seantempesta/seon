@@ -25,6 +25,7 @@ from seon_inspect.tasks.e1_spec_fn import e1_spec_fn
 from seon_inspect.tasks.ladder_lift import ladder_lift
 from seon_inspect.tasks.long_term_planning import long_term_planning
 from seon_inspect.tasks.milestone_lift import milestone_lift
+from seon_inspect.tasks.product_scenarios import product_scenario
 from seon_inspect.tasks.skill_lift import skill_lift
 
 @dataclass(frozen=True)
@@ -75,6 +76,15 @@ RUNS = [
         endpoint="mock:experiment:model_authored"), "planning_scorer", 1.0),
     ExpectedRun("planning no-plan", lambda: long_term_planning(
         endpoint="mock:experiment:no_plan"), "planning_scorer", 0.0),
+    *[
+        ExpectedRun(f"product {scenario} {outcome}",
+                    lambda scenario=scenario, outcome=outcome: product_scenario(
+                        scenario=scenario, outcome=outcome),
+                    "product_scenario_scorer", expected)
+        for scenario in ("namespace", "reuse_repair", "child_recovery",
+                         "pod_restart")
+        for outcome, expected in (("good", 1.0), ("bad", 0.0))
+    ],
 ]
 
 

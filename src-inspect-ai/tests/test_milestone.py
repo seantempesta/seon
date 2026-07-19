@@ -52,7 +52,7 @@ def _generated_db_proof_rows(oracle):
     rows = _ev(
         (f"(schema/register! {identity} "
          "[:string {:seon.db/identity true}])", True),
-        (f"(schema/register! {measure} {oracle['measure_type']})", True),
+        (f"(schema/register! {measure} :int)", True),
         ("(db/transact! [" + " ".join(
             f"{{{identity} {record['identity']!r} "
             f"{measure} {record['measure']}}}"

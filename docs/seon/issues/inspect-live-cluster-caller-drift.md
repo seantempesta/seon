@@ -184,6 +184,16 @@ This is distinct from `acme-operator-migration-drift.md`. That issue owns the
 ACME process/artifact/database migration itself; this issue owns Inspect's
 live consumers after the current operator boundary exists.
 
+The 2026-07-19 product-scenario slice makes the next consumer contract
+executable without weakening this issue. Native good/bad scorers now cover
+namespace-targeted residency, cross-agent function reuse and in-place repair,
+execution-child recovery, and pod restart using one final database snapshot.
+Its driver sends both work phases through `POST /agents/run` with the same root
+agent. It deliberately requires injected restart and database-read operations;
+an unowned restart fails before a second request. Twenty focused tests and the
+expanded 24-arm offline proof pass. Live logs remain blocked on this issue's
+lease and typed final database read-back.
+
 ## Owner
 
 `seon.dev.config`, `seon.dev.state`, `seon.dev.process`, and `seon.dev.cli` own
