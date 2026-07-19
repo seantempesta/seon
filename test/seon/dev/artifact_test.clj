@@ -41,7 +41,10 @@
                  ["/selected/bun" "install" "--frozen-lockfile"]]}
               @commands))
     (is (= ["build web CSS"
-            ["/selected/bun" "run" "--bun" "css:build"]]
+            ["/selected/bun"
+             "/checkout/node_modules/@tailwindcss/cli/dist/index.mjs"
+             "-i" "resources/public/css/input.css"
+             "-o" "resources/public/css/output.css"]]
            (last @commands)))))
 
 (deftest application-digest-includes-every-bun-identity-field

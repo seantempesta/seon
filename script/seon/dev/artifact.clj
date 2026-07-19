@@ -805,7 +805,10 @@
               "install" "--frozen-lockfile"])
   (run-step! config "build web CSS"
              [(:seon.dev.artifact/bun-executable bun)
-              "run" "--bun" "css:build"]))
+              (str (fs/path (:seon.dev.config/root config)
+                            "node_modules/@tailwindcss/cli/dist/index.mjs"))
+              "-i" "resources/public/css/input.css"
+              "-o" "resources/public/css/output.css"]))
 
 (defn- build-lock-configuration [config]
   ;; Default and downstream targets intentionally own different lifecycle

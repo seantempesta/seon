@@ -1041,7 +1041,11 @@
         ;; explicitly before Tailwind runs; production dependencies are copied
         ;; later from their own --production closure.
         (run! root environment bun "install" "--frozen-lockfile")
-        (run! root environment bun "run" "--bun" "css:build")
+        (run! root environment bun
+              (str (fs/path root
+                            "node_modules/@tailwindcss/cli/dist/index.mjs"))
+              "-i" "resources/public/css/input.css"
+              "-o" "resources/public/css/output.css")
         ((requiring-resolve 'seon.dev.artifact/build-release-programs!)
          config release-programs)
         (copy-file! (fs/path root "package.json")
