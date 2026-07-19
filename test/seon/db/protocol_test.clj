@@ -272,6 +272,25 @@
                  (assoc request ::protocol/query-form
                         '[:find ?e :where [?e :person/name]]))))))
 
+(deftest listeners-accept-scoped-evidence-from-executed-reads
+  (let [plan {:datahike.query.dependency/sources
+              [{:datahike.query.source/symbol '$orders
+                :datahike.query.source/argument-position 1
+                :datahike.query.source/attributes #{:order/total}}]}
+        evidence [{:seon.db/db db
+                   :seon.db/source-argument-position 1
+                   :datahike.read/dependency-plan plan}]
+        request
+        (protocol/listen-request
+         {::protocol/request-id "listen/read-evidence"
+          :seon.db/db db
+          :seon.db/read-evidence evidence})]
+    (is (protocol/valid-request? request))
+    (is (= request (transit-roundtrip request)))
+    (is (false? (protocol/valid-request?
+                 (assoc request :datahike.read/dependency-plan plan)))
+        "one interest has one Datahike dependency authority")))
+
 (deftest release-selects-an-acquired-database-by-ordinary-value
   (let [request (protocol/release-database-request
                  {::protocol/request-id "release/research"

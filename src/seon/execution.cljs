@@ -122,6 +122,7 @@
   [::invocation-id ::invocation-id]
   [:seon.db/db :seon.db/db]
   [::result ::result]
+  [:seon.db/read-evidence {:optional true} :seon.db/read-evidence]
   [::result-bytes ::result-bytes]])
 (schema/register!
  ::error-message
@@ -802,19 +803,23 @@
              :seon.error/kind (or (:seon.error/kind data) :agent)}
       (seq wire-data) (assoc :seon.error/data wire-data))))
 
-(defn- terminal-message [invocation bounded]
+(defn- terminal-message
+  ([invocation bounded]
+   (terminal-message invocation bounded nil))
+  ([invocation bounded read-evidence]
   (if (::ok? bounded)
-    {::message result-message
-     ::protocol-version protocol-version
-     ::invocation-id (::invocation-id invocation)
-     :seon.db/db (:seon.db/db invocation)
-     ::result (::value bounded)
-     ::result-bytes (::result-bytes bounded)}
+    (cond-> {::message result-message
+             ::protocol-version protocol-version
+             ::invocation-id (::invocation-id invocation)
+             :seon.db/db (:seon.db/db invocation)
+             ::result (::value bounded)
+             ::result-bytes (::result-bytes bounded)}
+      (some? read-evidence) (assoc ::db/read-evidence read-evidence))
     {::message error-message
      ::protocol-version protocol-version
      ::invocation-id (::invocation-id invocation)
      :seon.db/db (:seon.db/db invocation)
-     ::error (::error bounded)}))
+     ::error (::error bounded)})))
 
 (defn- send! [send-message! message]
   (when-not (valid-child-message? message)
@@ -933,22 +938,24 @@
                           (eval/lookup-value function-symbol))]
                  (try
                    (let [value
-                         (db/with-agent
-                          (::agent-id invocation)
+                         (db/with-read-evidence
                           (fn []
-                            (db/with-tx-context
-                             (cond-> (or (::run-fence invocation) {})
-                               pin-database?
-                               (assoc :seon.db/db (:seon.db/db invocation)))
+                            (db/with-agent
+                             (::agent-id invocation)
                              (fn []
-                               (if compiled?
-                                 (function-value
-                                  (::arguments invocation)
-                                  (partial invoke-selected! state invocation)
-                                  (partial ensure-compile-state! state)
-                                  (partial prepare-eval-program! state invocation))
-                                 (apply function-value
-                                        (::arguments invocation)))))))]
+                               (db/with-tx-context
+                                (cond-> (or (::run-fence invocation) {})
+                                  pin-database?
+                                  (assoc :seon.db/db (:seon.db/db invocation)))
+                                (fn []
+                                  (if compiled?
+                                    (function-value
+                                     (::arguments invocation)
+                                     (partial invoke-selected! state invocation)
+                                     (partial ensure-compile-state! state)
+                                     (partial prepare-eval-program! state invocation))
+                                    (apply function-value
+                                           (::arguments invocation)))))))))]
                      (js/Promise.resolve value))
                    (catch :default exception
                      (js/Promise.reject exception)))
@@ -957,12 +964,12 @@
                            {::function-symbol function-symbol
                             :seon.error/kind :core-bug})))))
             (.then
-             (fn [value]
+             (fn [{::db/keys [value read-evidence]}]
                (let [bounded (bounded-result value
                                              (::result-limit-bytes invocation))]
                  (settle-active!
                   state token send-message!
-                  (terminal-message invocation bounded)))))
+                  (terminal-message invocation bounded read-evidence)))))
             (.catch
              (fn [exception]
                (-> (record-top-level-call-error! function-symbol exception)

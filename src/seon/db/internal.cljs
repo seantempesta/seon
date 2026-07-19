@@ -18,6 +18,10 @@
   (let [ctor (.-AsyncLocalStorage (js/require "node:async_hooks"))]
     (ctor.)))
 
+(defonce ^:private read-evidence-context
+  (let [ctor (.-AsyncLocalStorage (js/require "node:async_hooks"))]
+    (ctor.)))
+
 (defn current-tx-context
   "The current fiber-local transaction context."
   []
@@ -27,6 +31,26 @@
   "The current fiber-local agent id."
   []
   (some-> agent-context .getStore))
+
+(defn record-read-evidence!
+  "Retain one ordinary Datahike read-evidence entry in the current fiber."
+  [evidence]
+  (when-let [entries (some-> read-evidence-context .getStore)]
+    (swap! entries conj evidence))
+  nil)
+
+(defn run-with-read-evidence
+  "Run `f` in a fresh fiber-local evidence scope and return value + evidence."
+  [f]
+  (let [entries (atom [])]
+    (.run
+     read-evidence-context entries
+     (fn []
+       (-> (js/Promise.resolve nil)
+           (.then (fn [_] (f)))
+           (.then (fn [value]
+                    {::db/value value
+                     ::db/read-evidence (vec (distinct @entries))})))))))
 
 (defn run-with-tx-context
   "Run `f` with `context` merged into the current transaction context."

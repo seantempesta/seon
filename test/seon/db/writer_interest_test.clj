@@ -564,6 +564,66 @@
     (is (re-find #"must depend on a database attribute"
                  (.getMessage ^Throwable failure)))))
 
+(deftest executed-read-evidence-is-unioned-at-its-source-position
+  (let [database {:db-name "evidence"
+                  :store-id [(random-uuid) :db]
+                  :t 1
+                  :as-of nil
+                  :since nil
+                  :history false
+                  :datahike/commit-id (random-uuid)}
+        first-plan
+        {:datahike.query.dependency/sources
+         [{:datahike.query.source/symbol '$
+           :datahike.query.source/argument-position 0
+           :datahike.query.source/attributes #{:agent/id}}]}
+        multi-source-plan
+        {:datahike.query.dependency/sources
+         [{:datahike.query.source/symbol '$left
+           :datahike.query.source/argument-position 0
+           :datahike.query.source/attributes #{:ignored/value}}
+          {:datahike.query.source/symbol '$right
+           :datahike.query.source/argument-position 2
+           :datahike.query.source/attributes #{:message/text}}]}
+        interest
+        (#'writer/listen-interest
+         (protocol/listen-request
+          {::protocol/request-id "evidence/listen"
+           :seon.db/db database
+           :seon.db/read-evidence
+           [{:seon.db/db database
+             :seon.db/source-argument-position 0
+             :datahike.read/dependency-plan first-plan}
+            {:seon.db/db database
+             :seon.db/source-argument-position 2
+             :datahike.read/dependency-plan multi-source-plan}]})
+         {})]
+    (is (= #{:agent/id :message/text}
+           (::writer/dependencies interest))
+        "the writer interprets Datahike plans without reparsing queries")))
+
+(deftest executed-read-evidence-rejects-another-database-value
+  (let [database {:db-name "evidence"
+                  :store-id [(random-uuid) :db]
+                  :t 1
+                  :as-of nil
+                  :since nil
+                  :history false
+                  :datahike/commit-id (random-uuid)}
+        other (assoc database :t 2 :datahike/commit-id (random-uuid))]
+    (is (thrown-with-msg?
+         clojure.lang.ExceptionInfo
+         #"must describe the listener database value"
+         (#'writer/listen-interest
+          (protocol/listen-request
+           {::protocol/request-id "evidence/mismatch"
+            :seon.db/db database
+            :seon.db/read-evidence
+            [{:seon.db/db other
+              :seon.db/source-argument-position 0
+              :datahike.read/dependency-plan :all}]})
+          {})))))
+
 (deftest one-process-readiness-thread-routes-concurrent-runtime-sources
   (let [scope-a {::executor/database-name "runtime-a"
                  ::branch/connection-id [(random-uuid) :db]

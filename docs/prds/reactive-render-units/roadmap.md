@@ -28,7 +28,9 @@ parts of the target:
   interest;
 - equivalent sockets share a normalized subscription, render, and serialized
   event;
-- web commits currently coalesce for hard-coded 16–500 ms intervals;
+- web commits coalesce using settle, structural-settle, and maximum-latency
+  values resolved from database configuration, with manifest environment
+  overrides;
 - each subscription owns one active render plus the newest pending value;
 - independent subscriptions and page reads already overlap through bounded
   async boundaries;
@@ -37,15 +39,18 @@ parts of the target:
 - complete Datastar snapshots use stable-ID outer morphs and latest-wins
   backpressure.
 
-The dependency contract is not sound. Current page dependencies are fixed
-attributes plus analyzer-derived `:seon.fn/read-attrs`; helper-indirected reads
-are invisible. The architecture says those declarations cannot veto actual
-reads, but the removed runtime-observation engine is no longer in current
-source. Renderer source changes can also be filtered when their declared read
-set is unchanged.
+Current page invalidation is not yet sound end to end. The execution child now
+captures the Datahike-owned read evidence from successful query, pull,
+pull-many, entity, schema, index, and mixed `execute-many` operations in one
+fiber-local scope and returns it on the ordinary invocation result. The writer
+can interpret and union that source-positioned evidence directly when
+installing a committed-report interest. Datastar has not yet migrated to that
+contract: it still installs fixed attributes plus analyzer-derived
+`:seon.fn/read-attrs`, so helper-indirected reads remain invisible to an open
+page until the general reactive-read owner replaces that declared gate.
 
 Datahike `main` now exposes an execution-aware, source-scoped query dependency
-plan at maintained revision `6a0386d2`. It folds the typed parsed query and
+plan at maintained revision `2e6c7bcf`. It folds the typed parsed query and
 PullSpec representations, resolves scalar `:in` bindings and supplied rules,
 canonicalizes reverse pull attributes, and widens unknown behavior to `:all`.
 The query cache stores and reuses that same plan; propagation selects only the
@@ -53,17 +58,16 @@ attributes for the database source that advanced, and schema transactions do
 not inherit cached results. The former flat attribute helper remains only as a
 projection of this plan for compatibility.
 
-This closes the characterized query false negatives, including nested pulls,
-`missing?`, input-bound attributes, supplied rules, and multiple database
-sources. It does not yet close the full read contract: direct pull, pull-many,
-schema, entity, and index reads still return no dependency evidence through the
-Seon protocol.
-
-Direct pull, pull-many, schema, and index reads return no dependency evidence
-and do not share the query result cache. A page rerun is therefore not
-uniformly cheap. A sole socket reconnect also normally rerenders because the
-last event is released with the final subscription consumer; current HTML reuse
-applies to equivalent active sockets, not a general reconnect cache.
+This closes the characterized query and pull false negatives, including nested
+and reverse pulls, `missing?`, input-bound attributes, supplied rules, multiple
+database sources, direct pull, and pull-many. Query, pull, pull-many, schema,
+entity, and index protocol responses now carry ordinary dependency evidence;
+unknown full-entity/schema/index behavior widens to `:all`. Query results retain
+the maintained immutable weighted cache and single-flight owner. Direct pull
+reuse has not been generalized without measurement. A sole socket reconnect
+also normally rerenders because the last event is released with the final
+subscription consumer; current HTML reuse applies to equivalent active
+sockets, not a general reconnect cache.
 
 The exact source audit, dependency ledger, parser probes, Datastar protocol
 review, concurrency analysis, and proof matrix are in
@@ -163,14 +167,15 @@ Node runner is intentionally smaller, and `bin/test-writer` runs Seon tests
 rather than the fork's entire suite. Graduation records all three separately so
 a green Seon gate cannot conceal a missing Datahike regression.
 
-Current evidence for maintained Datahike `main` revision `6a0386d2`:
+Current evidence for maintained Datahike `main` revision `2e6c7bcf`:
 
-- query namespace: 84 tests, 417 assertions, zero failures;
-- query-cache namespace: 114 tests, 834 assertions, zero failures before the
-  final focused source/schema additions, which passed across all three JVM
-  profiles;
-- specification namespace: 12 tests, 99 assertions, zero failures; and
-- full CLJS Node gate: 137 tests, 945 assertions, zero failures.
+- focused JVM query and specification gate: 96 tests, 531 assertions, zero
+  failures;
+- full Datahike CLJS Node gate: 138 tests, 951 assertions, zero failures;
+- Seon writer protocol and committed-interest gate: 25 tests, 128 assertions,
+  zero failures; and
+- Seon remote database plus execution-child capture gates: 51 tests, 225
+  assertions, zero failures.
 
 Exit: each known stale-result case fails for the intended reason before its
 implementation changes, while the imported upstream suite still establishes

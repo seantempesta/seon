@@ -743,6 +743,64 @@
                                    error))
                     (done)))))))
 
+(deftest read-evidence-is-fiber-local-and-preserves-read-values
+  (async done
+    (let [query-form '[:find ?e :where [?e :example/id]]
+          query-plan
+          {:datahike.query.dependency/sources
+           [{:datahike.query.source/symbol '$
+             :datahike.query.source/argument-position 0
+             :datahike.query.source/attributes #{}}]}
+          query-dependency
+          {::db/db database
+           ::db/source-argument-position 0
+           :datahike.read/dependency-plan query-plan}
+          all-dependency
+          {::db/db database
+           ::db/source-argument-position 0
+           :datahike.read/dependency-plan :all}]
+      (-> (with-recording-authority
+            {query-form #{[1]}}
+            (fn [_]
+              (-> (open!)
+                  (.then
+                   (fn [_]
+                     (js/Promise.all
+                      #js [(db/with-read-evidence #(db/query query-form))
+                           (db/with-read-evidence
+                            #(js/Promise.all
+                              #js [(db/pull database '[*] 1)
+                                   (db/pull-many database '[*] [1 2])
+                                   (db/index-page
+                                    database
+                                    {::db/index :eavt
+                                     ::db/direction :forward
+                                     ::db/limit 10})]))])))
+                  (.then
+                   (fn [scopes]
+                     (let [[query-scope aggregate-scope]
+                           (js->clj scopes :keywordize-keys false)]
+                       (is (= #{[1]} (::db/value query-scope)))
+                       (is (= [query-dependency]
+                              (::db/read-evidence query-scope)))
+                       (is (= [{:example/id 1}
+                               [{:example/id 1} nil]
+                               {:datahike.index-page/datoms
+                                [[1 :example/id "one" 536870913 true]]
+                                :datahike.index-page/complete? true}]
+                              (::db/value aggregate-scope)))
+                       (is (= [all-dependency]
+                              (::db/read-evidence aggregate-scope))
+                           "identical plans are compacted within one scope")
+                       (is (not= (::db/read-evidence query-scope)
+                                 (::db/read-evidence aggregate-scope))
+                           "concurrent asynchronous scopes do not leak")))))))
+          (.then (fn [_] (done)))
+          (.catch
+           (fn [error]
+             (is false (str "read evidence capture rejected: " error))
+             (done)))))))
+
 (deftest all-authority-operations-return-promises-of-values
   (async done
     (-> (with-recording-authority

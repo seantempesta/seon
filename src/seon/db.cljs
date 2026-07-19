@@ -60,6 +60,11 @@
 (schema/register! ::tx-context :map)
 (schema/register! ::managed-scope [:set :qualified-keyword])
 (schema/register! ::managed-identity-attrs [:set :qualified-keyword])
+(schema/register!
+ ::read-evidence-result
+ [:map {:closed true}
+  [::value :any]
+  [::read-evidence ::read-evidence]])
 
 (schema/register!
  ::transact-request
@@ -205,6 +210,50 @@
 
 (defn- db-value? [value]
   (protocol/database-value? value))
+
+(defn ^:async with-read-evidence
+  "Run `f` while accumulating exact Datahike plans from successful reads."
+  {:malli/schema [:=> [:cat ::thunk] ::read-evidence-result]}
+  [f]
+  (await (internal/run-with-read-evidence f)))
+
+(defn- query-source-database
+  [request argument-position]
+  (if-let [database (::db request)]
+    (if (zero? argument-position)
+      database
+      (nth (::protocol/arguments request) (dec argument-position) nil))
+    (nth (::protocol/arguments request) argument-position nil)))
+
+(defn- record-query-evidence! [request response]
+  (let [plan (:datahike.read/dependency-plan response)
+        positions
+        (if (= :all plan)
+          (cond->
+            (into []
+                  (keep-indexed
+                   (fn [position argument]
+                     (when (db-value? argument) position)))
+                  (::protocol/arguments request))
+            (::db request) (conj 0))
+          (into []
+                (map :datahike.query.source/argument-position)
+                (:datahike.query.dependency/sources plan)))]
+    (doseq [position (distinct positions)
+            :let [database (query-source-database request position)]
+            :when (db-value? database)]
+      (internal/record-read-evidence!
+       {::db database
+        ::source-argument-position position
+        :datahike.read/dependency-plan plan}))))
+
+(defn- record-primary-read-evidence! [request response]
+  (when-let [database (::db request)]
+    (internal/record-read-evidence!
+     {::db database
+      ::source-argument-position 0
+      :datahike.read/dependency-plan
+      (:datahike.read/dependency-plan response)})))
 
 (defn- newer-database
   "Keep the newest descriptor and reject an impossible split history."
@@ -853,9 +902,12 @@
     (if (error-value? wire-request)
       wire-request
       (let [response (await (send-request! wire-request 30000))]
-        (if (or (error-value? response) (::protocol/success? response))
-          response
-          (response-error response))))))
+        (cond
+          (error-value? response) response
+          (::protocol/success? response)
+          (do (record-query-evidence! wire-request response)
+              response)
+          :else (response-error response))))))
 
 (defn- ^:async query-result! [request]
   (let [response (await (query-response! request))]
@@ -916,7 +968,9 @@
          (cond
            (error-value? response) response
            (not (::protocol/success? response)) (response-error response)
-           :else (::protocol/result response))))))
+           :else (do (record-primary-read-evidence!
+                      (merge base request) response)
+                     (::protocol/result response)))))))
   ([selector entity-id]
    (await (pull {::pull-pattern selector ::ref entity-id})))
   ([database selector entity-id]
@@ -942,7 +996,9 @@
          (cond
            (error-value? response) response
            (not (::protocol/success? response)) (response-error response)
-           :else (::protocol/result response))))))
+           :else (do (record-primary-read-evidence!
+                      (merge base request) response)
+                     (::protocol/result response)))))))
   ([selector entity-ids]
    (await (pull-many {::pull-pattern selector ::refs (vec entity-ids)})))
   ([database selector entity-ids]
@@ -972,7 +1028,8 @@
          (cond
            (error-value? response) response
            (not (::protocol/success? response)) (response-error response)
-           :else (::protocol/schema response)))))))
+           :else (do (record-primary-read-evidence! base response)
+                     (::protocol/schema response))))))))
 
 (defn ^{:async true :seon.fn/agent-facing? true} execute-many
   "Run bounded independent database operations at one database value."
@@ -1009,8 +1066,18 @@
               (cond
                 (error-value? response) response
                 (not (::protocol/success? response)) (response-error response)
-                :else {::db database
-                       ::results (::protocol/results response)}))))))
+                :else
+                (do
+                  (doseq [[member member-response]
+                          (map vector (::protocol/members wire-request)
+                               (::protocol/results response))
+                          :when (true? (::protocol/success? member-response))]
+                    (if (= protocol/query-operation
+                           (::protocol/operation member))
+                      (record-query-evidence! member member-response)
+                      (record-primary-read-evidence! member member-response)))
+                  {::db database
+                   ::results (::protocol/results response)})))))))
     (catch :default exception
       (let [value (error/->map exception)]
         (cond-> value
@@ -1040,10 +1107,12 @@
            (error-value? response) response
            (not (::protocol/success? response)) (response-error response)
            :else
-           (select-keys response
-                        [:datahike.index-page/datoms
-                         :datahike.index-page/complete?
-                         :datahike.index-page/cursor]))))))
+           (do
+             (record-primary-read-evidence! base response)
+             (select-keys response
+                          [:datahike.index-page/datoms
+                           :datahike.index-page/complete?
+                           :datahike.index-page/cursor])))))))
   ([database options]
    (await (index-page (assoc options ::db database)))))
 
@@ -1065,7 +1134,11 @@
         (cond
           (error-value? response) response
           (not (::protocol/success? response)) (response-error response)
-          :else (::protocol/hits response))))))
+          :else
+          (do
+            (record-primary-read-evidence!
+             base {:datahike.read/dependency-plan :all})
+            (::protocol/hits response)))))))
 
 (schema/register! ::containing-branch-head ::branch-head)
 (schema/register! ::transaction-id :seon.db.protocol/transaction-id)
@@ -1098,6 +1171,7 @@
 ;;; Transaction interests
 
 (defn- ^:async listen-request! [{::keys [handler key query dependency-plan
+                                         read-evidence
                                          datom-patterns]
                                  :as input}]
   (if-let [{::keys [session]} (active-session)]
@@ -1113,11 +1187,15 @@
                         ::db database}
                  datom-patterns
                  (assoc ::protocol/datom-patterns datom-patterns)
+                 (and (not datom-patterns) read-evidence)
+                 (assoc ::read-evidence read-evidence)
                  (and (not datom-patterns) dependency-plan)
                  (assoc :datahike.read/dependency-plan dependency-plan)
-                 (and (not datom-patterns) (not dependency-plan) query)
+                 (and (not datom-patterns) (not read-evidence)
+                      (not dependency-plan) query)
                  (assoc ::protocol/query-form query)
-                 (and (not datom-patterns) (not dependency-plan) (not query))
+                 (and (not datom-patterns) (not read-evidence)
+                      (not dependency-plan) (not query))
                  (assoc :datahike.read/dependency-plan :all)))]
           (swap! !session assoc-in [::interest-handlers request-id]
                  {::owner owner

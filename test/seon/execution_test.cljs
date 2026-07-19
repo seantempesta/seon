@@ -176,6 +176,8 @@
                       (::execution/message (first @messages))))
                (is (= {:seon.execution-test/value 7}
                       (::execution/result (first @messages))))
+               (is (= [] (::db/read-evidence (first @messages)))
+                   "every successful child call returns its scoped read evidence")
                (done)))
             (.catch
              (fn [error]

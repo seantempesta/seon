@@ -338,6 +338,15 @@
   [:map {:closed true}
    [:datahike.query.dependency/sources
     :datahike.query.dependency/sources]]])
+(schema/register! :seon.db/source-argument-position [:int {:min 0}])
+(schema/register!
+ :seon.db/read-dependency
+ [:map {:closed true}
+  [:seon.db/db :seon.db/db]
+  [:seon.db/source-argument-position :seon.db/source-argument-position]
+  [:datahike.read/dependency-plan :datahike.read/dependency-plan]])
+(schema/register! :seon.db/read-evidence
+                  [:vector :seon.db/read-dependency])
 (schema/register!
  ::datom-pattern
  [:map {:closed true}
@@ -594,6 +603,13 @@
   [:seon.db/db :seon.db/db]
   [:datahike.read/dependency-plan :datahike.read/dependency-plan]])
 (schema/register!
+ ::read-evidence-listen-request
+ [:map {:closed true}
+  [::operation [:= listen-operation]]
+  [::request-id ::request-id]
+  [:seon.db/db :seon.db/db]
+  [:seon.db/read-evidence :seon.db/read-evidence]])
+(schema/register!
  ::datom-listen-request
  [:map {:closed true}
   [::operation [:= listen-operation]]
@@ -601,7 +617,8 @@
   [:seon.db/db :seon.db/db]
   [::datom-patterns ::datom-patterns]])
 (schema/register! ::listen-request
-                  [:or ::dependency-plan-listen-request
+                  [:or ::read-evidence-listen-request
+                   ::dependency-plan-listen-request
                    ::query-listen-request ::datom-listen-request])
 (schema/register!
  ::unlisten-request
@@ -1050,13 +1067,20 @@
   [:seon.db/db :seon.db/db]
   [:datahike.read/dependency-plan :datahike.read/dependency-plan]])
 (schema/register!
+ ::read-evidence-listen-request-input
+ [:map {:closed true}
+  [::request-id ::request-id]
+  [:seon.db/db :seon.db/db]
+  [:seon.db/read-evidence :seon.db/read-evidence]])
+(schema/register!
  ::datom-listen-request-input
  [:map {:closed true}
   [::request-id ::request-id]
   [:seon.db/db :seon.db/db]
   [::datom-patterns ::datom-patterns]])
 (schema/register! ::listen-request-input
-                  [:or ::dependency-plan-listen-request-input
+                  [:or ::read-evidence-listen-request-input
+                   ::dependency-plan-listen-request-input
                    ::query-listen-request-input
                    ::datom-listen-request-input])
 (schema/register!

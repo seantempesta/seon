@@ -2192,10 +2192,36 @@
     (doseq [request-id (keys @(::interests transport-connection))]
       (remove-interest-locked! runtime transport-connection request-id))))
 
+(defn- merge-read-dependencies [left right]
+  (if (or (= :all left) (= :all right))
+    :all
+    (into (or left #{}) right)))
+
+(defn- evidence-dependencies [request]
+  (reduce
+   (fn [dependencies evidence]
+     (when-not (= (:seon.db/db request) (:seon.db/db evidence))
+       (throw
+        (ex-info "Read evidence must describe the listener database value."
+                 {::failure-kind protocol/protocol-error
+                  ::protocol/request-id (::protocol/request-id request)
+                  :seon.db/db (:seon.db/db request)
+                  :seon.db/evidence-db (:seon.db/db evidence)})))
+     (merge-read-dependencies
+      dependencies
+      (d/dependency-plan-attributes
+       (:datahike.read/dependency-plan evidence)
+       (:seon.db/source-argument-position evidence))))
+   #{}
+   (:seon.db/read-evidence request)))
+
 (defn- listen-interest
   [request scope]
   (let [dependencies
         (cond
+          (contains? request :seon.db/read-evidence)
+          (evidence-dependencies request)
+
           (contains? request :datahike.read/dependency-plan)
           (d/dependency-plan-attributes
            (:datahike.read/dependency-plan request) 0)
