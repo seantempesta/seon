@@ -1,5 +1,7 @@
 import copy
 import json
+import io
+import urllib.error
 from types import SimpleNamespace
 
 import pytest
@@ -136,6 +138,18 @@ def test_typed_product_evidence_requests_datahike_history():
     payload = json.loads(requests[0].data.decode())
     assert payload["seon.db/history?"] is True
     assert result["database_value"]["history"] is True
+
+
+def test_typed_product_evidence_surfaces_database_refusal():
+    error = urllib.error.HTTPError(
+        "http://pod/_seon/operator/product-evidence", 422,
+        "Unprocessable Entity", {},
+        io.BytesIO(b'{"seon.db/ok?":false,"seon.db/error":"query budget exceeded"}'))
+
+    with pytest.raises(RuntimeError, match="query budget exceeded"):
+        query_product_evidence(
+            "http://pod/agents/run", "[:find ?e :where [?e :a ?v]]",
+            opener=lambda _request: (_ for _ in ()).throw(error))
 
 
 def test_execution_process_reader_uses_the_parent_host_endpoint():

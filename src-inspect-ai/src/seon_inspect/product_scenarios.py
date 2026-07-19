@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 from typing import Any
+import urllib.error
 import urllib.request
 
 from inspect_ai.scorer import (CORRECT, INCORRECT, Score, Scorer, Target,
@@ -261,8 +262,18 @@ def query_product_evidence(cluster_url: str, query: str,
     body = json.dumps(payload).encode()
     request = urllib.request.Request(
         endpoint, data=body, headers={"Content-Type": "application/json"})
-    with opener(request) as response:
-        result = json.loads(response.read().decode())
+    try:
+        with opener(request) as response:
+            result = json.loads(response.read().decode())
+    except urllib.error.HTTPError as error:
+        try:
+            result = json.loads(error.read().decode())
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            raise RuntimeError(
+                f"product evidence HTTP {error.code}: {error.reason}") from error
+        raise RuntimeError(
+            result.get("seon.db/error",
+                       f"product evidence HTTP {error.code}")) from error
     if result.get("seon.db/ok?") is not True:
         raise RuntimeError(result.get("seon.db/error", "database read failed"))
     database = result.get("seon.db/db")
