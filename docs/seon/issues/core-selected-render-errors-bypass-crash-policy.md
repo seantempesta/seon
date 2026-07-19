@@ -159,3 +159,10 @@ same absent-program message for a canvas surface and adds the qualified
 renderer, Malli/Hiccup contract, `my.canvas/view`, and `my.canvas/show!` repair.
 Other selected blocks and core loader failures retain their original messages.
 Focused execution-runtime proof passes 14 tests/74 assertions.
+
+The exact rebuilt feed now displays that complete instruction for
+`my.agents.canvas-recovery/mistyped` in both the primary canvas and rail preview
+while watcher, writer, and pod remain ready. `my.canvas/clear!` then retracted
+the stale selection; the next complete feed contained no absent-program error.
+The inverse stale-authored-reference case is therefore closed without a child
+crash, stored acknowledgement, or second warning path.

@@ -231,6 +231,16 @@ focused `seon.execution.runtime-test` proof passes 14/74. Exact rebuilt browser
 wording and repair/clear remain the next live canvas falsifier before the
 complete control matrix resumes.
 
+That exact rebuilt live falsifier now passes. The agent feed rendered the
+qualified `my.agents.canvas-recovery/mistyped` selection with the full Malli,
+Hiccup, `my.canvas/view`, and `my.canvas/show!` repair instruction twice (the
+primary canvas plus its rail preview) while watcher, writer, and pod remained
+ready. Calling the supported `my.canvas/clear!` operation retracted the stale
+selection; the next complete feed contained no absent-function error and the
+derived warning cause disappeared with the same database fact. The complete
+button/input/select/toggle/validation/focus/read-back matrix is again the next
+browser boundary.
+
 As of 2026-07-18, one JVM writer has passed the complete autonomous sibling
 cluster lifecycle: fresh initialization, distinct database values and store
 IDs, concurrent agents and gzip feeds, isolated writes, pod-only restart,
