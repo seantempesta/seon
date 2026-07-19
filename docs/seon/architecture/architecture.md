@@ -226,9 +226,10 @@ pod per active cluster, with three logical roles:
   bounded fair pools. Identical queries over the same database value share
   Datahike's result cache and, where proven, one in-flight computation. Data
   only; it never executes agent code or serves a second web application.
-- **Bun UI host** — the browser's single front door: a direct authority client
-  plus one database-scoped selective interest that derives every agent's
-  **view** (including the root agent's view at `/`) from
+- **Bun UI host** — the browser's single front door: one direct authority
+  session plus a normalized reactive registration for each demanded
+  computation. Each registration owns one database-scoped selective interest
+  and derives an agent's **view** (including the root agent's view at `/`) from
   `:seon.agent/ctx`, holds the route table, and streams patches. The streamer is
   a **role, not a process**—any protocol client with the capability and interest
   can play it, so the UI host is relocatable without copying indexes.
@@ -304,7 +305,7 @@ flowchart TB
   Reports -->|"embedding-relevant committed facts"| Embeddings
   Embeddings -->|"transact completed vectors later"| Sessions
 
-  Reports -->|"changed attributes wake matching demanded views"| Web
+  Reports -->|"dependency plans wake matching registrations"| Web
   Web -->|"affected reads at exact db-after"| Sessions
   Sessions -->|"ordinary data; identical reads share Datahike work"| Web
   Root -->|"complete stable-ID hiccup + read dependencies"| Web
@@ -322,15 +323,16 @@ required database values as ordinary Datalog sources. This is not a return to
 `*conn*`: connections and native Datahike values remain inside the authority,
 and every child receives only ordinary immutable descriptors and results.
 
-One committed transaction report is sufficient to wake every interested
-consumer of one database. The report's changed attributes are compared with
-each demanded view's observed query dependencies. Unaffected views do no work;
-affected equivalent views coalesce at the newest exact `db-after` and share one
-render. Their identical queries over the same immutable database value meet in
-Datahike's value-owned cache and in-flight computation, so agents, browser
+One committed transaction report is sufficient to select every interested
+registration for one database. Datahike compares the report with the
+source-scoped dependency plans produced by the reads that actually ran.
+Unaffected registrations do no work; affected equivalent demands share one
+registration, advance to the newest exact `db-after`, and share one render.
+Their identical reads over the same immutable database value meet in
+Datahike's value-owned cache and single-flight computation, so agents, browser
 sockets, and renderers reuse database work without a Seon-owned result cache.
-The cache and interest are always database-scoped; database A can neither wake
-nor satisfy a read for database B.
+Each interest and cache identity is database-scoped; database A can neither
+wake nor satisfy a read for database B.
 
 Datastar owns the browser's ID-aware morph. Datahike owns indexed computation,
 cache validity, and committed transaction reports. Bun owns agent isolation,
@@ -521,13 +523,15 @@ routes: the root agent’s view (`/`), per-agent views (`/agent/{id}`), and apps
 (`/agent/{id}/app/{x}`). Routing is data via **reitit** over `:seon.route/*` datoms;
 `/call` is the one browser-action door and its gate authorizes registered
 agent-owned home callbacks (it is not lifecycle authorization). The **live
-channel is ours**: one database-scoped selective interest wakes a
-database-value-pinned authority read that derives every affected view and streams
-whole-element **morphs** (idiomorph-diffed client-side); reconnect resolves the
-current database value and repaints current truth. No Bun process owns a Datahike
-replica or transaction replay cursor. The doc owns block/render/canvas/slot/layout, the page tree,
-reitit + the gate, the SSE channel, and the seed-copy + variadic `install!`/`remove!`
-override model. See [[ui]].
+channel is ours**: each demanded normalized computation owns one
+database-scoped selective interest. A matching report wakes its exact
+database-value-pinned derivation, and equivalent sockets share the resulting
+whole-element **morph** (idiomorph-diffed client-side); reconnect resolves the
+current database value and repaints current truth. No Bun process owns a
+Datahike replica or transaction replay cursor. The doc owns
+block/render/canvas/slot/layout, the page tree, reitit + the gate, the SSE
+channel, and the seed-copy + variadic `install!`/`remove!` override model. See
+[[ui]].
 
 ### Toolkit — [[toolkit]]
 

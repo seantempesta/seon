@@ -12,8 +12,9 @@ tags: [architecture, web, agent]
 The human's UI and the agent's prompt are the same data, dual-rendered. Every
 page is a derived projection of the database; nothing rendered is stored. The
 context unit is the **block**; the engine is `seon.render`; the front door is
-**reitit**; the live channel is a Datastar **morph** stream opened by one
-database-scoped selective interest. Loopback streams are uncompressed by
+**reitit**; the live channel is a Datastar **morph** stream backed by one
+normalized reactive registration and database-scoped selective interest per
+demanded computation. Loopback streams are uncompressed by
 default; remote compression is explicit configuration. Every layer is a
 symbol or a datom, so a third party overrides any of it — blocks, canvas,
 layout, the root agent’s view, routes, CSS, client — reusing the same
@@ -416,12 +417,14 @@ move.
 
 ## The live channel — selective Datastar morph SSE
 
-The live channel is **ours** (reitit has no streaming primitives by design): one
-database-scoped interest receives an ordinary transaction report plus conservative
-changed-attribute evidence, and the view is a pure `:db-after`-pinned derivation.
-There is no web-host Datahike replica or global transaction broadcast. The agent
-only transacts datoms; it never opens or writes a stream. The Bun web host
-implements the `view = f(db)` model through `seon.web.datastar`.
+The live channel is **ours** (reitit has no streaming primitives by design).
+Each demanded normalized computation registers its Datahike-produced dependency
+plan through the Bun host's one authority session. Matching committed reports
+advance that registration to an exact `db-after`; unrelated reports never reach
+the computation. There is no web-host Datahike replica, global render listener,
+or transaction broadcast. The agent only transacts datoms; it never opens or
+writes a stream. The Bun web host implements the `view = f(db)` model through
+`seon.reactive` and `seon.web.datastar`.
 
 - **view = f(db), one complete morph.** Reitit route match plus normalized
   path/query defines one semantic subscription key. Initial paint and each
@@ -539,9 +542,10 @@ never to dependency invalidation. Legitimate expensive units are bounded before
 building hidden hiccup; collapsed markup alone is not a compute bound.
 
 The streamer is a role inside the Bun web host: it owns one direct authority
-session plus database-scoped interests, derives render units at exact database
-values, and writes browser patches. Page code depends on that role's data
-contract rather than a transport-global registry.
+session, while each demanded normalized computation owns its database-scoped
+interest through `seon.reactive`. It derives complete views at exact database
+values and writes browser patches. Page code depends on that data contract
+rather than a transport-global registry.
 
 ## Errors render as surfaces
 

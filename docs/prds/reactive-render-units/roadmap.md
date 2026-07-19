@@ -1,6 +1,6 @@
 ---
 type: prd
-status: active
+status: complete
 tags: [prd, database, capability, flow]
 ---
 
@@ -39,10 +39,10 @@ parts of the target:
 - complete Datastar snapshots use stable-ID outer morphs and latest-wins
   backpressure.
 
-Current page invalidation has sustained-import, newest-value convergence,
-browser morph, reconnect, slow-consumer socket convergence, and
-resource-release proof. Failed-render repair is also live-proven below. The
-remaining program gate is final current-artifact browser/test graduation. The execution child
+Page invalidation has sustained-import, newest-value convergence, browser
+morph, reconnect, slow-consumer socket convergence, and resource-release
+proof. Failed-render repair and exact current-artifact browser/test graduation
+are also live-proven below. The execution child
 captures the Datahike-owned read evidence from successful query, pull,
 pull-many, entity, schema, index, and mixed `execute-many` operations in one
 fiber-local scope and returns it on the ordinary invocation result. The writer
@@ -677,24 +677,26 @@ None is required for correctness.
 
 ## Acceptance matrix
 
-| Boundary | Required proof |
-|---|---|
-| Parsed query | literal/source/boolean/join/predicate/database-function/rule/variable-attribute/multi-source forms are concrete or `:all`, never false-negative |
-| Parsed pull | nested/reverse/alias/default/limit/recursion/wildcard/dynamic/malformed selectors use canonical attrs or `:all` |
-| Cache inheritance | affected results do not propagate; unaffected query results hit at the child value; schema changes widen |
-| Cache demand | undemanded commits create no result entry; bounded eviction permits an old held database value to recompute after a miss |
-| Remote reads | query, pull, pull-many, schema, entity, and index responses carry sound ordinary evidence |
-| Page capture | actual conditional/helper-indirected reads replace declared metadata as authority |
-| Interest lifecycle | subscribe-before-read, acknowledgement fence, replacement, reconnect, resynchronization, unlisten |
-| Unrelated commit | zero page acquisition, selected renderer, serialization, and SSE work |
-| Affected commit | one normalized page rerender at exact `db-after`; cache evidence is truthful |
-| Error recovery | failed render widens and later repair transaction rerenders it |
-| Output | equal bytes require one comparison serialization but emit nothing; unequal complete event reaches every equivalent socket |
-| Scheduling | independent reads/subscriptions/agents/sockets progress independently; one subscription stays coherent |
-| Sustained import | bounded active/pending state, configured maximum-latency progress, no entry per row/transaction, final newest-value convergence |
-| Equality | `=` suppresses established-consumer notification while advancing basis/dependencies; a fresh consumer receives once |
-| Cleanup | final consumer releases subscription/output/dependency state; no database value or read-capture session remains |
-| Live UI | browser and server-side stream agree after initial paint, mutation, reconnect, continuous writes, and pressure |
+The final 2026-07-19 requirement audit closes every boundary:
+
+| Boundary | Status | Graduation evidence |
+|---|---|---|
+| Parsed query | Complete | Maintained PSS, HHT, specs, and Node gates cover literals, sources, boolean/join/predicate forms, database functions, rules, variable attributes, multiple sources, and conservative `:all`. |
+| Parsed pull | Complete | Direct pull, pull-many, query find-pull, nested/reverse/options/recursion/wildcard/dynamic/malformed regressions consume Datahike's parsed PullSpec projection. |
+| Cache inheritance | Complete | Affected/schema-changing values do not promote; unaffected immutable values inherit; materialized commits use their commit ID when exact attribute revisions are unavailable. |
+| Cache demand | Complete | Commits create no eager result entry; weighted eviction, held immutable values, recomputation, generation release, and single-flight gates pass. |
+| Remote reads | Complete | Query, pull, pull-many, schema, entity, index, and mixed `execute-many` responses carry ordinary Datahike-owned read evidence. |
+| Page capture | Complete | Parent and execution-child reads union actual evidence; conditional/helper-indirected reads drive invalidation and analyzer metadata is only a hint. |
+| Interest lifecycle | Complete | Subscribe-before-read acknowledgement, replacement reconciliation, reconnect/resynchronization, and final unlisten are unit- and live-proven. |
+| Unrelated commit | Complete | Reverse attribute selection produces no acquisition, render, serialization, or SSE work for an unaffected registration. |
+| Affected commit | Complete | A matching report schedules one normalized computation at the newest exact `db-after`; cache outcome and basis evidence remain truthful. |
+| Error recovery | Complete | Failed work widens to `:all`, its own pure error-evidence transaction cannot self-trigger, and an ordinary relevant transaction repairs and narrows it. |
+| Output | Complete | Clojure `=` suppresses equal reactive values; unequal complete events fan out byte-identically to equivalent sockets. |
+| Scheduling | Complete | Independent subscriptions and sockets overlap; response traffic is prioritized; one registration retains one coherent active evaluation. |
+| Sustained import | Complete | The 260-transaction live probes and 10,000-transaction paused-reader stress retain one active plus newest pending value and converge at configured maximum latency. |
+| Equality | Complete | Established consumers suppress equal values while advancing basis/dependencies; every fresh consumer receives the established current value once. |
+| Cleanup | Complete | Reactive, Datastar, writer-interest, UDS, timer, consumer, pending, and retained database-value ownership all return to zero. |
+| Live UI | Complete | Exact-artifact browser and server clients agree through initial paint, mutation, reconnect, continuous writes, slow/fast pressure, and canonical close. |
 
 ## Explicit non-goals
 
@@ -716,3 +718,22 @@ do zero page work; affected and repair transactions converge through one full
 Datastar morph; equivalent sockets share work; and live/browser/resource proof
 shows no stale page, false-negative cache inheritance, unbounded queue, or
 retained database owner.
+
+Graduated on 2026-07-19. Maintained Datahike `6f256908` passes the complete
+query-cache/versioning and Node compatibility gates; the selected Seon artifact
+loads that exact source. Seon's full CLJS, writer, focused reactive/transport,
+10,000-transaction stress, browser, reconnect, fault-repair, and exact live
+agent-delegation proofs satisfy the matrix above. No acceptance boundary
+requires a Seon parser, page-specific cache, global render listener, event
+replay queue, capacity increase, or second reactive mechanism.
+
+The final read-only stability audit against exact source `3a3a9e94` found no
+open run, running turn/eval, retained reactive registration/consumer/timer,
+Datastar view/subscription, or post-rebuild persisted core fault. Watcher,
+writer, pod, containment descriptors, HTTP readiness, and advertised artifact
+identities agreed. One execution child disappeared from the OS immediately
+before its parent snapshot cleared; the next observation returned no child,
+with no open work or retained owner. This is bounded asynchronous cleanup, not
+a readiness or graduation defect. The existing safe query-planner heuristic
+warning for an old database without subtree counts remains previously recorded
+performance evidence, not a correctness failure.

@@ -31,6 +31,14 @@ order never leak into it. Which functions are in scope, and in what order, is
 the entire design — and whether that set is **complete** is what makes the agent
 feel stateful.
 
+Read reuse cannot weaken that determinism. Datahike owns immutable eager-result
+entries and their parsed dependency plans at exact database source identities.
+A materialized committed value without retained exact attribute revisions uses
+its own commit ID as a conservative cache revision; it cannot inherit a result
+from another commit merely because both lack revision history. The render
+therefore sees the selected database value whether a read computes, joins
+single-flight, or hits cache.
+
 After that body, a deliberately tiny **free dynamic tail** may report live
 operational state whose value is useful precisely because it is current: wall
 clock, Unix load averages, process memory, and eventually active-child progress.
