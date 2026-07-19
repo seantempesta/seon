@@ -109,8 +109,18 @@ reactive registration, consumer, active, pending, and timer counts; Datastar
 view, subscription, active-render, and pending-render counts; and writer
 interest references and committed-report queue depth all returned to zero.
 This closes sustained-import, configured maximum-latency, newest convergence,
-and pressure cleanup. Current-source real-browser morph/reconnect evidence and
-the live failed-render repair remain graduation gates.
+and pressure cleanup.
+
+At source commit `9ab86700`, a disposable cluster rebuilt from the current
+artifact and a real headless Google Chrome page opened the root view. A
+supported `POST /agents` committed a child whose unique purpose marker then
+appeared through the existing Datastar feed. The morph preserved the identical
+`#app-view` DOM node, retained focus and the typed value in the namespace input
+outside the morph, left exactly one `#app-view`, and produced no browser console
+or page errors. A full reload opened a fresh feed and painted the newest marker
+without an intermediate stale view. This closes current-source browser morph
+and sole-connection reconnect correctness. Real slow-socket/fast-socket
+independence and the live failed-render repair remain graduation gates.
 
 The integrated Datastar/reactive gate now attaches two equivalent sockets to
 one normalized computation. An equal later event performs one demanded render
