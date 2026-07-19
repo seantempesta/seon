@@ -11,6 +11,7 @@
    Self-contained: no spine read API, just the canvas renderer +
    wired-content provenance."
   (:require
+    [clojure.string :as str]
     [seon.ai.tokens :as tokens]
     [seon.agent.ctx :as ctx]
     [seon.agent.ctx.render-fns :as render-fns]
@@ -187,12 +188,16 @@
   [{:seon.render/keys [hiccup ai error]
     wired :seon.render.canvas/wired}
    source cap]
-  (let [missing-function
-        (when (and (= :agent (:seon.error/kind error))
-                   (= "The selected function is not loaded in the execution child."
-                      (:seon.error/message error)))
-          (get-in error [:seon.error/data
-                         :seon.execution/function-symbol]))
+  (let [selected-value (:seon.render.canvas/value wired)
+        missing-function
+        (when (let [message (:seon.error/message error)]
+                (or (= "The selected function is absent from the current database program."
+                       message)
+                    (and (string? message)
+                         (str/includes?
+                          message
+                          "is absent from the current database program"))))
+          selected-value)
         body-kind (cond
                     (some? error)  :error
                     (some? ai)     :ai
@@ -248,11 +253,27 @@
 (defn- selected-canvas-response
   [wired result]
   (let [value (::canvas/value wired)
-        response (:seon.execution/value result)]
+        response (:seon.execution/value result)
+        selected-error (:seon.execution/error result)
+        missing-function
+        (when (= "The selected function is absent from the current database program."
+                 (:seon.error/message selected-error))
+          value)
+        canvas-error
+        (if missing-function
+          (assoc selected-error
+                 :seon.error/message
+                 (str "Canvas renderer " missing-function
+                      " is absent from the current database program. Define "
+                      "that exact qualified function with a :malli/schema so "
+                      "it returns Hiccup through my.canvas/view, or call "
+                      "my.canvas/show! with an existing qualified function "
+                      "or literal Hiccup."))
+          selected-error)]
     (cond
       (not (:seon.execution/ok? result))
       (assoc (canvas/error-response
-               (assoc (:seon.execution/error result) ::canvas/content value))
+               (assoc canvas-error ::canvas/content value))
              ::canvas/wired wired)
 
       (nil? response)

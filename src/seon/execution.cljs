@@ -752,7 +752,9 @@
                   :core
                   (error/fault-for function-symbol))
           exception
-          (ex-info "The selected function is not loaded in the execution child."
+          (ex-info (if program-function?
+                     "The selected function is not loaded in the execution child."
+                     "The selected function is absent from the current database program.")
                    {:seon.error/kind (if (= :core fault) :core-bug :agent)
                     ::function-symbol function-symbol})]
       (js/Promise.resolve

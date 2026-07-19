@@ -138,3 +138,16 @@ function. A fresh live child rendered the stale canvas as a safe error while
 the Bun pod and JVM writer remained available; the child was then reclaimed.
 The canvas context names the exact missing function and tells the agent to
 define it or select an existing function before removing the old definition.
+
+The follow-up live drive found that the warning still tested
+`seon.eval/lookup-value` in the pod, even though authored functions intentionally
+execute in children. It now derives authored existence from the current
+`:seon.fn/sym` rows and reserves runtime lookup for compiled core functions.
+`call-selected!` also emits different values for "absent from the current
+database program" and "present but not loaded," preserving the authored/core
+split at the owner that knows it. The canvas error card and prompt context turn
+only the former into Hiccup-specific repair guidance. Focused execution,
+canvas-context, and warning proof passes 49 tests/215 assertions. A persisted
+missing selection rendered safely in the live web UI while pod and writer
+remained ready; exact rebuilt guidance plus successful repair/clear is the
+remaining live proof for this inverse case.

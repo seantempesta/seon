@@ -210,6 +210,22 @@ received one database message naming recovery `qlme850pqh8g` and its diagnostic
 blob. Pod and writer remained ready. The recovery-evidence issue is resolved;
 the next product-level recovery gate is its Inspect AI scenario.
 
+The stale-canvas recovery seam is now source-correct and live-safe. A persisted
+selection of absent function `my.agents.canvas-recovery/mistyped` rendered one
+bounded error card while the Datastar feed, Bun pod, and JVM writer remained
+available. The execution boundary now distinguishes an absent current
+`:seon.fn/sym`—an authored application error—from a current function that the
+execution child failed to load—a core loader fault. The canvas projection adds
+the exact selected symbol and tells the agent to define that qualified function
+with a Malli schema returning Hiccup through `my.canvas/view`, or select an
+existing function/literal Hiccup through `my.canvas/show!`. The urgent warning
+derives existence from current database program facts rather than the pod's
+JavaScript vars, so healthy child-hosted authored functions are not falsely
+reported and the warning clears with the repair. Focused proof passes
+`seon.execution-test` 31/132, `seon.agent.ctx.canvas-test` 10/39, and
+`seon.warn-test` 8/44. Exact rebuilt browser wording and repair/clear remain the
+next live canvas falsifier before the complete control matrix resumes.
+
 As of 2026-07-18, one JVM writer has passed the complete autonomous sibling
 cluster lifecycle: fresh initialization, distinct database values and store
 IDs, concurrent agents and gzip feeds, isolated writes, pod-only restart,

@@ -637,6 +637,12 @@
                (is (false? (::execution/ok? (aget results 1))))
                (is (false? (::execution/ok? (aget results 2))))
                (is (false? (::execution/ok? (aget results 3))))
+               (is (= "The selected function is absent from the current database program."
+                      (get-in (aget results 1)
+                              [::execution/error :seon.error/message])))
+               (is (= "The selected function is not loaded in the execution child."
+                      (get-in (aget results 2)
+                              [::execution/error :seon.error/message])))
                (is (= 2 (count @recorded)))
                (is (every? #(= :core (::error/fault %)) @recorded))
                (is (= #{'my.orders/unloaded

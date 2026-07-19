@@ -199,15 +199,25 @@
 (deftest canvas-warning-is-pure-over-acquired-content
   (let [missing 'my.agent.warntst/missing-canvas
         broken (assoc acquired-data ::warn/canvases [["agent-a" missing]])
-        healthy (assoc acquired-data ::warn/canvases
-                       [["agent-a" 'seon.warn/render-warnings]
-                        ["agent-b" [:div "literal"]]])
+        healthy (-> acquired-data
+                    (assoc ::warn/canvases
+                           [["agent-a" 'my.shared/current-canvas]
+                            ["agent-b" [:div "literal"]]])
+                    (update ::warn/function-rows conj
+                            ["my.shared/current-canvas" :my.shared
+                             "[:=> [:cat :seon.render/system-input] :seon.render/html-response]"
+                             true false ""]))
         response (warn/check-canvas-unresolved {::warn/data broken})]
     (is (true? (:seon.warn/urgent? response)))
     (is (= #{(str missing)} (affected-syms response)))
     (is (str/includes?
          (:seon.warn/where (first (:seon.warn/affected response)))
          "agent-a"))
+    (is (str/includes? (:seon.warn/explain response)
+                       "absent from the current database program"))
+    (is (str/includes? (:seon.warn/explain response)
+                       "return Hiccup through my.canvas/view"))
+    (is (str/includes? (:seon.warn/example response) "my.canvas/show!"))
     (is (= []
            (:seon.warn/affected
             (warn/check-canvas-unresolved {::warn/data healthy})))

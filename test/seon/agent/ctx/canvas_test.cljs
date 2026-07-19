@@ -232,11 +232,17 @@
          {:seon.execution/ok? false
           :seon.execution/error
           {:seon.error/message
-           "The selected function is not loaded in the execution child."
+           "The selected function is absent from the current database program."
            :seon.error/kind :agent
            :seon.error/data
            {:seon.execution/function-symbol renderer}}})
         text (@#'canvas-ctx/rendered-canvas-text response nil 2000)]
+    (is (str/includes? (get-in response
+                               [:seon.render/error :seon.error/message])
+                       "Canvas renderer my.orders/view"))
+    (is (str/includes? (get-in response
+                               [:seon.render/error :seon.error/message])
+                       "returns Hiccup through my.canvas/view"))
     (is (str/includes? text "my.orders/view"))
     (is (str/includes? text "absent from the current database program"))
     (is (str/includes? text "Define that exact qualified function"))

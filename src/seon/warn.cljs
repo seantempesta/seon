@@ -961,16 +961,16 @@
    "(seon.test.runner/run-vars {:seon.test.runner/vars ['my.ns/my-test]})"})
 
 (defn check-canvas-unresolved
-  "Canvass pointing at a fn symbol not loaded in the runtime.
+  "Canvases pointing at a fn symbol absent from the current program.
 
    `:seon.render.canvas/content` names a qualified fn symbol that
-   `seon.eval/lookup-value` can't resolve, so the human sees a calm
-   \"preparing this view…\" placeholder instead of the real view. Literal
-   hiccup canvases (vectors) and resolving symbols (incl. the welcome
-   default) produce nothing. DERIVED at render; self-heals the moment the
-   fn is (re)defined. GLOBAL — :seon.warn/ns is ignored."
+   has no current `:seon.fn/sym`, so the human sees the guarded render-error
+   card instead of the intended view. Core renderers resolve from the compiled
+   package. Literal hiccup canvases (vectors), current authored functions, and
+   compiled core functions produce nothing. DERIVED at render; self-heals the
+   moment the fn is defined. GLOBAL — :seon.warn/ns is ignored."
   {:malli/schema [:=> [:cat ::check-request] ::check-response]}
-  [{:seon.db/keys [db] data ::data}]
+  [{:seon.db/keys [db] data ::data :as request}]
   (let [rows (or (::canvases data)
                  (db/query
                {:seon.db/db db
@@ -978,7 +978,9 @@
                 '[:find ?aid ?content
                   :where
                   [?e :seon.agent/id ?aid]
-                  [?e :seon.render.canvas/content ?content]]}))]
+                  [?e :seon.render.canvas/content ?content]]}))
+        current-authored-symbols
+        (into #{} (map (comp symbol :seon.fn/sym)) (fn-rows request nil))]
     {:seon.warn/kind :canvas-unresolved
      :seon.warn/urgent? true
      :seon.warn/affected
@@ -987,31 +989,30 @@
                   (let [decoded (db/decode-edn-value
                                   :seon.render.canvas/content content)]
                     (when (and (qualified-symbol? decoded)
+                               (not (contains? current-authored-symbols decoded))
                                (nil? (eval/lookup-value decoded)))
                       {:seon.warn/sym   (str decoded)
                        :seon.warn/where (str "canvas of " aid)}))))
           (sort-by :seon.warn/sym)
           vec)
      :seon.warn/explain
-     (str "Your canvas is BROKEN RIGHT NOW: "
-          ":seon.render.canvas/content points at a fn that isn't loaded "
-          "in the runtime, so the human is staring at a calm \"preparing "
-          "this view…\" placeholder INSTEAD of your view — this very "
-          "render. The fn does not exist (most likely its defn failed to "
-          "parse/eval — check your failed evals above). FIX IT IMMEDIATELY: "
-          "define the named fn (eval its defn) and the canvas auto-updates the "
-          "moment the symbol resolves — no re-pointing needed. (Or point the "
-          "canvas at a fn that already exists, or at literal hiccup.)")
+     (str "Your canvas selects a function that is absent from the current "
+          "database program, so the human sees the guarded render-error card "
+          "instead of the intended view. Define that exact qualified function "
+          "with a :malli/schema and return Hiccup through my.canvas/view; the "
+          "canvas updates after the successful eval. Alternatively call "
+          "my.canvas/show! with an existing qualified function or literal "
+          "Hiccup. Define a replacement before removing or renaming the "
+          "selected function.")
      :seon.warn/example
-     (str "(defn my-kb-canvas\n"
+     (str "(defn my-canvas\n"
           "  {:malli/schema [:=> [:cat :seon.render/system-input]\n"
           "                  :seon.render/html-response]}\n"
           "  [{:seon.db/keys [db] :seon.agent/keys [id]}]\n"
-          "  {:seon.render/hiccup [:div {:class \"seon-card\"} \"hi\"]})\n"
-          "(seon.db/transact!\n"
-          "  {:seon.db/tx-data\n"
-          "   [{:seon.agent/id \"<id>\"\n"
-          "     :seon.render.canvas/content `my.agent.<id>/my-kb-canvas}]})")}))
+          "  (my.canvas/view\n"
+          "    {:my.canvas/content\n"
+          "     [:div {:class \"seon-card\"} \"hi\"]}))\n"
+          "(my.canvas/show! {:my.canvas/content `my-canvas})")}))
 
 ;; ============================================================
 ;; Registry + clustered renderer
