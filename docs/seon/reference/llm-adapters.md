@@ -259,13 +259,25 @@ completion headroom, retrieved real contracts, behavioral verification, and a
 per-run cost ceiling; it is not a blind execution model. Full evidence lives in
 `docs/prds/generate-code/research/design-seam-audit-2026-07-19.md`.
 
-A third isolated-cluster compatibility probe used the shipped `:planning`
-variant with the reasoning field omitted and a deliberately trivial one-form
-request. It completed in 13.30 seconds with 1,809 input tokens, 2 completion
-tokens, one successful attempt, and a successful eval result of `42`; estimated
-cache-miss cost was $0.0055. This establishes the low-complexity floor, not a
-planning-task latency promise: K3 may still spend substantial reasoning tokens
-on difficult requests, as the two planning probes above demonstrate.
+An earlier isolated-cluster probe completed a trivial one-form request in
+13.30 seconds with 1,809 input tokens and 2 completion tokens. It established a
+low-context transport floor, but predates the final batch and completion-field
+contract and is not acceptance evidence for that contract.
+
+The exact-artifact acceptance run at `6e3b741d` used a fresh
+`kimi-k3-audit` database and the current shipped `:planning` variant. A normal
+batch request completed in 11.22 seconds, stopped normally, and evaluated
+`(+ 20 22)` to `42`. It used 32,551 input tokens and 40 completion tokens,
+including 19 reasoning tokens: approximately $0.098 at the dated cache-miss
+prices above. A separate agent-local 32-token cap completed in 11.36 seconds
+with `finish_reason=length`, 32 completion tokens including 29 reasoning
+tokens, no visible text, retained provider usage, and the expected nonretryable
+truncation error. A config-free pod restart preserved both distinct agent
+profiles and their complete attempt facts. This proves the current one-shot
+contract and also makes context economics explicit: even a trivial K3 planning
+turn costs nearly ten cents when the current development context contributes
+about 32.5K prompt tokens. Retrieval and progressive context are cost controls,
+not merely quality improvements.
 
 The planning variant selects `:max-completion-tokens` as ordinary model
 capability data, so K3 receives `max_completion_tokens` while DeepSeek retains

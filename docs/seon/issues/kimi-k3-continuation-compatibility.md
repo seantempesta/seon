@@ -9,12 +9,13 @@ tags: [issue, agent, capability]
 
 ## Problem
 
-Kimi K3's OpenAI-compatible single-response path works, but its completion,
-deadline, evidence, and continuation contracts are incomplete.
+Kimi K3's OpenAI-compatible single-response completion, deadline, and evidence
+contracts work. Provider-native multi-turn tool continuation remains
+unimplemented and unproven.
 
 Commit `003251ef` closes the one-shot completion, deadline, and evidence
-portion in source. The issue remains open for exact-artifact live K3 validation
-and any future provider-native tool continuation.
+portion in source. The exact-artifact live gate passed at `6e3b741d`; this issue
+remains open only for any future provider-native tool continuation.
 
 - K3 documents `max_completion_tokens` and deprecates `max_tokens`. The named
   planning variant now selects that field as ordinary capability data while
@@ -46,9 +47,13 @@ and any future provider-native tool continuation.
   `max_completion_tokens`; the accepted deprecated compatibility field is
   visible in the API reference reached from its documentation index.
 - `docs/prds/generate-code/research/design-seam-audit-2026-07-19.md` records two
-  paid planning calls and one isolated named-variant call. The first planning
-  call is direct evidence for the reasoning-only truncation shape; none
-  exercises tool continuation.
+  paid planning calls plus the final isolated exact-artifact normal and forced-
+  truncation calls. The normal call evaluated `42`; the 32-token call recorded
+  `length`, truncation, retained usage, and no evals. Neither exercises tool
+  continuation.
+- A config-free isolated restart preserved the two distinct per-agent profiles
+  and both complete attempt facts. The isolated cluster then closed cleanly
+  with its pod absent; default and ACME were untouched.
 
 ## Owner
 
@@ -84,7 +89,10 @@ agent loop.
   the only mode that requests a stream. Tests cover reasoning-before-content,
   terminal usage, `stop`, `length`, and `tool_calls` without feeding reasoning
   text into the REPL parser.
-- A live K3 test proves the configured output cap is honored.
+- A live K3 test proves the configured output cap is honored. **Passed at
+  `6e3b741d`:** the agent-local cap of 32 produced exactly 32 completion tokens,
+  `finish_reason=length`, `truncated? true`, retained usage, and the expected
+  no-visible-text error.
 - If provider-native tool continuation becomes an agent-loop feature, a live K3
   test returns the complete assistant message unchanged and pairs every tool
   result with its call ID.

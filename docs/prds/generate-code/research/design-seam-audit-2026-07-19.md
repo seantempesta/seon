@@ -289,21 +289,52 @@ effort. Prices in this report are a dated observation, not configuration truth.
 |---|---:|---:|---:|---:|---:|---|
 | planning | 4,096 | 107.17 s | miss | 4,093 tokens | 4,093 tokens | `length`; no code |
 | planning | 8,192 | 47.18 s | 239-token hit | 1,106 tokens | 975 tokens | `stop`; roughly 131 visible tokens and code returned |
-| isolated named variant | 16,384 | 13.30 s | miss | 2 tokens | 0 reported | `stop`; `(+ 20 22)` evaluated to `42` |
+| earlier isolated named variant | 16,384 | 13.30 s | miss | 2 tokens | 0 reported | `stop`; `(+ 20 22)` evaluated to `42` |
+| exact-artifact batch | 16,384 | 11.22 s | miss | 40 tokens | 19 tokens | `stop`; `(+ 20 22)` evaluated to `42` |
+| exact-artifact forced cap | 32 | 11.36 s | miss | 32 tokens | 29 tokens | `length`; no visible text; explicit truncation error |
 
 At the supplied prices, the first probe cost approximately $0.062 and produced
 nothing usable; the second cost approximately $0.017. These costs treat
 reasoning completion tokens as billed output tokens.
 
-The third call ran through a fresh `kimi-k3-audit` cluster and the shipped
-`:planning` model variant, not a direct HTTP script. Its committed attempt fact
-records `:openai-compat`, endpoint
+The earlier third call ran through a fresh `kimi-k3-audit` cluster and the
+then-shipped `:planning` model variant, not a direct HTTP script. Its committed
+attempt fact records `:openai-compat`, endpoint
 `https://api.moonshot.ai/v1/chat/completions`, credential name
 `MOONSHOT_API_KEY`, requested model `kimi-k3`, one successful attempt, and an
 effective false/omitted reasoning field. The turn recorded 1,809 prompt tokens,
 2 completion tokens, and one successful eval. At cache-miss prices the estimated
 cost was $0.0055. This is a transport/configuration and low-complexity latency
 floor only; it does not supersede the reasoning-heavy planning measurements.
+
+The final exact-artifact proof ran at commit `6e3b741d` and application digest
+`21cf5dbe…`. An initial config-free reopen deliberately preserved the old
+database variant and produced one stale-profile streaming call; that call is
+configuration-persistence evidence, not adapter acceptance. After a scoped
+registry deletion, fresh boot installed the current variant before readiness:
+`:batch`, `:max-completion-tokens`, a 300-second adapter timeout, and a
+360-second outer timeout.
+
+The current normal agent `big-days-attack` recorded turn `k55f66phlib4` as one
+nonstreaming successful attempt with `finish_reason=stop`, provider-reported
+usage of 32,551 prompt and 40 completion tokens, 19 reasoning tokens, and eval
+result `42`. Its close transaction was 11.22 seconds after launch; estimated
+cache-miss cost was $0.098253. The separate agent
+`breezy-places-wave` copied the same variant, then received an ordinary
+agent-local max-token value of 32 before its first message. Turn
+`k8baadedsbxy` recorded `finish_reason=length`, `truncated? true`, no evals, a
+nonretryable provider-error value, and retained usage of 32,553 prompt and 32
+completion tokens including 29 reasoning tokens. Its close transaction was
+11.36 seconds after delivery; estimated cache-miss cost was $0.098139.
+
+A config-free isolated restart reopened at basis transaction 536871437 and
+preserved both distinct agent rows plus both complete attempt and turn facts.
+Canonical close was clean and left the isolated pod absent. The two intended
+current-contract calls cost about $0.1964 together. The stale-profile evidence
+call added about $0.0859, for approximately $0.2823 spent in the full audit.
+The current 114K-character development prompt measured about 32.5K provider
+tokens, so embedding-ranked and progressive context directly govern the cost
+of K3 planning.
 
 The successful response obeyed the requested namespace split, emitted normal
 forms, used immutable transformations, added behavioral tests, and declared the
