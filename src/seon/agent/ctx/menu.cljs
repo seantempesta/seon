@@ -282,9 +282,9 @@
     (or (::protocol/result member)
         (:datahike.query/result member))))
 
-(defn- eval-row [[at _ source ns-name]]
+(defn- eval-row [[at eval-tx source ns-name]]
   {:seon.eval/at at :seon.eval/source source :seon.eval/ns ns-name
-   :seon.eval/ok? true})
+   :seon.eval/ok? true ::eval-tx eval-tx})
 
 (defn- namespace-info [rows]
   (into {}
@@ -404,18 +404,28 @@
                               :datahike.resource/max-results 32
                               :datahike.resource/max-result-weight 4096}
                              (query-member prompt-eval-query [agent-id] 32768 262144)
-                             (query-member cluster-eval-query [] 131072 1048576)]
+                             (query-member cluster-eval-query [] 131072 1048576)
+                             (query-member home/namespace-assignment-query
+                                           [agent-id] 64 4096)]
                             ::db/max-result-weight 1314816}))]
         (if-not (and (not (:seon.error/message initial))
                      (every? #(true? (::protocol/success? %))
                              (::db/results initial)))
           {:seon.error/message "Function menu acquisition failed."
            :seon.error/kind :core-bug :seon.error/data initial}
-          (let [[policy-member agent-member cluster-member] (::db/results initial)
+          (let [[policy-member agent-member cluster-member assignment-member]
+                (::db/results initial)
             agent-rows (mapv eval-row (member-result agent-member))
             cluster-rows (mapv eval-row (member-result cluster-member))
-            current-ns (or (:seon.eval/ns (first agent-rows))
-                           (home/home-ns agent-id))
+            latest-eval (first agent-rows)
+            current-ns
+            (home/current-ns
+             agent-id (:seon.agent/entity input)
+             (when latest-eval
+               [(:seon.eval/ns latest-eval)
+                (:seon.eval/at latest-eval)
+                (::eval-tx latest-eval)])
+             (some-> (member-result assignment-member) first))
             source-nses (->> (concat [current-ns]
                                      (map :seon.eval/ns agent-rows)
                                      (map :seon.eval/ns cluster-rows))

@@ -52,6 +52,114 @@
   (is (= -3 (#'agent/next-transaction-tempid
              [{:db/id -1 :seon.agent/namespace -2}]))))
 
+(deftest namespace-assignment-transaction-reuses-existing-namespace
+  (is (= [[:db.fn/retractAttribute
+           [:seon.agent/id "child"]
+           :seon.agent/namespace]
+          {:seon.agent/id "child"
+           :seon.agent/namespace [:seon.ns/name :my.orders]}]
+         (#'agent/namespace-assignment-tx
+          {::agent/namespace-target
+           {:seon.agent/id "child"
+            :seon.agent/namespace
+            {:db/id 41 :seon.ns/name :my.agent.child}}
+           ::agent/namespace-exists? true
+           :seon.agent/id "child"
+           :seon.agent/namespace 'my.orders}))))
+
+(deftest namespace-assignment-transaction-creates-one-namespace
+  (let [transaction
+        (#'agent/namespace-assignment-tx
+         {::agent/namespace-target
+          {:seon.agent/id "child"
+           :seon.eval/home-requires '[[seon.db :as db]]
+           :seon.agent/namespace
+           {:db/id 41 :seon.ns/name :my.agent.child}}
+          ::agent/namespace-exists? false
+          :seon.agent/id "child"
+          :seon.agent/namespace 'my.orders})
+        [namespace-row release-current agent-row] transaction]
+    (is (= -1 (:db/id namespace-row)))
+    (is (= :my.orders (:seon.ns/name namespace-row)))
+    (is (str/includes? (:seon.ns/source namespace-row)
+                       "[seon.db :as db]"))
+    (is (= [:db.fn/retractAttribute
+            [:seon.agent/id "child"]
+            :seon.agent/namespace]
+           release-current))
+    (is (= {:seon.agent/id "child" :seon.agent/namespace -1}
+           agent-row))))
+
+(deftest set-namespace-authorizes-and-commits-at-one-database-value
+  (async done
+    (let [current-agent-id db/current-agent-id
+          db! db/db
+          pull db/pull
+          query db/query
+          transact! db/transact!
+          pulls (atom 0)
+          transaction (atom nil)]
+      (set! db/current-agent-id (constantly "root"))
+      (set! db/db
+            (fn
+              ([] (js/Promise.resolve database))
+              ([_] (js/Promise.resolve database))))
+      (set! db/pull
+            (fn
+              ([request]
+               (is (identical? database (::db/db request)))
+               (js/Promise.resolve
+                (when (= 1 (swap! pulls inc))
+                  {:seon.agent/id "child"
+                   :seon.eval/home-requires '[[seon.db :as db]]
+                   :seon.agent/namespace
+                   {:db/id 41 :seon.ns/name :my.agent.child}})))
+              ([_ _] (js/Promise.reject (js/Error. "unexpected pull arity")))
+              ([_ _ _]
+               (js/Promise.reject (js/Error. "unexpected pull arity")))))
+      (set! db/query
+            (fn [request]
+              (is (identical? database (::db/db request)))
+              (js/Promise.resolve nil)))
+      (set! db/transact!
+            (fn [& call-args]
+              (let [request (first call-args)]
+                (reset! transaction request)
+                (js/Promise.resolve
+                 {:db-before database
+                  :db-after database-after
+                  :tx-data (::db/tx-data request)
+                  :tempids {-1 7000}}))))
+      (finish!
+       (-> (agent/set-namespace!
+            {:seon.agent/id "child"
+             :seon.agent/namespace 'my.orders})
+           (.then
+            (fn [result]
+              (is (= {:seon.agent/id "child"
+                      :seon.agent/namespace 'my.orders}
+                     result))
+              (is (= 2 @pulls))
+              (is (identical? database (::db/db @transaction)))
+              (is (identical? database (::db/expected-db @transaction)))
+              (let [[namespace-row release-current agent-row]
+                    (::db/tx-data @transaction)]
+                (is (= -1 (:db/id namespace-row)))
+                (is (= :my.orders (:seon.ns/name namespace-row)))
+                (is (= [:db.fn/retractAttribute
+                        [:seon.agent/id "child"]
+                        :seon.agent/namespace]
+                       release-current))
+                (is (= {:seon.agent/id "child"
+                        :seon.agent/namespace -1}
+                       agent-row))))))
+       done
+       [[#(set! db/current-agent-id %) current-agent-id]
+        [#(set! db/db %) db!]
+        [#(set! db/pull %) pull]
+        [#(set! db/query %) query]
+        [#(set! db/transact! %) transact!]]))))
+
 (deftest agent-id-readers-use-one-ordinary-database-value
   (async done
     (let [db! db/db

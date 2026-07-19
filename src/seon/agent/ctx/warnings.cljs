@@ -11,19 +11,6 @@
     [seon.instrument :as instrument]
     [seon.warn :as warn]))
 
-(def ^:private current-ns-query
-  '{:find [?ns ?at ?eval]
-    :in [$ ?agent-id]
-    :where [[?agent :seon.agent/id ?agent-id]
-            [?run :seon.agent.run/agent ?agent]
-            [?turn :seon.agent.turn/run ?run]
-            [?turn :seon.agent.turn/evals ?eval]
-            [?eval :seon.eval/ok? true]
-            [?eval :seon.eval/at ?at]
-            [?eval :seon.eval/ns ?ns]]
-    :order-by [?at :desc ?eval :desc]
-    :limit 1})
-
 (def ^:private function-rows-query
   '[:find ?sym ?nm ?spec ?fnvar ?priv ?err
     :where
@@ -131,14 +118,17 @@
      [] 2000000 65536 1048576)])
 
 (defn ^:async ^:private acquire-warnings
-  [agent-id database]
+  [agent-id agent database]
   (let [first-result
         (await
           (db/execute-many
             {::db/db database
              ::db/members
              [(query-member latest-user-query)
-              (query-member current-ns-query [agent-id] 1000000 1 8192)
+              (query-member home/latest-successful-ns-query
+                            [agent-id] 1000000 32768 262144)
+              (query-member home/namespace-assignment-query
+                            [agent-id] 100000 64 4096)
               (query-member function-rows-query [] 5000000 65536 2097152)
               {::protocol/operation protocol/schema-operation}
               (query-member schema-provenance-query [] 3000000 65536 2097152)
@@ -150,7 +140,8 @@
                  (every? #(true? (::protocol/success? %)) first-members))
       {:seon.error/message "Warning acquisition failed."
        :seon.error/data first-members}
-      (let [[cutoff-member ns-member fn-member schema-member provenance-member
+      (let [[cutoff-member eval-ns-member assignment-member fn-member
+             schema-member provenance-member
              forms-member counts-member] first-members
             cutoff (ffirst (member-result cutoff-member))
             now (js/Date.)
@@ -166,7 +157,11 @@
            :seon.error/data runtime}
           (let [[failed fs-results hops record-errors slow failing canvases]
                 (map member-result runtime)]
-            {::warn/current-ns (ffirst (member-result ns-member))
+            {::warn/current-ns
+             (home/current-ns
+              agent-id agent
+              (some-> (member-result eval-ns-member) first)
+              (some-> (member-result assignment-member) first))
              ::warn/data
              {::warn/function-rows (member-result fn-member)
               ::warn/installed-schema (::protocol/schema schema-member)
@@ -192,7 +187,7 @@
    (failed-evals, bad-ref, slow-evals, failing-tests) are always global.
    Dev-only checks are not surfaced here. Add a kind via `seon.warn/checks`."
   {:malli/schema [:=> [:cat :seon.render/section-request :any] :string]}
-  [{:seon.agent/keys [id] :as input} _invoke-selected!]
+  [{:seon.agent/keys [id entity] :as input} _invoke-selected!]
   ;; The render engine injects this block's own map as :seon.render/node
   ;; (seon.render/render) — that is where a per-block :seon.warn/ns override
   ;; lives. (Reading :seon.agent.ctx/block here was a dead key: the input
@@ -202,7 +197,7 @@
                      (await (db/db)))
         acquired (if (:seon.error/message database)
                    database
-                   (await (acquire-warnings id database)))
+                   (await (acquire-warnings id entity database)))
         override (:seon.warn/ns (:seon.render/node input))
         scope    (cond
                    (= override :seon.warn/all) nil

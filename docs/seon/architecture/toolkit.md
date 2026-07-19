@@ -88,6 +88,13 @@ its published schemas. Every change uses the same validation, instrumentation,
 and test gate. Namespace names never encode agent IDs, and a steward process
 holds no private copy of the code.
 
+Root uses `seon.agent/set-namespace!` to change that ref for an existing agent;
+an ordinary agent may use it for itself or a descendant. The operation does
+not rename or recreate the agent. If the assignment transaction is newer than
+the latest successful eval transaction, the assigned namespace becomes the
+next turn's current namespace. Subsequent `in-ns` movement remains ordinary
+REPL history.
+
 ## Protected capabilities
 
 ### Database and program graph

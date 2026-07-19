@@ -21,6 +21,21 @@
   (is (= 'my.agent.lantern-copper-falcon
          (home/starting-ns "lantern-copper-falcon" nil))))
 
+(deftest current-namespace-follows-the-newest-database-fact
+  (let [agent {:seon.agent/namespace {:seon.ns/name :my.assigned}}
+        evaluated [:my.evaluated (js/Date. 1000) 50]
+        assigned [:my.assigned 60]]
+    (is (= :my.assigned
+           (home/current-ns "agent" agent evaluated assigned))
+        "a later namespace assignment selects the next turn")
+    (is (= :my.evaluated
+           (home/current-ns "agent" agent evaluated [:my.assigned 40]))
+        "a later successful eval preserves normal namespace movement")
+    (is (= :my.assigned
+           (home/current-ns "agent" agent nil assigned)))
+    (is (= :my.agent.agent
+           (home/current-ns "agent" nil nil nil)))))
+
 (deftest require-spec-contract-is-owned-and-structural
   (is (m/validate :seon.agent.home/require-specs
                   '[[seon.db :as db]

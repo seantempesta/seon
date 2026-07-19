@@ -1108,3 +1108,162 @@
                   res
                   {:seon.agent/id id
                    :seon.agent/purpose purpose})))))))))
+
+(schema/register! ::namespace-request
+  [:map
+   [:seon.agent/namespace :symbol]
+   [:seon.agent/id {:optional true} :seon.agent/id]])
+(schema/register! ::namespace-response
+  [:or
+   [:map
+    [:seon.agent/id :seon.agent/id]
+    [:seon.agent/namespace :symbol]]
+   ::direct-error])
+
+(defn- namespace-assignment-error
+  [target-id namespace resident-id]
+  {:seon.error/message
+   (str "set-namespace!: " (pr-str namespace) " is already assigned to agent "
+        (pr-str resident-id) "; agent " (pr-str target-id)
+        " was not changed.")})
+
+(defn ^:async ^:private acquire-namespace-assignment
+  [caller-id target-id namespace]
+  (let [database (await (db/db))]
+    (if (error-value? database)
+      database
+      (let [namespace-name (keyword (str namespace))
+            stored-target
+            (await
+             (db/pull
+              {::db/db database
+               ::db/pull-pattern
+               (into internal/managed-agent-selector
+                     [:seon.eval/home-requires
+                      {:seon.agent/namespace [:db/id :seon.ns/name]}])
+               ::db/ref [:seon.agent/id target-id]
+               ::db/max-results agent-creation-max-results
+               ::db/max-result-weight 1048576}))
+            target (if (error-value? stored-target)
+                     stored-target
+                     (db/decode-edn-values stored-target))]
+        (cond
+          (error-value? target) target
+          (not (internal/manages? caller-id target))
+          (internal/unauthorized-target-error
+           "set-namespace!" caller-id target-id)
+          (:seon.agent/terminated-at target)
+          {:seon.error/message
+           (str "set-namespace!: terminated agent " (pr-str target-id)
+                " cannot be assigned a namespace.")}
+          (= namespace-name
+             (get-in target [:seon.agent/namespace :seon.ns/name]))
+          {::db/db database
+           ::namespace-unchanged? true
+           :seon.agent/id target-id
+           :seon.agent/namespace namespace}
+          :else
+          (let [resident-id
+                (await
+                 (db/query
+                  {::db/db database
+                   ::db/query
+                   '[:find ?id . :in $ ?name :where
+                     [?namespace :seon.ns/name ?name]
+                     [?agent :seon.agent/namespace ?namespace]
+                     [?agent :seon.agent/id ?id]
+                     (not [?agent :seon.agent/terminated-at _])]
+                   ::db/args [namespace-name]
+                   ::db/max-results 64
+                   ::db/max-result-weight 4096}))]
+            (cond
+              (error-value? resident-id) resident-id
+              resident-id
+              (namespace-assignment-error target-id namespace resident-id)
+              :else
+              (let [namespace-entity
+                    (await
+                     (db/pull
+                      {::db/db database
+                       ::db/pull-pattern [:db/id :seon.ns/name]
+                       ::db/ref [:seon.ns/name namespace-name]
+                       ::db/max-results 64
+                       ::db/max-result-weight 4096}))]
+                (if (error-value? namespace-entity)
+                  namespace-entity
+                  {::db/db database
+                   ::namespace-exists? (some? (:db/id namespace-entity))
+                   ::namespace-target target
+                   :seon.agent/id target-id
+                   :seon.agent/namespace namespace})))))))))
+
+(defn- namespace-assignment-tx
+  [{target ::namespace-target
+    namespace-exists? ::namespace-exists?
+    target-id :seon.agent/id
+    namespace :seon.agent/namespace}]
+  (let [namespace-name (keyword (str namespace))
+        namespace-ref (if namespace-exists?
+                        [:seon.ns/name namespace-name]
+                        -1)
+        namespace-row
+        (when-not namespace-exists?
+          (assoc
+           (home/initial-ns-entity
+            {:seon.agent/namespace namespace
+             :seon.eval/home-requires
+             (or (:seon.eval/home-requires target)
+                 home/home-ns-require-specs)})
+           :db/id -1))]
+    (cond-> []
+      namespace-row (conj namespace-row)
+      (:seon.agent/namespace target)
+      (conj [:db.fn/retractAttribute
+             [:seon.agent/id target-id]
+             :seon.agent/namespace])
+      true
+      (conj {:seon.agent/id target-id
+             :seon.agent/namespace namespace-ref}))))
+
+(defn ^:async ^:private set-namespace-once!
+  [caller-id target-id namespace]
+  (let [acquisition
+        (await (acquire-namespace-assignment caller-id target-id namespace))]
+    (cond
+      (error-value? acquisition) acquisition
+      (::namespace-unchanged? acquisition)
+      (select-keys acquisition [:seon.agent/id :seon.agent/namespace])
+      :else
+      (let [database (::db/db acquisition)
+            result
+            (await
+             (db/transact!
+              {::db/db database
+               ::db/expected-db database
+               ::db/tx-data (namespace-assignment-tx acquisition)}))]
+        (if (error-value? result)
+          result
+          (select-keys acquisition
+                       [:seon.agent/id :seon.agent/namespace]))))))
+
+(defn ^:async set-namespace!
+  "Assign an agent to one namespace."
+  {:malli/schema [:=> [:cat ::namespace-request] ::namespace-response]}
+  [{namespace :seon.agent/namespace target-id :seon.agent/id}]
+  (let [caller-id (db/current-agent-id)
+        id (or target-id caller-id)]
+    (cond
+      (nil? id)
+      {:seon.error/message
+       (str "set-namespace!: no agent in scope — pass "
+            ":seon.agent/id or call inside (seon.db/with-agent id …).")}
+      (nil? caller-id)
+      (internal/no-agent-error "set-namespace!")
+      :else
+      (loop [attempt 1]
+        (let [result
+              (await (set-namespace-once! caller-id id namespace))]
+          (if (and (stale-database-error? result)
+                   (< attempt maximum-spawn-attempts))
+            (recur (inc attempt))
+            result))))))

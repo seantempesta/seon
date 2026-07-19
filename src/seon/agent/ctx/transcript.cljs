@@ -968,7 +968,11 @@
            ;; the grown-query fixture calibrates them independently.
            (query-member database turn-count-query [id] 1000000 1000000 4096)
            (query-member database (turns-query window-size) [id] 1000000 1000000 65536)
-           (query-member database last-action-query [id] 500000 500000 8192)]
+           (query-member database last-action-query [id] 500000 500000 8192)
+           (query-member database home/latest-successful-ns-query
+                         [id] 1000000 32768 262144)
+           (query-member database home/namespace-assignment-query
+                         [id] 100000 64 4096)]
           open? (conj (query-member database run-turn-count-query [run-id]
                                     500000 500000 4096)
                       (query-member database run-form-count-query [run-id]
@@ -983,6 +987,7 @@
                        (acquisition-error (::db/results stage-one)))]
       (assoc input ::error error)
       (let [[turn-count-member turns-member action-member
+             latest-ns-member assignment-member
              run-turn-member run-form-member] (::db/results stage-one)
             turn-count (or (query-result turn-count-member) 0)
             newest-rows (->> (query-result turns-member)
@@ -1038,14 +1043,11 @@
                                           vec)))
                             turns)
                 previous-ns (ffirst (query-result previous-ns-member))
-                current-ns (or (->> (::eval-rows eval-page-result)
-                                    (map second)
-                                    (filter :seon.eval/ok?)
-                                    (sort-by (juxt :seon.eval/at :db/id))
-                                    last
-                                    :seon.eval/ns)
-                               previous-ns
-                               (home/starting-ns id entity))
+                current-ns
+                (home/current-ns
+                 id entity
+                 (some-> (query-result latest-ns-member) first)
+                 (some-> (query-result assignment-member) first))
                 mode (or (:seon.config/repl-mode configuration) :batch)
                 policy (merge (config/default-run-policy) configuration)
                 state (derive/state-from-primitives

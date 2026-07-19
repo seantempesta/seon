@@ -234,19 +234,6 @@
       {}
       edges)))
 
-(def ^:private latest-successful-ns-query
-  '{:find [?ns ?at ?eval-tx]
-    :in [$ ?aid]
-    :where [[?agent :seon.agent/id ?aid]
-            [?run :seon.agent.run/agent ?agent]
-            [?turn :seon.agent.turn/run ?run]
-            [?turn :seon.agent.turn/evals ?eval]
-            [?eval :seon.eval/ok? true]
-            [?eval :seon.eval/at ?at ?eval-tx]
-            [?eval :seon.eval/ns ?ns]]
-    :order-by [?at :desc ?eval-tx :desc]
-    :limit 1})
-
 (def ^:private require-edge-selector
   '[:seon.ns.require/target
     :seon.ns.require/alias
@@ -286,13 +273,19 @@
     :datahike.resource/max-results 2048
     :datahike.resource/max-result-weight 262144}
    {::protocol/operation protocol/query-operation
-    ::protocol/query-form latest-successful-ns-query
+    ::protocol/query-form home/latest-successful-ns-query
     ::protocol/arguments [id]
     :datahike.resource/max-work 1000000
     ;; Datahike counts intermediate relation rows before order/limit. This
     ;; admits roughly 8,000 successful evals and fails explicitly beyond it.
     :datahike.resource/max-results 32768
     :datahike.resource/max-result-weight 262144}
+   {::protocol/operation protocol/query-operation
+    ::protocol/query-form home/namespace-assignment-query
+    ::protocol/arguments [id]
+    :datahike.resource/max-work 100000
+    :datahike.resource/max-results 64
+    :datahike.resource/max-result-weight 4096}
    {::protocol/operation protocol/pull-operation
     ::protocol/selector [:seon.config/current-ns]
     ::protocol/entity-id [:seon.config/id config/cluster-config-id]
@@ -346,16 +339,19 @@
                             ::db/max-result-weight 786432})))]
     (if (:seon.error/message initial)
       (acquisition-error "initial acquisition" initial)
-      (let [[agent-member ns-member config-member] (::db/results initial)
+      (let [[agent-member eval-ns-member assignment-member config-member]
+            (::db/results initial)
             agent (member-result agent-member)
-            latest-ns (some-> (member-result ns-member) first first)
+            latest-successful-ns (some-> (member-result eval-ns-member) first)
+            namespace-assignment (some-> (member-result assignment-member) first)
             config-row (member-result config-member)]
         (if-not (and (true? (::protocol/success? agent-member))
-                     (true? (::protocol/success? ns-member))
+                     (true? (::protocol/success? eval-ns-member))
+                     (true? (::protocol/success? assignment-member))
                      (true? (::protocol/success? config-member)))
           (acquisition-error "initial member" (::db/results initial))
-          (let [cur-ns (keyword
-                        (name (or latest-ns (home/starting-ns id agent))))
+          (let [cur-ns (home/current-ns id agent latest-successful-ns
+                                        namespace-assignment)
                 current-row
                 (await (db/pull {::db/db database
                                  ::db/pull-pattern

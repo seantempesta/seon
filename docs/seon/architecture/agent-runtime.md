@@ -756,6 +756,15 @@ not a root-only documentation system.
   It accepts the same optional namespace. An existing resident receives the
   message directly; an absent resident, its namespace assignment, and the
   initial message commit in one transaction before any child is hosted.
+- **`seon.agent/set-namespace!` changes the assignment without changing the
+  agent.** Root may assign any agent; an ordinary agent may assign itself or a
+  descendant. The transaction retracts the previous
+  `:seon.agent/namespace` ref and adds the new one atomically, creating the
+  namespace declaration only when absent. The immutable agent ID and all
+  messages, runs, turns, plans, and authored program facts remain unchanged.
+  Current namespace is derived by comparing the assignment transaction with
+  the latest successful eval transaction: a newer assignment selects the next
+  turn; a later successful eval preserves ordinary `in-ns` movement.
 - **Roles are capability-SETS, not a stored `:kind`/`:role`.** A role is the set
   of functions its home requires/context makes discoverable plus the guarded
   operations those functions allow. "Orchestrator" discovers spawn/terminate/

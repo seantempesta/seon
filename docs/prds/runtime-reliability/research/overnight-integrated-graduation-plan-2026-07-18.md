@@ -147,6 +147,17 @@ source lines in this ledger or the owning successor PRD.
   and both distinct messages addressed to it. The stale-database-value retry
   therefore closes the concurrent create race through Datahike uniqueness
   rather than a process-local lock.
+- `set-namespace!` now changes the one `:seon.agent/namespace` ref without
+  changing the agent identity. The first live attempt exposed that selecting
+  current namespace solely from the latest successful eval ignored a newer
+  assignment. The one `seon.agent.home/current-ns` rule now compares the
+  assignment transaction with the latest successful eval transaction. Live
+  agent `blue-banks-swim` retained its earlier turns and messages, moved to
+  `my.graduation.final`, and its next turn recorded successful eval
+  `ons3bv55dk4r` in that namespace. Database queries found one agent identity,
+  one current namespace ref, and no resident left on either prior namespace.
+  Focused home, multi-agent, namespace, transcript, function-menu, and warning
+  proof passes 37 tests and 187 assertions.
 
 ## Execution ledger
 
@@ -235,9 +246,9 @@ and recovery semantics.
   steward exists, atomically create one and deliver the message.
 - [x] Prove two concurrent assignments produce one active steward, while every
   agent remains free to inspect and repair every namespace.
-- [ ] **IN PROGRESS:** prove reassignment changes ordinary database facts without duplicating
+- [x] Prove reassignment changes ordinary database facts without duplicating
   agents, program entities, runs, turns, plans, or messages.
-- [ ] Prove newly committed functions, schemas, and tests become available to
+- [ ] **IN PROGRESS:** prove newly committed functions, schemas, and tests become available to
   every relevant fresh child through the one program mechanism.
 
 Exit: root can launch, find, message, stop, resume, and reassign agents by

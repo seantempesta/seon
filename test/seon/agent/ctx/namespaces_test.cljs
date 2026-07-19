@@ -118,10 +118,11 @@
   (let [initial (@#'nss/initial-acquisition-members agent-id)
         selected (@#'nss/selected-acquisition-members
                    [:my.agent.tst-2606260000 :my.helper])
-        [pull-member latest-member config-member] initial
+        [pull-member latest-member assignment-member config-member] initial
         [pull-many-member tx-member] selected]
     (testing "initial discovery is one pull plus the bounded latest query"
       (is (= [protocol/pull-operation protocol/query-operation
+              protocol/query-operation
               protocol/pull-operation]
              (mapv ::protocol/operation initial)))
       (is (= 32768 (:datahike.resource/max-results latest-member))
@@ -132,6 +133,9 @@
         (is (= '[?at :desc ?eval-tx :desc] (:order-by query)))
         (is (= 1 (:limit query)))
         (is (some #{'[?eval :seon.eval/at ?at ?eval-tx]} (:where query))))
+      (is (= home/namespace-assignment-query
+             (::protocol/query-form assignment-member)))
+      (is (= [agent-id] (::protocol/arguments assignment-member)))
       (is (= [:seon.agent/id agent-id] (::protocol/entity-id pull-member)))
       (is (= [:seon.config/id config/cluster-config-id]
              (::protocol/entity-id config-member)))

@@ -323,7 +323,7 @@
  ;; (bare `[ns]` is rejected by `seon.agent.home/require-spec`).
  :seon.config/root-context
  {:seon.eval/home-requires
-  [[seon.agent :refer [start! delegate! set-purpose!]]]
+  [[seon.agent :refer [start! delegate! set-purpose! set-namespace!]]]
   :seon.agent/ctx
   [{:seon.agent.ctx/name :root-role
     :seon.agent.ctx/priority 15

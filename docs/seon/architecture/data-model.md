@@ -105,6 +105,10 @@ ordinary AVET uniqueness on that eid. Consequently one namespace has at most
 one active resident agent, while messages, runs, plans, and parent refs keep
 pointing at the agent's sole upsert identity and stable eid. Namespace stewardship is sustained
 attention, never exclusive authority over shared code.
+Changing that ref is an ordinary transaction, not a new identity. Its
+transaction is compared with the latest successful eval transaction to derive
+the next current namespace, so reassignment needs no mutable runtime flag and
+does not rewrite eval history.
 
 ### 2.2 identity / lookup attrs (`{:seon.db/identity true}`)
 

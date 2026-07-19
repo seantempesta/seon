@@ -73,7 +73,10 @@ turn/FSM/bounds), `data-model.md` (every attr you'll touch), `observability.md`
   the same database value; the turn threads it through `run-turn!` →
   `ask-and-eval!` → `eval-batch!`, so an `(in-ns …)` from a PRIOR turn holds across the boundary
   — home-seeding silently defined into `my.agent.*` and broke cross-ns
-  resolution.
+  resolution. `seon.agent.home/current-ns` compares the latest successful
+  eval transaction with the `:seon.agent/namespace` assignment transaction:
+  a newer assignment selects the next turn, while a later eval preserves
+  ordinary REPL namespace movement. All prompt consumers reuse that rule.
 - **repl-mode `:batch`/`:stream` is a DB datom** returned by the same compiled
   prompt acquisition from the `:seon.config` singleton; manifest-absent default is per-MODEL,
   `config/default-repl-mode`). `:stream` aborts the LLM stream at the first

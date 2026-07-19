@@ -37,6 +37,7 @@
   [{::db/results
     [(member [])
      (member [[:wtest.warns (js/Date. 1) 1]])
+     (member [])
      (member
        [["wtest.warns/no-spec" :wtest.warns "" true false ""]
         ["wtest.clean/ok" :wtest.clean

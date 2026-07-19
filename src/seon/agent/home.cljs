@@ -36,13 +36,61 @@
 (defn starting-ns
   "Return an agent's database-selected starting namespace.
 
-   A later successful eval's `:seon.eval/ns` remains the current namespace.
-   This value is only the fallback before that history exists. Older database
-   values without the namespace ref retain the deterministic home namespace."
+   Older database values without the namespace ref retain the deterministic
+   home namespace."
   {:malli/schema [:=> [:cat ::agent-id [:maybe :map]] :symbol]}
   [agent-id agent]
   (or (some-> agent :seon.agent/namespace :seon.ns/name name symbol)
       (home-ns agent-id)))
+
+(def latest-successful-ns-query
+  "Query for the latest successful eval namespace and its transaction."
+  '{:find [?ns ?at ?eval-tx]
+    :in [$ ?aid]
+    :where [[?agent :seon.agent/id ?aid]
+            [?run :seon.agent.run/agent ?agent]
+            [?turn :seon.agent.turn/run ?run]
+            [?turn :seon.agent.turn/evals ?eval]
+            [?eval :seon.eval/ok? true]
+            [?eval :seon.eval/at ?at ?eval-tx]
+            [?eval :seon.eval/ns ?ns]]
+    :order-by [?at :desc ?eval-tx :desc]
+    :limit 1})
+
+(def namespace-assignment-query
+  "Query for an agent's assigned namespace and assignment transaction."
+  '[:find ?ns ?assignment-tx
+    :in $ ?aid
+    :where
+    [?agent :seon.agent/id ?aid]
+    [?agent :seon.agent/namespace ?namespace ?assignment-tx]
+    [?namespace :seon.ns/name ?ns]])
+
+(schema/register! ::latest-successful-ns
+  [:tuple :seon.ns/name :inst :int])
+(schema/register! ::namespace-assignment
+  [:tuple :seon.ns/name :int])
+
+(defn current-ns
+  "Return the namespace selected by eval history and assignment."
+  {:malli/schema
+   [:=> [:catn
+         [::agent-id ::agent-id]
+         [::agent [:maybe :map]]
+         [::latest-successful-ns [:maybe ::latest-successful-ns]]
+         [::namespace-assignment [:maybe ::namespace-assignment]]]
+    :seon.ns/name]}
+  [agent-id agent latest-successful-ns namespace-assignment]
+  (let [[eval-ns _ eval-tx] latest-successful-ns
+        [assigned-ns assignment-tx] namespace-assignment]
+    (keyword
+     (name
+      (cond
+        (and assigned-ns
+             (or (nil? eval-tx) (> assignment-tx eval-tx)))
+        assigned-ns
+        eval-ns eval-ns
+        :else (starting-ns agent-id agent))))))
 
 (def home-ns-require-specs
   "THE canonical require list every agent's home namespace is wired with —
