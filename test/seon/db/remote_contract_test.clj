@@ -868,6 +868,14 @@
             ^SocketChannel mutations (uds/connect! path)
             db-a (database-value database-a)
             db-b (database-value database-b)
+            acquire!
+            (fn [channel request-id database-name]
+              (call!
+               channel
+               (protocol/acquire-database-request
+                {::protocol/request-id request-id
+                 ::protocol/database-name database-name
+                 ::protocol/database-advanced? true})))
             listen
             (fn [channel request-id database]
               (call!
@@ -878,9 +886,13 @@
                          '[:find ?name :where
                            [?e :remote.contract/name ?name]]})))]
         (try
-          (let [first-a (listen listener-a "listen/a" db-a)
+          (let [acquired-a (acquire! listener-a "acquire/a" database-a)
+                acquired-b (acquire! listener-b "acquire/b" database-b)
+                first-a (listen listener-a "listen/a" db-a)
                 replacement-a (listen listener-a "listen/a" db-a)
                 first-b (listen listener-b "listen/b" db-b)]
+            (is (::protocol/acquired? acquired-a) (pr-str acquired-a))
+            (is (::protocol/acquired? acquired-b) (pr-str acquired-b))
             (is (::protocol/listening? first-a) (pr-str first-a))
             (is (::protocol/listening? replacement-a)
                 "registering the same key replaces rather than conflicts")

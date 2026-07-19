@@ -35,7 +35,7 @@
      (transit/reader (ByteArrayInputStream. (.toByteArray output)) :json))))
 
 (deftest database-values-are-complete-closed-and-temporally-unambiguous
-  (is (= 10 protocol/current-version))
+  (is (= 11 protocol/current-version))
   (is (protocol/database-value? db))
   (is (protocol/database-value? (assoc db :as-of 536870928)))
   (is (protocol/database-value? (assoc db :since #inst "2026-07-16")))
