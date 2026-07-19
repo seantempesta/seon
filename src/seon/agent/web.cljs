@@ -59,7 +59,8 @@
 ;;   :public-only — refuse internal targets (loopback/RFC-1918/link-local/ULA)
 ;;   :allowlist   — reachable ONLY if the host matches ::allowed-domains
 (schema/register! ::policy          [:enum :open :public-only :allowlist])
-(schema/register! ::allowed-domains [:vector :string])
+;; `::allowed-domains` is registered once by `seon.config`, which loads before
+;; this capability and owns the database configuration entity.
 
 (schema/register! ::fetch-request
   [:map
