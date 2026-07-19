@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 tags:
   - agent-runtime
   - reliability
@@ -24,3 +24,10 @@ produced `nil` even though the callee's public contract requires a boolean.
 - Focused context tests pass.
 - The retained live root orchestration scenario advances beyond prior-context
   rendering without retiring its execution child for this fault.
+
+## Resolution
+
+Commit `3ee9b129` makes the derived flag explicitly boolean and adds the focused
+regression. The focused context gate passes 8 tests/19 assertions. On the
+rebuilt artifact the same live root request rendered its context and reached
+the provider; it no longer retired the execution child for this fault.

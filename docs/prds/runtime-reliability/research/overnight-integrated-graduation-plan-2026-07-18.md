@@ -126,6 +126,18 @@ source lines in this ledger or the owning successor PRD.
   the slow tail confirms model work, not JVM serialization, dominates the
   variance. Native log:
   `src-inspect-ai/logs/2026-07-19T08-04-31-00-00_milestone-lift_LvFZXcaQxVu3r3bsjPBXUr.eval`.
+- [x] Explicit inherited agents are process-hosted before `/agents/run`
+  intake. A rebuilt non-autonomous branch opened root's turn immediately
+  without a manual REPL resume.
+- [x] Incomplete historical eval rows remain ordinary renderable data. The
+  live root row exposed a nil-to-boolean instrumentation fault in
+  `format-eval-row`; the boolean derivation and focused 8-test/19-assertion
+  regression are committed at `3ee9b129`, and the rebuilt request advanced to
+  the provider without retiring its execution child.
+- [ ] Rerun root orchestration scoring with a valid provider credential. The
+  2026-07-19 post-restart attempt reached Anthropic normally but received HTTP
+  401 before model work; do not classify that external credential failure as
+  product or scorer evidence.
 - The first admitted live namespace battery now reaches the real scorer. Native
   log `…fxN7bWkJXsVehcJBqs9K3B.eval` completed all three samples with two
   passes, zero fabrication, and one `NaN` failure after repeated unquoted

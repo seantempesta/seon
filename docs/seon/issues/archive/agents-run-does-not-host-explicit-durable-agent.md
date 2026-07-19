@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, agent, flow, pod]
 ---
@@ -30,4 +30,7 @@ The failed live root row had no open database run and a healthy pod heartbeat.
 A direct `agent.runtime/resume!` returned `resumed? true`; the queued message
 then opened a turn immediately. The HTTP task owner now performs that same
 resume before intake. Focused web proof passes 22 tests/87 assertions. A fresh
-live root row remains the archival gate.
+rebuilt live root row opened immediately through `/agents/run` without a manual
+resume. Its later failures were independent: first an execution-child
+context-rendering defect, then after that repair an external Anthropic 401.
+Commit `1b0bf91d` owns the hosting correction.

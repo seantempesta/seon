@@ -136,6 +136,19 @@ journey is the dependency-ready parallel portfolio; the
 complete live Inspect, browser, package, downstream,
 multi-cluster, and modest-hardware matrix remains the final gate.
 
+The rebuilt root-row falsifier opened root's turn immediately through
+`/agents/run`, closing the explicit-agent hosting defect. It then exposed an
+independent context-rendering bug: a partially assembled eval row without
+`:seon.eval/ok?` derived `nil` for the boolean argument to
+`seon.agent.ctx/cap-result`, and instrumentation correctly retired the
+execution child. The derived value is now explicitly boolean and a focused
+regression passes 8 tests/19 assertions. On the exact rebuilt artifact the
+same request advanced through context rendering to the provider; the provider
+then returned Anthropic HTTP 401 because the credential inherited after the
+desktop restart is invalid. Root reachability therefore remains unscored for
+an external credential reason, while the browser/Datastar journey is the next
+dependency-ready local boundary.
+
 As of 2026-07-18, one JVM writer has passed the complete autonomous sibling
 cluster lifecycle: fresh initialization, distinct database values and store
 IDs, concurrent agents and gzip feeds, isolated writes, pod-only restart,
