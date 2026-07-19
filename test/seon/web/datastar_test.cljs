@@ -1,5 +1,6 @@
 (ns seon.web.datastar-test
   (:require [cljs.test :refer [async deftest is]]
+            [clojure.string :as str]
             [seon.db :as db]
             [seon.execution :as execution]
             [seon.ui.html :as html]
@@ -12,6 +13,33 @@
    :since nil
    :history false
    :datahike/commit-id #uuid "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"})
+
+(deftest root-page-has-one-namespace-aware-agent-form-outside-the-morph
+  (let [root-markup (@#'datastar/root-page-html)
+        agent-markup (@#'datastar/agent-page-html "worker")
+        app-end (str/index-of root-markup "</main>")
+        form-start (str/index-of root-markup "id=\"app-agent-create\"")]
+    (is (= 1 (count (re-seq #"id=\"app-agent-create\"" root-markup))))
+    (is (< app-end form-start)
+        "human controls remain outside the whole-element morph target")
+    (is (str/includes?
+         root-markup
+         (str "data-on:submit=\"@post(&#39;/agents&#39;, "
+              "{contentType:&#39;form&#39;})\"")))
+    (doseq [[field signal label]
+            [["namespace" "agentNamespace" "agent namespace"]
+             ["purpose" "agentPurpose" "agent purpose"]
+             ["message" "agentMessage" "initial agent message"]]]
+      (let [input (some #(when (str/includes? % (str "name=\"" field "\"")) %)
+                        (re-seq #"<input[^>]+>" root-markup))]
+        (is (str/includes? input (str "data-bind=\"" signal "\""))
+            (str "binds the optional " field " form field"))
+        (is (str/includes? input (str "aria-label=\"" label "\""))
+            (str "labels the optional " field " form field"))))
+    (is (str/includes? root-markup "id=\"app-chat\""))
+    (is (str/includes? root-markup "id=\"app-agent-feed\""))
+    (is (not (str/includes? agent-markup "id=\"app-agent-create\""))
+        "ordinary agent pages do not gain a second cluster control")))
 
 (deftest unknown-agent-page-redirects-before-serving-a-loading-shell
   (async done

@@ -1082,6 +1082,45 @@
                  :class "bg-base-800 hover:bg-base-700 text-signal border border-base-700 px-3 py-1 rounded text-xs font-mono"}
         "send"]]))
 
+(defn- agent-create-form-html
+  "The root view's namespace-aware agent creation form."
+  []
+  (html/->string
+    [:form {:id "app-agent-create"
+            (keyword "data-on:submit")
+            "@post('/agents', {contentType:'form'})"
+            :class (str "shrink-0 flex flex-wrap items-center gap-2 border-t "
+                        "border-base-800 bg-base-900 px-3 py-2")}
+     [:span {:class "text-xs text-text-400 font-mono"} "new agent"]
+     [:input {:type "text"
+              :name "namespace"
+              :data-bind "agentNamespace"
+              :autocomplete "off"
+              :placeholder "namespace (optional)"
+              :aria-label "agent namespace"
+              :class (str "flex-1 bg-base-950 border border-base-800 "
+                          "rounded px-2 py-1 text-text-100 text-xs font-mono")}]
+     [:input {:type "text"
+              :name "purpose"
+              :data-bind "agentPurpose"
+              :autocomplete "off"
+              :placeholder "purpose (optional)"
+              :aria-label "agent purpose"
+              :class (str "flex-1 bg-base-950 border border-base-800 "
+                          "rounded px-2 py-1 text-text-100 text-xs font-mono")}]
+     [:input {:type "text"
+              :name "message"
+              :data-bind "agentMessage"
+              :autocomplete "off"
+              :placeholder "initial message (optional)"
+              :aria-label "initial agent message"
+              :class (str "flex-1 bg-base-950 border border-base-800 "
+                          "rounded px-2 py-1 text-text-100 text-xs font-mono")}]
+     [:button {:type "submit"
+               :class (str "bg-base-800 hover:bg-base-700 text-signal border "
+                           "border-base-700 px-3 py-1 rounded text-xs font-mono")}
+      "start"]]))
+
 (defn- agent-feed-opener-html
   "The hidden live-feed owner for an agent page, outside the morph target.
 
@@ -1386,6 +1425,21 @@
             {"Content-Type" "text/html; charset=utf-8"
              "Cache-Control" "no-store, no-cache, must-revalidate"}))
 
+(defn- root-page-html
+  "The root system-view shim with its ordinary cluster controls."
+  []
+  (shim-html "agent root"
+             "h-screen overflow-hidden flex flex-col bg-base-950 text-text-200 font-mono p-3"
+             nil
+             (str (agent-create-form-html)
+                  (chat-form-html "root")
+                  (agent-feed-opener-html "root"))))
+
+(defn- root-page-response []
+  (response (root-page-html) 200
+            {"Content-Type" "text/html; charset=utf-8"
+             "Cache-Control" "no-store, no-cache, must-revalidate"}))
+
 (defn- redirect-home-response []
   (response "" 302 {"Location" "/" "Cache-Control" "no-store"}))
 
@@ -1424,14 +1478,15 @@
   "Serve `/` — root's view (the all-agents dashboard).
 
    `root = /`
-   `/` is the root agent's view, so it reuses the shared agent
-   shim page bound to the literal id \"root\". The page's feed effect opens
+   `/` is the root agent's view. Its shim adds the ordinary namespace-aware
+   creation form outside the morph target, then uses the same chat and feed
+   controls as every agent page. The page's feed effect opens
    `/agent/root/feed` (already seeded), whose `agent-view` renders root's
    canvas = `seon.render.system/system-view` (root's seeded canvas content).
    One mechanism and no root-special feed; `/agent/root` canonicalizes to `/`.
    Public — db->routes resolves its symbol at request time."
   [_r]
-  (agent-page-response "root"))
+  (root-page-response))
 
 (def agent-view-function 'seon.execution.runtime/render-agent-view!)
 

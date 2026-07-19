@@ -171,10 +171,15 @@ create-or-reuse plus initial-task transaction. Focused `seon.web.serve-test`
 proof covers exact field preservation, lifecycle selection, root scope, and
 invalid-input refusal.
 
-This closes the HTTP contract identified in precondition 1. The current root
-shim still has no dedicated namespace-creation form, so B1 must continue to
-use root chat until that ordinary human control is added outside the morphed
-`#app-view`. Do not describe the backend contract alone as browser graduation.
+The root shim now also contains one ordinary `app-agent-create` form with the
+three optional fields. It is a sibling after `#app-view`, so a database feed
+morph cannot replace partially typed human input. Datastar posts its standard
+form encoding to the existing `/agents` route; the resulting database
+transaction updates the one root feed. Focused `seon.web.datastar-test` proof
+covers root-only placement, exact field names/bindings, the existing action
+URL, and preservation of the root chat and feed owners. This closes the source
+gap identified in precondition 1; B1 still requires the matrix's live browser
+and database evidence before graduation is claimed.
 
 ## Isolated graduation setup
 
