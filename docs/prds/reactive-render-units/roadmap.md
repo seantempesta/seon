@@ -106,10 +106,13 @@ rebuild reused a stale canonical writer jar because its input digest did not
 include the Git identity behind the stable Datahike local-root path. The
 artifact owner now includes every writer local root's exact clean Git identity;
 its focused gate is 29 tests / 141 assertions and proves revision-only
-invalidation while preserving cross-flavor reuse. The earliest unsettled
-contract is an exact rebuild proving the writer loaded Datahike `6f256908`,
-then live proof that each completed eval appears in the immediately following
-prompt, followed by the final requirement audit.
+invalidation while preserving cross-flavor reuse. The verified rebuild loaded
+Datahike `6f256908`, and live source inspection confirmed the conservative
+revision branch. The exact root request then completed in 50.036 seconds over
+eight turns/evals: current position, active step, child delegation, report,
+plan completion, message read, child result `42`, and lifecycle completion.
+This closes the materialized-value cache and writer artifact invalidation
+contract. The earliest unsettled contract is the final requirement audit.
 
 `seon.reactive` now implements the general registered-read lifecycle. Each
 registration owns one Datahike writer interest, one active computation, and at

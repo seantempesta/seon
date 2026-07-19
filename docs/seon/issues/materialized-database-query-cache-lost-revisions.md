@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, database, agent]
 ---
@@ -71,3 +71,15 @@ hit the exact snapshot cache entry.
 - A rebuilt exact-artifact root run sees each preceding eval in the next
   prompt and proceeds from one `my.plan/position` read to delegation without
   changing the repetition guard, plan selector, or transcript renderer.
+
+## Resolution
+
+The verified rebuild loaded Datahike `6f256908`; live JVM source inspection
+confirmed the conservative revision branch in `attached-cache-context`. The
+exact root request then completed in 50.036 seconds over eight turns and eight
+evals: it selected the current plan step, made it active, delegated
+`my.inspect.selector-proof`, received child `chilly-hands-draw`, read the
+report, completed the plan and lifecycle, and returned the child result `42`.
+The run closed `:completed`, not `:no-forms`, and required no change to the
+repetition guard, plan selection, or transcript rendering. The durable live
+artifact is `tmp/verified-cache-delegation-proof.json`.
