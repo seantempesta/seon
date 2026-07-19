@@ -258,7 +258,7 @@
   [h]
   (let [{::keys [static readiness chat stop resume clear log
                  complete agent-run config-apply operator-quiesce
-                 operator-blobs]} h]
+                 operator-blobs product-evidence]} h]
     (cond->
      [["/css/{*path}" {:get {:handler (fn [r] (static nil (:uri r)))}}]
      ["/js/{*path}"  {:get {:handler (fn [r] (static nil (:uri r)))}}]
@@ -293,7 +293,11 @@
       operator-blobs
       (conj ["/_seon/operator/blobs"
              {:post {:middleware [:seon.route/loopback-peer]
-                     :handler (post-handler operator-blobs)}}]))))
+                     :handler (post-handler operator-blobs)}}])
+      product-evidence
+      (conj ["/_seon/operator/product-evidence"
+             {:post {:middleware [:seon.route/loopback-peer]
+                     :handler (post-handler product-evidence)}}]))))
 
 ;; ============================================================
 ;; The no-match default-handler — a graceful redirect HOME (#28). reitit
@@ -434,7 +438,7 @@
    hot reload rebuilds the compiled handler from the already accepted ordinary
    projection. `config` keys:
    `:seon.web.router/{static chat stop resume clear log complete agent-run
-   config-apply operator-quiesce operator-blobs}` (the serve handler fns) +
+   config-apply operator-quiesce operator-blobs product-evidence}` (the serve handler fns) +
    `:seon.web.router/same-origin?` and `:seon.web.router/loopback-peer?`
    (the predicates). The CORE routes are NOT in
    `config` — they project from the

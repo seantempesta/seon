@@ -602,6 +602,42 @@
               (reset! @#'admission/!state prior)
               (done)))))))
 
+(deftest product-evidence-uses-one-database-value-and-namespaced-result
+  (async done
+    (let [commit-id (random-uuid)
+          database {:db-name "proof"
+                    :t 42 :as-of nil :since nil :history false
+                    :datahike/commit-id commit-id}
+          !requests (atom [])
+          original-db db/db
+          original-query db/query]
+      (set! db/db (fn ([] (js/Promise.resolve database))
+                    ([_] (js/Promise.resolve database))))
+      (set! db/query (fn ([request]
+                        (swap! !requests conj request)
+                        (js/Promise.resolve #{[:my.taxes 2]}))
+                       ([query & args]
+                        (swap! !requests conj {::db/query query ::db/args args})
+                        (js/Promise.resolve #{[:my.taxes 2]}))))
+      (-> (serve/product-evidence
+             {::db/query '[:find ?namespace ?count
+                           :where [?agent :seon.agent/namespace ?namespace]]
+              ::db/args []})
+            (.then
+             (fn [result]
+               (is (true? (:seon.db/ok? result)))
+               (is (= database (::db/db (first @!requests))))
+               (is (= [[":my.taxes" 2]] (:seon.db/result result)))
+               (is (= {:db_name "proof"
+                       :t 42 :as_of nil :since nil :history false
+                       :commit_id (str commit-id)}
+                      (:seon.db/db result)))))
+          (.catch (fn [error] (is false (str error))))
+          (.finally (fn []
+                      (set! db/db original-db)
+                      (set! db/query original-query)
+                      (done)))))))
+
 (deftest restore-readiness-serves-only-the-exact-closed-completion-head
   (async done
     (let [prior-admission (admission/state)

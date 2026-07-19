@@ -539,6 +539,61 @@
    :history (:history database)
    :commit_id (str (:datahike/commit-id database))})
 
+(defn- product-evidence-json-value
+  "Convert one database result to bounded JSON-compatible ordinary data."
+  [value]
+  (cond
+    (map? value) (into {} (map (fn [[key item]]
+                                 [(str key) (product-evidence-json-value item)]))
+                       value)
+    (set? value) (mapv product-evidence-json-value value)
+    (sequential? value) (mapv product-evidence-json-value value)
+    (or (keyword? value) (symbol? value) (uuid? value)) (str value)
+    (inst? value) (.toISOString ^js value)
+    :else value))
+
+(defn ^:async product-evidence
+  "Run one typed read against one immutable database value."
+  {:malli/schema [:=> [:cat :seon.db/query-request] :map]}
+  [request]
+  (let [database (await (db/db))]
+    (if (:seon.error/message database)
+      {:seon.db/ok? false :seon.db/error (:seon.error/message database)}
+      (let [result (await (db/query (assoc request ::db/db database)))]
+        (if (:seon.error/message result)
+          {:seon.db/ok? false :seon.db/error (:seon.error/message result)}
+          {:seon.db/ok? true
+           :seon.db/db (database-json database)
+           :seon.db/result (product-evidence-json-value result)})))))
+
+(defn- handle-product-evidence!
+  "Serve one loopback-only typed database query as namespaced JSON data."
+  [req res]
+  (-> (read-body req)
+      (.then
+       (fn [body]
+         (let [parsed (js->clj (js/JSON.parse body))
+               query-text (get parsed "seon.db/query")
+               args (vec (or (get parsed "seon.db/args") []))]
+           (if-not (string? query-text)
+             {:seon.db/ok? false
+              :seon.db/error "seon.db/query must be an EDN query string"}
+             (product-evidence
+              {::db/query (reader/read-string query-text) ::db/args args})))))
+      (.then
+       (fn [result]
+         (write-status!
+          res (if (:seon.db/ok? result) 200 422)
+          "application/json; charset=utf-8"
+          (js/JSON.stringify (clj->js result)))))
+      (.catch
+       (fn [error]
+         (write-status!
+          res 400 "application/json; charset=utf-8"
+          (js/JSON.stringify
+           #js {"seon.db/ok?" false
+                "seon.db/error" (or (.-message error) (str error))}))))))
+
 (defn- turn-evidence-row
   "Stable external projection of captured turn prompts and raw replies."
   [turn-id bundle]
@@ -1547,6 +1602,7 @@
    :seon.web.router/config-apply  handle-config-apply!
    :seon.web.router/operator-quiesce handle-operator-quiesce!
    :seon.web.router/operator-blobs handle-operator-blobs!
+   :seon.web.router/product-evidence handle-product-evidence!
    :seon.web.router/same-origin?  same-origin?
    :seon.web.router/loopback-peer? loopback-peer?})
 

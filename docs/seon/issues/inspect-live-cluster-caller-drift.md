@@ -226,3 +226,12 @@ separate container-internal topology.
   database boundaries. No arbitrary writer form or direct cluster-directory
   blob read remains in an accepted live path, and missing native Inspect logs
   fail evidence finalization rather than being silently ignored.
+
+## Implemented boundary
+
+The implementation commit connects Inspect to the maintained retained-branch
+operator lifecycle and adds one loopback-only typed `seon.db/query` read over
+one immutable database value. Focused Python proof passes 46 tests; focused
+CLJS HTTP/router proof passes 30 tests with 113 assertions. Live model runs are
+left to the coordinated source-frozen checkpoint. The issue remains open until
+that live evidence and cleanup proof are retained.

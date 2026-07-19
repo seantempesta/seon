@@ -4,6 +4,7 @@ import pytest
 from inspect_ai import eval as inspect_eval
 
 from seon_inspect.product_scenarios import (CHECKS, SCENARIOS,
+                                            query_product_evidence,
                                             run_product_scenario)
 from seon_inspect.tasks.product_scenarios import GOOD, bad_snapshot, product_scenario
 
@@ -76,3 +77,30 @@ def test_restart_driver_refuses_unowned_restart():
         run_product_scenario(
             "pod_restart", "http://pod/agents/run", lambda *_: {},
             run=lambda *args, **kwargs: {})
+
+
+def test_typed_product_evidence_retains_database_value():
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return None
+
+        def read(self):
+            return (b'{"seon.db/ok?":true,"seon.db/db":'
+                    b'{"db_name":"proof","t":42,"commit_id":"c"},'
+                    b'"seon.db/result":[["root"]]}')
+
+    requests = []
+
+    def opener(request):
+        requests.append(request)
+        return Response()
+
+    result = query_product_evidence(
+        "http://127.0.0.1:41000/agents/run",
+        "[:find ?id :where [?e :seon.agent/id ?id]]", opener=opener)
+    assert requests[0].full_url.endswith("/_seon/operator/product-evidence")
+    assert result["database_value"]["t"] == 42
+    assert result["database_snapshot"] == [["root"]]

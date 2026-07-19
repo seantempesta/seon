@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 from typing import Any
+import urllib.request
 
 from inspect_ai.scorer import (CORRECT, INCORRECT, Score, Scorer, Target,
                                accuracy, scorer)
@@ -161,6 +162,27 @@ def run_product_scenario(scenario: str, cluster_url: str, read_database,
     second = run(PHASES[scenario][1], None, cluster_url, agent_id=agent_id)
     return {"runs": [first, second],
             "database_snapshot": read_database(scenario, agent_id)}
+
+
+def query_product_evidence(cluster_url: str, query: str,
+                           args: list | None = None,
+                           *, opener=urllib.request.urlopen) -> dict:
+    """Read one immutable database value through the typed pod endpoint."""
+    endpoint = cluster_url.removesuffix("/agents/run") + \
+        "/_seon/operator/product-evidence"
+    body = json.dumps({"seon.db/query": query,
+                       "seon.db/args": args or []}).encode()
+    request = urllib.request.Request(
+        endpoint, data=body, headers={"Content-Type": "application/json"})
+    with opener(request) as response:
+        result = json.loads(response.read().decode())
+    if result.get("seon.db/ok?") is not True:
+        raise RuntimeError(result.get("seon.db/error", "database read failed"))
+    database = result.get("seon.db/db")
+    if not isinstance(database, dict) or not isinstance(database.get("t"), int):
+        raise RuntimeError("product evidence omitted its immutable database value")
+    return {"database_value": database,
+            "database_snapshot": result.get("seon.db/result")}
 
 
 @scorer(metrics=[accuracy()])

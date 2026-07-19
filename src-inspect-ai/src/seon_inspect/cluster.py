@@ -490,6 +490,63 @@ class Cluster:
         return f"http://127.0.0.1:{self.port}/agents/run"
 
 
+@dataclass(frozen=True)
+class BranchLease:
+    """One operator-owned isolated branch pod and its observed identity."""
+    name: str
+    cluster_url: str
+    status_edn: str
+    status_sha256: str
+
+
+def _operator(arguments: list[str], runner) -> subprocess.CompletedProcess:
+    result = runner([str(REPO_ROOT / "bin/seon"), *arguments],
+                    cwd=REPO_ROOT, text=True, capture_output=True, check=False)
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "operator failed").strip()
+        raise RuntimeError(detail.splitlines()[0])
+    return result
+
+
+def _branch_lease(name: str, runner) -> BranchLease:
+    result = _operator(["branch", "status", name, "--edn"], runner)
+    status = result.stdout.strip()
+    if ":seon.dev.target.status/ready" not in status:
+        raise RuntimeError(f"branch {name} is not ready")
+    match = re.search(r':seon\.dev\.target/url\s+"(http://127\.0\.0\.1:\d+)"',
+                      status)
+    if not match:
+        raise RuntimeError(f"branch {name} status has no web endpoint")
+    return BranchLease(
+        name=name, cluster_url=f"{match.group(1)}/agents/run",
+        status_edn=status,
+        status_sha256=hashlib.sha256(status.encode()).hexdigest())
+
+
+def acquire_branch_lease(name: str, *, runner=subprocess.run) -> BranchLease:
+    """Open one isolated native branch through the canonical operator."""
+    name = _check_name(name)
+    _operator(["branch", "open", name], runner)
+    return _branch_lease(name, runner)
+
+
+def restart_branch_lease(lease: BranchLease, *, runner=subprocess.run
+                         ) -> BranchLease:
+    """Restart only the pod named by ``lease`` and require new status bytes."""
+    _check_name(lease.name)
+    _operator(["branch", "restart", lease.name], runner)
+    restarted = _branch_lease(lease.name, runner)
+    if restarted.status_sha256 == lease.status_sha256:
+        raise RuntimeError("branch restart did not change the operator identity")
+    return restarted
+
+
+def release_branch_lease(lease: BranchLease, *, runner=subprocess.run) -> None:
+    """Close the exact retained branch named by the observed lease."""
+    _check_name(lease.name)
+    _operator(["branch", "close", lease.name], runner)
+
+
 def bench_cluster_name(prefix: str = "bench") -> str:
     """A fresh, collision-proof cluster name for one bench sample."""
     return f"{prefix}-{uuid.uuid4().hex[:12]}"

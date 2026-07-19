@@ -74,3 +74,32 @@ Inspect lease. Its final database reader must return the documented facts from
 one database value and retain basis transaction plus commit ID in the native
 Inspect log. Then run each fixed scenario three consecutive times and retain
 the native logs; model narration remains supporting evidence only.
+
+## Lease and typed read implementation
+
+Inspect now consumes the completed isolated operator lifecycle directly:
+`bin/seon branch open|restart|close|status NAME`. The retained branch name is
+the ownership identity, status supplies the dynamic pod URL and complete
+operator identity bytes, restart must change those bytes, and release closes
+that exact retained branch. No default-cluster lifecycle operation is used.
+
+The pod exposes one loopback-peer-only
+`POST /_seon/operator/product-evidence` operation. Its JSON request contains
+`seon.db/query` as an EDN Datalog string and optional `seon.db/args`. The
+handler acquires one ordinary database value, calls the existing `seon.db/query`
+once against that value, and returns `seon.db/ok?`, the database value's
+Datahike fields, and JSON-safe ordinary `seon.db/result` data. It cannot eval
+code, write data, or select another database.
+
+Focused proof:
+
+- Python lease, product-scenario, and legacy cluster tests: **46 passed**;
+- CLJS serve/router tests: **30 tests, 113 assertions**, all pass.
+
+The coordinated live fixed-scenario checkpoint opens a unique retained branch,
+drives both phases through its `/agents/run` URL, reads the final facts through
+the product-evidence operation, restarts only through `branch restart` for the
+restart row, and closes the same branch in `finally`. The top-level runner must
+provide each scenario's explicit Datalog projection into the documented scorer
+snapshot; the generic transport intentionally does not contain scenario names
+or hidden query templates.

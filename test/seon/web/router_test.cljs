@@ -182,6 +182,31 @@
         (finally
           (reset! @#'admission/!state prior))))))
 
+(deftest product-evidence-route-is-unadmitted-and-loopback-only
+  (let [!invocations (atom 0)
+        handler (fn [_request _response]
+                  (swap! !invocations inc)
+                  (js/Response. "{}" #js {:status 200}))]
+    (router/install!
+      {:seon.web.router/product-evidence handler
+       :seon.web.router/loopback-peer? (constantly false)})
+    (is (= 403 (.-status
+                (request! "POST" "/_seon/operator/product-evidence"))))
+    (is (zero? @!invocations))
+    (router/install!
+      {:seon.web.router/product-evidence handler
+       :seon.web.router/loopback-peer? (constantly true)})
+    (let [prior (admission/state)]
+      (try
+        (reset! @#'admission/!state
+                {::admission/status :unavailable
+                 ::admission/reason "ordinary work is closed"})
+        (is (= 200 (.-status
+                    (request! "POST" "/_seon/operator/product-evidence"))))
+        (is (= 1 @!invocations))
+        (finally
+          (reset! @#'admission/!state prior))))))
+
 (deftest closed-admission-refuses-post-before-the-domain-handler
   (let [!invocations (atom 0)
         prior (admission/state)]
