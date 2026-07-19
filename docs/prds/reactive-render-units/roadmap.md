@@ -67,6 +67,17 @@ retries without reconnecting. The full CLJS gate passed 1,209 tests / 5,420
 assertions; focused transport and remote-contract gates passed 17 / 66 and
 21 / 97. A rebuilt live retry remains required before the SSE pressure proof.
 
+The rebuilt live retry on the disposable `pressure-sse` cluster completed all
+260 concurrent transactions in 25,123 ms with zero error values. Pod, watcher,
+and writer readiness remained green, `/` remained HTTP 200, and the pod log
+contained no capacity, `:busy`, or core-fault marker. The bounded 256-request
+window therefore throttles excess work without dropping, duplicating,
+reconnecting, or degrading the runtime. The live SSE pressure/convergence gate
+remains separate: two attempts opened independent fast and paused feeds and
+delivered byte-identical 2,105,852-byte initial frames, but unrelated source
+reloads intentionally closed both sockets before pressure writes. Those runs
+prove initial equality and reload cleanup, not slow-consumer convergence.
+
 Datastar now delegates live page demand to `seon.reactive`. The page computation
 captures parent-process reads, unions execution-child evidence from the ordinary
 result message, serializes one complete morph event, and compares that event as

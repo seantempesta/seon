@@ -47,6 +47,13 @@ admission now resolves that one expected transport condition as failure data;
 `seon.db` translates the same fields into its existing error value below the
 instrumentation boundary, and the transaction owner retries it unchanged.
 
+The rebuilt disposable-cluster retry then completed 260 concurrent
+transactions in 25,123 ms with zero errors. Pod, watcher, and writer remained
+ready, the web UI returned HTTP 200, and the pod log contained no `:busy`,
+capacity, or core-fault marker. This closes local request-window correctness;
+the remaining acceptance items concern sustained agent/feed fanout and the
+separate slow-consumer SSE proof.
+
 The writer currently adds every connection that performs database work to
 `::acquisitions`, then `deliver-database-advanced!` sends every committed
 database value to every acquired connection. An execution child therefore
