@@ -57,6 +57,26 @@
 (schema/register! ::blocked? :boolean)
 (schema/register! ::ready? :boolean)
 (schema/register! ::progress [:map [::done :int] [::total :int]])
+(schema/register! ::direct-error [:map [:seon.error/message :string]])
+
+(schema/register! ::ready-namespace-state
+  [:map
+   [::id ::id]
+   [:seon.ns/name :symbol]])
+(schema/register! ::namespace-step-state
+  [:map
+   [::id ::id]
+   [:seon.ns/name :symbol]
+   [::status ::status]
+   [::claim {:optional true} ::claim]])
+(schema/register! ::generated-root-state
+  [:map
+   [::id ::id]
+   [::status ::status]
+   [::progress ::progress]
+   [::blocked? ::blocked?]
+   [:my.plan.internal/namespace-steps [:vector ::namespace-step-state]]
+   [:my.plan.internal/ready-steps [:vector ::ready-namespace-state]]])
 
 (schema/register! ::write-response
   [:map
@@ -388,6 +408,18 @@
           {:seon.error/message "Plan subtree read failed."
            :seon.error/data response
            :seon.error/kind :core-bug})))))
+
+(defn ^:async ^:no-doc generated-root-state
+  "Derive stable scheduler state for one generated-code plan root."
+  {:malli/schema [:=> [:cat ::id-request]
+                  [:or ::generated-root-state ::direct-error]]}
+  [{::keys [id] :as request}]
+  (let [acquired (await (acquire-root-plan-rows request id))]
+    (if (:seon.error/message acquired)
+      acquired
+      (or (internal/namespace-root-state-from-rows (::rows acquired) id)
+          {:seon.error/message
+           (str "No generated-code plan root " (pr-str id) ".")}))))
 
 (defn ^:async ^:private acquire-status
   [request step-id]
