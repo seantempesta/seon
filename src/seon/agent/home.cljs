@@ -33,6 +33,17 @@
   [agent-id]
   (symbol (str "my.agent." agent-id)))
 
+(defn starting-ns
+  "Return an agent's database-selected starting namespace.
+
+   A later successful eval's `:seon.eval/ns` remains the current namespace.
+   This value is only the fallback before that history exists. Older database
+   values without the namespace ref retain the deterministic home namespace."
+  {:malli/schema [:=> [:cat ::agent-id [:maybe :map]] :symbol]}
+  [agent-id agent]
+  (or (some-> agent :seon.agent/namespace :seon.ns/name name symbol)
+      (home-ns agent-id)))
+
 (def home-ns-require-specs
   "THE canonical require list every agent's home namespace is wired with —
    the single source of truth, shared by [[seon.eval/setup-agent-ns!]] (which INSTALLS
@@ -152,24 +163,25 @@
         specs))
 
 (defn initial-ns-entity
-  "Return the complete durable home-namespace entity for a new agent.
+  "Return the complete durable starting-namespace entity for a new agent.
 
-   `home-requires` must be the exact creation-time require list selected for
-   the agent. Namespace source and structural dependency edges therefore
-   commit in the same transaction as the agent identity instead of being
-   discovered by a later analyzer side effect."
+   `namespace` is the ClojureScript namespace symbol the agent starts in;
+   `home-requires` is the exact creation-time require list selected for the
+   agent. Namespace source and structural dependency edges therefore commit in
+   the same transaction as the agent identity instead of being discovered by a
+   later analyzer side effect."
   {:malli/schema
    [:=>
     [:catn [:request
             [:map
-             [:seon.agent/id ::agent-id]
+             [:seon.agent/namespace :symbol]
              [:seon.eval/home-requires ::require-specs]]]]
     [:map
      [:seon.ns/name :keyword]
      [:seon.ns/source :string]
      [:seon.ns/require-edges [:vector ::require-edge]]]]}
-  [{:seon.agent/keys [id] :seon.eval/keys [home-requires]}]
-  (let [ns-sym (home-ns id)]
-    {:seon.ns/name (keyword (str ns-sym))
-     :seon.ns/source (home-ns-form ns-sym home-requires)
-     :seon.ns/require-edges (vec (require-edges home-requires))}))
+  [{namespace :seon.agent/namespace
+    :seon.eval/keys [home-requires]}]
+  {:seon.ns/name (keyword (str namespace))
+   :seon.ns/source (home-ns-form namespace home-requires)
+   :seon.ns/require-edges (vec (require-edges home-requires))})

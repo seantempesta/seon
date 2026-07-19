@@ -88,7 +88,8 @@
     (let [entity (await
                   (db/pull
                    {::db/pull-pattern
-                    [:seon.agent/id :seon.agent/terminated-at ::wake?]
+                    [:seon.agent/id :seon.agent/terminated-at ::wake?
+                     {:seon.agent/namespace [:seon.ns/name]}]
                     ::db/ref [:seon.agent/id id]}))]
       (cond
         (database-error? entity)
@@ -111,7 +112,7 @@
 
         :else
         (let [llm (or llm-fn (ai.dispatch/llm-fn))
-              ns  (home/home-ns id)]
+              ns  (home/starting-ns id entity)]
           (await
             (db/with-agent id
               (fn ^:async resume-agent! []

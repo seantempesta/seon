@@ -717,9 +717,8 @@ state-gated context. This is the same context mechanism as every other agent,
 not a root-only documentation system.
 
 - **`seon.agent/start!` — the spawn function, a SOFT gate + a hard depth-cap backstop.**
-  `start!` is the sole public core birth function. A private pure compiler builds
-  its transaction; there is no callable `create!`, `delegate!`, or forwarding
-  alias. It transacts a new **idle** child agent and **writes
+  A private pure compiler builds the birth transaction. With no namespace,
+  `start!` transacts a new **idle** child agent and writes
   `:seon.agent/parent` = the caller**. That write *is* the activation of
   `:seon.agent/parent`; no separate writer exists. Two spawn
   controls are real. The `/call` HTTP gate separately admits only registered
@@ -740,11 +739,23 @@ not a root-only documentation system.
     child created), never a throw. It is a **config-dialed number, never a name
     list** — raise the dial + add the spawn requires to the general agent-context to
     deepen the tree.
+- **Namespace-targeted start is database get-or-create.** An optional
+  `:seon.agent/namespace` symbol selects the ordinary `:seon.ns/name` program
+  entity. The agent's unique namespace ref is the one-resident constraint.
+  If a nonterminated resident already exists, `start!` returns its stable
+  agent id. Otherwise the namespace declaration, resident agent, parent ref,
+  context, and limits commit atomically. Concurrent attempts use the same
+  immutable database-value fence; the loser reacquires and finds the committed
+  resident instead of creating a process-registry race.
 - **Start = durable creation observed by the pod, leaving the child idle.**
   `start!` commits the child's complete initial facts and returns its id. The
   pod establishes the safe runtime projection from that same committed
   transaction. The child does no work until it receives a trigger; to make it
   work, root (or anyone) sends it a message—that message opens run #1.
+- **`seon.agent/delegate!` is the atomic birth-plus-first-message operation.**
+  It accepts the same optional namespace. An existing resident receives the
+  message directly; an absent resident, its namespace assignment, and the
+  initial message commit in one transaction before any child is hosted.
 - **Roles are capability-SETS, not a stored `:kind`/`:role`.** A role is the set
   of functions its home requires/context makes discoverable plus the guarded
   operations those functions allow. "Orchestrator" discovers spawn/terminate/

@@ -741,7 +741,9 @@
       (set! db/pull
             (fn
               ([_]
-               (js/Promise.resolve {:seon.agent/id "agent-a"}))
+               (js/Promise.resolve
+                {:seon.agent/id "agent-a"
+                 :seon.agent/namespace {:seon.ns/name :my.tax}}))
               ([_ _]
                (js/Promise.reject (js/Error. "unexpected pull arity")))
               ([_ _ _]
@@ -766,6 +768,7 @@
           (.then
            (fn [result]
              (is (true? (:seon.agent.runtime/resumed? result)))
+             (is (= 'my.tax (:seon.agent/ns result)))
              (is (= [:install-start :install-finished :drive] @effects))))
           (.catch (fn [error]
                     (is false (str "runtime resume rejected: " error))))

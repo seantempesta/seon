@@ -31,6 +31,12 @@ stored projection that duplicates derivable database facts.
   values, basis transactions, commit IDs, schema, transactions, and indexed
   reads are owned by `reference-code/datahike/`, `reference-code/proximum/`,
   `src/seon/db/`, and the database-authority-mesh dependency ledger.
+- Namespace residency uses vendored Datahike commit
+  `4c55791be1fb8bb8d9332f21c576f5c20b85b760`: schema validation permits a
+  unique `:db.type/ref`, transaction ref values resolve to eids before AVET
+  uniqueness, and stale database-value retry serializes concurrent creation.
+  First-party owners are `src/seon/agent.cljs`, `src/seon/agent/home.cljs`,
+  `src/seon/agent/runtime.cljs`, and `test/seon/agent/multiagent_test.cljs`.
 - Bun is the pod and execution-child runtime selected by the packaged artifact;
   spawning, supervision, HTTP/SSE, and process evidence are grounded in
   `reference-code/bun/`, `src/seon/execution.cljs`, `src/seon/client.cljs`, and
@@ -107,6 +113,13 @@ source lines in this ledger or the owning successor PRD.
   later turn admitted the repaired definition and returned `:repaired` from
   eval `qmproratkoif`; failed source therefore cannot poison a fresh child or
   prevent the agent from repairing its program.
+- The namespace-targeted slice now registers unique ref
+  `:seon.agent/namespace`, reconciles existing agents to their generated home
+  namespace, selects that database ref as the pre-eval starting namespace, and
+  extends `start!`/`delegate!` with an optional namespace symbol. Focused
+  multi-agent proof passes 7 tests/51 assertions; the Datahike bridge proof
+  passes 14/81 and confirms the attribute compiles to
+  `:db.type/ref` plus `:db.unique/identity`.
 
 ## Execution ledger
 
@@ -186,10 +199,10 @@ and recovery semantics.
 
 ### 3. Namespace-targeted agents and messaging
 
-- [ ] Source-ground the smallest database representation connecting an agent to
+- [x] Source-ground the smallest database representation connecting an agent to
   the `:seon.ns/name` it is asked to steward. Do not rename `:seon.agent/id` or
   treat stewardship as code ownership.
-- [ ] Extend the existing `start!` and `delegate!` lifecycle requests with the
+- [ ] **IN PROGRESS:** extend the existing `start!` and `delegate!` lifecycle requests with the
   optional namespace through one atomic child-birth/message transaction.
 - [ ] Resolve a message addressed to a namespace to its active steward; when no
   steward exists, atomically create one and deliver the message.

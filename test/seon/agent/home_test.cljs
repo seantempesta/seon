@@ -13,6 +13,14 @@
   (is (= (home/home-ns "lantern-copper-falcon")
          (home/home-ns "lantern-copper-falcon"))))
 
+(deftest starting-namespace-prefers-the-database-ref
+  (is (= 'my.tax
+         (home/starting-ns
+          "lantern-copper-falcon"
+          {:seon.agent/namespace {:seon.ns/name :my.tax}})))
+  (is (= 'my.agent.lantern-copper-falcon
+         (home/starting-ns "lantern-copper-falcon" nil))))
+
 (deftest require-spec-contract-is-owned-and-structural
   (is (m/validate :seon.agent.home/require-specs
                   '[[seon.db :as db]

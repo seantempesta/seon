@@ -169,6 +169,8 @@
               (let [[agent-row home-row] (::db/tx-data @transaction)]
                 (is (= configured-requires
                        (:seon.eval/home-requires agent-row)))
+                (is (= [:seon.ns/name :my.agent.created]
+                       (:seon.agent/namespace agent-row)))
                 (is (str/includes? (:seon.ns/source home-row)
                                    "[seon.db :as configured-db]"))))))
        done
@@ -182,12 +184,14 @@
     (let [available? admission/available?
           current-agent-id db/current-agent-id
           db! db/db
+          query db/query
           pull-many db/pull-many
           initial-agent-context ctx/initial-agent-context
           initial-message message/initial-agent-transaction
           allocate! db.id/allocate!
           standalone-message message/agent
           allocation (atom nil)
+          namespace-reads (atom 0)
           creation-configurations (atom [])
           standalone-calls (atom 0)]
       (set! admission/available? (constantly true))
@@ -196,6 +200,11 @@
             (fn
               ([] (js/Promise.resolve database))
               ([_] (js/Promise.resolve database))))
+      (set! db/query
+            (fn [request]
+              (is (identical? database (::db/db request)))
+              (let [read (swap! namespace-reads inc)]
+                (js/Promise.resolve (when (= 2 read) 7000)))))
       (set! db/pull-many
             (fn
               ([request]
@@ -250,7 +259,8 @@
               (js/Promise.resolve {:seon.error/message "forbidden"})))
       (finish!
        (-> (agent/delegate!
-            {:seon.agent/purpose "research"
+            {:seon.agent/namespace 'my.tax
+             :seon.agent/purpose "research"
              :seon.agent.message/content "investigate"})
            (.then
             (fn [result]
@@ -277,6 +287,10 @@
                     "the child identity precedes its task lookup ref")
                 (is (= [[:seon.agent/id "child"]]
                        (:seon.agent.message/to (nth tx message-index))))
+                (is (= [:seon.ns/name :my.tax]
+                       (:seon.agent/namespace (nth tx child-index))))
+                (is (not-any? :seon.ns/name tx)
+                    "an existing namespace declaration is not overwritten")
                 (is (= [configuration configuration]
                        @creation-configurations)
                     "every child tx build receives the decoded singleton")
@@ -287,6 +301,7 @@
        [[#(set! admission/available? %) available?]
         [#(set! db/current-agent-id %) current-agent-id]
         [#(set! db/db %) db!]
+        [#(set! db/query %) query]
         [#(set! db/pull-many %) pull-many]
         [#(set! ctx/initial-agent-context %) initial-agent-context]
         [#(set! message/initial-agent-transaction %) initial-message]
@@ -348,6 +363,68 @@
         [#(set! db/current-agent-id %) current-agent-id]
         [#(set! db/db %) db!]
         [#(set! db/pull-many %) pull-many]
+       [#(set! db.id/allocate! %) allocate!]]))))
+
+(deftest delegate-to-namespace-messages-existing-resident-without-birth
+  (async done
+    (let [available? admission/available?
+          current-agent-id db/current-agent-id
+          db! db/db
+          query db/query
+          pull-many db/pull-many
+          message! message/message!
+          allocate! db.id/allocate!
+          query-count (atom 0)
+          message-request (atom nil)
+          allocation-count (atom 0)]
+      (set! admission/available? (constantly true))
+      (set! db/current-agent-id (constantly "parent"))
+      (set! db/db
+            (fn
+              ([] (js/Promise.resolve database))
+              ([_] (js/Promise.resolve database))))
+      (set! db/pull-many
+            (fn
+              ([request]
+               (is (identical? database (::db/db request)))
+               (js/Promise.resolve
+                [{:seon.agent/id "parent"} stored-configuration]))
+              ([_ _] (js/Promise.reject (js/Error. "unexpected pull-many arity")))
+              ([_ _ _] (js/Promise.reject (js/Error. "unexpected pull-many arity")))))
+      (set! db/query
+            (fn [_]
+              (js/Promise.resolve
+               (if (= 1 (swap! query-count inc)) "tax-resident" 7000))))
+      (set! message/message!
+            (fn [request]
+              (reset! message-request request)
+              (js/Promise.resolve
+               {:seon.agent.message/id "message"
+                :seon.agent.message/hops 1})))
+      (set! db.id/allocate!
+            (fn [_]
+              (swap! allocation-count inc)
+              (js/Promise.resolve {:seon.error/message "must not allocate"})))
+      (finish!
+       (-> (agent/delegate!
+            {:seon.agent/namespace 'my.tax
+             :seon.agent.message/content "continue the tax work"})
+           (.then
+            (fn [result]
+              (is (= {:seon.agent/id "tax-resident"} result))
+              (is (zero? @allocation-count))
+              (is (identical? database (::db/db @message-request)))
+              (is (= [:seon.agent/id "parent"]
+                     (:seon.agent.message/from @message-request)))
+              (is (= [[:seon.agent/id "tax-resident"]]
+                     (:seon.agent.message/to @message-request))))))
+       done
+       [[#(set! admission/available? %) available?]
+        [#(set! db/current-agent-id %) current-agent-id]
+        [#(set! db/db %) db!]
+        [#(set! db/query %) query]
+        [#(set! db/pull-many %) pull-many]
+        [#(set! message/message! %) message!]
         [#(set! db.id/allocate! %) allocate!]]))))
 
 (deftest set-purpose-authorizes-and-writes-at-one-database-value

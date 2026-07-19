@@ -75,8 +75,7 @@
     [seon.schema :as schema]))
 
 ;; ============================================================
-;; Schemas — every shape the agent reads or writes. The agent-ns is not
-;; stored on the entity — it's deterministic from the id via `home-ns`.
+;; Schemas — every shape the agent reads or writes.
 ;; ============================================================
 
 ;; `:seon.agent/id` itself is registered in `seon.render` — the
@@ -86,6 +85,12 @@
 ;; rejects forward references; same precedent as `:seon.ns/name` living
 ;; in seon.agent.ctx.render-fns).
 (schema/register! :seon.agent/purpose       :string)
+;; The resident namespace is a unique ref to the ordinary `:seon.ns/name`
+;; program entity. Datahike AVET uniqueness enforces at most one resident per
+;; namespace while every durable relationship continues to point at the
+;; stable agent entity.
+(schema/register! :seon.agent/namespace
+                  [:and {:seon.db/identity true} :seon.db/ref])
 ;; Subagent → parent (optional; the atomic spawn transaction sets it and
 ;; `complete` derives its delivery target through it). References the canonical
 ;; ref shape; never inline.
@@ -277,6 +282,7 @@
 (schema/register! :seon.agent
   [:map {:seon.db/entity true}
    [:seon.agent/id      :seon.agent/id]
+   [:seon.agent/namespace         :seon.agent/namespace]
    [:seon.agent/purpose            {:optional true} :seon.agent/purpose]
    [:seon.agent/parent             {:optional true} :seon.agent/parent]
    ;; derived-state primitives + run bounds + cron
@@ -425,8 +431,14 @@
    identity without its configured context, scalar dials, and structural home
    namespace. `existing` is used only to finish the reserved root's bare
    provenance-genesis stub: facts already present are preserved, never reset."
-  [configuration id purpose default-turn-limit parent existing]
-  (let [context       (ctx/initial-agent-context
+  ([configuration id purpose default-turn-limit parent existing]
+   (initial-agent-tx configuration id purpose default-turn-limit parent existing
+                     (home/home-ns id) false))
+  ([configuration id purpose default-turn-limit parent existing namespace
+    namespace-exists?]
+  (let [namespace     (symbol (str namespace))
+        namespace-ref [:seon.ns/name (keyword (str namespace))]
+        context       (ctx/initial-agent-context
                        {:seon.agent/id id
                         :seon.config/configuration configuration})
         home-requires (or (:seon.eval/home-requires context)
@@ -437,6 +449,8 @@
                    {}
                    context)
         agent-row     (cond-> (assoc missing-context :seon.agent/id id)
+                        (not (contains? existing :seon.agent/namespace))
+                        (assoc :seon.agent/namespace namespace-ref)
                         (and (not (contains? existing :seon.agent/purpose))
                              (string? purpose) (not (str/blank? purpose)))
                         (assoc :seon.agent/purpose purpose)
@@ -446,9 +460,12 @@
                         (assoc :seon.agent/default-turn-limit default-turn-limit)
                         (and (not (contains? existing :seon.agent/parent)) parent)
                         (assoc :seon.agent/parent parent))]
-    [agent-row
-     (home/initial-ns-entity
-       {:seon.agent/id id :seon.eval/home-requires home-requires})]))
+    (cond-> [agent-row]
+      (not namespace-exists?)
+      (conj
+       (home/initial-ns-entity
+        {:seon.agent/namespace namespace
+         :seon.eval/home-requires home-requires}))))))
 
 (defn ^:async create!
   "Reconcile a known agent entity by its durable id.
@@ -517,6 +534,8 @@
 
 (defn- ^:async allocate-agent!
   [{:seon.agent/keys [purpose default-turn-limit parent]
+    namespace :seon.agent/namespace
+    namespace-exists? ::namespace-exists?
     :seon.db/keys [db tx-data expected-db]
     initial-message-transaction ::initial-message-transaction
     configuration :seon.config/configuration
@@ -544,7 +563,9 @@
            {::db/tx-data
             (into (into (vec tx-data)
                         (initial-agent-tx
-                         configuration id purpose default-turn-limit parent nil))
+                         configuration id purpose default-turn-limit parent nil
+                         (or namespace (home/home-ns id))
+                         (boolean namespace-exists?)))
                   message-rows)}
             expected-db
             (assoc ::db/expected-db expected-db))))}
@@ -617,35 +638,63 @@
                 {::db/db (db/history database)
                  ::db/query ordinary-agent-ever-born-query
                  ::db/max-results 1
-                 ::db/max-result-weight 4096})))]
+                 ::db/max-result-weight 4096})))
+            agents-without-namespace
+            (when (and (not (error-value? root-data))
+                       (not (error-value? ordinary-born)))
+              (await
+               (db/query
+                {::db/db database
+                 ::db/query
+                 '[:find [?id ...] :where
+                   [?agent :seon.agent/id ?id]
+                   (not [?agent :seon.agent/namespace _])]
+                 ::db/max-results 4096
+                 ::db/max-result-weight 262144})))]
         (cond
           (error-value? root-data) root-data
           (error-value? ordinary-born) ordinary-born
+          (error-value? agents-without-namespace) agents-without-namespace
           :else
           (let [[root root-home configuration-entity] root-data
                 configuration (configuration-from-entity configuration-entity)]
             (if (error-value? configuration)
               configuration
-              (let [root-complete? (and root (string? (:seon.ns/source root-home)))
+              (let [root-complete? (and root
+                                        (:seon.agent/namespace root)
+                                        (string? (:seon.ns/source root-home)))
                     ordinary-born? (boolean ordinary-born)
                     root-tx (if root-complete?
                               []
                               (initial-agent-tx
-                               configuration "root" nil nil nil root))]
+                               configuration "root" nil nil nil root))
+                    namespace-tx
+                    (into []
+                          (comp
+                           (remove #{"root"})
+                           (map
+                            (fn [id]
+                              {:seon.agent/id id
+                               :seon.agent/namespace
+                               [:seon.ns/name
+                                (keyword (str (home/home-ns id)))]})))
+                          agents-without-namespace)
+                    reconciliation-tx (into root-tx namespace-tx)]
                 (cond
-                  (and root-complete? ordinary-born?)
+                  (and root-complete? ordinary-born? (empty? namespace-tx))
                   {::root-created? false ::initial-created? false}
 
                   ordinary-born?
                   (let [result
                         (await
                          (db/transact!
-                          {::db/db database
+                           {::db/db database
                            ::db/expected-db database
-                           ::db/tx-data root-tx}))]
+                           ::db/tx-data reconciliation-tx}))]
                     (if (error-value? result)
                       result
-                      {::root-created? true ::initial-created? false}))
+                      {::root-created? (not root-complete?)
+                       ::initial-created? false}))
 
                   :else
                   (let [result
@@ -653,7 +702,7 @@
                          (allocate-agent!
                           {::db/db database
                            ::db/expected-db database
-                           ::db/tx-data root-tx
+                           ::db/tx-data reconciliation-tx
                            :seon.config/configuration configuration
                            :seon.agent/parent [:seon.agent/id "root"]}))]
                     (if (error-value? result)
@@ -727,6 +776,7 @@
 ;; `create!` (which REQUIRES the id, so nothing resolves into it).
 (schema/register! ::start-request
   [:map
+   [:seon.agent/namespace           {:optional true} :symbol]
    [:seon.agent/purpose             {:optional true} :seon.agent/purpose]
    [:seon.agent/default-turn-limit  {:optional true}
     :seon.agent/default-turn-limit]])
@@ -736,7 +786,7 @@
 (defn ^:async ^:private spawn-child!
   "Commit one child birth; the pod hosts it from the committed transaction."
   [database configuration purpose default-turn-limit parent-id
-   initial-message-transaction]
+   initial-message-transaction namespace namespace-exists?]
   (let [res
         (await
          (allocate-agent!
@@ -745,6 +795,9 @@
             ::db/expected-db database
             :seon.config/configuration configuration
             ::initial-message-transaction initial-message-transaction}
+            namespace
+            (assoc :seon.agent/namespace namespace
+                   ::namespace-exists? namespace-exists?)
             (some? purpose)
             (assoc :seon.agent/purpose purpose)
             (some? default-turn-limit)
@@ -761,7 +814,7 @@
         " is at spawn depth " depth " (cap " cap ").")})
 
 (defn ^:async ^:private acquire-spawn-database
-  [function-name parent-id]
+  [function-name parent-id namespace]
   (let [database (await (db/db))]
     (if (error-value? database)
       database
@@ -782,14 +835,46 @@
                 configuration-entity (last entities)
                 configuration
                 (configuration-from-entity configuration-entity)
-                depth (when parent-id (spawn-depth-from parent))]
+                depth (when parent-id (spawn-depth-from parent))
+                namespace-name (some-> namespace str keyword)
+                resident-id
+                (when namespace-name
+                  (await
+                   (db/query
+                    {::db/db database
+                     ::db/query
+                     '[:find ?id . :in $ ?name :where
+                       [?namespace :seon.ns/name ?name]
+                       [?agent :seon.agent/namespace ?namespace]
+                       [?agent :seon.agent/id ?id]
+                       (not [?agent :seon.agent/terminated-at _])]
+                     ::db/args [namespace-name]
+                     ::db/max-results 1
+                     ::db/max-result-weight 4096})))
+                namespace-eid
+                (when (and namespace-name (not (error-value? resident-id)))
+                  (await
+                   (db/query
+                    {::db/db database
+                     ::db/query
+                     '[:find ?namespace . :in $ ?name :where
+                       [?namespace :seon.ns/name ?name]]
+                     ::db/args [namespace-name]
+                     ::db/max-results 1
+                     ::db/max-result-weight 4096})))]
             (if (error-value? configuration)
               configuration
-              (let [cap (config/spawn-depth-cap configuration)]
-                (if (and depth (>= depth cap))
-                  (spawn-depth-error function-name parent-id depth cap)
-                  {::db/db database
-                   :seon.config/configuration configuration})))))))))
+              (cond
+                (error-value? resident-id) resident-id
+                (error-value? namespace-eid) namespace-eid
+                :else
+                (let [cap (config/spawn-depth-cap configuration)]
+                  (if (and depth (>= depth cap))
+                    (spawn-depth-error function-name parent-id depth cap)
+                    {::db/db database
+                     :seon.config/configuration configuration
+                     ::resident-id resident-id
+                     ::namespace-exists? (some? namespace-eid)}))))))))))
 
 (def ^:private maximum-spawn-attempts 32)
 
@@ -799,26 +884,46 @@
      (get-in value [:seon.error/data ::protocol/error-kind])))
 
 (defn ^:async ^:private spawn-child-with-retry!
-  [function-name parent-id purpose default-turn-limit initial-message-content]
+  [function-name parent-id purpose default-turn-limit initial-message-content
+   namespace]
   (loop [attempt 1]
-    (let [acquisition (await (acquire-spawn-database function-name parent-id))]
+    (let [acquisition
+          (await (acquire-spawn-database function-name parent-id namespace))]
       (if (error-value? acquisition)
         acquisition
         (let [database (::db/db acquisition)
               configuration (:seon.config/configuration acquisition)
+              resident-id (::resident-id acquisition)
               initial-message-transaction
-              (when initial-message-content
+              (when (and initial-message-content (nil? resident-id))
                 (await
                  (msg/initial-agent-transaction
                   database [:seon.agent/id parent-id]
                   initial-message-content)))
               result
-              (if (error-value? initial-message-transaction)
+              (cond
+                resident-id
+                (if initial-message-content
+                  (let [message-result
+                        (await
+                         (msg/message!
+                          {::db/db database
+                           :seon.agent.message/from [:seon.agent/id parent-id]
+                           :seon.agent.message/to [[:seon.agent/id resident-id]]
+                           :seon.agent.message/content initial-message-content}))]
+                    (if (error-value? message-result)
+                      message-result
+                      {:seon.agent/id resident-id}))
+                  {:seon.agent/id resident-id})
+
+                (error-value? initial-message-transaction)
                 initial-message-transaction
+                :else
                 (await
                  (spawn-child!
                   database configuration purpose default-turn-limit parent-id
-                  initial-message-transaction)))]
+                  initial-message-transaction namespace
+                  (::namespace-exists? acquisition))))]
           (if (and (stale-database-error? result)
                    (< attempt maximum-spawn-attempts))
             (recur (inc attempt))
@@ -839,12 +944,12 @@
    Resolves to `{:seon.agent/id child-id}`. Called outside an agent scope, the
    child is created parentless, matching `create!`."
   {:malli/schema [:=> [:cat ::start-request] ::start-response]}
-  [{:seon.agent/keys [purpose default-turn-limit]}]
+  [{:seon.agent/keys [namespace purpose default-turn-limit]}]
   (if-not (admission/available?)
     (unavailable-response)
     (await
      (spawn-child-with-retry!
-      "start!" (db/current-agent-id) purpose default-turn-limit nil))))
+      "start!" (db/current-agent-id) purpose default-turn-limit nil namespace))))
 
 ;; ============================================================
 ;; delegate! — the one atomic child-birth plus initial-task transition.
@@ -855,6 +960,7 @@
 (schema/register! ::delegate-request
   [:map
    [:seon.agent.message/content     :string]
+   [:seon.agent/namespace           {:optional true} :symbol]
    [:seon.agent/purpose             {:optional true} :seon.agent/purpose]
    [:seon.agent/default-turn-limit  {:optional true}
     :seon.agent/default-turn-limit]])
@@ -880,14 +986,14 @@
    address for any follow-up. A database failure commits neither child nor
    task. The pod hosts the committed child from the same database event."
   {:malli/schema [:=> [:cat ::delegate-request] ::delegate-response]}
-  [{:seon.agent/keys [purpose default-turn-limit]
+  [{:seon.agent/keys [namespace purpose default-turn-limit]
     content :seon.agent.message/content}]
   (if-not (admission/available?)
     (unavailable-response)
     (if-let [parent-id (db/current-agent-id)]
       (await
        (spawn-child-with-retry!
-        "delegate!" parent-id purpose default-turn-limit content))
+        "delegate!" parent-id purpose default-turn-limit content namespace))
       (internal/no-agent-error "delegate!"))))
 
 ;; ============================================================

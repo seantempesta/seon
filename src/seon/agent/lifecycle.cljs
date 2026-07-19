@@ -368,9 +368,12 @@
                   {:seon.agent/id target-id :seon.db/db database}))]
             (if (error-value? current)
               current
-              (let [termination
+                (let [termination
                     [:db.fn/cas [:seon.agent/id target-id]
                      :seon.agent/terminated-at nil (js/Date.)]
+                    release-namespace
+                    [:db.fn/retractAttribute [:seon.agent/id target-id]
+                     :seon.agent/namespace]
                     close-data
                     (when current
                       (close-transaction-data
@@ -381,7 +384,8 @@
                      (db/transact!
                       {::db/db database
                        ::db/expected-db database
-                       ::db/tx-data (into [termination] close-data)}))]
+                       ::db/tx-data
+                       (into [termination release-namespace] close-data)}))]
                 (if (error-value? report) report :terminated)))))))))
 
 (defn ^{:async true :seon.fn/agent-facing? true} terminate

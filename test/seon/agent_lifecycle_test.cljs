@@ -345,8 +345,12 @@
                 (is (identical? database (::db/db @transaction)))
                 (is (identical? database (::db/expected-db @transaction)))
                 (is (= :seon.agent/terminated-at (nth (first tx) 2)))
-                (is (= :seon.agent/run (nth (second tx) 2)))
-                (is (= :closed (:seon.agent.run/status (nth tx 2))))
+                (is (= [:db.fn/retractAttribute
+                        [:seon.agent/id "agent-a"]
+                        :seon.agent/namespace]
+                       (second tx)))
+                (is (= :seon.agent/run (nth (nth tx 2) 2)))
+                (is (= :closed (:seon.agent.run/status (nth tx 3))))
                 (is (= :db/retract (first (last tx))))))))
        done
        [[#(set! db/current-agent-id %) current-agent-id]

@@ -1045,7 +1045,7 @@
                                     last
                                     :seon.eval/ns)
                                previous-ns
-                               (home/home-ns id))
+                               (home/starting-ns id entity))
                 mode (or (:seon.config/repl-mode configuration) :batch)
                 policy (merge (config/default-run-policy) configuration)
                 state (derive/state-from-primitives

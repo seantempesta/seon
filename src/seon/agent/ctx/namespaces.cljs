@@ -268,6 +268,7 @@
 
 (def ^:private agent-selector
   `[:seon.agent/id
+    {:seon.agent/namespace [:seon.ns/name]}
     ::full-source
     ::with-tests
     ::current-full?
@@ -353,7 +354,8 @@
                      (true? (::protocol/success? ns-member))
                      (true? (::protocol/success? config-member)))
           (acquisition-error "initial member" (::db/results initial))
-          (let [cur-ns (keyword (name (or latest-ns (home/home-ns id))))
+          (let [cur-ns (keyword
+                        (name (or latest-ns (home/starting-ns id agent))))
                 current-row
                 (await (db/pull {::db/db database
                                  ::db/pull-pattern

@@ -24,7 +24,8 @@ cascade-retract component vectors, its **blocks** (`:seon.agent/ctx` →
 `:seon.agent.ctx/block` children — the context units, each up to two renders)
 and its **schedules** (`:seon.agent/schedules` → `:seon.agent.schedule` cron
 maps). It POINTS (plain ref) at its current **run** (`:seon.agent/run`) and at
-the agent that started it (`:seon.agent/parent`); a run points back
+the agent that started it (`:seon.agent/parent`), and uniquely POINTS at its
+resident program namespace (`:seon.agent/namespace` → `:seon.ns/name`); a run points back
 (`:seon.agent.run/agent`); **turns** point up to their run
 (`:seon.agent.turn/run`) and own their **evals**
 (`:seon.agent.turn/evals`). **Messages** (`:seon.agent.message`) and the one
@@ -65,7 +66,8 @@ its `[:or …]` body. Every ref attribute REFERENCES this shape — never inline
 `[:or :int :string …]`.
 
 A **plain ref** is a single pointer (`:db.cardinality/one :db.type/ref`):
-`:seon.agent/run`, `:seon.agent/parent`, `:seon.agent.run/agent`,
+`:seon.agent/run`, `:seon.agent/parent`, `:seon.agent/namespace`,
+`:seon.agent.run/agent`,
 `:seon.agent.run/cause`, `:seon.agent.turn/run`,
 `:seon.agent.turn/cause-message`, `:seon.fn/ns`, `:seon.schema/ns`,
 `:seon.test/ns`, `:seon.agent.message/from`, `:seon.route/owner`,
@@ -96,6 +98,13 @@ Lookup-by-identity rides on a ref's `[:attr val]` form: `[:seon.agent/id "abc"]`
 is a valid `:seon.db/ref` value (the `[:tuple :keyword …]` arm) that datahike
 resolves to the agent's eid, so a write can reference an entity by its natural
 key without first querying its eid.
+
+`:seon.agent/namespace` is additionally a unique identity ref. Datahike first
+resolves its `[:seon.ns/name ...]` value to the namespace eid, then enforces
+ordinary AVET uniqueness on that eid. Consequently one namespace has at most
+one active resident agent, while messages, runs, plans, and parent refs keep
+pointing at the agent's stable eid. Namespace stewardship is sustained
+attention, never exclusive authority over shared code.
 
 ### 2.2 identity / lookup attrs (`{:seon.db/identity true}`)
 
