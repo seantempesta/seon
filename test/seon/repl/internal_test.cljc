@@ -80,6 +80,116 @@
     (testing (str note " — " (pr-str in))
       (is (= expected (strip-form-span (parse/parse-forms in)))))))
 
+(deftest namespace-program-is-one-projection-of-the-ordinary-parse
+  (let [source (str ";; shared model first\n"
+                    "(ns my.orders.model\n"
+                    "  (:require [seon.schema :as schema]))\n"
+                    "(def before-schema 1)\n"
+                    "(schema/register! ::id :string)\n"
+                    "(schema/validate ::id \"x\")\n"
+                    "(def after-schema 2)\n"
+                    "(ns my.orders.service\n"
+                    "  (:require [my.orders.model :as model]\n"
+                    "            [seon.schema :refer [register!]]))\n"
+                    "(register! ::request [:map])\n"
+                    "(defn run [] (model/value))")
+        program (parse/parse-program source)
+        entries (:seon.repl/entries program)
+        [model service] (:seon.repl/namespaces program)]
+    (is (= entries (parse/parse-forms source))
+        "parse-program exposes the exact single parse result")
+    (is (= ['my.orders.model 'my.orders.service]
+           (:seon.repl/namespace-order program)))
+    (is (empty? (:seon.repl/errors program)))
+    (is (= 'my.orders.model (:seon.ns/name model)))
+    (is (= #{'seon.schema} (:seon.ns/require-edges model)))
+    (is (= ["(schema/register! ::id :string)"]
+           (mapv :seon.repl/source (:seon.repl/schema-entries model))))
+    (is (= ["(def before-schema 1)" "(schema/validate ::id \"x\")"
+            "(def after-schema 2)"]
+           (mapv :seon.repl/source (:seon.repl/entries model)))
+        "schema-first is a projection while lexical order remains recoverable")
+    (is (= #{'my.orders.model 'seon.schema}
+           (:seon.ns/require-edges service)))
+    (is (= ["(register! ::request [:map])"]
+           (mapv :seon.repl/source (:seon.repl/schema-entries service))))
+    (is (every? (fn [entry]
+                  (= (:seon.repl/source entry)
+                     (subs source (first (:seon.repl/span entry))
+                           (second (:seon.repl/span entry)))))
+                (filter :seon.repl/span entries))
+        "all scheduled entries retain original source positions")))
+
+(deftest namespace-program-orders-independent-ready-sections-by-source
+  (let [program (parse/parse-program
+                  (str "(ns my.app.ui (:require [my.app.model]))\n"
+                       "(defn view [] nil)\n"
+                       "(ns my.app.audit)\n"
+                       "(defn record! [] nil)\n"
+                       "(ns my.app.model)\n"
+                       "(def value 1)"))]
+    (is (= ['my.app.audit 'my.app.model 'my.app.ui]
+           (:seon.repl/namespace-order program)))
+    (is (empty? (:seon.repl/errors program)))))
+
+(deftest namespace-program-can-start-in-the-active-repl-namespace
+  (let [program (parse/parse-program
+                  "(def local 1)\n(+ local 2)"
+                  {:seon.repl/current-ns 'my.agent.active})
+        section (first (:seon.repl/namespaces program))]
+    (is (= ['my.agent.active] (:seon.repl/namespace-order program)))
+    (is (= 'my.agent.active (:seon.ns/name section)))
+    (is (nil? (:seon.repl/declaration section)))
+    (is (= ["(def local 1)" "(+ local 2)"]
+           (mapv :seon.repl/source (:seon.repl/entries section))))
+    (is (empty? (:seon.repl/errors program)))))
+
+(deftest active-namespace-section-accepts-its-explicit-declaration
+  (let [program (parse/parse-program
+                  (str "(def before-declaration 1)\n"
+                       "(ns my.agent.active (:require [seon.schema :as schema]))\n"
+                       "(schema/register! ::id :string)")
+                  {:seon.repl/current-ns 'my.agent.active})
+        section (first (:seon.repl/namespaces program))]
+    (is (= 1 (count (:seon.repl/namespaces program))))
+    (is (= "(ns my.agent.active (:require [seon.schema :as schema]))"
+           (get-in section [:seon.repl/declaration :seon.repl/source])))
+    (is (= ["(schema/register! ::id :string)"]
+           (mapv :seon.repl/source (:seon.repl/schema-entries section))))
+    (is (empty? (:seon.repl/errors program)))))
+
+(deftest namespace-program-fences-invalid-and-duplicate-declarations
+  (let [program (parse/parse-program
+                  (str "(ns my.good)\n"
+                       "(def accepted 1)\n"
+                       "(ns :not-a-symbol)\n"
+                       "(def must-not-land-in-good 2)\n"
+                       "(ns my.good)\n"
+                       "(def must-not-land-in-duplicate 3)\n"
+                       "(ns my.later)\n"
+                       "(def accepted-later 4)"))
+        [good later] (:seon.repl/namespaces program)]
+    (is (= ['my.good 'my.later] (:seon.repl/namespace-order program)))
+    (is (= ["(def accepted 1)"]
+           (mapv :seon.repl/source (:seon.repl/entries good))))
+    (is (= ["(def accepted-later 4)"]
+           (mapv :seon.repl/source (:seon.repl/entries later))))
+    (is (= 4 (count (:seon.repl/errors program)))
+        "bad declaration, its form, duplicate declaration, and its form are isolated")))
+
+(deftest namespace-program-rejects-generated-require-cycles
+  (let [program (parse/parse-program
+                  (str "(ns my.cycle.a (:require [my.cycle.b]))\n"
+                       "(def a 1)\n"
+                       "(ns my.cycle.b (:require [my.cycle.a]))\n"
+                       "(def b 2)"))]
+    (is (= [] (:seon.repl/namespace-order program)))
+    (is (= [{:seon.error/kind :namespace-cycle
+             :seon.error/message
+             "Generated namespaces contain a require cycle: my.cycle.a, my.cycle.b"
+             :seon.ns/names ['my.cycle.a 'my.cycle.b]}]
+           (:seon.repl/errors program)))))
+
 ;; ============================================================
 ;; Form `:span` is code-buffer-aligned — every `:kind :form` entry carries an
 ;; ABSOLUTE `[start end)` char span whose substring IS its byte-faithful

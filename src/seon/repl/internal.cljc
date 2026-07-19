@@ -1166,3 +1166,221 @@
       (let [{::keys [rewritten segments markers]} (assemble orig pieces)
             base (parse-forms* rewritten {:strip-fences? false})]
         (heredoc-remap orig (seq segments) (seq markers) base)))))
+
+;; ============================================================
+;; Multi-namespace program projection
+;;
+;; This is a projection of the ONE parse result, not another parser or source
+;; format.  Ordinary replies and goal-driven code generation consume the same
+;; entries; callers that need namespace scheduling use the additional graph.
+;; ============================================================
+
+(defn- ns-declaration? [form]
+  (and (seq? form) (= 'ns (first form))))
+
+(defn- valid-ns-declaration? [form]
+  (and (ns-declaration? form) (symbol? (second form))))
+
+(defn- require-clause [form]
+  (some #(when (and (seq? %) (= :require (first %))) %)
+        (drop 2 form)))
+
+(defn- require-spec-library [spec]
+  (cond
+    (symbol? spec) spec
+    (and (vector? spec) (symbol? (first spec))) (first spec)
+    :else nil))
+
+(defn- require-spec-option [spec option]
+  (when (vector? spec)
+    (some (fn [[k v]] (when (= option k) v))
+          (partition 2 (rest spec)))))
+
+(defn- ns-require-info [form]
+  (reduce
+    (fn [{:keys [libraries aliases refers] :as acc} spec]
+      (if-let [library (require-spec-library spec)]
+        (let [alias (require-spec-option spec :as)
+              refer (require-spec-option spec :refer)]
+          (cond-> (assoc acc :libraries (conj libraries library))
+            (symbol? alias) (assoc-in [:aliases alias] library)
+            (and (sequential? refer) (every? symbol? refer))
+            (update :refers into (map (fn [sym] [sym library]) refer))))
+        acc))
+    {:libraries #{} :aliases {} :refers {}}
+    (rest (or (require-clause form) '()))))
+
+(defn- schema-registration? [{:keys [aliases refers]} entry]
+  (let [form (:seon.repl/form entry)
+        head (when (seq? form) (first form))
+        alias (when (and (symbol? head) (namespace head))
+                (symbol (namespace head)))]
+    (and (symbol? head)
+         (or (= 'seon.schema/register! head)
+             (and (= "register!" (name head))
+                  (= 'seon.schema (get aliases alias)))
+             (and (= 'register! head)
+                  (= 'seon.schema (get refers head)))))))
+
+(defn- projection-error [entry message]
+  (cond-> {:seon.error/kind :namespace
+           :seon.error/message message
+           :seon.repl/entry entry}
+    (:seon.repl/span entry)
+    (assoc :seon.repl/span (:seon.repl/span entry))))
+
+(defn- dependency-order [sections]
+  (let [names (mapv :seon.ns/name sections)
+        generated (set names)
+        position (zipmap names (range))
+        needs (into {}
+                    (map (fn [{name :seon.ns/name
+                               required :seon.ns/require-edges}]
+                           [name (set (filter generated required))]))
+                    sections)]
+    (loop [remaining needs
+           ordered []]
+      (if (empty? remaining)
+        {:seon.repl/namespace-order ordered}
+        (let [ready (->> remaining
+                         (keep (fn [[name required]]
+                                 (when (empty? required) name)))
+                         (sort-by position)
+                         vec)]
+          (if (empty? ready)
+            {:seon.repl/namespace-order ordered
+             :seon.repl/cycle (->> (keys remaining)
+                                   (sort-by position)
+                                   vec)}
+            (let [released (set ready)]
+              (recur (into {}
+                           (map (fn [[name required]]
+                                  [name (apply disj required released)]))
+                           (apply dissoc remaining ready))
+                     (into ordered ready)))))))))
+
+(defn project-program
+  "Project one [[parse-forms]] result into namespace sections and dependency
+   order without reparsing source.
+
+   Entries retain their byte-faithful source, narration, and absolute spans.
+   Namespace declarations fence subsequent entries.  A malformed declaration
+   never lets later forms fall through into the previous namespace.  Require
+   edges use the analyzer/program fact name `:seon.ns/require-edges`; only
+   edges between namespaces in this projection participate in ordering."
+  [entries & [{current-ns :seon.repl/current-ns}]]
+  (let [{:keys [root sections errors]}
+        (reduce
+          (fn [{:keys [sections current] :as state} entry]
+            (let [form (:seon.repl/form entry)]
+              (cond
+                (and (= :form (:seon.repl/kind entry))
+                     (ns-declaration? form))
+                (if (valid-ns-declaration? form)
+                  (let [name (second form)
+                        require-info (ns-require-info form)
+                        existing-index
+                        (first (keep-indexed
+                                 (fn [index section]
+                                   (when (= name (:seon.ns/name section)) index))
+                                 sections))]
+                    (cond
+                      (and (some? existing-index)
+                           (nil? (:seon.repl/declaration
+                                   (nth sections existing-index)))
+                           (= existing-index (dec (count sections))))
+                      (-> state
+                          (assoc :current name)
+                          (assoc-in [:sections existing-index
+                                     :seon.repl/declaration] entry)
+                          (assoc-in [:sections existing-index
+                                     :seon.ns/require-edges]
+                                    (:libraries require-info))
+                          (assoc-in [:sections existing-index ::require-info]
+                                    require-info))
+
+                      (some? existing-index)
+                      (-> state
+                          (assoc :current nil)
+                          (update :errors conj
+                                  (projection-error
+                                    entry
+                                    (str "Duplicate namespace declaration: " name))))
+
+                      :else
+                      (-> state
+                          (assoc :current name)
+                          (update :sections conj
+                                  {:seon.ns/name name
+                                   :seon.ns/require-edges
+                                   (:libraries require-info)
+                                   :seon.repl/declaration entry
+                                   :seon.repl/schema-entries []
+                                   :seon.repl/entries []
+                                   ::require-info require-info}))))
+                  (-> state
+                      (assoc :current nil)
+                      (update :errors conj
+                              (projection-error
+                                entry
+                                "Namespace declaration requires a symbol name."))))
+
+                current
+                (let [index (dec (count sections))
+                      info (::require-info (nth sections index))
+                      state (if (schema-registration? info entry)
+                              (update-in state
+                                         [:sections index
+                                          :seon.repl/schema-entries]
+                                         conj entry)
+                              (update-in state
+                                         [:sections index :seon.repl/entries]
+                                         conj entry))]
+                  (if (= :read (:seon.repl/kind entry))
+                    (update state :errors conj
+                            (or (:seon/error entry)
+                                (projection-error entry
+                                  "The namespace contains an unreadable form.")))
+                    state))
+
+                (= :comment (:seon.repl/kind entry))
+                (update state :root conj entry)
+
+                :else
+                (update state :errors conj
+                        (projection-error
+                          entry
+                          "A form outside a valid namespace declaration cannot be scheduled.")))))
+          {:root []
+           :sections
+           (cond-> []
+             (symbol? current-ns)
+             (conj {:seon.ns/name current-ns
+                    :seon.ns/require-edges #{}
+                    :seon.repl/declaration nil
+                    :seon.repl/schema-entries []
+                    :seon.repl/entries []
+                    ::require-info
+                    {:libraries #{} :aliases {} :refers {}}}))
+           :errors []
+           :current (when (symbol? current-ns) current-ns)}
+          entries)
+        sections (mapv #(dissoc % ::require-info) sections)
+        {:seon.repl/keys [namespace-order cycle]} (dependency-order sections)
+        errors (cond-> errors
+                 (seq cycle)
+                 (conj {:seon.error/kind :namespace-cycle
+                        :seon.error/message
+                        (str "Generated namespaces contain a require cycle: "
+                             (str/join ", " cycle))
+                        :seon.ns/names cycle}))]
+    {:seon.repl/entries entries
+     :seon.repl/root-entries root
+     :seon.repl/namespaces sections
+     :seon.repl/namespace-order namespace-order
+     :seon.repl/errors errors}))
+
+(defn parse-program
+  "Parse `text` exactly once and return its namespace-aware program projection."
+  [text & [options]]
+  (project-program (parse-forms text options) options))
