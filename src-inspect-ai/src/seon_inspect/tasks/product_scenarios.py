@@ -94,7 +94,8 @@ def live_product_solver(scenario: str, timeout_s: int = 300):
                                               release_branch_lease)
             from seon_inspect.solver import pod_run
 
-            lease = acquire_branch_lease(bench_cluster_name(f"inspect-{scenario}"))
+            branch_prefix = f"inspect-{scenario.replace('_', '-')}"
+            lease = acquire_branch_lease(bench_cluster_name(branch_prefix))
             try:
                 if scenario == "namespace":
                     target_namespace = f"my.inspect.n{lease.name.rsplit('-', 1)[-1]}"

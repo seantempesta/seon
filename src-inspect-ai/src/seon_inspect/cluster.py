@@ -38,8 +38,8 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 BENCH_BUNDLE = REPO_ROOT / "out-bench" / "client" / "main.js"
 BENCH_BUNDLE_SHA = BENCH_BUNDLE.parent / (BENCH_BUNDLE.name + ".sha256")
 
-# Matches bin/seon's valid_cluster_name (a path segment + a wire db-name).
-_NAME_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
+# Matches seon.dev.branch/::name, the public operator target contract.
+_NAME_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 
 # ---------------------------------------------------------------------------
 # Per-cluster LLM config (the thinking-arm lever) — config-DATA, never env

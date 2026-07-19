@@ -200,10 +200,10 @@ def test_create_cluster_names_missing_operator_fields():
 
 
 def test_cluster_name_validated():
-    # the name becomes a path segment + a wire db-name — reject junk before
-    # it reaches a shell (mirrors bin/seon valid_cluster_name; an EMPTY/None
+    # The name enters seon.dev.branch/::name — reject junk before
+    # it reaches a shell (an EMPTY/None
     # name means "mint a fresh bench name", so it is not in this list)
-    for bad in ("a/b", "..", "x y", "a;rm"):
+    for bad in ("a/b", "..", "x y", "a;rm", "has_underscore", "Uppercase"):
         with pytest.raises(ValueError):
             cl.create_cluster(bad, runner=FakeRunner(), ready=lambda n: 1)
 

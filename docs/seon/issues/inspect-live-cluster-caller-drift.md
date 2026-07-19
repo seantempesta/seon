@@ -235,3 +235,13 @@ one immutable database value. Focused Python proof passes 46 tests; focused
 CLJS HTTP/router proof passes 30 tests with 113 assertions. Live model runs are
 left to the coordinated source-frozen checkpoint. The issue remains open until
 that live evidence and cleanup proof are retained.
+
+The first native repair-row attempt failed before process creation because the
+scenario name `reuse_repair` reached the public branch operation unchanged.
+`seon.dev.branch/::name` permits lowercase letters, digits, and internal
+hyphens, while Inspect's stale local validator also permitted underscores and
+uppercase letters. Inspect now mirrors the operator schema and converts the
+scenario separator to a hyphen before minting the branch name. The combined
+cluster/product proof passes 51 tests. A corrected retry then reached the next
+truthful prerequisite: the source watcher and writer were absent, so no branch
+was opened and no product result is claimed.
