@@ -5242,7 +5242,8 @@
           (await
             (db/with-tx-context
               {::db/user [:seon.agent/id agent-id]
-               ::db/process (db.process/lookup-ref ::db.process/repl)}
+               ::db/process (db.process/lookup-ref ::db.process/repl)
+               :seon.eval/ns (keyword (str @current-ns))}
               (fn ^:async run-with-provenance! []
                 (await (body-fn))))))
         append-record!

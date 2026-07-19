@@ -19,17 +19,21 @@
       [:seon.config/configuration
        {:optional true}
        :seon.config/singleton]
+      [:seon.eval/ns {:optional true} :keyword]
       [:probe/x :int]]]
     [:map
      [:probe/got-id {:optional true} :string]
      [:probe/got-configuration? :boolean]
+     [:probe/got-ns {:optional true} :keyword]
      [:probe/x :int]]]}
   [{id :seon.agent/id
     operation-configuration :seon.config/configuration
+    current-ns :seon.eval/ns
     x :probe/x}]
   (cond-> {:probe/got-configuration? (some? operation-configuration)
            :probe/x x}
-    id (assoc :probe/got-id id)))
+    id (assoc :probe/got-id id)
+    current-ns (assoc :probe/got-ns current-ns)))
 
 (defn probe-required-configuration
   "Return an ordinary required configuration argument unchanged."
@@ -79,7 +83,8 @@
   (db/with-agent
    valid-id
    #(db/with-tx-context
-     {:seon.config/configuration operation-configuration}
+     {:seon.config/configuration operation-configuration
+      :seon.eval/ns :my.instrument.probe}
      thunk)))
 
 (deftest declared-absent-dependencies-come-from-one-operation
@@ -87,6 +92,7 @@
                  #(probe-injects {:probe/x 1}))]
     (is (= valid-id (:probe/got-id result)))
     (is (true? (:probe/got-configuration? result)))
+    (is (= :my.instrument.probe (:probe/got-ns result)))
     (is (= 1 (:probe/x result)))))
 
 (deftest caller-provided-agent-id-remains-inspectable

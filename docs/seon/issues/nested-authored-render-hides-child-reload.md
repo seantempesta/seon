@@ -60,3 +60,17 @@ for host-compiled `wait`, `complete`, `pause`, `resume`, and `terminate`.
 the same namespace form; `load-authored-program!` did not. The correction is to
 derive the require specs from the existing persisted edges and seed the same
 analyzer definitions before cold authored-program loading.
+
+The second exact package retained one more failure because the accepted canvas
+transaction itself stored the unqualified symbol `control-matrix`. A stale
+child detects the database-wide program change before symbol selection, but a
+fresh child correctly filters that unqualified name out of the program's
+qualified `:seon.fn/sym` keys and then cannot invoke it. The function was
+authored in `my.agent.red-apes-reply`; the eval boundary already knows that
+current namespace for every form.
+
+The owning interface is therefore `my.canvas/show!`: a bare renderer symbol is
+resolved against the eval's `:seon.eval/ns` before transaction, while a
+qualified symbol and literal hiccup remain unchanged. The existing eval
+dependency-injection mechanism now carries that current namespace as
+invocation-local data; no renderer fallback or database repair rule is added.

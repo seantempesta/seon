@@ -54,3 +54,11 @@
   (let [h [:section [:h2 "Visual only"]]
         response (canvas/view {:my.canvas/content h})]
     (is (= {:seon.render/hiccup h} response))))
+
+(deftest canvas-content-uses-the-eval-current-namespace
+  (is (= 'my.orders/dashboard
+         (@#'canvas/qualify-content 'dashboard :my.orders)))
+  (is (= 'my.shared/dashboard
+         (@#'canvas/qualify-content 'my.shared/dashboard :my.orders)))
+  (is (= [:h2 "literal"]
+         (@#'canvas/qualify-content [:h2 "literal"] :my.orders))))

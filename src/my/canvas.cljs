@@ -68,20 +68,30 @@
 (schema/register! ::show-request
   [:map
    [::content :seon.render.canvas/content]
-   [:seon.agent/id {:optional true} :string]])
+   [:seon.agent/id {:optional true} :string]
+   [:seon.eval/ns {:optional true} :keyword]])
 (schema/register! ::show-response :seon.db/transact-response)
 
-(defn ^{:async true :seon.fn/agent-facing? true} show!
-  "Pin literal hiccup or a qualified renderer fn to YOUR canvas.
+(defn- qualify-content
+  [content current-ns]
+  (if (and (symbol? content) (nil? (namespace content)) current-ns)
+    (symbol (name current-ns) (name content))
+    content))
 
-   `:seon.agent/id` is injected. Omit it in agent code."
+(defn ^{:async true :seon.fn/agent-facing? true} show!
+  "Pin literal hiccup or a renderer fn to YOUR canvas.
+
+   A bare renderer symbol resolves in the eval's current namespace; an already
+   qualified symbol stays unchanged. `:seon.agent/id` and `:seon.eval/ns` are
+   injected. Omit them in agent code."
   {:malli/schema [:=> [:cat ::show-request] ::show-response]}
-  [{::keys [content] agent-id :seon.agent/id}]
+  [{::keys [content] agent-id :seon.agent/id current-ns :seon.eval/ns}]
   (await
     (db/transact!
       {:seon.db/tx-data
        [{:seon.agent/id agent-id
-         :seon.render.canvas/content content}]})))
+         :seon.render.canvas/content
+         (qualify-content content current-ns)}]})))
 
 (schema/register! ::canvas-request
   [:map

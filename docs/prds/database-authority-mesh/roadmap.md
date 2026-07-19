@@ -4188,3 +4188,16 @@ members into the fresh self-host analyzer before ClojureScript's `check-uses`.
 `setup-agent-ns!` already performs that projection. The same persisted
 `:seon.ns/require-edges` must drive both paths; the integration gate remains
 the unchanged real canvas journey after a second exact package build.
+
+The second package retained a selected-function-not-loaded error and exposed
+the final input defect: the original `my.canvas/show!` transaction stored the
+bare symbol `control-matrix`, while the database program correctly identifies
+the function as `my.agent.red-apes-reply/control-matrix`. The eval fold already
+owns the current namespace of every form. That ordinary `:seon.eval/ns` value
+now enters the existing request-injection context, and `my.canvas/show!`
+qualifies only bare renderer symbols before writing. Qualified symbols and
+literal hiccup are unchanged. Focused proof passes 5 canvas tests/19
+assertions, 8 injection tests/18 assertions, and 27 execution tests/103
+assertions. The remaining gate is a third exact package drive that performs a
+new bare-symbol `show!`, observes the qualified database value, renders the
+control matrix, and exercises its actions.

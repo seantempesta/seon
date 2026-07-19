@@ -143,6 +143,9 @@
       :seon.config/configuration
       {::resolver (fn [_]
                     (:seon.config/configuration (db/current-tx-context)))
+       ::caller-policy ::context-only}
+      :seon.eval/ns
+      {::resolver (fn [_] (:seon.eval/ns (db/current-tx-context)))
        ::caller-policy ::context-only}}))
 
 #?(:cljs
