@@ -12,6 +12,10 @@
 (def ^:private valid-ending-ns? (deref #'eval/valid-ending-ns?))
 (def ^:private namespace-declaration?
   (deref #'eval/namespace-declaration?))
+(def ^:private bare-namespace-declaration
+  (deref #'eval/bare-namespace-declaration))
+(def ^:private effective-require-edges
+  (deref #'eval/effective-require-edges))
 (def ^:private program-entry-skipped?
   (deref #'eval/program-entry-skipped?))
 
@@ -28,6 +32,25 @@
   (is (namespace-declaration? "(ns my.agent.next)"))
   (is (not (namespace-declaration? "(js/Promise.resolve 323)")))
   (is (not (namespace-declaration? "(message/user \"done\")"))))
+
+(deftest bare-namespace-reentry-retains-existing-require-edges
+  (let [prior #{{:seon.ns.require/target 'my.orders.model
+                 :seon.ns.require/alias 'model}}
+        standard #{{:seon.ns.require/target 'seon.db
+                    :seon.ns.require/alias 'db}}]
+    (is (= 'my.orders
+           (bare-namespace-declaration "(ns my.orders)")))
+    (is (nil? (bare-namespace-declaration
+               "(ns my.orders (:require [my.other :as other]))"))
+        "an explicit require declaration remains authoritative")
+    (is (= (into prior standard)
+           (effective-require-edges
+            'my.orders prior 'my.orders standard))
+        "bare re-entry preserves prior aliases plus augmented standard requires")
+    (is (= standard
+           (effective-require-edges
+            nil prior 'my.orders standard))
+        "an explicit declaration replaces the prior require edges")))
 
 (deftest ordered-program-skips-only-unsafe-namespace-work
   (let [entry {:seon.repl/namespace 'my.orders.service

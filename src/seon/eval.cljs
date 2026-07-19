@@ -3536,6 +3536,36 @@
         form (when (= 1 (count forms)) (first forms))]
     (and (seq? form) (= 'ns (first form)))))
 
+(defn- bare-namespace-declaration
+  "The namespace symbol when `source` is one bare `(ns name)` declaration.
+
+   This is tested before [[augment-ns-source]] adds Seon's standard requires.
+   Re-entering an existing namespace is movement, not a request to discard its
+   aliases. An authored `:require` clause—even an empty one—is explicit and
+   therefore returns nil here so the declaration's replacement semantics win."
+  [source]
+  (let [forms (try (read-all-forms source) (catch :default _ nil))
+        form  (when (= 1 (count forms)) (first forms))]
+    (when (and (seq? form)
+               (= 'ns (first form))
+               (symbol? (second form))
+               (not-any? (fn [clause]
+                           (and (seq? clause) (= :require (first clause))))
+                         (drop 2 form)))
+      (second form))))
+
+(defn- effective-require-edges
+  "Require edges to persist after evaluating one namespace declaration.
+
+   A bare namespace re-entry retains the analyzer edges that existed before
+   eval and adds any edges established by the augmented declaration. An
+   explicit declaration is authoritative and persists only its resulting
+   analyzer edges."
+  [bare-namespace prior-edges ending-ns resulting-edges]
+  (if (and bare-namespace (= bare-namespace ending-ns))
+    (into (set prior-edges) resulting-edges)
+    resulting-edges))
+
 (defn repl-form-of
   "The parsed REPL form of `source` when it is a single top-level list
    whose head is one of [[repl-form-heads]]; nil otherwise (the caller
@@ -4405,7 +4435,15 @@
     configuration :seon.config/configuration
     database ::db/db
     turn-id :seon.agent.turn/id-of-turn}]
-  (let [;; Real requires (#73/#56): if this is a NEW agent-authored `(ns …)`
+  (let [;; Capture a bare re-entry before augmentation adds the standard
+        ;; requires. cljs.js may replace its analyzer aliases while evaluating
+        ;; the augmented declaration; bare `(ns name)` is movement and must
+        ;; retain the namespace's pre-existing edges for cold reconstruction.
+        bare-namespace (bare-namespace-declaration source)
+        prior-require-edges
+        (when bare-namespace
+          (analyzer-info/ns-require-edges compile-state bare-namespace))
+        ;; Real requires (#73/#56): if this is a NEW agent-authored `(ns …)`
         ;; form, write the canonical short aliases into its REAL `:require`
         ;; clause so `db/`/`plan/`/`message/`/`schema/` resolve in the new ns
         ;; exactly as they do in the agent's home ns — no magic injection. A
@@ -4622,9 +4660,13 @@
               changed-schemas (schema/changed-keys schemas-before)
               old-projection (schema/current-projection)
               ending-ns (when (::ok? result) @current-ns)
-              require-edges
+              resulting-require-edges
               (when (symbol? ending-ns)
                 (analyzer-info/ns-require-edges compile-state ending-ns))
+              require-edges
+              (effective-require-edges
+               bare-namespace prior-require-edges ending-ns
+               resulting-require-edges)
               frozen
               {::tee-entities (vec tee-entities)
                ::schemas-after (schema/snapshot)
