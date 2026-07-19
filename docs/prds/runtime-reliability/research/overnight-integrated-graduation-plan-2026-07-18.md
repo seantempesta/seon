@@ -119,6 +119,13 @@ source lines in this ledger or the owning successor PRD.
   the incompatible endpoint attributes; the fixed namespace scenario then
   passed in 2:24 with accuracy 1.0 and fabrication 0.0. Native log:
   `src-inspect-ai/logs/2026-07-19T07-56-56-00-00_milestone-lift_jCpMNc4cVt8U5b7pdnKhbv.eval`.
+- The formal fixed namespace run now passes three concurrent epochs: accuracy
+  1.0, `pass_at_3` 1.0, fabrication 0.0, and no transport, database-feed,
+  evidence-size, or lifecycle failure in 5:13. The first two completed agents
+  used 19 turns/35 evals in 208 seconds and 26 turns/37 evals in 223 seconds;
+  the slow tail confirms model work, not JVM serialization, dominates the
+  variance. Native log:
+  `src-inspect-ai/logs/2026-07-19T08-04-31-00-00_milestone-lift_LvFZXcaQxVu3r3bsjPBXUr.eval`.
 - The first admitted live namespace battery now reaches the real scorer. Native
   log `…fxN7bWkJXsVehcJBqs9K3B.eval` completed all three samples with two
   passes, zero fabrication, and one `NaN` failure after repeated unquoted
@@ -459,6 +466,7 @@ prose is supporting evidence only.
   acquisition after the awaited host drain.
 - [x] Prove abnormal pod TERM/KILL leaves no execution child or descendant
   through Bun no-orphans cleanup.
+- [x] Pass three consecutive fixed live namespace epochs without fabrication.
 - [ ] Pass the fixed live namespace and later-turn database-memory scenarios.
 - [ ] Pass generated namespace and database variants without adding scorer
   exceptions for model answers.
