@@ -95,20 +95,20 @@ def test_pod_run_422_raises_distinct_refusal():
 
 
 def test_record_result_preserves_database_and_turn_evidence():
-    coordinate = {"database_id": "db-1", "branch": "db",
-                  "commit_id": "commit-1", "t": 536870930}
+    database = {"db_name": "db-1", "commit_id": "commit-1",
+                "t": 536870930}
     turns = [{"turn_id": "turn-1", "prompt": "exact prompt",
-              "reply": "raw reply", "rendered_coordinate": coordinate}]
+              "reply": "raw reply"}]
     evals = [{"eval_id": "eval-1", "source": "(+ 1 2)", "ok": True,
               "operation_evidence": {
                   "status": "inline", "blob_hash": "abc",
                   "operations": [{"position": 0, "result": {
                       "kind": "scalar", "value": 3}}]}}]
-    transport = _model_transport_evidence(coordinate)
+    transport = _model_transport_evidence()
     state = SimpleNamespace(output=SimpleNamespace(completion=""), metadata={})
 
     _record_result(state, {"reply": "answer",
-                           "database_coordinate": coordinate,
+                           "database": database,
                            "turn_evidence": turns,
                            "model_transport_evidence": transport,
                            "eval_evidence": evals,
@@ -116,7 +116,7 @@ def test_record_result_preserves_database_and_turn_evidence():
                            "timeout_source": "database"})
 
     assert state.output.completion == "answer"
-    assert state.metadata["pod_database_coordinate"] == coordinate
+    assert state.metadata["pod_database_value"] == database
     assert state.metadata["pod_turn_evidence"] == turns
     assert state.metadata["pod_model_transport_evidence"] == transport
     assert state.metadata["pod_eval_evidence"] == evals
@@ -126,7 +126,7 @@ def test_record_result_preserves_database_and_turn_evidence():
     incomplete = SimpleNamespace(output=SimpleNamespace(completion=""),
                                  metadata={})
     _record_result(incomplete, {"reply": "legacy"})
-    assert "pod_database_coordinate" not in incomplete.metadata
+    assert "pod_database_value" not in incomplete.metadata
     assert "pod_turn_evidence" not in incomplete.metadata
     assert "pod_model_transport_evidence" not in incomplete.metadata
     assert "pod_eval_evidence" not in incomplete.metadata
@@ -134,14 +134,11 @@ def test_record_result_preserves_database_and_turn_evidence():
     assert "pod_timeout_source" not in incomplete.metadata
 
 
-def _model_transport_evidence(coordinate=None):
-    coordinate = coordinate or {
-        "database_id": "db-1", "branch": "db",
-        "commit_id": "attempt-1", "t": 20}
+def _model_transport_evidence():
     model = "/cache/models--owner--model/snapshots/" + "a" * 40
     attempt = {
         "turn_id": "turn-1", "ordinal": 0,
-        "coordinate": coordinate, "coordinate_valid": True,
+        "historical_config_valid": True,
         "provider": "deepseek", "adapter": "openai-compat",
         "requested_model": model, "temperature": 0.0,
         "max_tokens": 512,
@@ -188,13 +185,12 @@ def _model_server_identity(mechanism="huggingface-snapshot"):
 
 
 def _admitted_state(evidence=None):
-    final = {"database_id": "db-1", "branch": "db",
-             "commit_id": "final", "t": 30}
     return SimpleNamespace(metadata={
         "seon_source_admission": {"revision": "admitted"},
         "seon_model_server_identity": _model_server_identity(),
         "pod_timed_out": False, "pod_closed_reason": ":completed",
-        "pod_database_coordinate": final,
+        "pod_database_value": {"db_name": "db-1", "commit_id": "final",
+                               "t": 30},
         "pod_turn_evidence": [{"turn_id": "turn-1"}],
         "pod_model_transport_evidence": (
             evidence if evidence is not None
@@ -241,7 +237,7 @@ def test_externally_mutable_model_identity_is_not_formally_scorable():
         require_scorable_pod_state(state)
 
 
-def _add_retry(metadata, *, t, drift=False):
+def _add_retry(metadata, *, drift=False):
     import copy
 
     attempts = metadata["pod_model_transport_evidence"]["turns"][0][
@@ -249,8 +245,6 @@ def _add_retry(metadata, *, t, drift=False):
     attempts[0]["outcome"] = "provider-error"
     retry = copy.deepcopy(attempts[0])
     retry.update(ordinal=1, outcome="success")
-    retry["coordinate"] = {**retry["coordinate"],
-                           "commit_id": "attempt-2", "t": t}
     if drift:
         retry["max_tokens"] = 1024
     attempts.append(retry)
@@ -265,7 +259,7 @@ def _add_retry(metadata, *, t, drift=False):
         lambda metadata: metadata["pod_model_transport_evidence"].update(
             transport_drift=True),
         lambda metadata: metadata["pod_model_transport_evidence"]["turns"][0][
-            "attempts"][0]["coordinate"].update(database_id="foreign"),
+            "attempts"][0].update(historical_config_valid=False),
         lambda metadata: metadata["pod_model_transport_evidence"]["turns"][0][
             "attempts"][0].pop("requested_model"),
         lambda metadata: metadata["pod_model_transport_evidence"]["turns"][0][
@@ -274,8 +268,7 @@ def _add_retry(metadata, *, t, drift=False):
             "attempts"][0].update(outcome="provider-error"),
         lambda metadata: metadata["pod_model_transport_evidence"]["turns"][0][
             "attempts"][0].update(evidence_error="identity invalid"),
-        lambda metadata: _add_retry(metadata, t=19),
-        lambda metadata: _add_retry(metadata, t=21, drift=True),
+        lambda metadata: _add_retry(metadata, drift=True),
     ],
 )
 def test_admitted_model_transport_evidence_fails_closed(mutate):
@@ -287,6 +280,12 @@ def test_admitted_model_transport_evidence_fails_closed(mutate):
     with pytest.raises(PodRunInfrastructureError,
                        match="model transport|OpenAI-compatible"):
         require_scorable_pod_state(state)
+
+
+def test_admitted_model_transport_retry_with_same_config_is_scorable():
+    state = _admitted_state()
+    _add_retry(state.metadata)
+    assert require_scorable_pod_state(state) is state
 
 
 @pytest.mark.parametrize(

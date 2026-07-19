@@ -138,8 +138,8 @@ def _record_result(state: TaskState, result: dict) -> TaskState:
     # so a scored failure remains reconstructable after the live cluster
     # advances or is removed. Presence is meaningful: an older/broken pod that
     # omitted evidence must not be normalized into a plausible null/empty set.
-    if "database_coordinate" in result:
-        state.metadata["pod_database_coordinate"] = result["database_coordinate"]
+    if "database" in result:
+        state.metadata["pod_database_value"] = result["database"]
     if "turn_evidence" in result:
         state.metadata["pod_turn_evidence"] = result["turn_evidence"]
     if "model_transport_evidence" in result:
@@ -157,27 +157,9 @@ def _record_result(state: TaskState, result: dict) -> TaskState:
     return state
 
 
-def _coordinate_at_or_before(point: object, final: object) -> bool:
-    keys = ("database_id", "branch", "commit_id", "t")
-    return (isinstance(point, dict) and isinstance(final, dict)
-            and all(key in point and key in final for key in keys)
-            and point["database_id"] == final["database_id"]
-            and point["branch"] == final["branch"]
-            and isinstance(point["commit_id"], str)
-            and bool(point["commit_id"])
-            and isinstance(final["commit_id"], str)
-            and bool(final["commit_id"])
-            and isinstance(point["t"], int)
-            and not isinstance(point["t"], bool)
-            and isinstance(final["t"], int)
-            and not isinstance(final["t"], bool)
-            and point["t"] <= final["t"])
-
-
 def _require_model_transport_evidence(metadata: dict) -> list[dict]:
     """Fail closed on incomplete or inconsistent admitted provider proof."""
     evidence = metadata.get("pod_model_transport_evidence")
-    final = metadata.get("pod_database_coordinate")
     turn_evidence = metadata.get("pod_turn_evidence")
     if (not isinstance(evidence, dict)
             or evidence.get("status") != "inline"
@@ -206,7 +188,6 @@ def _require_model_transport_evidence(metadata: dict) -> list[dict]:
         "outer_timeout_ms", "stream", "extra_body_digest", "dg_backend",
         "api_key_env")
     configurations = []
-    attempt_ts = []
     all_attempts = []
     outcomes = {"success", "provider-error", "adapter-timeout",
                 "outer-timeout"}
@@ -217,7 +198,7 @@ def _require_model_transport_evidence(metadata: dict) -> list[dict]:
                 "admitted model transport attempt sequence is absent")
         for ordinal, attempt in enumerate(attempts):
             required = {
-                "turn_id", "ordinal", "coordinate", "coordinate_valid",
+                "turn_id", "ordinal", "historical_config_valid",
                 "provider", "adapter", "requested_model",
                 "outer_timeout_ms", "stream",
                 "outcome"}
@@ -225,9 +206,7 @@ def _require_model_transport_evidence(metadata: dict) -> list[dict]:
                     or not required.issubset(attempt)
                     or attempt.get("turn_id") != turn_id
                     or attempt.get("ordinal") != ordinal
-                    or attempt.get("coordinate_valid") is not True
-                    or not _coordinate_at_or_before(
-                        attempt.get("coordinate"), final)
+                    or attempt.get("historical_config_valid") is not True
                     or "evidence_error" in attempt
                     or not isinstance(attempt.get("provider"), str)
                     or not attempt["provider"]
@@ -263,16 +242,12 @@ def _require_model_transport_evidence(metadata: dict) -> list[dict]:
                     "admitted OpenAI-compatible transport identity is absent")
             configurations.append(tuple(
                 (key, attempt[key]) for key in comparable_keys if key in attempt))
-            attempt_ts.append(attempt["coordinate"]["t"])
             all_attempts.append(attempt)
         if ([attempt.get("outcome") for attempt in attempts].count("success")
                 != 1 or attempts[-1].get("outcome") != "success"):
             raise PodRunInfrastructureError(
                 "admitted model transport outcome sequence is inconsistent")
 
-    if attempt_ts != sorted(attempt_ts):
-        raise PodRunInfrastructureError(
-            "admitted model transport coordinates are out of order")
     if len(set(configurations)) != 1:
         raise PodRunInfrastructureError(
             "admitted model transport configuration drifted during the run")
