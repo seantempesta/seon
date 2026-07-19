@@ -3554,18 +3554,6 @@
                          (drop 2 form)))
       (second form))))
 
-(defn- effective-require-edges
-  "Require edges to persist after evaluating one namespace declaration.
-
-   A bare namespace re-entry retains the analyzer edges that existed before
-   eval and adds any edges established by the augmented declaration. An
-   explicit declaration is authoritative and persists only its resulting
-   analyzer edges."
-  [bare-namespace prior-edges ending-ns resulting-edges]
-  (if (and bare-namespace (= bare-namespace ending-ns))
-    (into (set prior-edges) resulting-edges)
-    resulting-edges))
-
 (defn repl-form-of
   "The parsed REPL form of `source` when it is a single top-level list
    whose head is one of [[repl-form-heads]]; nil otherwise (the caller
@@ -3659,6 +3647,21 @@
           (let [new-req (apply list :require new-vec)
                 other   (remove (fn [c] (= c req)) clauses)]
             (pr-str (apply list 'ns name-sym (concat other [new-req])))))))))
+
+(defn- namespace-source-for-eval
+  "Augment one namespace declaration and retain prior requires on bare re-entry.
+
+   The returned source is what cljs.js evaluates and what Seon records. This
+   keeps the live analyzer and the database projection identical, so later
+   ordinary forms cannot overwrite retained aliases with a reduced edge set."
+  [source prior-require-edges]
+  (let [augmented (augment-ns-source source)]
+    (if (and (bare-namespace-declaration source)
+             (seq prior-require-edges))
+      (or (merge-requires-into-ns-source
+           augmented (require-specs prior-require-edges))
+          augmented)
+      augmented)))
 
 (defn- require-form-specs
   "The libspecs of a top-level `(require …)` form, quotes stripped and
@@ -4448,7 +4451,7 @@
         ;; clause so `db/`/`plan/`/`message/`/`schema/` resolve in the new ns
         ;; exactly as they do in the agent's home ns — no magic injection. A
         ;; no-op (identical source) for non-ns forms / a complete home ns.
-        aug-source  (augment-ns-source source)
+        aug-source  (namespace-source-for-eval source prior-require-edges)
         augmented?  (not (identical? aug-source source))
         source      aug-source
         narration   (if augmented?
@@ -4660,13 +4663,9 @@
               changed-schemas (schema/changed-keys schemas-before)
               old-projection (schema/current-projection)
               ending-ns (when (::ok? result) @current-ns)
-              resulting-require-edges
+              require-edges
               (when (symbol? ending-ns)
                 (analyzer-info/ns-require-edges compile-state ending-ns))
-              require-edges
-              (effective-require-edges
-               bare-namespace prior-require-edges ending-ns
-               resulting-require-edges)
               frozen
               {::tee-entities (vec tee-entities)
                ::schemas-after (schema/snapshot)

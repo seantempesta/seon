@@ -28,12 +28,14 @@ the retained edge instead of exercising its recording owner.
 ## Resolution
 
 Before evaluating an authored bare namespace declaration, the eval owner now
-captures that namespace's current analyzer require edges. Successful bare
-re-entry persists their union with the standard edges added during evaluation.
-An authored declaration containing `:require` remains authoritative and keeps
-replacement semantics; `ns-unalias` remains the explicit removal operation.
-Cold namespace source continues to merge the persisted effective libspecs into
-the latest declaration.
+captures that namespace's current analyzer require edges and merges their real
+libspecs into the declaration alongside Seon's standard requires. The same
+source is evaluated and recorded, keeping the live analyzer and database facts
+identical so a later ordinary form cannot reintroduce the loss. An authored
+declaration containing `:require` remains authoritative and keeps replacement
+semantics; `ns-unalias` remains the explicit removal operation. Cold namespace
+source continues to merge the persisted effective libspecs into the latest
+declaration.
 
 ## Verification
 

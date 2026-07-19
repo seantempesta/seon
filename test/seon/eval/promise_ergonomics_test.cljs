@@ -14,8 +14,8 @@
   (deref #'eval/namespace-declaration?))
 (def ^:private bare-namespace-declaration
   (deref #'eval/bare-namespace-declaration))
-(def ^:private effective-require-edges
-  (deref #'eval/effective-require-edges))
+(def ^:private namespace-source-for-eval
+  (deref #'eval/namespace-source-for-eval))
 (def ^:private program-entry-skipped?
   (deref #'eval/program-entry-skipped?))
 
@@ -43,14 +43,16 @@
     (is (nil? (bare-namespace-declaration
                "(ns my.orders (:require [my.other :as other]))"))
         "an explicit require declaration remains authoritative")
-    (is (= (into prior standard)
-           (effective-require-edges
-            'my.orders prior 'my.orders standard))
-        "bare re-entry preserves prior aliases plus augmented standard requires")
-    (is (= standard
-           (effective-require-edges
-            nil prior 'my.orders standard))
-        "an explicit declaration replaces the prior require edges")))
+    (let [source (namespace-source-for-eval "(ns my.orders)" prior)]
+      (is (.includes source "[my.orders.model :as model]")
+          "bare re-entry evaluates the prior alias into the analyzer")
+      (is (.includes source "[seon.db :as db]")
+          "the same declaration carries the standard requires"))
+    (let [source (namespace-source-for-eval
+                  "(ns my.orders (:require [my.other :as other]))" prior)]
+      (is (.includes source "[my.other :as other]"))
+      (is (not (.includes source "[my.orders.model :as model]"))
+          "an explicit declaration replaces prior requires"))))
 
 (deftest ordered-program-skips-only-unsafe-namespace-work
   (let [entry {:seon.repl/namespace 'my.orders.service
