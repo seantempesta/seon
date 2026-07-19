@@ -525,6 +525,20 @@
                 (is false (str "nested compiled selection rejected: " error))
                 (done))))))))
 
+(deftest selected-load-error-preserves-only-child-reload
+  (let [ordinary (ex-info "ordinary compile failure"
+                          {:seon.error/kind :compile})
+        reload (ex-info "Authored source changed; a fresh child is required."
+                        {::execution/reload-required? true
+                         :seon.error/kind :core-bug})]
+    (is (identical? ordinary
+                    (@#'execution/selected-load-error ordinary)))
+    (try
+      (@#'execution/selected-load-error reload)
+      (is false "the child reload signal became an ordinary selected error")
+      (catch :default error
+        (is (identical? reload error))))))
+
 (deftest ordinary-namespace-source-preserves-one-compile-unit
   (let [source (seval/namespace-source
                 {:seon.ns/name :my.render

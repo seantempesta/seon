@@ -4151,3 +4151,30 @@ process-retention falsifier without adding socket-owned child lifetime. The
 remaining program boundary is the explicit requirement-by-requirement
 graduation audit, with any contradicted or missing product journey returned to
 its existing owner before final completion is claimed.
+
+## 2026-07-18 exact-package canvas falsifier
+
+The exact read-only `e806ac30` package passed its real agent, restart, gzip,
+identity-encoding, and immutable-tree checks, then exposed one earlier
+correctness boundary during the required browser control journey. An ordinary
+agent successfully published a canvas renderer and action functions, but the
+next Datastar feed displayed `Authored source changed; a fresh child is
+required.` instead of the canvas.
+
+The owning distinction is now source-proven. `seon.execution.host` already
+retires a stale child and retries a top-level invocation exactly once when the
+error carries `:seon.execution/reload-required?`. Compiled renderers reach
+authored functions through `seon.execution/invoke-selected!`; that nested seam
+was catching the identical program-change exception and returning it as an
+ordinary selected-call error. The successful outer renderer result hid the
+reload signal from the supervisor. The ordered correction is to preserve that
+one signal through nested selection, retain ordinary error values for ordinary
+authored failures, and reuse the existing host retirement/retry contract.
+
+Integrated proof requires the focused nested-selection regression, the
+existing one-retry host regression, and a rebuilt exact read-only package in
+which the same published canvas renders and its input, select, toggle, button,
+and form actions complete through a real browser. This correctness boundary
+precedes the remaining current 1/2/4-agent and five-minute private-memory
+measurements; performance evidence from a package that cannot refresh authored
+render source is not graduation evidence.

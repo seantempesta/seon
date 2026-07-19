@@ -685,6 +685,12 @@
   [exception]
   {::ok? false ::error (exception-value exception)})
 
+(defn- selected-load-error
+  [exception]
+  (if (true? (::reload-required? (ex-data exception)))
+    (throw exception)
+    exception))
+
 (declare invoke-selected!)
 
 (defn- call-selected!
@@ -728,7 +734,7 @@
       (try
         (await (ensure-program! state invocation unresolved false))
         (catch :default exception
-          (reset! load-error exception))))
+          (reset! load-error (selected-load-error exception)))))
     (-> (js/Promise.all
          (into-array
           (mapv (fn [{::keys [function-symbol] :as call}]
