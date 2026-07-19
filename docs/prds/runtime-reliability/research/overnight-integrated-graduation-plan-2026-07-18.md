@@ -457,7 +457,7 @@ prose is supporting evidence only.
   a render display cap to formal Inspect evidence.
 - [x] Prove normal retained-branch close leaves no execution child or database
   acquisition after the awaited host drain.
-- [ ] Prove abnormal pod TERM/KILL leaves no execution child or descendant
+- [x] Prove abnormal pod TERM/KILL leaves no execution child or descendant
   through Bun no-orphans cleanup.
 - [ ] Pass the fixed live namespace and later-turn database-memory scenarios.
 - [ ] Pass generated namespace and database variants without adding scorer

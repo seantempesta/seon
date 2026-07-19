@@ -92,7 +92,13 @@ absent one second later, the branch database was deleted without a
 database-in-use refusal, and the shared writer remained ready. The namespace
 workflow itself passed with accuracy 1.0 and zero fabrication in native Inspect
 log `2026-07-19T07-56-56-00-00_milestone-lift_jCpMNc4cVt8U5b7pdnKhbv.eval`.
-Abnormal TERM/KILL remains open.
+Abnormal parent loss now passes too. An isolated TERM probe used pod PID `43626`
+and execution child PID `44043`; an isolated KILL probe used pod PID `44563`
+and child PID `44849`. Each pair was absent within two seconds, each retained
+branch then closed without a database-in-use refusal, and the shared writer and
+default pod remained ready. This closes the Bun execution-child escape added to
+this issue; the broader default crash/restart acceptance below still owns the
+issue's final archival gate.
 
 ## Owner
 

@@ -109,9 +109,10 @@ execution children and released the branch while the shared writer stayed
 ready. One real Anthropic-backed namespace sample also passed in 2:24 with
 accuracy 1.0 and zero fabrication; the default persisted Meta-compatible
 provider currently returns HTTP 402, so that external configuration cannot be
-mistaken for a runtime regression. Abnormal parent-loss and the same
-three-epoch live run must
-close both contracts before the database scorer advances. The real browser/Datastar
+mistaken for a runtime regression. Isolated live TERM and KILL probes each
+reaped the pod and its execution child within two seconds, allowed branch
+deletion, and left the shared writer ready. The same three-epoch live run must
+close the remaining Inspect contract before the database scorer advances. The real browser/Datastar
 journey is the dependency-ready parallel portfolio; the
 complete live Inspect, browser, package, downstream,
 multi-cluster, and modest-hardware matrix remains the final gate.
