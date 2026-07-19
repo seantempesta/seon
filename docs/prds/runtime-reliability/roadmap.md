@@ -325,6 +325,20 @@ ordinary authoritative transaction path; focused remote-database proof passes
 both process exit and a queryable `:seon.error/fault :core` datom before host
 replacement is credited.
 
+The exact package now proves that contract twice: each feed invocation spawned
+a fresh execution child, persisted the core fault at transactions `536871417`
+and `536871418`, and exited without taking down the pod. After restoring the
+qualified authored canvas renderer, the package rendered `Canvas control
+matrix` cleanly and retained the exact read-only tree digest `ff1ea1fc…`. The
+subsequent boundary audit simplified the owner further: selected-call failure
+classification and recording now live in `seon.execution/call-selected!`, so
+canvas, prompt-block, and interactive-call consumers cannot downgrade a core
+failure after it becomes protocol data. Renderer-specific policy code is
+deleted. Focused selected-call proof passes 28 tests/108 assertions and
+execution-runtime proof passes 13/71. The next exact package repeats the
+persist-then-exit proof on this final seam, followed by the parent host-error
+conversion audit and the canvas browser matrix.
+
 Current-source release application
 `0d8bc9c2ff2088de3103f951d1bd3f94f96d2c80cb4f4ccf6a035aaa9f96197b`
 now passes the source-free runtime boundary from `/Users/sean/seon-release-9df21b23`

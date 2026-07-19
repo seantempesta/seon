@@ -70,27 +70,8 @@
   (or (get-in result [::execution/error :seon.error/message])
       "selected function failed"))
 
-(defn- record-selected-core-error!
-  "Record a failed internal selected call before rendering its error value.
-
-   Selected calls cross the child protocol as ordinary data, so no exception
-   catch remains outside this boundary to apply the core-fault policy. Agent
-   failures stay ordinary render values; a core failure is persisted here and
-   `seon.error/record!` applies the configured development crash policy."
-  [result]
-  (let [selected-error (::execution/error result)]
-    (when (= :core-bug (:seon.error/kind selected-error))
-      (error/record!
-       {::error/raw
-        (ex-info (selected-error-message result)
-                 (merge (:seon.error/data selected-error)
-                        {:seon.error/kind :core-bug}))
-        ::error/fault :core})))
-  result)
-
 (defn- block-error-text
   [block result]
-  (record-selected-core-error! result)
   (str "[" (name (:seon.agent.ctx/name block)) "] render failed: "
        (selected-error-message result)))
 
@@ -135,13 +116,7 @@
           (str "expected hiccup from " (:seon.render/html block))})))
     (canvas/error-card
      {:seon.error/message
-      (selected-error-message (record-selected-core-error! result))})))
-
-(defn- configured-html-value
-  [configuration id block result]
-  (error/with-configuration
-   configuration
-   #(html-value id block result)))
+      (selected-error-message result)})))
 
 (defn- block-call
   [id entity configuration block]
@@ -542,9 +517,8 @@
                               (map
                                (fn [{:keys [index]} result]
                                  [index
-                                  (configured-html-value
-                                   configuration id
-                                   (nth all-blocks index) result)])
+                                  (html-value
+                                   id (nth all-blocks index) result)])
                                targets
                                results))
                         surfaces

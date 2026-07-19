@@ -682,8 +682,11 @@
       load-error (assoc ::program-load-error load-error))))
 
 (defn- selected-call-error
-  [exception]
-  {::ok? false ::error (exception-value exception)})
+  [function-symbol exception]
+  (let [fault (error/fault-for function-symbol)]
+    (when (= :core fault)
+      (error/record! {::error/raw exception ::error/fault :core}))
+    {::ok? false ::error (exception-value exception)}))
 
 (defn- selected-load-error
   [exception]
@@ -708,15 +711,16 @@
                      (assoc ::source
                             (get-in @state [::program ::source-by-symbol
                                             function-symbol])))))
-          (.catch selected-call-error))
+          (.catch #(selected-call-error function-symbol %)))
         (catch :default exception
-          (js/Promise.resolve (selected-call-error exception)))))
-    (js/Promise.resolve
-     {::ok? false
-      ::error {:seon.error/message
-               "The selected function is not loaded in the execution child."
-               :seon.error/kind :core-bug
-               :seon.error/data {::function-symbol function-symbol}}})))
+          (js/Promise.resolve
+           (selected-call-error function-symbol exception)))))
+    (let [exception
+          (ex-info "The selected function is not loaded in the execution child."
+                   {:seon.error/kind :core-bug
+                    ::function-symbol function-symbol})]
+      (js/Promise.resolve
+       (selected-call-error function-symbol exception)))))
 
 (defn- ^:async invoke-selected!
   "Invoke selected compiled or authored functions inside the active child."
@@ -740,7 +744,8 @@
           (mapv (fn [{::keys [function-symbol] :as call}]
                   (if (and @load-error
                            (nil? (eval/lookup-value function-symbol)))
-                    (js/Promise.resolve (selected-call-error @load-error))
+                    (js/Promise.resolve
+                     (selected-call-error function-symbol @load-error))
                     (call-selected! state invocation call)))
                 calls)))
         (.then #(vec (array-seq %))))))

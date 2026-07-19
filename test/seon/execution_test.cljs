@@ -4,6 +4,7 @@
    [seon.agent.lifecycle :as lifecycle]
    [seon.db :as db]
    [seon.db.protocol :as protocol]
+   [seon.error :as error]
    [seon.eval :as seval]
    [seon.execution :as execution]
    [seon.runtime.admission :as admission]
@@ -558,6 +559,39 @@
               (fn [error]
                 (is false (str "nested compiled selection rejected: " error))
                 (done))))))))
+
+(deftest selected-call-boundary-records-core-but-not-authored-failures
+  (async done
+    (let [recorded (atom [])
+          state (atom {::execution/authored-symbols #{'my.orders/view}})]
+      (with-redefs [error/record! #(swap! recorded conj %)
+                    seval/lookup-value
+                    (fn [sym]
+                      (when (= 'my.orders/view sym)
+                        (fn [] (throw (js/Error. "authored failure")))))]
+        (-> (js/Promise.all
+             #js [(@#'execution/call-selected!
+                   state invocation
+                   {::execution/function-symbol 'my.orders/view
+                    ::execution/arguments []})
+                  (@#'execution/call-selected!
+                   state invocation
+                   {::execution/function-symbol 'seon.missing/core-renderer
+                    ::execution/arguments []})])
+            (.then
+             (fn [results]
+               (is (false? (::execution/ok? (aget results 0))))
+               (is (false? (::execution/ok? (aget results 1))))
+               (is (= 1 (count @recorded)))
+               (is (= :core (::error/fault (first @recorded))))
+               (is (= 'seon.missing/core-renderer
+                      (get (ex-data (::error/raw (first @recorded)))
+                           ::execution/function-symbol)))
+               (done)))
+            (.catch
+             (fn [exception]
+               (is false (str exception))
+               (done))))))))
 
 (deftest selected-load-error-preserves-only-child-reload
   (let [ordinary (ex-info "ordinary compile failure"

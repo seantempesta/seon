@@ -25,11 +25,12 @@ hiding a core runtime invariant failure during development.
 
 ## Expected owner
 
-`seon.execution.runtime` owns the boundary where selected-call protocol data
-becomes rendered Hiccup. It records a `:core-bug` result exactly there through
-the existing `seon.error/record!` mechanism. An agent-authored failure remains
-an ordinary error value and never escalates. There is no second crash switch,
-renderer, or error registry.
+`seon.execution/call-selected!` owns the boundary where every selected function
+becomes either a value or an error. It records a failed core function exactly
+there through the existing `seon.error/record!` mechanism, before protocol data
+can be converted into Hiccup, prompt text, or an interactive-call response. An
+agent-authored `my.*` failure remains an ordinary error value and never
+escalates. There is no second crash switch, renderer, or error registry.
 
 ## Acceptance criteria
 
@@ -69,3 +70,18 @@ late-bound hook over its ordinary authoritative `transact!` path and adapts the
 current transaction-report/error result to the error owner's acknowledgment.
 Focused remote-database proof passes 18 tests and 84 assertions. Exact package
 proof must now show both the child exit and the durable core-fault datom.
+
+The exact package then proved that ordering twice. Each feed invocation spawned
+a fresh child, persisted `:seon.error/fault :core` with the exact missing
+function message at transactions `536871417` and `536871418`, and exited; no
+task child survived either invocation. Restoring the qualified authored canvas
+renderer and restarting normally rendered `Canvas control matrix` without an
+error, and the recursively read-only package digest remained `ff1ea1fc…`.
+
+The final boundary audit moved recording one step closer to the producer:
+`seon.execution/call-selected!` now classifies and records every selected call,
+covering canvas, prompt blocks, and interactive calls with one mechanism. The
+renderer-specific recording code and tests are deleted. Focused selected-call
+proof passes 28 tests and 108 assertions; execution-runtime proof returns to 13
+tests and 71 assertions. One exact-package repetition on this final seam and
+the parent host-error conversion audit remain before closure.
