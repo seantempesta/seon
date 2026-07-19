@@ -1,6 +1,6 @@
 ---
 type: prd
-status: planned
+status: active
 tags: [prd, database, capability, flow]
 ---
 
@@ -44,12 +44,20 @@ reads, but the removed runtime-observation engine is no longer in current
 source. Renderer source changes can also be filtered when their declared read
 set is unchanged.
 
-Datahike's current query dependency helper is itself incomplete. It hand-walks
-raw normalized `:where` forms rather than the typed parsed query, omits nested
-pull attributes, records reverse pull display keys instead of stored datom
-attributes, and misses database predicates such as `missing?`. Because the
-query cache and selective listener both consume this result, the defect can
-preserve stale cached query results as well as stale pages.
+Datahike `main` now exposes an execution-aware, source-scoped query dependency
+plan at maintained revision `6a0386d2`. It folds the typed parsed query and
+PullSpec representations, resolves scalar `:in` bindings and supplied rules,
+canonicalizes reverse pull attributes, and widens unknown behavior to `:all`.
+The query cache stores and reuses that same plan; propagation selects only the
+attributes for the database source that advanced, and schema transactions do
+not inherit cached results. The former flat attribute helper remains only as a
+projection of this plan for compatibility.
+
+This closes the characterized query false negatives, including nested pulls,
+`missing?`, input-bound attributes, supplied rules, and multiple database
+sources. It does not yet close the full read contract: direct pull, pull-many,
+schema, entity, and index reads still return no dependency evidence through the
+Seon protocol.
 
 Direct pull, pull-many, schema, and index reads return no dependency evidence
 and do not share the query result cache. A page rerun is therefore not
@@ -154,6 +162,15 @@ The fork's full JVM aggregation is the dependency conformance gate. Its CLJS
 Node runner is intentionally smaller, and `bin/test-writer` runs Seon tests
 rather than the fork's entire suite. Graduation records all three separately so
 a green Seon gate cannot conceal a missing Datahike regression.
+
+Current evidence for maintained Datahike `main` revision `6a0386d2`:
+
+- query namespace: 84 tests, 417 assertions, zero failures;
+- query-cache namespace: 114 tests, 834 assertions, zero failures before the
+  final focused source/schema additions, which passed across all three JVM
+  profiles;
+- specification namespace: 12 tests, 99 assertions, zero failures; and
+- full CLJS Node gate: 137 tests, 945 assertions, zero failures.
 
 Exit: each known stale-result case fails for the intended reason before its
 implementation changes, while the imported upstream suite still establishes
