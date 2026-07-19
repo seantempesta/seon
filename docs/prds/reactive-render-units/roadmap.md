@@ -94,8 +94,12 @@ The gate now also exercises the real timer rather than only the `due-at`
 arithmetic. With a 1,000 ms moving settle edge and 20 ms maximum latency, a
 120 ms continuous event stream completes repeatedly before the producer stops,
 collapses obsolete database values, converges to the newest basis transaction,
-and releases its registration. The focused reactive gate passes 6 tests and 36
-assertions.
+and releases its registration. The focused reactive gate passes 7 tests and 42
+assertions. Its repair regression begins with a visible failed value and
+conservative `:all` interest, then proves a later transaction reruns the
+computation, delivers the repaired value, replaces `:all` with exact read
+evidence, converges at the repair basis transaction, and releases the
+registration.
 
 A disposable live `reactive-latency` cluster then resolved its policy from
 database configuration seeded through environment overrides: 1,000 ms ordinary

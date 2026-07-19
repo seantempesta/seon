@@ -259,6 +259,83 @@
                      {::reactive/registrations {}})
              (done)))))))
 
+(deftest failed-read-widens-then-a-repair-narrows-and-delivers
+  (async done
+    (let [original-db db/db
+          original-listen db/listen!
+          original-unlisten db/unlisten!
+          head (atom database)
+          listens (atom [])
+          computes (atom 0)
+          delivered (atom [])
+          compute
+          (fn [value]
+            (let [attempt (swap! computes inc)]
+              (js/Promise.resolve
+               (if (= 1 attempt)
+                 {::db/value [:main {:id "app-view"}
+                              [:div {:id "app-error"} "render failed"]]
+                  ::db/read-evidence :all}
+                 {::db/value [:main {:id "app-view"} "repaired"]
+                  ::db/read-evidence (evidence value)}))))]
+      (set! db/db (fn ([] (js/Promise.resolve @head))
+                    ([_] (js/Promise.resolve @head))))
+      (set! db/listen!
+            (fn
+              ([request]
+               (swap! listens conj request)
+               (js/Promise.resolve (::db/key request)))
+              ([key handler]
+               (db/listen! {::db/key key ::db/handler handler}))
+              ([value key handler]
+               (db/listen! {::db/db value ::db/key key
+                            ::db/handler handler}))))
+      (set! db/unlisten! (fn [_] (js/Promise.resolve true)))
+      (reactive/configure!
+       {:seon.config/reactive-settle-ms 0
+        :seon.config/reactive-structural-settle-ms 0
+        :seon.config/reactive-max-latency-ms 20})
+      (-> (reactive/observe!
+           {::reactive/key :repair
+            ::reactive/consumer-key :consumer
+            ::reactive/compute compute
+            ::reactive/notify #(swap! delivered conj %)})
+          (.then
+           (fn [_]
+             (is (= "app-error" (get-in (first @delivered) [2 1 :id])))
+             (is (= :all (::db/dependency-plan (last @listens)))
+                 "failed computation keeps conservative interest")
+             (let [next-db (at-t (inc (:t database)))]
+               (reset! head next-db)
+               ((::db/handler (last @listens)) {:db-after next-db})
+               (next-turn))))
+          (.then
+           (fn [_]
+             (is (= [:main {:id "app-view"} "repaired"]
+                    (last @delivered)))
+             (is (= (evidence @head)
+                    (::db/read-evidence (last @listens)))
+                 "successful repair replaces :all with exact evidence")
+             (is (= (:t @head)
+                    (::reactive/last-completed-t
+                     (reactive/measurements))))
+             (reactive/unobserve!
+              {::reactive/key :repair
+               ::reactive/consumer-key :consumer})))
+          (.then
+           (fn [_]
+             (is (= 0 (::reactive/registration-count
+                       (reactive/measurements))))))
+          (.catch (fn [exception] (is false (str exception))))
+          (.finally
+           (fn []
+             (set! db/db original-db)
+             (set! db/listen! original-listen)
+             (set! db/unlisten! original-unlisten)
+             (reset! @#'reactive/!runtime
+                     {::reactive/registrations {}})
+             (done)))))))
+
 (deftest active-computation-retains-only-the-newest-pending-database
   (async done
     (let [original-db db/db
