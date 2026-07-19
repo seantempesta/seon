@@ -231,8 +231,10 @@ ready current process for the same agent with a different PID and the same
 artifact. Its native solver acquires one retained branch, drives both real pod
 phases, validates each pod result as infrastructure-scorable, reads Datahike
 history plus parent-host state, and releases the exact lease in `finally`.
-The product slice passes 21 tests. Exact live execution is now the earliest
-Inspect falsifier; host pressure still prevents a truthful artifact build.
+The product slice passes 21 tests, and the complete offline Inspect checkpoint
+passes 525 tests with eight intentional environment-gated skips. Exact live
+execution is now the earliest Inspect falsifier; host pressure still prevents a
+truthful artifact build.
 
 The development-tool reconnect defect is source-grounded in the maintained
 Shadow runtime rather than Seon's database advertisement. Shadow commit

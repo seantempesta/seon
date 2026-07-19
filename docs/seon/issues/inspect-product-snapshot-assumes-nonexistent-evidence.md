@@ -41,8 +41,9 @@ the same artifact digest, and ready state. The first native live task owns a
 retained branch in `finally`, drives both real `/agents/run` phases, queries the
 history evidence, samples the host, validates infrastructure admission for both
 pod calls, and releases the exact branch. Its offline native lifecycle/scorer
-proof passes in the 21-test product slice. Exact live execution remains the
-acceptance gate.
+proof passes in the 21-test product slice; the complete offline Inspect suite
+passes 525 tests with eight intentional environment-gated skips. Exact live
+execution remains the acceptance gate.
 
 ## Acceptance
 
