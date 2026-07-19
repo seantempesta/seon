@@ -273,7 +273,10 @@
         initial (#'writer/execute-many-result-state request)
         placeholder-weight (::writer/result-placeholder-weight initial)
         small-value {:position 0 :payload "small"}
-        small-result (protocol/success {::protocol/result small-value})
+        small-result
+        (protocol/success
+         {::protocol/result small-value
+          :datahike.read/dependency-plan :all})
         small-weight
         (d/shallow-weight-within small-result protocol/maximum-frame-bytes)
         max-result-weight
@@ -282,9 +285,9 @@
                 small-weight 8))
         request
         (assoc request :datahike.resource/max-result-weight max-result-weight)
-        original-pull d/pull]
+        original-pull d/pull-with-evidence]
     (try
-      (with-redefs [d/pull
+      (with-redefs [d/pull-with-evidence
                     (fn [_db-value options]
                       (let [position (:eid options)]
                         (swap! calls conj position)
@@ -293,12 +296,14 @@
                               (.countDown slow-entered)
                               (when-not (.await release-slow 5 TimeUnit/SECONDS)
                                 (throw (ex-info "slow member was not released" {})))
-                              small-value)
+                              {:datahike.pull/result small-value
+                               :datahike.read/dependency-plan :all})
                           1 (let [value
                                   {:position position
                                    :payload (apply str (repeat 2048 "x"))}]
                               (.countDown large-completed)
-                              value)
+                              {:datahike.pull/result value
+                               :datahike.read/dependency-plan :all})
                           (original-pull _db-value options))))]
         (let [response (request! runtime transport request)]
           (is (.await slow-entered 2 TimeUnit/SECONDS))

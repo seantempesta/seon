@@ -320,13 +320,14 @@
             first-response (promise)
             duplicate-response (promise)
             reused-response (promise)]
-        (with-redefs [d/pull
+        (with-redefs [d/pull-with-evidence
                       (fn [_db-value _request]
                         (let [call (swap! calls inc)]
                           (when (= 1 call)
                             (.countDown entered)
                             (.await finish))
-                          {:callback/value call}))]
+                          {:datahike.pull/result {:callback/value call}
+                           :datahike.read/dependency-plan :all}))]
           (writer/handle-request! runtime transport request
                                   #(deliver first-response %))
           (is (.await entered 5 java.util.concurrent.TimeUnit/SECONDS))
