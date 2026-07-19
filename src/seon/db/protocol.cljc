@@ -319,6 +319,26 @@
  :datahike.query/attribute-dependencies
  [:or [:= :all] [:set :keyword]])
 (schema/register!
+ :datahike.query.source/attributes
+ :datahike.query/attribute-dependencies)
+(schema/register!
+ :datahike.query.source/dependency
+ [:map {:closed true}
+  [:datahike.query.source/symbol :symbol]
+  [:datahike.query.source/argument-position [:int {:min 0}]]
+  [:datahike.query.source/attributes
+   :datahike.query.source/attributes]])
+(schema/register!
+ :datahike.query.dependency/sources
+ [:vector :datahike.query.source/dependency])
+(schema/register!
+ :datahike.read/dependency-plan
+ [:or
+  [:= :all]
+  [:map {:closed true}
+   [:datahike.query.dependency/sources
+    :datahike.query.dependency/sources]]])
+(schema/register!
  ::datom-pattern
  [:map {:closed true}
   [:seon.db/a :keyword]
@@ -718,6 +738,7 @@
   [::success? [:= true]]
   [::request-id ::request-id]
   [:datahike.query/result :datahike.query/result]
+  [:datahike.read/dependency-plan :datahike.read/dependency-plan]
   [:datahike.query/attribute-dependencies
    :datahike.query/attribute-dependencies]
   [:datahike.query/cache-evidence :datahike.query/cache-evidence]

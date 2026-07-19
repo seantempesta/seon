@@ -873,13 +873,14 @@
       {::query request-or-query ::args (vec inputs)}))))
 
 (defn ^{:async true :seon.fn/agent-facing? true} query-with-evidence
-  "Run a query and return its result plus Datahike cache/resource evidence."
+  "Run a query and return its result plus Datahike dependency/cache evidence."
   [request]
   (let [response (await (query-response! request))]
     (if (or (error-value? response) (not (::protocol/success? response)))
       response
       (select-keys response
                    [:datahike.query/result
+                    :datahike.read/dependency-plan
                     :datahike.query/attribute-dependencies
                     :datahike.query/cache-evidence
                     :datahike.query/resource-evidence]))))

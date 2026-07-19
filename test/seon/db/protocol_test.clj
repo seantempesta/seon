@@ -160,6 +160,30 @@
     (is (false? (protocol/valid-request?
                  (assoc request ::protocol/cursor [17 :person/name]))))))
 
+(deftest query-responses-carry-datahikes-source-scoped-dependency-plan
+  (let [plan {:datahike.query.dependency/sources
+              [{:datahike.query.source/symbol '$
+                :datahike.query.source/argument-position 0
+                :datahike.query.source/attributes #{:person/name}}]}
+        response
+        (protocol/success
+         {::protocol/request-id "query/dependency-plan"
+          :datahike.query/result [["Ada"]]
+          :datahike.read/dependency-plan plan
+          :datahike.query/attribute-dependencies #{:person/name}
+          :datahike.query/cache-evidence {}
+          :datahike.query/resource-evidence {}})]
+    (is (protocol/valid-response? response))
+    (is (= response (transit-roundtrip response)))
+    (is (false? (protocol/valid-response?
+                 (dissoc response :datahike.read/dependency-plan))))
+    (is (false? (protocol/valid-response?
+                 (assoc-in response
+                           [:datahike.read/dependency-plan
+                            :datahike.query.dependency/sources 0
+                            :datahike.query.source/attributes]
+                           #{"not-an-attribute"}))))))
+
 (deftest execute-many-members-select-their-own-database-values
   (let [request (protocol/execute-many-request
                  {::protocol/request-id "many/databases"

@@ -86,6 +86,11 @@
       :seon.db.protocol.operation/query
       (success request {:datahike.query/result
                         (get query-results (::protocol/query-form request))
+                        :datahike.read/dependency-plan
+                        {:datahike.query.dependency/sources
+                         [{:datahike.query.source/symbol '$
+                           :datahike.query.source/argument-position 0
+                           :datahike.query.source/attributes #{}}]}
                         :datahike.query/attribute-dependencies #{}
                         :datahike.query/cache-evidence {}
                         :datahike.query/resource-evidence {}})
@@ -102,6 +107,11 @@
                 (mapv (fn [_]
                         (protocol/success
                          {:datahike.query/result [::grouped-result]
+                          :datahike.read/dependency-plan
+                          {:datahike.query.dependency/sources
+                           [{:datahike.query.source/symbol '$
+                             :datahike.query.source/argument-position 0
+                             :datahike.query.source/attributes #{}}]}
                           :datahike.query/attribute-dependencies #{}
                           :datahike.query/cache-evidence {}
                           :datahike.query/resource-evidence {}}))
