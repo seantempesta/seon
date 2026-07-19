@@ -95,9 +95,11 @@ That prerequisite passed at `6e3b741d`. A fresh agent's three identical
 root run reached six turns and five evals in 36,456 ms without premature
 closure while moving through position, full-tree, active-plan status, and
 position observations. The latter timed out because stale active-plan attention
-prevented delegation; it does not invalidate the stable-observation fold. The
-optional read-cost aggregate can now proceed independently from that driver
-scenario.
+prevented delegation: the plan block selected the current run's next-ready
+cause, while agent-facing plan reads returned an older active step. That
+separate projection inconsistency does not invalidate the stable-observation
+fold. The optional read-cost aggregate can now proceed independently from that
+driver scenario.
 
 ## Required contract
 

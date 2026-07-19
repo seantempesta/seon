@@ -211,11 +211,14 @@ with three turns and three evals. The prior-style root scenario then ran six
 turns and five evals in 36,456 ms without premature `:no-forms`; its ordered
 sources included position, full-tree, active-plan status, and another position
 read, proving distinct stable observations survive the existing three-turn
-bound. That root timed out without delegating because it attended to a stale
-active plan, which is a separate scenario/driver-context defect rather than a
-reason to weaken the one repetition mechanism. Child completion remains a
-separate driver-phase contract because `delegate!` resolves the child ID rather
-than synchronously awaiting its report.
+bound. That root timed out without delegating because its rendered plan context
+marked the current request next-ready while agent-facing `plan/position` and
+`plan/tree` returned an older active step. This separate plan-projection
+consistency defect must make both interfaces derive the same current-run cause
+step without demoting unrelated active work; it is not a reason to weaken the
+one repetition mechanism. Child completion remains a separate driver-phase
+contract because `delegate!` resolves the child ID rather than synchronously
+awaiting its report.
 
 The gate now also exercises the real timer rather than only the `due-at`
 arithmetic. With a 1,000 ms moving settle edge and 20 ms maximum latency, a

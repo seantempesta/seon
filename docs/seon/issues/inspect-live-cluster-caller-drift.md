@@ -226,6 +226,11 @@ separate container-internal topology.
   database boundaries. No arbitrary writer form or direct cluster-directory
   blob read remains in an accepted live path, and missing native Inspect logs
   fail evidence finalization rather than being silently ignored.
+- For one current run, the rendered plan block and agent-facing `plan/position`
+  and `plan/tree` functions derive the same current-run cause step. A new
+  unanswered request cannot render as next-ready while those functions return
+  an older active step; unrelated active plan work remains active rather than
+  being globally demoted.
 
 ## Implemented boundary
 
@@ -307,10 +312,17 @@ scenario emitted position, position, full-tree, active-plan status, and position
 reads across six turns in 36,456 ms and timed out rather than closing at the
 three-turn repetition bound. Distinct observations therefore remain useful
 while identical polling stays bounded. The root still did not delegate because
-its attention remained on a stale active plan; that is scenario/driver-context
-evidence, not a defect in repetition accounting. The child-delivery scenario
-also remains separate because `delegate!` resolves a child ID rather than
-synchronously awaiting the child's report.
+two first-party plan interfaces disagreed about the current run. The rendered
+plan context marked request `njij...` as `→ next ready` and explicitly showed
+the current user message as new and unanswered, while agent-facing
+`(plan/position {})` returned stale active step `kjrg...`; `(plan/tree ...)`
+then reinforced that older anchor. This is a plan-projection consistency defect,
+not merely model attention and not a defect in repetition accounting. The
+current-run-aware plan block and agent-facing plan functions must derive the
+same cause step for the current run without demoting unrelated active work or
+adding an ambient-plan abstraction. The child-delivery scenario also remains
+separate because `delegate!` resolves a child ID rather than synchronously
+awaiting the child's report.
 
 The same controlled branch also reproduced the one-call release race with the
 writer's exact `database-in-use` response. Pod containment completed cleanly
