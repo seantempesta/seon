@@ -49,6 +49,17 @@ contract: it still installs fixed attributes plus analyzer-derived
 `:seon.fn/read-attrs`, so helper-indirected reads remain invisible to an open
 page until the general reactive-read owner replaces that declared gate.
 
+`seon.reactive` now implements the general registered-read lifecycle. Each
+registration owns one Datahike writer interest, one active computation, and at
+most one newest pending database value. Independent registrations start
+without awaiting one another; configured settle and maximum latency bound
+progress; plan replacement uses the listener acknowledgement database value
+to close the evaluation race; Clojure `=` suppresses established-consumer
+notifications; a fresh consumer receives the current value; and the final
+consumer releases its timer, value, database reachability, and writer
+interest. Datastar migration and sustained live/import proof remain the next
+ordered boundary.
+
 Datahike `main` now exposes an execution-aware, source-scoped query dependency
 plan at maintained revision `2e6c7bcf`. It folds the typed parsed query and
 PullSpec representations, resolves scalar `:in` bindings and supplied rules,
@@ -175,7 +186,10 @@ Current evidence for maintained Datahike `main` revision `2e6c7bcf`:
 - Seon writer protocol and committed-interest gate: 25 tests, 128 assertions,
   zero failures; and
 - Seon remote database plus execution-child capture gates: 51 tests, 225
-  assertions, zero failures.
+  assertions, zero failures;
+- general reactive lifecycle gate: 5 tests, 22 assertions, zero failures; and
+- writer branch-relative evidence gate: 11 tests, 67 assertions, zero
+  failures.
 
 Exit: each known stale-result case fails for the intended reason before its
 implementation changes, while the imported upstream suite still establishes

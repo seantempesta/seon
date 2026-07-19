@@ -2197,12 +2197,18 @@
     :all
     (into (or left #{}) right)))
 
+(defn- same-live-branch?
+  [left right]
+  (= (select-keys left [:db-name :store-id :as-of :since :history])
+     (select-keys right [:db-name :store-id :as-of :since :history])))
+
 (defn- evidence-dependencies [request]
   (reduce
    (fn [dependencies evidence]
-     (when-not (= (:seon.db/db request) (:seon.db/db evidence))
+     (when-not (same-live-branch? (:seon.db/db request)
+                                  (:seon.db/db evidence))
        (throw
-        (ex-info "Read evidence must describe the listener database value."
+        (ex-info "Read evidence must describe the listener database branch."
                  {::failure-kind protocol/protocol-error
                   ::protocol/request-id (::protocol/request-id request)
                   :seon.db/db (:seon.db/db request)

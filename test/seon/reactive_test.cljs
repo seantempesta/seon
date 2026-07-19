@@ -1,0 +1,364 @@
+(ns seon.reactive-test
+  (:require
+   [cljs.test :refer [async deftest is]]
+   [seon.db :as db]
+   [seon.reactive :as reactive]))
+
+(def ^:private database
+  {:db-name "reactive"
+   :store-id [#uuid "10000000-0000-0000-0000-000000000000" :db]
+   :t 536870913
+   :as-of nil
+   :since nil
+   :history false
+   :datahike/commit-id #uuid "10000000-0000-0000-0000-000000000001"})
+
+(defn- at-t [t]
+  (assoc database :t t :datahike/commit-id (random-uuid)))
+
+(defn- evidence [value]
+  [{::db/db value
+    ::db/source-argument-position 0
+    :datahike.read/dependency-plan
+    {:datahike.query.dependency/sources
+     [{:datahike.query.source/symbol '$
+       :datahike.query.source/argument-position 0
+       :datahike.query.source/attributes #{:example/value}}]}}])
+
+(defn- next-turn []
+  (js/Promise. (fn [resolve _] (js/setTimeout resolve 5))))
+
+(deftest maximum-latency-bounds-a-moving-settle-edge
+  (let [prior @@#'reactive/!policy]
+    (try
+      (reactive/configure!
+       {:seon.config/reactive-settle-ms 1000
+        :seon.config/reactive-structural-settle-ms 1000
+        :seon.config/reactive-max-latency-ms 20})
+      (is (= 120
+             (@#'reactive/due-at
+              {::reactive/dirty-at 100
+               ::reactive/pending-settle-ms 1000}
+              500))
+          "continuous transactions cannot postpone demanded progress")
+      (finally
+        (reactive/configure! prior)))))
+
+(deftest registration-delivers-first-suppresses-equal-and-releases
+  (async done
+    (let [original-db db/db
+          original-listen db/listen!
+          original-unlisten db/unlisten!
+          head (atom database)
+          listens (atom [])
+          unlistens (atom [])
+          computes (atom [])
+          current-value (atom :same)
+          first-values (atom [])
+          second-values (atom [])
+          compute
+          (fn [value]
+            (swap! computes conj value)
+            (js/Promise.resolve
+             {::db/value @current-value
+              ::db/read-evidence (evidence value)}))]
+      (set! db/db (fn ([] (js/Promise.resolve @head))
+                    ([_] (js/Promise.resolve @head))))
+      (set! db/listen!
+            (fn
+              ([request]
+               (swap! listens conj request)
+               (js/Promise.resolve (::db/key request)))
+              ([key handler]
+               (db/listen! {::db/key key ::db/handler handler}))
+              ([value key handler]
+               (db/listen! {::db/db value ::db/key key
+                            ::db/handler handler}))))
+      (set! db/unlisten!
+            (fn [request]
+              (swap! unlistens conj request)
+              (js/Promise.resolve true)))
+      (reactive/configure!
+       {:seon.config/reactive-settle-ms 0
+        :seon.config/reactive-structural-settle-ms 0
+        :seon.config/reactive-max-latency-ms 20})
+      (-> (reactive/observe!
+           {::reactive/key :example
+            ::reactive/consumer-key :first
+            ::reactive/compute compute
+            ::reactive/notify #(swap! first-values conj %)})
+          (.then
+           (fn [consumer]
+             (is (= :first consumer))
+             (is (= [:same] @first-values)
+                 "a fresh consumer receives the established value")
+             (reactive/observe!
+              {::reactive/key :example
+               ::reactive/consumer-key :second
+               ::reactive/compute compute
+               ::reactive/notify #(swap! second-values conj %)})))
+          (.then
+           (fn [_]
+             (is (= [:same] @second-values)
+                 "a later consumer receives the current value immediately")
+             (next-turn)))
+          (.then
+           (fn [_]
+             (is (= :all (::db/dependency-plan (first @listens))))
+             (is (= (evidence database)
+                    (::db/read-evidence (second @listens)))
+                 "the actual read evidence atomically replaces cold :all")
+             (let [next-db (at-t 536870914)]
+               (reset! head next-db)
+               ((::db/handler (second @listens)) {:db-after next-db})
+               (next-turn))))
+          (.then
+           (fn [_]
+             (is (= 2 (count @computes)))
+             (is (= [:same] @first-values))
+             (is (= [:same] @second-values)
+                 "Clojure equality suppresses established notifications")
+             (reset! current-value :changed)
+             (let [next-db (at-t 536870915)]
+               (reset! head next-db)
+               ((::db/handler (last @listens)) {:db-after next-db})
+               (next-turn))))
+          (.then
+           (fn [_]
+             (is (= [:same :changed] @first-values))
+             (is (= [:same :changed] @second-values))
+             (reactive/unobserve!
+              {::reactive/key :example
+               ::reactive/consumer-key :first})))
+          (.then
+           (fn [_]
+             (is (= 1 (::reactive/registration-count
+                       (reactive/measurements))))
+             (reactive/unobserve!
+              {::reactive/key :example
+               ::reactive/consumer-key :second})))
+          (.then
+           (fn [_]
+             (is (= {::reactive/registration-count 0
+                     ::reactive/active-count 0
+                     ::reactive/pending-count 0
+                     ::reactive/timer-count 0
+                     ::reactive/consumer-count 0}
+                    (reactive/measurements)))
+             (is (= [{::db/key [::reactive/registration :example]}]
+                    @unlistens))))
+          (.catch (fn [exception] (is false (str exception))))
+          (.finally
+           (fn []
+             (set! db/db original-db)
+             (set! db/listen! original-listen)
+             (set! db/unlisten! original-unlisten)
+             (reset! @#'reactive/!runtime
+                     {::reactive/registrations {}})
+             (done)))))))
+
+(deftest active-computation-retains-only-the-newest-pending-database
+  (async done
+    (let [original-db db/db
+          original-listen db/listen!
+          original-unlisten db/unlisten!
+          head (atom database)
+          listens (atom [])
+          computed-ts (atom [])
+          delivered-ts (atom [])
+          resolve-slow (atom nil)
+          envelope (fn [value]
+                     {::db/value (:t value)
+                      ::db/read-evidence (evidence value)})
+          compute
+          (fn [value]
+            (swap! computed-ts conj (:t value))
+            (if (= 536870914 (:t value))
+              (js/Promise. (fn [resolve _] (reset! resolve-slow resolve)))
+              (js/Promise.resolve (envelope value))))]
+      (set! db/db (fn ([] (js/Promise.resolve @head))
+                    ([_] (js/Promise.resolve @head))))
+      (set! db/listen!
+            (fn
+              ([request]
+               (swap! listens conj request)
+               (js/Promise.resolve (::db/key request)))
+              ([key handler]
+               (db/listen! {::db/key key ::db/handler handler}))
+              ([value key handler]
+               (db/listen! {::db/db value ::db/key key
+                            ::db/handler handler}))))
+      (set! db/unlisten! (fn [_] (js/Promise.resolve true)))
+      (reactive/configure!
+       {:seon.config/reactive-settle-ms 0
+        :seon.config/reactive-structural-settle-ms 0
+        :seon.config/reactive-max-latency-ms 20})
+      (-> (reactive/observe!
+           {::reactive/key :newest
+            ::reactive/consumer-key :consumer
+            ::reactive/compute compute
+            ::reactive/notify #(swap! delivered-ts conj %)})
+          (.then (fn [_] (next-turn)))
+          (.then
+           (fn [_]
+             (let [next-db (at-t 536870914)]
+               (reset! head next-db)
+               ((::db/handler (last @listens)) {:db-after next-db})
+               (next-turn))))
+          (.then
+           (fn [_]
+             (is (= [536870913 536870914] @computed-ts))
+             (is (fn? @resolve-slow))
+             (doseq [t [536870915 536870916]]
+               (let [next-db (at-t t)]
+                 (reset! head next-db)
+                 ((::db/handler (last @listens)) {:db-after next-db})))
+             (is (= 1 (::reactive/pending-count
+                       (reactive/measurements))))
+             (@resolve-slow (envelope (at-t 536870914)))
+             (next-turn)))
+          (.then
+           (fn [_]
+             (is (= [536870913 536870914 536870916] @computed-ts)
+                 "the obsolete middle database value never computes")
+             (is (= [536870913 536870914 536870916] @delivered-ts))
+             (is (= 0 (::reactive/pending-count
+                       (reactive/measurements))))
+             (reactive/unobserve!
+              {::reactive/key :newest
+               ::reactive/consumer-key :consumer})))
+          (.catch (fn [exception] (is false (str exception))))
+          (.finally
+           (fn []
+             (set! db/db original-db)
+             (set! db/listen! original-listen)
+             (set! db/unlisten! original-unlisten)
+             (reset! @#'reactive/!runtime
+                     {::reactive/registrations {}})
+             (done)))))))
+
+(deftest plan-replacement-acknowledgement-closes-the-render-race
+  (async done
+    (let [original-db db/db
+          original-listen db/listen!
+          original-unlisten db/unlisten!
+          head (atom database)
+          listen-count (atom 0)
+          computed-ts (atom [])
+          compute
+          (fn [value]
+            (swap! computed-ts conj (:t value))
+            (js/Promise.resolve
+             {::db/value (:t value)
+              ::db/read-evidence (evidence value)}))]
+      (set! db/db (fn ([] (js/Promise.resolve @head))
+                    ([_] (js/Promise.resolve @head))))
+      (set! db/listen!
+            (fn
+              ([request]
+               (when (= 2 (swap! listen-count inc))
+                 ;; This commit lands after the initial read but before the
+                 ;; newly discovered plan is acknowledged.
+                 (reset! head (at-t 536870914)))
+               (js/Promise.resolve (::db/key request)))
+              ([key handler]
+               (db/listen! {::db/key key ::db/handler handler}))
+              ([value key handler]
+               (db/listen! {::db/db value ::db/key key
+                            ::db/handler handler}))))
+      (set! db/unlisten! (fn [_] (js/Promise.resolve true)))
+      (reactive/configure!
+       {:seon.config/reactive-settle-ms 0
+        :seon.config/reactive-structural-settle-ms 0
+        :seon.config/reactive-max-latency-ms 20})
+      (-> (reactive/observe!
+           {::reactive/key :replacement
+            ::reactive/consumer-key :consumer
+            ::reactive/compute compute
+            ::reactive/notify (fn [_])})
+          (.then (fn [_] (next-turn)))
+          (.then
+           (fn [_]
+             (is (= [536870913 536870914] @computed-ts)
+                 "the acknowledgement advances work missed during evaluation")
+             (reactive/unobserve!
+              {::reactive/key :replacement
+               ::reactive/consumer-key :consumer})))
+          (.catch (fn [exception] (is false (str exception))))
+          (.finally
+           (fn []
+             (set! db/db original-db)
+             (set! db/listen! original-listen)
+             (set! db/unlisten! original-unlisten)
+             (reset! @#'reactive/!runtime
+                     {::reactive/registrations {}})
+             (done)))))))
+
+(deftest independent-registrations-start-without-awaiting-one-another
+  (async done
+    (let [original-db db/db
+          original-listen db/listen!
+          original-unlisten db/unlisten!
+          started (atom #{})
+          resolvers (atom {})
+          compute
+          (fn [key]
+            (fn [value]
+              (swap! started conj key)
+              (js/Promise.
+               (fn [resolve _]
+                 (swap! resolvers assoc key
+                        #(resolve {::db/value key
+                                   ::db/read-evidence (evidence value)}))))))]
+      (set! db/db (fn ([] (js/Promise.resolve database))
+                    ([_] (js/Promise.resolve database))))
+      (set! db/listen!
+            (fn
+              ([request] (js/Promise.resolve (::db/key request)))
+              ([key handler]
+               (db/listen! {::db/key key ::db/handler handler}))
+              ([value key handler]
+               (db/listen! {::db/db value ::db/key key
+                            ::db/handler handler}))))
+      (set! db/unlisten! (fn [_] (js/Promise.resolve true)))
+      (reactive/configure!
+       {:seon.config/reactive-settle-ms 0
+        :seon.config/reactive-structural-settle-ms 0
+        :seon.config/reactive-max-latency-ms 20})
+      (let [observations
+            [(reactive/observe!
+              {::reactive/key :left
+               ::reactive/consumer-key :consumer
+               ::reactive/compute (compute :left)
+               ::reactive/notify (fn [_])})
+             (reactive/observe!
+              {::reactive/key :right
+               ::reactive/consumer-key :consumer
+               ::reactive/compute (compute :right)
+               ::reactive/notify (fn [_])})]]
+        (-> (next-turn)
+            (.then
+             (fn [_]
+               (is (= #{:left :right} @started)
+                   "dependency-ready computations overlap")
+               ((:left @resolvers))
+               ((:right @resolvers))
+               (js/Promise.all (clj->js observations))))
+            (.then
+             (fn [_]
+               (js/Promise.all
+                #js [(reactive/unobserve!
+                      {::reactive/key :left
+                       ::reactive/consumer-key :consumer})
+                     (reactive/unobserve!
+                      {::reactive/key :right
+                       ::reactive/consumer-key :consumer})])))
+            (.catch (fn [exception] (is false (str exception))))
+            (.finally
+             (fn []
+               (set! db/db original-db)
+               (set! db/listen! original-listen)
+               (set! db/unlisten! original-unlisten)
+               (reset! @#'reactive/!runtime
+                       {::reactive/registrations {}})
+               (done))))))))

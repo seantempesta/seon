@@ -589,7 +589,9 @@
         (#'writer/listen-interest
          (protocol/listen-request
           {::protocol/request-id "evidence/listen"
-           :seon.db/db database
+           :seon.db/db (assoc database
+                              :t 2
+                              :datahike/commit-id (random-uuid))
            :seon.db/read-evidence
            [{:seon.db/db database
              :seon.db/source-argument-position 0
@@ -610,10 +612,12 @@
                   :since nil
                   :history false
                   :datahike/commit-id (random-uuid)}
-        other (assoc database :t 2 :datahike/commit-id (random-uuid))]
+        other (assoc database
+                     :store-id [(random-uuid) :other]
+                     :datahike/commit-id (random-uuid))]
     (is (thrown-with-msg?
          clojure.lang.ExceptionInfo
-         #"must describe the listener database value"
+         #"must describe the listener database branch"
          (#'writer/listen-interest
           (protocol/listen-request
            {::protocol/request-id "evidence/mismatch"

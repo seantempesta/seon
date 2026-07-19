@@ -19,6 +19,7 @@ existing one needs strengthening IN PLACE.
 | Mechanism | The one owner | Never |
 |---|---|---|
 | DB access | `seon.db` (sole API; the JVM authority owns indexed reads and writes) | touch `datahike.api` outside `src/seon/db/` |
+| Reactive reads | `seon.reactive` owns registration, one active computation, newest pending database value, writer interest replacement, equality suppression, and final-consumer release | a renderer-local transaction listener, dependency parser, recompute queue, or equality cache |
 | Schema | `seon.schema/register!` (auto-derives datahike schema) | hand-written datahike schema, inline duplicated shapes |
 | Context unit | `:seon.agent.ctx/block` + seed-copy + `install!`/`remove!` | a second block set, render-merge, a provider/catalog |
 | Rendering | `seon.render` — one guarded walker, ai + html views | a second projection path; renders are NEVER stored |
