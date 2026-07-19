@@ -805,14 +805,20 @@
 
 (def ^:private ai-eval-selector
   '[:db/id :seon.eval/id :seon.eval/at
+    :seon.eval/status
     :seon.eval/source :seon.eval/narration
     :seon.eval/output :seon.eval/ok? :seon.eval/duration-ms
     :seon.eval/result-edn :seon.eval/error
     :seon.eval/error-data :seon.eval/ns
-    :seon.render/full?])
+    :seon.render/full?
+    {:seon.runtime.recovery/_eval
+     [:seon.runtime.recovery/id
+      :seon.runtime.recovery/detail
+      {:seon.runtime.recovery/diagnostic-blob [:my.blob/hash]}]}])
 
 (def ^:private html-eval-selector
   '[:db/id :seon.eval/id :seon.eval/at
+    :seon.eval/status
     :seon.eval/narration
     :seon.eval/ok? :seon.eval/duration-ms :seon.eval/ns])
 

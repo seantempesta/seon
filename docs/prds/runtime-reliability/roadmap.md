@@ -158,12 +158,38 @@ all emitted `datastar-patch-elements`. The remaining browser boundary is the
 complete control/validation/read-back matrix, gzip remote-mode proof, shared
 render computation, and slow-client isolation.
 
+The deterministic namespace browser cut now also passes against the fused
+default database. Root created `dirty-places-sniff` for
+`:my.agents.browser-resident` with one initial message; the live root view
+advanced from four to five agents and showed its running state without reload.
+The JVM database value proved the exact namespace ref and one root-to-resident
+message. A second form submission to the same namespace retained the same five
+agents and immutable ID and committed exactly one second message. The resident
+later changed from running to paused on its open page. DeepSeek did not follow
+the trivial reply instruction and was paused after repeated turns, preserving
+the distinction between green product mechanics and the still-red live Inspect
+model-trajectory boundary.
+
 The current-source complete local correctness checkpoint now passes CLJS 1,179
 tests/5,254 assertions, JVM writer 222/1,836, operator 281/1,583, and offline
 Inspect 521 tests with eight environment-gated skips. The first writer run
 removed two stale v10 listener assumptions rather than restoring implicit
 broadcasts. The first Inspect run removed one retired database wrapper fixture
 and retained the solver's fail-closed model-transport admission.
+
+The current recovery/browser boundary now distinguishes authored configuration
+from runtime-loader failure. Selecting a missing authored canvas function is an
+agent error with exact repair guidance, and `my.canvas/show!` refuses to persist
+that selection; a function present in the database program but absent from the
+prepared child remains a core fault. The same live drive found that an outer
+instrumentation/orchestration wrapper discarded retained child-exit evidence,
+preventing the recovery transaction. The turn boundary now preserves the
+committed turn ID and nested process evidence. Interrupted transcript rows
+derive the recovery ID, detail, and diagnostic blob through the existing eval
+ref, explain discarded process-local values, and state that current functions,
+schemas, and tests reload in the fresh child. Focused proof passes 80 tests/318
+assertions; deliberate exact-artifact child-exit and repeated-crash live proof
+is the next gate.
 
 As of 2026-07-18, one JVM writer has passed the complete autonomous sibling
 cluster lifecycle: fresh initialization, distinct database values and store

@@ -745,12 +745,18 @@
         (catch :default exception
           (js/Promise.resolve
            (selected-call-error function-symbol exception)))))
-    (let [exception
+    (let [program-function?
+          (contains? (get-in @state [::program ::source-by-symbol] {})
+                     function-symbol)
+          fault (if program-function?
+                  :core
+                  (error/fault-for function-symbol))
+          exception
           (ex-info "The selected function is not loaded in the execution child."
-                   {:seon.error/kind :core-bug
+                   {:seon.error/kind (if (= :core fault) :core-bug :agent)
                     ::function-symbol function-symbol})]
       (js/Promise.resolve
-       (selected-call-error function-symbol exception :core)))))
+       (selected-call-error function-symbol exception fault)))))
 
 (defn- ^:async invoke-selected!
   "Invoke selected compiled or authored functions inside the active child."

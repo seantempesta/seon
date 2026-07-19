@@ -119,3 +119,22 @@ agent mistake. The missing-function branch now explicitly records `:core`;
 ordinary exceptions thrown by an invoked `my.*` function remain agent faults.
 Focused execution proof passes 30 tests and 118 assertions. Exact child-exit,
 durable-datom, and recovery proof remains required before this issue closes.
+
+The 2026-07-19 browser journey exposed the inverse case. An authored canvas
+still selected `my.graduation.browser/renderer` after an agent successfully
+removed that function from the current database program. That stale authored
+reference is an application error, not evidence that Seon's loader lost a
+published function. The old unconditional missing-runtime branch repeatedly
+recorded `:core` faults and retired each replacement child, obstructing the
+agent's repair door.
+
+`call-selected!` now uses the exact current program already retained by the
+child. A function present in that program but absent from the runtime remains a
+core loader failure. An absent authored function follows the ordinary symbol
+fault classification and returns an agent error. Focused selected-call proof
+passes 1 test and 7 assertions across invoked authored failure, stale authored
+reference, published-but-unloaded authored function, and missing compiled core
+function. A fresh live child rendered the stale canvas as a safe error while
+the Bun pod and JVM writer remained available; the child was then reclaimed.
+The canvas context names the exact missing function and tells the agent to
+define it or select an existing function before removing the old definition.

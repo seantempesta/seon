@@ -603,7 +603,12 @@
 (deftest selected-call-boundary-records-core-but-not-authored-failures
   (async done
     (let [recorded (atom [])
-          state (atom {::execution/authored-symbols #{'my.orders/view}})]
+          state
+          (atom
+           {::execution/authored-symbols #{'my.orders/view}
+            ::execution/program
+            {::execution/source-by-symbol
+             {'my.orders/unloaded "(defn unloaded [] :ok)"}}})]
       (with-redefs [error/record! #(swap! recorded conj %)
                     seval/lookup-value
                     (fn [sym]
@@ -616,17 +621,30 @@
                     ::execution/arguments []})
                   (@#'execution/call-selected!
                    state invocation
+                   {::execution/function-symbol 'my.orders/stale
+                    ::execution/arguments []})
+                  (@#'execution/call-selected!
+                   state invocation
+                   {::execution/function-symbol 'my.orders/unloaded
+                    ::execution/arguments []})
+                  (@#'execution/call-selected!
+                   state invocation
                    {::execution/function-symbol 'seon.missing/core-renderer
                     ::execution/arguments []})])
             (.then
              (fn [results]
                (is (false? (::execution/ok? (aget results 0))))
                (is (false? (::execution/ok? (aget results 1))))
-               (is (= 1 (count @recorded)))
-               (is (= :core (::error/fault (first @recorded))))
-               (is (= 'seon.missing/core-renderer
-                      (get (ex-data (::error/raw (first @recorded)))
-                           ::execution/function-symbol)))
+               (is (false? (::execution/ok? (aget results 2))))
+               (is (false? (::execution/ok? (aget results 3))))
+               (is (= 2 (count @recorded)))
+               (is (every? #(= :core (::error/fault %)) @recorded))
+               (is (= #{'my.orders/unloaded
+                        'seon.missing/core-renderer}
+                      (into #{}
+                            (map #(get (ex-data (::error/raw %))
+                                       ::execution/function-symbol))
+                            @recorded)))
                (done)))
             (.catch
              (fn [exception]

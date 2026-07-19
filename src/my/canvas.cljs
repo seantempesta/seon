@@ -68,6 +68,7 @@
 (schema/register! ::show-request
   [:map
    [::content :seon.render.canvas/content]
+   [:seon.db/db {:optional true} :seon.db/db]
    [:seon.agent/id {:optional true} :string]
    [:seon.eval/ns {:optional true} :keyword]])
 (schema/register! ::show-response :seon.db/transact-response)
@@ -82,16 +83,46 @@
   "Pin literal hiccup or a renderer fn to YOUR canvas.
 
    A bare renderer symbol resolves in the eval's current namespace; an already
-   qualified symbol stays unchanged. `:seon.agent/id` and `:seon.eval/ns` are
-   injected. Omit them in agent code."
+   qualified symbol stays unchanged. A symbol must already identify a current
+   `:seon.fn/sym`; define the function before selecting it. `:seon.agent/id`,
+   `:seon.eval/ns`, and `:seon.db/db` are injected. Omit them in agent code."
   {:malli/schema [:=> [:cat ::show-request] ::show-response]}
-  [{::keys [content] agent-id :seon.agent/id current-ns :seon.eval/ns}]
-  (await
-    (db/transact!
-      {:seon.db/tx-data
-       [{:seon.agent/id agent-id
-         :seon.render.canvas/content
-         (qualify-content content current-ns)}]})))
+  [{::keys [content]
+    database :seon.db/db
+    agent-id :seon.agent/id
+    current-ns :seon.eval/ns}]
+  (let [renderer (qualify-content content current-ns)
+        database (or database (await (db/db)))
+        function-row
+        (when (and (symbol? renderer)
+                   (not (:seon.error/message database)))
+          (await (db/pull database [:seon.fn/sym]
+                          [:seon.fn/sym renderer])))]
+    (cond
+      (:seon.error/message database)
+      database
+
+      (:seon.error/message function-row)
+      function-row
+
+      (and (symbol? renderer) (nil? (:seon.fn/sym function-row)))
+      {:seon.error/message
+       (str "Canvas renderer " renderer
+            " is not a current :seon.fn/sym. Define that exact qualified "
+            "function so it returns Hiccup through my.canvas/view, or select "
+            "an existing function.")
+       :seon.error/kind :agent
+       :seon.error/data
+       {:seon.render.canvas/content renderer
+        :seon.fn/sym renderer}}
+
+      :else
+      (await
+       (db/transact!
+        {:seon.db/db database
+         :seon.db/tx-data
+         [{:seon.agent/id agent-id
+           :seon.render.canvas/content renderer}]})))))
 
 (schema/register! ::canvas-request
   [:map

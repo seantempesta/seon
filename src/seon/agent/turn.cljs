@@ -270,8 +270,29 @@
 
 (defn- execution-child-evidence [value]
   (when (execution-child-retired? value)
-    (let [data (:seon.error/data value)]
-      (if (map? data) data value))))
+    (let [data (:seon.error/data value)
+          nested (when (map? data) (:seon.error/data data))]
+      (cond
+        (and (map? nested)
+             (true? (::execution/child-retired? nested))) nested
+        (map? data) data
+        :else value))))
+
+(defn- turn-failure
+  "Preserve an orchestration failure's committed turn and child evidence."
+  [exception]
+  (let [failure (error/->map exception)
+        data (:seon.error/data failure)
+        child-retired? (execution-child-retired? failure)
+        child-evidence (execution-child-evidence failure)
+        turn-id (or (:seon.agent.turn/id data)
+                    (:seon.agent.turn/id (ex-data exception)))]
+    (cond-> {:seon.agent.turn/status :error
+             :seon.error/data (error/->message exception)}
+      turn-id (assoc :seon.agent.turn/id turn-id)
+      child-retired?
+      (assoc ::execution/child-retired? true
+             :seon.error/data child-evidence))))
 
 (defn ^:async render-prompt
   "Render one agent prompt inside its isolated execution child.
@@ -931,17 +952,8 @@
         ;; Catastrophic turn failure → return the :error shape. State is the
         ;; loop's concern (its finally resets :idle); the turn never touches it.
         ;; A body failure carries the identity already committed by open-turn!.
-        (let [failure-data (ex-data e)
-              turn-id     (:seon.agent.turn/id failure-data)
-              child-retired? (execution-child-retired? failure-data)
-              child-evidence (execution-child-evidence failure-data)]
-          (log id "run-turn! error" (str e))
-          (cond-> {:seon.agent.turn/status :error
-                   :seon.error/data        (str e)}
-            turn-id (assoc :seon.agent.turn/id turn-id)
-            child-retired?
-            (assoc ::execution/child-retired? true
-                   :seon.error/data child-evidence)))))))
+        (log id "run-turn! error" (str e))
+        (turn-failure e)))))
 
 (defn ^:async run-turn!
   "Run one complete turn and convert every outer orchestration failure to data."
@@ -951,5 +963,4 @@
     (await (run-turn-body! input))
     (catch :default exception
       (log id "run-turn! orchestration error" (error/->message exception))
-      {:seon.agent.turn/status :error
-       :seon.error/data (error/->message exception)})))
+      (turn-failure exception))))

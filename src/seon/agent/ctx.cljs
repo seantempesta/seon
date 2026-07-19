@@ -616,6 +616,7 @@
   {:malli/schema [:=> [:catn [::row :map]
                              [::result-unavailable? :boolean]] :string]}
   [{src        :seon.eval/source
+     status     :seon.eval/status
      ok?        :seon.eval/ok?
      res        :seon.eval/result-edn
      out        :seon.eval/output
@@ -624,6 +625,7 @@
      eid        :seon.eval/id
      narr       :seon.eval/narration
      full?      :seon.render/full?
+     recoveries :seon.runtime.recovery/_eval
      ;; CP-3 move 4: the citable RESULT-BODY cap, selected by the eval's AGE
      ;; from the transcript block's `::result-decay` levels — computed by the
      ;; transcript converter (which reads the block) and threaded in here.
@@ -687,6 +689,25 @@
          result-ln
          (cond
            comment-only? nil
+
+           (= :interrupted status)
+           (let [{recovery-id :seon.runtime.recovery/id
+                  detail :seon.runtime.recovery/detail
+                  diagnostic-blob :seon.runtime.recovery/diagnostic-blob}
+                 (first recoveries)
+                 blob-hash (:my.blob/hash diagnostic-blob)]
+             (str result-marker
+                  " ✗ The execution child stopped while this form was running. "
+                  (when detail (str detail ". "))
+                  "Runtime-local result vars and scratch definitions were "
+                  "discarded; their dead result handles are omitted. Committed "
+                  "database facts and program definitions remain. The fresh "
+                  "child reloads the current functions, schemas, and tests. "
+                  "Automatic recovery runs once and stops if the same form "
+                  "crashes again"
+                  (when recovery-id (str "; recovery " recovery-id))
+                  (when blob-hash (str "; evidence blob " blob-hash))
+                  "."))
 
            ok?
            ;; READ-SIDE projection net (#41, D4): a legacy row whose

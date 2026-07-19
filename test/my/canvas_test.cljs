@@ -64,6 +64,89 @@
   (is (= [:h2 "literal"]
          (@#'canvas/qualify-content [:h2 "literal"] :my.orders))))
 
+(deftest show-refuses-a-mistyped-renderer-before-changing-the-canvas
+  (async done
+    (let [original-pull db/pull
+          original-transact db/transact!
+          transacts (atom 0)
+          database {:db-name "test"
+                    :t 42
+                    :as-of nil
+                    :since nil
+                    :history false
+                    :datahike/commit-id
+                    #uuid "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"}]
+      (set! db/pull
+            (fn
+              ([_request] (js/Promise.resolve nil))
+              ([_pattern _ref] (js/Promise.resolve nil))
+              ([_database _pattern _ref] (js/Promise.resolve nil))))
+      (set! db/transact! (fn [& _requests]
+                           (swap! transacts inc)
+                           (js/Promise.resolve nil)))
+      (-> (canvas/show! {:my.canvas/content 'mistyped
+                         :seon.agent/id "agent-1"
+                         :seon.eval/ns :my.orders
+                         :seon.db/db database})
+          (.then
+           (fn [result]
+             (is (= :agent (:seon.error/kind result)))
+             (is (str/includes? (:seon.error/message result)
+                                "my.orders/mistyped"))
+             (is (str/includes? (:seon.error/message result)
+                                "returns Hiccup through my.canvas/view"))
+             (is (zero? @transacts))))
+          (.catch (fn [error] (is false (str error))))
+          (.finally
+           (fn []
+             (set! db/pull original-pull)
+             (set! db/transact! original-transact)
+             (done)))))))
+
+(deftest show-pins-an-existing-renderer-at-the-injected-database-value
+  (async done
+    (let [original-pull db/pull
+          original-transact db/transact!
+          request (atom nil)
+          renderer 'my.orders/view
+          database {:db-name "test"
+                    :t 42
+                    :as-of nil
+                    :since nil
+                    :history false
+                    :datahike/commit-id
+                    #uuid "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"}]
+      (set! db/pull
+            (fn
+              ([_request]
+               (js/Promise.resolve {:seon.fn/sym renderer}))
+              ([_pattern _ref]
+               (js/Promise.resolve {:seon.fn/sym renderer}))
+              ([_database _pattern _ref]
+               (js/Promise.resolve {:seon.fn/sym renderer}))))
+      (set! db/transact! (fn [& values]
+                           (reset! request (first values))
+                           (js/Promise.resolve
+                            {:db-before database
+                             :db-after database
+                             :tx-data [] :tempids {} :tx-meta {}})))
+      (-> (canvas/show! {:my.canvas/content renderer
+                         :seon.agent/id "agent-1"
+                         :seon.eval/ns :my.orders
+                         :seon.db/db database})
+          (.then
+           (fn [_]
+             (is (= database (:seon.db/db @request)))
+             (is (= [{:seon.agent/id "agent-1"
+                      :seon.render.canvas/content renderer}]
+                    (:seon.db/tx-data @request)))))
+          (.catch (fn [error] (is false (str error))))
+          (.finally
+           (fn []
+             (set! db/pull original-pull)
+             (set! db/transact! original-transact)
+             (done)))))))
+
 (deftest state-awaits-the-remote-pull-before-returning-data
   (async done
     (let [original db/pull

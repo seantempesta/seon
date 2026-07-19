@@ -187,14 +187,27 @@
   [{:seon.render/keys [hiccup ai error]
     wired :seon.render.canvas/wired}
    source cap]
-  (let [body-kind (cond
+  (let [missing-function
+        (when (and (= :agent (:seon.error/kind error))
+                   (= "The selected function is not loaded in the execution child."
+                      (:seon.error/message error)))
+          (get-in error [:seon.error/data
+                         :seon.execution/function-symbol]))
+        body-kind (cond
                     (some? error)  :error
                     (some? ai)     :ai
                     (some? hiccup) :hiccup)
         body (cond
                (some? error)
                (str "Render failed; your human sees the fallback card.\n"
-                    "Fix the renderer or pin a working canvas. Cause: "
+                    (if missing-function
+                      (str "The canvas selects " missing-function
+                           ", but that function is absent from the current "
+                           "database program. Define that exact qualified "
+                           "function, or call my.canvas/show! with an existing "
+                           "qualified function or literal hiccup. Define the "
+                           "replacement before removing the old function. Cause: ")
+                      "Fix the renderer or pin a working canvas. Cause: ")
                     (:seon.error/message error) "\n"
                     (pr-str (select-keys error [:seon.error/data
                                                 :seon.error/ex-data]))

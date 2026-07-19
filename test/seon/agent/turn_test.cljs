@@ -197,6 +197,32 @@
              (set! execution.host/invoke-compiled! original)
              (done)))))))
 
+(deftest orchestration-wrapper-preserves-retired-child-recovery-evidence
+  (let [inner
+        (ex-info
+         "The execution child exited before returning a result."
+         {:seon.agent.turn/id "turn-crashed"
+          ::execution/child-retired? true
+          :seon.error/data
+          {::execution/child-retired? true
+           :seon.execution.host/pid 812
+           :seon.execution.host/stderr-tail "native loop"}})
+        wrapper
+        (ex-info ":malli.core/invalid-output"
+                 {:seon.error/kind :seon.error.kind/malli-instrument-output}
+                 inner)
+        result (@#'turn/turn-failure wrapper)]
+    (is (= :error (:seon.agent.turn/status result)))
+    (is (= "turn-crashed" (:seon.agent.turn/id result)))
+    (is (true? (::execution/child-retired? result)))
+    (is (true? (get-in result [:seon.error/data
+                               ::execution/child-retired?])))
+    (is (= 812 (get-in result [:seon.error/data
+                               :seon.execution.host/pid])))
+    (is (= "native loop"
+           (get-in result [:seon.error/data
+                           :seon.execution.host/stderr-tail])))))
+
 (deftest open-turn-stores-the-basis-transaction-and-consumes-native-results
   (async done
     (let [original-allocate db.id/allocate!

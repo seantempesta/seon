@@ -100,6 +100,32 @@
           false)
         "(+ 1 2)")))
 
+(deftest interrupted-eval-row-explains-the-one-fresh-child-recovery
+  (let [rendered
+        (ctx/format-eval-row
+         {:seon.eval/id "interrupted-eval"
+          :seon.eval/status :interrupted
+          :seon.eval/source "(loop [] (recur))"
+          :seon.eval/ok? false
+          :seon.runtime.recovery/_eval
+          [{:seon.runtime.recovery/id "recovery-123"
+            :seon.runtime.recovery/detail "deadline exceeded"
+            :seon.runtime.recovery/diagnostic-blob
+            {:my.blob/hash "sha256-diagnostic"}}]}
+         true)]
+    (is (str/includes? rendered "execution child stopped"))
+    (is (str/includes? rendered "scratch definitions were discarded"))
+    (is (str/includes? rendered "dead result handles are omitted"))
+    (is (str/includes? rendered
+                       "Committed database facts and program definitions remain"))
+    (is (str/includes? rendered
+                       "reloads the current functions, schemas, and tests"))
+    (is (str/includes? rendered "Automatic recovery runs once"))
+    (is (str/includes? rendered "deadline exceeded"))
+    (is (str/includes? rendered "recovery recovery-123"))
+    (is (str/includes? rendered "evidence blob sha256-diagnostic"))
+    (is (not (str/includes? rendered "result/interrupted-eval")))))
+
 (deftest context-transactions-classify-native-database-results
   (is (= {::ctx/ok? false
           ::ctx/error "install! transact failed: writer unavailable"}

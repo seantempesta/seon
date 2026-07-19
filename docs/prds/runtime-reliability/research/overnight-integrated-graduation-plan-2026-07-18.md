@@ -529,7 +529,7 @@ than a special harness runtime or transcript regex.
 
 ### 6. Browser and Datastar graduation
 
-- [ ] Root launches and messages a namespace-targeted agent from the web UI.
+- [x] Root launches and messages a namespace-targeted agent from the web UI.
 - [ ] Verify reactive agent, status, message, plan, canvas, and error changes
   without page reload.
 - [ ] Exercise button, input, select, toggle, validation, rapid submission,
@@ -551,6 +551,22 @@ the acceptance signal. Root, agent, and database server-side clients each
 received `datastar-patch-elements`; browser pages reported no application
 console faults before the intentional restart.
 
+The exact-source deterministic namespace journey now passes B1 and B2. The
+root form created agent `dirty-places-sniff` for
+`:my.agents.browser-resident`, with the requested purpose and initial message;
+the already-open root DOM moved from four to five agents and showed the child
+running without reload. A direct JVM read of the committed database found one
+agent connected to that namespace and one exact message from `root` to that
+same immutable agent ID. Submitting a second unique message through the same
+namespace field retained five agents, retained the same ID, and a later
+database value contained exactly one second message from `root` to that agent.
+The same live page then observed `running` to `paused` through the normal
+lifecycle door without reload. DeepSeek ignored the deliberately trivial
+requested reply and continued taking turns, so the agent was paused; this is
+model-trajectory evidence for section 5, not a browser, namespace, database,
+or Datastar routing failure. The broader reactive/canvas checkbox remains open
+for B4–B12 rather than being inferred from these narrower passes.
+
 The slow-client boundary now passes too. One raw root-feed socket stopped
 reading while 12 ordinary commits produced more than 1.1 MiB of serialized
 events. Bun reported one backpressured write and the application replaced its
@@ -561,6 +577,30 @@ once for all three sockets. Closing the slow socket returned views,
 subscriptions, and pending renders to zero. There is no automatic stale-client
 eviction, but application buffering is bounded to one newest event per blocked
 connection and one blocked client does not delay another.
+
+The crash-recovery/browser cut found two inverse failures and repairs one
+mechanism rather than adding containment. A selected authored canvas function
+that is absent from the current database program is now an agent error with
+the exact missing symbol; the feed renders guidance and the pod/writer remain
+ready. `my.canvas/show!` also refuses to persist a missing function and tells
+the caller to define that exact qualified function returning Hiccup or select
+an existing function. Conversely, a function present in the database program
+but missing after child preparation remains a core loader fault. The live
+`legal-mugs-accept` stale selection rendered the safe error through its normal
+Datastar feed without retiring the pod or writer.
+
+The same drive exposed a recovery regression: the inner turn retained child
+exit evidence, but an outer instrumentation/orchestration exception converted
+it to message-only data, so no recovery anchor committed. The outer boundary
+now preserves the committed turn ID and nested retired-child evidence through
+the one turn failure value. Interrupted transcript rows retain the exact source,
+omit dead result handles, explain which process-local values were discarded,
+state that current functions/schemas/tests reload in the fresh child, and pull
+the recovery ID, concise detail, and diagnostic blob through the existing
+`:seon.runtime.recovery/eval` ref. Focused proof passes 80 tests/318 assertions.
+The next exact-artifact gate is a deliberate child exit proving the recovery
+transaction, one replacement, repeated-crash breaker/root notice, transcript,
+and healthy pod/writer together.
 
 Exit: the real browser journey and server-side gzip client agree on one reactive
 render/feed mechanism.
@@ -663,9 +703,10 @@ to repeat the already-proven five-minute idle-timeout reclamation.
 ## Scheduling clock
 
 - **Ordered spine:** section 5's fixed live Inspect namespace,
-  database-memory, planning,
-  multi-agent, and failure-recovery scenarios. The complete section 4 journey
-  already has database-derived live proof.
+  database-memory, planning, multi-agent, and failure-recovery scenarios. The
+  immediate falsifier is the current-source exact-artifact child exit after the
+  orchestration-wrapper evidence repair. The complete section 4 journey already
+  has database-derived live proof.
 - **Integrated proof:** three namespace-targeted agents exchange database-backed
   messages, reuse and repair one shared program, survive one child replacement
   and one pod restart, and complete from database state.
@@ -676,6 +717,9 @@ to repeat the already-proven five-minute idle-timeout reclamation.
   render fault cut.
 - **Next refill:** after the fixed live Inspect scenarios close, run their
   generated variants and repeated pass thresholds while browser proof advances.
+  After recovery correctness is live-green, compare full current-program
+  namespace loading with existing selective preparation on the same fresh child;
+  keep the simpler eager path only if measured startup/memory remain acceptable.
 - **Final graduation gate:** sections 1–8 are checked against one exact source
   revision, including live Inspect, browser, downstream, package, and measured
   modest-hardware evidence.

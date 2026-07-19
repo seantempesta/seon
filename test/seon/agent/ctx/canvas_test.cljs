@@ -222,6 +222,26 @@
     (is (not (contains? response :seon.db/error)))
     (is (str/includes? (:seon.render/ai response) "renderer failed"))))
 
+(deftest missing-selected-canvas-function-gives-exact-repair-guidance
+  (let [renderer 'my.orders/view
+        wired {::canvas/source ::canvas/derived
+               ::canvas/value renderer}
+        response
+        (@#'canvas-ctx/selected-canvas-response
+         wired
+         {:seon.execution/ok? false
+          :seon.execution/error
+          {:seon.error/message
+           "The selected function is not loaded in the execution child."
+           :seon.error/kind :agent
+           :seon.error/data
+           {:seon.execution/function-symbol renderer}}})
+        text (@#'canvas-ctx/rendered-canvas-text response nil 2000)]
+    (is (str/includes? text "my.orders/view"))
+    (is (str/includes? text "absent from the current database program"))
+    (is (str/includes? text "Define that exact qualified function"))
+    (is (str/includes? text "Define the replacement before removing"))))
+
 (deftest selected-canvas-response-accepts-bare-hiccup
   (let [wired {::canvas/source ::canvas/derived
                ::canvas/value 'my.canvas/view}
