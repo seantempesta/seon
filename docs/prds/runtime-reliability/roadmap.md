@@ -173,6 +173,19 @@ schema-delta installation path must install every attribute in its selector;
 the acceptance proof is a fresh/reopened database plus a successfully rendered
 block, never an omission guard or query workaround.
 
+The exact transaction timeline strengthens that boundary. Cold boot advertised
+ready at 19:27:40 while namespace reads failed from 19:28 through 19:34; hot
+reload installed the four attributes together at basis transaction `536871385`
+at 19:37:34 before reopening the database session. Cold publication and reload
+therefore do not yet derive the same schema. The installed cardinality-many
+`full-source` and `with-tests` attributes also incorrectly inherit
+`:db.unique/identity` from the `:seon.ns/name` value schema; two block entities
+must be able to select the same ordinary namespace symbol. Finally, recording
+the deterministic render core fault repeatedly retriggered the failed
+`:all`-interest owner through its own fault transaction. Graduation requires
+one visible fault, no self-exciting transaction loop, a later unrelated
+transaction repairing the owner, and exact-plan narrowing afterward.
+
 The deterministic namespace browser cut now also passes against the fused
 default database. Root created `dirty-places-sniff` for
 `:my.agents.browser-resident` with one initial message; the live root view
