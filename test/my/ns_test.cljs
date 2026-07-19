@@ -1,9 +1,11 @@
 (ns my.ns-test
-  "The my.ns/functions contract over ordinary program-graph query results."
+  "Program discovery and source-selection contracts for my.ns."
   (:require
     [cljs.test :refer [deftest is async]]
     [clojure.string :as str]
     [my.ns :as my-ns]
+    [seon.agent.ctx :as ctx]
+    [seon.agent.ctx.namespaces :as namespaces]
     [seon.db :as db]
     [seon.repl.internal :as repl-internal]))
 
@@ -89,6 +91,46 @@
 (defn- functions
   [namespace-name]
   (my-ns/functions {:my.ns/ns namespace-name :seon.db/db database}))
+
+(defn- with-selection-results
+  [namespace-rows initial-block body]
+  (let [saved-db db/db
+        saved-current-agent-id db/current-agent-id
+        saved-pull db/pull
+        saved-install ctx/install!
+        block (atom initial-block)
+        installs (atom [])]
+    (set! db/db
+          (fn
+            ([] (js/Promise.resolve database))
+            ([_request] (js/Promise.resolve database))))
+    (set! db/current-agent-id (fn [] "agent-1"))
+    (set! db/pull
+          (fn
+            ([{ref :seon.db/ref dbv :seon.db/db}]
+             (is (= database dbv) "selection reads one database value")
+             (js/Promise.resolve
+              (case (first ref)
+                :seon.ns/name (get namespace-rows (second ref))
+                :seon.agent/id {:seon.agent/ctx [@block]}
+                nil)))
+            ([_pattern _ref]
+             (js/Promise.reject (js/Error. "expected map pull")))
+            ([_database _pattern _ref]
+             (js/Promise.reject (js/Error. "expected map pull")))))
+    (set! ctx/install!
+          (fn [updated]
+            (reset! block updated)
+            (swap! installs conj updated)
+            (js/Promise.resolve {:seon.agent.ctx/ok? true})))
+    (-> (js/Promise.resolve)
+        (.then (fn [] (body block installs)))
+        (.finally
+         (fn []
+           (set! db/db saved-db)
+           (set! db/current-agent-id saved-current-agent-id)
+           (set! db/pull saved-pull)
+           (set! ctx/install! saved-install))))))
 
 (deftest functions-lists-public-fns-as-compact-cards
   (async done
@@ -187,6 +229,79 @@
                 (is (true? ok?) "no functions is success, not an error")
                 (is (= [] (:my.ns/cards result)))
                 (is (= 0 (:my.ns/count result)))
-                (is (str/includes? (:my.ns/hint result) "render-namespace")
+                (is (str/includes? (:my.ns/hint result) "my.ns/full!")
                     "the hint points at the full-namespace drill"))))))
      done)))
+
+(deftest full-and-compact-update-the-one-namespaces-block
+  (async done
+    (let [initial
+          {:seon.agent.ctx/name :namespaces
+           :seon.agent.ctx/priority 20
+           :seon.render/ai 'seon.agent.ctx.namespaces/namespaces-block
+           :seon.agent.ctx.namespaces/full-source ['my.existing]
+           :seon.agent.ctx.namespaces/with-tests ['my.existing]
+           :seon.agent.ctx.namespaces/current-full? false
+           :seon.agent.ctx.namespaces/current-tests? false}]
+      (finish
+       (with-selection-results
+         {'my.demo {:seon.ns/name 'my.demo
+                    :seon.ns/source "(ns my.demo)"}}
+         initial
+         (fn [block installs]
+           (-> (my-ns/full! {:my.ns/ns 'my.demo})
+               (.then
+                (fn [result]
+                  (is (= {:seon.result/ok? true
+                          :my.ns/ns 'my.demo
+                          :my.ns/full? true}
+                         result))
+                  (is (= ['my.demo 'my.existing]
+                         (::namespaces/full-source @block)))
+                  (is (= (dissoc initial ::namespaces/full-source)
+                         (dissoc @block ::namespaces/full-source))
+                      "every other namespace-block dial is preserved")
+                  (my-ns/full! {:my.ns/ns 'my.demo})))
+               (.then
+                (fn [_]
+                  (is (= (first @installs) (second @installs))
+                      "repeating full selection produces the same exact block")
+                  (my-ns/compact! {:my.ns/ns 'my.demo})))
+               (.then
+                (fn [result]
+                  (is (= {:seon.result/ok? true
+                          :my.ns/ns 'my.demo
+                          :my.ns/full? false}
+                         result))
+                  (is (= ['my.existing]
+                         (::namespaces/full-source @block))
+                      "compact reverses only the requested presence"))))))
+       done))))
+
+(deftest source-selection-rejects-unknown-or-stale-namespaces
+  (async done
+    (let [initial
+          {:seon.agent.ctx/name :namespaces
+           :seon.agent.ctx/priority 20
+           :seon.render/ai 'seon.agent.ctx.namespaces/namespaces-block
+           :seon.agent.ctx.namespaces/full-source []}]
+      (finish
+       (with-selection-results
+         {'my.stale {:seon.ns/name 'my.stale}}
+         initial
+         (fn [_block installs]
+           (-> (my-ns/full! {:my.ns/ns 'my.unknown})
+               (.then
+                (fn [unknown]
+                  (is (false? (:seon.result/ok? unknown)))
+                  (is (str/includes? (:my.ns/error unknown)
+                                     "no indexed source"))
+                  (my-ns/compact! {:my.ns/ns 'my.stale})))
+               (.then
+                (fn [stale]
+                  (is (false? (:seon.result/ok? stale)))
+                  (is (str/includes? (:my.ns/error stale)
+                                     "no indexed source"))
+                  (is (empty? @installs)
+                      "invalid selections never replace the block"))))))
+       done))))

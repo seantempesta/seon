@@ -6,6 +6,7 @@
    same compact function-card representation as agent context, keeping source
    parsing and alternate documentation indexes outside this boundary."
   (:require
+    [seon.agent.ctx :as ctx]
     [seon.agent.ctx.namespaces :as ns-cards]
     [seon.db :as db]
     ;; the shared `:seon.result/ok?` discriminator — Core owns it; my.ns
@@ -22,6 +23,7 @@
 (schema/register! ::count :int)
 (schema/register! ::error :string)
 (schema/register! ::hint :string)
+(schema/register! ::full? :boolean)
 (schema/register! ::functions-request
   [:map
    [::ns ::ns]
@@ -34,6 +36,15 @@
    [::count {:optional true} ::count]
    [::error {:optional true} ::error]
    [::hint  {:optional true} ::hint]])
+(schema/register! ::selection-request [:map [::ns ::ns]])
+(schema/register!
+  ::selection-response
+  [:map
+   [:seon.result/ok? :seon.result/ok?]
+   [::ns ::ns]
+   [::full? {:optional true} ::full?]
+   [::error {:optional true} ::error]
+   [::hint {:optional true} ::hint]])
 
 (defn ^{:async true :seon.fn/agent-facing? true} functions
   "List the functions a namespace defines — name, doc, and args.
@@ -45,14 +56,14 @@
    supplied, or the current database when `:seon.db/db` is omitted.
 
      (my.ns/functions {:my.ns/ns 'my.plan})
-     ; ⟹ «map: :seon.result/ok? true, :my.ns/cards [\"fn my.plan/done! […]\" …],
-     ;    :my.ns/count int»
+     ; returns an ok result with compact cards and their count
 
    An unknown namespace returns an ok?-false envelope whose `::hint`
-   carries the query that lists every indexed namespace. To read ONE
-   fn's FULL source afterwards, drill:
-   (seon.agent.ctx/render-namespace {:seon.ns/name 'my.plan
-                                     :seon.ns/member \"done!\"})."
+   carries the query that lists every indexed namespace. To reveal the
+   namespace's complete indexed source in your next context, use:
+   (my.ns/full! {:my.ns/ns 'my.plan})
+   Compact it again when the source is no longer needed:
+   (my.ns/compact! {:my.ns/ns 'my.plan})."
   {:malli/schema [:=> [:cat ::functions-request] ::functions-response]}
   [{ns-name ::ns dbv :seon.db/db}]
   (let [ns-sym ns-name
@@ -104,6 +115,109 @@
                   (empty? cards)
                   (assoc ::hint
                          (str "indexed, but no public schema-complete fns — "
-                              "(seon.agent.ctx/render-namespace "
-                              "{:seon.ns/name " (pr-str ns-sym)
-                              "}) shows the whole namespace.")))))))))))
+                              "(my.ns/full! {:my.ns/ns " (pr-str ns-sym)
+                              "}) reveals its complete source in your next "
+                              "context.")))))))))))
+
+(defn- selection-error
+  [ns-name message]
+  {:seon.result/ok? false
+   ::ns ns-name
+   ::error message})
+
+(defn ^:async ^:private select-source!
+  [ns-name full?]
+  (let [agent-id (db/current-agent-id)]
+    (if-not agent-id
+      (selection-error
+       ns-name
+       "namespace selection requires an agent evaluation context.")
+      (let [database (await (db/db))]
+        (if (:seon.error/message database)
+          (selection-error
+           ns-name (str "namespace selection read failed: "
+                        (:seon.error/message database)))
+          (let [namespace-row
+                (await
+                 (db/pull
+                  {:seon.db/db database
+                   :seon.db/pull-pattern [:seon.ns/name :seon.ns/source]
+                   :seon.db/ref [:seon.ns/name ns-name]}))]
+            (cond
+              (:seon.error/message namespace-row)
+              (selection-error
+               ns-name (str "namespace query failed: "
+                            (:seon.error/message namespace-row)))
+
+              (not (string? (:seon.ns/source namespace-row)))
+              (assoc
+               (selection-error
+                ns-name
+                (str "namespace " ns-name
+                     " has no indexed source to reveal or compact."))
+               ::hint
+               "Use the namespace catalog in context or my.ns/functions on an indexed namespace.")
+
+              :else
+              (let [agent
+                    (await
+                     (db/pull
+                      {:seon.db/db database
+                       :seon.db/pull-pattern '[{:seon.agent/ctx [*]}]
+                       :seon.db/ref [:seon.agent/id agent-id]}))
+                    block
+                    (when-not (:seon.error/message agent)
+                      (some #(when (= :namespaces
+                                      (:seon.agent.ctx/name %))
+                               %)
+                            (ctx/agent-blocks agent)))]
+                (cond
+                  (:seon.error/message agent)
+                  (selection-error
+                   ns-name (str "agent context query failed: "
+                                (:seon.error/message agent)))
+
+                  (nil? block)
+                  (selection-error
+                   ns-name "the agent has no :namespaces context block.")
+
+                  :else
+                  (let [current (set (::ns-cards/full-source block))
+                        selected (cond-> current
+                                   full? (conj ns-name)
+                                   (not full?) (disj ns-name))
+                        updated (assoc block ::ns-cards/full-source
+                                       (vec (sort-by str selected)))
+                        installed (await (ctx/install! updated))]
+                    (if (:seon.agent.ctx/ok? installed)
+                      {:seon.result/ok? true
+                       ::ns ns-name
+                       ::full? full?}
+                      (selection-error
+                       ns-name (str "namespace selection failed: "
+                                    (:seon.agent.ctx/error installed))))))))))))))
+
+(defn ^{:async true :seon.fn/agent-facing? true} full!
+  "Reveal one indexed namespace's complete source in your next context.
+
+   This updates only the existing `:namespaces` context block's exact
+   full-source presence-set and preserves every other namespace display dial.
+   Repeating the same selection is idempotent. An unknown namespace or a stale
+   program row without indexed source returns an error value.
+
+     (my.ns/full! {:my.ns/ns 'my.plan})"
+  {:malli/schema [:=> [:cat ::selection-request] ::selection-response]}
+  [{ns-name ::ns}]
+  (await (select-source! ns-name true)))
+
+(defn ^{:async true :seon.fn/agent-facing? true} compact!
+  "Return one indexed namespace to its compact card in your next context.
+
+   This removes only that namespace from the existing `:namespaces` block's
+   full-source presence-set. The current namespace can still render in full
+   through the block's independent current-namespace dial.
+
+     (my.ns/compact! {:my.ns/ns 'my.plan})"
+  {:malli/schema [:=> [:cat ::selection-request] ::selection-response]}
+  [{ns-name ::ns}]
+  (await (select-source! ns-name false)))
