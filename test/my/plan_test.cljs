@@ -7,6 +7,7 @@
     [my.plan :as plan]
     [my.plan.internal :as internal]
     [seon.db :as db]
+    [seon.db.id :as db.id]
     [seon.db.protocol :as protocol]
     [seon.schema :as schema]))
 
@@ -269,6 +270,122 @@
      :seon.ns/require-edges #{'my.generated.model 'seon.schema}}]
    :seon.repl/namespace-order ['my.generated.model 'my.generated.service]
    :seon.repl/errors []})
+
+(deftest generated-program-publication-no-ops-only-without-a-cause-linked-root
+  (async done
+    (let [original-db db/db
+          original-query db/query
+          original-execute-many db/execute-many
+          original-allocate db.id/allocate!
+          downstream? (atom false)]
+      (set! db/db
+            (fn [& _]
+              (reset! downstream? true)
+              (js/Promise.reject (js/Error. "unexpected current-db read"))))
+      (set! db/query
+            (fn [request]
+              (is (= database (::db/db request)))
+              (js/Promise.resolve nil)))
+      (set! db/execute-many
+            (fn [_]
+              (reset! downstream? true)
+              (js/Promise.reject (js/Error. "unexpected subtree read"))))
+      (set! db.id/allocate!
+            (fn [_]
+              (reset! downstream? true)
+              (js/Promise.reject (js/Error. "unexpected allocation"))))
+      (-> (plan/publish-generated-program!
+           {:seon.agent.run/id "ordinary-run"
+            :seon.agent.turn/id "turn-1"
+            ::db/db database
+            :my.plan/program namespace-projection
+            :my.plan/eval-batch
+            {:seon.eval/ids ["eval-1"]
+             :seon.eval/n-ok 1
+             :seon.eval/n-fail 0}})
+          (.then
+           (fn [result]
+             (is (= {:my.plan/ok? true} result))
+             (is (false? @downstream?))))
+          (.finally
+           (fn []
+             (set! db/db original-db)
+             (set! db/query original-query)
+             (set! db/execute-many original-execute-many)
+             (set! db.id/allocate! original-allocate)))
+          (.then (fn [_] (done)))
+          (.catch (fn [error] (is false (str error)) (done)))))))
+
+(deftest generated-program-publication-reuses-ordered-evals-and-expected-db
+  (async done
+    (let [original-db db/db
+          original-query db/query
+          original-execute-many db/execute-many
+          original-allocate db.id/allocate!
+          allocation-request (atom nil)
+          current-db (assoc database
+                            :t 536870913
+                            :datahike/commit-id
+                            #uuid "00000000-0000-0000-0000-000000000003")
+          current-requests (atom [])
+          success (fn [result]
+                    {::protocol/success? true ::protocol/result result})
+          eval-ids ["eval-model" "eval-service"]]
+      (set! db/db
+            (fn
+              ([]
+               (js/Promise.reject
+                (js/Error. "current DB acquisition must name the database")))
+              ([request]
+               (swap! current-requests conj request)
+               (js/Promise.resolve current-db))))
+      (set! db/query
+            (fn [request]
+              (is (= database (::db/db request)))
+              (js/Promise.resolve "root")))
+      (set! db/execute-many
+            (fn [request]
+              (is (= current-db (::db/db request)))
+              (js/Promise.resolve
+               {::db/results [(success (first rows)) (success [])]})))
+      (set! db.id/allocate!
+            (fn [request]
+              (reset! allocation-request request)
+              (let [ids {:my.plan.namespace/id-0 "model-step"
+                         :my.plan.namespace/id-1 "service-step"}
+                    write ((::db.id/transaction-builder request) ids)]
+                (js/Promise.resolve
+                 {::db.id/ids ids ::db/tx-data (::db/tx-data write)}))))
+      (-> (plan/publish-generated-program!
+           {:seon.agent.run/id "planner-run"
+            :seon.agent.turn/id "turn-1"
+            ::db/db database
+            :my.plan/program namespace-projection
+            :my.plan/eval-batch
+            {:seon.eval/ids eval-ids
+             :seon.eval/n-ok 2
+             :seon.eval/n-fail 0}})
+          (.then
+           (fn [result]
+             (is (true? (:my.plan/ok? result)))
+             (is (= "root" (:my.plan/root result)))
+             (is (= eval-ids (:seon.eval/ids result))
+                 "the publisher returns the evaluator's exact ordered ids")
+             (is (= [{::db/database-name "plan-test"}] @current-requests))
+             (is (= current-db (::db/db @allocation-request)))
+             (is (= current-db
+                    (::db/expected-db
+                     ((::db.id/transaction-builder @allocation-request)
+                      {:my.plan.namespace/id-0 "model-step"
+                       :my.plan.namespace/id-1 "service-step"}))))))
+          (.finally
+           (fn []
+             (set! db/db original-db)
+             (set! db/query original-query)
+             (set! db/execute-many original-execute-many)
+             (set! db.id/allocate! original-allocate)))
+          (.then (fn [_] (done)))
+          (.catch (fn [error] (is false (str error)) (done)))))))
 
 (deftest namespace-dag-compiler-authors-dependency-leaves-and-is-idempotent
   (let [compiled (compile-namespace-dag-with-generated-ids

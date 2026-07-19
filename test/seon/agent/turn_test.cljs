@@ -1,11 +1,14 @@
 (ns seon.agent.turn-test
   (:require
    [cljs.test :refer [async deftest is]]
+   [my.blob :as blob]
+   [my.plan :as plan]
    [seon.agent.turn :as turn]
    [seon.db :as db]
    [seon.db.id :as db.id]
    [seon.execution :as execution]
-   [seon.execution.host :as execution.host]))
+   [seon.execution.host :as execution.host]
+   [seon.repl.internal :as repl-internal]))
 
 (def database
   {:db-name "turn-test"
@@ -27,6 +30,9 @@
    :seon.eval/ns 'my.agent.agent-1})
 
 (def ^:private reply-program (deref #'turn/reply-program))
+(defn- ask-and-eval-reply-promise
+  [& arguments]
+  (apply (deref #'turn/ask-and-eval-reply!) arguments))
 
 (deftest batch-replies-use-the-shared-ordered-program-projection
   (let [program
@@ -58,6 +64,140 @@
            (->> (:seon.repl/eval-entries program)
                 (filter #(= :form (:seon.repl/kind %)))
                 (mapv :seon.repl/source))))))
+
+(deftest planner-handoff-publishes-the-identical-program-and-eval-batch-once
+  (async done
+    (let [original-put blob/put!
+          original-parse repl-internal/parse-program
+          original-eval turn/eval-parsed!
+          original-publish plan/publish-generated-program!
+          parse-calls (atom 0)
+          published (atom nil)
+          program {:seon.repl/eval-entries
+                   [{:seon.repl/kind :form :seon.repl/source "(+ 1 2)"}]
+                   :seon.repl/namespaces []
+                   :seon.repl/namespace-order []
+                   :seon.repl/errors []}
+          batch {:seon.eval/ids ["eval-1"]
+                 :seon.eval/n-ok 1
+                 :seon.eval/n-fail 0}]
+      (set! blob/put!
+            (fn [_]
+              (js/Promise.resolve
+               {:my.blob/ok? false :my.blob/error "test capture omitted"})))
+      (set! repl-internal/parse-program
+            (fn [& _]
+              (swap! parse-calls inc)
+              program))
+      (set! turn/eval-parsed!
+            (fn [_ _ parsed _ _ _]
+              (is (identical? (:seon.repl/eval-entries program) parsed))
+              (js/Promise.resolve batch)))
+      (set! plan/publish-generated-program!
+            (fn [request]
+              (reset! published request)
+              (js/Promise.resolve
+               {:my.plan/ok? true
+                :my.plan/root "root"
+                :my.plan/diff
+                {:my.plan/added 0 :my.plan/dropped 0 :my.plan/updated 0}
+                :my.plan/namespace-ids {}
+                :seon.eval/ids (:seon.eval/ids batch)})))
+      (-> (ask-and-eval-reply-promise
+           {:text "ignored"} "planner" "turn-1" "run-1" false
+           'my.agent.planner database)
+          (.then
+           (fn [result]
+             (is (= 1 (:seon.agent/eval-count result)))
+             (is (= 1 @parse-calls))
+             (is (identical? program (:my.plan/program @published)))
+             (is (identical? batch (:my.plan/eval-batch @published)))
+             (is (= database (::db/db @published)))
+             (is (= "run-1" (:seon.agent.run/id @published)))
+             (is (= "turn-1" (:seon.agent.turn/id @published)))))
+          (.finally
+           (fn []
+             (set! blob/put! original-put)
+             (set! repl-internal/parse-program original-parse)
+             (set! turn/eval-parsed! original-eval)
+             (set! plan/publish-generated-program! original-publish)))
+          (.then (fn [_] (done)))
+          (.catch (fn [error] (is false (str error)) (done)))))))
+
+(deftest planner-publication-failure-closes-the-existing-turn-as-error
+  (async done
+    (let [original-put blob/put!
+          original-parse repl-internal/parse-program
+          original-eval turn/eval-parsed!
+          original-publish plan/publish-generated-program!
+          original-allocate db.id/allocate!
+          original-transact db/transact!
+          original-context db/with-tx-context
+          transactions (atom [])
+          program {:seon.repl/eval-entries []
+                   :seon.repl/namespaces []
+                   :seon.repl/namespace-order []
+                   :seon.repl/errors []}
+          batch {:seon.eval/ids []
+                 :seon.eval/n-ok 0
+                 :seon.eval/n-fail 0}]
+      (set! blob/put!
+            (fn [_]
+              (js/Promise.resolve
+               {:my.blob/ok? false :my.blob/error "test capture omitted"})))
+      (set! repl-internal/parse-program (fn [& _] program))
+      (set! turn/eval-parsed! (fn [& _] (js/Promise.resolve batch)))
+      (set! plan/publish-generated-program!
+            (fn [_]
+              (js/Promise.resolve
+               {:my.plan/ok? false
+                :my.plan/root "root"
+                :my.plan/error "namespace DAG publication failed"})))
+      (set! db.id/allocate!
+            (fn [request]
+              (let [ids {::turn/turn-allocation "turn-failed"}]
+                (js/Promise.resolve
+                 {::db.id/ids ids
+                  ::db/tx-data
+                  (::db/tx-data
+                   ((::db.id/transaction-builder request) ids))}))))
+      (set! db/transact!
+            (fn [& [request]]
+              (swap! transactions conj request)
+              (js/Promise.resolve
+               {:db-before database
+                :db-after (update database :t inc)
+                :tx-data (::db/tx-data request)
+                :tempids {}
+                :tx-meta {}})))
+      (set! db/with-tx-context (fn [_ thunk] (thunk)))
+      (-> (turn/open-turn!
+           {:seon.agent/id "planner"
+            :seon.agent.run/id-of-run "run-1"
+            ::db/db database
+            :seon.agent.turn/prompt-text "planner prompt"}
+           (fn [turn-id]
+             (ask-and-eval-reply-promise
+              {:text "ignored"} "planner" turn-id "run-1" false
+              'my.agent.planner database)))
+          (.then (fn [_] (is false "publication failure must reject the turn body")))
+          (.catch
+           (fn [error]
+             (is (= "namespace DAG publication failed" (.-message error)))
+             (is (= [{:seon.agent.turn/id "turn-failed"
+                      :seon.agent.turn/status :error
+                      :seon.agent.turn/error "namespace DAG publication failed"}]
+                    (::db/tx-data (last @transactions))))))
+          (.finally
+           (fn []
+             (set! blob/put! original-put)
+             (set! repl-internal/parse-program original-parse)
+             (set! turn/eval-parsed! original-eval)
+             (set! plan/publish-generated-program! original-publish)
+             (set! db.id/allocate! original-allocate)
+             (set! db/transact! original-transact)
+             (set! db/with-tx-context original-context)
+             (done)))))))
 
 (deftest prompt-is-the-database-value-pinned-child-result
   (async done

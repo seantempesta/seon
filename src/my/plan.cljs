@@ -200,6 +200,29 @@
 (schema/register! ::diff
   [:map [::added ::added] [::dropped ::dropped] [::updated ::updated]])
 
+(schema/register! ::program :map)
+(schema/register! ::eval-batch :map)
+(schema/register! ::namespace-ids [:map-of :symbol ::id])
+(schema/register! ::publish-generated-program-request
+  [:map {:closed true}
+   [::db/db :seon.db/db]
+   [:seon.agent.run/id ::db.id/compact-value]
+   [:seon.agent.turn/id ::db.id/compact-value]
+   [::program ::program]
+   [::eval-batch ::eval-batch]])
+(schema/register! ::publish-generated-program-response
+  [:or
+   [:map
+    [::ok? [:= true]]
+    [::root {:optional true} ::id]
+    [::diff {:optional true} ::diff]
+    [::namespace-ids {:optional true} ::namespace-ids]
+    [:seon.eval/ids {:optional true} [:vector ::db.id/compact-value]]]
+   [:map
+    [::ok? [:= false]]
+    [::root {:optional true} ::id]
+    [::error ::error]]])
+
 ;; ::tree stays structurally permissive at the boundary — a malformed
 ;; document is EXPECTED input (hand-authored or model edits) and must come
 ;; back as a guiding fail envelope, never an instrumentation throw. The
@@ -340,6 +363,19 @@
     (unfinished ?root)
     (not-join [?root] [?root :my.plan/parent _])])
 
+(def ^:private generated-root-for-run-query
+  '[:find ?root-id .
+    :in $ ?run-id
+    :where
+    [?run :seon.agent.run/id ?run-id]
+    [?run :seon.agent.run/cause ?message]
+    [?message :seon.agent.message/id ?message-id]
+    [?root :my.plan/message ?message]
+    [?root :my.plan/claim ?message-id]
+    [?root :my.plan/goal _]
+    (not-join [?root] [?root :my.plan/parent _])
+    [?root :my.plan/id ?root-id]])
+
 (declare plan-ref-id)
 
 (defn- query-member
@@ -417,6 +453,36 @@
           {:seon.error/message "Plan subtree read failed."
            :seon.error/data response
            :seon.error/kind :core-bug})))))
+
+(defn ^:async ^:private acquire-generated-root-plan-rows
+  "Find a generated planner root at the turn's pinned database value.
+
+   Ordinary turns stop after the indexed cause query. Once applicable, acquire
+   exactly one current value for the named database after eval recording and
+   use that same value for the complete subtree read and fenced write."
+  [{database ::db/db run-id :seon.agent.run/id}]
+  (let [root-id
+        (await
+         (db/query
+          {::db/db database
+           ::db/query generated-root-for-run-query
+           ::db/args [run-id]
+           ::db/max-work 250000
+           ::db/max-results 1
+           ::db/max-result-weight 4096}))]
+    (cond
+      (:seon.error/message root-id) root-id
+      (nil? root-id) {::db/db database ::root nil ::rows []}
+      :else
+      (let [current
+            (await (db/db {::db/database-name (:db-name database)}))]
+        (if (:seon.error/message current)
+          (assoc current ::root root-id)
+          (let [acquired
+                (await (acquire-root-plan-rows {::db/db current} root-id))]
+            (if (:seon.error/message acquired)
+              (assoc acquired ::db/db current ::root root-id)
+              (assoc acquired ::root root-id))))))))
 
 (defn ^:async ^:no-doc generated-root-state
   "Derive stable scheduler state for one generated-code plan root."
@@ -723,6 +789,129 @@
                 (internal/fail
                   (str "plan!: store failed — "
                        (:seon.error/message env)))))))))))
+
+(defn ^:async ^:private block-generated-root!
+  [database root-id message]
+  (let [blocked
+        (await
+         (db/transact!
+          {::db/db database
+           ::db/expected-db database
+           ::db/tx-data
+           [{::id root-id ::status :blocked}]}))]
+    (assoc
+     (internal/fail
+      (str message
+           (when (:seon.error/message blocked)
+             (str " The generation root could not be marked blocked: "
+                  (:seon.error/message blocked)))))
+     ::root root-id)))
+
+(defn ^:async ^:no-doc publish-generated-program!
+  "Publish one planner turn's already-parsed namespace DAG.
+
+   The turn supplies its exact pinned database value, parsed program, and
+   eval-batch result. The pinned value identifies an applicable generated root
+   through the ordinary run cause and assignment message. An absent match is
+   the only no-op. Once matched, this operation acquires one current database
+   value after eval recording, reconciles through `compile-namespace-dag`, and
+   fences the one write against that value. The returned eval ids are the
+   evaluator's existing ordered identities; no result facts are copied."
+  {:malli/schema
+   [:=> [:cat ::publish-generated-program-request]
+    ::publish-generated-program-response]}
+  [{program ::program
+    batch ::eval-batch
+    :as request}]
+  (let [acquired (await (acquire-generated-root-plan-rows request))
+        root-id (::root acquired)
+        database (::db/db acquired)]
+    (cond
+      (:seon.error/message acquired)
+      (if (and root-id database)
+        (await
+         (block-generated-root!
+          database root-id
+          (str "publish-generated-program!: "
+               (:seon.error/message acquired))))
+        (internal/fail
+         (str "publish-generated-program!: "
+              (:seon.error/message acquired))))
+
+      (nil? root-id)
+      {::ok? true}
+
+      (:seon.eval/fenced? batch)
+      (await
+       (block-generated-root!
+        database root-id
+        "publish-generated-program!: the planner eval batch lost its run fence."))
+
+      (or (:seon.error/message batch) (:seon/error batch))
+      (await
+       (block-generated-root!
+        database root-id
+        (str "publish-generated-program!: planner evaluation failed: "
+             (or (:seon.error/message batch)
+                 (get-in batch [:seon/error :seon.error/message])
+                 (pr-str (:seon/error batch))))))
+
+      :else
+      (let [now (js/Date.)
+            preview
+            (internal/compile-namespace-dag
+             (::rows acquired) root-id program {} now)
+            compile-error (::internal/error preview)]
+        (if compile-error
+          (await
+           (block-generated-root!
+            database root-id
+            (str "publish-generated-program!: " compile-error)))
+          (let [allocation-keys (::internal/allocation-keys preview)
+                transaction-data (::internal/transaction-data preview)
+                written
+                (cond
+                  (seq allocation-keys)
+                  (await
+                   (db.id/allocate!
+                    {::db/db database
+                     ::db.id/allocations
+                     (allocation-declarations allocation-keys)
+                     ::db.id/transaction-builder
+                     (fn [ids]
+                       (let [compiled
+                             (internal/compile-namespace-dag
+                              (::rows acquired) root-id program ids now)]
+                         (when-let [error (::internal/error compiled)]
+                           (throw
+                            (ex-info
+                             "namespace DAG changed during allocation"
+                             {:my.plan/error error
+                              :seon.error/kind :core-bug})))
+                         (expected-allocation-write
+                          acquired (::internal/transaction-data compiled))))}))
+
+                  (seq transaction-data)
+                  (await
+                   (db/transact!
+                    (expected-write acquired transaction-data)))
+
+                  :else nil)]
+            (if (:seon.error/message written)
+              (assoc
+               (internal/fail
+                (str "publish-generated-program!: store failed — "
+                     (:seon.error/message written)))
+               ::root root-id)
+              (let [compiled
+                    (internal/compile-namespace-dag
+                     (::rows acquired) root-id program
+                     (or (::db.id/ids written) {}) now)]
+                {::ok? true
+                 ::root root-id
+                 ::diff (::internal/diff compiled)
+                 ::namespace-ids (::internal/namespace-ids compiled)
+                 :seon.eval/ids (vec (:seon.eval/ids batch))}))))))))
 
 (defn ^{:async true :seon.fn/agent-facing? true} active!
   "Mark a plan step `:active`, the one you are working on now.

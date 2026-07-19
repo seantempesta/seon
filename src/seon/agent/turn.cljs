@@ -7,6 +7,7 @@
    and run fencing remain in their established namespaces."
   (:require
     [clojure.string :as str]
+    [my.plan :as plan]
     [seon.ai :as ai]
     [seon.ai.tokens :as tokens]
     [seon.config :as config]
@@ -608,6 +609,20 @@
                        (seq (:seon.repl/errors program))
                        (assoc :seon.repl/errors
                               (:seon.repl/errors program))))
+        publication
+        (when run-id
+          (await
+           (plan/publish-generated-program!
+            {::db/db database
+             :seon.agent.run/id run-id
+             :seon.agent.turn/id id-of-turn
+             :my.plan/program program
+             :my.plan/eval-batch batch})))
+        _          (when (false? (:my.plan/ok? publication))
+                     (throw
+                      (ex-info
+                       (:my.plan/error publication)
+                       publication)))
         _          (when (:seon.error/message batch)
                      (throw (ex-info (:seon.error/message batch) batch)))]
     (cond->
