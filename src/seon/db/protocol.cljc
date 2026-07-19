@@ -95,7 +95,7 @@
 (def unknown-status :seon.db.protocol.status/unknown)
 (def feed-behind-status :seon.db.protocol.status/feed-behind)
 
-(def current-version 10)
+(def current-version 11)
 
 ;; One wire contract must reject the same legal frame on every host. Paging and
 ;; operation-level result bounds remain the preferred way to stay well below it.
@@ -596,7 +596,8 @@
  [:map {:closed true}
   [::operation [:= acquire-database-operation]]
   [::request-id ::request-id]
-  [::database-name ::database-name]])
+  [::database-name ::database-name]
+  [::database-advanced? {:optional true} :boolean]])
 (schema/register!
  ::observe-database-lifecycle-request
  [:map {:closed true}
@@ -925,7 +926,8 @@
  ::acquire-database-request-input
  [:map {:closed true}
   [::request-id ::request-id]
-  [::database-name ::database-name]])
+  [::database-name ::database-name]
+  [::database-advanced? {:optional true} :boolean]])
 (schema/register!
  ::request-id-input
  [:map {:closed true}

@@ -135,7 +135,10 @@
           (is (= "execution" (::execution/shadow-build-id startup)))
           (is (= "tmp/test.req.sock"
                  (get-in startup [::execution/database-selection
-                                  :seon.db/socket-path])))))
+                                  :seon.db/socket-path])))
+          (is (false?
+               (get-in startup [::execution/database-selection
+                                :seon.db/database-advanced?])))))
       (feed! @options (:process child) (ready-message))
       (-> (js/Promise.resolve nil)
           (.then

@@ -73,6 +73,22 @@ source lines in this ledger or the owning successor PRD.
 
 ## Current evidence
 
+- The clarified three-epoch namespace retry exposed a real concurrency fault,
+  not a scorer miss. While sibling agents committed more than 64 transactions,
+  execution child `common-dots-stay` received database-advanced events it did
+  not consume, the writer closed that physical session with
+  `send/session-full`, and the child retained a core write fault before exit.
+  Bun's maintained socket contract confirms that `write` returning zero or a
+  partial count is backpressure, while `-1` means the socket is already closed
+  or shutting down. The writer had treated every database acquisition as a
+  subscription to committed database values. Protocol version 11 now makes
+  that delivery selectable: the pod retains it and execution children decline
+  it because each child begins with one immutable database value and advances
+  through its own transaction reports. A real two-session writer test proves a
+  declined acquisition remains silent across a sibling transaction; the
+  focused writer boundary passes 40 tests/222 assertions and the CLJS session,
+  execution-host, and UDS selection passes 40/164. The fix is not graduated
+  until a fresh three-epoch live run completes without delivery pressure.
 - The first admitted live namespace battery now reaches the real scorer. Native
   log `…fxN7bWkJXsVehcJBqs9K3B.eval` completed all three samples with two
   passes, zero fabrication, and one `NaN` failure after repeated unquoted
@@ -405,6 +421,8 @@ prose is supporting evidence only.
 ### 5. Inspect AI graduation
 
 - [x] Pass the complete offline `src-inspect-ai` tests and oracle liveness proof.
+- [x] Separate ordinary database acquisition from database-advanced delivery;
+  keep the pod subscribed and let execution children decline unconsumed events.
 - [ ] Pass the fixed live namespace and later-turn database-memory scenarios.
 - [ ] Pass generated namespace and database variants without adding scorer
   exceptions for model answers.

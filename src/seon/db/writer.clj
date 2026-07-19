@@ -1665,6 +1665,8 @@
           {::registry/released? false})]
     (when (::registry/released? result)
       (swap! (::acquisitions transport-connection)
+             disj [database-name (::registry/connection-id route)])
+      (swap! (::database-advanced-acquisitions transport-connection)
              disj [database-name (::registry/connection-id route)]))
     (protocol/success
      {::protocol/released? (boolean (::registry/released? result))})))
@@ -2329,7 +2331,8 @@
     (when (and (not @(::closed? transport-connection))
                (not (.get ^java.util.concurrent.atomic.AtomicBoolean
                           (::closing? transport-connection)))
-               (contains? @(::acquisitions transport-connection)
+               (contains? @(::database-advanced-acquisitions
+                            transport-connection)
                           [database-name connection-id]))
       (let [result ((::send! transport-connection) event)
             status (::uds/send-status result)]
@@ -2523,6 +2526,7 @@
    ::closed? (atom false)
    ::closing? (java.util.concurrent.atomic.AtomicBoolean. false)
    ::acquisitions (atom #{})
+   ::database-advanced-acquisitions (atom #{})
    ::interests (atom {})
    ::close! close!
    ::send! send!})
@@ -2787,6 +2791,9 @@
                   ::registry/transport-connection transport-connection})]
             (swap! (::acquisitions transport-connection)
                    conj [database-name (::registry/connection-id result)])
+            (when (not (false? (::protocol/database-advanced? request)))
+              (swap! (::database-advanced-acquisitions transport-connection)
+                     conj [database-name (::registry/connection-id result)]))
             result))
         resolved
         (registry/resolve-connection
@@ -3603,6 +3610,8 @@
                       owned))
                   acquisitions @(::acquisitions transport-connection)]
               (reset! (::acquisitions transport-connection) #{})
+              (reset! (::database-advanced-acquisitions transport-connection)
+                      #{})
               {:requests requests :acquisitions acquisitions})))]
     (doseq [{request-id ::protocol/request-id
              owner ::owner

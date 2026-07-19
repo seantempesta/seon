@@ -327,7 +327,8 @@
      ::execution/database-selection
      (cond-> {:seon.db/socket-path (::launch/request-socket-path writer)
               :seon.db/database-name (::db.protocol/database-name database)
-              :seon.db/backend (::db.protocol/backend database)}
+              :seon.db/backend (::db.protocol/backend database)
+              :seon.db/database-advanced? false}
        (::db.protocol/database-path database)
        (assoc :seon.db/database-path
               (::db.protocol/database-path database))

@@ -45,11 +45,14 @@
    :datahike/commit-id (d/commit-id native)})
 
 (defn- acquire!
-  [channel database-name label]
-  (call! channel
-         (protocol/acquire-database-request
-          {::protocol/request-id (str label "/acquire")
-           ::protocol/database-name database-name})))
+  ([channel database-name label]
+   (acquire! channel database-name label true))
+  ([channel database-name label database-advanced?]
+   (call! channel
+          (protocol/acquire-database-request
+           {::protocol/request-id (str label "/acquire")
+            ::protocol/database-name database-name
+            ::protocol/database-advanced? database-advanced?}))))
 
 (defn- read-next
   [channel]
@@ -79,6 +82,7 @@
          ::writer/closed? (atom false)
          ::writer/closing? (AtomicBoolean. false)
          ::writer/acquisitions (atom #{})
+         ::writer/database-advanced-acquisitions (atom #{})
          ::writer/interests (atom {})
          ::writer/close! #(deliver closed true)
          ::writer/send!
@@ -86,6 +90,62 @@
            (swap! sent conj message)
            {::uds/send-status uds/send-accepted})}]
     connection))
+
+(deftest database-advanced-delivery-requires-explicit-acquisition
+  (let [sent (atom [])
+        closed (promise)
+        connection (fake-transport-connection sent closed)
+        acquisition ["proof" [:proof :branch]]
+        event {::protocol/event protocol/database-advanced-event}]
+    (swap! (::writer/acquisitions connection) conj acquisition)
+    (is (nil? (@#'writer/send-database-event!
+               connection (first acquisition) (second acquisition) event)))
+    (is (empty? @sent))
+    (swap! (::writer/database-advanced-acquisitions connection)
+           conj acquisition)
+    (is (= uds/send-accepted
+           (@#'writer/send-database-event!
+            connection (first acquisition) (second acquisition) event)))
+    (is (= [event] @sent))))
+
+(deftest an-acquisition-can-decline-database-advanced-events
+  (let [database-name (str "writer-no-database-advanced-" (random-uuid))
+        request-path (socket-path "no-database-advanced")
+        server
+        (writer/start!
+         {::writer/dependencies (dependencies)
+          ::writer/database-name database-name
+          ::writer/backend :memory
+          ::writer/selected-processors 3
+          ::writer/request-socket-path request-path})
+        ^SocketChannel quiet (uds/connect! request-path)
+        ^SocketChannel writer-channel (uds/connect! request-path)]
+    (try
+      (let [quiet-acquired (acquire! quiet database-name "quiet" false)
+            writer-acquired (acquire! writer-channel database-name "writer")
+            pending (future
+                      (try
+                        (read-next quiet)
+                        (catch java.nio.channels.AsynchronousCloseException _
+                          ::socket-closed)))
+            transaction
+            (transact!
+             writer-channel (:seon.db/db writer-acquired) "writer/schema"
+             [{:db/ident :quiet-proof/value
+               :db/valueType :db.type/string
+               :db/cardinality :db.cardinality/one}])]
+        (is (= (:seon.db/db quiet-acquired) (:db-before transaction)))
+        (is (= ::no-database-event
+               (deref pending 250 ::no-database-event)))
+        (.close quiet)
+        (is (= ::socket-closed
+               (deref pending 3000 ::read-did-not-finish))))
+      (finally
+        (try (.close quiet) (catch Throwable _))
+        (try (.close writer-channel) (catch Throwable _))
+        (writer/stop! server)
+        (.delete (File. request-path))
+        nil))))
 
 (defn- interest-connection
   [server request-id]

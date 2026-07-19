@@ -150,7 +150,7 @@
         request (protocol/execute-many-request
                  {::protocol/request-id "many-1"
                   ::protocol/members members})]
-    (is (= 10 protocol/current-version))
+    (is (= 11 protocol/current-version))
     (is (protocol/valid-request? request))
     (is (= request (uds/decode (uds/encode request))))
     (is (= [database database database]
@@ -159,7 +159,8 @@
 (deftest database-acquisition-is-closed-correlated-and-transit-stable
   (let [request (protocol/acquire-database-request
                  {::protocol/request-id "acquire/alpha"
-                  ::protocol/database-name "alpha"})
+                  ::protocol/database-name "alpha"
+                  ::protocol/database-advanced? false})
         response (protocol/success
                   {::protocol/request-id "acquire/alpha"
                    ::protocol/database-name "alpha"
@@ -168,6 +169,7 @@
     (is (protocol/valid-request? request))
     (is (protocol/valid-response? response))
     (is (= request (uds/decode (uds/encode request))))
+    (is (false? (::protocol/database-advanced? request)))
     (is (= response (uds/decode (uds/encode response))))
     (is (false? (protocol/valid-request?
                  (assoc request :unexpected/field true)))

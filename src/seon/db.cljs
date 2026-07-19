@@ -49,6 +49,7 @@
 (schema/register! ::datom-patterns :seon.db.protocol/datom-patterns)
 (schema/register! ::socket-path :seon.db.transport.uds/socket-path)
 (schema/register! ::database-name :seon.db.protocol/database-name)
+(schema/register! ::database-advanced? :boolean)
 (schema/register! ::backend :seon.db.protocol/backend)
 (schema/register! ::database-path :seon.db.protocol/database-path)
 (schema/register! ::capabilities :seon.db.protocol/capabilities)
@@ -157,6 +158,7 @@
   [::backend ::backend]
   [::database-path {:optional true} ::database-path]
   [::initialization {:optional true} ::initialization]
+  [::database-advanced? {:optional true} ::database-advanced?]
   [::connection-id {:optional true} :seon.db.branch/connection-id]])
 (schema/register!
  ::open-session-response
@@ -305,7 +307,8 @@
 
 (defn- ^:async ensure-and-acquire!
   [session selection initialization]
-  (let [{::keys [database-name backend database-path connection-id]} selection
+  (let [{::keys [database-name backend database-path connection-id
+                 database-advanced?]} selection
         ensure-response
         (await
          (request-on-session!
@@ -326,7 +329,8 @@
           session
           (protocol/acquire-database-request
            {::protocol/request-id (str (random-uuid))
-            ::protocol/database-name database-name})
+            ::protocol/database-name database-name
+            ::protocol/database-advanced? (not (false? database-advanced?))})
           15000))]
     (when-not (::protocol/success? acquire-response)
       (throw (ex-info "Acquiring the database failed." acquire-response)))

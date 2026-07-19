@@ -185,6 +185,29 @@
            (is false (str "session open rejected: " error "\n" (.-stack error)))
            (done))))))
 
+(deftest open-can-decline-database-advanced-events
+  (async done
+    (-> (with-authority
+          (fn [control]
+            (-> (db/open-session!
+                 {::db/socket-path socket-path
+                  ::db/database-name database-name
+                  ::db/backend :memory
+                  ::db/database-advanced? false})
+                (.then
+                 (fn [_]
+                   (let [request (first
+                                  (operation-requests
+                                   control
+                                   protocol/acquire-database-operation))]
+                     (is (false?
+                          (::protocol/database-advanced? request)))))))))
+        (.then (fn [_] (done)))
+        (.catch
+         (fn [error]
+           (is false (str "session opt-out rejected: " error))
+           (done))))))
+
 (deftest changed-initialization-reuses-session-and-listener-owner
   (async done
     (-> (with-authority

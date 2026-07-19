@@ -88,7 +88,14 @@ of three with zero fabrication, while the miss and 13–23-turn cost trace to
 unquoted Datalog repair loops rather than database transport. The next database
 scenario is blocked by stale scorer-only database wrapper and operation-evidence
 assumptions; [[research/live-inspect-contract-audit-2026-07-19]] records the
-exact producer contract and ordered correction. The real browser/Datastar
+exact producer contract and ordered correction. A clarified retry exposed the
+earlier runtime boundary: execution children inherited the pod's subscription
+to every committed database value, so sibling transaction volume filled one
+idle child's physical-session queue and closed its socket. Protocol version 11
+now separates database acquisition from database-advanced delivery; the pod
+retains delivery and execution children decline it. Real writer and CLJS
+boundary tests pass, but the same three-epoch live run must close the contract
+before the database scorer advances. The real browser/Datastar
 journey is the dependency-ready parallel portfolio; the
 complete live Inspect, browser, package, downstream,
 multi-cluster, and modest-hardware matrix remains the final gate.
