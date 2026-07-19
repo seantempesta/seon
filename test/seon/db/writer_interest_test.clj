@@ -58,14 +58,27 @@
   [channel]
   (uds/read-frame (Channels/newInputStream ^SocketChannel channel)))
 
-(defn- wait-until!
-  [predicate]
-  (let [deadline (+ (System/currentTimeMillis) 3000)]
+(defn- wait-until-ms!
+  [timeout-ms predicate]
+  (let [deadline (+ (System/currentTimeMillis) timeout-ms)]
     (loop []
       (cond
         (predicate) true
         (> (System/currentTimeMillis) deadline) false
         :else (do (Thread/sleep 5) (recur))))))
+
+(defn- wait-until! [predicate]
+  (wait-until-ms! 3000 predicate))
+
+(defn- elapsed-ms [started]
+  (/ (- (System/nanoTime) started) 1000000.0))
+
+(defn- percentile [samples fraction]
+  (nth (vec (sort samples))
+       (dec (long (Math/ceil (* fraction (count samples)))))))
+
+(defn- percentile-95 [samples]
+  (percentile samples 0.95))
 
 (defn- transact!
   [channel database request-id transaction-data]
@@ -514,6 +527,245 @@
       (second-complete! uds/send-accepted))
     (is (= {::writer/pending-order [] ::writer/pending {}}
            @(::writer/event-state connection)))))
+
+(deftest paused-reader-keeps-ten-thousand-commits-bounded
+  (if-not (= "1" (System/getenv "SEON_STRESS"))
+    (is true "set SEON_STRESS=1 to run the bounded paused-reader stress gate")
+    (let [database-name (str "writer-paused-reader-" (random-uuid))
+          request-path (socket-path "paused-reader")
+          server
+          (writer/start!
+           {::writer/dependencies (dependencies)
+            ::writer/database-name database-name
+            ::writer/backend :memory
+            ::writer/selected-processors 3
+            ::writer/request-socket-path request-path})
+          ^SocketChannel listener (uds/connect! request-path)
+          ^SocketChannel healthy (uds/connect! request-path)
+          closed? (atom false)]
+      (try
+        (let [listener-acquired
+              (acquire! listener database-name "paused/listener" false)
+              healthy-acquired
+              (acquire! healthy database-name "paused/healthy" false)
+              schema-report
+              (transact!
+               healthy (:seon.db/db healthy-acquired) "paused/schema"
+               [{:db/ident :paused/id
+                 :db/valueType :db.type/string
+                 :db/cardinality :db.cardinality/one
+                 :db/unique :db.unique/identity}
+                {:db/ident :paused/value
+                 :db/valueType :db.type/long
+                 :db/cardinality :db.cardinality/one}])
+              seed-report
+              (transact!
+               healthy (:db-after schema-report) "paused/seed"
+               [{:paused/id "target" :paused/value 0}])
+              request-id "paused/value-interest"
+              listen-response
+              (call!
+               listener
+               (protocol/listen-request
+                {::protocol/request-id request-id
+                 :seon.db/db (:db-after seed-report)
+                 ::protocol/datom-patterns [{:seon.db/a :paused/value}]}))
+              connection (interest-connection server request-id)
+              query-form
+              '[:find ?value . :in $ ?id
+                :where [?entity :paused/id ?id]
+                       [?entity :paused/value ?value]]
+              query!
+              (fn [database request-suffix]
+                (call!
+                 healthy
+                 (protocol/query-request
+                  {::protocol/request-id (str "paused/query-" request-suffix)
+                   :seon.db/db database
+                   ::protocol/query-form query-form
+                   ::protocol/arguments ["target"]})))
+              result
+              (loop [position 1
+                     database (:db-after seed-report)
+                     transaction-ms []
+                     query-ms []
+                     pending-high-water 0]
+                (if (> position 10000)
+                  {::database database
+                   ::transaction-ms transaction-ms
+                   ::query-ms query-ms
+                   ::pending-high-water pending-high-water}
+                  (let [transaction-start (System/nanoTime)
+                        report
+                        (transact!
+                         healthy database (str "paused/tx-" position)
+                         [{:paused/id "target" :paused/value position}])
+                        transaction-duration (elapsed-ms transaction-start)
+                        checkpoint? (zero? (mod position 100))
+                        query-start (when checkpoint? (System/nanoTime))
+                        query-response
+                        (when checkpoint?
+                          (query! (:db-after report) position))
+                        query-duration
+                        (when checkpoint? (elapsed-ms query-start))
+                        pending-count
+                        (count (::writer/pending
+                                @(::writer/event-state connection)))]
+                    (is (::protocol/success? report)
+                        (str "transaction " position " failed"))
+                    (when checkpoint?
+                      (is (::protocol/success? query-response)
+                          (str "query after transaction " position " failed"))
+                      (is (= position (:datahike.query/result query-response))))
+                    (recur (inc position)
+                           (:db-after report)
+                           (conj transaction-ms transaction-duration)
+                           (cond-> query-ms checkpoint?
+                             (conj query-duration))
+                           (max pending-high-water pending-count)))))
+              final-database (::database result)
+              transaction-ms (::transaction-ms result)
+              query-ms (::query-ms result)
+              pending-high-water (::pending-high-water result)
+              interest
+              (get @(::writer/interests connection) request-id)
+              scope (::writer/scope interest)
+              current-source
+              #(get-in @(::writer/interest-state (::writer/runtime server))
+                       [::writer/by-scope scope ::writer/source])
+              latest-semantic-t
+              (fn []
+                (let [state @(::writer/event-state connection)]
+                  (apply max 0
+                         (keep #(get-in % [::writer/event :db-after :t])
+                               (cond-> (vals (::writer/pending state))
+                                 (::writer/in-flight state)
+                                 (conj (::writer/in-flight state)))))))
+              delivery-wait-start (System/nanoTime)
+              delivery-converged?
+              (wait-until-ms!
+               60000
+               #(and (zero? (:datahike.committed-report/queued
+                             (committed-report/evidence (current-source))))
+                     (= (:t final-database) (latest-semantic-t))))
+              delivery-wait-ms (elapsed-ms delivery-wait-start)
+              source-evidence (committed-report/evidence (current-source))
+              readiness-evidence (committed-report/readiness-evidence)
+              executor-evidence
+              (executor/evidence (::writer/executor (::writer/runtime server)))
+              semantic-state @(::writer/event-state connection)
+              transport-session
+              (some
+               (fn [session]
+                 (when (identical? connection @(::uds/owner session))
+                   session))
+               (vals @(::uds/connections (::writer/request-server server))))
+              physical-state (some-> transport-session ::uds/event-state deref)
+              stress-evidence
+              {::transaction-p50-ms (percentile transaction-ms 0.50)
+               ::transaction-p95-ms (percentile transaction-ms 0.95)
+               ::transaction-p99-ms (percentile transaction-ms 0.99)
+               ::transaction-max-ms (apply max transaction-ms)
+               ::query-p50-ms (percentile query-ms 0.50)
+               ::query-p95-ms (percentile query-ms 0.95)
+               ::query-p99-ms (percentile query-ms 0.99)
+               ::query-max-ms (apply max query-ms)
+               ::pending-high-water pending-high-water
+               ::delivery-converged? delivery-converged?
+               ::delivery-wait-ms delivery-wait-ms
+               ::source-evidence source-evidence
+               ::readiness-evidence readiness-evidence
+               ::executor-evidence executor-evidence
+               ::semantic-pending-count
+               (count (::writer/pending semantic-state))
+               ::semantic-pending-order (::writer/pending-order semantic-state)
+               ::semantic-in-flight? (boolean (::writer/in-flight
+                                               semantic-state))
+               ::latest-semantic-t (latest-semantic-t)
+               ::physical-phase (::uds/phase physical-state)
+               ::physical-frame-remaining
+               (some-> physical-state ::uds/frame .remaining)
+               ::physical-queued-output-bytes
+               (some-> transport-session ::uds/queued-output-bytes deref)}
+              _ (println (pr-str stress-evidence))
+              resumed-progress (atom {::event-count 0})
+              resumed
+              (future
+                (loop [event-count 0]
+                  (let [event (read-next listener)]
+                    (reset! resumed-progress
+                            {::event-count (inc event-count)
+                             ::event-type (::protocol/event event)
+                             ::event-t (get-in event [:db-after :t])})
+                    (if (= (:t final-database)
+                           (get-in event [:db-after :t]))
+                      {::event event ::event-count (inc event-count)}
+                      (recur (inc event-count))))))
+              resumed-result (deref resumed 30000 ::resume-timed-out)
+              resume-physical-state
+              (some-> transport-session ::uds/event-state deref)
+              resume-evidence
+              (merge @resumed-progress
+                     {::resume-result resumed-result
+                      ::semantic-state @(::writer/event-state connection)
+                      ::physical-phase (::uds/phase resume-physical-state)
+                      ::physical-frame-remaining
+                      (some-> resume-physical-state ::uds/frame .remaining)
+                      ::physical-queued-output-bytes
+                      (some-> transport-session ::uds/queued-output-bytes deref)})
+              _ (println (pr-str resume-evidence))
+              post-query-ms
+              (mapv
+               (fn [sample]
+                 (let [started (System/nanoTime)
+                       response (query! final-database (str "post-" sample))]
+                   (is (::protocol/success? response))
+                   (elapsed-ms started)))
+               (range 20))]
+          (is (::protocol/listening? listen-response))
+          (is (some? connection))
+          (is (= 1 pending-high-water)
+              "one interest retains one newest semantic event under pressure")
+          (is delivery-converged? (pr-str stress-evidence))
+          (is (= 0 (:datahike.committed-report/queued source-evidence)))
+          (is (= 0 (:datahike.committed-report/overflowed source-evidence)))
+          (is (= 10000
+                 (:datahike.committed-report/offered source-evidence)
+                 (:datahike.committed-report/delivered source-evidence)))
+          (is (= 0 (::executor/queued executor-evidence)))
+          (is (= 0 (::executor/running executor-evidence)))
+          (is (= 0 (::executor/rejected executor-evidence)))
+          (is (false? @(::writer/closed? connection)))
+          (is (not= ::resume-timed-out resumed-result)
+              (pr-str resume-evidence))
+          (when (map? resumed-result)
+            (is (= (:t final-database)
+                   (get-in resumed-result [::event :db-after :t])))
+            (is (= protocol/resynchronization-event
+                   (get-in resumed-result [::event ::protocol/event]))))
+          (is (empty? (::writer/pending
+                       (::semantic-state resume-evidence))))
+          (is (empty? (::writer/pending-order
+                       (::semantic-state resume-evidence))))
+          (is (nil? (::physical-phase resume-evidence)))
+          (is (zero? (::physical-queued-output-bytes resume-evidence)))
+          (is (< (percentile-95 transaction-ms) 5000.0))
+          (is (< (percentile-95 query-ms) 5000.0))
+          (is (<= (percentile-95 post-query-ms)
+                  (+ 20.0 (* 5.0 (percentile-95 query-ms)))))
+          (.close listener)
+          (.close healthy)
+          (reset! closed? true)
+          (is (wait-until!
+               #(empty? @(::uds/connections (::writer/request-server server)))))
+          (is (empty? (::writer/by-scope
+                       @(::writer/interest-state (::writer/runtime server))))))
+          (finally
+            (when-not @closed?
+              (try (.close listener) (catch Throwable _))
+              (try (.close healthy) (catch Throwable _)))
+            (writer/stop! server)
+            (.delete (File. request-path)))))))
 
 (deftest database-advanced-events-retain-only-the-newest-database-value
   (let [sent (atom [])
