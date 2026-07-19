@@ -24,14 +24,13 @@
    only the newest pending application event until the socket drains."
   (:require
     ["node:zlib" :as zlib]
-    [clojure.set :as set]
     [clojure.string :as str]
-    [seon.config :as config]
     [seon.db :as db]
     [seon.db.branch :as db.branch]
     [seon.execution :as execution]
     [seon.execution.host :as execution.host]
     [seon.log :as log]
+    [seon.reactive :as reactive]
     [seon.schema :as schema]
     [seon.ui.agent-view :as agent-view]
     [seon.ui.html :as html]
@@ -43,11 +42,8 @@
 
 (schema/register! ::view-id [:string {:min 1 :max 128}])
 (schema/register! ::optional-view-id [:maybe ::view-id])
-(schema/register! ::dependencies
-  [:or [:= :all] [:set :qualified-keyword]])
 (schema/register! ::element :seon.render.canvas/hiccup)
 (schema/register! ::event :string)
-(schema/register! ::rendered-db :seon.db/db)
 (schema/register! ::view-state
   [:map
    [::view-id ::view-id]])
@@ -68,7 +64,6 @@
    [:seon.web.feed/branch-head {:optional true} ::db.branch/head]
    [::db {:optional true} :seon.db/db]
    [:seon.web.feed/render ::render]
-   [::dependencies {:optional true} ::dependencies]
    [::view-id {:optional true} ::view-id]])
 ;; Ring is a third-party request boundary.
 (schema/register! ::ring-request :map)
@@ -82,8 +77,7 @@
 (def ^:private empty-feed-registry
   {::views {}
    ::subscriptions {}
-   ::measurements {}
-   ::listener-installed? false})
+   ::measurements {}})
 
 (defonce ^{:doc "Ephemeral views and their normalized subscription authorities.
                   Reconnecting one view replaces only its socket. Equivalent
@@ -115,10 +109,8 @@
     {::measurements (::measurements registry)
      ::view-count (count (::views registry))
      ::subscription-count (count (::subscriptions registry))
-     ::active-render-count
-     (count (filter ::active-render (vals (::subscriptions registry))))
-     ::pending-render-count
-     (count (filter ::pending-render (vals (::subscriptions registry))))}))
+     ::active-render-count (::reactive/active-count (reactive/measurements))
+     ::pending-render-count (::reactive/pending-count (reactive/measurements))}))
 
 (defn reset-performance!
   "Reset only Datastar feed measurements; open feeds and renders continue."
@@ -161,7 +153,8 @@
           [:div {:id "app-error" :class "text-error text-xs font-mono"}
            (str "render error: " message)]]
          html/->string
-         patch-elements)}))
+         patch-elements)
+     ::db/read-evidence :all}))
 
 (defn- promise-like? [value]
   (and (some? value)
@@ -174,8 +167,8 @@
            render-error-patch)
     (let [event (patch-elements* html)]
       (cond-> {::event event}
-        (and observed? (contains? rendered ::dependencies))
-        (assoc ::dependencies (::dependencies rendered))))))
+        (and observed? (contains? rendered ::db/read-evidence))
+        (assoc ::db/read-evidence (::db/read-evidence rendered))))))
 
 (defn- rendered-view-patch [rendered]
   (if (promise-like? rendered)
@@ -195,10 +188,10 @@
             (rendered-html-patch rendered observed? rendered-html)))))))
 
 (defn- view-fn-patch
-  "Render a bound full-view fn into one event plus learned dependencies.
+  "Render a bound full-view fn into one event plus captured read evidence.
 
    A plain hiccup result remains valid. A database-observed view returns
-   `::element` and `::dependencies`; the normalized subscription owns both.
+   `::element` and `:seon.db/read-evidence`; the reactive registration owns it.
    Async views retain the same result shape and visible error boundary."
   [view-fn]
   (try
@@ -397,184 +390,71 @@
     (clear-heartbeat-interval! timer)
     (reset! !heartbeat-timer nil)))
 
-(declare merge-change start-render! reconcile-listener!)
+(defn- combined-read-evidence [captured rendered]
+  (let [embedded (::db/read-evidence rendered)]
+    (if (= :all embedded)
+      :all
+      (vec (distinct (into (vec captured) (or embedded [])))))))
 
-(defn- render-request-result [subscription request]
-  (try
-    (view-fn-patch #((::render subscription) (::db request)))
-    (catch :default error
-      (render-error-patch error))))
+(defn- ^:async render-read [subscription database]
+  (let [started-at (.now js/performance)
+        {rendered ::db/value captured ::db/read-evidence}
+        (await
+         (db/with-read-evidence
+          (fn []
+            (view-fn-patch (fn [] ((::render subscription) database))))))
+        event (::event rendered)]
+    (record-count! ::render-completed 1)
+    (record-sample! ::render-duration-ms
+                    (- (.now js/performance) started-at))
+    (when event
+      (record-sample! ::serialized-event-bytes
+                      (.byteLength js/Buffer event "utf8")))
+    {::db/value event
+     ::db/read-evidence (combined-read-evidence captured rendered)}))
 
-(defn- pending-render-request [_subscription _active _pending request]
-  request)
+(defn- structural-settle-ms [event policy]
+  (let [attrs (into #{} (keep #(when (vector? %) (nth % 1 nil)))
+                    (:tx-data event))]
+    (if (agent-view/structural-change? attrs)
+      (:seon.config/reactive-structural-settle-ms policy)
+      (:seon.config/reactive-settle-ms policy))))
 
-(defn- subscription-affected?
-  "Whether committed attributes can change one subscription's projection."
-  [subscription change]
-  (let [dependencies (::dependencies subscription)
-        changed-attrs (:seon.db/changed-attrs change)]
-    (or (= :all dependencies)
-        (nil? dependencies)
-        (empty? changed-attrs)
-        (boolean (seq (set/intersection dependencies changed-attrs))))))
+(defn- current-socket? [conn]
+  (= (:seon.web.feed/id conn)
+     (:seon.web.feed/id
+      (get-in @!feeds [::views (::view-id conn)]))))
 
-(defn- record-complete-event
-  "Retain one complete serialized render inside its live subscription."
-  [subscription active rendered]
-  (let [event (::event rendered)
-        database (::db active)]
-    (cond-> subscription
-      event
-      (assoc ::full-event event)
+(defn- observe-connection! [conn]
+  (let [subscription-key (::subscription-key conn)]
+    (when-let [subscription (get-in @!feeds [::subscriptions subscription-key])]
+      (record-count! ::render-requested 1)
+      (reactive/observe!
+       (cond->
+        {::reactive/key subscription-key
+         ::reactive/consumer-key (:seon.web.feed/id conn)
+         ::reactive/compute #(render-read subscription %)
+         ::reactive/notify (fn [event]
+                             (when (current-socket? conn)
+                               (record-sample! ::fanout 1)
+                               (push-event! conn event)))
+         ::reactive/settle-ms structural-settle-ms}
+         (::db subscription) (assoc ::db/db (::db subscription)))))))
 
-      (and database event)
-      (assoc ::rendered-db database))))
-
-(defn- finish-render!
-  [subscription-key subscription-id render-id rendered]
-  (let [[before after]
-        (swap-vals!
-         !feeds
-         (fn [registry]
-           (let [path [::subscriptions subscription-key]
-                 subscription (get-in registry path)
-                 active (::active-render subscription)]
-             (if (and (= subscription-id (::subscription-id subscription))
-                      (= render-id (::render-id active)))
-               (if-let [pending (::pending-render subscription)]
-                 (assoc-in registry path
-                           (-> subscription
-                               (assoc ::active-render pending)
-                               (dissoc ::pending-render)))
-                 (assoc-in
-                  registry path
-                  (cond-> (record-complete-event
-                           (dissoc subscription ::active-render)
-                           active rendered)
-                    (contains? rendered ::dependencies)
-                    (assoc ::dependencies (::dependencies rendered)))))
-               registry))))
-        before-subscription (get-in before [::subscriptions subscription-key])
-        after-subscription (get-in after [::subscriptions subscription-key])
-        active-before (::active-render before-subscription)
-        promoted (::active-render after-subscription)
-        completed? (and (= subscription-id (::subscription-id after-subscription))
-                        (= render-id (::render-id active-before))
-                        (nil? promoted))
-        event (::event rendered)
-        emit? (and completed?
-                   event
-                   (not= event (::full-event before-subscription)))
-        consumer-view-ids (::consumer-view-ids after-subscription)
-        connections
-        (when emit?
-          (keep #(get-in @!feeds [::views %]) consumer-view-ids))]
-    (when (= render-id (::render-id active-before))
-      (record-count! (if promoted ::render-superseded ::render-completed) 1)
-      (when-let [started-at (::render-started-at active-before)]
-        (record-sample! ::render-duration-ms
-                        (- (.now js/performance) started-at)))
-      (when event
-        (record-sample! ::serialized-event-bytes
-                        (.byteLength js/Buffer event "utf8"))))
-    (when emit?
-      (record-sample! ::fanout (count connections)))
-    (doseq [conn connections]
-      (push-event! conn event))
-    (when (and completed? (contains? rendered ::dependencies))
-      (reconcile-listener!))
-    (when (and promoted
-               (not= render-id (::render-id promoted)))
-      (start-render! subscription-key subscription-id))))
-
-(defn- finish-render-result!
-  "Settle every asynchronous render layer before it reaches feed state."
-  [subscription-key subscription-id render-id rendered]
-  (if (promise-like? rendered)
-    (.then rendered
-           #(finish-render-result! subscription-key subscription-id render-id %)
-           #(finish-render! subscription-key subscription-id render-id
-                            (render-error-patch %)))
-    (finish-render! subscription-key subscription-id render-id rendered)))
-
-(defn- start-render! [subscription-key subscription-id]
-  (let [subscription (get-in @!feeds [::subscriptions subscription-key])
-        request (some-> (::active-render subscription)
-                        (assoc ::render-started-at (.now js/performance)))]
-    (when (and (= subscription-id (::subscription-id subscription)) request)
-      (swap! !feeds
-             (fn [registry]
-               (if (= (::render-id request)
-                      (get-in registry [::subscriptions subscription-key
-                                        ::active-render ::render-id]))
-                 (assoc-in registry
-                           [::subscriptions subscription-key ::active-render]
-                           request)
-                 registry)))
-      (when (= (::render-id request)
-               (get-in @!feeds [::subscriptions subscription-key
-                                 ::active-render ::render-id]))
-        (record-count! ::render-started 1))
-      (finish-render-result! subscription-key subscription-id
-                             (::render-id request)
-                             (render-request-result subscription request)))))
-
-(defn- enqueue-render! [subscription-key request]
-  (let [subscription (get-in @!feeds [::subscriptions subscription-key])
-        subscription-id (::subscription-id subscription)
-        render-number (inc (or (::render-number subscription) 0))
-        request (assoc request
-                       ::render-id (random-uuid)
-                       ::render-number render-number)
-        [_ after]
-        (swap-vals!
-         !feeds
-         (fn [registry]
-           (let [path [::subscriptions subscription-key]
-                 current (get-in registry path)]
-             (if (= subscription-id (::subscription-id current))
-               (assoc-in
-                registry path
-                (if (::active-render current)
-                  (-> current
-                      (assoc ::render-number render-number)
-                      (assoc ::pending-render
-                             (pending-render-request
-                              current (::active-render current)
-                              (::pending-render current) request)))
-                  (assoc current
-                         ::render-number render-number
-                         ::active-render request)))
-               registry))))
-        active (get-in after [::subscriptions subscription-key ::active-render])]
-    (when (or (= (::render-id request) (::render-id active))
-              (= (::render-id request)
-                 (get-in after [::subscriptions subscription-key
-                                ::pending-render ::render-id])))
-      (record-count! ::render-requested 1))
-    (when (= (::render-id request) (::render-id active))
-      (start-render! subscription-key subscription-id))))
-
-(defn- push-full!
-  "Write one shared full view, or join the normalized render already in flight."
-  [conn]
+(defn- push-full! [conn]
   (let [subscription-key (::subscription-key conn)
-         subscription (get-in @!feeds [::subscriptions subscription-key])
-         event (::full-event subscription)
-         rendering? (or (::active-render subscription)
-                        (::pending-render subscription))]
-     (cond
-       event (push-event! conn event)
-       rendering? nil
-       :else
-       (-> (if-let [database (::db subscription)]
-             (js/Promise.resolve database)
-             (db/db))
-           (.then
-            (fn [database]
-              (if (:seon.error/message database)
-                (push-event! conn (::event (render-error-patch database)))
-                (enqueue-render! subscription-key {::db database}))))))))
+        subscription (get-in @!feeds [::subscriptions subscription-key])]
+    (-> (if (::live? subscription)
+          (-> (js/Promise.resolve (observe-connection! conn))
+              (.then
+               (fn [result]
+                 (when (:seon.error/message result)
+                   (push-event! conn (::event (render-error-patch result)))))))
+          (-> (js/Promise.resolve
+               (render-read subscription (::db subscription)))
+              (.then #(push-event! conn (::db/value %)))))
+        (.catch
+         #(push-event! conn (::event (render-error-patch %)))))))
 
 (defn- subscription-key-for
   "Normalized subscription key for one feed or socket view."
@@ -589,13 +469,9 @@
     ::subscription-key subscription-key
     ::consumer-view-ids #{}
     ::live? (:seon.web.feed/live? feed)
-    ::render-number 0
     ::render (:seon.web.feed/render feed)}
     (contains? feed ::db)
-    (assoc ::db (::db feed))
-
-    (contains? feed ::dependencies)
-    (assoc ::dependencies (::dependencies feed))))
+    (assoc ::db (::db feed))))
 
 (defn- socket-consumer
   "Remove subscription authority from a socket-owning view descriptor."
@@ -605,8 +481,7 @@
       (dissoc :seon.web.feed/key
               :seon.web.feed/live?
               :seon.web.feed/render
-              ::db
-              ::dependencies)))
+              ::db)))
 
 (defn- detach-subscription
   "Remove one socket consumer from only its normalized subscription."
@@ -646,329 +521,22 @@
         (assoc-in [::subscriptions subscription-key]
                   (update subscription ::consumer-view-ids conj view-id)))))
 
-(defn- broadcast!
-  "Render each normalized live subscription once, then fan out its patch."
-  [change]
-  (let [live-subscriptions (filter (comp ::live? val)
-                                   (::subscriptions @!feeds))
-        affected (filter (fn [[_ subscription]]
-                           (subscription-affected? subscription change))
-                         live-subscriptions)]
-    (record-count! ::affected-subscription-count (count affected))
-    (record-count! ::skipped-subscription-count
-                   (- (count live-subscriptions) (count affected)))
-    (doseq [[subscription-key _subscription] affected]
-      (enqueue-render! subscription-key
-                       {::db (::db change)
-                        ::change change}))))
-
-;; ============================================================
-;; Coalescing — one lifecycle-owned state collapses a tx burst into one
-;; morph. Running eval-record commits can retain evidence without a timer.
-;; The first render-worthy enqueue fixes a maximum deadline; later ordinary
-;; commits may move the trailing edge toward it, but never beyond it.
-;; ============================================================
-
-(def ^:private empty-coalescer {})
-
-(defonce ^{:private true
-           :doc "One pending Datastar broadcast and its optional timer."}
-  !coalescer (atom empty-coalescer))
-
-(defonce ^{:private true
-           :doc "Reactive timing policy acquired from database configuration."}
-  !reactive-policy
-  (atom config/default-reactive-policy))
-
 (defn configure!
-  "Install the database-acquired reactive timing policy."
+  "Install the database-acquired policy in the one reactive-read owner."
+  {:malli/schema [:=> [:cat :seon.config/reactive] :nil]}
   [policy]
-  (reset! !reactive-policy policy))
-
-(defn- monotonic-ms [] (.now js/performance))
-
-(defn- set-broadcast-timeout! [callback delay-ms]
-  (js/setTimeout callback delay-ms))
-
-(defn- clear-broadcast-timeout! [timer]
-  (js/clearTimeout timer))
-
-(defn- change-attrs [change]
-  (or (:seon.db/changed-attrs change) #{}))
-
-(defn- event-change [event]
-  (let [datoms (vec (or (:tx-data event) []))
-        attrs (into #{} (keep #(when (vector? %) (nth % 1 nil))) datoms)]
-    {::db (:db-after event)
-     :seon.db/changed-attrs attrs
-     :seon.db/tx-data datoms
-     :seon.web.broadcast/structural?
-     (agent-view/structural-change? attrs)}))
-
-(defn- merge-change [pending change]
-  {::db (or (::db change) (::db pending))
-   :seon.db/changed-attrs
-   (set/union (or (:seon.db/changed-attrs pending) #{})
-              (or (:seon.db/changed-attrs change) #{}))
-   :seon.db/tx-data
-   (into (vec (or (:seon.db/tx-data pending) []))
-         (or (:seon.db/tx-data change) []))
-   :seon.web.broadcast/structural?
-   (or (:seon.web.broadcast/structural? pending)
-       (:seon.web.broadcast/structural? change))})
-
-(defn- broadcast-due-at
-  [enqueued-at now structural?]
-  (let [{:seon.config/keys [reactive-settle-ms
-                            reactive-structural-settle-ms
-                            reactive-max-latency-ms]}
-        @!reactive-policy]
-    (min (+ enqueued-at reactive-max-latency-ms)
-         (+ now (if structural?
-                  reactive-structural-settle-ms
-                  reactive-settle-ms)))))
-
-(declare drain-coalescer!)
-
-(defn- schedule-broadcast! [change]
-  (let [now (monotonic-ms)
-        current @!coalescer
-        pending (merge-change (::pending-change current) change)]
-    (let [enqueued-at (or (::enqueued-at current) now)
-            due-at (broadcast-due-at
-                     enqueued-at now
-                     (:seon.web.broadcast/structural? pending))]
-        (if (and (::timer current) (= due-at (::due-at current)))
-          ;; Once the maximum deadline is reached, keep its already-owned timer.
-          ;; Clearing and recreating a zero-delay timer here would let continuous
-          ;; transaction callbacks starve the render indefinitely.
-          (reset! !coalescer
-                  (assoc current
-                         ::pending-change pending
-                         ::enqueued-at enqueued-at))
-          (let [timer-token (random-uuid)
-                delay-ms (max 0 (- due-at now))
-                timer (set-broadcast-timeout!
-                        #(drain-coalescer! timer-token)
-                        delay-ms)]
-            ;; Publish pending data + timer ownership as one value. Bun cannot
-            ;; run the new timeout until this stack returns; a queued old
-            ;; callback is fenced by timer-token and becomes inert after reset.
-            (reset! !coalescer
-                    {::pending-change pending
-                     ::timer timer
-                     ::timer-token timer-token
-                     ::enqueued-at enqueued-at
-                     ::due-at due-at})
-            (when-let [old-timer (::timer current)]
-              (clear-broadcast-timeout! old-timer)))))))
-
-(defn- drain-coalescer! [timer-token]
-  (let [[before _]
-        (swap-vals! !coalescer
-                    (fn [state]
-                      (if (= timer-token (::timer-token state))
-                        empty-coalescer
-                        state)))
-        ready (when (= timer-token (::timer-token before))
-                (::pending-change before))]
-    (when ready (broadcast! ready))))
-
-(defn- clear-coalescer! []
-  (let [[before _] (reset-vals! !coalescer empty-coalescer)]
-    (when-let [timer (::timer before)]
-      (clear-broadcast-timeout! timer))))
-
-;; ============================================================
-;; Lifecycle — db/listen! IS the refresh signal.
-;; ============================================================
-
-(defonce ^{:private true
-           :doc "Serialized updates to the one authority database interest."}
-  !listener-updates (atom (js/Promise.resolve nil)))
-
-(defonce ^{:private true
-           :doc "Fence preventing an old interest update from surviving stop."}
-  !listener-generation (atom 0))
-
-(defn- live-listener-dependencies
-  "Union dependencies for every live normalized subscription."
-  [registry]
-  (let [dependencies
-        (into []
-              (comp (map val)
-                    (filter ::live?)
-                    (map #(get % ::dependencies ::unknown)))
-              (::subscriptions registry))]
-    (cond
-      (empty? dependencies) nil
-      (some #{:all ::unknown} dependencies) :all
-      :else (not-empty (apply set/union #{} dependencies)))))
-
-(defn- dependencies-plan
-  "One default-source dependency plan for the live page union."
-  [dependencies]
-  (if (= :all dependencies)
-    :all
-    {:datahike.query.dependency/sources
-     [{:datahike.query.source/symbol '$
-       :datahike.query.source/argument-position 0
-       :datahike.query.source/attributes dependencies}]}))
-
-(defn- advance-full-events
-  "Invalidate affected renders and advance unchanged renders to the commit."
-  [registry change]
-  (update registry ::subscriptions
-          (fn [subscriptions]
-            (into {}
-                  (map (fn [[subscription-key subscription]]
-                         [subscription-key
-                          (cond
-                            (not (::live? subscription)) subscription
-                            (subscription-affected? subscription change)
-                            (dissoc subscription
-                                    ::full-event
-                                    ::rendered-db)
-                            :else
-                            (cond-> subscription
-                              (::full-event subscription)
-                              (assoc ::rendered-db (::db change))))]))
-                  subscriptions))))
-
-(defn- on-tx [event]
-  (let [change (event-change event)]
-    ;; Invalidate only affected subscriptions before their coalesced morph.
-    ;; Unaffected complete bytes remain valid at the later database value.
-    (swap! !feeds advance-full-events change)
-    (when (some (fn [[_ subscription]]
-                  (and (::live? subscription)
-                       (subscription-affected? subscription change)))
-                (::subscriptions @!feeds))
-      (schedule-broadcast! change))))
-
-(defn- subscription-has-database?
-  "Whether completed or already-requested work covers `database`."
-  [subscription database]
-  (boolean
-   (some #(= database %)
-         [(::rendered-db subscription)
-          (get-in subscription [::active-render ::db])
-          (get-in subscription [::pending-render ::db])])))
-
-(defn- refresh-behind-listener! [database]
-  (doseq [[subscription-key subscription] (::subscriptions @!feeds)
-          :when (and (::live? subscription)
-                     (not (subscription-has-database? subscription database)))]
-    (enqueue-render! subscription-key {::db database})))
-
-(defn- remove-listener! [generation]
-  (-> (db/unlisten! {::db/key ::views})
-      (.then
-       (fn [result]
-         (when (= generation @!listener-generation)
-           (swap! !feeds dissoc ::listener-dependencies))
-         result))))
-
-(defn- register-listener! [generation dependencies]
-  (-> (db/listen!
-       {::db/key ::views
-        ::db/handler on-tx
-        ::db/dependency-plan (dependencies-plan dependencies)})
-      (.then
-       (fn [result]
-         (cond
-           (not= generation @!listener-generation) result
-
-           (= ::views result)
-           (-> (db/db)
-               (.then
-                (fn [database]
-                  (when (= generation @!listener-generation)
-                    (swap! !feeds assoc ::listener-dependencies dependencies)
-                    (refresh-behind-listener! database))
-                  result)))
-
-           :else
-           (do
-             (swap! !feeds dissoc ::listener-dependencies)
-             (log/error-console! "seon.web.datastar"
-                                 "database interest registration failed"
-                                 result)
-             result))))))
-
-(defn- apply-listener-dependencies! [generation]
-  (let [dependencies (live-listener-dependencies @!feeds)
-        installed (::listener-dependencies @!feeds)]
-    (cond
-      (= dependencies installed) nil
-      (nil? dependencies) (remove-listener! generation)
-      :else (register-listener! generation dependencies))))
-
-(defn- reconcile-listener!
-  "Make the one authority interest match all live subscription dependencies."
-  []
-  (let [generation @!listener-generation
-        prior @!listener-updates
-        update (-> prior
-                   (.catch (fn [_] nil))
-                   (.then
-                    (fn []
-                      (when (= generation @!listener-generation)
-                        (apply-listener-dependencies! generation)))))]
-    (reset! !listener-updates update)
-    update))
-
-(defn install!
-  "Reconcile the one selective database interest for all live views."
-  []
-  (swap! !feeds assoc ::listener-installed? true)
-  (reconcile-listener!))
-
-(defn- release-runtime!
-  "Release listener and timer ownership from one prior runtime state."
-  [listener-installed?]
-  (try
-    (when listener-installed?
-      (let [generation (swap! !listener-generation inc)
-            prior @!listener-updates
-            release
-            (-> prior
-                (.catch (fn [_] nil))
-                (.then
-                 (fn []
-                   (-> (db/unlisten! {::db/key ::views})
-                       (.then
-                        (fn [result]
-                          (when (= generation @!listener-generation)
-                            (swap! !feeds dissoc ::listener-dependencies))
-                          result))))))]
-        (reset! !listener-updates release)))
-    (finally
-      (clear-coalescer!)
-      (stop-heartbeat!))))
-
-(defn uninstall!
-  "Remove the view listener, pending broadcast, and shared heartbeat."
-  []
-  (let [[before _]
-        (swap-vals! !feeds assoc ::listener-installed? false)
-        listener-installed?
-        (or (true? (::listener-installed? before))
-            (and (nil? (::listener-installed? before))
-                 (seq (::views before))))]
-    (release-runtime! listener-installed?)))
+  (reactive/configure! policy))
 
 (defn ^:dev/before-load before-reload
-  "Uninstall the view tx-listener before a hot reload."
+  "Keep reactive registrations alive while hot reload replaces render code."
   []
-  (try (uninstall!) (catch :default _ nil)))
+  nil)
 
 (defn ^:dev/after-load after-reload
-  "Restore listener and heartbeat only when a feed survived hot reload."
+  "Restore only the socket heartbeat after hot reload."
   []
   (try
     (when (seq (::views @!feeds))
-      (install!)
       (ensure-heartbeat!))
     (catch :default _ nil)))
 
@@ -1164,6 +732,7 @@
                   (fn [event] (direct-write! controller event))})]
     (merge feed writer
            {::view-id view-id
+            ::subscription-key (subscription-key-for feed)
             :seon.web.feed/id feed-id
             :seon.web.feed/controller controller
             :seon.web.feed/closed? closed?
@@ -1187,8 +756,6 @@
   (if (= feed-id (:seon.web.feed/id (get-in @!feeds [::views view-id])))
     (do
       (swap! !feeds detach-view view-id)
-      (when (seq (::views @!feeds))
-        (reconcile-listener!))
       true)
     false))
 
@@ -1198,21 +765,22 @@
   (when-let [close! (:seon.web.feed/close! conn)]
     (close! nil)))
 
+(defn- unobserve-connection! [conn]
+  (when (and conn (::subscription-key conn))
+    (reactive/unobserve!
+     {::reactive/key (::subscription-key conn)
+      ::reactive/consumer-key (:seon.web.feed/id conn)})))
+
 (defn close-all-feeds!
   "Close every Datastar feed and release its complete runtime state."
   {:malli/schema [:=> [:cat] :nil]}
   []
   (let [[before _] (reset-vals! !feeds empty-feed-registry)
-        connections (vals (::views before))
-        listener-installed? (true? (::listener-installed? before))
-        runtime-owned? (or listener-installed?
-                           (seq connections)
-                           (seq @!coalescer)
-                           (some? @!heartbeat-timer))]
+        connections (vals (::views before))]
     (doseq [conn connections]
+      (unobserve-connection! conn)
       (close-feed-socket! conn))
-    (when runtime-owned?
-      (release-runtime! listener-installed?))
+    (stop-heartbeat!)
     nil))
 
 (defn- open-feed!
@@ -1232,7 +800,9 @@
         close!
         (fn [error]
           (when (compare-and-set! closed? false true)
-            (let [released? (release-feed! view-id feed-id)]
+            (let [conn @!conn
+                  released? (release-feed! view-id feed-id)]
+              (unobserve-connection! conn)
               (when-let [controller (:seon.web.feed/controller @!conn)]
                 (when-let [close-writer!
                            (:seon.web.feed/close-writer! @!conn)]
@@ -1241,7 +811,7 @@
               (when-let [finish @!finish-stream]
                 (finish nil))
               (when (and released? (empty? (::views @!feeds)))
-                (uninstall!))
+                (stop-heartbeat!))
               (log/info-console! "seon.web.datastar" "FEED CLOSE"
                                  {:seon.web.feed/id (str feed-id)
                                   :seon.web.datastar/view-id view-id
@@ -1259,9 +829,6 @@
                       (reset! !conn conn)
                       (when-let [replaced (replace-feed! conn)]
                         (close-feed-socket! replaced))
-                      ;; Attach first so the database interest is the exact
-                      ;; union of live normalized subscription dependencies.
-                      (install!)
                       (push-full! (get-in @!feeds [::views view-id]))
                       (ensure-heartbeat!)
                       (log/info-console!
@@ -1507,15 +1074,15 @@
         {::element
          [:main {:id "app-view" :class "text-error text-xs font-mono"}
           (str "render error: " error-message)]
-         ::dependencies :all}
+         ::db/read-evidence :all}
         {::element (agent-view/render-agent-view projection)
-         ::dependencies (or (::dependencies projection) :all)}))
+         ::db/read-evidence (or (::db/read-evidence message) :all)}))
     {::element
      [:main {:id "app-view" :class "text-error text-xs font-mono"}
       (str "render error: "
            (or (get-in message [::execution/error :seon.error/message])
                "execution child failed"))]
-     ::dependencies :all}))
+     ::db/read-evidence :all}))
 
 (defn- ^:async render-agent-view! [id database]
   (agent-view-result
@@ -1535,7 +1102,7 @@
 
    The seeded :seon.route/agent-feed handler. A Ring handler: takes the
    Ring request `r`, self-extracts its WHATWG request + `{id}` path-param.
-   Lazily installs the tx-listener (idempotent). Invalid or stale ids 404. Public —
+   Registers the demanded page read. Invalid or stale ids 404. Public —
    db->routes resolves its symbol.
 
    A historical request supplies all four `store-id`, `branch`, `commit-id`,

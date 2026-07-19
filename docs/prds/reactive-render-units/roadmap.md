@@ -24,11 +24,11 @@ parts of the target:
 
 - one JVM database authority owns committed reports and attribute-indexed
   interests;
-- one Bun session multiplexes coordinate-pinned reads and one live page
-  interest;
+- one Bun session multiplexes database-value-pinned reads and demanded
+  normalized reactive registrations;
 - equivalent sockets share a normalized subscription, render, and serialized
   event;
-- web commits coalesce using settle, structural-settle, and maximum-latency
+- reactive commits settle using ordinary, structural, and maximum-latency
   values resolved from database configuration, with manifest environment
   overrides;
 - each subscription owns one active render plus the newest pending value;
@@ -39,15 +39,14 @@ parts of the target:
 - complete Datastar snapshots use stable-ID outer morphs and latest-wins
   backpressure.
 
-Current page invalidation is not yet sound end to end. The execution child now
+Current page invalidation is implemented but not yet proven sound live end to
+end. The execution child
 captures the Datahike-owned read evidence from successful query, pull,
 pull-many, entity, schema, index, and mixed `execute-many` operations in one
 fiber-local scope and returns it on the ordinary invocation result. The writer
 can interpret and union that source-positioned evidence directly when
-installing a committed-report interest. Datastar has not yet migrated to that
-contract: it still installs fixed attributes plus analyzer-derived
-`:seon.fn/read-attrs`, so helper-indirected reads remain invisible to an open
-page until the general reactive-read owner replaces that declared gate.
+installing a committed-report interest. Datastar now consumes that evidence;
+analyzer-derived `:seon.fn/read-attrs` is no longer an invalidation authority.
 
 `seon.reactive` now implements the general registered-read lifecycle. Each
 registration owns one Datahike writer interest, one active computation, and at
@@ -57,8 +56,24 @@ progress; plan replacement uses the listener acknowledgement database value
 to close the evaluation race; Clojure `=` suppresses established-consumer
 notifications; a fresh consumer receives the current value; and the final
 consumer releases its timer, value, database reachability, and writer
-interest. Datastar migration and sustained live/import proof remain the next
-ordered boundary.
+interest. Sustained live/import proof remains the next ordered boundary.
+
+Datastar now delegates live page demand to `seon.reactive`. The page computation
+captures parent-process reads, unions execution-child evidence from the ordinary
+result message, serializes one complete morph event, and compares that event as
+the reactive value. The former Datastar attribute declarations, synthetic
+dependency plan, global listener, coalescer, active/pending render queue, and
+serialized-event cache are removed. Each socket remains an independent
+latest-wins transport consumer keyed by its feed ID; equivalent sockets share
+the normalized reactive computation and a fresh socket receives its established
+value. Historical feeds still render once without installing an interest.
+
+Focused Datastar proof is currently 13 tests and 53 assertions. A live root-feed
+probe exposed and fixed two lifecycle defects: the live observer sent an
+invalid explicit nil database value, and the pre-registry socket descriptor
+lacked the normalized registration key needed by final-consumer release. The
+next coordinated rebuild must still prove that the Bun workload and listener
+remain alive across root-feed open/close before this boundary is counted live.
 
 Datahike `main` now exposes an execution-aware, source-scoped query dependency
 plan at maintained revision `2e6c7bcf`. It folds the typed parsed query and
@@ -264,15 +279,16 @@ one final newest-value result; an unused cached read performs no work.
 
 ### 5. Make page rendering one reactive computation
 
-Add one async-local accumulator around the execution-child page invocation.
+Use the existing async-local accumulator around every parent page computation.
 Every successful `seon.db` read unions the Datahike response plan. Nested and
 concurrent operations compose safely; failed or incomplete operations widen the
 render to `:all`.
 
-Return the union with the completed ordinary page projection. Install it only
-when the normalized subscription still owns the render ID and database value.
-Keep `:seon.fn/read-attrs` for discovery/focus hints, but delete it from the
-correctness gate.
+Return the execution-child evidence on its ordinary result message and union it
+with parent-process evidence after the completed page projection is serialized.
+The normalized `seon.reactive` registration owns the computation and immutable
+database value. Keep `:seon.fn/read-attrs` for discovery/focus hints, but delete
+it from the correctness gate.
 
 Exit: helper-indirected and conditional reads update an already-open page;
 renderer source/configuration changes cannot be skipped; a branch change
@@ -280,14 +296,16 @@ atomically replaces the subscription's dependency union.
 
 ### 6. Send the dependency plan directly to Datahike interests
 
-Extend the listen request to accept Datahike's normalized plan. Delete
+Send captured evidence directly through the existing listen request and delete
 Datastar's synthetic dependency query. The writer retains one reverse scope /
-attribute index and exact match filter; Bun retains only the union of live page
-plans needed to reconcile the one web interest.
+attribute index and exact match filter. Bun retains no dependency parser or
+page-wide interest union: each demanded normalized reactive computation owns
+one writer interest.
 
 Subscribe before initial read and use the acknowledgement database value so
-interest replacement has no commit gap. Keep listener reconciliation serialized
-and refresh subscriptions whose accepted value falls behind during replacement.
+interest replacement has no commit gap. The general owner serializes replacement
+for one registration and schedules a newest-value evaluation when the accepted
+branch head advanced during replacement.
 
 Exit: unrelated commits produce no Bun event or page work; every relevant
 commit is covered by the acknowledgement value or a later report.

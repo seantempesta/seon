@@ -3,6 +3,8 @@
             [clojure.string :as str]
             [seon.db :as db]
             [seon.execution :as execution]
+            [seon.reactive :as reactive]
+            [seon.ui.agent-view :as agent-view]
             [seon.ui.html :as html]
             [seon.web.datastar :as datastar]))
 
@@ -69,25 +71,29 @@
              (set! db/query original-query)
              (done)))))))
 
-(deftest native-interest-events-become-render-evidence
-  (let [change (@#'datastar/event-change
-                {:db-after database
-                 :tx-data [[1 :seon.agent/id "root" 42 true]
-                           [2 :seon.message/text "hello" 42 true]]})]
-    (is (= database (::datastar/db change)))
-    (is (= #{:seon.agent/id :seon.message/text}
-           (:seon.db/changed-attrs change)))
-    (is (= 2 (count (:seon.db/tx-data change))))))
+(def read-evidence
+  [{::db/db database
+    ::db/source-argument-position 0
+    :datahike.read/dependency-plan :all}])
 
-(deftest one-render-function-receives-the-exact-database-value
-  (let [seen (atom nil)
-        result (@#'datastar/render-request-result
-                {::datastar/render (fn [value]
-                                     (reset! seen value)
-                                     [:main {:id "app-view"} "ok"])}
-                {::datastar/db database})]
-    (is (= database @seen))
-    (is (string? (::datastar/event result)))))
+(deftest complete-render-returns-event-value-and-child-read-evidence
+  (async done
+    (let [seen (atom nil)]
+      (-> (js/Promise.resolve
+           (@#'datastar/render-read
+            {::datastar/render
+             (fn [value]
+               (reset! seen value)
+               {::datastar/element [:main {:id "app-view"} "ok"]
+                ::db/read-evidence read-evidence})}
+            database))
+          (.then
+           (fn [result]
+             (is (= database @seen))
+             (is (string? (::db/value result)))
+             (is (= read-evidence (::db/read-evidence result)))))
+          (.catch (fn [error] (is false (str error))))
+          (.finally done)))))
 
 (deftest nested-async-render-values-are-settled-before-serialization
   (let [inner (js-obj "then"
@@ -102,9 +108,9 @@
                                           "<main id=\"app-view\">ready</main>"))))]
                  (@#'datastar/rendered-view-patch
                   {::datastar/element outer
-                   ::datastar/dependencies #{:seon.agent/id}}))]
+                   ::db/read-evidence read-evidence}))]
     (is (string? (::datastar/event result)))
-    (is (= #{:seon.agent/id} (::datastar/dependencies result)))
+    (is (= read-evidence (::db/read-evidence result)))
     (is (re-find #"<main id=\"app-view\">ready</main>"
                  (::datastar/event result)))
     (is (not (re-find #"Promise" (::datastar/event result))))))
@@ -129,122 +135,76 @@
                  {:seon.error/message
                   "datahike query-results budget exceeded"}})]
     (is (= :main (first (::datastar/element result))))
-    (is (= :all (::datastar/dependencies result)))
+    (is (= :all (::db/read-evidence result)))
     (is (= "render error: datahike query-results budget exceeded"
            (last (::datastar/element result))))))
 
-(deftest subscriptions-render-only-for-declared-changed-attributes
-  (let [affected? @#'datastar/subscription-affected?]
-    (is (affected? {::datastar/dependencies #{:seon.agent/id}}
-                   {:seon.db/changed-attrs #{:seon.agent/id}}))
-    (is (not (affected? {::datastar/dependencies #{:seon.agent/id}}
-                        {:seon.db/changed-attrs #{:seon.message/text}})))
-    (is (affected? {::datastar/dependencies :all}
-                   {:seon.db/changed-attrs #{:seon.message/text}}))
-    ;; Missing transaction evidence or missing render dependencies fail open.
-    (is (affected? {::datastar/dependencies #{:seon.agent/id}}
-                   {:seon.db/changed-attrs #{}}))
-    (is (affected? {}
-                   {:seon.db/changed-attrs #{:seon.message/text}}))))
+(deftest child-message-read-evidence-is-authoritative
+  (with-redefs [agent-view/render-agent-view
+                (fn [_] [:main {:id "app-view"} "projection"])]
+    (let [result (@#'datastar/agent-view-result
+                  {::execution/message execution/result-message
+                   ::execution/result {:unrelated/declaration :wrong}
+                   ::db/read-evidence read-evidence})]
+      (is (= read-evidence (::db/read-evidence result))))))
 
-(deftest one-listener-unions-only-live-subscription-dependencies
-  (let [dependencies @#'datastar/live-listener-dependencies]
-    (is (= #{:seon.agent/id :seon.message/text}
-           (dependencies
-            {::datastar/subscriptions
-             {:agent {::datastar/live? true
-                      ::datastar/dependencies #{:seon.agent/id}}
-              :debug {::datastar/live? true
-                      ::datastar/dependencies #{:seon.message/text}}
-              :history {::datastar/live? false
-                        ::datastar/dependencies :all}}})))
-    (is (= :all
-           (dependencies
-            {::datastar/subscriptions
-             {:agent {::datastar/live? true}}})))
-    (is (nil? (dependencies
-               {::datastar/subscriptions
-                {:history {::datastar/live? false
-                           ::datastar/dependencies :all}}})))))
+(deftest structural-settle-selects-the-database-configured-delay
+  (let [select @#'datastar/structural-settle-ms
+        policy {:seon.config/reactive-settle-ms 7
+                :seon.config/reactive-structural-settle-ms 70
+                :seon.config/reactive-max-latency-ms 100}]
+    (is (= 7 (select {:tx-data [[1 :seon.message/text "x" 1 true]]}
+                     policy)))
+    (is (= 70 (select {:tx-data [[1 :seon.render/html "x" 1 true]]}
+                      policy)))))
 
-(deftest listener-plan-declares-the-exact-attribute-union
-  (is (= {:datahike.query.dependency/sources
-          [{:datahike.query.source/symbol '$
-            :datahike.query.source/argument-position 0
-            :datahike.query.source/attributes
-            #{:seon.agent/id :seon.message/text}}]}
-         (@#'datastar/dependencies-plan
-          #{:seon.message/text :seon.agent/id})))
-  (is (= :all (@#'datastar/dependencies-plan :all))))
+(deftest live-root-feed-observer-omits-the-absent-database-value
+  (async done
+    (let [feeds @#'datastar/!feeds
+          original @feeds
+          original-observe reactive/observe!
+          request (atom nil)
+          subscription-key [:seon.web.feed/agent "root"]
+          conn {::datastar/view-id "root-view"
+                ::datastar/subscription-key subscription-key
+                :seon.web.feed/id #uuid "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}]
+      (reset! feeds
+              {::datastar/views {"root-view" conn}
+               ::datastar/subscriptions
+               {subscription-key
+                {::datastar/live? true
+                 ::datastar/render (fn [_] [:main {:id "app-view"}])}}
+               ::datastar/measurements {}})
+      (set! reactive/observe!
+            (fn [value]
+              (reset! request value)
+              (js/Promise.resolve (:seon.reactive/consumer-key value))))
+      (-> (js/Promise.resolve (@#'datastar/observe-connection! conn))
+          (.then
+           (fn [_]
+             (is (map? @request))
+             (is (not (contains? @request ::db/db))
+                 "a live root feed reaches reactive observe without invalid nil")))
+          (.catch (fn [error] (is false (str error))))
+          (.finally
+           (fn []
+             (set! reactive/observe! original-observe)
+             (reset! feeds original)
+             (done)))))))
 
-(deftest reactive-timing-comes-from-the-database-configuration-policy
-  (let [prior @@#'datastar/!reactive-policy]
-    (try
-      (datastar/configure!
-       {:seon.config/reactive-settle-ms 7
-        :seon.config/reactive-structural-settle-ms 70
-        :seon.config/reactive-max-latency-ms 100})
-      (is (= 17 (@#'datastar/broadcast-due-at 10 10 false)))
-      (is (= 80 (@#'datastar/broadcast-due-at 10 10 true)))
-      (is (= 110 (@#'datastar/broadcast-due-at 10 500 false))
-          "sustained writes cannot move work beyond the first max deadline")
-      (finally
-        (datastar/configure! prior)))))
-
-(deftest complete-render-bytes-follow-the-database-that-proved-them
-  (let [next-database (assoc database :t 43)
-        registry {::datastar/subscriptions
-                  {:agent {::datastar/live? true
-                           ::datastar/dependencies #{:seon.agent/id}
-                           ::datastar/full-event "event: full\n\n"
-                           ::datastar/rendered-db database}
-                   :historical {::datastar/live? false
-                                ::datastar/full-event "event: frozen\n\n"
-                                ::datastar/rendered-db database}}}
-        unchanged (@#'datastar/advance-full-events
-                   registry
-                   {::datastar/db next-database
-                    :seon.db/changed-attrs #{:seon.message/text}})
-        affected (@#'datastar/advance-full-events
-                  registry
-                  {::datastar/db next-database
-                   :seon.db/changed-attrs #{:seon.agent/id}})]
-    (is (= "event: full\n\n"
-           (get-in unchanged [::datastar/subscriptions :agent
-                              ::datastar/full-event])))
-    (is (= next-database
-           (get-in unchanged [::datastar/subscriptions :agent
-                              ::datastar/rendered-db])))
-    (is (= "event: frozen\n\n"
-           (get-in affected [::datastar/subscriptions :historical
-                             ::datastar/full-event])))
-    (is (= database
-           (get-in affected [::datastar/subscriptions :historical
-                             ::datastar/rendered-db])))
-    (is (not (contains? (get-in affected [::datastar/subscriptions :agent])
-                        ::datastar/full-event)))
-    (is (not (contains? (get-in affected [::datastar/subscriptions :agent])
-                        ::datastar/rendered-db)))))
-
-(deftest listener-refresh-does-not-duplicate-render-work-for-the-same-database
-  (let [covered? @#'datastar/subscription-has-database?
-        next-database (assoc database :t 43)]
-    (is (covered? {::datastar/rendered-db database} database))
-    (is (covered? {::datastar/active-render {::datastar/db database}}
-                  database))
-    (is (covered? {::datastar/pending-render {::datastar/db database}}
-                  database))
-    (is (not (covered? {::datastar/rendered-db database}
-                       next-database)))))
-
-(deftest completed-render-becomes-the-shared-reconnect-event
-  (let [event "event: datastar-patch-elements\n\n"
-        recorded (@#'datastar/record-complete-event
-                  {::datastar/full-event "old"}
-                  {::datastar/db database}
-                  {::datastar/event event})]
-    (is (= event (::datastar/full-event recorded)))
-    (is (= database (::datastar/rendered-db recorded)))))
+(deftest prepared-socket-retains-the-reactive-registration-key-for-close
+  (let [subscription-key [:seon.web.feed/agent "root"]
+        conn (@#'datastar/prepare-feed
+              {:seon.web.feed/key subscription-key
+               :seon.web.feed/live? true
+               :seon.web.feed/render (fn [_])}
+              "root-view"
+              #uuid "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+              #js {}
+              (atom false)
+              (fn [_]))]
+    (is (= subscription-key (::datastar/subscription-key conn))
+        "the close callback can always release its exact reactive consumer")))
 
 (deftest direct-stream-backpressure-keeps-only-the-newest-event
   (async done
