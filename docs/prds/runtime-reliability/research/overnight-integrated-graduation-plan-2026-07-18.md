@@ -582,7 +582,7 @@ Exit: one exact source revision passes every maintained gate and product journey
   including shared computation and serialization costs.
 - [ ] Measure transaction latency, committed database-value propagation,
   execution-child cold/warm start, and program-delta acquisition.
-- [ ] Measure Datastar first render, database-update render, and 1/10/50/100
+- [x] Measure Datastar first render, database-update render, and 1/10/50/100
   simultaneous feeds.
 - [ ] Measure private memory, proportional set size, retained heap, idle CPU,
   event-loop delay, and reclamation after warm timeout and termination.
@@ -591,6 +591,15 @@ Exit: one exact source revision passes every maintained gate and product journey
 
 Exit: the completed architecture has explicit latency and resource evidence on
 modest hardware, with no micro-optimization displacing a correctness boundary.
+
+Current measurements and exact methods are recorded in
+[[architecture-performance-current-2026-07-19]]. The full Bun database hop is
+about one millisecond p50, eight concurrent clients compute one identical
+query once, 10/50/100 Datastar views retain one render and serialization, and
+the full execution child reclaims 166.8 MiB physical footprint when stopped.
+The remaining unchecked rows are intentionally broader than this evidence:
+pull/entity/index, 2/4-client waves, transaction/program propagation, private
+retained heap plus idle CPU, and slow-client backpressure still need samples.
 
 ## Scheduling clock
 

@@ -584,6 +584,21 @@ changes were already present: runtime drain awaits `execution.host/stop!`, IPC
 disconnect invokes child shutdown, and only the pod receives
 `BUN_FEATURE_FLAG_NO_ORPHANS=1`.
 
+The first current architecture measurements are durable in
+[[research/architecture-performance-current-2026-07-19]]. Direct JVM cached
+query p50 is 0.015 ms and an uncached varying query is 0.162 ms; the complete
+Bun→UDS→JVM→UDS→Bun equivalents are 0.979 ms and 1.063 ms. Eight real Bun
+clients retained one JVM connection and identical index roots, with exactly
+one miss owner and seven joined callers before all second reads hit cache.
+Datastar 10/50/100-view waves each retained one subscription, one render, and
+one serialization; render duration stayed 74–77 ms and every client received
+identical bytes. A cold root render after child reclamation took 1.386 seconds.
+`vmmap` measured 635.8 MiB writer, 276.4 MiB pod, and 166.8 MiB full execution
+child physical footprints; stopping the child removed its PID completely. The
+1.7 GiB JVM seen in development is the Shadow watcher/compiler, not the
+packaged writer. Remaining measurements are transaction propagation,
+pull/entity/index, 2/4-client waves, slow-client backpressure, and idle CPU.
+
 The existing remote query surface now exposes its protocol-native historical
 view, closing the only facade gap needed by coordinate-pinned startup birth.
 LLM configuration and brand startup sync also use bounded coordinate-fenced
