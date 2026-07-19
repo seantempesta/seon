@@ -17,6 +17,7 @@
 (schema/register! ::compute 'fn?)
 (schema/register! ::notify 'fn?)
 (schema/register! ::settle-ms 'fn?)
+(schema/register! ::failed? :boolean)
 (schema/register!
  ::observe-request
  [:map {:closed true}
@@ -110,17 +111,24 @@
       (assoc :seon.error/kind :core-bug))))
 
 (defn- result-envelope [result]
-  (if (and (map? result)
-           (contains? result ::db/value)
-           (or (= :all (::db/read-evidence result))
-               (vector? (::db/read-evidence result))))
-    result
-    {::db/value
-     (if (and (map? result) (:seon.error/message result))
-       result
-       {:seon.error/message "Reactive computation returned no read evidence."
-        :seon.error/kind :core-bug})
-     ::db/read-evidence :all}))
+  (let [envelope
+        (if (and (map? result)
+                 (contains? result ::db/value)
+                 (or (= :all (::db/read-evidence result))
+                     (vector? (::db/read-evidence result))))
+          result
+          {::db/value
+           (if (and (map? result) (:seon.error/message result))
+             result
+             {:seon.error/message
+              "Reactive computation returned no read evidence."
+              :seon.error/kind :core-bug})
+           ::db/read-evidence :all
+           ::failed? true})]
+    (cond-> envelope
+      (and (map? (::db/value envelope))
+           (:seon.error/message (::db/value envelope)))
+      (assoc ::failed? true))))
 
 (defn- notify-one! [notify value]
   (try
@@ -180,9 +188,21 @@
                          runtime))))
             (when prior-timer (clear-timer! prior-timer))))))))
 
+(def ^:private error-evidence-transaction-attributes
+  (into error/persisted-attributes
+        #{:db/txInstant :seon.db/user :seon.db/process}))
+
+(defn- error-evidence-event?
+  [event]
+  (let [attributes (into #{} (keep #(when (vector? %) (nth % 1 nil)))
+                         (:tx-data event))]
+    (and (contains? attributes :seon.error/fault)
+         (every? error-evidence-transaction-attributes attributes))))
+
 (defn- enqueue!
   [key registration-id database event]
   (let [now (monotonic-ms)
+        error-evidence? (error-evidence-event? event)
         [before after]
         (swap-vals!
          !runtime
@@ -199,7 +219,12 @@
                     (assoc ::dirty-at (or (::dirty-at registration) now))
                     (assoc ::pending-settle-ms
                            (max (or (::pending-settle-ms registration) 0)
-                                (settle-delay registration event)))))
+                                (settle-delay registration event)))
+                    (assoc ::pending-error-evidence-only?
+                           (and error-evidence?
+                                (or (nil? (::pending-db registration))
+                                    (::pending-error-evidence-only?
+                                     registration))))))
                runtime))))
         prior (get-in before [::registrations key])
         registration (get-in after [::registrations key])]
@@ -216,7 +241,10 @@
     (when (and (= registration-id (::registration-id registration))
                (= install-id (::interest-install-id registration)))
       (when-let [database (:db-after event)]
-        (enqueue! key registration-id database event)))))
+        (let [error-evidence? (error-evidence-event? event)]
+          (if (and (::failed? registration) error-evidence?)
+            (record-count! ::failure-evidence-events-suppressed 1)
+            (enqueue! key registration-id database event)))))))
 
 (defn- resolve-ready! [registration value]
   (when-let [resolve (::resolve-ready registration)]
@@ -232,7 +260,8 @@
                (assoc-in runtime [::registrations key]
                          (-> registration
                              (dissoc ::active ::pending-db ::dirty-at
-                                     ::pending-settle-ms ::timer
+                                     ::pending-settle-ms
+                                     ::pending-error-evidence-only? ::timer
                                      ::timer-token ::due-at)
                              (assoc ::delivered? true
                                     ::value failure)))
@@ -328,6 +357,7 @@
   (let [result (result-envelope raw-result)
         value (::db/value result)
         read-evidence (::db/read-evidence result)
+        failed? (true? (::failed? result))
         signature (evidence-signature read-evidence)
         [before after]
         (swap-vals!
@@ -338,14 +368,23 @@
              (if (and (= registration-id (::registration-id registration))
                       (= evaluation-id (get-in registration
                                                [::active ::evaluation-id])))
-               (assoc-in
-                runtime path
-                (-> registration
-                    (dissoc ::active ::timer ::timer-token ::due-at)
-                    (assoc ::delivered? true
-                           ::value value
-                           ::basis-db basis-db
-                           ::read-evidence read-evidence)))
+               (let [pending-error-db
+                     (when (and failed?
+                                (::pending-error-evidence-only? registration))
+                       (::pending-db registration))]
+                 (assoc-in
+                  runtime path
+                  (cond->
+                   (-> registration
+                       (dissoc ::active ::timer ::timer-token ::due-at)
+                       (assoc ::delivered? true
+                              ::failed? failed?
+                              ::value value
+                              ::basis-db (or pending-error-db basis-db)
+                              ::read-evidence read-evidence))
+                    pending-error-db
+                    (dissoc ::pending-db ::dirty-at ::pending-settle-ms
+                            ::pending-error-evidence-only?))))
                runtime))))
         prior (get-in before [::registrations key])
         registration (get-in after [::registrations key])
@@ -365,7 +404,8 @@
       (if (= signature (::installed-signature prior))
         (when (::pending-db registration)
           (arm! key registration-id))
-        (install-interest! key registration-id basis-db read-evidence false)))))
+        (install-interest! key registration-id (::basis-db registration)
+                           read-evidence false)))))
 
 (defn- start-evaluation! [key registration-id timer-token]
   (let [evaluation-id (random-uuid)
@@ -388,6 +428,7 @@
                            {::evaluation-id evaluation-id
                             ::db (::pending-db registration)})
                     (dissoc ::pending-db ::dirty-at ::pending-settle-ms
+                            ::pending-error-evidence-only?
                             ::timer ::timer-token ::due-at)))
                runtime))))
         prior (get-in before [::registrations key])
@@ -406,7 +447,8 @@
             (.catch #(finish-evaluation!
                       key registration-id evaluation-id database
                       {::db/value (error-value %)
-                       ::db/read-evidence :all})))))))
+                       ::db/read-evidence :all
+                       ::failed? true})))))))
 
 (defn ^:async observe!
   "Attach one consumer to a registered reactive computation.

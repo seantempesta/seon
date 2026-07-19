@@ -215,6 +215,27 @@ the complete CLJS Node gate remains green at 138 tests and 951 assertions.
 failure and correction. The full JVM aggregation and rebuilt Seon live proof
 remain the graduation checks for this revision.
 
+Those revision-wide checks are now complete. The full maintained JVM
+aggregation at `6611de27` passes 2,602 tests and 13,678 assertions across
+`clj-pss`, `clj-hht`, and `specs`. After rebuilding Seon, the original missing
+namespace symbol query returns `nil` within the unchanged 64-result budget,
+and `POST /agents` creates the requested symbol-named namespace with one
+addressed initial message rather than reusing an unrelated agent.
+
+The rebuilt browser proof exposed a separate failure feedback loop: a failed
+render widens correctly to `:all`, but its persisted fault transaction could
+then schedule the same failed render repeatedly. The existing error projection
+is now the recursion fence—no classifier fact or transaction metadata is
+added. While a registration is failed, an error-projection-only transaction is
+suppressed; any mixed or ordinary relevant transaction still schedules repair.
+The upgraded failure test begins with exact evidence containing both error and
+domain attributes, proves an error-only commit does not recompute, proves a
+mixed commit with a relevant domain attribute does recompute, then proves exact
+plan narrowing and zero ownership. The focused reactive, Datastar, and remote
+database gate passes 44 tests and 220 assertions. Live deterministic
+failure/repair evidence remains before closing
+[[reactive-failed-render-recorded-fault-feedback-loop]].
+
 Cache inheritance is demand-driven. A commit updates only attribute revision
 facts and a conservative revision in its cache context; it never walks or
 copies cached result rows. A later demanded read scans the bounded weighted

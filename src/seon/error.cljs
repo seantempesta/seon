@@ -67,6 +67,13 @@
 ;; raw :seon.error.malli/errors leafs — live Schema objects — dropped).
 (schema/register! ::data-edn :string)
 
+(def persisted-attributes
+  "Attributes emitted by the bounded persisted error projection."
+  #{::fault ::message ::kind ::store-id ::branch-name ::commit-id ::basis-t
+    ::stack ::frames ::args-edn ::data-edn
+    :seon.error.frame/index :seon.error.frame/fn :seon.error.frame/file
+    :seon.error.frame/line :seon.error.frame/column})
+
 ;; Frame leaf attrs precede the frame entity shape (leaf-rule).
 (schema/register! :seon.error.frame/index  [:int {:min 0}])
 (schema/register! :seon.error.frame/fn     :string)

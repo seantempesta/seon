@@ -124,6 +124,12 @@
 (deftest native-javascript-promises-are-recognized
   (is (@#'datastar/promise-like? (js/Promise.resolve :ready))))
 
+(deftest render-errors-identify-the-failed-reactive-computation
+  (let [result (@#'datastar/render-error-patch (js/Error. "broken view"))]
+    (is (true? (::reactive/failed? result)))
+    (is (= :all (::db/read-evidence result)))
+    (is (re-find #"broken view" (::datastar/event result)))))
+
 (deftest feed-compression-is-explicit-and-negotiated
   (let [select @#'datastar/selected-feed-encoding]
     (is (= :identity (select nil "gzip, deflate")))

@@ -154,7 +154,8 @@
            (str "render error: " message)]]
          html/->string
          patch-elements)
-     ::db/read-evidence :all}))
+     ::db/read-evidence :all
+     ::reactive/failed? true}))
 
 (defn- promise-like? [value]
   (and (some? value)
@@ -403,15 +404,17 @@
          (db/with-read-evidence
           (fn []
             (view-fn-patch (fn [] ((::render subscription) database))))))
-        event (::event rendered)]
+        event (::event rendered)
+        failed? (::reactive/failed? rendered)]
     (record-count! ::render-completed 1)
     (record-sample! ::render-duration-ms
                     (- (.now js/performance) started-at))
     (when event
       (record-sample! ::serialized-event-bytes
                       (.byteLength js/Buffer event "utf8")))
-    {::db/value event
-     ::db/read-evidence (combined-read-evidence captured rendered)}))
+    (cond-> {::db/value event
+             ::db/read-evidence (combined-read-evidence captured rendered)}
+      failed? (assoc ::reactive/failed? true))))
 
 (defn- structural-settle-ms [event policy]
   (let [attrs (into #{} (keep #(when (vector? %) (nth % 1 nil)))

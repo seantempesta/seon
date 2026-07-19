@@ -268,18 +268,27 @@
           listens (atom [])
           computes (atom 0)
           delivered (atom [])
+          repair-evidence
+          (fn [value]
+            (assoc-in
+             (evidence value)
+             [0 :datahike.read/dependency-plan
+              :datahike.query.dependency/sources 0
+              :datahike.query.source/attributes]
+             #{:seon.error/fault :example/value}))
           compute
           (fn [value]
             (let [attempt (swap! computes inc)]
               (js/Promise.resolve
                (case attempt
                  1 {::db/value [:main {:id "app-view"} "initial"]
-                    ::db/read-evidence (evidence value)}
+                    ::db/read-evidence (repair-evidence value)}
                  2 {::db/value [:main {:id "app-view"}
                                 [:div {:id "app-error"} "render failed"]]
-                    ::db/read-evidence :all}
+                    ::db/read-evidence :all
+                    ::reactive/failed? true}
                  {::db/value [:main {:id "app-view"} "repaired"]
-                  ::db/read-evidence (evidence value)}))))]
+                  ::db/read-evidence (repair-evidence value)}))))]
       (set! db/db (fn ([] (js/Promise.resolve @head))
                     ([_] (js/Promise.resolve @head))))
       (set! db/listen!
@@ -306,9 +315,9 @@
            (fn [_]
              (is (= [:main {:id "app-view"} "initial"]
                     (first @delivered)))
-             (is (= (evidence @head)
+             (is (= (repair-evidence @head)
                     (::db/read-evidence (last @listens)))
-                 "the established page begins with a narrow exact plan")
+                 "the established page begins with exact error and domain attrs")
              (let [next-db (at-t (inc (:t database)))]
                (reset! head next-db)
                ((::db/handler (last @listens)) {:db-after next-db})
@@ -318,11 +327,32 @@
              (is (= "app-error" (get-in (last @delivered) [2 1 :id])))
              (is (= :all (::db/dependency-plan (last @listens)))
                  "failure replaces the prior narrow plan with :all")
+             (let [fault-db (at-t (inc (:t @head)))]
+               (reset! head fault-db)
+               ((::db/handler (last @listens))
+                {:db-after fault-db
+                 :tx-data [[1 :seon.error/fault :core (:t fault-db) true]
+                           [1 :seon.error/message "render failed"
+                            (:t fault-db) true]
+                           [(:t fault-db) :db/txInstant
+                            #inst "2026-07-19T00:00:00.000-00:00"
+                            (:t fault-db) true]]}))
+             (next-turn)))
+          (.then
+           (fn [_]
+             (is (= 2 @computes)
+                 "recording the visible failure does not retrigger it")
+             (is (= 0 (::reactive/pending-count
+                       (reactive/measurements))))
+             (is (= 1 (::reactive/failure-evidence-events-suppressed
+                       (reactive/measurements))))
              (let [next-db (at-t (inc (:t @head)))]
                (reset! head next-db)
                ((::db/handler (last @listens))
                 {:db-after next-db
-                 :tx-data [[1 :example/disjoint-repair true
+                 :tx-data [[1 :seon.error/fault :core
+                            (:t next-db) true]
+                           [2 :example/value :repaired
                             (:t next-db) true]]})
                (next-turn))))
           (.then
@@ -330,9 +360,9 @@
              (is (= [:main {:id "app-view"} "repaired"]
                     (last @delivered)))
              (is (= 3 (count @delivered)))
-             (is (= (evidence @head)
+             (is (= (repair-evidence @head)
                     (::db/read-evidence (last @listens)))
-                 "a disjoint repair replaces :all with exact evidence")
+                 "a mixed ordinary repair replaces :all with exact evidence")
              (is (= (:t @head)
                     (::reactive/last-completed-t
                      (reactive/measurements))))
