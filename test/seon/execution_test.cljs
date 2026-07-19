@@ -2,6 +2,7 @@
   (:require
    [cljs.test :refer [async deftest is testing]]
    [seon.agent.lifecycle :as lifecycle]
+   [seon.config :as config]
    [seon.db :as db]
    [seon.db.protocol :as protocol]
    [seon.error :as error]
@@ -592,6 +593,77 @@
              (fn [exception]
                (is false (str exception))
                (done))))))))
+
+(deftest top-level-core-failure-loads-the-database-crash-policy-only-on-error
+  (async done
+    (let [record-top-level! (deref #'execution/record-top-level-call-error!)
+          current-scope (deref #'error/current-scope)
+          reads (atom [])
+          recorded (atom nil)
+          original-db db/db
+          original-entity db/entity
+          original-record! error/record!
+          core-error (ex-info "composition failed"
+                              {:seon.error/kind :core-bug})]
+      (set! db/db
+            (fn
+              ([]
+               (swap! reads conj :db)
+               (js/Promise.resolve database))
+              ([_] (js/Promise.resolve database))))
+      (set! db/entity
+            (fn
+              ([_ reference]
+               (swap! reads conj reference)
+               (js/Promise.resolve
+                {:seon.config/id config/cluster-config-id
+                 :seon.config/on-core-error :crash}))
+              ([_] (js/Promise.resolve nil))))
+      (set! error/record!
+            (fn [request]
+              (reset! recorded
+                      {:request request
+                       :policy
+                       (get-in
+                        (current-scope)
+                        [:seon.error.scope/configuration
+                         :seon.config/on-core-error])})))
+      (try
+        (is (= :core
+               (error/fault-for
+                'seon.execution.runtime/render-agent-view!)))
+        (-> (js/Promise.resolve
+             (record-top-level! 'my.orders/view
+                                (js/Error. "authored failure")))
+            (.then
+             (fn [_]
+               (is (empty? @reads))
+               (js/Promise.resolve
+                (record-top-level!
+                 'seon.execution.runtime/render-agent-view! core-error))))
+            (.then
+             (fn [_]
+               (is (= [:db [:seon.config/id config/cluster-config-id]]
+                      @reads))
+               (is (= :core (get-in @recorded [:request ::error/fault])))
+               (is (identical? core-error
+                               (get-in @recorded [:request ::error/raw])))
+               (is (= :crash (:policy @recorded)))
+               (done)))
+            (.catch
+             (fn [exception]
+               (is false (str exception))
+               (done)))
+            (.finally
+             (fn []
+               (set! db/db original-db)
+               (set! db/entity original-entity)
+               (set! error/record! original-record!))))
+        (catch :default exception
+          (set! db/db original-db)
+          (set! db/entity original-entity)
+          (set! error/record! original-record!)
+          (throw exception))))))
 
 (deftest selected-load-error-preserves-only-child-reload
   (let [ordinary (ex-info "ordinary compile failure"

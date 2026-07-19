@@ -688,6 +688,30 @@
       (error/record! {::error/raw exception ::error/fault :core}))
     {::ok? false ::error (exception-value exception)}))
 
+(defn- ^:async record-top-level-call-error!
+  "Record a top-level core composition failure with the database's current
+   fault policy. This is an error-only read: successful invocations pay no
+   configuration hop. Authored `my.*` failures remain ordinary values."
+  [function-symbol exception]
+  (when (= :core (error/fault-for function-symbol))
+    (try
+      (let [database (await (db/db))
+            stored (when-not (:seon.error/message database)
+                     (await
+                      (db/entity database
+                                 [:seon.config/id config/cluster-config-id])))
+            configuration
+            (when-not (:seon.error/message stored)
+              (some-> stored db/decode-edn-values))]
+        (error/with-configuration
+         configuration
+         #(error/record! {::error/raw exception ::error/fault :core})))
+      (catch :default _
+        ;; Persistence still gets one attempt through the normal error hook.
+        ;; Without the database configuration the conservative policy is gate.
+        (error/record! {::error/raw exception ::error/fault :core}))))
+  (exception-value exception))
+
 (defn- selected-load-error
   [exception]
   (if (true? (::reload-required? (ex-data exception)))
@@ -927,11 +951,14 @@
                   (terminal-message invocation bounded)))))
             (.catch
              (fn [exception]
-               (settle-active!
-                state token send-message!
-                (terminal-message
-                 invocation
-                 {::ok? false ::error (exception-value exception)})))))
+               (-> (record-top-level-call-error! function-symbol exception)
+                   (.then
+                    (fn [failure]
+                      (settle-active!
+                       state token send-message!
+                       (terminal-message
+                        invocation
+                        {::ok? false ::error failure}))))))))
         state))))
 
 (defn- cancel-active! [state invocation-id send-message!]

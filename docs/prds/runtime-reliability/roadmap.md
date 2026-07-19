@@ -349,6 +349,15 @@ policy audit is only the top-level compiled composition function: distinguish
 its own core throw from the expected report of a supervised child exit, then
 resume the canvas browser matrix and complete exact-source gates.
 
+That final distinction is now explicit. Top-level authored `my.*` failures stay
+agent errors. A top-level compiled `seon.*` failure performs an error-only read
+of the current database configuration, records through the authoritative error
+transaction hook, and applies its crash policy; successful calls add no read or
+latency. The parent host treats the resulting process exit as supervised
+evidence rather than crashing the pod again. Focused execution proof passes 29
+tests/114 assertions. The ordered spine returns to the full canvas browser
+matrix, followed by exact-current CLJS/writer/operator gates.
+
 Current-source release application
 `0d8bc9c2ff2088de3103f951d1bd3f94f96d2c80cb4f4ccf6a035aaa9f96197b`
 now passes the source-free runtime boundary from `/Users/sean/seon-release-9df21b23`

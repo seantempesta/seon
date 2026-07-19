@@ -99,3 +99,13 @@ top-level compiled composition function itself do not pass through
 exit before deciding whether the child, pod, or neither process should crash.
 This issue remains active until that distinction has an explicit regression;
 selected canvas, prompt-block, and interactive-call failures are closed.
+
+That distinction now lives at the child boundary. A top-level authored `my.*`
+failure stays an agent error. A top-level compiled `seon.*` failure performs an
+error-only read of the current database configuration, records through the same
+authoritative transaction hook, and applies its crash policy; successful calls
+pay no configuration hop. The parent host continues to treat the resulting
+process exit as supervised evidence and does not crash the pod a second time.
+Focused execution proof passes 29 tests and 114 assertions, including the
+agent/core split and observation of the database's `:crash` policy at the exact
+recording boundary.
