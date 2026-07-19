@@ -506,8 +506,19 @@ than a special harness runtime or transcript regex.
 - [ ] Verify gzip SSE reconnect and tool reconnect after child and pod restart.
 - [ ] Prove identical active renders share computation where function,
   arguments, and database value match; a slow client does not block a fast one.
-- [ ] Run multiple browser tabs and concurrent feeds without duplicate actions,
+- [x] Run multiple browser tabs and concurrent feeds without duplicate actions,
   stale output, Promise rendering, console errors, or leaked interests.
+
+Current-source live proof created three idle namespace agents through the web
+UI. Two independent root tabs each moved from 9 to 10 agents after one POST,
+rendered the same database-backed purpose, and retained independent canvas/plan
+selection. After a clean supervised restart both tabs reconnected and each
+received the next database update, moving from 10 to 11 agents without reload.
+The rebuild interval produced Datastar's expected network/retry diagnostics and
+backed off to 30 seconds before reconnecting; post-reconnect morph delivery is
+the acceptance signal. Root, agent, and database server-side clients each
+received `datastar-patch-elements`; browser pages reported no application
+console faults before the intentional restart.
 
 Exit: the real browser journey and server-side gzip client agree on one reactive
 render/feed mechanism.

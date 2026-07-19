@@ -149,6 +149,15 @@ desktop restart is invalid. Root reachability therefore remains unscored for
 an external credential reason, while the browser/Datastar journey is the next
 dependency-ready local boundary.
 
+The first current-source browser boundary passes. Creating namespace agents in
+the web UI updated the root feed without reload. Two independent root tabs
+observed one creation transaction, retained independent canvas/plan selection,
+survived a clean supervised restart, and both received a later creation morph
+after Datastar's reconnect backoff. Server-side root, agent, and database feeds
+all emitted `datastar-patch-elements`. The remaining browser boundary is the
+complete control/validation/read-back matrix, gzip remote-mode proof, shared
+render computation, and slow-client isolation.
+
 As of 2026-07-18, one JVM writer has passed the complete autonomous sibling
 cluster lifecycle: fresh initialization, distinct database values and store
 IDs, concurrent agents and gzip feeds, isolated writes, pod-only restart,
