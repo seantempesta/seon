@@ -1785,7 +1785,7 @@
   "Close every SSE feed and await HTTP server shutdown."
   {:malli/schema [:=> [:cat] :any]}
   []
-  (datastar/close-all-feeds!)
+  (await (datastar/close-all-feeds!))
   (await (router/detach!))
   (await
    (if-let [server @!server]

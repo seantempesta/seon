@@ -527,10 +527,12 @@
   [policy]
   (reactive/configure! policy))
 
-(defn ^:dev/before-load before-reload
-  "Keep reactive registrations alive while hot reload replaces render code."
+(declare close-all-feeds!)
+
+(defn ^:async ^:dev/before-load before-reload
+  "Close feeds so reconnects acquire the newly loaded renderer definitions."
   []
-  nil)
+  (await (close-all-feeds!)))
 
 (defn ^:dev/after-load after-reload
   "Restore only the socket heartbeat after hot reload."
@@ -771,16 +773,17 @@
      {::reactive/key (::subscription-key conn)
       ::reactive/consumer-key (:seon.web.feed/id conn)})))
 
-(defn close-all-feeds!
+(defn ^:async close-all-feeds!
   "Close every Datastar feed and release its complete runtime state."
   {:malli/schema [:=> [:cat] :nil]}
   []
   (let [[before _] (reset-vals! !feeds empty-feed-registry)
         connections (vals (::views before))]
-    (doseq [conn connections]
-      (unobserve-connection! conn)
-      (close-feed-socket! conn))
     (stop-heartbeat!)
+    (await
+     (js/Promise.all
+      (clj->js
+       (mapv #(js/Promise.resolve (close-feed-socket! %)) connections))))
     nil))
 
 (defn- open-feed!
@@ -798,11 +801,12 @@
         (js/Promise. (fn [resolve _reject]
                        (reset! !finish-stream resolve)))
         close!
-        (fn [error]
+        (fn ^:async close! [error]
           (when (compare-and-set! closed? false true)
             (let [conn @!conn
                   released? (release-feed! view-id feed-id)]
-              (unobserve-connection! conn)
+              (await
+               (js/Promise.resolve (unobserve-connection! conn)))
               (when-let [controller (:seon.web.feed/controller @!conn)]
                 (when-let [close-writer!
                            (:seon.web.feed/close-writer! @!conn)]

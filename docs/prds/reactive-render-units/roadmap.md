@@ -95,7 +95,19 @@ and serialization but increments equality suppression and performs zero socket
 writes; a changed event computes once and reaches both sockets byte-identically;
 a fresh third socket receives the established event without recomputation; and
 final release returns reactive registration/consumer counts to zero. The
-focused Datastar gate now passes 14 tests and 67 assertions.
+focused Datastar gate passes 14 tests and 67 assertions. Datastar reload and
+pod shutdown now use the same awaited close path: every socket closure releases
+its exact reactive consumer before reload completes, so a surviving registration
+cannot retain an obsolete renderer closure. The lifecycle regression raises the
+focused Datastar gate to 15 tests and 72 assertions; the focused web-server gate
+passes 24 tests and 93 assertions.
+
+Maintained Datahike revision `2e6c7bcf` passes the focused weighted-LRU and
+query-cache suites in all persistent-set, spec-instrumented, and
+hitchhiker-tree profiles: 156 tests and 954 assertions. This directly covers
+count/weight eviction, overlarge-result rejection, exact immutable database
+identities, safe inheritance, schema widening, generation close, stale-owner
+fencing, cancellation, and single-flight ownership/waiter cleanup.
 
 Datahike `main` now exposes an execution-aware, source-scoped query dependency
 plan at maintained revision `2e6c7bcf`. It folds the typed parsed query and

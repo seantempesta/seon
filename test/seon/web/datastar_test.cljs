@@ -212,6 +212,47 @@
     (is (= subscription-key (::datastar/subscription-key conn))
         "the close callback can always release its exact reactive consumer")))
 
+(deftest close-all-awaits-every-socket-release
+  (async done
+    (let [feeds @#'datastar/!feeds
+          original @feeds
+          releases (atom {})
+          closed (atom #{})
+          conn (fn [id]
+                 {:seon.web.feed/close!
+                  (fn [_]
+                    (js/Promise.
+                     (fn [resolve _]
+                       (swap! releases assoc id
+                              #(do (swap! closed conj id) (resolve nil))))))})]
+      (reset! feeds
+              {::datastar/views {"left" (conn :left)
+                                 "right" (conn :right)}
+               ::datastar/subscriptions {}
+               ::datastar/measurements {}})
+      (let [completion (js/Promise.resolve (datastar/close-all-feeds!))]
+        (-> (next-turn)
+            (.then
+             (fn [_]
+               (is (= #{} @closed))
+               (is (= #{:left :right} (set (keys @releases))))
+               ((:left @releases))
+               (next-turn)))
+            (.then
+             (fn [_]
+               (is (= #{:left} @closed))
+               ((:right @releases))
+               completion))
+            (.then
+             (fn [_]
+               (is (= #{:left :right} @closed))
+               (is (empty? (::datastar/views @feeds)))))
+            (.catch (fn [error] (is false (str error))))
+            (.finally
+             (fn []
+               (reset! feeds original)
+               (done))))))))
+
 (deftest equivalent-sockets-share-compute-suppress-equal-and-deliver-fresh
   (async done
     (let [original-db db/db
