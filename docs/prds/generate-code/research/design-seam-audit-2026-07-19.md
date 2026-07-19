@@ -272,7 +272,7 @@ the same deterministic expansion. Namespace-summary embeddings should be added
 to the one existing index only after a measured recall evaluation shows that
 function-only retrieval misses owners.
 
-### Kimi K3 planning probe
+### Kimi K3 planning and compatibility probes
 
 Two paid calls used the official `kimi-k3` endpoint with a 239-token identical
 prompt asking for two small ClojureScript namespaces, schemas first, and
@@ -285,14 +285,25 @@ environment name is `MOONSHOT_API_KEY`, the OpenAI-compatible base URL is
 `https://api.moonshot.ai/v1`, and K3 currently exposes only maximal reasoning
 effort. Prices in this report are a dated observation, not configuration truth.
 
-| Completion cap | Wall time | Cache | Reasoning | Visible answer | Result |
-|---:|---:|---:|---:|---:|---|
-| 4,096 | 107.17 s | miss | 4,093 tokens | 0 tokens | `length`; no code |
-| 8,192 | 47.18 s | 239-token hit | 975 tokens | 1,106 tokens | `stop`; code returned |
+| Probe | Completion cap | Wall time | Cache | Reasoning | Visible answer | Result |
+|---|---:|---:|---:|---:|---:|---|
+| planning | 4,096 | 107.17 s | miss | 4,093 tokens | 0 tokens | `length`; no code |
+| planning | 8,192 | 47.18 s | 239-token hit | 975 tokens | 1,106 tokens | `stop`; code returned |
+| isolated named variant | 16,384 | 13.30 s | miss | 0 reported | 2 tokens | `stop`; `(+ 20 22)` evaluated to `42` |
 
 At the supplied prices, the first probe cost approximately $0.062 and produced
 nothing usable; the second cost approximately $0.017. These costs treat
 reasoning completion tokens as billed output tokens.
+
+The third call ran through a fresh `kimi-k3-audit` cluster and the shipped
+`:planning` model variant, not a direct HTTP script. Its committed attempt fact
+records `:openai-compat`, endpoint
+`https://api.moonshot.ai/v1/chat/completions`, credential name
+`MOONSHOT_API_KEY`, requested model `kimi-k3`, one successful attempt, and an
+effective false/omitted reasoning field. The turn recorded 1,809 prompt tokens,
+2 completion tokens, and one successful eval. At cache-miss prices the estimated
+cost was $0.0055. This is a transport/configuration and low-complexity latency
+floor only; it does not supersede the reasoning-heavy planning measurements.
 
 The successful response obeyed the requested namespace split, emitted normal
 forms, used immutable transformations, added behavioral tests, and declared the

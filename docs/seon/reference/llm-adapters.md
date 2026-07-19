@@ -242,6 +242,14 @@ completion headroom, retrieved real contracts, behavioral verification, and a
 per-run cost ceiling; it is not a blind execution model. Full evidence lives in
 `docs/prds/generate-code/research/design-seam-audit-2026-07-19.md`.
 
+A third isolated-cluster compatibility probe used the shipped `:planning`
+variant with the reasoning field omitted and a deliberately trivial one-form
+request. It completed in 13.30 seconds with 1,809 input tokens, 2 completion
+tokens, one successful attempt, and a successful eval result of `42`; estimated
+cache-miss cost was $0.0055. This establishes the low-complexity floor, not a
+planning-task latency promise: K3 may still spend substantial reasoning tokens
+on difficult requests, as the two planning probes above demonstrate.
+
 The current adapter sends the deprecated-but-accepted OpenAI `max_tokens`
 field, while K3 documents `max_completion_tokens`. This is recorded
 compatibility debt, not a reason to change the shared field blindly because
