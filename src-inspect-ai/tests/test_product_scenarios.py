@@ -1,14 +1,18 @@
 import copy
 import json
+from types import SimpleNamespace
 
 import pytest
 from inspect_ai import eval as inspect_eval
 
 from seon_inspect.product_scenarios import (CHECKS, SCENARIOS,
+                                            CHILD_RECOVERY_SOURCE,
+                                            read_child_recovery_evidence,
                                             query_execution_processes,
                                             query_product_evidence,
                                             run_product_scenario)
 from seon_inspect.tasks.product_scenarios import GOOD, bad_snapshot, product_scenario
+from seon_inspect.tasks import product_scenarios as product_tasks
 
 
 @pytest.mark.parametrize("scenario", SCENARIOS)
@@ -150,3 +154,62 @@ def test_execution_process_reader_uses_the_parent_host_endpoint():
         opener=lambda url: urls.append(url) or Response())
     assert urls == ["http://127.0.0.1:41000/_seon/operator/processes"]
     assert processes == [{"seon.execution.host/pid": 41001}]
+
+
+def test_child_recovery_evidence_joins_database_and_parent_host():
+    calls = []
+
+    def product_reader(url, query, args, *, history):
+        calls.append((url, args, history))
+        return {
+            "database_value": {"t": 42, "history": True},
+            "database_snapshot": [["eval-1", "turn-1", "recovery-1",
+                                   41001, "a" * 64, "blob-hash",
+                                   "eval-2", "sibling-eval"]],
+        }
+
+    processes = [{"seon.execution/agent-id": "root",
+                  "seon.execution.host/pid": 41002,
+                  "seon.execution.host/artifact-digest": "a" * 64,
+                  "seon.execution.host/ready?": True}]
+    snapshot = read_child_recovery_evidence(
+        "http://pod/agents/run", "root", product_reader=product_reader,
+        process_reader=lambda _url: processes)
+    assert calls == [("http://pod/agents/run",
+                      ["root", CHILD_RECOVERY_SOURCE], True)]
+    assert snapshot["recovery"]["pid"] == 41001
+    assert snapshot["processes"] == processes
+    assert CHECKS["child_recovery"](snapshot)["ok"]
+
+
+def test_native_live_recovery_task_owns_and_releases_its_branch(monkeypatch):
+    from seon_inspect import cluster, solver as pod_solver
+
+    events = []
+    lease = SimpleNamespace(name="inspect-recovery-proof",
+                            cluster_url="http://pod/agents/run")
+    monkeypatch.setattr(cluster, "acquire_branch_lease",
+                        lambda name: events.append(("open", name)) or lease)
+    monkeypatch.setattr(cluster, "release_branch_lease",
+                        lambda value: events.append(("close", value.name)))
+    monkeypatch.setattr(
+        pod_solver, "pod_run",
+        lambda prompt, timeout, url, *, agent_id:
+        events.append(("run", prompt, timeout, url, agent_id))
+        or {"reply": "done", "agent_id": agent_id})
+    monkeypatch.setattr(product_tasks, "read_child_recovery_evidence",
+                        lambda url, agent_id: copy.deepcopy(GOOD["child_recovery"]))
+    monkeypatch.setattr(pod_solver, "require_scorable_pod_state",
+                        lambda state: state)
+
+    log = inspect_eval(
+        product_scenario(scenario="child_recovery", live=True,
+                         _admission={"tree_sha256": "a" * 64}),
+        model="mockllm/model", display="none", log_level="warning")[0]
+    assert log.status == "success", log.error
+    score = next(score for score in log.results.scores
+                 if score.name == "product_scenario_scorer")
+    assert score.metrics["accuracy"].value == 1.0
+    assert events[0][0] == "open"
+    assert [event[0] for event in events].count("run") == 2
+    assert events[-1] == ("close", "inspect-recovery-proof")

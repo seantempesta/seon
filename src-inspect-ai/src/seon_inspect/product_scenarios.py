@@ -18,6 +18,39 @@ from inspect_ai.solver import TaskState
 
 SCENARIOS = ("namespace", "reuse_repair", "child_recovery", "pod_restart")
 
+CHILD_RECOVERY_SOURCE = "(js/process.exit 17)"
+CHILD_RECOVERY_QUERY = """[:find ?eval-id ?turn-id ?recovery-id ?pid ?digest
+                                  ?blob-hash ?later-id ?sibling-id
+ :in $ ?agent-id ?source
+ :where
+ [?agent :seon.agent/id ?agent-id _ true]
+ [?failed :seon.eval/agent ?agent _ true]
+ [?failed :seon.eval/id ?eval-id _ true]
+ [?failed :seon.eval/source ?source _ true]
+ [?failed :seon.eval/status :interrupted _ true]
+ [?turn :seon.agent.turn/evals ?failed _ true]
+ [?turn :seon.agent.turn/id ?turn-id _ true]
+ [?turn :seon.agent.turn/status :interrupted _ true]
+ [?recovery :seon.runtime.recovery/id ?recovery-id ?recovery-tx true]
+ [?recovery :seon.runtime.recovery/eval ?failed ?recovery-tx true]
+ [?recovery :seon.runtime.recovery/pid ?pid ?recovery-tx true]
+ [?recovery :seon.runtime.recovery/execution-digest ?digest ?recovery-tx true]
+ [?recovery :seon.runtime.recovery/diagnostic-blob ?blob ?recovery-tx true]
+ [?blob :my.blob/hash ?blob-hash _ true]
+ [?later :seon.eval/agent ?agent ?later-tx true]
+ [?later :seon.eval/id ?later-id ?later-tx true]
+ [?later :seon.eval/status :done ?later-tx true]
+ [(> ?later-tx ?recovery-tx)]
+ [?sibling-agent :seon.agent/id ?sibling-agent-id _ true]
+ [(not= ?sibling-agent ?agent)]
+ [?sibling :seon.eval/agent ?sibling-agent _ true]
+ [?sibling :seon.eval/id ?sibling-id _ true]
+ [?sibling :seon.eval/status :done _ true]
+ (not-join [?agent ?source ?failed]
+   [?duplicate :seon.eval/agent ?agent _ true]
+   [?duplicate :seon.eval/source ?source _ true]
+   [(not= ?duplicate ?failed)])]"""
+
 
 def _exactly_one(rows: list[dict], **attrs: Any) -> dict | None:
     found = [row for row in rows
@@ -74,16 +107,22 @@ def check_reuse_repair(snapshot: dict) -> dict:
 def check_child_recovery(snapshot: dict) -> dict:
     failed = snapshot.get("failed_eval", {})
     recovery = snapshot.get("recovery", {})
-    children = snapshot.get("children", [])
+    processes = snapshot.get("processes", [])
+    replacements = [
+        process for process in processes
+        if process.get("seon.execution/agent-id") == failed.get("agent_id")
+        and process.get("seon.execution.host/pid") != recovery.get("pid")]
     checks = {
         "interrupted_eval": (failed.get("status") == "interrupted"
                              and failed.get("turn_status") == "interrupted"),
         "diagnostic_blob": bool(recovery.get("diagnostic_blob_hash")),
-        "failed_child_recorded": (recovery.get("failed_child_id")
-                                  == failed.get("child_id")),
-        "one_replacement": (len(children) == 2
-                            and sum(c.get("replacement") is True
-                                    for c in children) == 1),
+        "failed_process_recorded": (recovery.get("eval_id") == failed.get("id")
+                                    and isinstance(recovery.get("pid"), int)),
+        "one_replacement": (
+            len(replacements) == 1
+            and replacements[0].get("seon.execution.host/ready?") is True
+            and replacements[0].get("seon.execution.host/artifact-digest")
+            == recovery.get("execution_digest")),
         "crashing_eval_not_replayed": snapshot.get("crashing_eval_count") == 1,
         "later_success": snapshot.get("later_eval", {}).get("status") == "done",
         "sibling_uninterrupted": snapshot.get("sibling", {}).get("status") == "done",
@@ -132,8 +171,12 @@ PHASES = {
         "function without redefining it.",
         "Have a peer repair my.tax/rate in place and run its test in a fresh child."),
     "child_recovery": (
-        "Perform the maintained deterministic execution-child failure probe.",
-        "After recovery, perform later work and verify a sibling was uninterrupted."),
+        "From root, send namespace my.inspect.recovery-sibling a small task "
+        "that evaluates (+ 1 1) and completes. Then perform the maintained "
+        "deterministic execution-child failure probe by evaluating exactly "
+        "(js/process.exit 17). Do not evaluate that form a second time.",
+        "After the recovery notice, evaluate (+ 20 22), confirm the sibling "
+        "completed, and finish without replaying the crashing form."),
     "pod_restart": (
         "Commit the requested database value before the pod restart.",
         "After the pod restart, read the committed value with the same agent."),
@@ -200,6 +243,41 @@ def query_execution_processes(cluster_url: str, *,
             isinstance(process, dict) for process in processes):
         raise RuntimeError("operator process response omitted its process vector")
     return processes
+
+
+def read_child_recovery_evidence(cluster_url: str, agent_id: str, *,
+                                 product_reader=query_product_evidence,
+                                 process_reader=query_execution_processes
+                                 ) -> dict:
+    """Join durable crash recovery with one demanded host snapshot."""
+    evidence = product_reader(
+        cluster_url, CHILD_RECOVERY_QUERY,
+        [agent_id, CHILD_RECOVERY_SOURCE], history=True)
+    rows = evidence.get("database_snapshot")
+    if not isinstance(rows, list) or not rows:
+        raise RuntimeError("child recovery query returned no complete evidence")
+    row = rows[0]
+    if not isinstance(row, list) or len(row) != 8:
+        raise RuntimeError("child recovery query returned an invalid row")
+    stable = row[:6]
+    if any(candidate[:6] != stable for candidate in rows
+           if isinstance(candidate, list) and len(candidate) == 8):
+        raise RuntimeError("child recovery query returned several recoveries")
+    (eval_id, _turn_id, _recovery_id, pid, digest, blob_hash,
+     later_id, sibling_id) = row
+    return {
+        "database_value": evidence.get("database_value"),
+        "failed_eval": {"id": eval_id, "agent_id": agent_id,
+                        "status": "interrupted",
+                        "turn_status": "interrupted"},
+        "recovery": {"eval_id": eval_id, "pid": pid,
+                     "execution_digest": digest,
+                     "diagnostic_blob_hash": blob_hash},
+        "processes": process_reader(cluster_url),
+        "crashing_eval_count": 1,
+        "later_eval": {"id": later_id, "status": "done"},
+        "sibling": {"id": sibling_id, "status": "done"},
+    }
 
 
 @scorer(metrics=[accuracy()])

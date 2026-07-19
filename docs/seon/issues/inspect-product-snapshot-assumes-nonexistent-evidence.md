@@ -34,6 +34,16 @@ no healthy telemetry to the database, and asks no child event loop to
 cooperate. This is the real second owner the live recovery scorer must join;
 it is not another durable process registry.
 
+The child-recovery scorer and fixture no longer use generic child IDs. They now
+join the recovery anchor's real eval ID, failed PID, execution digest, and blob
+hash to the current parent-host process for the same agent, requiring a new PID,
+the same artifact digest, and ready state. The first native live task owns a
+retained branch in `finally`, drives both real `/agents/run` phases, queries the
+history evidence, samples the host, validates infrastructure admission for both
+pod calls, and releases the exact branch. Its offline native lifecycle/scorer
+proof passes in the 21-test product slice. Exact live execution remains the
+acceptance gate.
+
 ## Acceptance
 
 - The live repair scorer consumes real history datoms and their transaction

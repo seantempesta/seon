@@ -220,8 +220,19 @@ persist the failed PID/digest/eval/blob, while healthy replacement processes
 remain transient in `seon.execution.host/processes`; the provisional scorer's
 generic child IDs must therefore be replaced with those real facts. The
 history seam passes 18 focused Python tests and the complete 1,186-test/
-5,297-assertion CLJS gate. Parent-host process evidence is the earliest
-unsettled Inspect contract before wiring the native live solver.
+5,297-assertion CLJS gate. Parent-host process evidence was the next unsettled
+Inspect contract.
+
+That contract is now source-complete. A loopback-only operator read returns the
+existing demanded `seon.execution.host/processes` value without polling child
+event loops or persisting healthy samples. The recovery scorer now joins the
+persisted eval ID, failed PID, execution digest, and diagnostic blob to one
+ready current process for the same agent with a different PID and the same
+artifact. Its native solver acquires one retained branch, drives both real pod
+phases, validates each pod result as infrastructure-scorable, reads Datahike
+history plus parent-host state, and releases the exact lease in `finally`.
+The product slice passes 21 tests. Exact live execution is now the earliest
+Inspect falsifier; host pressure still prevents a truthful artifact build.
 
 The development-tool reconnect defect is source-grounded in the maintained
 Shadow runtime rather than Seon's database advertisement. Shadow commit
@@ -859,7 +870,7 @@ database, renderer, runtime, operator, or packaging mechanisms.
 |---|---|---|---|---|
 | 0 | Current branch graduation | **COMPLETE** | none | Reconciled docs and successor PRDs; clean full pod/writer/operator/Inspect-offline gates; destructive default reset; live CLJ+CLJS MCP, browser, gzip SSE, database read-back, restart, and retained-result/query-budget proof; legacy lane evidence classified before cleanup. |
 | 1 | `database-lifecycle-recovery` | **IMPLEMENTING** | 0 | Fresh, converged, config-free reopen, clean restart, crash recovery, canonical coordinates, as-of/fork/restore/undo, and multi-form transitions pass without replay or duplicate registries. |
-| 2 | `reactive-render-units` | **CARVED + GROUNDED** | 1 | One runtime-observed unit engine serves root, agent, canvas, debug, and data views; helper-indirected reads update; unrelated writes do no work; equivalent tabs share bounded plain-data/output reuse. |
+| 2 | `reactive-render-units` | **CARVED + RE-GROUNDED** | 1 | Datahike owns one tests-first reactive-read and lazy immutable-result protocol; registered consumers converge at configured maximum latency, equal values suppress notification, and Datastar pages are one downstream consumer. |
 | 3 | `database-browser` | **CARVED + GROUNDED** | 1, unit contract from 2 | Entity, refs, transactions, provenance, and history are navigable through bounded Datahike index cursors; closed details construct no expensive body; no global scan or second feed exists. |
 | 4 | `root-workspace-sessions` | **CARVED + GROUNDED** | 2 | Root has its distinct system layout and concise context; ordinary-agent cards use the same derived focus; database-backed per-tab locations prove two tabs do not fight. |
 | 5 | `agent-canvas-interaction` | **CARVED + GROUNDED** | 2, 4 | The one `my.canvas` path proves every control, validation/error result, focus/pin/clear transition, reactive update, and narrow/wide layout in a real browser. |
