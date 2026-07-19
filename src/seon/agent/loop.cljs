@@ -776,6 +776,26 @@
              (str "seon.agent.loop: open-run! FAILED for " id ": "
                   (pr-str opened)))))))))
 
+(defn- schedule-human-message-run! [input run-id cause-eid]
+  (let [id (:seon.agent/id input)]
+    (js/setTimeout
+     (fn []
+       (-> (js/Promise.resolve
+            (with-agent-repl
+             id
+             (fn ^:async supersede! []
+               (await
+                (run/close-run!
+                 {:seon.agent.run/id run-id
+                  :seon.agent.run/closed-reason :superseded}))
+               (await (open-or-renew-message-run! input cause-eid)))))
+           (.catch
+            (fn [exception]
+              (js/console.error
+               (str "seon.agent.loop: human-message supersede threw for " id
+                    ": " (or (.-message exception) exception)))))))
+     0)))
+
 (defn- schedule-message-run! [input cause-eid]
   (let [id (:seon.agent/id input)]
     (js/setTimeout
@@ -874,7 +894,13 @@
                     (log id "wake skipped" "paused — resume first")
 
                     :running
-                    (schedule-renew! id (:seon.agent.run/id current-run))
+                    (let [cause-eid (ffirst waking)
+                          cause (get message-by-eid cause-eid)]
+                      (if (= :human (:seon.agent.message/origin cause))
+                        (schedule-human-message-run!
+                         input (:seon.agent.run/id current-run) cause-eid)
+                        (schedule-renew!
+                         id (:seon.agent.run/id current-run))))
 
                     :idle
                     (schedule-message-run! input (ffirst waking)))))))))))))

@@ -293,6 +293,16 @@ idempotently ensures the runtime host. A failed host attempt leaves the task
 durable rather than silently discarding it. Commit `6f005b1c` passes 24 web
 tests/93 assertions; the exact rebuilt live row is the next proof.
 
+That rebuilt row proved message-before-resume was necessary but insufficient.
+With watcher, writer, and isolated branch stable for both 90-second phases,
+root still continued the inherited open run, queried the same three agents from
+its previous plan, and never called `agent/delegate!`. The running-message wake
+path only renewed the open run, so stale work could append turns after the new
+human message. Human messages now close the owned run as `:superseded` and open
+the existing message-caused run; agent messages retain lease renewal. The
+focused loop gate passes 18 tests/75 assertions. Exact live task-priority proof
+remains required before the reuse/repair scorer is rerun.
+
 The first exact live repair row opened the isolated branch and found two
 earlier runtime contracts. A delegated agent passed the unresolved Promise from
 `seon.db/db` to `seon.db/pull`; Malli correctly rejected the input, but the

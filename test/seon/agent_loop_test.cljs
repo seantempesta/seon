@@ -462,6 +462,75 @@
              (set! admission/available? available?)
              (done)))))))
 
+(deftest human-message-supersedes-an-open-run
+  (async done
+    (let [available? admission/available?
+          pull-many db/pull-many
+          close-run! run/close-run!
+          open-run! run/open-run!
+          run-loop! loop/run-loop!
+          database {:db-name "default" :t 3 :as-of nil :since nil
+                    :history false
+                    :datahike/commit-id
+                    #uuid "10000000-0000-0000-0000-000000000003"}
+          !closed (atom nil)
+          !opened (atom nil)
+          !driven (atom nil)
+          handler (loop/wake-handler {:seon.agent/id "agent-a"})]
+      (set! admission/available? (constantly true))
+      (set! db/pull-many
+            (fn
+              ([_request]
+               (js/Promise.reject (js/Error. "unexpected map pull")))
+              ([_database _selector _refs]
+               (js/Promise.resolve
+                [{:db/id 7
+                  :seon.agent/run {:seon.agent.run/id "run-old"
+                                   :seon.agent.run/status :open}}
+                 {:db/id 11
+                  :seon.agent.message/id "message-human"
+                  :seon.agent.message/hops 0
+                  :seon.agent.message/origin :human
+                  :seon.agent.message/from {:db/id 9}}]))))
+      (set! run/close-run!
+            (fn [request]
+              (reset! !closed request)
+              (js/Promise.resolve {:db-after database})))
+      (set! run/open-run!
+            (fn [request]
+              (reset! !opened request)
+              (js/Promise.resolve {:seon.agent.run/id "run-human"})))
+      (set! loop/run-loop!
+            (fn [_input run-id]
+              (reset! !driven run-id)
+              (js/Promise.resolve :idle)))
+      (-> (handler
+           {:db-after database
+            :tx-data [[11 :seon.agent.message/to 7 536870915 true]]})
+          (.then (fn [_]
+                   (js/Promise.
+                    (fn [resolve _] (js/setTimeout resolve 20)))))
+          (.then
+           (fn [_]
+             (is (= {:seon.agent.run/id "run-old"
+                     :seon.agent.run/closed-reason :superseded}
+                    @!closed))
+             (is (= {:seon.agent/id "agent-a"
+                     :seon.agent.run/trigger :message
+                     :seon.agent.run/cause 11}
+                    @!opened))
+             (is (= "run-human" @!driven))))
+          (.catch (fn [error]
+                    (is false (str "human wake rejected: " error))))
+          (.finally
+           (fn []
+             (set! db/pull-many pull-many)
+             (set! run/close-run! close-run!)
+             (set! run/open-run! open-run!)
+             (set! loop/run-loop! run-loop!)
+             (set! admission/available? available?)
+             (done)))))))
+
 (deftest activity-log-is-one-authority-query
   (async done
     (let [query db/query
