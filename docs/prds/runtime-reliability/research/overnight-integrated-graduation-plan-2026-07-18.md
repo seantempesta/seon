@@ -62,9 +62,7 @@ source lines in this ledger or the owning successor PRD.
   diagnostic call to the execution-child-only `load-authored-program!` inside
   the pod. That call intentionally replaces the process-local schema
   projection; clean cold start and ordinary watched reload retain
-  `:seon.db/db`. The remaining atomic-publication concern is exact child
-  artifact admission and Shadow partial-import failure, not schema loss during
-  the supported reload path.
+  `:seon.db/db`. Maintained Shadow now reports partial imports as failures.
 - Three cold starts and three full supervised restarts against the same
   database completed ready with application digest `209b23e8…` and the
   `:seon.db/db` schema resolvable.
@@ -78,6 +76,12 @@ source lines in this ledger or the owning successor PRD.
   assertions. Its first run exposed one canvas test that signaled completion
   before restoring a global database stub; the lifecycle fix removed all six
   downstream false failures.
+- A demanded compiled root render spawned child PID `70423` with artifact digest
+  `420939e7…`, exactly matching the immutable launch descriptor. A watched
+  shared-source edit changed current client/execution outputs and made the
+  operator target degraded, while the retained child continued to report the
+  same exact admitted digest. Watched reload therefore never claims to replace
+  the execution artifact; `bin/seon up` is the canonical cross-process cut.
 
 ## Execution ledger
 
@@ -87,13 +91,15 @@ source lines in this ledger or the owning successor PRD.
   it as an unsupported execution-child loader call that replaced the pod's
   process-local schema projection; prove the supported cold/reload path retains
   the schema.
-- [ ] Make schema and program publication atomic: ready with the complete
+- [x] Make schema and program publication atomic: ready with the complete
   admitted program or recorded core fault plus process exit. Maintained Shadow
   now reports caught Node import failures truthfully, and admission permits the
   next build to recover from `:unavailable`. Live proof rejected a guarded
   `seon.log` import, performed no rehost/ticker install, then committed all 754
   functions and returned the same pod to ready on the repaired next build.
-  Exact execution-child artifact admission remains.
+  Execution children admit only the digest-verified immutable launch artifact;
+  changed watched outputs degrade the target until canonical republish rather
+  than silently changing a live child.
 - [ ] **IN PROGRESS:** apply the database-selected core-fault policy
   consistently at ticker, reload, publication, render, selected-call, and
   top-level child boundaries. The ticker now retains the already-acquired
