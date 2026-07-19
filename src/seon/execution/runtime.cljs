@@ -137,6 +137,12 @@
      {:seon.error/message
       (selected-error-message (record-selected-core-error! result))})))
 
+(defn- configured-html-value
+  [configuration id block result]
+  (error/with-configuration
+   configuration
+   #(html-value id block result)))
+
 (defn- block-call
   [id entity configuration block]
   {::execution/function-symbol (:seon.render/ai block)
@@ -536,10 +542,9 @@
                               (map
                                (fn [{:keys [index]} result]
                                  [index
-                                  (html-value
-                                   id
-                                   (nth all-blocks index)
-                                   result)])
+                                  (configured-html-value
+                                   configuration id
+                                   (nth all-blocks index) result)])
                                targets
                                results))
                         surfaces

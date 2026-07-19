@@ -307,7 +307,11 @@ execution child remained alive. [[../../seon/issues/core-selected-render-errors-
 owns the correction and exact evidence. The selected-call-to-Hiccup boundary
 now records core failures through the existing `seon.error/record!` owner while
 agent-authored failures remain ordinary values; focused proof passes 14 tests
-and 75 assertions. The ordered gate is an exact-package crash/host-replacement
+and 75 assertions. The first exact package proved the fault record but exposed
+that Hiccup conversion had left the operation's async configuration scope, so
+the default `:gate` policy replaced the configured `:crash` policy. Conversion
+now remains inside that existing scope; focused proof passes 15 tests and 77
+assertions. The ordered gate is a second exact-package crash/host-replacement
 proof followed by the remaining web-boundary audit, then the canvas browser
 matrix. This fault-policy proof precedes performance work because a stable
 process that silently renders a core invariant failure is not healthy.

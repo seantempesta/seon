@@ -90,6 +90,31 @@
       (finally
         (set! error/record! original-record!)))))
 
+(deftest selected-render-conversion-retains-the-operation-configuration
+  (let [configured-html-value (deref #'runtime/configured-html-value)
+        original-record! error/record!
+        observed (atom nil)
+        current-scope (deref #'error/current-scope)
+        operation-configuration
+        (assoc configuration :seon.config/on-core-error :crash)]
+    (set! error/record!
+          (fn [_]
+            (reset! observed
+                    (get-in (current-scope)
+                            [:seon.error.scope/configuration
+                             :seon.config/on-core-error]))))
+    (try
+      (configured-html-value
+       operation-configuration
+       "agent-1"
+       {:seon.render/html 'seon.render.core/view}
+       {::execution/ok? false
+        ::execution/error {:seon.error/message "core render failed"
+                           :seon.error/kind :core-bug}})
+      (is (= :crash @observed))
+      (finally
+        (set! error/record! original-record!)))))
+
 (defn- call-with-acquired-agent
   ([result request observed]
    (call-with-acquired-agent

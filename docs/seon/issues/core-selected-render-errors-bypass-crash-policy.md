@@ -49,6 +49,13 @@ renderer, or error registry.
 `seon.execution.runtime/record-selected-core-error!` now routes selected
 `:core-bug` results into `seon.error/record!` before either prompt-block text or
 canvas Hiccup is produced. Focused execution-runtime proof passes 14 tests and
-75 assertions, including the explicit agent/core classification split. Exact
-package crash, host replacement, and the remaining web-boundary audit are
+75 assertions, including the explicit agent/core classification split.
+
+The first exact package then falsified an async-scope assumption: the fault was
+recorded, but canvas Hiccup conversion happened after the selected-call Promise
+left `error/with-configuration`, so `record!` saw the default `:gate` policy
+rather than the operation's database configuration. The conversion now runs
+inside that existing operation scope. Focused proof passes 15 tests and 77
+assertions and explicitly observes `:crash` at the recording boundary. A second
+exact-package crash, host replacement, and the remaining web-boundary audit are
 still required before closing this issue.
