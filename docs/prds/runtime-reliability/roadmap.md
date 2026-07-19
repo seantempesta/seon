@@ -262,13 +262,27 @@ namespace requiring the implementation namespace; focused proof passes 26
 tests. The first rebuild against Datahike's execution-aware dependency plan
 then failed closed because Seon's closed query-response schema omitted the new
 `:datahike.read/dependency-plan`; commit `8b8596a5` closes and tests that JVM/CLJS
-boundary. A source-frozen rebuild and the exact isolated-branch live row are the
-next Inspect falsifiers. The reactive-render task still owns uncommitted
-Datahike pull-evidence inputs, so no artifact checkpoint is valid until it
-hands off a coherent commit and freezes those inputs. Pod
-restart/database read-back follows on the same lease boundary, and complete
-Inspect, browser, downstream, package, multi-cluster, performance, and resource
-proof remain the final graduation portfolio.
+boundary. The frozen rebuild now passes and all three canonical processes become
+ready. It also exposed that `bun run` can terminate Tailwind's spawned CLI with
+signal 9 before execution even though the same lock-pinned module runs through
+vendored Bun in 63–76 milliseconds. Development and release builds now invoke
+that module directly through Bun; the focused operator gate passes 29 tests/140
+assertions. A live malformed database call then proved that the execution child
+survives and completes a later valid query, but local request validation
+mislabeled the agent mistake as `:core-bug`; it is now `:user-input` and the
+remote-contract gate passes 19 tests/87 assertions.
+
+The first exact reuse/repair drive did not crash the pod or database. With a
+90-second phase budget, `/agents/run` returned two structured timeouts while the
+same branch and root stayed alive, then the history read correctly reported no
+repair evidence. Root spent 12 turns in phase one without finishing the two
+delegations. The native task now names the existing `agent/delegate!` interface,
+requires one form and one real child completion at a time, and retains compact
+phase summaries on evidence failure; its focused gate passes 26 tests. This
+explicit live row is the next Inspect falsifier. Pod restart/database read-back
+follows on the same lease boundary, and complete Inspect, browser, downstream,
+package, multi-cluster, performance, and resource proof remain the final
+graduation portfolio.
 
 The first exact live repair row opened the isolated branch and found two
 earlier runtime contracts. A delegated agent passed the unresolved Promise from
