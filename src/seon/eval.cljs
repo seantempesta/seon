@@ -1866,8 +1866,8 @@
 
    Evaluates ONE `(ns <home> (:require …))` form that aliases the function + data
    namespaces the context teaches — so the agent's reflexive
-   `(message/user …)` / `(message/agent …)` / `(wait …)` / `(complete …)` /
-   `(terminate …)` AND the short-aliased `(schema/register! …)` /
+   `(message/user …)` / `(message/agent …)` and fully qualified
+   `seon.agent.lifecycle/*` calls, plus the short-aliased `(schema/register! …)` /
    `(db/query …)` / `(db/transact! …)` / `::db/…` data forms all resolve
    without fully-qualifying:
 

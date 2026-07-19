@@ -95,9 +95,10 @@
    the single source of truth, shared by [[seon.eval/setup-agent-ns!]] (which INSTALLS
    it) and `seon.agent.ctx.namespaces/cur-ns-workspace-stub` (which RENDERS it
    VERBATIM into the agent's workspace block). No parallel reconstruction, no
-   hidden aliasing: the agent SEES the exact aliases/refers its reflexive
-   `(message/user …)` / `(wait …)` / `(schema/register! …)` / `(db/transact! …)`
-   forms resolve against.
+   hidden aliasing: the agent SEES the exact aliases and requires. Lifecycle
+   examples remain fully qualified so they keep resolving after namespace
+   movement; `(message/user …)`, `(schema/register! …)`, and `(db/transact! …)`
+   use the aliases carried by authored namespaces.
 
    Each entry is a `(require …)`-style spec — `[ns :as alias]` or
    `[ns :refer [functions…]]` — `pr-str`'d straight into the `(ns … (:require …))`

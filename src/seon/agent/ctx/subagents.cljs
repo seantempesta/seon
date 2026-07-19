@@ -361,8 +361,8 @@
       (str ";;; ORPHANED AGENTS — " (count rows)
            " live agent" (when (> (count rows) 1) "s")
            " whose parent is TERMINATED (root-only)\n"
-           "; Their parent is dead but they are not — decide per case "
-           "(terminate / re-task / leave).\n"
+           "; Their parent is dead but they are not — decide per case: "
+           "seon.agent.lifecycle/terminate, re-task, or leave.\n"
            (str/join
              "\n"
              (map (fn [[cid pid purpose]]

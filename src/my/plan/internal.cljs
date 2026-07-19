@@ -865,7 +865,7 @@
          "{:my.plan/tree <edited> :seon.agent/id \"" worker-id "\"}). "
          "Optionally send the worker ONE line of guidance: (message/agent "
          "\"" worker-id "\" \"…\"). When the reconcile receipt renders, "
-         "the ask is fulfilled — call (complete \"re-planned " id "\") in "
+         "the ask is fulfilled — call (seon.agent.lifecycle/complete \"re-planned " id "\") in "
          "that SAME turn; further turns add nothing."))
 
 (declare acquire-plan-block)
@@ -1370,7 +1370,8 @@
            (:my.plan/id step) " «" (:my.plan/title step) "» — "
            done " of " total " steps done"
            (if completed?
-             (str "\n;   close this run now with (complete \"<result>\"); "
+             (str "\n;   close this run now with "
+                  "(seon.agent.lifecycle/complete \"<result>\"); "
                   "continue only by deliberately selecting another step.")
              (when expect (str "\n;   verify before done!: " expect)))))))
 

@@ -304,7 +304,8 @@
     (str "; Your turn ends at your first complete form — the runtime evaluates it and its\n"
          "; real value is already in the log when you continue. Write one form and stop.\n"
          "; A reply with NO form does nothing and a few in a row end your run — to say\n"
-         "; something, (message/user \"…\"); to deliver a final answer, (complete \"…\").")
+         (str "; something, (message/user \"…\"); to deliver a final answer, "
+              "(seon.agent.lifecycle/complete \"…\")."))
     ;; :batch (default)
     (str "; Write the forms you want run; never write out a result yourself — a result you\n"
          "; type is stripped, and the real value arrives interleaved on your next turn.")))
@@ -665,11 +666,13 @@
         (cond
           (>= loop-k (max 1 (- cap 2)))
           (str "; loop " loop-k "/" cap " — you are near the per-loop cap. "
-               "Wrap up: (complete \"…\") with what you have, or message the "
+               (str "Wrap up: (seon.agent.lifecycle/complete \"…\") with "
+                    "what you have, or message the ")
                "result to your human.\n")
           (>= loop-k (quot cap 2))
           (str "; loop " loop-k "/" cap " — past halfway through this loop. "
-               "If you have what you need, (complete \"…\") or message the result.\n")
+               (str "If you have what you need, "
+                    "(seon.agent.lifecycle/complete \"…\") or message the result.\n"))
           :else "")]
     (str steer
          "; " ns-str " · turn " n-turns " · loop " loop-k "/" cap

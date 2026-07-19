@@ -253,7 +253,8 @@
              (is (str/includes? text
                                 "CURRENT REQUEST COMPLETED: message"))
              (is (str/includes? text
-                                "close this run now with (complete"))
+                                (str "close this run now with "
+                                     "(seon.agent.lifecycle/complete")))
              (is (str/includes? text "Unrelated older work")
                  "other work stays visible but cannot replace the run cause")))
           (.finally (fn [] (set! db/execute-many original)))

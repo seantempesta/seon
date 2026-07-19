@@ -237,6 +237,16 @@
                     (fn [result]
                       (is (true? (:seon.eval/ok? result)))
                       (is (true? (:seon.eval/value result))
-                          "db/query is the live function in the authored ns"))))))
+                          "db/query is the live function in the authored ns")
+                      (seval/eval
+                        cs "(fn? seon.agent.lifecycle/complete)"
+                        {:seon.eval/starting-ns new-ns
+                         :seon.eval/analyze-deps? false})))
+                  (.then
+                    (fn [result]
+                      (is (true? (:seon.eval/ok? result)))
+                      (is (true? (:seon.eval/value result))
+                          (str "the fully qualified lifecycle function resolves "
+                               "after namespace movement")))))))
           (.then (fn [_] (done)))
           (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
