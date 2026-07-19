@@ -1005,7 +1005,6 @@
             [?step :my.plan/agent ?agent]
             [?step :my.plan/message ?message]
             [?step :my.plan/status ?status ?status-tx]
-            [(not= ?status :done)]
             [?step :my.plan/id ?id]
             [?step :my.plan/title ?title]
             [?step :my.plan/created-at ?created]
@@ -1160,7 +1159,8 @@
 
 (defn- run-cause-step-row
   [[id title expect created message status status-tx]]
-  (cond-> (step-row [id title expect created message])
+  (cond-> (assoc (step-row [id title expect created message])
+                 :my.plan/status status)
     (= :active status) (assoc :seon.db/tx status-tx)))
 
 (defn- ancestor-chain-from-pull
@@ -1347,9 +1347,10 @@
   "The position-anchor lines for [[anchor]] map `a` — \"\" when nil.
 
    Line 1 names the goal (root title, `goal:` narrative + pace when
-   present); line 2 is the you-are-here: the :active step (or the next
-   ready one) with the root's done/total roll-up; a `verify before done!`
-   line follows when the anchored step carries `:my.plan/expect`."
+   present); line 2 is the you-are-here: the active, next-ready, or completed
+   current-run step with the root's done/total roll-up. A completed current
+   request tells the agent to close the run or deliberately select more work;
+   a `verify before done!` line follows an unfinished step with an expectation."
   [a]
   (if (nil? a)
     ""
@@ -1358,14 +1359,20 @@
           {:my.plan/keys [done total]} progress
           goal   (:my.plan/goal root)
           pace   (:my.plan/pace root)
-          expect (:my.plan/expect step)]
+          expect (:my.plan/expect step)
+          completed? (= :done (:my.plan/status step))]
       (str "; PLAN «" (:my.plan/title root) "»"
            (when goal (str " — goal: " goal))
            (when pace (str " [" (name pace) "]")) "\n"
-           "; → " (if active? "NOW (active)" "next ready") ": "
+           "; → " (cond completed? "CURRENT REQUEST COMPLETED"
+                       active? "NOW (active)"
+                       :else "next ready") ": "
            (:my.plan/id step) " «" (:my.plan/title step) "» — "
            done " of " total " steps done"
-           (when expect (str "\n;   verify before done!: " expect))))))
+           (if completed?
+             (str "\n;   close this run now with (complete \"<result>\"); "
+                  "continue only by deliberately selecting another step.")
+             (when expect (str "\n;   verify before done!: " expect)))))))
 
 (defn frontier-section
   "The open-frontier lines: `actives` (`▶` — the step you are on) then up

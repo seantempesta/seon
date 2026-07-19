@@ -220,6 +220,46 @@
           (.then (fn [_] (done)))
           (.catch (fn [error] (is false (str error)) (done)))))))
 
+(deftest completed-current-run-cause-remains-the-position-anchor
+  (async done
+    (let [original db/execute-many
+          calls (atom 0)
+          success (fn [result]
+                    {::protocol/success? true ::protocol/result result})]
+      (set! db/execute-many
+            (fn [_]
+              (js/Promise.resolve
+               (case (swap! calls inc)
+                 1 {::db/results
+                    [(success [])
+                     (success [["older" "Unrelated older work" ""
+                                (js/Date. 1) false]])
+                     (success [["message" "Answer the current request"
+                                (js/Date. 2)]])
+                     (success {:db/id 1 :seon.agent/id agent-id})
+                     (success [["message" "Answer the current request" ""
+                                (js/Date. 1) 77 :done 12]])]}
+                 2 {::db/results
+                    [(success {:my.plan/id "message"
+                               :my.plan/title "Answer the current request"})
+                     (success [[:done 1]])]}))))
+      (-> (internal/plan-block
+           {:seon.db/db database
+            :seon.agent/id agent-id
+            :seon.agent.run/id "run-from-message"}
+           nil)
+          (.then
+           (fn [text]
+             (is (str/includes? text
+                                "CURRENT REQUEST COMPLETED: message"))
+             (is (str/includes? text
+                                "close this run now with (complete"))
+             (is (str/includes? text "Unrelated older work")
+                 "other work stays visible but cannot replace the run cause")))
+          (.finally (fn [] (set! db/execute-many original)))
+          (.then (fn [_] (done)))
+          (.catch (fn [error] (is false (str error)) (done)))))))
+
 (deftest tree-assembly-is-cycle-safe-and-agent-scoped
   (let [other (assoc (row "other" "Other" :open 4)
                      :my.plan/agent {:seon.agent/id "agent-b"})
