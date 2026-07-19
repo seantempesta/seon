@@ -315,37 +315,46 @@
   (let [paths (->> (event-file-paths event)
                    (filter changed-test-path?)
                    vec)
-        invalid-source?
-        (some (fn [path]
-                (let [absolute (absolute-file-path path)]
-                  (and absolute
-                       (.isFile (io/file absolute))
-                       (not (:valid
-                              (validate-clojure-syntax (slurp absolute)))))))
-              paths)]
+        invalid-source-paths
+        (->> paths
+             (filter clojure-source-file?)
+             (keep (fn [path]
+                     (let [absolute (absolute-file-path path)]
+                       (when (and absolute (.isFile (io/file absolute)))
+                         (try
+                           (when-not (:valid
+                                      (validate-clojure-syntax
+                                       (slurp absolute)))
+                             path)
+                           (catch Exception _ path))))))
+             vec)]
     (when (and (= (:hook_event_name event) "PostToolUse")
                (get-in config [:changed-tests :enabled] true)
-               (seq paths)
-               (not invalid-source?))
-      (try
-        (load-direct-check! 'seon.dev.changed-test)
-        (load-direct-check! 'seon.dev.config)
-        (let [configuration
-              ((requiring-resolve 'seon.dev.config/load!) repo-root)
-              request
-              ((requiring-resolve 'seon.dev.changed-test/enqueue-hook!)
-               configuration paths)
-              message
-              (str "ADVISORY — the edit was accepted; tests never gate refactoring.\n"
-                   "Changed tests queued as generation "
-                   (:seon.dev.changed-test/generation request)
-                   " for " (count (:seon.dev.changed-test/paths request))
-                   " coalesced path(s). Latest result: "
-                   (root-file "tmp/test-changed/latest.report.edn"))]
-          (clip-feedback config message))
-        (catch Exception error
-          (str "ADVISORY — changed-test feedback could not run: "
-               (.getMessage error)))))))
+               (seq paths))
+      (if (seq invalid-source-paths)
+        (str "ADVISORY — the edit was accepted, but changed tests were not "
+             "queued because these resulting Clojure files do not parse:\n"
+             (str/join "\n" (map #(str "- " %) invalid-source-paths)))
+        (try
+          (load-direct-check! 'seon.dev.changed-test)
+          (load-direct-check! 'seon.dev.config)
+          (let [configuration
+                ((requiring-resolve 'seon.dev.config/load!) repo-root)
+                request
+                ((requiring-resolve 'seon.dev.changed-test/enqueue-hook!)
+                 configuration paths)
+                message
+                (str "ADVISORY — the edit was accepted; tests never gate refactoring.\n"
+                     "Changed tests queued as generation "
+                     (:seon.dev.changed-test/generation request)
+                     " for " (count (:seon.dev.changed-test/paths request))
+                     " coalesced path(s). The result will be published to "
+                     (root-file "tmp/test-changed/latest.report.edn")
+                     "; that path is mutable and may later describe another generation.")]
+            (clip-feedback config message))
+          (catch Exception error
+            (str "ADVISORY — changed-test feedback could not run: "
+                 (.getMessage error))))))))
 
 
 ;;; ---------------------------------------------------------------------------

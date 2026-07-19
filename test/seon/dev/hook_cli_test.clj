@@ -142,3 +142,67 @@
         (is (string? feedback))
         (is (str/includes? feedback "public-fn")))
       (finally (fs/delete-tree directory)))))
+
+(deftest codex-multifile-patch-reports-docstrings-from-every-source-file
+  (let [{:seon.dev.hook-test/keys [directory config]} (fixture)
+        first-source (fs/path directory "first_missing_doc.clj")
+        second-source (fs/path directory "second_missing_doc.cljs")
+        first-path (str (fs/relativize repo-root first-source))
+        second-path (str (fs/relativize repo-root second-source))
+        patch (str "*** Begin Patch\n"
+                   "*** Add File: " first-path "\n"
+                   "*** Add File: " second-path "\n"
+                   "*** End Patch")]
+    (try
+      (spit (str first-source)
+            "(ns hook.first-missing-doc)\n(defn first-public [] :ok)\n")
+      (spit (str second-source)
+            "(ns hook.second-missing-doc)\n(defn second-public [] :ok)\n")
+      (let [result (run-hook
+                     {:hook_event_name "PostToolUse"
+                      :tool_name "apply_patch"
+                      :tool_input {:command patch}}
+                     config)
+            feedback (get-in result
+                             [:seon.dev.hook-test/response
+                              :hookSpecificOutput
+                              :additionalContext])]
+        (is (zero? (:seon.dev.hook-test/exit result)))
+        (is (str/includes? feedback "first-public"))
+        (is (str/includes? feedback "second-public")))
+      (finally (fs/delete-tree directory)))))
+
+(deftest invalid-resulting-source-explicitly-skips-changed-test-enqueue
+  (let [{:seon.dev.hook-test/keys [directory]} (fixture)
+        config (fs/path directory "changed-tests.edn")
+        first-source (fs/path directory "first_broken.clj")
+        second-source (fs/path directory "second_broken.cljs")
+        first-path (str (fs/relativize repo-root first-source))
+        second-path (str (fs/relativize repo-root second-source))
+        patch (str "*** Begin Patch\n"
+                   "*** Add File: " first-path "\n"
+                   "*** Add File: " second-path "\n"
+                   "*** End Patch")]
+    (try
+      (spit (str config)
+            (str "{:seon.config/on-core-error :log\n"
+                 " :docstring-lint {:enabled false}\n"
+                 " :changed-tests {:enabled true}}\n"))
+      (spit (str first-source) "(ns hook.first-broken\n")
+      (spit (str second-source) "(ns hook.second-broken\n")
+      (let [result (run-hook
+                     {:hook_event_name "PostToolUse"
+                      :tool_name "apply_patch"
+                      :tool_input {:command patch}}
+                     (str config))
+            feedback (get-in result
+                             [:seon.dev.hook-test/response
+                              :hookSpecificOutput
+                              :additionalContext])]
+        (is (zero? (:seon.dev.hook-test/exit result)))
+        (is (true? (get-in result [:seon.dev.hook-test/response :continue])))
+        (is (str/includes? feedback "changed tests were not queued"))
+        (is (str/includes? feedback first-path))
+        (is (str/includes? feedback second-path))
+        (is (not (str/includes? feedback "Changed tests queued as generation"))))
+      (finally (fs/delete-tree directory)))))
