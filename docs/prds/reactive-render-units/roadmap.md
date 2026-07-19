@@ -154,7 +154,7 @@ tests and 1,849 assertions. The writer aggregation exposed two stale fixtures
 that still redefined `datahike.api/pull`; both now exercise the maintained
 `pull-with-evidence` result and dependency-plan shape.
 
-Maintained Datahike revision `d664dce7` passes the focused weighted-LRU and
+Maintained Datahike revision `d59f76bb` passes the focused weighted-LRU and
 query-cache suites in all persistent-set, spec-instrumented, and
 hitchhiker-tree profiles: 162 tests and 990 assertions. This directly covers
 count/weight eviction, overlarge-result rejection, exact immutable database
@@ -174,7 +174,7 @@ demanded child snapshot. An affected transaction misses and recomputes while a
 held parent database value remains immutable and exact.
 
 Datahike `main` now exposes an execution-aware, source-scoped query dependency
-plan at maintained revision `d664dce7`. It folds the typed parsed query and
+plan at maintained revision `d59f76bb`. It folds the typed parsed query and
 PullSpec representations, resolves scalar `:in` bindings and supplied rules,
 canonicalizes reverse pull attributes, and widens unknown behavior to `:all`.
 The query cache stores and reuses that same plan; propagation selects only the
@@ -204,15 +204,17 @@ propagation, and the planner probes. The 14-test named integration gate passes
 196 assertions. The rerun exposed one reactive correctness defect: purge changed
 current and temporal indexes without including those attribute retractions in
 the committed transaction report, so lazy cache inheritance could return a
-purged entity. Revision `d664dce7` records purge retractions in `:tx-data`,
+purged entity. Revision `d59f76bb` records purge retractions in `:tx-data`,
 repairs finite-window Stratum predecessor inheritance, and closes the Java/HTTP
 test connection leaks. The first unfiltered rerun reached 2,599 tests / 13,527
 assertions and exposed only independent shared-fixture and HTTP remote-decoding
 failures. Those owners now use unique released stores, preserve remote database
-values through the remote mapper, and release the history fixture; focused
-PSS/HHT proofs pass. The complete unfiltered maintained aggregation remains the
-final Datahike proof and is tracked in
-[[datahike-full-aggregation-integration-drift]].
+values through the remote mapper, and release the history fixture. Two later
+runs exposed and closed the final database-hash and schema-persistence
+reconnect leaks. The complete maintained aggregation at `d59f76bb` passes
+2,599 tests / 13,651 assertions with zero failures or errors across `clj-pss`,
+`clj-hht`, and `specs`; [[datahike-full-aggregation-integration-drift]] is
+closed.
 
 ## Settled decisions
 

@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: closed
 severity: friction
 tags: [issue, database, flow]
 ---
@@ -46,8 +46,18 @@ Revisions `d45ee18b`, `eedea005`, and `d664dce7` repair those owners. Their
 focused PSS/HHT proofs pass 8 tests / 74 assertions, 4 tests / 18 assertions,
 and 2 tests / 26 assertions respectively. The planner as-of selector also
 passes independently in both profiles (2 tests / 4 assertions), confirming its
-aggregate failure was shared-fixture interference. One final unfiltered rerun
-is the sole remaining acceptance step.
+aggregate failure was shared-fixture interference.
+
+Two unfiltered reruns then exposed the last shared-store owners instead of
+reactive defects: the database-hash fixture retained four reconnects, and the
+schema-persistence fixture retained its reconnect while reusing a fixed memory
+store. Revisions `c2379bcf` and `d59f76bb` give those tests independent stores
+and deterministic release/delete ownership. Their focused PSS/HHT gates pass
+2 tests / 20 assertions and 2 tests / 8 assertions.
+
+The final complete maintained aggregation at `d59f76bb` passes 2,599 tests /
+13,651 assertions with zero failures or errors across `clj-pss`, `clj-hht`,
+and `specs`. This issue is closed.
 
 ## Acceptance criteria
 
