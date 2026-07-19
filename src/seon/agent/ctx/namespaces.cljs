@@ -1,10 +1,11 @@
 (ns seon.agent.ctx.namespaces
   "Render relevant code namespaces into agent context.
 
-   The current namespace may appear in full, while its required namespaces
-   appear as compact cards containing indexed schemas and public signatures.
-   Selection is database-derived from real require edges; source indexing and
-   function execution remain outside this namespace."
+   The current namespace may appear in full, while its required and explicitly
+   selected namespaces appear as compact cards containing indexed schemas and
+   public signatures. Selection is database-derived from real require edges
+   and flat block presence-sets; source indexing and function execution remain
+   outside this namespace."
   (:require
     [cljs.reader :as edn]
     [clojure.string :as str]
@@ -38,7 +39,8 @@
 ;; compact-everywhere + full-current-ns purely from these defaults.
 ;; ============================================================
 
-(schema/register! ::full-source   [:vector {:default []} :seon.ns/name]) ; ns present → render FULL (absent → compact)
+(schema/register! ::compact       [:vector {:default []} :seon.ns/name]) ; ns present → select its compact card
+(schema/register! ::full-source   [:vector {:default []} :seon.ns/name]) ; ns present → render FULL
 (schema/register! ::with-tests    [:vector {:default []} :seon.ns/name]) ; ns present → also show its tests
 (schema/register! ::current-full?  [:boolean {:default true}])           ; the agent's current ns renders full
 (schema/register! ::current-tests? [:boolean {:default true}])           ; …and its current ns shows its tests
@@ -54,6 +56,7 @@
 (schema/register! ::block
   [:map {:seon.db/entity true}
    [:seon.agent.ctx/name :seon.agent.ctx/name]
+   [::compact {:optional true} ::compact]
    [::full-source {:optional true} ::full-source]
    [::with-tests {:optional true} ::with-tests]
    [::current-full? {:optional true} ::current-full?]
@@ -255,7 +258,7 @@
   `[:seon.agent/id
     {:seon.agent/namespace [:seon.ns/name]}
     {:seon.agent/ctx [:db/id :seon.agent.ctx/name
-                      ::full-source ::with-tests
+                      ::compact ::full-source ::with-tests
                       ::current-full? ::current-tests?]}])
 
 (def ^:private generated-assignment-query
@@ -353,11 +356,21 @@
    :seon.error/data value
    :seon.error/kind :core-bug})
 
-(defn- effective-full-source
-  "Stored namespace policy plus this active generated assignment's siblings."
+(defn- effective-selections
+  "Stored density pins plus this active generated assignment's exact overlay.
+
+   Generated namespace siblings are full for the current assignment and are
+   removed from compact density. A later assignment supplies a different
+   overlay, so stale generated symbols never accumulate; ordinary stored pins
+   remain independent configuration."
   [block generated-namespaces]
-  (into (set (resolve-cfg block ::full-source #{}))
-        generated-namespaces))
+  {::compact
+   (reduce disj
+           (set (resolve-cfg block ::compact #{}))
+           generated-namespaces)
+   ::full-source
+   (into (set (resolve-cfg block ::full-source #{}))
+         generated-namespaces)})
 
 (defn- assignment-namespaces
   "Namespace symbols of every namespace-bearing sibling in an assignment."
@@ -413,8 +426,9 @@
                     (member-result generated-assignment-member)
                     generated-full-source
                     (assignment-namespaces generated-assignment)
-                    full-source-cfg
-                    (effective-full-source block generated-full-source)
+                    {compact-cfg ::compact
+                     full-source-cfg ::full-source}
+                    (effective-selections block generated-full-source)
                     with-tests-cfg
                     (set (resolve-cfg block ::with-tests #{}))
                     current-full?
@@ -424,7 +438,8 @@
                     required
                     (required-ns-selections
                       (:seon.ns/require-edges current-row) cur-ns)
-                    names (->> (cond-> (into (set (keys required))
+                    names (->> (cond-> (into (into (set (keys required))
+                                                    compact-cfg)
                                                full-source-cfg)
                                  cur-ns (conj cur-ns))
                                (filter #(selected-ns? full-source-cfg %))
@@ -451,6 +466,7 @@
                     {::db/db database
                      :seon.agent/id id
                      :seon.agent.ctx.render-fns/current-ns cur-ns
+                     ::compact compact-cfg
                      ::full-source full-source-cfg
                      ::with-tests with-tests-cfg
                      ::current-full? current-full?
@@ -625,8 +641,9 @@
        "; (ns-unmap 'name) removes one.\n"
        "; Your CURRENT namespace renders in FULL; its required namespaces\n"
        "; render as INERT COMPACT CARDS (fn signatures + docstring line 1 +\n"
-       "; :malli/schema; no bodies or pseudo-definitions). More namespaces exist\n"
-       "; here — query rather than guess."))
+       "; :malli/schema; no bodies or pseudo-definitions). Inspect any indexed\n"
+       "; namespace with (my.ns/functions {:my.ns/ns 'the.namespace}); select\n"
+       "; its source with my.ns/full! and keep its card with my.ns/compact!."))
 
 (defn- cur-ns-workspace-stub
   "The never-omit block for the agent's CURRENT ns when it has no members
@@ -694,16 +711,18 @@
         :else         txt))))
 
 (defn- compact-block
-  "Render ns `nm` as a COMPACT CARD, or nil when the card would carry no real
-   content (a `; (nothing indexed)` / `; (not in db …)` stub) — a required ns
-   with nothing indexed adds noise, not signal, so it stays dropped rather than
-   emit an empty card. The compact SIBLING of [[render-one]] (the full
-   wrapper); delegates to [[render-one-ns-compact]]."
-  [nm row schema-rows selection]
+  "Render ns `nm` as a COMPACT CARD.
+
+   An implicit required namespace with no indexed contract stays omitted.
+   Explicit compact selection keeps its inert empty card visible because the
+   agent deliberately asked to retain that namespace. The compact sibling of
+   [[render-one]] delegates to [[render-one-ns-compact]]."
+  [nm row schema-rows selection explicit?]
   (let [card (render-one-ns-compact-row
                nm row schema-rows (:seon.ns.require/refers selection))]
-    (when-not (or (str/includes? card "(nothing indexed)")
-                  (str/includes? card "(not in db"))
+    (when-not (and (not explicit?)
+                   (or (str/includes? card "(nothing indexed)")
+                       (str/includes? card "(not in db")))
       card)))
 
 (defn- namespace-catalog-text
@@ -759,7 +778,8 @@
      - FULL — the agent's CURRENT ns + any ns in the per-agent `::full-source`
        presence-set. A `;;; ┌─ namespace x ─` / `;;; └─ end namespace x ─`
        bracketed block carrying its REAL FULL FILE SOURCE, unclipped.
-     - COMPACT CARD — every ns the CURRENT ns `:require`s
+     - COMPACT CARD — every ns the CURRENT ns `:require`s plus every exact
+       namespace in the per-agent `::compact` presence-set
        ([[required-ns-selections]]) that isn't already full
        ([[render-one-ns-compact]]): inert selected schema records + every
        selected public, schema-complete fn's one-line signature, ~3–5× smaller
@@ -774,6 +794,7 @@
    `:namespaces` BLOCK entity, then the Malli default ([[resolve-cfg]] — a
    `db/transact!` re-derives next render, no apply step):
 
+     - `::compact` — a presence-set of namespace symbols to keep as cards;
      - `::full-source` — a presence-set of namespace symbols to force FULL;
      - `::current-full?` (default true) — whether the agent's CURRENT ns
        renders full (false → its compact card);
@@ -795,6 +816,7 @@
   (if-let [error (or (::error input) (database-error input))]
       (str "[namespaces] render failed: " (pr-str error))
       (let [cur-ns          (:seon.agent.ctx.render-fns/current-ns input)
+            compact-cfg     (set (::compact input))
             full-source-cfg (set (::full-source input))
             with-tests-cfg  (set (::with-tests input))
             current-full?   (if (boolean? (::current-full? input))
@@ -809,7 +831,9 @@
             current-row     (get row-by-name cur-ns)
             required        (required-ns-selections
                               (:seon.ns/require-edges current-row) cur-ns)
-            include-set     (cond-> (into (set (keys required)) full-source-cfg)
+            include-set     (cond-> (into (into (set (keys required))
+                                               compact-cfg)
+                                          full-source-cfg)
                               cur-ns (conj cur-ns))
             tests-set       (cond-> with-tests-cfg
                               (and cur-ns current-tests?) (conj cur-ns))
@@ -836,7 +860,10 @@
                            [nm row
                             (full? nm cur-ns full-source-cfg current-full?)
                             (if prefix? :prefix :body)
-                            (if (= nm cur-ns) {} (get required nm {}))]))
+                            (if (or (= nm cur-ns)
+                                    (contains? compact-cfg nm))
+                              {}
+                              (get required nm {}))]))
                        rows)
         ;; Render ONE row: full → render-one (omitted when empty); else a
         ;; COMPACT card (it is a required ns). A card is nil when nothing is
@@ -845,7 +872,9 @@
                      (when-let [block-txt (if full?
                                             (render-one nm row schema-rows cur-ns
                                                         home-requires)
-                                            (compact-block nm row schema-rows selection))]
+                                            (compact-block
+                                             nm row schema-rows selection
+                                             (contains? compact-cfg nm)))]
                        (str block-txt
                             (when (contains? tests-set nm)
                               (ns-tests-block row)))))

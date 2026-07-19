@@ -235,18 +235,29 @@
 
 (deftest full-and-compact-update-the-one-namespaces-block
   (async done
-    (let [initial
+    (let [demo-row
+          {:seon.ns/name 'my.demo
+           :seon.ns/source "(ns my.demo)"
+           :seon.fn/_ns
+           [{:seon.fn/sym "my.demo/show"
+             :seon.fn/source "(defn show [x] (DEMO-BODY x))"
+             :seon.fn/fn-var? true
+             :seon.fn/private? false
+             :seon.fn/agent-facing? true
+             :seon.fn/arglists "([x])"
+             :seon.fn/spec "[:=> [:cat :int] :int]"}]}
+          initial
           {:seon.agent.ctx/name :namespaces
            :seon.agent.ctx/priority 20
            :seon.render/ai 'seon.agent.ctx.namespaces/namespaces-block
+           :seon.agent.ctx.namespaces/compact ['my.card]
            :seon.agent.ctx.namespaces/full-source ['my.existing]
            :seon.agent.ctx.namespaces/with-tests ['my.existing]
            :seon.agent.ctx.namespaces/current-full? false
            :seon.agent.ctx.namespaces/current-tests? false}]
       (finish
        (with-selection-results
-         {'my.demo {:seon.ns/name 'my.demo
-                    :seon.ns/source "(ns my.demo)"}}
+         {'my.demo demo-row}
          initial
          (fn [block installs]
            (-> (my-ns/full! {:my.ns/ns 'my.demo})
@@ -258,8 +269,11 @@
                          result))
                   (is (= ['my.demo 'my.existing]
                          (::namespaces/full-source @block)))
-                  (is (= (dissoc initial ::namespaces/full-source)
-                         (dissoc @block ::namespaces/full-source))
+                  (is (= ['my.card] (::namespaces/compact @block)))
+                  (is (= (dissoc initial ::namespaces/compact
+                                 ::namespaces/full-source)
+                         (dissoc @block ::namespaces/compact
+                                 ::namespaces/full-source))
                       "every other namespace-block dial is preserved")
                   (my-ns/full! {:my.ns/ns 'my.demo})))
                (.then
@@ -275,7 +289,29 @@
                          result))
                   (is (= ['my.existing]
                          (::namespaces/full-source @block))
-                      "compact reverses only the requested presence"))))))
+                      "compact removes only the requested full presence")
+                  (is (= ['my.card 'my.demo]
+                         (::namespaces/compact @block))
+                      "compact keeps the unrelated namespace selected")
+                  (let [rendered
+                        (@#'namespaces/format-namespaces-block
+                         {:seon.agent.ctx.render-fns/current-ns 'my.current
+                          :seon.agent.ctx.namespaces/compact
+                          (set (::namespaces/compact @block))
+                          :seon.agent.ctx.namespaces/full-source
+                          (set (::namespaces/full-source @block))
+                          :seon.agent.ctx.namespaces/with-tests #{}
+                          :seon.agent.ctx.namespaces/current-full? false
+                          :seon.agent.ctx.namespaces/current-tests? false
+                          :seon.agent.ctx.namespaces/home-requires []
+                          :seon.agent.ctx.namespaces/namespace-rows
+                          [{:seon.ns/name 'my.current
+                            :seon.ns/source "(ns my.current)"}
+                           demo-row]
+                          :seon.agent.ctx/schema-rows []})]
+                    (is (str/includes? rendered "my.demo/show"))
+                    (is (not (str/includes? rendered "DEMO-BODY"))
+                        "compact! keeps the namespace rendered as a card")))))))
        done))))
 
 (deftest source-selection-rejects-unknown-or-stale-namespaces
@@ -284,6 +320,7 @@
           {:seon.agent.ctx/name :namespaces
            :seon.agent.ctx/priority 20
            :seon.render/ai 'seon.agent.ctx.namespaces/namespaces-block
+           :seon.agent.ctx.namespaces/compact []
            :seon.agent.ctx.namespaces/full-source []}]
       (finish
        (with-selection-results

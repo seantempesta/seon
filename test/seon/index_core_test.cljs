@@ -432,6 +432,7 @@
         "agent-level context settings are native Datahike attributes")
     (is (not-any? attributes
                   [:seon.agent.ctx/render-namespaces
+                   :seon.agent.ctx.namespaces/compact
                    :seon.agent.ctx.namespaces/full-source
                    :seon.agent.ctx.namespaces/with-tests
                    :seon.agent.ctx.namespaces/current-full?
@@ -450,6 +451,7 @@
     (is (true? (:seon.db/entity properties))
         "the specialized component block participates in cold schema publication")
     (is (= #{:seon.agent.ctx/name
+             :seon.agent.ctx.namespaces/compact
              :seon.agent.ctx.namespaces/full-source
              :seon.agent.ctx.namespaces/with-tests
              :seon.agent.ctx.namespaces/current-full?
@@ -458,7 +460,8 @@
         "the one namespaces block owns every persisted render dial")
     (is (= attributes installed-idents)
         "every attribute queried from a namespaces block has a Datahike declaration")
-    (doseq [attribute [:seon.agent.ctx.namespaces/full-source
+    (doseq [attribute [:seon.agent.ctx.namespaces/compact
+                       :seon.agent.ctx.namespaces/full-source
                        :seon.agent.ctx.namespaces/with-tests]]
       (let [declaration (first (db/malli->datahike-schema [attribute]))]
         (is (= :db.cardinality/many (:db/cardinality declaration)))

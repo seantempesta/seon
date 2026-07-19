@@ -1,10 +1,11 @@
 (ns seon.agent.ctx.namespaces-test
-  "Behavior of the `:namespaces` section — the THREE-rule SELECTION model
+  "Behavior of the `:namespaces` section — one explicit selection model
    ([[seon.agent.ctx.namespaces/namespaces-block]]) and the two DENSITIES it
    dispatches to (FULL source vs COMPACT card):
 
      FULL    = the CURRENT ns + any ns in the `::full-source` presence-set
-     COMPACT = every ns the CURRENT ns `:require`s (that isn't full)
+     COMPACT = every real requirement or explicit `::compact` selection
+               (that isn't full)
      DROPPED = everything else
 
    Tests assert BEHAVIOR, never rendered format: SELECTION by which ns
@@ -89,6 +90,7 @@
 (defn- eager-input []
   {:seon.agent/id agent-id
    :seon.agent.ctx.render-fns/current-ns cur-ns
+   :seon.agent.ctx.namespaces/compact #{}
    :seon.agent.ctx.namespaces/full-source #{}
    :seon.agent.ctx.namespaces/with-tests #{}
    :seon.agent.ctx.namespaces/current-full? true
@@ -128,6 +130,58 @@
         (set! db/pull original-pull)
         (set! db/entity original-entity)))))
 
+(deftest explicit-compact-selection-keeps-an-unrelated-public-card
+  (let [unrelated
+        {:seon.ns/name 'my.unrelated
+         :seon.db/tx 2
+         :seon.ns/source "(ns my.unrelated)"
+         :seon.fn/_ns
+         [(dissoc (fn-row "my.unrelated/useful" 'my.unrelated
+                          "UNRELATED-BODY")
+                  :seon.fn/ns)]}
+        base (update (eager-input)
+                     :seon.agent.ctx.namespaces/namespace-rows
+                     conj unrelated)
+        absent (@#'nss/format-namespaces-block base)
+        compact (@#'nss/format-namespaces-block
+                 (assoc base :seon.agent.ctx.namespaces/compact
+                        #{'my.unrelated}))
+        conflicting (@#'nss/format-namespaces-block
+                     (assoc base
+                            :seon.agent.ctx.namespaces/compact
+                            #{'my.unrelated}
+                            :seon.agent.ctx.namespaces/full-source
+                            #{'my.unrelated}))]
+    (is (not (str/includes? absent "my.unrelated/useful"))
+        "an unrelated namespace is ordinarily absent")
+    (is (str/includes? compact "my.unrelated/useful"))
+    (is (not (str/includes? compact "UNRELATED-BODY"))
+        "explicit compact selection keeps contracts but elides bodies")
+    (is (str/includes? conflicting "UNRELATED-BODY")
+        "full selection deterministically wins a conflicting compact pin")))
+
+(deftest explicit-compact-selection-shows-the-whole-card
+  (let [out (@#'nss/format-namespaces-block
+             (assoc (eager-input)
+                    :seon.agent.ctx.namespaces/compact #{'my.helper}))]
+    (is (str/includes? out "my.helper/assist"))
+    (is (str/includes? out "my.helper/runtime-helper")
+        "an explicit compact pin overrides the require edge's narrow refer")
+    (is (not (str/includes? out "HLP-BODY")))))
+
+(deftest explicit-empty-compact-card-remains-visible
+  (let [empty-row {:seon.ns/name 'my.empty
+                   :seon.db/tx 3
+                   :seon.ns/source "(ns my.empty)"}
+        out (@#'nss/format-namespaces-block
+             (-> (eager-input)
+                 (update :seon.agent.ctx.namespaces/namespace-rows
+                         conj empty-row)
+                 (assoc :seon.agent.ctx.namespaces/compact #{'my.empty})))]
+    (is (str/includes? out "namespace my.empty"))
+    (is (str/includes? out "nothing indexed")
+        "an explicit empty selection reports its real empty contract")))
+
 (deftest exact-full-source-pin-may-reveal-internal-but-never-tests
   (let [base (update (eager-input)
                      :seon.agent.ctx.namespaces/namespace-rows
@@ -150,6 +204,22 @@
         "an exact generated-development pin exposes the implementation")
     (is (not (str/includes? explicitly-pinned "TEST-NS-BODY"))
         "test namespaces remain excluded even under an exact pin")))
+
+(deftest compact-never-reveals-internal-or-test-namespaces
+  (let [base (update (eager-input)
+                     :seon.agent.ctx.namespaces/namespace-rows
+                     into [eager-internal-row eager-test-row])
+        compact (@#'nss/format-namespaces-block
+                 (assoc base :seon.agent.ctx.namespaces/compact
+                        #{'my.helper.internal 'my.helper-test}))
+        full-internal (@#'nss/format-namespaces-block
+                       (assoc base
+                              :seon.agent.ctx.namespaces/full-source
+                              #{'my.helper.internal}))]
+    (is (not (str/includes? compact "INTERNAL-BODY")))
+    (is (not (str/includes? compact "TEST-NS-BODY")))
+    (is (str/includes? full-internal "INTERNAL-BODY")
+        "only an exact full pin reveals an internal namespace")))
 
 (deftest remote-acquisition-is-bounded-and-selection-scoped
   (let [initial (@#'nss/initial-acquisition-members agent-id)
@@ -179,7 +249,13 @@
       (is (some #{:my.plan/namespace}
                 (tree-seq coll? seq
                           (::protocol/query-form generated-assignment-member))))
-      (is (= [:seon.agent/id agent-id] (::protocol/entity-id pull-member))))
+      (is (= [:seon.agent/id agent-id] (::protocol/entity-id pull-member)))
+      (let [selector-values
+            (set (tree-seq coll? seq (::protocol/selector pull-member)))]
+        (is (contains? selector-values
+                       :seon.agent.ctx.namespaces/compact))
+        (is (contains? selector-values
+                       :seon.agent.ctx.namespaces/full-source))))
     (testing "selected rows use one pull-many and one selected tx query"
       (is (= [protocol/pull-many-operation protocol/query-operation]
              (mapv ::protocol/operation selected)))
@@ -230,17 +306,26 @@
               (set! db/execute-many original-execute-many)
               (done)))))))
 
-(deftest generated-full-source-is-an-additive-current-assignment-overlay
-  (let [block {:seon.agent.ctx.namespaces/full-source #{'my.configured}}
-        effective @#'nss/effective-full-source]
-    (is (= #{'my.configured 'my.alpha 'my.beta}
+(deftest generated-density-overlay-replaces-warm-assignment-selections
+  (let [block {:seon.agent.ctx.namespaces/compact
+               #{'my.configured-card 'my.alpha}
+               :seon.agent.ctx.namespaces/full-source #{'my.configured-full}}
+        effective @#'nss/effective-selections]
+    (is (= {:seon.agent.ctx.namespaces/compact #{'my.configured-card}
+            :seon.agent.ctx.namespaces/full-source
+            #{'my.configured-full 'my.alpha 'my.beta}}
            (effective block #{'my.alpha 'my.beta})))
-    (is (= #{'my.configured 'my.next}
+    (is (= {:seon.agent.ctx.namespaces/compact
+            #{'my.configured-card 'my.alpha}
+            :seon.agent.ctx.namespaces/full-source
+            #{'my.configured-full 'my.next}}
            (effective block #{'my.next}))
-        "a later assignment derives a replacement overlay, not stale union")
-    (is (= #{'my.configured}
+        "a later assignment replaces the generated compact/full overlay")
+    (is (= {:seon.agent.ctx.namespaces/compact
+            #{'my.configured-card 'my.alpha}
+            :seon.agent.ctx.namespaces/full-source #{'my.configured-full}}
            (effective block #{}))
-        "inactive generation preserves the ordinary stored config exactly")))
+        "inactive generation preserves every ordinary stored dial")))
 
 (deftest assignment-namespace-selection-derives-from-one-pulled-plan-branch
   (is (= #{'my.alpha 'my.beta}

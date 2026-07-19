@@ -182,12 +182,19 @@
                    ns-name "the agent has no :namespaces context block.")
 
                   :else
-                  (let [current (set (::ns-cards/full-source block))
-                        selected (cond-> current
-                                   full? (conj ns-name)
-                                   (not full?) (disj ns-name))
-                        updated (assoc block ::ns-cards/full-source
-                                       (vec (sort-by str selected)))
+                  (let [current-full (set (::ns-cards/full-source block))
+                        current-compact (set (::ns-cards/compact block))
+                        selected-full (if full?
+                                        (conj current-full ns-name)
+                                        (disj current-full ns-name))
+                        selected-compact (if full?
+                                           (disj current-compact ns-name)
+                                           (conj current-compact ns-name))
+                        updated (assoc block
+                                       ::ns-cards/compact
+                                       (vec (sort-by str selected-compact))
+                                       ::ns-cards/full-source
+                                       (vec (sort-by str selected-full)))
                         installed (await (ctx/install! updated))]
                     (if (:seon.agent.ctx/ok? installed)
                       {:seon.result/ok? true
@@ -200,7 +207,7 @@
 (defn ^{:async true :seon.fn/agent-facing? true} full!
   "Reveal one indexed namespace's complete source in your next context.
 
-   This updates only the existing `:namespaces` context block's exact
+   This moves the namespace from the block's compact presence-set to its exact
    full-source presence-set and preserves every other namespace display dial.
    Repeating the same selection is idempotent. An unknown namespace or a stale
    program row without indexed source returns an error value.
@@ -213,9 +220,10 @@
 (defn ^{:async true :seon.fn/agent-facing? true} compact!
   "Return one indexed namespace to its compact card in your next context.
 
-   This removes only that namespace from the existing `:namespaces` block's
-   full-source presence-set. The current namespace can still render in full
-   through the block's independent current-namespace dial.
+   This moves the namespace from full-source to the existing block's compact
+   presence-set, so an unrelated namespace remains visible as an inert public
+   schema/function card. The current namespace can still render in full through
+   the block's independent current-namespace dial.
 
      (my.ns/compact! {:my.ns/ns 'my.plan})"
   {:malli/schema [:=> [:cat ::selection-request] ::selection-response]}
