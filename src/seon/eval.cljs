@@ -4253,15 +4253,36 @@
    direct-eval callers."
   (into '#{ns require require-macros use import} repl-form-heads))
 
+(defn- macro-invocation?
+  "True when `source` invokes a macro referred in `ns-sym`."
+  [compile-state ns-sym source]
+  (let [form (first (or (read-all-forms source) []))
+        head (when (seq? form) (first form))
+        ns-info (get-in @compile-state [:cljs.analyzer/namespaces ns-sym])]
+    (and (symbol? head)
+         (if (qualified-symbol? head)
+           (let [alias (symbol (namespace head))
+                 target (get (:require-macros ns-info) alias alias)]
+             (contains?
+              (get-in @compile-state
+                      [:cljs.analyzer/namespaces
+                       (symbol (str target "$macros")) :defs])
+              (symbol (name head))))
+           (contains? (:use-macros ns-info) head)))))
+
 (defn- preflight-eligible?
   "Should `source` get the pre-flight compile gate? A symbol-tier class
    must be enabled, the source must be a real form (non-blank, not a
-   bare `result/<id>` read), and the head must not be a loader form."
-  [configuration source]
+   bare `result/<id>` read), and the head must not be a loader form or
+   macro. Macro expansion is analysis-time execution, so a compile-only
+   repair trial is not side-effect-free and must not consume it before the
+   real eval."
+  [configuration compile-state source ns-sym]
   (and (or (repair-class-on? configuration :seon.repair/undeclared-var)
            (repair-class-on? configuration :seon.repair/def-vs-defn))
        (not (str/blank? (str source)))
        (not (result-var-ref? source))
+       (not (macro-invocation? compile-state ns-sym source))
        (let [form (first (or (read-all-forms source) []))]
          (not (and (seq? form)
                    (symbol? (first form))
@@ -4419,7 +4440,8 @@
             ;; the visible `↻ fixed:` note rides the narration. A REFUSED
             ;; fix (ambiguous / unproven) surfaces as did-you-mean on the
             ;; eval error below.
-            pre        (when (preflight-eligible? configuration source)
+            pre        (when (preflight-eligible? configuration compile-state
+                                                   source @current-ns)
                          (await (preflight-repair!
                                   configuration compile-state authored-sources
                                   source @current-ns)))
