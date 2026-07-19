@@ -777,12 +777,6 @@
    ;; EDN-string encoding. ---
    :seon.agent.ctx/name
    :seon.agent.ctx/priority
-   ;; per-agent live-DB render override (cardinality-many ns-name keywords) —
-   ;; the namespaces section unions these onto the curated full set at render
-   ;; time (seon.agent.ctx.namespaces/db-render-set). Boot-installed so an
-   ;; agent can pin/unpin a ns into its always-on view by transact/retract.
-   :seon.agent.ctx/render-namespaces
-
    ;; --- Run (seon.agent.run — the wake-episode grouping; turns point UP
    ;; to it via :seon.agent.turn/run, it points UP to the agent) ---
    :seon.agent.run/id

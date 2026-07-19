@@ -72,14 +72,6 @@
    [:seon.render/ai    {:optional true} :seon.render/ai]
    [:seon.render/html  {:optional true} :seon.render/html]])
 
-;; Per-agent LIVE-DB render-set OVERRIDE (cardinality-many ns-name keywords).
-;; The `:namespaces` section UNIONS this onto the config-curated full set at
-;; render time (`seon.agent.ctx.namespaces/db-render-set`): transact a ns
-;; keyword onto an agent's row and that ns renders FULL next turn; retract and
-;; it leaves. Pure reactive — derive-at-render, no stored projection, scoped
-;; per-agent like install!/remove!. `[:vector :keyword]` ⇒ cardinality-many.
-(schema/register! :seon.agent.ctx/render-namespaces [:vector :keyword])
-
 ;; ============================================================
 ;; Config-driven agent-init — agent-level composer attrs.
 ;;   ::escape-clipping? (#43) — WIRED (CP-5): default true frees successful
@@ -933,21 +925,20 @@
     "; by a type tag.\n"
     ";\n"
     "; THE NAMESPACES BELOW are real loaded code, each delimited by its own\n"
-    "; ;;; ┌─ namespace X ─ / ;;; └─ end namespace X ─ brackets, all in FULL\n"
-    "; real source (no signatures, no clipping). What renders is CURATED: YOUR\n"
-    "; CURRENT namespace (your live workspace, the most important thing here)\n"
-    "; and the nses it :requires, the my.* toolkit (my.kb / my.data / my.ui /\n"
-    "; my.canvas) and your core functions (plan / message / lifecycle). Everything\n"
-    "; else — the rest of the seon framework AND your other my.* nses — is\n"
-    "; deliberately NOT dumped; it stays QUERYABLE and SEARCHABLE, one step\n"
-    "; away, so you are not buried in code you don't need. Never hallucinate a\n"
-    "; fn name — discover it. To find or read any non-shown ns or fn:\n"
+    "; ;;; ┌─ namespace X ─ / ;;; └─ end namespace X ─ brackets. Your CURRENT\n"
+    "; namespace renders in FULL. Its required namespaces normally render as\n"
+    "; inert COMPACT CARDS: persisted schemas plus public, schema-complete fn\n"
+    "; contracts, without bodies. A namespace selected by the namespaces\n"
+    "; block's :seon.agent.ctx.namespaces/full-source presence-set renders in\n"
+    "; FULL instead. Everything else stays QUERYABLE and SEARCHABLE so you are\n"
+    "; not buried in irrelevant code. Never hallucinate a fn name — discover\n"
+    "; it. To find or read any non-shown ns or fn:\n"
     ";   (seon.agent.search/grep {:seon.agent.search/pattern \"defn store-\"})\n"
     ";   (seon.agent.search/grep {:seon.agent.search/pattern \"seon.warn\"})\n"
-    "; To PIN a ns into your always-on view, transact its keyword onto your\n"
-    "; agent's :seon.agent.ctx/render-namespaces; retract it to unpin.\n"
-    "; Full namespaces are ordered by RECENCY — most-recently-modified LAST,\n"
-    "; not dependency order; the runtime loaded them correctly.\n"
+    "; Namespace detail is one mechanism: current namespace + real :require\n"
+    "; edges + the namespaces block's full-source selection. Full namespaces\n"
+    "; are ordered by RECENCY — most-recently-modified LAST, not dependency\n"
+    "; order; the runtime loaded them correctly.\n"
     ";\n"
     "; BUILD YOUR ENVIRONMENT. This runtime is yours to shape. When you have\n"
     "; data worth keeping, CREATE a namespace for it — WRITE THE REAL REQUIRES\n"

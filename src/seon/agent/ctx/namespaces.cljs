@@ -29,9 +29,8 @@
 ;; attrs, so they live HERE, colocated with the render fn that reads them.
 ;;
 ;; Attribute-PRESENCE is the config (decision 22/23): a ns present in a set
-;; IS its config; compact is the ABSENCE. The two set attrs mirror the
-;; proven cardinality-many pattern of `:seon.agent.ctx/render-namespaces`;
-;; the element type is `:seon.ns/name` (a keyword, matching the identity
+;; IS its config; compact is the ABSENCE. The element type is
+;; `:seon.ns/name` (currently a keyword, matching the identity
 ;; attr's shape) — the bridge derives the SAME cardinality-many keyword
 ;; column as a bare `:keyword` would, but names the shape. A keyword (not a
 ;; `:db.type/ref`) tolerates configuring a not-yet-indexed ns (a fresh
@@ -227,10 +226,6 @@
 (def ^:private agent-selector
   `[:seon.agent/id
     {:seon.agent/namespace [:seon.ns/name]}
-    ::full-source
-    ::with-tests
-    ::current-full?
-    ::current-tests?
     {:seon.agent/ctx [:db/id :seon.agent.ctx/name
                       ::full-source ::with-tests
                       ::current-full? ::current-tests?]}])
@@ -256,13 +251,7 @@
     ::protocol/arguments [id]
     :datahike.resource/max-work 100000
     :datahike.resource/max-results 64
-    :datahike.resource/max-result-weight 4096}
-   {::protocol/operation protocol/pull-operation
-    ::protocol/selector [:seon.config/current-ns]
-    ::protocol/entity-id [:seon.config/id config/cluster-config-id]
-    :datahike.resource/max-work 10000
-    :datahike.resource/max-results 8
-    :datahike.resource/max-result-weight 1024}])
+    :datahike.resource/max-result-weight 4096}])
 
 (defn- selected-acquisition-members
   [names]
@@ -310,16 +299,14 @@
                             ::db/max-result-weight 786432})))]
     (if (:seon.error/message initial)
       (acquisition-error "initial acquisition" initial)
-      (let [[agent-member eval-ns-member assignment-member config-member]
+      (let [[agent-member eval-ns-member assignment-member]
             (::db/results initial)
             agent (member-result agent-member)
             latest-successful-ns (some-> (member-result eval-ns-member) first)
-            namespace-assignment (some-> (member-result assignment-member) first)
-            config-row (member-result config-member)]
+            namespace-assignment (some-> (member-result assignment-member) first)]
         (if-not (and (true? (::protocol/success? agent-member))
                      (true? (::protocol/success? eval-ns-member))
-                     (true? (::protocol/success? assignment-member))
-                     (true? (::protocol/success? config-member)))
+                     (true? (::protocol/success? assignment-member)))
           (acquisition-error "initial member" (::db/results initial))
           (let [cur-ns (home/current-ns id agent latest-successful-ns
                                         namespace-assignment)
@@ -340,13 +327,13 @@
                                     candidate))
                                 (:seon.agent/ctx agent))
                     full-source-cfg
-                    (set (resolve-cfg block agent ::full-source #{}))
+                    (set (resolve-cfg block ::full-source #{}))
                     with-tests-cfg
-                    (set (resolve-cfg block agent ::with-tests #{}))
+                    (set (resolve-cfg block ::with-tests #{}))
                     current-full?
-                    (resolve-cfg block agent ::current-full? true)
+                    (resolve-cfg block ::current-full? true)
                     current-tests?
-                    (resolve-cfg block agent ::current-tests? true)
+                    (resolve-cfg block ::current-tests? true)
                     required
                     (required-ns-selections
                       (:seon.ns/require-edges current-row) cur-ns)
@@ -372,8 +359,6 @@
                     {::db/db database
                      :seon.agent/id id
                      :seon.agent.ctx.render-fns/current-ns cur-ns
-                     :seon.config/current-ns
-                     (or (:seon.config/current-ns config-row) :full)
                      ::full-source full-source-cfg
                      ::with-tests with-tests-cfg
                      ::current-full? current-full?
@@ -492,28 +477,24 @@
 
      full? ⇔ (nm = current-ns ∧ ::current-full?) ∨ (nm ∈ ::full-source)
 
-   The current ns honors the per-agent `::current-full?` flag (default true)
-   and the config policy's `:current-ns` off-switch (`:off` → compact). Every
-   OTHER included ns — the current ns's `:require`s — renders compact."
-  [policy nm cur-ns full-source current-full?]
+   The current ns honors the namespaces block's `::current-full?` flag
+   (default true). Every other included namespace — the current namespace's
+   requirements — renders compact unless selected by `::full-source`."
+  [nm cur-ns full-source current-full?]
   (boolean
     (or (contains? full-source nm)
         (and (= nm cur-ns)
-             current-full?
-             (not= :off (:seon.config/current-ns policy))))))
+             current-full?))))
 
 (defn- resolve-cfg
-  "Resolve render-dial attr `k` for the agent: the value on its `:namespaces`
-   BLOCK entity if present, else the value on its AGENT entity (datom
-   fallback), else `default`. `some?` (not truthiness) draws the present/absent
-   line so a legit `false`/empty value overrides. Mirrors
-   [[seon.agent.ctx.canvas/canvas-block]]'s block→agent→default read."
-  [block agent-ent k default]
+  "Resolve render-dial attr `k` from the one `:namespaces` block.
+
+   `some?` (not truthiness) draws the present/absent line so a legitimate
+   false or empty presence-set overrides the default. Namespace render config
+   never falls back to duplicate attributes on the agent entity."
+  [block k default]
   (let [bv (get block k)]
-    (if (some? bv)
-      bv
-      (let [av (get agent-ent k)]
-        (if (some? av) av default)))))
+    (if (some? bv) bv default)))
 
 (defn- ns-tests-block
   "The indexed test SOURCE for ns `nm`, as a `; tests:`-headed block appended
@@ -677,10 +658,9 @@
        (`*.internal` / `*-test` excluded
        outright, [[included-ns?]]; empty cards dropped.)
 
-   DRIVEN BY THE PER-AGENT CONFIG DIALS, read reactively off the agent's
-   `:namespaces` BLOCK entity, falling back to the agent datom, then the malli
-   default ([[resolve-cfg]] — a `db/transact!` re-derives next render, no apply
-   step):
+   DRIVEN BY THE PER-AGENT CONFIG DIALS, read reactively from the agent's one
+   `:namespaces` BLOCK entity, then the Malli default ([[resolve-cfg]] — a
+   `db/transact!` re-derives next render, no apply step):
 
      - `::full-source` — a presence-set of ns keywords to force FULL;
      - `::current-full?` (default true) — whether the agent's CURRENT ns
@@ -699,26 +679,26 @@
   [input]
   (if-let [error (or (::error input) (database-error input))]
       (str "[namespaces] render failed: " (pr-str error))
-      (let [policy {:seon.config/current-ns (:seon.config/current-ns input)}
-        cur-ns (:seon.agent.ctx.render-fns/current-ns input)
-        full-source-cfg (set (::full-source input))
-        with-tests-cfg (set (::with-tests input))
-        current-full? (if (boolean? (::current-full? input))
-                        (::current-full? input) true)
-        current-tests? (if (boolean? (::current-tests? input))
-                         (::current-tests? input) true)
-        namespace-rows (::namespace-rows input)
-        schema-rows (:seon.agent.ctx/schema-rows input)
-        home-requires (::home-requires input)
-        row-by-name (into {} (map (juxt :seon.ns/name identity)) namespace-rows)
-        current-row (get row-by-name cur-ns)
-        required (required-ns-selections
-                   (:seon.ns/require-edges current-row) cur-ns)
-        include-set (cond-> (into (set (keys required)) full-source-cfg)
-                      cur-ns (conj cur-ns))
-        tests-set (cond-> with-tests-cfg
-                    (and cur-ns current-tests?) (conj cur-ns))
-        scanned (->> namespace-rows
+      (let [cur-ns          (:seon.agent.ctx.render-fns/current-ns input)
+            full-source-cfg (set (::full-source input))
+            with-tests-cfg  (set (::with-tests input))
+            current-full?   (if (boolean? (::current-full? input))
+                              (::current-full? input) true)
+            current-tests?  (if (boolean? (::current-tests? input))
+                              (::current-tests? input) true)
+            namespace-rows  (::namespace-rows input)
+            schema-rows     (:seon.agent.ctx/schema-rows input)
+            home-requires   (::home-requires input)
+            row-by-name     (into {} (map (juxt :seon.ns/name identity))
+                                  namespace-rows)
+            current-row     (get row-by-name cur-ns)
+            required        (required-ns-selections
+                              (:seon.ns/require-edges current-row) cur-ns)
+            include-set     (cond-> (into (set (keys required)) full-source-cfg)
+                              cur-ns (conj cur-ns))
+            tests-set       (cond-> with-tests-cfg
+                              (and cur-ns current-tests?) (conj cur-ns))
+            scanned         (->> namespace-rows
                      (filter (fn [row]
                                (let [nm (:seon.ns/name row)]
                                  (and (included-ns? nm)
@@ -727,26 +707,26 @@
                                 [(or (:seon.db/tx row)
                                      js/Number.MAX_SAFE_INTEGER)
                                  (name (:seon.ns/name row))])))
-        rows (if (and cur-ns
+            rows (if (and cur-ns
                       (not (some #(= cur-ns (:seon.ns/name %)) scanned)))
                (conj (vec scanned) {:seon.ns/name cur-ns})
                scanned)
         ;; Each row + its full? flag + PHASE: :prefix for a STABLE seon.*
         ;; required ns (name-sorted cache prefix); :body for the agent's
         ;; churning nses (my.* / current ns), recency-ordered nearest the tail.
-        selected (mapv (fn [row]
+            selected (mapv (fn [row]
                          (let [nm (:seon.ns/name row)
                                prefix? (and (not= nm cur-ns)
                                             (seon-framework-ns? nm))]
                            [nm row
-                            (full? policy nm cur-ns full-source-cfg current-full?)
+                            (full? nm cur-ns full-source-cfg current-full?)
                             (if prefix? :prefix :body)
                             (if (= nm cur-ns) {} (get required nm {}))]))
                        rows)
         ;; Render ONE row: full → render-one (omitted when empty); else a
         ;; COMPACT card (it is a required ns). A card is nil when nothing is
         ;; indexed. Append the ns's indexed test source when it is in tests-set.
-        render-row (fn [[nm row full? _phase selection]]
+            render-row (fn [[nm row full? _phase selection]]
                      (when-let [block-txt (if full?
                                             (render-one nm row schema-rows cur-ns
                                                         home-requires)
@@ -754,13 +734,13 @@
                        (str block-txt
                             (when (contains? tests-set nm)
                               (ns-tests-block row)))))
-        prefix-rows (->> selected
+            prefix-rows (->> selected
                          (filter (fn [[_ _ _ phase _]] (= phase :prefix)))
                          (sort-by (fn [[nm _ _ _ _]] (name nm))))
-        body-rows   (filterv (fn [[_ _ _ phase _]] (= phase :body)) selected)
-        prefix-blocks (keep render-row prefix-rows)
-        body-blocks   (keep render-row body-rows)
-        blocks        (concat prefix-blocks body-blocks)]
+            body-rows   (filterv (fn [[_ _ _ phase _]] (= phase :body)) selected)
+            prefix-blocks (keep render-row prefix-rows)
+            body-blocks   (keep render-row body-rows)
+            blocks        (concat prefix-blocks body-blocks)]
     (if (seq blocks)
       (str namespaces-header "\n\n" (str/join "\n\n" blocks))
       ""))))

@@ -72,7 +72,13 @@
                    (mapv first))
         facets (db/malli->datahike-schema attrs)]
     (is (= (set attrs) (into #{} (map :db/ident) facets))
-        "every config fact written at cold boot bridges to one database attr")))
+        "every config fact written at cold boot bridges to one database attr")
+    (is (= {:db/ident :seon.agent.web/allowed-domains
+            :db/valueType :db.type/string
+            :db/cardinality :db.cardinality/many}
+           (first (db/malli->datahike-schema
+                    [:seon.agent.web/allowed-domains])))
+        "the existing web allowlist remains cardinality-many strings")))
 
 (deftest config-absent-is-identity
   (testing "the {} manifest leaves the route seed untouched"
@@ -479,9 +485,22 @@
       (is (= 500       (:seon.config/reactive-max-latency-ms s)))
       (is (= {}        (:seon.config.repair/classes s)))
       (is (= []        (:seon.agent.web/allowed-domains s)))
-      (is (= :full     (:seon.config/current-ns s)))
+      (is (not (contains? s :seon.config/current-ns))
+          "namespace render selection belongs to the namespaces block")
       ;; system-text has NO default — absent from a bare manifest
       (is (not (contains? s :seon.config/system-text)))))
+  (testing "the namespace manifest has one source-storage option"
+    (is (m/validate :seon.config/manifest
+                    {:seon.config/namespaces
+                     {:seon.config/always '[my.kb seon.agent.message]}}))
+    (is (not (m/validate :seon.config/manifest
+                         {:seon.config/namespaces
+                          {:seon.config/current-ns :off}}))
+        "the removed duplicate render switch fails instead of being ignored"))
+  (testing "an absent cardinality-many allowlist reads as an empty vector"
+    (is (= {:seon.agent.web/policy :public-only
+            :seon.agent.web/allowed-domains []}
+           (config/web-policy {}))))
   (testing "a manifest value overrides the resolved knob"
     (let [agent-context {:seon.agent/ctx
                          [{:seon.agent.ctx/name :transcript}]}

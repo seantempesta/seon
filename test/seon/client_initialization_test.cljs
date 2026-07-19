@@ -146,8 +146,7 @@
           original-entity db/entity
           original-resolve config/resolve-config-singleton
           retained (assoc configuration
-                          :seon.config/always #{:custom.core}
-                          :seon.config/current-ns :off)
+                          :seon.config/always #{:custom.core})
           stored (update retained :seon.config/always pr-str)
           cleanup!
           (fn []
@@ -200,7 +199,7 @@
           original-open client/open-database-session!
           original-skills skills/seed-skills-tx-data
           original-reconcile state/reconcile!
-          resolved (assoc configuration :seon.config/current-ns :off)
+          resolved (assoc configuration :seon.config.render/eval-cap 42)
           resolve-count (atom 0)
           opened-configuration (atom nil)
           applied-configuration (atom nil)
@@ -212,8 +211,8 @@
             (set! skills/seed-skills-tx-data original-skills)
             (set! state/reconcile! original-reconcile)
             (done))
-          manifest {:seon.config/namespaces
-                    {:seon.config/current-ns :off}}]
+          manifest {:seon.config/render
+                    {:seon.config.render/eval-cap 42}}]
       (set! config/resolve-config-singleton
             (fn [_]
               (swap! resolve-count inc)

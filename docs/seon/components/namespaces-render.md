@@ -63,7 +63,7 @@ agent's home ns requires, so it IS what renders as cards. Root additionally gets
 ## Per-agent dials (config-driven-agent-init)
 
 Four attrs on the `:namespaces` BLOCK entity, read reactively via `resolve-cfg`
-(block → agent datom → malli default; a `db/transact!` re-derives next render):
+(block → Malli default; a `db/transact!` re-derives next render):
 
 - `::full-source` (`[:vector :seon.ns/name]`, default `[]`) — force a ns FULL.
 - `::with-tests` (same) — append the ns's indexed `:seon.test/source`.
@@ -71,8 +71,10 @@ Four attrs on the `:namespaces` BLOCK entity, read reactively via `resolve-cfg`
 - `::current-tests?` (`:boolean`, default true) — whether it shows its tests.
 
 Presence = config; compact = absence. No `:compact` token exists, so the
-`#{:full :compact}` conflict is unrepresentable. Per-cluster full-source policy
-also rides `:seon.config/namespaces` (`:seon.config/always` + `:seon.config/current-ns`).
+`#{:full :compact}` conflict is unrepresentable. Cluster
+`:seon.config/namespaces` has one distinct storage option,
+`:seon.config/always`: it makes complete framework source available for later
+selection but never decides what renders.
 
 ## Invariants
 
@@ -98,9 +100,9 @@ also rides `:seon.config/namespaces` (`:seon.config/always` + `:seon.config/curr
 ## Third-party override-proven (acme)
 
 `config/acme.edn` sets its OWN `:seon.eval/home-requires` (a trimmed core subset
-PLUS `acme.helpers` / `acme.notes`) and its OWN `:seon.config/namespaces`
-full-source set — with ZERO `src/seon` edits, a fresh acme agent's card surface
-is acme's toolkit. Load-bearing gotcha: a manifest that supplies `:seon.agent/ctx`
+PLUS `acme.helpers` / `acme.notes`) and its OWN namespace source-storage set —
+with ZERO `src/seon` edits, a fresh acme agent's card surface is acme's toolkit.
+Load-bearing gotcha: a manifest that supplies `:seon.agent/ctx`
 REPLACES the default block tree wholesale (malli default-fill only fills ABSENT
 keys), so acme must re-list every block it wants to keep — including `:namespaces`
 at priority 20 — or the section silently vanishes.

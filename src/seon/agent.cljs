@@ -295,22 +295,12 @@
    [:seon.agent/default-deadline-ms {:optional true} :seon.agent/default-deadline-ms]
    [:seon.agent/schedules          {:optional true} :seon.agent/schedules]
    [:seon.agent/ctx                {:optional true} :seon.agent/ctx]
-   [:seon.agent.ctx/render-namespaces
-    {:optional true} :seon.agent.ctx/render-namespaces]
    [:seon.agent.ctx/capabilities
     {:optional true} :seon.agent.ctx/capabilities]
    [:seon.agent.ctx/escape-clipping?
     {:optional true} :seon.agent.ctx/escape-clipping?]
    [:seon.agent.ctx/cache-breakpoint
     {:optional true} :seon.agent.ctx/cache-breakpoint]
-   [:seon.agent.ctx.namespaces/full-source
-    {:optional true} :seon.agent.ctx.namespaces/full-source]
-   [:seon.agent.ctx.namespaces/with-tests
-    {:optional true} :seon.agent.ctx.namespaces/with-tests]
-   [:seon.agent.ctx.namespaces/current-full?
-    {:optional true} :seon.agent.ctx.namespaces/current-full?]
-   [:seon.agent.ctx.namespaces/current-tests?
-    {:optional true} :seon.agent.ctx.namespaces/current-tests?]
    [:seon.agent.runtime/wake?      {:optional true} :seon.agent.runtime/wake?]
    [:seon.eval/home-requires       {:optional true} :seon.eval/home-requires]
    [:seon.render/ai   {:optional true} :seon.render/ai]

@@ -66,30 +66,24 @@
    ;; else `.claude/skills`.
    [:seon.config/dirs {:optional true} [:vector :string]]])
 
-;;; NAMESPACES render policy (#42 explicit listing) — the single curation lever
-;;; for the agent's prompt BODY. Signatures are RETIRED: every rendered ns
-;;; renders FULL real source, so the only knobs are WHICH nses render (the
-;;; explicit `:always` list, plus the agent's current ns + its requires +
-;;; third-party code, resolved in `seon.agent.ctx.namespaces`) and whether the
-;;; current ns renders at all. Token budget is bound by curation (which nses
-;;; render), never by compression (how each renders).
-
-(schema/register! :seon.config/current-ns [:enum :full :off])
+;;; NAMESPACE SOURCE-STORAGE policy (#42 explicit listing). The cluster manifest
+;;; chooses the non-`my.*` namespace files whose complete source is indexed and
+;;; therefore available for a per-agent namespaces block to select. Runtime
+;;; render selection lives only on that block; cluster config does not carry a
+;;; second current/full/compact switch.
 
 (schema/register! :seon.config/namespaces-spec
-  [:map
-   ;; explicit always-present FULL-source nses
-   [:seon.config/always     {:optional true} [:vector :symbol]]
-   ;; the agent's CURRENT ns: :full (default — rendered) | :off (dropped)
-   [:seon.config/current-ns {:optional true} :seon.config/current-ns]])
+  [:map {:closed true}
+   ;; Complete source is stored for these framework namespaces so a namespaces
+   ;; block may select it later. This list does not itself render anything.
+   [:seon.config/always {:optional true} [:vector :symbol]]])
 
 ;; The RESOLVED policy the renderer + boot indexer read (symbols → ns-name
 ;; keywords, defaults applied). Registered once + referenced by
 ;; [[resolve-namespaces]].
 (schema/register! :seon.config/namespaces-policy
   [:map
-   [:seon.config/always     [:set :keyword]]
-   [:seon.config/current-ns :seon.config/current-ns]])
+   [:seon.config/always [:set :keyword]]])
 
 (schema/register! :seon.config/route-spec
   [:map
@@ -355,11 +349,11 @@
 ;;; at BOOT and TRANSACTED into the db (this singleton); from then on EVERY
 ;;; runtime read begins with one ordinary singleton row acquired by the owning
 ;;; database operation. Each knob is its OWN registered attr — a real type is the knob's
-;;; contract, NEVER an EDN-blob dump of the whole config. Three collection knobs
-;;; (`:seon.config/always`, `:seon.config.repair/classes`,
-;;; `:seon.agent.web/allowed-domains`) ride the ESTABLISHED mixed-`:or` EDN-slot
-;;; bridge (the `:seon.eval/home-requires` precedent) — one cardinality-one
-;;; datom that upsert REPLACES (so a shrunk list heals, no accumulation). The
+;;; contract, NEVER an EDN-blob dump of the whole config. The heterogeneous
+;;; collection knobs (`:seon.config/always`, `:seon.config.repair/classes`) ride
+;;; the established mixed-`:or` EDN-slot bridge. The homogeneous web allowlist
+;;; keeps its installed cardinality-many string contract; exact config
+;;; reconciliation retracts removed values before asserting the desired set. The
 ;;; singleton is ONE entity in the boot `#{:config}` `seon.state/reconcile!`
 ;;; desired set (routes/skills pattern) — upsert-by-identity keeps it current +
 ;;; retract-protected; NO second mechanism.
@@ -374,7 +368,7 @@
 ;;; section specs above (the LEAF-attr block before `:seon.config/render`) —
 ;;; the singleton entity schema below references those registrations. Only
 ;;; the knobs whose DATOM shape differs from their manifest shape live here:
-;;; the three collections ride the mixed-`:or` EDN-slot bridge (a `:nil` alt
+;;; heterogeneous collections ride the mixed-`:or` EDN-slot bridge (a `:nil` alt
 ;;; makes it a mixed `:or` so `transact!` pr-str's the value and the acquiring
 ;;; operation decodes it once with `seon.db/decode-edn-value`).
 ;; The always-on FULL-source ns render list — the resolved keyword set
@@ -385,8 +379,9 @@
 (schema/register! :seon.config/skills [:or :seon.config/skills-spec :nil])
 ;; The per-class repair kill-switch map `{class-kw boolean}`. EDN-slot bridged.
 (schema/register! :seon.config.repair/classes [:or [:map-of :keyword :boolean] :nil])
-;; The web allowlist hosts (meaningful only under `:allowlist`). EDN-slot bridged.
-(schema/register! :seon.agent.web/allowed-domains [:or [:vector :string] :nil])
+;; The web allowlist hosts (meaningful only under `:allowlist`). This established
+;; cardinality-many string attribute is already installed in durable databases.
+(schema/register! :seon.agent.web/allowed-domains [:vector :string])
 ;; The cluster system-prompt TEXT — OPTIONAL, no default (absent ⇒ not seeded
 ;; ⇒ `seon.ai/effective-system-prompt` falls through to the shipped
 ;; `seon.agent.ctx/system-text`, preserving the pre-datom behavior). The
@@ -420,7 +415,6 @@
     {:optional true} :seon.config.model-transport/response-identity-cap]
    [:seon.config.model-transport/endpoint-cap
     {:optional true} :seon.config.model-transport/endpoint-cap]
-   [:seon.config/current-ns         {:optional true} :seon.config/current-ns]
    [:seon.config/on-core-error      {:optional true} :seon.config/on-core-error]
    [:seon.config/spawn-depth-cap    {:optional true} :seon.config/spawn-depth-cap]
    [:seon.config/always             {:optional true} :seon.config/always]
@@ -638,17 +632,13 @@
 ;;; ============================================================
 
 (def ^:private default-namespaces-policy
-  "The SHIPPED default namespaces render policy. Everything renders FULL real
-   source; this is just WHICH nses are always present: the `my.*` toolkit
-   exemplars plus the core function nses the agent calls constantly
-   (`my.plan`/`seon.agent.message`/`seon.agent.lifecycle`). The agent's
-   CURRENT ns and the nses it `:require`s render full on top of this (resolved
-   in `seon.agent.ctx.namespaces`). `config/system.edn` mirrors this list
-   verbatim for visibility; a lean cluster overrides it with a short explicit
-   list (the curation lever)."
-  {:seon.config/always     '[my.kb my.data my.ui my.canvas
-                             my.plan seon.agent.message seon.agent.lifecycle]
-   :seon.config/current-ns :full})
+  "The shipped namespace full-source storage policy.
+
+   Complete source for these framework exemplars is indexed so a per-agent
+   namespaces block may select it. `my.*` source follows its structural storage
+   rule independently. This policy never decides what renders."
+  {:seon.config/always '[my.kb my.data my.ui my.canvas
+                          my.plan seon.agent.message seon.agent.lifecycle]})
 
 (defn- ns-sym->kw
   "An ns-name SYMBOL (config) → its ns-name KEYWORD (the DB `:seon.ns/name`
@@ -661,15 +651,15 @@
 
    The `manifest` section becomes the policy
    the renderer + boot indexer read (`seon.agent.ctx.namespaces`). KEY-LEVEL
-   merge over [[default-namespaces-policy]]: an absent section ⇒ the
-   byte-identical default; a present section overrides ONLY the keys it lists.
-   Symbols become ns-name keywords."
+   merge over [[default-namespaces-policy]]. An absent section uses the shipped
+   storage set; a present section overrides the one list. Symbols become the
+   current ns-name database values."
   {:malli/schema [:=> [:catn [::manifest :seon.config/manifest]]
                   :seon.config/namespaces-policy]}
   [manifest]
   (let [merged (merge default-namespaces-policy (:seon.config/namespaces manifest))]
-    {:seon.config/always     (into #{} (map ns-sym->kw) (:seon.config/always merged))
-     :seon.config/current-ns (:seon.config/current-ns merged)}))
+    {:seon.config/always
+     (into #{} (map ns-sym->kw) (:seon.config/always merged))}))
 
 ;;; ============================================================
 ;;; THE CONFIG RESOLVER. `resolve-config-singleton` maps a manifest
@@ -756,7 +746,6 @@
              (:seon.config.run/stream-form-limit run)
              :seon.config.run/deadline-ms
              (:seon.config.run/deadline-ms run)
-             :seon.config/current-ns (:seon.config/current-ns nsp)
              :seon.config/always     (:seon.config/always nsp)
              :seon.config/on-core-error
              (coerce-enum (get manifest :seon.config/on-core-error :gate) #{:crash :gate :log} :gate)
@@ -836,17 +825,15 @@
          (select-keys configuration (keys default-reactive-policy))))
 
 (defn namespaces-policy
-  "The resolved namespaces render policy from ordinary singleton data.
+  "The resolved full-source storage policy from ordinary singleton data.
 
-   `{:seon.config/always #{ns-kw…} :seon.config/current-ns :full|:off}` off the
    The operation that owns the immutable database value acquires and decodes
-   the singleton once, then passes it here. This function performs no database,
-   manifest, environment, cache, or process-state read."
+   the singleton once, then passes it here. Runtime namespace selection belongs
+   to the agent's namespaces block."
   {:malli/schema [:=> [:cat :seon.config/singleton]
                   :seon.config/namespaces-policy]}
   [configuration]
-  {:seon.config/always     (or (:seon.config/always configuration) #{})
-   :seon.config/current-ns (or (:seon.config/current-ns configuration) :full)})
+  {:seon.config/always (or (:seon.config/always configuration) #{})})
 
 ;;; ============================================================
 ;;; ENV KNOBS — the ONE typed env surface for the FEW knobs that stay env-only
@@ -1207,7 +1194,7 @@
   {:seon.agent.web/policy
    (or (:seon.agent.web/policy configuration) :public-only)
    :seon.agent.web/allowed-domains
-   (vec (:seon.agent.web/allowed-domains configuration))})
+   (vec (or (:seon.agent.web/allowed-domains configuration) []))})
 
 (defn web-search-config
   "The resolved web-SEARCH backend config for `seon.agent.web/search`.

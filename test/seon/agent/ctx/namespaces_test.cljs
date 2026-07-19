@@ -20,7 +20,6 @@
     [seon.agent.ctx :as ctx]
     [seon.agent.ctx.namespaces :as nss]
     [seon.agent.home :as home]
-    [seon.config :as config]
     [seon.db :as db]
     [seon.db.protocol :as protocol]))
 
@@ -73,7 +72,6 @@
 
 (defn- eager-input []
   {:seon.agent/id agent-id
-   :seon.config/current-ns :full
    :seon.agent.ctx.render-fns/current-ns cur-ns
    :seon.agent.ctx.namespaces/full-source #{}
    :seon.agent.ctx.namespaces/with-tests #{}
@@ -118,12 +116,11 @@
   (let [initial (@#'nss/initial-acquisition-members agent-id)
         selected (@#'nss/selected-acquisition-members
                    [:my.agent.tst-2606260000 :my.helper])
-        [pull-member latest-member assignment-member config-member] initial
+        [pull-member latest-member assignment-member] initial
         [pull-many-member tx-member] selected]
     (testing "initial discovery is one pull plus the bounded latest query"
       (is (= [protocol/pull-operation protocol/query-operation
-              protocol/query-operation
-              protocol/pull-operation]
+              protocol/query-operation]
              (mapv ::protocol/operation initial)))
       (is (= 32768 (:datahike.resource/max-results latest-member))
           "the bound admits about 8,000 successful evals before explicit failure")
@@ -136,11 +133,7 @@
       (is (= home/namespace-assignment-query
              (::protocol/query-form assignment-member)))
       (is (= [agent-id] (::protocol/arguments assignment-member)))
-      (is (= [:seon.agent/id agent-id] (::protocol/entity-id pull-member)))
-      (is (= [:seon.config/id config/cluster-config-id]
-             (::protocol/entity-id config-member)))
-      (is (= [:seon.config/current-ns]
-             (::protocol/selector config-member))))
+      (is (= [:seon.agent/id agent-id] (::protocol/entity-id pull-member))))
     (testing "selected rows use one pull-many and one selected tx query"
       (is (= [protocol/pull-many-operation protocol/query-operation]
              (mapv ::protocol/operation selected)))

@@ -37,15 +37,12 @@
 
  ;; ── NAMESPACES policy (#42) — :always is BOOT-STORAGE only (owner decision
  ;; 2026-07-01, 2eeb3bd9): the boot indexer stores these nses' REAL FULL file
- ;; source so a per-agent ::full-source pin CAN promote them to full. It does
- ;; NOT drive render selection — an agent renders its CURRENT ns full
- ;; (:seon.config/current-ns :full, default; :off → compact) plus its home-ns
- ;; :require's as compact cards; render selection is the home-requires list
- ;; below. (Mirrors seon.config/default-namespaces-policy.)
+ ;; source so a per-agent namespaces block's ::full-source selection CAN
+ ;; promote them to full. It does NOT drive render selection: the namespaces
+ ;; block alone selects current/full/compact/test detail.
  :seon.config/namespaces
  {:seon.config/always     [my.kb my.data my.ui my.canvas seon.render.canvas
-                           my.plan seon.agent.message seon.agent.lifecycle]
-  :seon.config/current-ns :full}
+                           my.plan seon.agent.message seon.agent.lifecycle]}
 
  ;; ── RUN RESOURCE POLICY — safety ceilings, queryable as singleton datoms.
  ;; Normal runs stop through complete/wait/no-progress/error handling first.

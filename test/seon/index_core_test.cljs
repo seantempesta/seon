@@ -379,15 +379,17 @@
               (map first)
               (drop 2 (schema/schema-definition :seon.agent)))]
     (is (every? attributes
-                [:seon.agent.ctx/render-namespaces
-                 :seon.agent.ctx/capabilities
+                [:seon.agent.ctx/capabilities
                  :seon.agent.ctx/escape-clipping?
-                 :seon.agent.ctx/cache-breakpoint
-                 :seon.agent.ctx.namespaces/full-source
-                 :seon.agent.ctx.namespaces/with-tests
-                 :seon.agent.ctx.namespaces/current-full?
-                 :seon.agent.ctx.namespaces/current-tests?])
-        "agent context settings are native Datahike attributes at initialization")))
+                 :seon.agent.ctx/cache-breakpoint])
+        "agent-level context settings are native Datahike attributes")
+    (is (not-any? attributes
+                  [:seon.agent.ctx/render-namespaces
+                   :seon.agent.ctx.namespaces/full-source
+                   :seon.agent.ctx.namespaces/with-tests
+                   :seon.agent.ctx.namespaces/current-full?
+                   :seon.agent.ctx.namespaces/current-tests?])
+        "namespace render settings live only on the namespaces block")))
 
 (deftest namespace-entities-declare-structural-require-edges
   (let [namespace-attributes
