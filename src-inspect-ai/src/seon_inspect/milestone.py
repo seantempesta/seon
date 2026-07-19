@@ -352,28 +352,34 @@ def check_store_recall(eval_rows: list[dict[str, Any]],
             tx.append(i)
     transact_idx = tx[0] if tx else None
     query_idx = None
+    compute_idx = None
     if transact_idx is not None:
         later = [i for i in _ok_indices(eval_rows, r"db/query|seon\.db/query")
                  if (i > transact_idx
-                     and measure_attr in (eval_rows[i].get("source") or "")
-                     and ">" in (eval_rows[i].get("source") or "")
-                     and _reply_has_number(
-                         eval_rows[i].get("source") or "", threshold))]
+                     and measure_attr in (eval_rows[i].get("source") or ""))]
         query_idx = later[0] if later else None
+    if query_idx is not None:
+        computations = [
+            i for i, row in enumerate(eval_rows)
+            if i >= query_idx and row.get("ok") is True
+            and ">" in (row.get("source") or "")
+            and _reply_has_number(row.get("source") or "", threshold)
+            and (i == query_idx or "result/" in (row.get("source") or ""))]
+        compute_idx = computations[0] if computations else None
     schema_indices = identity_schema + measure_schema
     schema_before = (bool(identity_schema) and bool(measure_schema)
                      and transact_idx is not None
                      and max(schema_indices) < transact_idx)
-    report_indices = ([] if query_idx is None else [
+    report_indices = ([] if compute_idx is None else [
         i for i in _ok_indices(
             eval_rows, r"(?:seon\.agent\.)?message/user")
-        if (i > query_idx and _reply_has_number(
+        if (i > compute_idx and _reply_has_number(
             eval_rows[i].get("source") or "", expected))
     ])
-    complete_indices = ([] if query_idx is None else [
+    complete_indices = ([] if compute_idx is None else [
         i for i in _ok_indices(
             eval_rows, r"(?:seon\.agent\.lifecycle/)?complete\b")
-        if (i > query_idx and _reply_has_number(
+        if (i > compute_idx and _reply_has_number(
             eval_rows[i].get("source") or "", expected))
     ])
     answer = _reply_has_number(reply, expected)
@@ -411,13 +417,15 @@ def check_store_recall(eval_rows: list[dict[str, Any]],
     checks = {"schema_register": schema_before,
               "transact": transact_idx is not None,
               "query_later": query_idx is not None,
+              "compute_later": compute_idx is not None,
               "database_readback": database_readback,
               "report_human": bool(report_indices),
               "complete": bool(complete_indices),
               "answer": answer}
     failures = [k for k, v in checks.items() if not v]
     return {"ok": not failures, "checks": checks, "failures": failures,
-            "transact_idx": transact_idx, "query_idx": query_idx}
+            "transact_idx": transact_idx, "query_idx": query_idx,
+            "compute_idx": compute_idx}
 
 
 # One capability oracle per milestone id — the driver/scorer dispatch table.

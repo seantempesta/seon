@@ -44,3 +44,11 @@ and typed final query. The synthetic operation tree and eleven fixture-only
 mutations were deleted; 70 focused milestone/solver tests pass and the diff is
 28 net lines smaller. The issue remains open until a fixed live database run
 passes and a generated row proves the dynamic attribute query.
+
+The fixed live row now passes in 48 seconds with accuracy 1.0 and zero
+fabrication. The first generated row stored and read back every correct fact but
+exposed a narrower scorer mismatch: its contract permits querying records and
+computing from the returned `result/...` value in a later eval, while the
+scorer required the predicate inside Datalog. The scorer now accepts both
+valid evaluation shapes and keeps the typed final read mandatory; 71 focused
+tests pass. The generated rerun remains the archival gate.

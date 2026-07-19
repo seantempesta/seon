@@ -95,6 +95,15 @@ and test lines. Live database proof remains required before the issue closes.
 Reachability still owns the same stale wrapper vocabulary independently and is
 the next source correction after this live milestone falsifier.
 
+The first seeded live row then found one remaining scorer-only assumption. The
+contract asked the agent to query the stored records and compute from that
+result; the agent did exactly that in two successful evals and the final typed
+query returned all five correct facts. The scorer had required the threshold
+predicate inside the Datalog form itself. It now recognizes either a direct
+aggregate query or a later successful computation that references the query's
+`result/...` value, while final database readback remains mandatory. Focused
+proof is 71 tests; the seeded live rerun remains the next falsifier.
+
 ## Ordered next boundary
 
 1. Run the corrected fixed database scenario against its final typed query.

@@ -194,7 +194,7 @@ def test_store_recall_answer_absent_fails():
         (_DB_GOOD_ROWS[:3]
          + _ev(("(db/query '[:find (sum ?w) . :where "
                 "[?e :my.cache/weight-kg ?w] [(> ?w 9)]])", True))
-         + _DB_GOOD_ROWS[4:], "query_later"),
+         + _DB_GOOD_ROWS[4:], "compute_later"),
         (_DB_GOOD_ROWS[:4] + _DB_GOOD_ROWS[5:], "report_human"),
         (_DB_GOOD_ROWS[:-1], "complete"),
     ],
@@ -203,6 +203,18 @@ def test_store_recall_rejects_partial_workflow(rows, failed_check):
     result = check_store_recall(rows, _DB_GOOD_REPLY)
     assert not result["ok"]
     assert failed_check in result["failures"]
+
+
+def test_store_recall_accepts_computation_from_a_later_query_result():
+    rows = _DB_GOOD_ROWS[:3] + _ev(
+        ("(db/query '[:find ?name ?w :where "
+         "[?e :my.cache/name ?name] [?e :my.cache/weight-kg ?w]])", True),
+        ("(->> result/example (map second) (filter #(> % 10)) "
+         "(reduce + 0))", True),
+    ) + _DB_GOOD_ROWS[4:]
+    result = check_store_recall(rows, _DB_GOOD_REPLY)
+    assert result["ok"], result["failures"]
+    assert result["compute_idx"] == 4
 
 
 def test_generated_database_workflow_uses_structured_oracle():
