@@ -253,7 +253,19 @@ joins `:seon.fn/source` history and transaction `:seon.db/user` facts with the
 successful eval rows, `:seon.test/last-passed-at`, and the namespace's current
 `:seon.fn/sym` facts. It therefore rejects a suffixed replacement without a
 second code registry or model-narrated evidence. The product slice passes 25
-tests. Its exact isolated-branch live row is the next Inspect falsifier; pod
+tests. The live drive exposed two real integration defects before scoring: a
+fresh child lost its captured agent scope while entering self-host evaluation,
+and the conventional test was initially evaluated in the implementation
+namespace rather than its own `-test` namespace. Agent scope is now restored at
+the immediate self-host boundary, and the native task evaluates a normal test
+namespace requiring the implementation namespace; focused proof passes 26
+tests. The first rebuild against Datahike's execution-aware dependency plan
+then failed closed because Seon's closed query-response schema omitted the new
+`:datahike.read/dependency-plan`; commit `8b8596a5` closes and tests that JVM/CLJS
+boundary. A source-frozen rebuild and the exact isolated-branch live row are the
+next Inspect falsifiers. The reactive-render task still owns uncommitted
+Datahike pull-evidence inputs, so no artifact checkpoint is valid until it
+hands off a coherent commit and freezes those inputs. Pod
 restart/database read-back follows on the same lease boundary, and complete
 Inspect, browser, downstream, package, multi-cluster, performance, and resource
 proof remain the final graduation portfolio.
