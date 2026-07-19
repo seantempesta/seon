@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, agent, flow, pod]
 ---
@@ -51,5 +51,14 @@ run's existing `:seon.agent.run/cause` ref. The event projection associates
 that exact message with the current turn before the shared clipping and settled
 budget passes, without retaining another message list or bypassing transcript
 bounds. Focused transcript and compiled-prompt gates pass 8 tests/29 assertions
-and 15 tests/77 assertions. Rebuilt live task-priority proof remains the final
-acceptance gate.
+and 15 tests/77 assertions.
+
+The current immutable execution artifact then received
+`CURRENT-RUN-CAUSE-PROOF-4` through the real `/agents/run` boundary. Its first
+captured prompt contained the complete new request, selected its derived plan
+step as the next ready work, and the agent acted on that step before returning
+to any inherited plan. The run later timed out because the model marked the
+step done without closing its run and resumed unrelated plan inspection. That
+is remaining trajectory/lifecycle graduation evidence, but it no longer
+falsifies current-message selection: the new human request survived clipping
+and displaced the inherited work at the first decision boundary.

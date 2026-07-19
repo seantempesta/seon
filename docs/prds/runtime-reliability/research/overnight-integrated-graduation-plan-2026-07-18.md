@@ -533,9 +533,14 @@ older authored plan work instead of its cause message. The existing run ID now
 flows through the compiled prompt section request, and the plan block derives
 the message-linked step from `:seon.agent.run/cause`; that step anchors the
 current run while older authored work remains visible in the ordinary open
-frontier. Focused compile proof is green; the exact live acceptance is an
-immediate response to a new human message followed by a passing `reuse_repair`
-scenario, without scorer exceptions or another priority mechanism.
+frontier. Commit `5756769d` also retains the exact cause message through the
+ordinary bounded transcript event projection. A rebuilt live request proved
+the complete message is present, its step is next-ready, and the agent acts on
+it before inherited work. The same run exposed the next independent failure:
+after marking that step done, the model did not close its run, resumed unrelated
+plan inspection, and timed out after 13 turns. The next falsifier is therefore
+the existing plan-done/run-completion seam, followed by the unchanged
+`reuse_repair` scorer; no second priority or completion mechanism is allowed.
 
 Exit: Inspect AI drives the real pod door and scores durable facts/evals rather
 than a special harness runtime or transcript regex.

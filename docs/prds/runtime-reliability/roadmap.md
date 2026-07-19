@@ -1487,11 +1487,19 @@ passes 61 tests/317 assertions. Live close classified the unresponsive pod as
 forced, drained exact containment generation
 `c9129eaf-df39-42b6-bc9a-9e3d0c367b0a`, reclaimed its Bun workload and execution
 child, and left the cluster down with no pod process. The reactive lane can now
-resume independent writer/browser proof. On the ordered product spine, exact
-human-message priority remains the earliest unsettled contract: the corrected
-bounded transcript query includes the current run-cause message, but the live
-rendered prompt still follows stale completed work, so downstream event/render
-selection must be traced before rerunning the reuse/repair scorer.
+resume independent writer/browser proof.
+
+Exact human-message priority is now live-proven. Commit `5756769d` retains the
+current run-cause message through ordinary bounded transcript event selection;
+focused transcript and compiled-prompt gates pass 8 tests/29 assertions and
+15/77. A current immutable execution child received
+`CURRENT-RUN-CAUSE-PROOF-4`: its first captured prompt contained the complete
+request, selected its message-derived plan step as next-ready work, and acted
+on it before inherited work. The agent then marked the step done without
+closing the run, resumed unrelated plan inspection, and timed out after 13
+turns. Deterministic run completion after a done current step is therefore the
+earliest unsettled product contract; the reuse/repair scorer follows after that
+transition is grounded and proven.
 
 ## Active execution ledger
 
