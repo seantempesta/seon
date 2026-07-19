@@ -166,12 +166,15 @@ def run_product_scenario(scenario: str, cluster_url: str, read_database,
 
 def query_product_evidence(cluster_url: str, query: str,
                            args: list | None = None,
-                           *, opener=urllib.request.urlopen) -> dict:
+                           *, history: bool = False,
+                           opener=urllib.request.urlopen) -> dict:
     """Read one immutable database value through the typed pod endpoint."""
     endpoint = cluster_url.removesuffix("/agents/run") + \
         "/_seon/operator/product-evidence"
-    body = json.dumps({"seon.db/query": query,
-                       "seon.db/args": args or []}).encode()
+    payload = {"seon.db/query": query, "seon.db/args": args or []}
+    if history:
+        payload["seon.db/history?"] = True
+    body = json.dumps(payload).encode()
     request = urllib.request.Request(
         endpoint, data=body, headers={"Content-Type": "application/json"})
     with opener(request) as response:

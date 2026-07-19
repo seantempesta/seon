@@ -556,14 +556,26 @@
     (inst? value) (.toISOString ^js value)
     :else value))
 
+(schema/register!
+ ::product-evidence-request
+ [:map {:closed true}
+  [::db/query ::db/query-form]
+  [::db/args {:optional true} ::db/args]
+  [::db/history? {:optional true} ::db/history?]])
+
 (defn ^:async product-evidence
   "Run one typed read against one immutable database value."
-  {:malli/schema [:=> [:cat :seon.db/query-request] :map]}
+  {:malli/schema [:=> [:cat ::product-evidence-request] :map]}
   [request]
   (let [database (await (db/db))]
     (if (:seon.error/message database)
       {:seon.db/ok? false :seon.db/error (:seon.error/message database)}
-      (let [result (await (db/query (assoc request ::db/db database)))]
+      (let [database (if (::db/history? request)
+                       (db/history database)
+                       database)
+            result (await (db/query (-> request
+                                        (dissoc ::db/history?)
+                                        (assoc ::db/db database))))]
         (if (:seon.error/message result)
           {:seon.db/ok? false :seon.db/error (:seon.error/message result)}
           {:seon.db/ok? true
@@ -578,12 +590,15 @@
        (fn [body]
          (let [parsed (js->clj (js/JSON.parse body))
                query-text (get parsed "seon.db/query")
-               args (vec (or (get parsed "seon.db/args") []))]
+               args (vec (or (get parsed "seon.db/args") []))
+               history? (true? (get parsed "seon.db/history?"))]
            (if-not (string? query-text)
              {:seon.db/ok? false
               :seon.db/error "seon.db/query must be an EDN query string"}
              (product-evidence
-              {::db/query (reader/read-string query-text) ::db/args args})))))
+              (cond-> {::db/query (reader/read-string query-text)
+                       ::db/args args}
+                history? (assoc ::db/history? true)))))))
       (.then
        (fn [result]
          (write-status!

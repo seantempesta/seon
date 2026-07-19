@@ -674,6 +674,36 @@
                       (set! db/query original-query)
                       (done)))))))
 
+(deftest product-evidence-can-query-the-history-database-value
+  (async done
+    (let [database {:db-name "proof" :t 42 :as-of nil :since nil
+                    :history false :datahike/commit-id (random-uuid)}
+          !request (atom nil)
+          original-db db/db
+          original-query db/query]
+      (set! db/db (fn ([] (js/Promise.resolve database))
+                    ([_] (js/Promise.resolve database))))
+      (set! db/query
+            (fn [request]
+              (reset! !request request)
+              (js/Promise.resolve #{["my.tax/rate" 10 true]})))
+      (-> (serve/product-evidence
+            {::db/query '[:find ?sym ?tx ?added
+                          :where [?f :seon.fn/sym ?sym ?tx ?added]]
+             ::db/history? true})
+          (.then
+            (fn [result]
+              (is (true? (:history (::db/db @!request))))
+              (is (nil? (::db/history? @!request)))
+              (is (true? (get-in result [:seon.db/db :history])))
+              (is (= [["my.tax/rate" 10 true]]
+                     (:seon.db/result result)))))
+          (.catch (fn [error] (is false (str error))))
+          (.finally (fn []
+                      (set! db/db original-db)
+                      (set! db/query original-query)
+                      (done)))))))
+
 (deftest restore-readiness-serves-only-the-exact-closed-completion-head
   (async done
     (let [prior-admission (admission/state)

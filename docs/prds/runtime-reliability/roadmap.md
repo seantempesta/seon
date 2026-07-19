@@ -210,6 +210,19 @@ received one database message naming recovery `qlme850pqh8g` and its diagnostic
 blob. Pod and writer remained ready. The recovery-evidence issue is resolved;
 the next product-level recovery gate is its Inspect AI scenario.
 
+Grounding that native Inspect gate against current owners exposed two
+fixture-only assumptions before a misleading live run. Function repair must
+query the Datahike history database value to observe both source assertions;
+the current value contains only the latest. The typed product reader now
+accepts namespaced `:seon.db/history?`, derives history from its one acquired
+database value, and returns the matching ordinary descriptor. Recovery facts
+persist the failed PID/digest/eval/blob, while healthy replacement processes
+remain transient in `seon.execution.host/processes`; the provisional scorer's
+generic child IDs must therefore be replaced with those real facts. The
+history seam passes 18 focused Python tests and the complete 1,186-test/
+5,297-assertion CLJS gate. Parent-host process evidence is the earliest
+unsettled Inspect contract before wiring the native live solver.
+
 The development-tool reconnect defect is source-grounded in the maintained
 Shadow runtime rather than Seon's database advertisement. Shadow commit
 `615430b3` permanently stopped reconnecting after more than three websocket

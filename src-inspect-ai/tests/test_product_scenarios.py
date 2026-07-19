@@ -1,4 +1,5 @@
 import copy
+import json
 
 import pytest
 from inspect_ai import eval as inspect_eval
@@ -104,3 +105,27 @@ def test_typed_product_evidence_retains_database_value():
     assert requests[0].full_url.endswith("/_seon/operator/product-evidence")
     assert result["database_value"]["t"] == 42
     assert result["database_snapshot"] == [["root"]]
+
+
+def test_typed_product_evidence_requests_datahike_history():
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return None
+
+        def read(self):
+            return (b'{"seon.db/ok?":true,"seon.db/db":'
+                    b'{"db_name":"proof","t":42,"history":true},'
+                    b'"seon.db/result":[]}')
+
+    requests = []
+
+    result = query_product_evidence(
+        "http://127.0.0.1:41000/agents/run",
+        "[:find ?tx :where [_ :seon.fn/source _ ?tx]]",
+        history=True, opener=lambda request: requests.append(request) or Response())
+    payload = json.loads(requests[0].data.decode())
+    assert payload["seon.db/history?"] is True
+    assert result["database_value"]["history"] is True

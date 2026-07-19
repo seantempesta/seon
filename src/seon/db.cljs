@@ -50,6 +50,7 @@
 (schema/register! ::socket-path :seon.db.transport.uds/socket-path)
 (schema/register! ::database-name :seon.db.protocol/database-name)
 (schema/register! ::database-advanced? :boolean)
+(schema/register! ::history? :boolean)
 (schema/register! ::backend :seon.db.protocol/backend)
 (schema/register! ::database-path :seon.db.protocol/database-path)
 (schema/register! ::capabilities :seon.db.protocol/capabilities)
