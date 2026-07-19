@@ -58,6 +58,15 @@ notifications; a fresh consumer receives the current value; and the final
 consumer releases its timer, value, database reachability, and writer
 interest. Sustained live/import proof remains the next ordered boundary.
 
+The first 260-transaction capacity probe exposed one lower transport boundary:
+the exact-request retry already recognized local `:busy`, but the public
+instrumented UDS request rejected before that owner could consume it, recording
+ordinary flow control as a core fault. Capacity refusal now resolves as
+transport failure data, which `seon.db` adapts to its existing error value and
+retries without reconnecting. The full CLJS gate passed 1,209 tests / 5,420
+assertions; focused transport and remote-contract gates passed 17 / 66 and
+21 / 97. A rebuilt live retry remains required before the SSE pressure proof.
+
 Datastar now delegates live page demand to `seon.reactive`. The page computation
 captures parent-process reads, unions execution-child evidence from the ordinary
 result message, serializes one complete morph event, and compares that event as

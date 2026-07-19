@@ -574,7 +574,20 @@
   "Send one request with an optional caller-selected deadline."
   {:malli/schema [:=> [:catn [::request ::request]] :any]}
   [{::keys [session] :as request}]
-  ((::request! session) (dissoc request ::session)))
+  (-> ((::request! session) (dissoc request ::session))
+      (.catch
+       (fn [exception]
+         ;; Capacity is ordinary flow control for the multiplexed session.
+         ;; Keep it as data below public async instrumentation so the
+         ;; transaction owner can wait and retry the exact immutable request
+         ;; without recording an expected rejection as a core fault.
+         (if (= :seon.db.transport.uds.failure/busy
+                (::failure (ex-data exception)))
+           (assoc (ex-data exception)
+                  ::message
+                  (or (.-message exception)
+                      "Database session has no request capacity."))
+           (throw exception))))))
 
 (defn close!
   "Close a database session and settle its pending requests once."

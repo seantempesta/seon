@@ -312,8 +312,19 @@
                        ::uds/message request
                        ::uds/timeout-ms timeout-ms})
         (.then (fn [response]
-                 (if (valid-response-for? request response)
+                 (cond
+                   (= :seon.db.transport.uds.failure/busy
+                      (::uds/failure response))
+                   (session-error
+                    (or (::uds/message response)
+                        "The database session has no request capacity.")
+                    {::protocol/request-id (::protocol/request-id request)
+                     :seon.error/ex-data response})
+
+                   (valid-response-for? request response)
                    response
+
+                   :else
                    (session-error
                     "The database authority returned an invalid response."
                     {::protocol/request-id (::protocol/request-id request)

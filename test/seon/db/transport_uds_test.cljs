@@ -641,12 +641,11 @@
                      (-> (uds/request!
                           {::uds/session session
                            ::uds/message (request-message "over-capacity")})
-                         (.then (fn [_]
-                                  (is false "timed-out work still uses capacity")))
-                         (.catch
-                          (fn [error]
+                         (.then
+                          (fn [result]
                             (is (= :seon.db.transport.uds.failure/busy
-                                   (::uds/failure (ex-data error))))
+                                   (::uds/failure result)))
+                            (is (string? (::uds/message result)))
                             (uds/close! session))))))))))
         (.then (fn [_] (done)))
         (.catch (fn [error]

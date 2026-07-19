@@ -37,6 +37,16 @@ with its existing exact-request delivery recovery. The ordinary overload then
 escaped as hundreds of core faults, filled the bounded pending-error buffer,
 and degraded the disposable pod before socket pressure could be measured.
 
+The first source-admitted retry probe on 2026-07-19 narrowed the remaining
+boundary. Two hundred sixty concurrent transactions did enter the exact-request
+retry loop, but `seon.db.transport.uds/request!` was a public instrumented async
+function. Its expected rejected `:busy` Promise was therefore recorded as a
+core fault before `seon.db` could convert and retry it. The named pod became
+not-ready and undiscoverable while the transaction backlog drained. Capacity
+admission now resolves that one expected transport condition as failure data;
+`seon.db` translates the same fields into its existing error value below the
+instrumentation boundary, and the transaction owner retries it unchanged.
+
 The writer currently adds every connection that performs database work to
 `::acquisitions`, then `deliver-database-advanced!` sends every committed
 database value to every acquired connection. An execution child therefore
@@ -68,7 +78,8 @@ intermediate database-advanced events.
 ## Acceptance
 
 - The transport test fills the selected capacity with timed-out physical work
-  and proves that one more request receives the existing busy error.
+  and proves that one more request receives the existing busy failure as data,
+  without rejecting through public async instrumentation.
 - A transaction that meets transient busy admission retries the byte-identical
   request on the same session and commits once capacity returns.
 - A sustained real-agent run with five feeds does not exhaust session capacity.
