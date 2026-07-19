@@ -91,9 +91,13 @@
                     value/render-ai
                     (fn [& _] (throw (js/Error. "generic render fixture")))]
         (let [rendered
-              (error/with-configuration
-               configuration
-               #(render/block :ai configuration {:seon.test/value 42}))
+              (error/expecting-core-fault!
+               (fn []
+                 (error/with-configuration
+                  configuration
+                  (fn []
+                    (render/block :ai configuration
+                                  {:seon.test/value 42})))))
               faults (->> @transactions
                           (mapcat identity)
                           (filter #(= "generic render fixture"

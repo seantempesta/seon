@@ -504,7 +504,8 @@
    the pod AFTER the persist Promise settles (datom first, then loud exit)."
   [projection persist-promise]
   (let [expected? (expecting-a-core-fault?)
-        configuration (:seon.error.scope/configuration (current-scope))]
+        configuration (:seon.error.scope/configuration (current-scope))
+        policy (config/on-core-error configuration)]
     (js/console.error
       (str (if expected? "SEON-EXPECTED-CORE-FAULT" "SEON-CORE-FAULT") " "
            (:seon.error/message projection)
@@ -512,7 +513,7 @@
              (str " " data-edn))
            (when-let [basis-t (::basis-t projection)]
              (str " @basis-t=" basis-t))))
-    (when (and (not expected?) (= :crash (config/on-core-error configuration)))
+    (when (and (not expected?) (= :crash policy))
       (let [exit! (fn [& _]
                     (js/console.error
                       "seon.error/record!: on-core-error :crash — exiting after persisting the fault datom")
