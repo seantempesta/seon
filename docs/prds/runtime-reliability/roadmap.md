@@ -187,6 +187,20 @@ fault transaction. Graduation requires one visible fault, no self-exciting
 transaction loop, a later unrelated transaction repairing the owner, and
 exact-plan narrowing afterward.
 
+The namespace block schema boundary now passes at `49bebaf5`. Its specialized
+stored entity declares the four block-owned attributes, and the shared JVM
+Malli-to-Datahike bridge no longer copies identity, uniqueness, index, or
+component properties from a collection's value schema onto the cardinality-many
+attribute. The complete CLJS gate passes 1,239 tests/5,552 assertions and the
+changed writer gate passes 125/791. A destructive fresh default database
+installed both presence sets as ordinary non-unique cardinality-many symbols
+and both booleans as cardinality-one before readiness. Root's compiled
+namespace context rendered cleanly; a config-free supervised restart retained
+the identical schema and render; and a newly seed-copied idle resident for
+`my.schema.reopen-proof` rendered its own namespace block and included that
+namespace. Current writer and pod logs contain no namespace schema or core
+fault after the reset.
+
 The deterministic namespace browser cut now also passes against the fused
 default database. Root created `dirty-places-sniff` for
 `:my.agents.browser-resident` with one initial message; the live root view
