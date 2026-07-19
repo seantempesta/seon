@@ -41,18 +41,25 @@ dependencies order sections, declarations fence leakage, schemas precede the
 remaining authored forms, independent namespaces survive failure, and ordered
 eval IDs plus skipped entries remain the evidence seam for `generate-code!`.
 The final source-generation gate passed 1,223 tests/5,485 assertions; focused
-parser/eval/turn proof passed 77 tests/476 assertions. Current-artifact live
-proof is the remaining Stage 3 exit before orchestration consumes the seam.
+parser/eval/turn proof passed 77 tests/476 assertions. Current-artifact ordered
+execution and cold-child reconstruction are now live-proven; orchestration can
+consume this seam without changing the parser.
 
 The exact current artifact now proves dependency ordering and top-level Promise
 sequencing through a real execution child. Source authored the consumer before
 its base namespace; the projection evaluated the base first. A Promise form
 resolved to `42` before the following definition read its atom, and consumer
 calls before and after a repeated namespace declaration both returned `43`.
-That proof exposed and closed one cold-restart mismatch: `cljs.js` retained an
-alias after bare namespace reentry while the stored declaration did not.
-Reconstruction now merges the analyzer-derived require edges into the authored
-declaration, with a focused 38-test/148-assertion gate green.
+That proof exposed and closed one cold-restart mismatch. A function already
+compiled in the warm child kept using its alias after bare namespace reentry,
+while the analyzer and database require edges had both lost it. The eval owner
+now merges the namespace's prior real libspecs into a bare reentry before
+cljs.js evaluates it; explicit `:require` declarations retain replacement
+semantics. The affected gate passes 54 tests/231 assertions. On a fresh
+database the ordered six-form batch completed 6/6, persisted
+`[my.live.base-721 :as base]`, and awaited the final Promise to `43`. After a
+full watcher/writer/pod restart, a new execution child evaluated the bare
+consumer declaration and `(answer)` 2/2, with the durable result `43`.
 
 Canonical behavioral-test evidence now follows the same eval seam. The test
 runner writes its native summary counters and selected `:seon.test` refs onto

@@ -40,5 +40,9 @@ declaration.
 ## Verification
 
 `seon.eval.promise-ergonomics-test` pins the recording decision for bare versus
-explicit namespace declarations. A live ordered batch and fresh execution-child
-reconstruction prove the persisted edge and function behavior together.
+explicit namespace declarations. The focused eval/execution gate passes 54
+tests and 231 assertions with no failures, errors, or compile warnings. On a
+fresh database the six-form ordered batch completed 6/6, retained
+`[my.live.base-721 :as base]`, and returned `43` through a top-level Promise.
+After a full watcher/writer/pod restart, a new execution child evaluated bare
+`(ns my.live.consumer-721)` and `(answer)` 2/2; the recorded result was `43`.
