@@ -60,3 +60,11 @@ as cardinality one.
 Named-variant focused proof passed 39 tests/206 assertions across configuration
 validation, the EDN-slot database facet, atomic copied birth attributes,
 unknown-selector rejection, and selector re-resolution across stale retries.
+
+Follow-up `ensure-namespace-agent!` reuse originally resolved the request's
+birth-only variant before returning an existing namespace resident. Removing a
+profile after that resident's birth therefore made reuse fail as “unknown,”
+even though the committed resident needed no launch configuration. The reuse
+branch now bypasses variant resolution only when the resident is already
+present; absent residents and non-reuse birth functions retain fail-closed
+variant validation.

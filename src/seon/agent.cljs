@@ -999,7 +999,9 @@
               configuration (:seon.config/configuration acquisition)
               resident-id (::resident-id acquisition)
               model-overrides
-              (model-variant-overrides configuration model-variant)
+              (if (and resident-id reuse-resident?)
+                {}
+                (model-variant-overrides configuration model-variant))
               initial-message-transaction
               (when (and initial-message-content
                          (nil? resident-id)

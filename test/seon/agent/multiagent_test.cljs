@@ -677,7 +677,7 @@
         [#(set! message/message! %) message!]
         [#(set! db.id/allocate! %) allocate!]]))))
 
-(deftest ensure-namespace-agent-reuses-resident-with-a-launch-variant
+(deftest ensure-namespace-agent-reuses-resident-after-launch-variant-is-removed
   (async done
     (let [available? admission/available?
           db! db/db
@@ -698,11 +698,7 @@
               ([request]
                (is (identical? database (::db/db request)))
                (js/Promise.resolve
-                [{:seon.agent/id "parent"}
-                 (assoc stored-configuration
-                        :seon.config/model-variants
-                        (pr-str {:execution
-                                 {:seon.ai/agent-model "executor"}}))]))
+                [{:seon.agent/id "parent"} stored-configuration]))
               ([_ _]
                (js/Promise.reject (js/Error. "unexpected pull-many arity")))
               ([_ _ _]
@@ -727,6 +723,8 @@
            (.then
             (fn [result]
               (is (= {:seon.agent/id "tax-resident"} result))
+              (is (= 1 @query-count)
+                  "resident reuse does not need namespace birth acquisition")
               (is (zero? @message-count))
               (is (zero? @allocation-count)))))
        done
