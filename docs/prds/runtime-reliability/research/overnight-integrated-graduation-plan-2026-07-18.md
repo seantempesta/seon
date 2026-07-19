@@ -531,7 +531,7 @@ render/feed mechanism.
 - [ ] Complete Inspect AI Python suite and live scenarios.
 - [ ] Concurrent independent-cluster isolation and restart.
 - [ ] ACME downstream application journey.
-- [ ] Source-free immutable release, restart/read-back, unchanged recursive
+- [x] Source-free immutable release, restart/read-back, unchanged recursive
   digest, and clean shutdown with no surviving child.
 - [ ] Delete obsolete code and tests revealed by the integrated proof; do not
   preserve compatibility mechanisms.
@@ -543,6 +543,17 @@ run failure was a stale frozen-tool fixture using retired database wrapper
 fields; the current ordinary database-value and model-transport contract now
 passes. The combined Inspect checkbox remains open until its provider-backed
 live scenario matrix also graduates.
+
+Source-free application `ae860bc4522ec10b21a6a9bf14cd55737598cbcd2c92c90819258bfd37b2ba6c`
+from commit `be5bd11c` passed from `/Users/sean/seon-release-be5bd11c` with the
+producer development cluster down. The release-owned JVM writer and Bun pod
+reached readiness, served `/` and `/data`, and created agent
+`nine-lands-tickle` with purpose `release-persistence-proof` through the
+ordinary `POST /agents` route. The root Datastar feed rendered that committed
+fact before and after a clean writer/pod restart. Normal shutdown left both
+release processes absent. The recursive package digest remained exactly
+`8dbbefab82993fd712781ab9af5fd8f91e3fab54bedb7e8ed13cb120ebf67a47`
+before startup, while running, after restart, and after shutdown.
 
 Exit: one exact source revision passes every maintained gate and product journey.
 

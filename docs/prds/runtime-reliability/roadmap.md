@@ -543,6 +543,20 @@ The next distribution boundary is the general downstream descriptor; runtime
 immutability, reproducibility, clean build, MCP, and metadata no longer block
 it.
 
+The post-protocol-v11 release gate is also current. Application
+`ae860bc4522ec10b21a6a9bf14cd55737598cbcd2c92c90819258bfd37b2ba6c`
+from commit `be5bd11c` ran source-free with only its JVM writer and Bun pod,
+created `nine-lands-tickle` through `POST /agents`, and rendered its
+`release-persistence-proof` purpose through the root Datastar feed. A clean
+writer/pod restart preserved and rerendered the same committed fact. Normal
+shutdown left both processes absent, and the complete package-tree digest was
+unchanged at
+`8dbbefab82993fd712781ab9af5fd8f91e3fab54bedb7e8ed13cb120ebf67a47`
+at every pre-start, running, post-restart, and post-shutdown sample. The default
+development cluster was then restored. Current ACME, independent-cluster, and
+architecture-level resource measurements remain; package immutability does
+not.
+
 The existing remote query surface now exposes its protocol-native historical
 view, closing the only facade gap needed by coordinate-pinned startup birth.
 LLM configuration and brand startup sync also use bounded coordinate-fenced
