@@ -544,7 +544,10 @@
   [value]
   (cond
     (map? value) (into {} (map (fn [[key item]]
-                                 [(str key) (product-evidence-json-value item)]))
+                                 [(if (keyword? key)
+                                    (subs (str key) 1)
+                                    (str key))
+                                  (product-evidence-json-value item)]))
                        value)
     (set? value) (mapv product-evidence-json-value value)
     (sequential? value) (mapv product-evidence-json-value value)
@@ -585,7 +588,8 @@
          (write-status!
           res (if (:seon.db/ok? result) 200 422)
           "application/json; charset=utf-8"
-          (js/JSON.stringify (clj->js result)))))
+          (js/JSON.stringify
+           (clj->js (product-evidence-json-value result))))))
       (.catch
        (fn [error]
          (write-status!

@@ -631,7 +631,14 @@
                (is (= {:db_name "proof"
                        :t 42 :as_of nil :since nil :history false
                        :commit_id (str commit-id)}
-                      (:seon.db/db result)))))
+                      (:seon.db/db result)))
+               (is (= {"seon.db/ok?" true
+                       "seon.db/db"
+                       {"db_name" "proof"
+                        "t" 42 "as_of" nil "since" nil "history" false
+                        "commit_id" (str commit-id)}
+                       "seon.db/result" [[":my.taxes" 2]]}
+                      (#'serve/product-evidence-json-value result)))))
           (.catch (fn [error] (is false (str error))))
           (.finally (fn []
                       (set! db/db original-db)
