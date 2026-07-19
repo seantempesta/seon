@@ -102,15 +102,27 @@ cannot retain an obsolete renderer closure. The lifecycle regression raises the
 focused Datastar gate to 15 tests and 72 assertions; the focused web-server gate
 passes 24 tests and 93 assertions.
 
-Maintained Datahike revision `2e6c7bcf` passes the focused weighted-LRU and
+Maintained Datahike revision `2241df17` passes the focused weighted-LRU and
 query-cache suites in all persistent-set, spec-instrumented, and
-hitchhiker-tree profiles: 156 tests and 954 assertions. This directly covers
+hitchhiker-tree profiles: 162 tests and 990 assertions. This directly covers
 count/weight eviction, overlarge-result rejection, exact immutable database
 identities, safe inheritance, schema widening, generation close, stale-owner
-fencing, cancellation, and single-flight ownership/waiter cleanup.
+fencing, cancellation, and single-flight ownership/waiter cleanup. The CLJS
+gate passes 138 tests and 951 assertions.
+
+Cache inheritance is demand-driven. A commit updates only attribute revision
+facts and a conservative revision in its cache context; it never walks or
+copies cached result rows. A later demanded read scans the bounded weighted
+cache, accepts an older entry only when its source-scoped dependency plan is
+unchanged since that entry's commit, and promotes the value under the exact
+demanded database identity. A 100-transaction unrelated-write regression keeps
+the cache at one row and constant retained weight, records one revised
+attribute rather than one fact per transaction, and creates only the single
+demanded child snapshot. An affected transaction misses and recomputes while a
+held parent database value remains immutable and exact.
 
 Datahike `main` now exposes an execution-aware, source-scoped query dependency
-plan at maintained revision `2e6c7bcf`. It folds the typed parsed query and
+plan at maintained revision `2241df17`. It folds the typed parsed query and
 PullSpec representations, resolves scalar `:in` bindings and supplied rules,
 canonicalizes reverse pull attributes, and widens unknown behavior to `:all`.
 The query cache stores and reuses that same plan; propagation selects only the
@@ -132,6 +144,12 @@ sockets, not a general reconnect cache.
 The exact source audit, dependency ledger, parser probes, Datastar protocol
 review, concurrency analysis, and proof matrix are in
 [[research/datahike-reactive-page-protocol-2026-07-19]].
+
+The complete maintained Datahike aggregation also reaches optional Stratum VT,
+Java binding, documentation transaction, HTTP server, purge, and planner-probe
+surfaces that currently fail independently of this cache contract. They are
+recorded in [[datahike-full-aggregation-integration-drift]] and do not block the
+source-frozen default-cluster rebuild of the focused green slice.
 
 ## Settled decisions
 

@@ -426,6 +426,43 @@ open run's sliding window (it renews the lease), not a second run. A stop betwee
 turns exits cleanly at the next `next-event`; a stop mid-turn is rejected at the
 CAS (hard-aborting an in-flight LLM call is the worker-kill of the isolation tier).
 
+## Database-driven swarm orchestration
+
+A nested swarm is a database work graph, not a process tree used as state. Work
+entities point to prerequisite work, their owning parent agent, and any claimed
+or completed run. Readiness is derived by one query: prerequisites are complete,
+no live claim exists, and the parent's configured concurrency capacity is not
+exhausted. Worker results, failures, and newly exposed work are transactions, so
+the same query always reconstructs the current frontier after restart.
+
+There are two wake paths, and neither polls the whole database:
+
+- An agent-owned coordinator uses the existing addressed-message interest. A
+  worker commits its result and an addressed message to its parent in one
+  transaction. The exact `:seon.agent.message/to` pattern wakes only that parent;
+  the parent rereads the ready frontier and delegates the dependency-ready work.
+- A substrate coordinator registers that ready-frontier query through
+  `seon.reactive/observe!`. Datahike returns the query value plus its
+  source-scoped dependency plan. The writer's reverse interest index selects
+  only matching committed reports; bursts converge on the newest database value,
+  and Clojure `=` suppresses a callback when the derived frontier is unchanged.
+
+In either path, observing readiness never grants ownership. Before launching a
+child, the coordinator commits one claim/fence through the single writer; only
+the successful claimant delegates or ensures the runtime host. The claim and
+child/task relationship are one transaction whenever the domain permits it.
+This makes duplicate callbacks, reconnects, hot reloads, and competing parents
+safe. Completion retracts or supersedes the claim and exposes dependent work;
+that transaction is the next reactive input.
+
+Use one stable reactive registration key per normalized frontier, not one
+listener per task and not one broad transaction listener. One registration owns
+one active derivation and at most the newest pending database value. Independent
+frontiers proceed independently, while the configured settle and maximum-latency
+bounds collapse imports without starving progress. Release the registration when
+the coordinator has no consumer. The exact dependency, cache, equality, and
+cleanup contract is maintained in [[../../prds/reactive-render-units/roadmap]].
+
 ## The one ticker — schedules + overdue runs
 
 The DB is **passive about wall-clock**: `now > deadline` is true in the view but
