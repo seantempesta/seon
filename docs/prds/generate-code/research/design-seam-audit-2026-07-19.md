@@ -229,15 +229,13 @@ the framework full-source storage superset. Code generation should reconcile
 the block's existing `full-source` set for each assignment; it should not add a
 second dynamic renderer.
 
-The LLM audit found global database-owned provider, model, temperature, output
-cap, thinking, timeout, base URL, credential-variable name, backend, and extra
-body fields. Agent entities already override provider, model, temperature,
-output cap, thinking, and retry count. Missing pieces are named model profiles,
-per-agent timeout, and per-agent compatible-gateway base URL/credential
-selection. Therefore planning/execution specialization belongs as one extra
-precedence layer in `seon.ai`'s existing resolution, not in `generate-code!`
-dispatch. Until gateway selection is isolated, Muse and Kimi comparisons need
-separate clusters.
+The LLM audit found one database-owned resolution chain. It now exposes the
+complete non-secret provider surface on every agent entity: provider, model,
+temperature, output cap, thinking, timeout, base URL, credential-variable name,
+backend, extra body, and retries. Planning/execution specialization therefore
+attaches ordinary agent attributes and remains outside `generate-code!`
+dispatch. Independent Muse and Kimi agents can share a cluster while their
+actual secrets remain process environment values.
 
 The progressive developer renderer should derive four states without storing a
 phase: initial planning from the root assignment, namespace repair from failed

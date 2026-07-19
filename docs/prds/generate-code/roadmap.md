@@ -264,27 +264,23 @@ resolution rather than exposing provider choices to calling agents:
 - summarization/embedding — existing specialized paths, not part of code
   generation scheduling.
 
-The current configuration already supports global provider/model/temperature/
-output-cap/thinking/timeout/base-URL/key-name values and per-agent overrides for
-provider, model, temperature, output cap, thinking, and retries. It does **not**
-yet have a named planning/execution profile, a per-agent timeout, or per-agent
-base URL/key selection. Stage 7 must extend that one resolution path rather than
-adding call-site conditionals. The smallest target is a typed, database-backed
-model-profile entity referenced by an agent: explicit request options override
-agent values, which override its model profile, which overrides the global row,
-which overrides shipped defaults. `generate-code!` assigns the planning profile
-mechanically; callers never select a provider.
+The current configuration supports the complete non-secret provider surface on
+each agent entity: provider, model, temperature, output cap, thinking, timeout,
+base URL, credential-variable name, DiffusionGemma backend, extra body, and
+retries. Explicit request options override agent values, which override the
+global row, which overrides shipped defaults. `generate-code!` can therefore
+attach a planning configuration directly and mechanically; callers never
+select a provider. Named reusable profiles remain a convenience to evaluate,
+not a prerequisite for multi-model execution.
 
 Provider-specific options stay inside that existing adapter configuration. Kimi
 K3 always reasons, currently accepts only maximal reasoning effort, and needs
 completion headroom: the live 4,096-token probe returned no visible answer. A
 K3 planning profile therefore omits temperature and reasoning effort, raises
 the output and wall-clock limits deliberately, and carries a documented cost
-ceiling. Empty length-limited output is a normal error value. Because base URL
-and credential-variable selection are global today, Kimi and Muse cannot be
-independent per-agent OpenAI-compatible profiles in one cluster until that
-specific resolution limitation is addressed; separate clusters remain the
-honest comparison path.
+ceiling. Empty length-limited output is a normal error value. Kimi and Muse can
+run as independent agents in one cluster because endpoint and credential-name
+selection are part of each agent's derived configuration.
 
 ## Implementation stages
 
@@ -394,9 +390,9 @@ Exit:
 ### Stage 7 — public function and model routing
 
 Add `seon.ai/generate-code!` over the approved root, planner, projection,
-scheduler, and result query. Add named planning/execution/repair model profiles
-to the one provider-resolution mechanism, including the missing per-agent
-timeout and compatible-gateway selection required for honest profile isolation.
+scheduler, and result query. Select planning/execution/repair settings by
+attaching the existing per-agent model attributes. Add named reusable profiles
+only if the MVP shows direct configuration repetition is materially costly.
 
 Exit:
 

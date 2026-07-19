@@ -229,13 +229,19 @@
         resolution
         (ai/resolved-config-from-rows
          {::ai/id "config"
-          ::ai/provider :openai-compat
+          ::ai/provider :deepseek
           ::ai/model "global-model"
           ::ai/timeout-ms 1111
           :seon.config.model-transport/response-identity-cap 31}
          {:seon.agent/id "agent-1"
+          ::ai/agent-provider (pr-str :openai-compat)
           ::ai/agent-model (pr-str "agent-model")
           ::ai/agent-temperature (pr-str 0.0)
+          ::ai/agent-timeout-ms (pr-str 2222)
+          ::ai/agent-base-url (pr-str "https://agent.example/v1")
+          ::ai/agent-api-key-env (pr-str "AGENT_API_KEY")
+          ::ai/agent-dg-backend (pr-str :vllm)
+          ::ai/agent-extra-body-edn (pr-str "{:agent-option true}")
           ::ai/agent-max-retries (pr-str 2)
           ::ai/agent-thinking (pr-str :inherit)})
         config (::ai/resolved-config resolution)]
@@ -245,12 +251,52 @@
     (is (= :openai-compat (::ai/provider config)))
     (is (= "agent-model" (::ai/model config)))
     (is (= 0.0 (::ai/temperature config)))
-    (is (= 1111 (::ai/timeout-ms config)))
+    (is (= 2222 (::ai/timeout-ms config)))
+    (is (= "https://agent.example/v1" (::ai/base-url config)))
+    (is (= "AGENT_API_KEY" (::ai/api-key-env config)))
+    (is (= :vllm (::ai/dg-backend config)))
+    (is (= {:agent-option true} (::ai/extra-body resolution)))
+    (is (= 64 (count (::ai/extra-body-digest config))))
     (is (= 2 (::ai/agent-max-retries resolution)))
     (is (= 31
            (:seon.config.model-transport/response-identity-cap config)))
-    (is (= :agent-override (get-in resolution [::ai/provenance ::ai/model])))
+    (doseq [attr [::ai/provider ::ai/model ::ai/temperature ::ai/timeout-ms
+                  ::ai/base-url ::ai/api-key-env ::ai/dg-backend
+                  ::ai/extra-body-digest]]
+      (is (= :agent-override (get-in resolution [::ai/provenance attr]))
+          (str attr " comes from the agent entity")))
     (is (= :config-row
            (get-in resolution
                    [::ai/provenance
                     :seon.config.model-transport/response-identity-cap])))))
+
+(deftest compatible-gateway-settings-are-independent-per-agent
+  (let [global {::ai/provider :deepseek
+                ::ai/model "deepseek-v4-pro"}
+        kimi (ai/resolved-config-from-rows
+               global
+               {::ai/agent-provider (pr-str :openai-compat)
+                ::ai/agent-model (pr-str "kimi-k3")
+                ::ai/agent-base-url (pr-str "https://api.moonshot.ai/v1")
+                ::ai/agent-api-key-env (pr-str "MOONSHOT_API_KEY")
+                ::ai/agent-timeout-ms (pr-str 180000)})
+        muse (ai/resolved-config-from-rows
+               global
+               {::ai/agent-provider (pr-str :openai-compat)
+                ::ai/agent-model (pr-str "muse-spark-1.1")
+                ::ai/agent-base-url (pr-str "https://api.meta.ai/v1")
+                ::ai/agent-api-key-env (pr-str "META_API_KEY")
+                ::ai/agent-thinking (pr-str "minimal")})
+        kimi-config (::ai/resolved-config kimi)
+        muse-config (::ai/resolved-config muse)]
+    (is (= ["kimi-k3" "https://api.moonshot.ai/v1"
+            "MOONSHOT_API_KEY" 180000]
+           (mapv kimi-config
+                 [::ai/model ::ai/base-url ::ai/api-key-env ::ai/timeout-ms])))
+    (is (= ["muse-spark-1.1" "https://api.meta.ai/v1"
+            "META_API_KEY" "minimal"]
+           (mapv muse-config
+                 [::ai/model ::ai/base-url ::ai/api-key-env ::ai/thinking])))
+    (is (= :deepseek (::ai/provider (::ai/resolved-config
+                                      (ai/resolved-config-from-rows global {}))))
+        "an unrelated agent still inherits the cluster provider")))

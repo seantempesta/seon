@@ -161,6 +161,44 @@
         (is (false? (:seon.agent.runtime/wake? ctx)))
         (is (= '[[seon.db :as db]] (:seon.eval/home-requires ctx)))))))
 
+(deftest per-agent-model-config-resolves-through-the-birth-context
+  (let [base {:seon.ai/agent-provider :openai-compat
+              :seon.ai/agent-model "kimi-k3"
+              :seon.ai/agent-temperature :inherit
+              :seon.ai/agent-max-tokens 16384
+              :seon.ai/agent-thinking "false"
+              :seon.ai/agent-timeout-ms 180000
+              :seon.ai/agent-base-url "https://api.moonshot.ai/v1"
+              :seon.ai/agent-api-key-env "MOONSHOT_API_KEY"
+              :seon.ai/agent-dg-backend :inherit
+              :seon.ai/agent-extra-body-edn "{:planner true}"
+              :seon.ai/agent-max-retries 1}
+        configuration {:seon.config/id config/cluster-config-id
+                       :seon.config/agent-context base
+                       :seon.config/root-context
+                       {:seon.ai/agent-model "muse-spark-1.1"
+                        :seon.ai/agent-base-url "https://api.meta.ai/v1"
+                        :seon.ai/agent-api-key-env "META_API_KEY"}}
+        ordinary (config/resolve-agent-context "worker-x" nil configuration)
+        root (config/resolve-agent-context "root" nil configuration)]
+    (is (m/validate :seon.config/manifest
+                    (dissoc configuration :seon.config/id)))
+    (is (= base (dissoc ordinary :seon.agent/ctx))
+        "ordinary births retain every logical agent model value")
+    (is (= "kimi-k3" (:seon.ai/agent-model ordinary)))
+    (is (= "https://api.moonshot.ai/v1"
+           (:seon.ai/agent-base-url ordinary)))
+    (is (= "muse-spark-1.1" (:seon.ai/agent-model root)))
+    (is (= "https://api.meta.ai/v1" (:seon.ai/agent-base-url root)))
+    (is (= "META_API_KEY" (:seon.ai/agent-api-key-env root)))
+    (is (= 180000 (:seon.ai/agent-timeout-ms root))
+        "a sparse root override inherits the remaining model fields")
+    (is (= "kimi-k3"
+           (:seon.ai/agent-model
+            (config/resolve-agent-context
+             "worker-x" {:seon.ai/agent-model "kimi-k3"} configuration)))
+        "per-mint model attributes use the same resolver")))
+
 ;;; Block-override MERGES by name — a manifest overriding a block need only name
 ;;; the sub-keys it changes; the default block's other attrs survive (the
 ;;; third-party-first contract). Proven via the root-context `:canvas` block,

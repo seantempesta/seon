@@ -406,8 +406,8 @@
 ;; agent-entity attr overriding the global :seon.ai/config row for that
 ;; ONE agent; `:inherit` (the default) resolves to the global row. The
 ;; value arm REUSES the existing global-row value shape by keyword (the
-;; register-once rule) — `::provider`/`::model`/`::temperature`/
-;; `::max-tokens`/`::thinking`. `::agent-max-retries` replaces the
+;; register-once rule). Every non-secret provider setting is available on the
+;; agent entity; `::agent-max-retries` replaces the
 ;; SEON_AI_MAX_RETRIES env read (seon.agent.turn). The execution boundary
 ;; resolves explicit request opt → the agent's own config → the global row →
 ;; shipped defaults from ordinary maps pulled at one database value.
@@ -419,6 +419,12 @@
 (schema/register! ::agent-temperature [:or {:default :inherit} [:enum :inherit] ::temperature])
 (schema/register! ::agent-max-tokens  [:or {:default :inherit} [:enum :inherit] ::max-tokens])  ; OUTPUT cap
 (schema/register! ::agent-thinking    [:or {:default :inherit} [:enum :inherit] ::thinking])
+(schema/register! ::agent-timeout-ms  [:or {:default :inherit} [:enum :inherit] ::timeout-ms])
+(schema/register! ::agent-base-url    [:or {:default :inherit} [:enum :inherit] ::base-url])
+(schema/register! ::agent-api-key-env [:or {:default :inherit} [:enum :inherit] ::api-key-env])
+(schema/register! ::agent-dg-backend  [:or {:default :inherit} [:enum :inherit] ::dg-backend])
+(schema/register! ::agent-extra-body-edn
+                  [:or {:default :inherit} [:enum :inherit] ::extra-body-edn])
 (schema/register! ::agent-max-retries [:or {:default :inherit} [:enum :inherit] [:int {:min 0}]])
 (schema/register!
  ::agent-config
@@ -429,6 +435,11 @@
   [::agent-temperature {:optional true} ::agent-temperature]
   [::agent-max-tokens {:optional true} ::agent-max-tokens]
   [::agent-thinking {:optional true} ::agent-thinking]
+  [::agent-timeout-ms {:optional true} ::agent-timeout-ms]
+  [::agent-base-url {:optional true} ::agent-base-url]
+  [::agent-api-key-env {:optional true} ::agent-api-key-env]
+  [::agent-dg-backend {:optional true} ::agent-dg-backend]
+  [::agent-extra-body-edn {:optional true} ::agent-extra-body-edn]
   [::agent-max-retries {:optional true} ::agent-max-retries]])
 ;; PARKED (decision 21): ::agent-context-window — a NEW input budget,
 ;; nothing enforces it today. Deferred to phase 2.
@@ -526,7 +537,12 @@
    ::agent-model       ::model
    ::agent-temperature ::temperature
    ::agent-max-tokens  ::max-tokens
-   ::agent-thinking    ::thinking})
+   ::agent-thinking    ::thinking
+   ::agent-timeout-ms  ::timeout-ms
+   ::agent-base-url    ::base-url
+   ::agent-api-key-env ::api-key-env
+   ::agent-dg-backend  ::dg-backend
+   ::agent-extra-body-edn ::extra-body-edn})
 
 (defn agent-config-pull-pattern
   "Pull pattern for one agent's ordinary LLM override values."

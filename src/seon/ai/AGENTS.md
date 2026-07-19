@@ -19,11 +19,14 @@ LLM call sits in the turn), `observability.md` (what of the request/response
   it returns its timeout value. OpenAI first-form `.abort()` remains a distinct
   successful stream-consumer stop; DiffusionGemma also best-effort cancels a
   known remote job id. Never reuse an aborted signal across retries.
-- **Per-agent provider routing** (`:seon.ai/agent-provider` via the config
-  manifest) selects the adapter per agent — this is how forensic/debug
-  agents get a reasoning model with thinking ON while workers stay on the
-  cheap default (DeepSeek via `openai_compat.cljs`). Extend routing through
-  the manifest, not with per-callsite conditionals.
+- **Per-agent provider routing** is a complete non-secret overlay on the agent
+  entity: `:seon.ai/agent-provider`, `/agent-model`, `/agent-temperature`,
+  `/agent-max-tokens`, `/agent-thinking`, `/agent-timeout-ms`, `/agent-base-url`,
+  `/agent-api-key-env`, `/agent-dg-backend`, and `/agent-extra-body-edn`.
+  Each absent or `:inherit` value falls through to the cluster row. Secrets
+  remain in the named process environment variable. This is how independent
+  agents use different providers and compatible gateways; never add
+  call-site provider conditionals.
 - **`::max-tokens` is the OUTPUT cap** — a context-window limit is a
   separate concern; don't conflate them.
 - **`tokens.cljs` owns the one token estimator** (`chars/4`). Every size

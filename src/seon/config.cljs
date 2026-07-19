@@ -201,14 +201,11 @@
 ;;; (VERIFIED to survive `m/decode` as `cljs.core/Symbol`), not var refs.
 ;;; ============================================================
 
-;; Agent-level keys are persisted on the agent entity and read reactively:
-;;       `:seon.agent.runtime/wake?` (gates the wake trigger at resume),
-;;       `:seon.eval/home-requires` (the home-ns require list). These are
+;; Agent-level keys are persisted on the agent entity and read reactively.
+;; Runtime/home keys plus the complete non-secret `:seon.ai/agent-*` overlay are
 ;;       declared HERE (referencing their owning ns's registered shape) so the
 ;;       recursive decode validates overrides before `seon.agent` includes
 ;;       them in the atomic birth transaction. Default = today's value ⇒ parity.
-;; (The per-agent LLM / capabilities / toolkit / transcript-scalar keys are the
-;; owner's pending three-fates call — added here the same way once decided.)
 ;; The persisted agent-level dials (`:seon.agent.runtime/wake?`, `:seon.eval/home-requires`)
 ;; carry NO schema `:default` here — their DEFAULT lives ONCE at the CONSUMER
 ;; (the runtime's acquired wake value → true; `seon.agent.home/home-requires-for` → the
@@ -217,13 +214,46 @@
 ;; OVERRIDE. Declared LEAF-shaped (NOT a keyword ref — `seon.config` is a leaf
 ;; that loads before `seon.eval`/`seon.client`, and the full shape is validated
 ;; downstream at `transact!`, the same rule the block vector uses).
+(def ^:private agent-model-config-entries
+  "Leaf-shaped per-agent model fields accepted before `seon.ai` loads.
+
+   These logical values are validated again by `:seon.ai/agent-config` when
+   transacted. `:seon.ai/agent-api-key-env` stores only an environment-variable
+   name; credentials never enter config or the database."
+  [[:seon.ai/agent-provider
+    {:optional true}
+    [:or [:enum :inherit]
+     [:enum :deepseek :anthropic :openai-compat :diffusiongemma :typeahead]]]
+   [:seon.ai/agent-model
+    {:optional true} [:or [:enum :inherit] [:string {:min 1}]]]
+   [:seon.ai/agent-temperature
+    {:optional true} [:or [:enum :inherit] :double]]
+   [:seon.ai/agent-max-tokens
+    {:optional true} [:or [:enum :inherit] :int]]
+   [:seon.ai/agent-thinking
+    {:optional true} [:or [:enum :inherit] [:string {:min 1}]]]
+   [:seon.ai/agent-timeout-ms
+    {:optional true} [:or [:enum :inherit] :int]]
+   [:seon.ai/agent-base-url
+    {:optional true} [:or [:enum :inherit] [:string {:min 1}]]]
+   [:seon.ai/agent-api-key-env
+    {:optional true} [:or [:enum :inherit] [:string {:min 1}]]]
+   [:seon.ai/agent-dg-backend
+    {:optional true} [:or [:enum :inherit] [:enum :vllm :control]]]
+   [:seon.ai/agent-extra-body-edn
+    {:optional true} [:or [:enum :inherit] [:string {:min 1}]]]
+   [:seon.ai/agent-max-retries
+    {:optional true} [:or [:enum :inherit] [:int {:min 0}]]]])
+
 (schema/register! :seon.config/agent-context
   [:or
-   [:map
-    ;; Persisted agent datoms — override-only (no default; consumer owns it).
-    [:seon.agent.runtime/wake? {:optional true} :boolean]
-    [:seon.eval/home-requires {:optional true} [:vector :any]]
-    [:seon.agent/ctx {:optional true :default []} [:vector :map]]]
+   (into
+    [:map
+     ;; Persisted agent datoms — override-only (no default; consumer owns it).
+     [:seon.agent.runtime/wake? {:optional true} :boolean]
+     [:seon.eval/home-requires {:optional true} [:vector :any]]
+     [:seon.agent/ctx {:optional true :default []} [:vector :map]]]
+    agent-model-config-entries)
    :nil])
 
 ;; The ROOT override — a SPARSE agent-context merged over `:seon.config/agent-context`
@@ -233,13 +263,15 @@
 ;; only the MERGED result is decoded. Same loose `[:vector :map]` leaf shape.
 (schema/register! :seon.config/root-context
   [:or
-   [:map
-    ;; root can override its home-ns require list (e.g. add `[seon.agent :as agent]`
-    ;; so root additionally shows the orchestration card). Same leaf shape +
-    ;; override-only semantics as `:seon.config/agent-context` — merged by
-    ;; [[context-config-for]] onto the defaulted base for id "root".
-    [:seon.eval/home-requires {:optional true} [:vector :any]]
-    [:seon.agent/ctx {:optional true} [:vector :map]]]
+   (into
+    [:map
+     ;; root can override its home-ns require list (e.g. add `[seon.agent :as agent]`
+     ;; so root additionally shows the orchestration card). Same leaf shape +
+     ;; override-only semantics as `:seon.config/agent-context` — merged by
+     ;; [[context-config-for]] onto the defaulted base for id "root".
+     [:seon.eval/home-requires {:optional true} [:vector :any]]
+     [:seon.agent/ctx {:optional true} [:vector :map]]]
+    agent-model-config-entries)
    :nil])
 
 ;; The core-fault escalation dial (error-blame-strict-gate, RULED

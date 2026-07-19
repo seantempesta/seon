@@ -44,8 +44,8 @@ cache, no restart). Consequence: to change a value on an EXISTING
 deployment, transact the row (or wipe it) — editing the env alone does
 nothing after first boot.
 
-**Precedence for every setting:** explicit request opt → config row → shipped
-default.
+**Precedence for every setting:** explicit request opt → agent entity override
+→ config row → shipped default.
 
 | Env var | Config-row attr | Type | Applies to | Notes |
 |---------|-----------------|------|------------|-------|
@@ -223,18 +223,29 @@ required `max` default. Setting `max` produces the same effort and is not a
 latency optimization. Lower effort levels are announced but not yet available;
 there is currently no supported K3 dial that trades quality for lower latency.
 For ordinary low-latency turns, keep a faster model as the cluster default and
-route only long-horizon agents to K3 (or use a separate K3 cluster because the
-OpenAI-compatible base URL/key selection is global).
+route only long-horizon agents to K3.
 
 The useful mixed-cost topology in one cluster is therefore **DeepSeek globally,
-Kimi for selected planning agents**: keep `:seon.ai/provider :deepseek` on the
-config singleton while storing the Moonshot base URL and credential variable
-there; set the planning agent's provider/model overrides to
-`:openai-compat`/`"kimi-k3"`. DeepSeek ignores that compatible-gateway endpoint,
-while the selected planner resolves it. Muse and Kimi cannot both be selected
-as separate per-agent OpenAI-compatible gateways in one cluster today because
-base URL and credential selection are global-row settings; use separate
-clusters when comparing them live.
+Kimi for selected planning agents**. Keep the global row on DeepSeek and attach
+the complete Moonshot config to the planning agent:
+
+```clojure
+(seon.db/transact!
+  {:seon.db/tx-data
+   [{:seon.agent/id "planner"
+     :seon.ai/agent-provider :openai-compat
+     :seon.ai/agent-model "kimi-k3"
+     :seon.ai/agent-max-tokens 16384
+     :seon.ai/agent-thinking "false"
+     :seon.ai/agent-timeout-ms 180000
+     :seon.ai/agent-base-url "https://api.moonshot.ai/v1"
+     :seon.ai/agent-api-key-env "MOONSHOT_API_KEY"}]})
+```
+
+The database stores only `MOONSHOT_API_KEY`, the variable's name. The adapter
+reads that variable's secret from the process environment at call time. A Muse
+agent can simultaneously carry its own Meta endpoint, model, and credential
+variable; neither agent changes the other or the global default.
 
 ### Anthropic (`:anthropic`)
 
@@ -265,11 +276,14 @@ ANTHROPIC_API_KEY=<key>
 
 ### Per-agent routing
 
-`:seon.ai/agent-provider` / `agent-model` / `agent-thinking` override the
-global row per agent (`:inherit` default). Caveat: `base-url`/`api-key-env`
-are GLOBAL-row only — one `:openai-compat` gateway at a time; a second
-gateway needs its own cluster (or the `:deepseek` provider, which ignores
-the row's base-url).
+Every non-secret provider field has a per-agent mirror:
+`agent-provider`, `agent-model`, `agent-temperature`, `agent-max-tokens`,
+`agent-thinking`, `agent-timeout-ms`, `agent-base-url`, `agent-api-key-env`,
+`agent-dg-backend`, and `agent-extra-body-edn`; `agent-max-retries` controls the
+turn retry policy. Absent or `:inherit` values fall through to the global row.
+These attributes can be transacted onto an existing agent, supplied through
+the manifest's ordinary/root agent context for atomic birth, or included in a
+per-mint context override.
 
 ## Serving Qwen3.6-35B-A3B (or any OpenAI-compatible server)
 

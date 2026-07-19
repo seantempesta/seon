@@ -523,8 +523,11 @@ when all attempts agree; drift or missing attempt evidence rejects formal
 capability scoring.
 
 **Per-agent config = intent, one chain.** The agent entity carries optional
-`:seon.ai/agent-provider`/`-model`/`-temperature`/`-max-tokens`/`-thinking`
-override attrs (absent/`:inherit` = inherit); `seon.ai/current` lays the
+`:seon.ai/agent-provider`/`-model`/`-temperature`/`-max-tokens`/`-thinking`/
+`-timeout-ms`/`-base-url`/`-api-key-env`/`-dg-backend`/`-extra-body-edn`
+override attrs (absent/`:inherit` = inherit). The credential attribute stores
+only an environment-variable name; its secret remains process-local.
+`seon.ai/current` lays the
 CALLING agent's overrides over the global row per call: **explicit call opts
 → the agent's own attrs → the cluster config row → shipped defaults**. This
 resolution shape is the general pattern for every agent-related config

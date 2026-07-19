@@ -260,7 +260,12 @@
           pull-request (atom nil)
           transaction (atom nil)
           received-configuration (atom nil)
-          configured-requires '[[seon.db :as configured-db]]]
+          configured-requires '[[seon.db :as configured-db]]
+          configured-model {:seon.ai/agent-provider :openai-compat
+                            :seon.ai/agent-model "kimi-k3"
+                            :seon.ai/agent-timeout-ms 180000
+                            :seon.ai/agent-base-url "https://api.moonshot.ai/v1"
+                            :seon.ai/agent-api-key-env "MOONSHOT_API_KEY"}]
       (set! db/db
             (fn
               ([] (js/Promise.resolve database))
@@ -276,7 +281,8 @@
             (fn [request]
               (reset! received-configuration
                       (:seon.config/configuration request))
-              {:seon.eval/home-requires configured-requires}))
+              (assoc configured-model
+                     :seon.eval/home-requires configured-requires)))
       (set! db/transact!
             (fn [& call-args]
               (let [request (first call-args)]
@@ -304,6 +310,9 @@
               (let [[home-row agent-row] (::db/tx-data @transaction)]
                 (is (= configured-requires
                        (:seon.eval/home-requires agent-row)))
+                (is (= configured-model
+                       (select-keys agent-row (keys configured-model)))
+                    "model routing facts commit with the complete agent birth")
                 (is (= (:db/id home-row)
                        (:seon.agent/namespace agent-row))
                     "a new namespace and its agent share one transaction tempid")
