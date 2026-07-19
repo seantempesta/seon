@@ -94,6 +94,9 @@ source lines in this ledger or the owning successor PRD.
   consistently at ticker, reload, publication, render, selected-call, and
   top-level child boundaries. The ticker now retains the already-acquired
   configuration and has exact persist-before-exit and pod-only recovery proof.
+  The failed-import run exposed the same missing scope in Shadow failure
+  notification; reload now acquires the database configuration before recording
+  either build failure or publication failure, with live crash proof next.
 - [x] Prove three cold starts and three pod restarts against the same database.
 - [ ] Inject one deterministic core failure at each affected process boundary;
   prove the database record precedes exit and the supervisor restores only the

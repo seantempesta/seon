@@ -534,7 +534,9 @@ JavaScript import and lifecycle callback completes. An import rejection reports
 `:build-failure`, so Seon keeps program admission closed and never rehosts
 agents or the ticker around a partially replaced namespace population. The next
 build may acquire a fresh publication transition and publish normally without a
-second edit or process restart.
+second edit or process restart when the selected core-fault policy keeps the pod
+alive. The failure is recorded under the immutable database configuration, so a
+development `:crash` policy instead persists the fault and exits the pod.
 
 Process ownership is `(pid, operating-system start stamp)`, never a bare PID.
 That identity survives the supervised shell's `exec` into Node/JVM while a

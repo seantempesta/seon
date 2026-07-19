@@ -633,52 +633,70 @@
       (admission/begin-publication!)
 
       :build-failure
-      (admission/mark-unavailable!
-        {:seon.error/raw
-         (ex-info "Shadow build failed while runtime publication was closed"
+      (-> (acquire-configuration!)
+          (.then
+           (fn [configuration]
+             (error/with-configuration
+              configuration
+              #(admission/mark-unavailable!
+                {:seon.error/raw
+                 (ex-info
+                  "Shadow build failed while runtime publication was closed"
                   {:seon.client/build-message message})
-         ::admission/reason "Shadow build failed"})
+                 ::admission/reason "Shadow build failed"}))))
+          (.catch
+           (fn [configuration-error]
+             (admission/mark-unavailable!
+              {:seon.error/raw
+               (ex-info
+                "Shadow failure could not acquire its database configuration"
+                {:seon.client/build-message message}
+                configuration-error)
+               ::admission/reason
+               "Shadow build and configuration acquisition failed"}))))
 
       :build-complete
       (-> (acquire-configuration!)
           (.then
            (fn [configuration]
-             (-> (open-database-session!
-                   {::initialize? true
-                    ::configuration configuration})
-                 (.then (fn [_] configuration)))))
-          (.then
-           (fn [configuration]
-             (-> (admission/publish-committed!)
-                 (.then
-                  (fn [publication]
-                    {::configuration configuration
-                     ::publication publication})))))
-          (.then
-           (fn ^:async publish! [{::keys [configuration publication]}]
-             (log/info-console!
-              "seon.client"
-              (str "reload: committed publication "
-                   (pr-str
-                    (instrumentation-summary
-                     (::admission/instrumentation publication)))))
-             (when (::admission/published? publication)
-               ;; Reinstall listeners/ticker only after the reloaded program is
-               ;; one verified generation. Web feeds re-arm lazily.
-               (if (autonomous-runtime?)
-                 (do
-                   (await (rehost-agent-runtimes!))
-                   (agent-loop/install-ticker! configuration))
-                 (do
-                   (agent-loop/uninstall-ticker!)
-                   (agent-runtime/unhost-all!)))
-               (start-heartbeat!))))
+             (error/with-configuration
+              configuration
+              #(-> (open-database-session!
+                    {::initialize? true
+                     ::configuration configuration})
+                   (.then (fn [_] (admission/publish-committed!)))
+                   (.then
+                    (fn ^:async publish! [publication]
+                      (log/info-console!
+                       "seon.client"
+                       (str "reload: committed publication "
+                            (pr-str
+                             (instrumentation-summary
+                              (::admission/instrumentation publication)))))
+                      (when (::admission/published? publication)
+                        ;; Reinstall listeners/ticker only after the reloaded
+                        ;; program is one verified generation. Web feeds re-arm
+                        ;; lazily.
+                        (if (autonomous-runtime?)
+                          (do
+                            (await (rehost-agent-runtimes!))
+                            (agent-loop/install-ticker! configuration))
+                          (do
+                            (agent-loop/uninstall-ticker!)
+                            (agent-runtime/unhost-all!)))
+                        (start-heartbeat!))))
+                   (.catch
+                    (fn [publication-error]
+                      (admission/mark-unavailable!
+                       {:seon.error/raw publication-error
+                        ::admission/reason
+                        "Committed reload initialization or publication failed"})))))))
           (.catch
-           (fn [error]
+           (fn [configuration-error]
              (admission/mark-unavailable!
-              {:seon.error/raw error
+              {:seon.error/raw configuration-error
                ::admission/reason
-               "Committed reload initialization or publication failed"}))))
+               "Reload configuration acquisition failed"}))))
 
       nil))
   true)

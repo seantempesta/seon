@@ -1,11 +1,12 @@
 (ns seon.instrument-delta-test
   "Behavioral proof for exact boot and incremental instrumentation data."
   (:require
-    [cljs.test :refer [deftest is testing]]
+    [cljs.test :refer [async deftest is testing]]
     [goog.object :as gobj]
     [malli.core :as m]
     [seon.agent.loop :as agent-loop]
     [seon.client :as client]
+    [seon.config :as config]
     [seon.db :as db]
     [seon.instrument :as instrument]
     [seon.runtime.admission :as admission]
@@ -93,30 +94,58 @@
         "instrument exactly the namespaces the Shadow Node client reloaded")))
 
 (deftest shadow-publication-closes-before-build-and-does-not-rearm-on-failure
-  (let [!effects (atom [])
-        original-state @client/!state]
-    (try
+  (async done
+    (let [!effects (atom [])
+          configuration (config/resolve-config-singleton {})
+          original-state @client/!state
+          original-db db/db
+          original-entity db/entity
+          original-begin admission/begin-publication!
+          original-unavailable admission/mark-unavailable!
+          original-publish admission/publish-committed!
+          original-install agent-loop/install-ticker!
+          finished (atom nil)
+          completion (js/Promise. (fn [resolve _] (reset! finished resolve)))]
       (reset! client/!state
               (assoc original-state
                      ::client/runtime-phase :seon.client.runtime/running))
-      (with-redefs [db/attached? (constantly true)
-                    admission/begin-publication!
-                    (fn [] (swap! !effects conj :close) true)
-                    admission/mark-unavailable!
-                    (fn [_] (swap! !effects conj :failed) true)
-                    admission/publish-committed!
-                    (fn []
-                      (swap! !effects conj :publish)
-                      {::admission/published? false})
-                    agent-loop/install-ticker!
-                    (fn [_configuration] (swap! !effects conj :ticker))]
-        (is (true? (client/shadow-build-notify! {:type :build-start})))
-        (is (true? (client/shadow-build-notify! {:type :build-failure})))
-        (is (true? (client/shadow-build-notify! {:type :build-complete})))
-        (is (= [:close :failed] @!effects)
-            "a failed generation never publishes or rearms autonomous work"))
-      (finally
-        (reset! client/!state original-state)))))
+      (set! db/db (fn [] (js/Promise.resolve {:db-name "test"})))
+      (set! db/entity
+            (fn [_database _lookup]
+              (js/Promise.resolve configuration)))
+      (set! admission/begin-publication!
+            (fn [] (swap! !effects conj :close) true))
+      (set! admission/mark-unavailable!
+            (fn [_]
+              (swap! !effects conj :failed)
+              (@finished true)
+              true))
+      (set! admission/publish-committed!
+            (fn []
+              (swap! !effects conj :publish)
+              {::admission/published? false}))
+      (set! agent-loop/install-ticker!
+            (fn [_configuration] (swap! !effects conj :ticker)))
+      (is (true? (client/shadow-build-notify! {:type :build-start})))
+      (is (true? (client/shadow-build-notify! {:type :build-failure})))
+      (-> completion
+          (.then
+           (fn [_]
+             (is (= [:close :failed] @!effects)
+                 "a failed generation never publishes or rearms autonomous work")))
+          (.catch
+           (fn [e]
+             (is false (str "failed publication proof rejected: " e))))
+          (.finally
+           (fn []
+             (reset! client/!state original-state)
+             (set! db/db original-db)
+             (set! db/entity original-entity)
+             (set! admission/begin-publication! original-begin)
+             (set! admission/mark-unavailable! original-unavailable)
+             (set! admission/publish-committed! original-publish)
+             (set! agent-loop/install-ticker! original-install)
+             (done)))))))
 
 (deftest exact-data-and-delta-refresh-only-affected-wrappers
   (let [function-schemas-before (m/function-schemas :cljs)
