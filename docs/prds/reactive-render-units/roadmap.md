@@ -145,7 +145,7 @@ tests and 1,849 assertions. The writer aggregation exposed two stale fixtures
 that still redefined `datahike.api/pull`; both now exercise the maintained
 `pull-with-evidence` result and dependency-plan shape.
 
-Maintained Datahike revision `3af6e46e` passes the focused weighted-LRU and
+Maintained Datahike revision `107bc8f6` passes the focused weighted-LRU and
 query-cache suites in all persistent-set, spec-instrumented, and
 hitchhiker-tree profiles: 162 tests and 990 assertions. This directly covers
 count/weight eviction, overlarge-result rejection, exact immutable database
@@ -165,7 +165,7 @@ demanded child snapshot. An affected transaction misses and recomputes while a
 held parent database value remains immutable and exact.
 
 Datahike `main` now exposes an execution-aware, source-scoped query dependency
-plan at maintained revision `3af6e46e`. It folds the typed parsed query and
+plan at maintained revision `107bc8f6`. It folds the typed parsed query and
 PullSpec representations, resolves scalar `:in` bindings and supplied rules,
 canonicalizes reverse pull attributes, and widens unknown behavior to `:all`.
 The query cache stores and reuses that same plan; propagation selects only the
@@ -188,11 +188,18 @@ The exact source audit, dependency ledger, parser probes, Datastar protocol
 review, concurrency analysis, and proof matrix are in
 [[research/datahike-reactive-page-protocol-2026-07-19]].
 
-The complete maintained Datahike aggregation also reaches optional Stratum VT,
-Java binding, documentation transaction, HTTP server, purge, and planner-probe
-surfaces that currently fail independently of this cache contract. They are
-recorded in [[datahike-full-aggregation-integration-drift]] and do not block the
-source-frozen default-cluster rebuild of the focused green slice.
+The formerly failing named aggregation surfaces are now green in both
+persistent-set and hitchhiker-tree profiles: Stratum valid-time, Java bindings,
+documentation transactions, HTTP transit/EDN/JSON, purge, secondary-index purge
+propagation, and the planner probes. The 14-test named integration gate passes
+196 assertions. The rerun exposed one reactive correctness defect: purge changed
+current and temporal indexes without including those attribute retractions in
+the committed transaction report, so lazy cache inheritance could return a
+purged entity. Revision `107bc8f6` records purge retractions in `:tx-data`,
+repairs finite-window Stratum predecessor inheritance, and closes the Java/HTTP
+test connection leaks. The complete unfiltered maintained aggregation remains
+the final Datahike proof and is tracked in
+[[datahike-full-aggregation-integration-drift]].
 
 ## Settled decisions
 

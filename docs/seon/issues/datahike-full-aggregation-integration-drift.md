@@ -24,6 +24,19 @@ planner selectors pass: four tests and twelve assertions in total. The focused
 weighted-LRU and query-cache profiles pass 162 tests and 990 assertions, and
 the CLJS gate passes 138 tests and 951 assertions.
 
+The remaining named failures were reproduced and repaired at maintained
+revision `107bc8f6`. Purge index surgery omitted its attribute retractions from
+the committed transaction report, which let a cached query inherit a stale
+pre-purge value; the purge primitive now records effective retractions and its
+existing behavioral test asserts the report. Stratum selected only an
+open-ended predecessor for partial valid-time updates, so a contiguous finite
+window dropped unchanged attributes; it now selects the latest predecessor
+whose valid start does not follow the new row. Java and raw HTTP JSON fixtures
+also release their live connections before database deletion. The combined
+named gate passes 14 tests and 196 assertions across both maintained index
+profiles. The unfiltered complete aggregation is the sole remaining acceptance
+step.
+
 ## Acceptance criteria
 
 - Reproduce each remaining named integration failure with its smallest owning
