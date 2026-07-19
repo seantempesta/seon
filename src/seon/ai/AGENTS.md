@@ -54,8 +54,9 @@ Verified `:openai-compat` gateways: OpenRouter (acme), Meta Model API
 `SEON_AI_THINKING=minimal` dial in
 `docs/prds/agent-ctx/research/meta-model-api-muse-spark-2026-07-10.md`), and
 Moonshot AI (Kimi K3 — `https://api.moonshot.ai/v1`, `kimi-k3`, credential
-name `MOONSHOT_API_KEY`; K3 only accepts max reasoning effort today). Two paid
-single-response probes and their latency, token, cost, and quality limitations
+name `MOONSHOT_API_KEY`; K3 only accepts max reasoning effort today). Three paid
+single-response probes—two planning-quality probes plus one isolated named-
+variant compatibility probe—and their latency, token, cost, and quality limitations
 are recorded in
 `docs/prds/generate-code/research/design-seam-audit-2026-07-19.md`; do not
 describe full tool continuation or task quality as verified from those calls.

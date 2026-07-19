@@ -154,7 +154,7 @@ hits where the provider publishes a separate rate.
 | `deepseek-v4-flash` | $0.0028 | $0.14 | $0.28 | 1M | 384K | Vendor price/limits; Seon ~68 tok/s | Cheapest fast worker / routine turns |
 | `deepseek-v4-pro` | $0.003625 | $0.435 | $0.87 | 1M | 384K | Vendor price/limits; Seon ~43 tok/s | Default quality/cost baseline |
 | `muse-spark-1.1` | unpublished | $1.25* | $4.25* | 1M | unpublished | Vendor existence/context; Seon transport | Experimental fast specialist pending task-success evaluation |
-| `kimi-k3` | $0.30 | $3.00 | $15.00 | 1M | 1,048,576 | Vendor price/limits; two paid Seon calls | Selective long-horizon planning escalation |
+| `kimi-k3` | $0.30 | $3.00 | $15.00 | 1M | 1,048,576 | Vendor price/limits; three paid Seon calls | Selective long-horizon planning escalation |
 | `claude-haiku-4-5` | $0.10 | $1.00 | $5.00 | 200K | see vendor | Vendor; not live in Seon | Quick specialist when Anthropic behavior matters |
 | `claude-sonnet-5` | $0.20 | $2.00 | $10.00 | 1M | see vendor | Vendor; not live in Seon | Coding alternative during introductory pricing |
 | `claude-opus-4-8` | $0.50 | $5.00 | $25.00 | 1M | see vendor | Vendor; not live in Seon | Hard cross-boundary coding and judgment |
