@@ -1,5 +1,8 @@
 (ns seon.db.restore.schema
-  "Portable schemas for durable completed-restore facts."
+  "Define portable schemas for completed database restores.
+
+   These closed forms validate the durable restore identity and evidence shared
+   by operator, pod, and authority code without performing recovery work."
   (:require [seon.db.branch :as branch]
             [seon.db.id.schema]
             [seon.dev.restore.schema]

@@ -1,5 +1,8 @@
 (ns seon.db.executor
-  "One bounded capacity and fairness owner for JVM database work."
+  "Schedule JVM database work with bounded capacity and fairness.
+
+   This namespace owns admission, per-database serialization, cancellation,
+   and worker execution without interpreting database protocol operations."
   (:require [clojure.core.async :as async]
             [clojure.core.async.impl.protocols :as async-protocols]
             [clojure.set :as set]

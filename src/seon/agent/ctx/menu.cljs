@@ -1,32 +1,9 @@
 (ns seon.agent.ctx.menu
-  "The typeahead MENU block family — glyph-numbered, strictly-OPTIONAL
-   offers derived from the db at render time (diffusion-typeahead P3a;
-   see docs/prds/diffusion-dynamic-context/typeahead-design.md). One
-   section, a pure fn of the db (reactive-context — the query
-   returns nothing → the section vanishes, nothing is stored):
+  "Render optional typeahead menus from current database facts.
 
-     - `:function-menu` ([[function-menu-block]]) — the agent's most-used
-       public fns, derived from its OWN eval log (the `:seon.eval` rows
-       the turn loop already persists — no new storage), each rendered
-       as a glyph plus the SAME inert callable-contract record as the compact
-       namespace cards.
-
-   (The former `:plan-ledger` section retired 2026-07-11 — owner ruling,
-   planner-worker-design.md: `:plan` is THE plan surface; its ▶/☐/
-   done-dropped compactness contract lives in
-   `my.plan.internal/plan-block` now.)
-
-   The one law (settled by measurement — see the design doc): selection
-   is STRICTLY OPTIONAL, forever. Each section header teaches it once,
-   colocated with the block: select by outputting the glyph alone, or
-   ignore the menu and write any Clojure — both work.
-
-   This ns also owns the `:seon.typeahead/*` driver-policy row — the ONE
-   policy surface the typeahead design allows (no new config system).
-   Defaults live in code ([[default-policy]]); the database row is acquired
-   at the invocation database value by [[function-menu-block]]. The keyword ns
-   `seon.typeahead` names the DRIVER
-   surface later phases add; the design doc pins these keyword names."
+   This namespace derives compact, glyph-addressed function suggestions and
+   owns the database-backed typeahead policy schemas. Menus are advisory and
+   vanish when empty; plan presentation and provider execution live elsewhere."
   (:require
     [clojure.string :as str]
     [seon.agent.home :as home]

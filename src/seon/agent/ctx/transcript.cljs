@@ -1,39 +1,10 @@
 (ns seon.agent.ctx.transcript
-  "The `:transcript` context section + its `:seon.render/html` twin — the
-   WHOLE bottom of the agent's context.
+  "Render the chronological agent transcript and live readline.
 
-   ONE flat, time-ordered EVENT LOG. The transcript is a chronological
-   stream of EVENTS — inbound/outbound messages and evals — each carrying
-   its own stored time (`:seon.agent.message/at` / `:seon.eval/at`), sorted
-   by that instant, rendered through the SAME recursive `seon.render/render`
-   handle every other section uses (ONE section model). Turn boundaries are
-   NOT containers — there are no per-turn headers or synthetic process
-   boundary rows.
-
-   It reads as a REPL transcript: `;` comments + forms + BARE
-   `⟹ <value> ⟸ result/<id>` runtime result lines (NOT comment-shaped, so a
-   model can't fabricate one) + `;;;`-bracketed sections / `;;; ◀`/`;;; ▶`
-   message lines + a live `ns=>` readline. Settled tradeoff
-   (transcript-render redesign): the transcript is no longer re-evaluable
-   Clojure — clarity + anti-fabrication win, because the old `; ⟹` shape was
-   copied by agents into fabricated results.
-
-   The masthead opens it, the events stream in time order, and the folded
-   live readline at the very bottom carries the cursor (current ns) + this
-   turn's status/steering. Symbol-wired into `config manifest` as
-   `'seon.agent.ctx.transcript/transcript-block` (+ the html twin
-   `'…/transcript-block-html`).
-
-   BYTE-STABILITY: every past event renders byte-identical turn-to-turn —
-   each time comes from the event's FIXED stored `:at` (never `now`), and
-   the event list is `sort-by`'d before joining. The ONLY moving byte is
-   the free dynamic readline at the very bottom (below the cache breakpoint —
-   busting there is free). It carries live time and, for root, bounded host
-   telemetry. No historical row reads either input.
-
-   The eval-row converter delegates to `seon.agent.ctx/format-eval-row` (which
-   carries the fabrication-guard + the component caps); the message
-   converter renders the REPL-comment `;;; ◀ from X` / `;;; ▶ to X` line."
+   This namespace turns stored message and evaluation events into byte-stable
+   AI and HTML views, with only the final readline reflecting live state. It
+   owns transcript ordering and presentation, while event capture and generic
+   recursive rendering remain separate mechanisms."
   (:require
     [clojure.string :as str]
     [malli.core :as m]

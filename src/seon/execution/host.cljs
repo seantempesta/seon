@@ -1,5 +1,8 @@
 (ns seon.execution.host
-  "Native Bun supervision for flavor-owned agent execution children."
+  "Supervise flavor-owned agent execution children with Bun.
+
+   The host owns spawning, request correlation, liveness, and shutdown for
+   child processes while execution semantics stay inside each child runtime."
   (:require
    [seon.db.branch :as branch]
    [seon.db.protocol :as db.protocol]

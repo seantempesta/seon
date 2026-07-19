@@ -1,5 +1,5 @@
 (ns seon.web.reactive.transform
-  "Render-time rewrite — agent fn-calls in handler slots → standard Datastar.
+  "Rewrite agent event handlers into Datastar actions.
 
    Agents make a canvas interactive by writing a normal Clojure fn-call (or a
    bare fn-ref) in an event-handler slot of their hiccup. The browser only

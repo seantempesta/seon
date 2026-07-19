@@ -1,47 +1,10 @@
 (ns seon.agent.loop
-  "The agent LOOP — the wake trigger + the run-driven fold.
+  "Drive agent runs through the event-derived runtime loop.
 
-   The loop is a FOLD of [[transition]] (the FSM transition table, which lives
-   HERE with the loop that folds it) over events derived from the RUN's data.
-   A trigger (an inbound message) opens a RUN ([[seon.agent.run/open-run!]]);
-   `run-loop!` then drives turns until a bound fires or a function closes the run:
-
-     each iteration re-reads ONE frozen db value (§8a) and `next-event` derives
-     the event from it:
-       - run already :closed (a function ran inside a turn) → :wait / :complete /
-         :terminate (from the run's closed-reason) — the function owns the close
-       - the agent's `:seon.agent/run` points at a DIFFERENT run → :superseded
-       - the run carries :paused-at                       → :pause
-       - work ≥ turn-limit (the WORK bound: turns in repl-mode
-         :batch, FORMS in :stream)                        → :turn-limit
-       - now > deadline (the WALL-CLOCK bound)            → :deadline
-       - else                                             → :turn-ok
-     `(transition state event)` gives the next state; the EFFECT of
-       :turn-ok is `beat!` + `run-turn!`; the LOOP closes the run on
-       :turn-limit/:deadline/:error (the bounds it owns), while function closes
-       and supersede are already handled (no re-close). The loop ends when the
-       state leaves :running.
-
-   The RUN-ID is the fencing token, enforced IN-TX (§8b): `beat!`/`run-turn!`
-   each LEAD their work tx with a CAS asserting the agent's `:seon.agent/run`
-   STILL names this run. A superseded run's beat returns a direct CAS error
-   (lost authority → terminate); its turn-open is rejected at commit. Between turns
-   the next iteration re-reads the latest db and `next-event` sees the moved
-   pointer → :superseded (§8c).
-
-   Wake = read-derived-then-open. An inbound datom fires the per-tx listener;
-   the handler derives the agent's state from the local db snapshot. If :idle
-   → `open-run!` ({trigger :message, cause the message}) then `run-loop!` on
-   that run. If already :running → `renew!` (the new message extends the lease
-   — the sliding window is now lease renewal). The idle→running open is ATOMIC
-   (a CAS on `:seon.agent/run` being absent — [[seon.agent.run/open-run!]]):
-   two simultaneous idle wakes can't both open, the loser's open returns a
-   direct CAS error and it RENEWS the winner's run instead (no orphaned run).
-
-   Requires `seon.agent.message` (the wake gate `inbound-msg-datom?`),
-   `seon.derive` (the one derived-state leaf), `seon.agent.run` (the run
-   lifecycle), `seon.agent.turn` (`run-turn!`). The boot path (`seon.client`)
-   requires THIS ns to `install-wake-trigger!`."
+   This namespace owns wake handling, the one ticker, run driving, and the
+   finite-state fold that selects the next effect from persisted facts. Each
+   turn uses one pinned database value; run fencing, turn execution, and
+   schedule matching remain delegated to their owning namespaces."
   (:require
     [clojure.string :as str]
     [my.plan.internal :as plan-internal]

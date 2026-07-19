@@ -1,41 +1,10 @@
 (ns seon.agent.fs
-  "Local-filesystem capability — your eyes and hands on the user's
-   machine, gated by an explicit allowlist.
+  "Provide gated local-filesystem capabilities to agents.
 
-   ## Security model
-
-   **Default-deny.** With no configuration every op returns
-   `:seon.agent.fs/ok? false`. Access is granted via [[configure!]] (or
-   the `SEON_FS_ROOT` env var); writes additionally require
-   `:seon.agent.fs/read-only? false`. This is a SOFT boundary against
-   LLM-emitted accidents, not a security boundary: a `..`-traversal or
-   out-of-scope absolute path lands on a denial envelope rather than
-   touching disk.
-
-   ## House-rule API
-
-   Map-in / map-out. Every fn takes one map with fully-namespaced keys,
-   returns one map with a `:seon.agent.fs/ok?` discriminator, and never
-   throws from its body — SEMANTIC failures (denied path, read-only,
-   missing file) land as a `:seon.agent.fs/error` string. Only a
-   SHAPE-invalid call trips the instrumentation validator, which the eval
-   boundary surfaces as a structured `:seon/error` value — data, never a
-   crash.
-
-   ## Worked examples
-
-     (seon.agent.fs/grants)    ;; the CONFIGURED roots + read-only flag —
-                               ;; call this, never infer the grant from a listing
-     (seon.agent.fs/read-file  {:seon.agent.fs/path \"/Users/me/work-folder/notes.md\"})
-     (seon.agent.fs/write-file {:seon.agent.fs/path \"/Users/me/work-folder/out.txt\"
-                                :seon.agent.fs/content \"hello\"})
-     (seon.agent.fs/edit-file  {:seon.agent.fs/path \"/Users/me/work-folder/out.txt\"
-                                :seon.agent.fs/old-string \"hello\"
-                                :seon.agent.fs/new-string \"hi\"})
-     (seon.agent.fs/list-dir   {:seon.agent.fs/path \"/Users/me/work-folder\"})
-     (seon.agent.fs/walk-dir   {:seon.agent.fs/path \"/Users/me/work-folder\"
-                                :seon.agent.fs/match-ext \".md\"})
-     (seon.agent.fs/stat       {:seon.agent.fs/path \"/Users/me/work-folder/notes.md\"})"
+   The public surface offers map-in, map-out reads, writes, listings, and
+   anchored edits under explicit host grants, with paging and failures reported
+   as data. Path enforcement and low-level I/O live in the internal namespace;
+   this namespace owns the taught contracts and schemas."
   (:require
     ["node:fs" :as fs]
     [clojure.string :as str]

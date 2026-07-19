@@ -1,17 +1,12 @@
 (ns seon.agent.internal
-  "Framework data-manipulation internals for the agent lifecycle functions.
+  "Support agent lifecycle functions with shared data transformations.
 
-   This namespace is NOT whitelisted for full-source rendering — it holds
-   the small shared plumbing the teaching namespaces ([[seon.agent.lifecycle]])
-   lean on so their bodies stay clean and self-explaining in agent context.
-
-   Right now that is the one shared shape the scoped functions need: the loud
-   'no agent in scope' error value and the one parent-graph authorization
-   rule for target-scoped lifecycle management (errors are values, never a
-   throw).")
+   This internal namespace centralizes scoped-agent error values and
+   parent-graph authorization used by the public lifecycle surface. It is not
+   rendered as agent-facing source and does not own lifecycle policy.")
 
 (def managed-agent-selector
-  "Agent facts needed by the one parent-tree authorization rule."
+  "Agent facts needed by the parent-tree authorization rule."
   '[:db/id :seon.agent/id :seon.agent/terminated-at
     {:seon.agent/parent ...}
     {:seon.agent/run

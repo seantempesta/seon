@@ -1,7 +1,5 @@
 (ns seon.repl.internal
-  "REPL text parser — turns an LLM reply (text containing `;` comments
-   interleaved with Clojure forms) into a vector of structured entries
-   the eval pipeline can drive form-by-form.
+  "Parse model replies into ordered REPL entries.
 
    Pure rewrite-clj. CLJC so JVM tests can exercise the corpus without
    spinning up the CLJS pod — the agent's eval-batch path runs in the

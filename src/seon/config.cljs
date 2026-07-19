@@ -1,6 +1,8 @@
 (ns seon.config
-  "The pod's config-read layer — ONE optional manifest explicitly selected by
-   `SEON_CONFIG`. A selected manifest is compiled into database facts; an
+  "Compile one explicitly selected manifest into database-owned config.
+
+   The pod reads the optional manifest selected by `SEON_CONFIG`. A selected
+   manifest becomes database facts; an
    unselected boot preserves the database and never reads `config/system.edn`
    implicitly. The shipped file is selected automatically only for a fresh
    database by the operator. A present manifest declares:

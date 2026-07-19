@@ -1,6 +1,9 @@
 (ns seon.agent
-  "The agent RECORD + the agent-facing functions — 'what an agent IS' (the loop
-   that runs it lives in [[seon.agent.loop]], one turn in [[seon.agent.turn]]).
+  "Define agent identity, lifecycle data, and public agent capabilities.
+
+   The loop that runs an agent lives in [[seon.agent.loop]], while one turn
+   lives in [[seon.agent.turn]]. This namespace owns the agent entity and the
+   capability surface that operates on it.
 
    The agent operates as a real REPL: bootstrap-CLJS evaluates its forms,
    results land in a per-agent home namespace (`my.agent.<id>`) as live

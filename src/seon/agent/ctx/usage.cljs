@@ -1,24 +1,10 @@
 (ns seon.agent.ctx.usage
-  "Read-side extractor for the per-turn LLM token usage — the FIRST (and
-   so far only) consumer of `:seon.agent.turn/llm-usage`, the verbatim
-   provider `usage` map persisted as an EDN string by
-   [[seon.agent.turn/ask-and-eval!]].
+  "Derive normalized token usage from captured LLM responses.
 
-   There is NO normalization at capture time: the map carries
-   provider-specific, differently-named keys (token-usage-pipeline
-   research, §3). This ns DERIVES a normalized `{total cached output}`
-   triple at read time (reactive-context — nothing normalized is stored),
-   branching on KEY PRESENCE so it works for old turns whose provider may
-   differ from the live one:
-
-     - `:prompt_tokens` present  => OpenAI/DeepSeek shape. `prompt_tokens`
-       is the FULL input (cached is a SUBSET); cached = `prompt_cache_hit_tokens`.
-     - `:input_tokens` present   => Anthropic shape. `input_tokens` is the
-       UNCACHED remainder; the cache fields are DISJOINT and ADD to it for
-       the true total; cached = `cache_read_input_tokens`.
-
-   Errors are values: a turn with no usage (stub-LLM turn) or an
-   unparseable string yields nil — never a throw."
+   This namespace reads provider-specific usage maps stored on turns and
+   projects comparable input, cached-input, and output counts without storing
+   another normalized representation. Missing or malformed usage yields no
+   projection rather than disrupting context rendering."
   (:require
     [cljs.reader :as reader]
     [seon.schema :as schema]))

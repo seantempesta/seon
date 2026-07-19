@@ -1,25 +1,11 @@
 (ns my.plan.internal
-  "Private plumbing for `my.plan` — fail/agent-scoping helpers, the
-   write-result envelope mapper, the shared Datalog rule set, the derived
-   work-queue queries (ready leaves, roll-up, blocked/ready), the position
-   ANCHOR derivation, the reverse-ref tree pull, the ONE document compiler
-   behind plan! AND reconcile!, the drop! subtree walk, the derived
-   stuck×N → frontier re-plan
-   ESCALATION (flag query + STUCK band + once-per-episode planner
-   consult), and the WINDOWED plan-block context render (anchor + open
-   frontier + recently-completed tail; the completed interior stays in
-   the DB, out of the prompt).
+  "Implement the private derived mechanics behind `my.plan`.
 
-   Factored out of the public function surface so the teaching ns shows ONLY the
-   functions + their register! schemas (the `*.internal` convention drops these
-   from rendered agent context — see
-   `seon.agent.ctx.namespaces/hidden-ns-name?`).
-
-   Keyword-namespace note: this lives under `my.plan.internal`, so `::foo`
-   would expand WRONG. Every helper references the owning ns's attrs
-   fully-qualified (`:my.plan/id`, never `::id`). The rule set lives HERE
-   (the render fns need it and the dep is one-way); `my.plan/rules` re-defs
-   the same value so an agent can still read and extend it."
+   This hidden namespace owns plan compilation, agent scoping, Datalog rules,
+   dependency and progress derivations, tree mutation support, replanning
+   escalation, and windowed context rendering. It keeps implementation detail
+   out of the agent-facing teaching surface and uses fully qualified
+   `:my.plan/*` attributes across the namespace boundary."
   (:require
     [cljs.reader :as edn]
     [clojure.string :as str]

@@ -1,31 +1,10 @@
 (ns seon.agent.search
-  "Content search over allowed files — ripgrep (`@vscode/ripgrep`) wrapped
-   as a core capability. THE EXEMPLAR npm-package wrapper: copy this shape
-   when wrapping the next package.
+  "Search allowed files and indexed database text.
 
-   The wrapper contract:
-     - Map-in / map-out: registered `::request`/`::response` schemas, full
-       `:malli/schema`, ALL keys namespaced.
-     - ERRORS ARE VALUES: every public fn RESOLVES to an envelope —
-       `{::ok? true …}` on success, `{::ok? false ::error <guiding message>
-       ::raw-error <npm-side detail>}` on failure. SEMANTIC failures (blank
-       pattern, no roots, rg errors) never throw — they are envelopes. Only
-       a SHAPE-invalid call trips the instrumentation validator, which the
-       eval boundary surfaces as a structured `:seon/error` value — still
-       data, never a crash.
-     - CAPABILITY-GATED: search roots are gated through seon.agent.fs's
-       allowlist (never reimplemented), so search and read agree on reach.
-
-   gitignore semantics: ignore rules apply relative to the SEARCH ROOT —
-   searching the repo root skips node_modules/out/tmp, but a directory you
-   were explicitly granted is fully searchable when passed as a root.
-
-   The search→read recipe (the core move) — see [[grep]] for the worked
-   example; a hit's `::path` is absolute + allowlisted, so it feeds
-   `seon.agent.fs/read-file` directly with no guessing.
-
-   Plumbing (hard caps, envelope helpers, npm boundary, allowlist gate, rg
-   --json parser) lives in [[seon.agent.search.internal]]."
+   The public capability provides literal ripgrep-backed file search and regex
+   search over program-graph text with bounded, paged result envelopes. It
+   reuses filesystem grants and delegates subprocess parsing and caps to its
+   internal namespace."
   (:require
     [clojure.string :as str]
     [seon.agent.search.internal :as in]

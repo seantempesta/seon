@@ -1,40 +1,10 @@
 (ns my.skills
-  "Loadable skills — knowledge an agent dials INTO its own context only while
-   it needs it, then drops so it stops paying for what it isn't using. A skill
-   is NOT a new subsystem: a loaded skill IS a `:seon.agent.ctx/block`
-   ([[seon.agent.ctx/install!]] puts it on the agent's own `:seon.agent/ctx`,
-   [[seon.agent.ctx/remove!]] takes it off), its body rides the existing
-   file-block read+quote path, and its cost is DERIVED at render — nothing
-   stored that needs clearing.
+  "Discover and manage skills in an agent's active context.
 
-   THE MODEL — a skill is its attributes, never a `:kind` stamp. A row 'is a
-   skill' because it carries `:my.skills/name`; it is 'file-backed' because it
-   carries `:seon.agent.ctx/file-path` (body stays in the SKILL.md, read fresh
-   every render) and 'inline/agent-authored' because it carries
-   `:my.skills/body` instead. Where it came from is the transaction's
-   `:seon.db/user` / `:seon.db/process` refs, not a field on the row.
-
-   THREE SURFACES, three levels of disclosure (this slice ships L0 ⇄ L2):
-     - L0 catalog — one always-on `;`-line per skill (name + description), the
-       cheap discovery layer ([[catalog-block]], a default seed block). Costs
-       a line each; the body costs nothing until loaded.
-     - L2 body    — the whole SKILL.md, loaded only while `(load :name)`d
-       ([[skill-block]]), with a DERIVED token-cost footer + the explicit
-       unload hint so the trade stays visible. `(unload :name)` drops it.
-
-   THE CORPUS — `(load :name)` resolves a `:my.skills/*` row seeded at boot by
-   scanning the explicit corpus directory selected during startup. The shipped
-   config pins `seon-skills/` (`config/system.edn` `:seon.config/dirs`), so THAT
-   is the rendered agent corpus — the SAME directory humans edit. Drop a
-   standard `<name>/SKILL.md` in the corpus dir and it appears; edit a skill
-   file and the agent gets the edit. The pod stores only the path + the
-   frontmatter `name`/`description` — no YAML or markdown parser, the body is
-   the file.
-
-   Async: `load`/`unload` AWAIT the underlying `install!`/`remove!` transact
-   (they are `^:async`); the eval path auto-awaits, so an agent calling
-   `(my.skills/load :datahike)` gets the result MAP, not a Promise. `list`
-   acquires one immutable database value for its derived queries."
+   This namespace covers the database-backed skill catalog, file-backed and
+   inline skill bodies, explicit loading and unloading, and their derived
+   context renders. Skills reuse the ordinary context-block mechanism; corpus
+   discovery and source files remain startup configuration concerns."
   (:refer-clojure :exclude [load list])
   (:require
     [clojure.string :as str]

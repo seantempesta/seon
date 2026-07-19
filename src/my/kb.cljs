@@ -1,31 +1,11 @@
 (ns my.kb
-  "Your knowledge base IS the database — schema'd data, never a text blob.
-   The fns below are runnable RECIPES (every form compiles and is exercised
-   by my.kb-test, so they can't bit-rot): copy a body, swap in your own
-   `:my.<domain>/*` attrs. seon.db's own docstrings are the full reference.
+  "Model durable knowledge as database attributes and connections.
 
-   THE MODEL — datahike entities have NO type, class, or kind. An entity is
-   just an id with a set of attributes. A thing 'is a source' because it
-   carries `:my.kb.source/*` attrs, and 'is authored by' another entity
-   because a REF connects them — never because of a `:kind`/`:type` field
-   (don't add one). So:
-     - RECORD by ADDING fully-namespaced attrs to an entity and LINKING
-       entities with refs ([[remember-sources!]]).
-     - IDENTIFY one entity by a `:db.unique/identity` attr — also how
-       transact UPSERTS: same id ⇒ update in place, no duplicate.
-     - FIND a set by ATTRIBUTE PRESENCE — `[?e :my.kb.source/id]` enumerates
-       every source. There is no 'list all of kind K'.
-     - ATTRIBUTE provenance through the tx's `:seon.db/user` and
-       `:seon.db/process` refs; domain ownership remains an explicit domain ref.
-
-   Design one `my.kb.<domain>` schema per thing you learn (the same skill as
-   modelling your human's data); never default to a memory-markdown blob.
-   The database starts without sample knowledge; query before answering. The
-   `:my.kb.source/*` rows exist only once YOU run a recipe (my.kb-test uses
-   its own throwaway db), so never report them as real data.
-
-   Database reads and writes are asynchronous authority operations. Compose
-   related reads at one immutable database value inside an `^:async` function."
+   This namespace is the worked agent-facing guide to schema-first knowledge:
+   defining identity and reference attributes, transacting source facts, and
+   querying them by attribute presence. It demonstrates asynchronous database
+   authority operations without supplying a universal domain model or sample
+   knowledge; agents own their domain schemas in dedicated namespaces."
   (:require
     [clojure.string :as str]
     [my.data :as data]

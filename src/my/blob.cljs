@@ -1,31 +1,11 @@
 (ns my.blob
-  "Content-addressed blob store — the disk tier for LARGE content.
-   The three-tier storage rule: DB datoms = small indexed projections;
-   BLOBS = persistent full content; the globalThis stash = volatile live
-   values. Datom vs blob is decided by SIZE, never by kind — a benchmark
-   run's full output, a scraped document, a big prompt all belong here,
-   with only a hash + token estimate left in the DB.
+  "Store and retrieve large content by its SHA-256 address.
 
-   A blob's name IS its SHA-256 content hash: writes are idempotent,
-   identical content dedupes for free, and the hash on a datom is a
-   durable pointer that survives restarts. Files live in one storage view:
-   a writable cluster directory followed by ordered read-only bases. A normal
-   cluster has no bases; a branch can write an overlay while reading its source
-   archive. No GC — content-addressed blobs are append-only.
-
-   Errors are VALUES: every function returns a map with `:my.blob/ok?`;
-   a missing or malformed hash is a guiding error map, never a throw.
-
-     (await (my.blob/put! {:my.blob/content big-report
-                           :my.blob/media   :markdown}))
-     ; returns «map: :my.blob/ok? true, :my.blob/hash \"9f86d0…\", :my.blob/tokens 812»
-     (await (my.blob/concat! {:my.blob/hashes [h1 h2 h3]}))
-     ; returns «chunked put!s → ONE canonical hash with honest whole-doc totals»
-     (await (my.blob/stat {:my.blob/hash h})) ; DB projection — no disk touched
-     (await (my.blob/text {:my.blob/hash h :my.blob/from-line 41
-                           :my.blob/max-lines 40})) ; bounded page
-     (my.blob/get  {:my.blob/hash h})   ; FULL content — bind it in code,
-                                        ; never paste it into a reply"
+   This namespace is the agent-facing disk tier for content too large for
+   database datoms. It covers durable publication, chunk assembly, metadata,
+   bounded text reads, and full-content access through one writable archive
+   with optional ordered read-only bases. Operations use data envelopes and
+   leave only compact hashes and projections in the database."
   (:refer-clojure :exclude [get])
   (:require
     ["node:crypto" :as crypto]

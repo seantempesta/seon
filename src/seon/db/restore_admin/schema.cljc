@@ -1,5 +1,8 @@
 (ns seon.db.restore-admin.schema
-  "Portable closed result schemas for the no-listener restore writer."
+  "Define closed results for the no-listener restore writer.
+
+   These portable envelopes let operator and writer agree on administrative
+   restore outcomes without importing runtime or filesystem mechanisms."
   (:require [seon.db.branch :as branch]
             [seon.db.protocol :as protocol]
             [seon.dev.restore.schema]

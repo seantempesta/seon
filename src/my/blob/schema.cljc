@@ -1,5 +1,9 @@
 (ns my.blob.schema
-  "Portable storage-view schemas owned by `my.blob`."
+  "Define portable schemas for `my.blob` storage and restore data.
+
+   This namespace owns the shared shapes exchanged across the blob archive,
+   branch-retention, and restore boundaries. It contains schema declarations
+   only; storage behavior remains in the runtime namespaces that consume them."
   (:require [seon.db.branch :as branch]
             [seon.schema :as schema]))
 

@@ -1,17 +1,11 @@
 (ns my.canvas
-  "The permanent agent-facing canvas API.
+  "Build and manage an agent's persistent interactive canvas.
 
-   `show!` and `clear!` update YOUR canvas. The eval boundary injects the
-   current agent id and db, so normal calls never identify an agent manually.
-   A renderer fn queries the supplied `:seon.db/db` and returns [[view]]; every
-   database transaction then redraws through the normal live feed.
-
-   Controls are ordinary hiccup carrying handler forms understood by Seon's
-   render transform. A handler symbol is qualified to the renderer's agent
-   namespace and routed through the existing `/agent/{id}/call` capability
-   gate for the rendering agent. Buttons do not create routes. Reuse these
-   primitives directly or
-   build domain-specific helpers from them in your own namespace."
+   This namespace provides the canvas lifecycle, renderer contract, and
+   standard form controls for agent-defined views. Renderers derive hiccup
+   from an injected immutable database value, while control handlers travel
+   through the existing agent capability boundary. Domain-specific displays
+   belong in agent namespaces composed from these primitives."
   (:require
     [clojure.string :as str]
     [seon.db :as db]

@@ -1,5 +1,8 @@
 (ns seon.db.restore-admin
-  "Closed data exchanged by the restore operator and no-listener writer."
+  "Exchange closed restore data with the no-listener writer.
+
+   This administrative boundary validates restore requests and results for the
+   isolated writer path; normal database service traffic uses the protocol."
   (:require [malli.core :as m]
             [seon.db.branch :as branch]
             [seon.db.restore-admin.schema]

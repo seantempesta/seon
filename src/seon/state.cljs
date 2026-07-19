@@ -1,9 +1,5 @@
 (ns seon.state
-  "Holistic system-state reconcile — make the DB's MANAGED datoms match a
-   desired set of entity-maps. ONE primitive ([[reconcile!]]) over the whole
-   declarative-state surface (context blocks, routes, core entities): seed,
-   config override, reset, and restore are all expressions of it — we write
-   the reconcile once, never a loader per state area.
+  "Reconcile managed database facts with desired system state.
 
    The managed slice is defined by PROVENANCE, not a taxonomy: a row is
    managed iff its first-assertion tx refs a stable database process in the

@@ -1,6 +1,8 @@
 (ns seon.ai.openai-compat
-  "OpenAI-compatible chat-completions client on the official `openai`
-   Node SDK (SDK migration, 2026-06-16). ^:async — returns Promises.
+  "Adapt OpenAI-compatible chat completions to Seon's provider contract.
+
+   This async adapter uses the official `openai` Node SDK and returns
+   Promises.
 
    ONE request path, two providers (no fork — task #30):
 

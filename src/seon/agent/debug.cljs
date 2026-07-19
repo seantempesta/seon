@@ -1,32 +1,9 @@
 (ns seon.agent.debug
-  "Agent self-introspection: 'what am I seeing right now?'
+  "Inspect the exact context and turn data available to an agent.
 
-   Two functions:
-     - `ctx-preview` — the FULL prompt the agent would receive on its
-       next render: the database-value-pinned system block first, then the
-       assembled AI context from the same compiled child result consumed by
-       `seon.agent.turn/render-prompt`. The
-       `:seon.render/text` is byte-identical to what the LLM receives
-       (system message + context), with an explicit boundary between
-       them. Per-block texts (left pane) lead with the system block;
-       the per-block html twins (right pane) mirror the context
-       blocks only (which now include the SOUL.md / AGENTS.md
-       file-blocks). System block + context derive from the same
-       sources the real call uses, so divergence is impossible.
-     - `handlers` — the live handler registry visible to the agent
-       (core + per-agent).
-     - `turn` / `turn-diff` — turn replay: reconstruct any persisted
-       turn from its rendered transaction ref + prompt
-       and reply blobs; diff two turns.
-     - `errors` / `error` / `repro` — error triage over the persisted
-       `seon.error/record!` datoms: compact recent list → one full
-       envelope with the turn/agent joins → the work-backwards bundle
-       (as-of db frozen at the failure + a ready-to-eval repro
-       expression).
-
-   All map-in, map-out. Defaults `:seon.agent/id` to
-   `(seon.db/current-agent-id)` so REPL calls from inside an agent
-   scope work with no argument."
+   This namespace exposes read-only debugging projections over the same
+   acquired prompt, transcript, and persisted turn artifacts used at runtime.
+   It does not introduce a second rendering or capture path."
   (:require
     [cljs.reader :as reader]
     [clojure.string :as str]

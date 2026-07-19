@@ -1,10 +1,5 @@
 (ns seon.error
-  "Uniform error→map conversion for the safe-by-default boundary
-   (spec-02 §2.5), plus `record!` — the catch-site function that classifies,
-   structures, persists, and escalates a caught error. Anywhere a seon
-   surface catches an exception it should return `(error/->map e)` (or
-   call [[record!]] when the catch site knows the fault population) so
-   agents inspect a stable shape.
+  "Convert failures into Seon's uniform error values.
 
    The result map carries:
      :seon.error/message   string — best-effort human-readable summary

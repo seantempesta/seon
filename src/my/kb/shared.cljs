@@ -1,30 +1,10 @@
 (ns my.kb.shared
-  "The SYSTEM-WIDE instruction surface — standing guidance shown to ALL
-   agents in the cluster (context-v4 PRD §2.2, home 3). ONE `::shared`
-   entity (identity `::id` \"shared\") carries a many-refs vector of
-   instruction rows under `::instructions`; agents and the user keep
-   APPENDING — one transact adds a row and the ref in the same nested
-   map:
+  "Manage durable standing guidance shared by every cluster agent.
 
-     (db/transact!
-       {:seon.db/tx-data
-        [{:my.kb.shared/id \"shared\"
-          :my.kb.shared/instructions
-          [{:my.kb.shared/text \"Always store provenance (:my.kb/source-path) with findings.\"
-            :my.kb.shared/at   (js/Date.)}]}]})
-
-   These rows are shown to EVERY agent automatically, every turn — the
-   `:shared-instructions` context section ([[instructions-block]])
-   renders them live from the db, so an append here is durable standing
-   guidance, not a one-off. Reading is one fn call —
-   `(my.kb.shared/instructions)`. Append-only for now.
-
-   The OTHER instruction homes (don't mix them up): per-agent standing
-   orders go on the agent's OWN entity; identity/personality lives in the
-   SOUL.md / AGENTS.md files (read LIVE as context file-sections —
-   `seon.agent.ctx/file-block`); static behavioral defaults are the hardcoded
-   system prompt (`seon.agent.ctx/system-text`). This ns is only the
-   cluster-wide, all-agents home."
+   This namespace owns the append-only database shape, read surface, and live
+   context rendering for cluster-wide instructions. It deliberately excludes
+   per-agent orders, file-backed identity, and static system behavior, which
+   remain in their respective context homes."
   (:require
     [clojure.string :as str]
     [my.kb]

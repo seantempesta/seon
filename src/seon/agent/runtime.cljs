@@ -1,11 +1,10 @@
 (ns seon.agent.runtime
-  "Process-local hosting for durable agents.
+  "Host process-local resources for durable agents.
 
-   Durable birth belongs to [[seon.agent]]. This namespace owns the inverse
-   projection: reconstruct one existing agent's loop input and message listener
-   from database facts.
-   Resume never allocates identity or re-runs cluster boot work; unhost removes
-   every per-agent process handle."
+   This namespace connects database-authored agent identities to ephemeral
+   execution resources and cleanup. Durable lifecycle truth stays in database
+   facts; process state is retained only where the host must manage a live
+   runtime."
   (:require
     [seon.agent.home :as home]
     [seon.agent.loop :as loop]

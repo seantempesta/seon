@@ -1,17 +1,9 @@
 (ns seon.agent.shell.internal
-  "Plumbing behind `seon.agent.shell` — the hard caps, the envelope
-   helpers, the `SEON_SHELL` grant read, the seon.agent.fs cwd gate, and
-   the shared subprocess request, and generic exit/out/err classification.
+  "Implement shell grants, subprocess calls, and output envelopes.
 
-   This namespace is INTERNAL: it is never rendered into agent context
-   (the `*.internal` ns name IS the filter). Agents call the public face
-   in `seon.agent.shell`; nothing here is part of the taught surface.
-
-   All map keys stay in the `:seon.agent.shell/*` namespace (via
-   `:as-alias`): the keyword namespace tracks the OWNING DATA namespace
-   (`seon.agent.shell`), not the file the code lives in — same rule as
-   fs/search. (toolkit.md's §my.shell sketch spells the keys
-   `:seon.shell/*`; the code ns is the truth, per the root convention.)"
+   This internal namespace enforces host and working-directory policy, applies
+   resource caps, and classifies captured process results for the public shell
+   capability. It owns plumbing rather than the agent-facing contract."
   (:require
     [clojure.string :as str]
     [seon.agent.fs :as fs]

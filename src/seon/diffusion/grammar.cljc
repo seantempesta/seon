@@ -1,10 +1,5 @@
 (ns seon.diffusion.grammar
-  "Pure form-SHAPE predicates shared by the CLJS-pod oracle
-   (`seon.diffusion.oracle`) AND the co-located babashka parse server
-   (`bin/oracle-server`) — ONE definition of the structural-lint (T1
-   def-vs-defn) and phase-grammar tiers on BOTH sides of the wire, so the cheap
-   tiers the worker reaches via bb `op:\"refine\"` match the pod EXACTLY (no
-   drift between a bb copy and a pod copy).
+  "Recognize Clojure form shapes for diffusion tooling.
 
    Deliberately dependency-free — no `seon.schema`, no datahike, no malli
    require — so babashka loads it straight from source (the `:malli/schema`

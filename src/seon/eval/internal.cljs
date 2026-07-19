@@ -1,5 +1,8 @@
 (ns seon.eval.internal
-  "Pure receipt mechanics behind the one `seon.eval` execution service."
+  "Transform evaluation receipts behind the `seon.eval` service.
+
+   Pure helpers normalize forms, outcomes, and captured program facts; compiler
+   invocation and database publication remain at the public execution boundary."
   (:require
     [seon.db :as db]
     [seon.db.id :as db.id]

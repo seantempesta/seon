@@ -1,6 +1,5 @@
 (ns seon.log
-  "Structured event logging for the pod — error / warn / info / debug
-   entries flow through TWO sinks:
+  "Emit structured pod events through one logging boundary.
 
      1. stdout/stderr via `console!` (captured by the supervisor into
         `logs/pod.log` as raw text — human-readable, grep-friendly).

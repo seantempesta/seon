@@ -1,5 +1,8 @@
 (ns seon.launch
-  "Immutable process-launch data shared by the operator and pod."
+  "Define immutable process-launch data shared by operator and pod.
+
+   Portable values describe artifact flavor, paths, and child coordinates;
+   native spawning and lifecycle transitions remain with their runtime owners."
   (:require #?(:cljs [cljs.reader :as reader])
             [clojure.string :as str]
             [my.blob.schema]

@@ -1,7 +1,8 @@
 (ns seon.analyzer-info
-  "Read-side wrapper over the bootstrap-CLJS analyzer state in
-   `@compile-state`. One module so 'how we read the analyzer' lives
-   in one place. Three consumers:
+  "Project program facts from bootstrap-CLJS analyzer state.
+
+   This is the one read-side boundary around `@compile-state`, keeping analyzer
+   representation details out of its three consumers:
 
    - Phase B item 10: detect-and-tee in `seon.eval/eval-batch!` —
      diffs `snapshot-defs` before/after each form, calls

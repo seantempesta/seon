@@ -1,11 +1,10 @@
 (ns my.ns
-  "What code exists, as data — ask the live program graph, not a file.
+  "Inspect public functions through the live program graph.
 
-   Every namespace and function in this runtime is indexed as `:seon.ns` /
-   `:seon.fn` rows (code-as-data), including fns defined this session that
-   exist in no source file. [[functions]] turns one namespace's rows into
-   the SAME one-line cards the `:namespaces` context section renders
-   (`seon.agent.ctx.namespaces/compact-fn-head` — one card mechanism)."
+   This namespace exposes namespace-scoped discovery over indexed code facts,
+   including definitions created during the current session. Results use the
+   same compact function-card representation as agent context, keeping source
+   parsing and alternate documentation indexes outside this boundary."
   (:require
     [seon.agent.ctx.namespaces :as ns-cards]
     [seon.db :as db]

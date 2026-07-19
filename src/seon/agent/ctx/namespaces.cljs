@@ -1,39 +1,10 @@
 (ns seon.agent.ctx.namespaces
-  "The `:namespaces` context section — THE BODY of the prompt. COMPACT
-   EVERYTHING EXCEPT THE CURRENT NS: no hardcoded namespace list, no `my.*`
-   pinning, no `:always` allow-list. THREE rules, nothing else
-   ([[namespaces-block]]):
+  "Render relevant code namespaces into agent context.
 
-     - FULL — the agent's CURRENT ns (its complete working code) PLUS any ns in
-       the per-agent `::full-source` presence-set. Nothing else renders full.
-       The current ns is gated by the `::current-full?` flag (default true).
-     - COMPACT CARD — every ns the CURRENT ns `:require`s (ALL of them), that
-       isn't already full: inert schema and fn signature records, with no
-       pseudo-definitions or serialized runtime objects. Self-healing on the
-       `:seon.ns/require-edges` rows — write a real `(:require [x …])` and `x`
-       joins as a card; drop the require → it vanishes
-       ([[render-one-ns-compact]]).
-     - DROPPED — everything else remains indexed and searchable, just not
-       resident in the section. `*.internal` / `*-test` and empty cards are
-       always omitted.
-
-   Each rendered ns is a comment-block delimited by per-ns
-   `;;; ┌─ namespace x ─` / `;;; └─ end namespace x ─` brackets
-   ([[seon.agent.ctx/ns-demarc]]).
-
-   Symbol-wired into the composer layout (`seon.agent.ctx/default-seed-blocks`) as
-   `'seon.agent.ctx.namespaces/namespaces-block`; loaded at boot so the
-   symbol resolves for `seon.eval/lookup-value`.
-
-   The section NEVER re-reads files at render time (code-as-data): the boot
-   indexer (`seon.client/ns-row`) is the ONE file-reader. It stores the REAL
-   full file text for the nses that CAN render full ([[full-source-ns?]] — the
-   BOOT-STORAGE rule, all `my.*` incl. the agent's home ns + the config
-   `:always` nses + the extra-src roots) and leaves the rest a `(ns x)` stub.
-   Boot storage is a SUPERSET of what any one agent renders full — it governs
-   WHICH source is available, not the per-agent SELECTION above. So a full row
-   here is always real file source; a compact card reads only indexed
-   fn/schema rows (no stored source needed)."
+   The current namespace may appear in full, while its required namespaces
+   appear as compact cards containing indexed schemas and public signatures.
+   Selection is database-derived from real require edges; source indexing and
+   function execution remain outside this namespace."
   (:require
     [cljs.reader :as edn]
     [clojure.string :as str]

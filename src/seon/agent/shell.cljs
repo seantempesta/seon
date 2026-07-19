@@ -1,44 +1,10 @@
 (ns seon.agent.shell
-  "Run real commands — argv in, `{exit out err}` out, as data.
+  "Run explicitly granted subprocesses and return their results as data.
 
-   A formatter, a one-off `node`/`python` script, a `git` query: `run`
-   executes it and hands back the universal shell contract. ARGV ONLY —
-   there is no shell, no string interpolation, no injection surface.
-
-   ## The ok? refinement (read this)
-
-   `:seon.agent.shell/ok? true` means **the process RAN** and exit/out/err is
-   the answer — a NON-ZERO exit is a legitimate result (a formatter
-   found issues, a test failed, `git diff` found changes): read
-   `:seon.agent.shell/exit` yourself. `ok? false` is reserved for COULD NOT
-   RUN AT ALL (SEON_SHELL ungranted, cwd denied, binary not found,
-   internal error).
-
-   ## Security model
-
-   **Default-deny.** The whole capability is gated by the host-owned
-   `SEON_SHELL` env var (inspect with [[grants]]); a `:seon.agent.shell/cwd`
-   is additionally gated through the seon.agent.fs allowlist. A soft
-   boundary against LLM accidents, not a security boundary.
-
-   ## Output discipline
-
-   stdout/stderr in the envelope carry the full captured streams with honest
-   token metadata: `:seon.agent.shell/out-tokens` / `err-tokens` report their
-   size, `:seon.agent.shell/truncated?` flags any RAM-guard drop, and
-   `:seon.agent.shell/hint` names how to get more.
-
-   ## Worked examples
-
-     (seon.agent.shell/grants)   ; the SEON_SHELL grant — call this first
-     (seon.agent.shell/run {:seon.agent.shell/cmd  \"git\"
-                            :seon.agent.shell/args [\"status\" \"--porcelain\"]
-                            :seon.agent.shell/cwd  \"/Users/me/work-folder\"})
-     ; ⟹ «map: ::ok? true, ::exit 0, ::out/::err strings, ::out-tokens/::err-tokens ints, ::timed-out?/::truncated? bools»
-     (seon.agent.shell/py-run {:seon.agent.shell/source \"import sys\\nprint(sys.version)\"})
-
-   Plumbing (caps, grant read, cwd gate, subprocess request) lives in
-   [[seon.agent.shell.internal]]."
+   The public capability accepts argv-based commands, scripts, or background
+   jobs and reports execution, output size, truncation, and test projections in
+   typed envelopes. Grant enforcement and subprocess plumbing live in the
+   internal namespace; nonzero exits remain ordinary process results."
   (:require
     [clojure.string :as str]
     [seon.agent.shell.internal :as in]

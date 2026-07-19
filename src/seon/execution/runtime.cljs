@@ -1,5 +1,8 @@
 (ns seon.execution.runtime
-  "Composition root and compiled prompt entrypoint for execution children."
+  "Compose execution-child services and compiled prompt entrypoints.
+
+   This runtime wires evaluation, rendering, database access, and request
+   dispatch inside one child without taking over host process supervision."
   (:require
    [my.blob]
    [my.canvas]

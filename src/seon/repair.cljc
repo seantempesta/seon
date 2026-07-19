@@ -1,10 +1,5 @@
 (ns seon.repair
-  "Best-effort delimiter repair for one Clojure form, via parinferish
-   indent-mode. The heart of the multi-form eval path's self-correction:
-   when a top-level form fails to READ (an unmatched/missing delimiter),
-   we attempt an indent-mode repair, re-validate that the repaired text
-   now reads cleanly, and — only then — hand the repaired source back so
-   the eval pipeline can auto-eval it.
+  "Repair delimiters in one Clojure form on a best-effort basis.
 
    CLJC so the pod (`seon.eval`) and portable tests use ONE mechanism.
    Formatting is deliberately separate, and the caller already knows the

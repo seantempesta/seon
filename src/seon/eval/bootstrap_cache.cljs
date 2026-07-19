@@ -1,6 +1,5 @@
 (ns seon.eval.bootstrap-cache
-  "Bootstrap analysis-cache loading — the shared LEAF under `seon.eval`
-   and `seon.worker-eval` (dual-code-paths registry C9).
+  "Load analysis caches for self-hosted CLJS evaluation.
 
    Loads every `<bootstrap>/ana/*.transit.json` emitted by the shadow
    `:bootstrap` build into a cljs.js compile-state, so every namespace in

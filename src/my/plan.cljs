@@ -1,40 +1,10 @@
 (ns my.plan
-  "Your PLANNING system — a per-agent dependency graph, not a todo list.
-   One step = one `:my.plan` entity: a `:my.plan/parent` ref nests steps
-   under a root (whose `:my.plan/goal` says WHY and `:my.plan/pace` says
-   whether this spans sessions), `:my.plan/needs` refs make dependency
-   edges (a step is READY only when every need is `:done`), and
-   `:my.plan/status` `:active` marks where you ARE (one step at a time —
-   `active!` demotes the rest). `:my.plan/expect` states the falsifiable
-   outcome of a step — VERIFY it before `done!`, don't close on \"I
-   performed an action\". Progress, blocked-ness, readiness, and your
-   position anchor are all DERIVED from the step facts every turn — nothing
-   derivable is stored.
+  "Maintain an agent's durable dependency-aware plan graph.
 
-   Every turn your plan section renders WINDOWED: the position anchor
-   (goal + where you are + N of M done), the open frontier (active + ready
-   steps), and a short recently-completed tail — the completed interior
-   stays queryable (`tree`, `status`), out of the prompt. After a restart,
-   re-ground from that anchor, not from transcript archaeology.
-
-   For any multi-step task: lay the WHOLE plan down first, `active!` the
-   step you take up, verify its `expect`, `done!` it, move on. Worked
-   example:
-
-     (my.plan/plan!
-       {:my.plan/title \"Ship the expense tracker\"
-        :my.plan/goal  \"a tracker my human keeps using across sessions\"
-        :my.plan/pace  :multi-session
-        :my.plan/children
-        [{:my.plan/title \"design + register the schema\" :my.plan/ref \"schema\"
-          :my.plan/expect \"register! returns and a test row transacts\"}
-         {:my.plan/title \"write the seed expenses\" :my.plan/after [\"schema\"]
-          :my.plan/ref \"rows\"}
-         {:my.plan/title \"summary fn + surface\" :my.plan/after [\"rows\"]
-          :my.plan/expect \"surface renders totals with zero warnings\"}]})
-     (my.plan/active! {:my.plan/id \"<schema-step-id>\"})
-     ;; …do the work, VERIFY the expect, then:
-     (my.plan/done!   {:my.plan/id \"<schema-step-id>\"})"
+   This namespace is the public planning surface for creating and reconciling
+   plan trees, selecting active work, recording dependencies and outcomes, and
+   deriving readiness, blockage, progress, and bounded context views. Plans are
+   database facts scoped to one agent, never transcript or todo-list state."
   (:refer-clojure :exclude [next])
   (:require
     [clojure.string :as str]

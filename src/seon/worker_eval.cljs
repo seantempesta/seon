@@ -1,7 +1,5 @@
 (ns seon.worker-eval
-  "LEAN, STANDALONE EVAL/CORRECTNESS oracle for CO-LOCATION on the diffusion
-   GPU worker — the EVAL TIER sibling of the parse tier
-   (`seon.worker-validator` / `bin/oracle-server`).
+  "Evaluate generated CLJS beside the diffusion worker.
 
    ## What this answers
 

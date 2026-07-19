@@ -1,21 +1,10 @@
 (ns seon.agent.testrun
-  "Parse test-runner output into data + persist the latest run as datoms.
+  "Parse and persist structured test-run results.
 
-   ONE parser, two consumption points: `seon.agent.shell/run` attaches the
-   parsed map to a pytest run-response, and (via [[record!]]) the parsed
-   result is projected into the graph so the `:test-failures` context
-   section can render the CURRENT failing set reactively. Today the one
-   recognized framework is pytest; the shape is framework-tagged so a second
-   parser is a new `::framework` case here, never a second mechanism.
-
-   Errors-are-values: [[parse]] NEVER throws and NEVER guesses — output it
-   doesn't recognize as a test run returns `{::ok? false ::framework
-   :unknown …}`, the caller attaches nothing.
-
-   ## Worked example
-
-     (seon.agent.testrun/parse {::stdout \"…FAILED path::test - msg…\"})
-     ; ⟹ «map: ::ok? true, ::framework :pytest, ::passed 2, ::failed 1, ::errors 0, ::failures [{::test-name \"test\", ::path \"path\", ::message \"msg\"}]»"
+   This namespace recognizes supported runner output, projects the current
+   result into database facts, and returns unrecognized output as data. It is
+   the shared parser for shell responses and reactive failure context, with new
+   frameworks added here rather than through parallel parsers."
   (:require
     [clojure.string :as str]
     [seon.db :as db]

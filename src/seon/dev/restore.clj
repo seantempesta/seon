@@ -1,5 +1,8 @@
 (ns seon.dev.restore
-  "Immutable restore intent and fact-derived retry commands."
+  "Derive database restore commands from immutable intent and facts.
+
+   Development tooling uses this pure state machine to choose the next
+   recoverable operator action; filesystem publication has a separate owner."
   (:require [malli.core :as m]
             [seon.db.branch :as branch]
             [seon.db.protocol :as protocol]

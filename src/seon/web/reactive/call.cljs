@@ -1,6 +1,5 @@
 (ns seon.web.reactive.call
-  "The `/agent/{id}/call` route — agent fn-calls authored as hiccup, routed
-   into the selected agent's sandbox.
+  "Route hiccup-authored calls into an agent sandbox.
 
    This is the THIRD door of the one sandboxed-execution service (eval +
    render are the other two): an interaction is just an eval authored as

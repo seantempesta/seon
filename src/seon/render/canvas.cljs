@@ -1,10 +1,5 @@
 (ns seon.render.canvas
-  "The canvas — the ONE thing an agent is currently conveying to
-   its human (a chart, a status, a list — whatever the human asked
-   for). One wired value renders at every zoom surface: the root grid
-   (compact), the agent view (expanded), and — as an ai render — the
-   agent's own context every turn, so the agent always knows what its
-   human currently sees.
+  "Render the focal canvas shared by an agent and its human.
 
    ## Wiring the canvas
 

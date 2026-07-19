@@ -1,7 +1,9 @@
 (ns seon.demo
-  "Demo core ns — the always-on fixture for third-party build-time override.
-   `greet-loudly` calls `greeting` through the late-bound global, so a
-   third-party override of `greeting` flows through to existing callers.")
+  "Provide the namespace fixture for downstream build overrides.
+
+   The fixture exercises late-bound definitions so downstream builds can
+   replace behavior without changing callers. It is demonstration data, not an
+   application service.")
 (defn greeting
   "Overridable demo greeting."
   {:malli/schema [:=> [:cat] :string]}

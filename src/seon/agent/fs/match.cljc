@@ -1,25 +1,9 @@
 (ns seon.agent.fs.match
-  "Deterministic matching cascade for anchored in-place file edits.
+  "Choose deterministic matches for anchored file edits.
 
-   Pure fns — string in, decision out, NO IO — so a JVM gold-patch
-   replay harness can drive the exact production matcher without a pod.
-   The core rule: smart matching may FIND candidates; only DETERMINISTIC
-   matching MUTATES. The cascade (first hit wins):
-
-     1. exact text, exactly `::expected-count` occurrences → apply
-     2. exact text within the `::near` line window, exactly-count → apply
-     3. conservative normalization ONLY (CRLF/LF, per-line trailing
-        whitespace, final newline — NEVER indentation or internal
-        whitespace), line-based, exactly-count → apply, flagging which
-        normalizations matched (3b: the same within `::near`)
-     4. otherwise FAIL with `::reason` (`::not-found` / `::ambiguous`)
-        and `::candidates` — every occurrence carries a line-numbered
-        `::preview`. No fuzzy matching, no scoring, no guessing.
-
-   Stage 3 is LINE-based: a `::find` that does not span whole lines can
-   only match exactly (stages 1–2). [[decide]] is the single entry
-   point; [[number-lines]] is the ONE line-number formatter, shared
-   with `seon.agent.fs`'s read surface and the candidate previews."
+   The portable matcher evaluates exact, nearby, and conservative line-level
+   normalized candidates and returns an unambiguous decision with diagnostics.
+   It performs no I/O and never uses fuzzy scoring to authorize a mutation."
   (:require
     [clojure.string :as str]
     [seon.schema :as schema]))

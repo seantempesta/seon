@@ -1,6 +1,5 @@
 (ns seon.web.datastar
-  "Datastar SSE streamer — the hyperlith `view = f(db)` model
-   ported into the pod.
+  "Stream database-derived views through Datastar morphs.
 
    Each route derives a complete view from one immutable database value.
    Initial paint and later relevant commits send the whole `#app-view`.

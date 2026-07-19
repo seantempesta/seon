@@ -1,38 +1,10 @@
 (ns my.ui
-  "COMPOSE your canvas from small dual-render pieces — don't hand-roll a
-   `[:div …]` from scratch. Every helper here takes DATA and returns the
-   `:seon.render/html-response` envelope your canvas wants:
+  "Compose static canvas views from dual-render building blocks.
 
-     {:seon.render/hiccup […]   ; the HUMAN's view — styled, safelisted
-      :seon.render/ai    \"…\"}    ; YOUR view — the SAME info, compact text
-
-   The two are mirrored from ONE input, so they CAN'T drift: the agent
-   reasons over the lean `:seon.render/ai` line it sees every turn (the
-   `; Your canvas` section renders it), while the human gets the
-   beautiful HTML. Neither lies about the other.
-
-   THE MOVE — set your canvas by COMPOSING, then wire the result. Build
-   pieces, stack them in a `section`, transact the section's hiccup:
-
-     (let [s (section
-               {:my.ui/title \"Subscriptions\"
-                :my.ui/blocks
-                [(status-line {:my.ui/label \"Total\" :my.ui/value \"$101/mo\"
-                               :my.ui/tone :signal})
-                 (kv-table {:my.ui/rows [[\"Adobe CC\" \"$45\"]
-                                         [\"Netflix\" \"$18\"]]})]})]
-       (seon.db/transact!
-         {:seon.db/tx-data
-          [{:seon.agent/id (seon.db/current-agent-id)
-            :seon.render.canvas/content (:seon.render/hiccup s)}]}))
-
-   For a live surface that re-derives every render, wrap a `section` call in a
-   home-ns fn and wire its SYMBOL instead (see the `ui-canvas` skill).
-
-   All helpers emit ONLY safelisted classes (`resources/public/css/input.css`)
-   — anything else is invisible — and are SYNC pure data (no `^:async`).
-   `section` COMPOSES child envelopes: it stacks their hiccup and joins
-   their `:seon.render/ai`, so the mirror holds through nesting."
+   This namespace turns ordinary data into paired human-facing hiccup and
+   compact agent-facing text. It provides layout, status, table, and prose
+   components that remain synchronized by construction; persistence and
+   interactive behavior belong to the canvas and database namespaces."
   (:require
     [clojure.string :as str]
     [seon.schema :as schema]))

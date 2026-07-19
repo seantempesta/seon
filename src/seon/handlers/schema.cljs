@@ -1,6 +1,5 @@
 (ns seon.handlers.schema
-  "Renderers for `:seon.schema` entities — Malli schemas the agent has
-   registered via `(seon.schema/register! …)`.
+  "Render registered schema facts for agent context.
 
    Each entity renders WHAT THE SCHEMA IS (the live shape from the
    Malli registry), not the eval source that registered it. The shape
@@ -70,4 +69,3 @@
      ;; "generate sample" deferred — no eval-against-compile-state
      ;; route yet; see report.
      ]))
-

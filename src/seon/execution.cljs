@@ -1,5 +1,8 @@
 (ns seon.execution
-  "Data-only protocol and Bun entry point for one agent execution child."
+  "Define the protocol and Bun entry point for an execution child.
+
+   This namespace owns data exchanged with one agent process and dispatches its
+   compiled operations; supervision and runtime composition have separate owners."
   (:require
    [cognitect.transit :as transit]
    [clojure.walk :as walk]

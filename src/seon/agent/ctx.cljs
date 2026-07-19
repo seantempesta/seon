@@ -1,47 +1,10 @@
 (ns seon.agent.ctx
-  "Context generation — the ONE block renderer. The prompt IS a REPL
-   session: a static system header, the loaded namespaces as the body, the
-   agent's own entity as a map, what the human currently sees, the
-   reactive warnings/plan, and the comment-block transcript of past
-   turns + the live readline. Layout is ordered top→bottom =
-   static→volatile: everything through `:namespaces` is the
-   provider-cacheable prefix.
+  "Compose agent context from database-backed render blocks.
 
-   This namespace owns:
-     - the `:seon.agent.ctx/*` block schemas (`:seon.agent.ctx/name`,
-       `:seon.agent.ctx/priority`, the `:seon.agent.ctx/block` map shape). The
-       one slot attr is `:seon.render/ai` (string = verbatim doctrine,
-       symbol = late-bound block fn); `:seon.render/html` is the
-       optional debug-view twin.
-     - `install!` / `remove!` — the ONE scope-aware mutation surface over the
-       agent's own `:seon.agent/ctx` block set; [[initial-agent-context]]
-       projects the manifest-declared tree into the atomic birth transaction.
-       `selected-agent-blocks` reads the agent's COMPLETE `:seon.agent/ctx`, decoded
-       + priority-sorted — NO render-time merge, NO separate default set, NO
-       char budget. The render guard (a broken block renders an inline error
-       line, never breaks assembly) lives in [[seon.render]].
-     - the namespace-display selection rules live in their rightful
-       home [[seon.agent.ctx.namespaces]]:
-       [[seon.agent.ctx.namespaces/included-ns?]] (the ONE structural rule —
-       EVERY indexed `:seon.ns` row renders EXCEPT *.internal and *-test
-       ones; the library gate lives on the INDEX side) and
-       [[seon.agent.ctx.namespaces/full-source-ns?]] (which rows the boot
-       indexer inlines real file text for).
-     - `system-text` — the byte-stable, system-specific seon mechanics
-       sent as the LLM `system` role message (via
-       `seon.ai/effective-system-prompt`); NOT a context section (the
-       soul/agents files are context sections via [[file-block]]) — and
-       the pure formatting functions shared by acquired context data. The
-       other core sections live in their own
-       `seon.agent.ctx.<name>` nses: :namespaces → `seon.agent.ctx.namespaces`,
-       :canvas → `seon.agent.ctx.canvas`, :warnings →
-       `seon.agent.ctx.warnings`,
-       :transcript → `seon.agent.ctx.transcript`;
-       `config/system.edn` wires active blocks by SYMBOL (late lookup-value
-       resolution), so this ns does NOT require them — they require this
-       ns for the shared read API.
-   Child acquisition is asynchronous over one immutable database value in
-   `seon.execution.runtime`; this namespace formats only ordinary values."
+   This namespace owns block schemas, selection, installation, ordering, and
+   shared formatting for the prompt's stable context structure. Individual
+   block families own their queries and presentation; execution children
+   acquire ordinary values, and `seon.render` guards their rendering."
   (:require
     [clojure.string :as str]
     [cljs.reader :as edn]

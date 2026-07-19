@@ -1,5 +1,8 @@
 (ns seon.db.branch
-  "Datahike connection identity and Proximum branch-head values."
+  "Define portable Datahike connection and Proximum branch values.
+
+   These schemas name store, branch, basis-transaction, and commit facts shared
+   across the database protocol; they do not manage live connections."
   (:require
    #?@(:bb []
        :clj [[datahike.api :as d]

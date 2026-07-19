@@ -1,40 +1,9 @@
 (ns seon.agent.ctx.typeahead-steps
-  "The `:typeahead-steps` ctx block family — the diffusion typeahead
-   provider's observability twin (typeahead-design.md \"The live block\").
+  "Render diffusion typeahead step telemetry into context.
 
-   ONE block, BOTH render slots. Acquisition is asynchronous and pinned to
-   the invocation database value; formatting is pure over ordinary values:
-
-     - `:seon.render/html` ([[steps-surface-html]]) — the agent-page live
-       surface: a state banner (FSM state now, provider, step k/N, rounds,
-       wall, ctx tokens, server sha), THE CODE-BUFFER PANE (the last
-       step's `buffer_text` painted by `buffer_spans` status — locked /
-       clamped / settled / resolving / repaired / frontier — with a
-       legend), the offers panel (per-offer fired/suppressed/
-       below-margin + a calibrated-margin bar against the threshold),
-       the holes panel (per-hole entropy, CAL-chosen length, accepted),
-       the done-ness strip (EOS logprob meter + harvest totals) and the
-       compact step history. Fed by the per-step `:seon.typeahead/*`
-       projections the provider loop (`seon.ai.typeahead`) transacts
-       each round, so a tx during a live call morphs the surface via the
-       normal datastar SSE channel. nil when the agent has no step
-       rows — the surface vanishes; every panel vanishes when its rows
-       lack the data (reactive-context).
-     - `:seon.render/ai` ([[steps-ai]]) — the provider protocol's
-       special instructions, rendered ONLY when the agent's RESOLVED
-       provider is `:typeahead` (the per-agent provider overlay included). Any
-       other provider → \"\" and the section vanishes at zero token
-       cost. Glyph-selection teaching stays colocated with the menu
-       sections (`seon.agent.ctx.menu` headers own it — one fact, one
-       file); this slot adds only what the menu does not teach: how the
-       step loop builds the reply and the live result grammar.
-
-   NOT installed by default anywhere (owner constraint): no config seed,
-   no self-install. Enabling is an explicit per-agent
-   `(seon.agent.ctx/install! steps-block)` (or a manifest override a
-   cluster opts into — documented in typeahead-design.md, never shipped
-   in a default config). `(seon.agent.ctx/remove! :typeahead-steps)`
-   reverts; both slots vanish on the next render."
+   The block projects current provider-step observations into an optional,
+   database-derived context view. It focuses on observability and presentation;
+   provider control, policy, and persistence are owned elsewhere."
   (:require
     [cljs.reader :as reader]
     [clojure.string :as str]

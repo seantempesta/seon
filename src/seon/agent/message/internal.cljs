@@ -1,17 +1,9 @@
 (ns seon.agent.message.internal
-  "Private plumbing for `seon.agent.message` — the user-entity predicate
-   and the newest-inbound hop base used by `message!`.
+  "Support message writes with private identity and routing helpers.
 
-   Factored out of the public message surface so the teaching ns shows ONLY
-   message!/user/agent + the public wake-rule predicates + their register!
-   schemas (the `*.internal` convention drops these from rendered agent
-   context — see `seon.agent.ctx.namespaces/hidden-ns-name?`).
-
-   Required ONLY by its parent ns `seon.agent.message`.
-
-   Keyword-namespace note: this lives under `seon.agent.message.internal`,
-   so `::foo` would expand WRONG. Every helper references the owning ns's
-   attrs fully-qualified (`:seon.agent.message/from`, never `::from`)."
+   This internal namespace contains user lookup, target validation, and shared
+   message data transformations used by `seon.agent.message`. It owns no public
+   schemas or agent-facing messaging surface."
   (:require
     [clojure.string :as str]
     [seon.db :as db]

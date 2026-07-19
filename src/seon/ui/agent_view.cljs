@@ -1,5 +1,8 @@
 (ns seon.ui.agent-view
-  "Pure agent-page formatting from one database-derived ordinary projection."
+  "Format an agent page from one database projection.
+
+   This pure UI leaf composes eager header and surface data into stable hiccup.
+   Acquisition, render execution, and live-feed publication happen upstream."
   (:require
    [clojure.set :as set]
    [seon.render.surface :as surface]

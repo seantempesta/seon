@@ -1,32 +1,10 @@
 (ns my.data
-  "Turn stored rows into the number your human asked for — SUM, argMAX,
-   group-then-sum — WITHOUT hand-rolling a datalog aggregate. Datalog's
-   aggregates have two traps these functions make unreachable:
+  "Aggregate database rows without Datalog aggregate surprises.
 
-     - the `(sum ?x)` DEDUP collapse — an aggregate runs over the
-       deduplicated projected tuples, so two rows of 5 sum to 5, not 10,
-       unless you remember `:with ?e` (see the old my.kb/source-stats
-       warning). Here you reduce over MAPS with plain Clojure, which never
-       dedups — the footgun is structurally gone.
-     - the argMAX value-vs-entity trap — `(max ?c)` gives you 45, NOT the
-       entity that costs 45, so you need a second join to recover the name.
-       [[max-by]] returns the ROW, so 'which one is biggest' is one call.
-
-   THE PIPELINE — two PRODUCERS emit a `:seon.items/*` envelope (a vector of
-   self-describing entity maps + a count), two REDUCERS consume those items
-   plus a `:my.data/key` and emit a scalar / a row:
-
-     PRODUCE  rows        :my.data/attr      → :seon.items/* envelope
-              group-sum   items + group-key  → :seon.items/* envelope
-     REDUCE   sum-by      items + key        → number
-              max-by      items + key        → the winning row (or nil)
-
-   `rows` is asynchronous because database reads cross the authority session;
-   the three reducers remain pure synchronous functions over its ordinary
-   envelope.
-
-   NB rows does NOT clip — aggregation needs every row, so a truncated
-   collection would silently corrupt a sum."
+   This namespace bridges asynchronous attribute-oriented row retrieval with
+   pure item-envelope reducers for totals, grouping, and extremum selection.
+   It preserves duplicate row values and returns source rows where identity
+   matters. Query design and domain schemas remain with the calling namespace."
   (:refer-clojure :exclude [key])
   (:require
     ;; the shared `:seon.items/*` collection envelope + `:seon.result/ok?`

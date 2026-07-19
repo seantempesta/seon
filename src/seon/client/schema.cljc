@@ -1,5 +1,8 @@
 (ns seon.client.schema
-  "Portable schemas for the process launch capability owned by `seon.client`."
+  "Define portable process-launch schemas for `seon.client`.
+
+   These closed data shapes cross the operator and pod boundary; process
+   orchestration and lifecycle behavior remain in `seon.client`."
   (:require [seon.schema :as schema]))
 
 (schema/register! :seon.client/autonomous? :boolean)

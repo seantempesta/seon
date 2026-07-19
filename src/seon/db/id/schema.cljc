@@ -1,5 +1,8 @@
 (ns seon.db.id.schema
-  "Portable syntax and policy schemas for generated database identities."
+  "Define portable syntax and policy for generated database identities.
+
+   These declarations describe readable agent ids and compact persistent ids;
+   allocation and collision handling remain with the database authority."
   (:require [seon.schema :as schema]))
 
 (def word-pattern-source "^[a-z0-9]+-[a-z0-9]+-[a-z0-9]+$")

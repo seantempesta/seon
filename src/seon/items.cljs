@@ -1,11 +1,5 @@
 (ns seon.items
-  "The shared self-describing-collection envelope — a `:seon.items/*`
-   paged-list shape: a vector of self-describing entity maps
-   (`:seon.items/items`) plus their `:seon.items/count`, tagged with the
-   `:seon.result/ok?` discriminator. Registered ONCE here and referenced
-   (never inlined) by every producer/consumer of a collection result —
-   `my.data` (the aggregation toolkit), `my.kb/recall`, and the upcoming
-   `my.schedule`/`my.canvas`.
+  "Define the shared envelope for paged collections.
 
    Keyword namespaces = real code namespaces: the `:seon.items/*` shapes
    live in `seon.items`, the ns whose name the keywords carry — not in

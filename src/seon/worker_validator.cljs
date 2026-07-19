@@ -1,6 +1,5 @@
 (ns seon.worker-validator
-  "LEAN, STANDALONE parse/syntactic oracle for CO-LOCATION on the diffusion
-   GPU worker.
+  "Validate generated syntax beside the diffusion worker.
 
    The eval-renoise loop validates a PARTIAL code-buffer every diffusion
    checkpoint. Done over the internet that is a ~100ms round-trip per

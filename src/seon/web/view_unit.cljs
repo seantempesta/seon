@@ -1,5 +1,8 @@
 (ns seon.web.view-unit
-  "Stable browser identity for database-derived web units."
+  "Derive stable browser identities for database-backed web units.
+
+   Canonical tokens give morph targets deterministic presentation identity.
+   This namespace does not render, cache, query, or publish feeds."
   (:require [seon.schema :as schema]))
 
 (schema/register! ::identity-value

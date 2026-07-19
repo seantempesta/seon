@@ -1,53 +1,10 @@
 (ns seon.agent.web
-  "Fetch a web page — URL in, extracted markdown + a capped preview out.
+  "Fetch web content through a gated, browserless capability.
 
-   The lightweight, browserless read of the open web (the `curl` /
-   WebFetch class): `fetch` GETs a URL, extracts the main content to
-   markdown, stores the FULL text in the content-addressed blob store, and
-   hands back a small projection — url, final-url, status, title,
-   extractor, total TOKENS, blob-hash — plus a token-capped preview and a
-   capped link list. Page through the whole document with `my.blob/text`
-   on the returned `:seon.agent.web/blob-hash`; search it with
-   `seon.agent.search/grep` over the blob — this function adds NO paging or
-   search mechanism of its own.
-
-   ## The honest limitation
-
-   Fetch-only cannot render JavaScript: an SPA shell extracts to
-   near-nothing and the response says so (`:seon.agent.web/hint`). A
-   stateful browser tier is a separate, later tool.
-
-   ## Security model
-
-   **Default-deny + a host-owned reachability policy.** Two host-owned
-   knobs, distinct concerns: the `SEON_WEB` env var gates WHETHER web fetch
-   is available at all (default-deny); the cluster CONFIG
-   (`config/system.edn`'s `:seon.config/web`) shapes which TARGETS are
-   reachable via `:seon.agent.web/policy` — `:open` (anything),
-   `:public-only` (block loopback/RFC-1918/link-local/ULA on every redirect
-   hop — the SSRF-safe fallback), or `:allowlist` (only
-   `:seon.agent.web/allowed-domains`). The agent READS its policy via
-   [[grants]] but nothing inside the pod can widen it. Soft boundaries
-   against LLM accidents, not security boundaries.
-
-   ## Output discipline
-
-   Full extracted markdown → `my.blob` (content-addressed). The immediate
-   result carries the projection + a preview capped at
-   `:seon.agent.web/max-preview-tokens` (default 2000) with HONEST totals
-   (`:seon.agent.web/total-tokens`, `:seon.agent.web/preview-tokens`,
-   `:seon.agent.web/truncated?`) — a partial read never looks complete.
-   All sizes are TOKENS via seon.ai.tokens/estimate, never chars.
-
-   ## Worked examples
-
-     (seon.agent.web/grants {}) ; the SEON_WEB grant + reachability policy
-     (await (seon.agent.web/fetch {:seon.agent.web/url \"https://example.com\"}))
-     ; ⟹ «map: ::ok? true, ::status 200, ::title \"Example Domain\", ::extractor :readability, ::total-tokens 84, ::preview \"# …\", ::blob-hash \"9f86d0…\", …»
-     (my.blob/text {:my.blob/hash \"9f86d0…\"})   ; page the FULL document
-
-   Plumbing (SSRF guard, transport, extraction, grant read) lives in
-   [[seon.agent.web.internal]]."
+   The public surface retrieves allowed URLs, stores full extracted text in the
+   content-addressed blob tier, and returns a token-bounded preview with honest
+   metadata and links. It does not render JavaScript or create another paging
+   mechanism; transport, redirects, and reachability checks are internal."
   (:refer-clojure :exclude [fetch])
   (:require
     [clojure.string :as str]

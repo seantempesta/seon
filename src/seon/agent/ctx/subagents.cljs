@@ -1,25 +1,10 @@
 (ns seon.agent.ctx.subagents
-  "Two derived agent-relationship context sections (multiagent-context Pieces
-   3 + 4), both pure functions of the db that render NOTHING when their query
-   is empty (the reactive-context vanish — no stored state, nothing to clear):
+  "Render derived subagent relationships into context.
 
-     - `subagents-block` — the GENERAL section: the DIRECT children the
-       rendering agent spawned (`:seon.agent/parent` = me), one compact line
-       each with derived state + progress-or-result-or-death. A parent's
-       monitoring surface: completion is a FACT in the DB (`:seon.agent.run/
-       result`), so a parent that was mid-turn or restarted still sees every
-       child result. The renderer is deliberately dormant in the minimal
-       manifest until solo-agent drives graduate.
-
-     - `orphaned-agents-block` — the ROOT-ONLY section: live agents whose
-       parent is TERMINATED. Root (or the human) decides per case with the
-       existing functions — no cascade-terminate, no reparenting (observe first).
-       Wired into `:seon.config/root-context` (like `:core-faults`).
-
-   Sizes shown are TOKENS (`seon.ai.tokens/estimate`), never chars. Both
-   sections read the passed db EXPLICITLY (purity) and are byte-stable given a
-   db — the beat-age / breaker `now` is the only wall-clock input (a display
-   surface, not the pure scan core)."
+   The blocks summarize direct children for their parent and orphaned live
+   agents for the root, disappearing when their database queries are empty.
+   They are read-only monitoring views; lifecycle decisions and run outcomes
+   remain owned by the agent runtime."
   (:require
     [clojure.string :as str]
     [seon.ai.tokens :as tokens]

@@ -1,6 +1,5 @@
 (ns seon.diffusion.retrieval
-  "RETRIEVAL leg of the diffusion buzzsaw — the third control signal beside
-   parse (`seon.worker-validator`) and eval (`seon.worker-eval`).
+  "Retrieve program-graph context for diffusion checkpoints.
 
    ## What it answers
 

@@ -1,11 +1,9 @@
 (ns seon.agent.home
-  "Agent home-namespace data and reads.
+  "Derive each agent's home namespace and require policy.
 
-   The home namespace is a pure projection of an agent id. This namespace is
-   the one lower owner of that projection, its canonical require data, the
-   reactive per-agent require read, and the exact `(ns …)` source renderer.
-   It depends only on the database leaf, so agent creation, eval, and context
-   rendering can all reuse the same data without a require cycle."
+   This database-leaf namespace owns the canonical home-name projection,
+   reactive require data, current-namespace selection, and namespace source
+   rendering shared by creation, evaluation, and context assembly."
   (:require
     [clojure.string :as str]
     [seon.db :as db]

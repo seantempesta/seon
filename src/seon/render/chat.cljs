@@ -1,5 +1,8 @@
 (ns seon.render.chat
-  "Pure conversation bubble and stream renders over already-acquired messages."
+  "Render acquired messages as conversation bubbles and streams.
+
+   Pure projections format eager message data as chat hiccup. Database
+   acquisition, transcript selection, and feed publication remain upstream."
   (:require
     [seon.schema :as schema]
     [seon.ui.markdown :as md]))

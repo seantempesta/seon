@@ -1,5 +1,8 @@
 (ns seon.render.surface
-  "Pure surface normalization for database-derived execution-child results."
+  "Normalize execution-child results into renderable surfaces.
+
+   Pure transformations validate and order already-derived surface data. They
+   neither invoke render functions nor acquire database values."
   (:require
    [clojure.string :as str]
    [seon.schema :as schema]

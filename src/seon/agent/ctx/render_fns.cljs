@@ -1,5 +1,10 @@
 (ns seon.agent.ctx.render-fns
-  "Pure auto-run block selection and child-local selected-function execution."
+  "Select and execute database-authored context render functions.
+
+   This namespace derives auto-run blocks from indexed public function schemas
+   and invokes selected functions inside the execution child. It handles only
+   ordinary acquired data and render twins; context ordering and persistence
+   belong to the surrounding context system."
   (:require
    [cljs.reader :as reader]
    [malli.core :as m]

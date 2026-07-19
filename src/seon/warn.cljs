@@ -1,6 +1,5 @@
 (ns seon.warn
-  "Compositional, clustered warning checks over the program-graph corpus
-   (`:seon.fn` / `:seon.test` / `:seon.eval`).
+  "Derive clustered warnings from the program graph.
 
    Each `check-<kind>` is a separate, independently-testable fn:
 

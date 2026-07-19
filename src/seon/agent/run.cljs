@@ -1,35 +1,10 @@
 (ns seon.agent.run
-  "The RUN entity + its lifecycle — a run is the bounded unit of work a
-   trigger (an inbound message or a due schedule) opens. While a run is open
-   the agent is derived-`:running`; the loop drives turns until a BOUND fires:
-   the WORK bound (`turn-limit`, a bumpable count) or the WALL-CLOCK bound
-   (`deadline`, an absolute instant) — whichever first.
+  "Manage bounded, fenced units of agent work.
 
-   The run-id is the FENCING TOKEN: the agent's `:seon.agent/run` points at
-   the current run, and every WORK tx LEADS with an in-tx CAS
-   ([[seon.db/cas-assert]]) asserting the pointer STILL names this run — a
-   write from a superseded or timed-out run (a different run-id, or a
-   retracted pointer) aborts the whole tx at the single writer (the database,
-   not a pre-read predicate, reports the lost authority). New messages
-   `renew!` the lease (bump both bounds — the sliding window); `beat!` writes
-   a heartbeat per turn.
-
-   This namespace OWNS the `:seon.agent.run/*` schemas and the lifecycle:
-   `open-run!` / `close-run!` / `renew!` / `beat!` / `current-run` /
-   `turn-limit-reached?` / `deadline-passed?` /
-   `close-overdue-runs!` — the deadline WATCHDOG — and `close-stale-runs!` —
-   the HEARTBEAT watchdog (both scans run each pass of the one ticker,
-   [[seon.agent.loop/run-tick!]]; the schedule half is
-   `seon.agent.schedule/fire-due-schedules!`). `close-run!` is also the ONE
-   choke point that fires the Piece 2b parent/root OUTCOME notice.
-
-   Dependency direction (acyclic): it transacts via `seon.db` directly and
-   references `:seon.agent/*` keywords from the global registry (request agent
-   ids use `:string`, so this ns has NO load-time dependency on seon.agent). It
-   requires [[seon.agent.message]] (to send outcome notices — that ns never requires run
-   back, so acyclic) and the [[seon.error]] leaf (to record a wedge as a
-   `:core` fault). seon.agent requires THIS ns, so the edge runs
-   agent → run → {message, error}, never the reverse."
+   This namespace owns run schemas and lifecycle transitions, including work
+   limits, deadlines, heartbeats, renewal, and stale-run closure. The run id is
+   the database write fence; turn execution and loop scheduling remain in their
+   dedicated namespaces."
   (:require
     [seon.agent.ctx :as ctx]
     [seon.agent.message :as msg]

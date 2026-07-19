@@ -1,26 +1,10 @@
 (ns seon.agent.turn
-  "One agentic TURN, end-to-end — the unit the loop ([[seon.agent.loop]])
-   drives once per LLM completion.
+  "Execute and persist one complete agent turn.
 
-   A turn = open a `:seon.agent.turn` (stamping the agent's current run on
-   `:seon.agent.turn/run` so the run's derived current-turn count can count
-   it) → render the prompt → call the LLM → parse → eval-batch the forms →
-   close the turn. The per-form eval isolation (every form runs; errors are
-   values) lives in [[seon.eval]]; `eval-count = n-ok + n-fail`.
-
-   This namespace owns the `:seon.agent.turn/*` schema (its data-owner — a
-   turn is a STANDALONE entity that points UP to its run; there is no
-   session), and these fns:
-     - `run-turn!`      — one full turn (the loop calls this)
-     - `open-turn!` / `close-turn!` — the turn bracket (open-tx + close-tx)
-     - `ask-and-eval!`  — LLM call + parse + eval-batch
-     - `call-llm!`      — `(llm-fn prompt)` with one bounded transport retry
-     - `render-prompt`  — ctx assembly
-
-   Dependency direction (acyclic): it references `:seon.agent.run/*` keywords
-   (global registry, no require) and transacts via `seon.db` directly, so it
-   does NOT require `seon.agent` (which would cycle: `seon.agent.loop`
-   requires both). It MAY require ctx / eval / message / render."
+   This namespace brackets prompt acquisition, the sole retrying LLM call,
+   reply evaluation, and turn capture under the current run. It owns turn
+   schemas and orchestration, while per-form isolation, context composition,
+   and run fencing remain in their established namespaces."
   (:require
     [seon.ai :as ai]
     [seon.ai.tokens :as tokens]

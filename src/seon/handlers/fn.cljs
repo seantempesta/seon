@@ -1,6 +1,5 @@
 (ns seon.handlers.fn
-  "Renderers for `:seon.fn` entities — fns the agent has defined via
-   `(defn …)` or `(def …)` forms.
+  "Render captured function facts for agent context.
 
    Each entity renders WHAT THE FN IS (signature, doc, status), not
    the eval source that created it (the owning `:seon.eval` already

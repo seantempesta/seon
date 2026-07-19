@@ -1,5 +1,5 @@
 (ns seon.web.debug
-  "Database-value-pinned operator views backed by the remote database protocol.
+  "Render operator views pinned to immutable database values.
 
    Debug and data feeds receive ordinary values from the JVM writer. They do
    not retain Datahike database values or maintain a second render cache."

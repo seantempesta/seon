@@ -1,8 +1,5 @@
 (ns seon.diffusion.scaffold
-  "SCAFFOLD leg of the diffusion buzzsaw — the Seon-side template generator that
-   produces the clamp FRAME the GPU worker INFILLS. Where
-   `seon.diffusion.retrieval` CORRECTS a hallucinated symbol mid-denoise, this
-   ns CONSTRUCTS the frame a fn is generated INTO, before any GPU call.
+  "Build structural logit biases for diffusion generation.
 
    ## The `:defn-with-specs` MVP frame
 

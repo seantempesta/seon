@@ -1,5 +1,8 @@
 (ns seon.db.program
-  "Authority-owned reconciliation of compiled program facts."
+  "Reconcile compiled program facts at the database authority.
+
+   Namespace, function, schema, and test rows are diffed by their established
+   identities and committed together; compilation remains a pod concern."
   (:require [datahike.api :as d]
             [seon.schema :as schema]))
 

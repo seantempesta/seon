@@ -1,10 +1,5 @@
 (ns seon.retry
-  "Composable async retry — a general resilience primitive (NOT
-   LLM-specific). A STRATEGY is a lazy seq of delays in milliseconds; the
-   number of ATTEMPTS is `(inc (count strategy))` (the seq is the waits
-   BETWEEN attempts). The pure builder/manipulator combinators below
-   (strategy-as-seq, the design of the JVM `again` lib ported to native
-   CLJS) compose with `->`:
+  "Retry asynchronous operations with composable policy.
 
      (-> (multiplicative-strategy 500 2)  ; 500, 1000, 2000, …
          (randomize-strategy 0.5)         ; ± jitter

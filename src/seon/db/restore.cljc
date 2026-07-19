@@ -1,5 +1,8 @@
 (ns seon.db.restore
-  "Durable completion facts for one fully verified database restore."
+  "Define durable completion facts for verified database restores.
+
+   The portable model records the identity and proof of a completed restore;
+   filesystem orchestration and writer admission remain outside this namespace."
   (:require
    [seon.db.branch :as branch]
    [seon.db.id :as db.id]

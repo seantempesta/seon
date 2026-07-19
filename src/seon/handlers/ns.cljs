@@ -1,6 +1,5 @@
 (ns seon.handlers.ns
-  "Renderers for `:seon.ns` entities — namespaces the agent has created
-   via `(ns …)` forms.
+  "Render captured namespace facts for agent context.
 
    The entity card shows what the NAMESPACE CONTAINS (fns + schemas),
    not the `(ns ...)` source line itself — the owning `:seon.eval`

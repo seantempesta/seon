@@ -1,7 +1,5 @@
 (ns seon.ui.clojure
-  "Server-side Clojure syntax highlighter — `clj->hiccup`. A pure CLJS leaf,
-   the exact sibling of `seon.ui.markdown/md->hiccup`: source string in,
-   `[:pre [:code …]]` hiccup out, no client JS pass.
+  "Highlight Clojure source as server-rendered hiccup.
 
    Why server-side (not the CDN highlight.js the old `/debug` shell loads):
    the new agent view's shim ships ONLY `datastar.js` — no hljs — so eval

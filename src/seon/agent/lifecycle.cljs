@@ -1,11 +1,10 @@
 (ns seon.agent.lifecycle
-  "Agent-facing run lifecycle functions over ordinary database values.
+  "Control agent runs and lifecycle state through database facts.
 
-   State is derived from the agent's termination fact and current run. Each
-   operation acquires one immutable database value, reads every decision from
-   that value, and commits through the one JVM authority. Database failures are
-   returned directly as data; no lifecycle function creates another result
-   envelope or stores a state label."
+   This agent-facing namespace exposes scoped operations for waiting,
+   completing, pausing, resuming, and terminating work. It validates authority
+   and returns errors as data; state derivation and loop execution live in
+   their respective runtime owners."
   (:require
    [clojure.string :as str]
    [seon.agent.internal :as internal]

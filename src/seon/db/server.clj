@@ -1,5 +1,8 @@
 (ns seon.db.server
-  "Assemble and run the authoritative database process."
+  "Assemble and run the authoritative database process.
+
+   This composition root wires registry, executor, writer, transport, and
+   lifecycle ownership; domain semantics remain in their focused namespaces."
   (:require [clojure.core.server :as core-server]
             [clojure.edn :as edn]
             [clojure.java.io :as io]

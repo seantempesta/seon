@@ -1,5 +1,8 @@
 (ns seon.dev.restore.schema
-  "Portable restore identity schemas shared by operator and pod."
+  "Define restore identity schemas shared by operator and pod.
+
+   These portable declarations keep restore coordinates explicit across
+   process boundaries without owning restore planning or execution."
   (:require [seon.schema :as schema]))
 
 ;; Keys remain owned by `seon.dev.restore`; this namespace only makes their

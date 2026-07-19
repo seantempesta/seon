@@ -1,23 +1,10 @@
 (ns seon.agent.web.internal
-  "Plumbing behind `seon.agent.web` — the SSRF/private-range guard, the
-   redirect-following capped-body transport (direct `Bun.fetch`, zero
-   new transport deps), the readability + regex HTML→markdown extraction
-   pipeline (ported from openclaw's `web-fetch-utils.ts`), the `SEON_WEB`
-   grant read, and the errors-as-values envelope helpers.
+  "Implement web reachability, transport, and content extraction.
 
-   This namespace is INTERNAL: the `*.internal` ns name IS the render
-   filter — agents call the public functions in `seon.agent.web`, never these.
-   All map keys stay in the `:seon.agent.web/*` namespace (via
-   `:as-alias`): the keyword namespace tracks the OWNING DATA namespace
-   (`seon.agent.web`), not the file the code lives in — the same rule
-   fs/shell follow (the root 'keyword namespaces = real code namespaces').
-
-   ## Testing seams
-
-   [[!fetch-impl]] and [[!lookup-impl]] are override atoms so a hermetic
-   test injects a fake transport / DNS resolver and never touches the
-   network. The live pod leaves both nil (direct `Bun.fetch` +
-   `Bun.dns.lookup`)."
+   This internal namespace enforces host-owned target policy across redirects,
+   caps response bodies, extracts readable text, and builds public error
+   envelopes. Injectable transport and DNS seams support hermetic tests; agents
+   call only `seon.agent.web`."
   (:require
     [clojure.string :as str]
     [goog.object :as gobj]

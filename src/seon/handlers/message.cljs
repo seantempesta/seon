@@ -1,7 +1,5 @@
 (ns seon.handlers.message
-  "Renderers for `:seon.agent.message` entities — the AI-text form (`render-ai`)
-   and the HTML form (`render-html`). Both are the conventional shape
-   `(fn [{:seon.db/db :seon.agent/id :seon.render/entity}] ...)`.
+  "Render agent messages for model and human context.
 
    Stored on individual message entities via:
      :seon.render/ai   'seon.handlers.message/render-ai

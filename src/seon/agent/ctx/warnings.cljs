@@ -1,8 +1,9 @@
 (ns seon.agent.ctx.warnings
-  "The `:warnings` context section — current problems rendered as a
-   single-`;` `WARNINGS` comment-block via the `seon.warn` check registry.
-   Symbol-wired into the composer (`config manifest`) as
-   `'seon.agent.ctx.warnings/warnings-block`."
+  "Render current agent warnings into context.
+
+   The block presents active checks from `seon.warn` as a compact comment
+   section and disappears when none apply. Warning discovery and persistence
+   remain with their owning mechanisms."
   (:require
     [clojure.string :as str]
     [seon.agent.home :as home]

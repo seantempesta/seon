@@ -1,22 +1,9 @@
 (ns seon.agent.message
-  "Message model — THE single write path for `:seon.agent.message` rows.
-   The keyword namespace matches the code namespace. Owns:
-     - the `:seon.agent.message/*` attr + entity-kind schemas
-     - the `:seon.user` entity schema + `user-ref` (the default `to`
-       target — seeded at boot by seon.client)
-     - `message!` — fully-formed storage, boundary defaulting, the
-       blank-content refusal, hop derivation (`outbound-hops`), the
-       concise success value
-     - the two agent-facing functions, thin wrappers over `message!` — the
-       agent reaches them through the `message/` alias on its home ns
-       (`(message/user …)` / `(message/agent …)`):
-         `user`  — from = me (the ALS agent), to = the one human user
-         `agent` — from = me, to = [agent-id]. The one `message!` boundary
-                   refuses self-addressing for every caller.
+  "Persist and route messages between users and agents.
 
-   The wake trigger itself lives in [[seon.agent.loop]], while this
-   message-data namespace owns the pure waking-inbound rule. `seon.agent`
-   re-exports `message!`/`user-ref` on the face."
+   This namespace owns message and user schemas, the single validated write
+   boundary, and the agent-facing send surface. It derives whether inbound data
+   should wake an agent, while the runtime loop performs the wake itself."
   (:require
     [clojure.string :as str]
     [seon.agent.message.internal :as internal]

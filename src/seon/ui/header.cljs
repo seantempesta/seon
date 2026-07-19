@@ -1,5 +1,8 @@
 (ns seon.ui.header
-  "Pure global header formatting from an ordinary database projection."
+  "Format the global header from an ordinary database projection.
+
+   This namespace owns the eager header shape and its hiccup projection.
+   Database acquisition and brand resolution happen before this boundary."
   (:require [seon.schema :as schema]))
 
 (schema/register! ::brand-name [:string {:min 1}])

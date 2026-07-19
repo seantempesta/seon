@@ -1,31 +1,9 @@
 (ns seon.agent.fs.internal
-  "Filesystem-capability internals — the private data-manipulation +
-   allowlist plumbing behind [[seon.agent.fs]]'s public functions.
+  "Implement filesystem capability policy and I/O plumbing.
 
-   Split out so the teaching namespace stays a clean list of map-in /
-   map-out capability fns. Loaded + indexed + grep-able, but NOT
-   whitelisted for full-source rendering: agents call the public functions
-   in [[seon.agent.fs]], not these.
-
-   ## Capability config — default-deny allowlist
-
-   [[!config]] holds the live grant:
-     :seon.agent.fs/allowed-roots — vector of absolute paths. A path is
-         in-scope iff its resolved absolute form lives under one of these
-         roots. Empty = nothing allowed (default-deny).
-     :seon.agent.fs/read-only?    — when true, write-file refuses.
-
-   [[env-bootstrap]] seeds it from SEON_FS_ROOT / SEON_FS_READ_ONLY at ns
-   load; [[seon.agent.fs/configure!]] replaces it (unless SEON_FS_LOCK —
-   see [[fs-locked?]]).
-
-   ## Why sync, not async
-
-   The agent evals forms via cljs.js bootstrap; the only auto-await (in
-   seon.eval/maybe-await-value) fires on a form's outermost value, not
-   inside let-bindings. A Promise-returning fs op would bind `r` to a
-   Promise, so `(:seon.agent.fs/ok? r)` returns nil → wrong branch. Sync
-   ops hand the agent the resolved map."
+   This internal namespace resolves and enforces host allowlists, performs the
+   synchronous file operations, and builds the public result envelopes. Agents
+   use `seon.agent.fs`; none of these helpers form a taught capability surface."
   (:require
     ["node:crypto" :as crypto]
     ["node:fs" :as fs]

@@ -1,6 +1,7 @@
 (ns seon.ai
-  "Shared LLM surface (fix-everything PRD C-18 + C-20) — the provider
-   call settings are DATA, not compiled constants. A downstream
+  "Resolve database-owned LLM configuration for provider calls.
+
+   Provider call settings are data, not compiled constants. A downstream
    deployment retunes the LLM (provider, model, thinking, budgets)
    without forking an adapter ns.
 

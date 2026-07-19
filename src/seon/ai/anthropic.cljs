@@ -1,6 +1,7 @@
 (ns seon.ai.anthropic
-  "Anthropic Messages API client (C-20) on the official
-   `@anthropic-ai/sdk` Node SDK (SDK migration, 2026-06-16). ^:async —
+  "Adapt Anthropic Messages to Seon's provider request contract.
+
+   This async adapter uses the official `@anthropic-ai/sdk` Node SDK. It
    returns Promises. Same agent-adapter contract as
    [[seon.ai.openai-compat]]: one agent-facing fn, [[agent-adapter]],
    consumes the closed `:seon.ai/request` map passed by the agent turn's

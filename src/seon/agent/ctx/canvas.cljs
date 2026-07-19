@@ -1,15 +1,10 @@
 (ns seon.agent.ctx.canvas
-  "The `:canvas` context section — \"what your human currently sees\",
-   rendered as a `;; ── canvas ──` comment-block. Symbol-wired into the
-   composer layout (`config manifest`) as
-   `'seon.agent.ctx.canvas/canvas-block`; loaded at boot so the symbol
-   resolves for `seon.eval/lookup-value`.
+  "Render the agent's current canvas into context.
 
-   The agent sees the SAME wired value the human's surfaces render —
-   derived every turn, nothing stored (reactive-context doctrine), so the
-   agent can never believe its canvas is blank when the human sees content.
-   Self-contained: no spine read API, just the canvas renderer +
-   wired-content provenance."
+   The block derives the same wired canvas content shown in the web UI from
+   the supplied database value. It owns the context projection and provenance
+   lookup, while canvas rendering and persistence remain in their established
+   namespaces."
   (:require
     [clojure.string :as str]
     [seon.ai.tokens :as tokens]

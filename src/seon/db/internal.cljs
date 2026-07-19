@@ -1,5 +1,8 @@
 (ns seon.db.internal
-  "Pure transaction and schema transformations behind `seon.db`."
+  "Transform transaction and schema data behind `seon.db`.
+
+   This internal namespace normalizes public requests and process-local scope
+   into protocol data; transport and authoritative execution live elsewhere."
   (:require
    [clojure.string :as str]
    [seon.ai.tokens :as tokens]

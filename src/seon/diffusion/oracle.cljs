@@ -1,7 +1,5 @@
 (ns seon.diffusion.oracle
-  "UNIFIED control-signal oracle — the buzzsaw the diffusion worker calls ONCE
-   between denoise steps. The three control signals exist as separate Seon-side
-   legs; this ns dispatches all three and returns ONE combined control set.
+  "Produce unified control signals for each diffusion checkpoint.
 
    ## The three legs
 

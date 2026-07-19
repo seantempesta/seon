@@ -1,8 +1,5 @@
 (ns seon.handlers.test
-  "Renderers for `:seon.test` entities — `deftest`s the agent has
-   defined (detect-and-tee writes `:seon.test/sym`+`:ns`+`:source` on
-   eval) and runner result rows (`run!` upserts `:seon.test/last-*` on
-   the same `:seon.test/sym` identity).
+  "Render captured tests and their latest results.
 
    Each entity renders WHAT THE TEST IS (its symbol, pass/fail status
    when a run has been recorded, and its source). A test with no

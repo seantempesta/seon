@@ -1,18 +1,9 @@
 (ns seon.agent.search.internal
-  "Plumbing behind `seon.agent.search/grep` — the hard caps, the envelope
-   helpers, the npm boundary (lazy `js/require` + shared subprocess), the
-   seon.agent.fs allowlist gate, and the rg `--json` parser.
+  "Implement bounded search transport and result parsing.
 
-   This namespace is INTERNAL: it is never rendered into agent context (the
-   `*.internal` ns name IS the filter). Agents call the public face in
-   `seon.agent.search`; nothing here is part of the taught surface.
-   Everything is a plain `defn` — the ns boundary is the privacy boundary,
-   so `seon.agent.search` (and tests) can call across without `#'`
-   gymnastics.
-
-   All map keys stay in the `:seon.agent.search/*` namespace (via
-   `:as-alias`): the keyword namespace tracks the OWNING DATA namespace
-   (`seon.agent.search`), not the file the code lives in."
+   This internal namespace applies filesystem grants, runs the shared ripgrep
+   subprocess, parses its structured output, and builds search envelopes. The
+   public contracts and keyword schemas remain owned by `seon.agent.search`."
   (:require
     [clojure.string :as str]
     [seon.agent.fs :as fs]

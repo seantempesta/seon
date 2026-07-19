@@ -1,9 +1,5 @@
 (ns seon.eval
-  "Agent eval surface. SAFE BY DEFAULT — `eval` returns
-   {::ok? true ::value v} or {::ok? false :seon/error <error-map>}. A
-   throw,
-   compile error, or async rejection — all return as values. The agent
-   session continues.
+  "Evaluate agent-authored forms through the safe execution boundary.
 
    The unadorned name `eval` is the safe one; there is no public strict
    variant. Callers that want raw throw semantics drop down to

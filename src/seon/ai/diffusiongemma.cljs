@@ -1,6 +1,8 @@
 (ns seon.ai.diffusiongemma
-  "DiffusionGemma CONTROL backend — the transformers RunPod worker that
-   keeps the per-step LogitsProcessor/accept_canvas seam (the FROZEN cuda
+  "Drive the DiffusionGemma control backend through RunPod jobs.
+
+   The transformers worker retains the per-step LogitsProcessor/accept_canvas
+   seam (the FROZEN cuda
    worker's identifier — its code-buffer accept hook) (clamp / infill /
    eval-renoise). ^:async — returns Promises.
 

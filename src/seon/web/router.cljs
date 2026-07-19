@@ -1,6 +1,5 @@
 (ns seon.web.router
-  "The pod's HTTP front door — reitit over a route vector DERIVED from the
-   `:seon.route/*` datoms.
+  "Derive the pod's reitit router from route facts.
 
    The route vector is `(into (db->routes rows) (static-supplement h))`:
    [[db->routes]] is a PURE projection of the seeded `:seon.route/*` datoms

@@ -1,25 +1,10 @@
 (ns seon.agent.schedule
-  "Cron-as-data — the SCHEDULE entity + the PURE cron logic. An agent owns a
-   vector of schedule maps (`:seon.agent/schedules`); each carries a 5-field
-   cron expression AND the qualified fn to invoke when due (code-as-data,
-   resolved like canvas content / section AI). This generalizes cron from
-   'wake me' to 'at this schedule, run this fn.'
+  "Model cron schedules and fire due agent work.
 
-   This namespace OWNS the `:seon.agent.schedule/*` schemas and the pure cron
-   fns: `parse` (5-field string → field sets), `due?` (does an instant
-   match?), `next-fire-at` (the next matching instant). Each takes an EXPLICIT
-   `now`/`after` instant — no implicit clock, so they're testable.
-
-   The mechanism that FIRES a due schedule (`fire-due-schedules!`, the
-   schedule half of the one ticker — [[seon.agent.loop/install-ticker!]])
-   lives below; the pure matching logic above stands either way. Matching
-   uses the host process's LOCAL time — the schedule's `:timezone` field is
-   stored but not yet honored in matching (flagged).
-
-   Dependency direction: this ns requires `seon.agent.run` (open a `:schedule`
-   run) but NOT `seon.agent.loop` — the loop's ticker calls US, so an edge
-   back would cycle. The run DRIVER is INJECTED (`:seon.agent.schedule/drive!`
-   = `seon.agent.loop/drive-run!`)."
+   This namespace owns schedule schemas, pure cron parsing and matching, and
+   the ticker-facing transition that opens scheduled runs. Time inputs are
+   explicit for deterministic logic; loop driving is injected to preserve the
+   runtime dependency boundary."
   (:require
     [clojure.string :as str]
     [seon.agent.run :as run]

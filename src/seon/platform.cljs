@@ -1,5 +1,8 @@
 (ns seon.platform
-  "Artifact path and process-environment access for the Bun runtime.")
+  "Resolve artifact paths and process environment for Bun runtimes.
+
+   This leaf isolates platform-specific reads used during process setup.
+   Durable configuration and application state remain database-owned.")
 
 ;; ============================================================
 ;; Artifact path resolution — SEON_RUNTIME_ROOT.

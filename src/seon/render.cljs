@@ -1,7 +1,5 @@
 (ns seon.render
-  "The two renders every renderable carries — `:seon.render/ai` (the
-   prompt text) and `:seon.render/html` (a surface) — selected by key
-   presence, never a stored discriminator.
+  "Resolve the model and human twins of derived renders.
 
    Each render attribute is a fully-qualified symbol or a literal value.
    [[render]] resolves symbols through `seon.eval/lookup-value`, selects the

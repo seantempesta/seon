@@ -1,8 +1,5 @@
 (ns seon.web.brand
-  "Downstream brand surface (fix-everything PRD C-17) — the product
-   name, tagline, and theme the web UI renders are DATA, not compiled
-   constants. The thesis is customize-with-data; the product name is
-   the most basic customization.
+  "Resolve database-backed branding for the web UI.
 
    One singleton row (identity `::id` = \"brand\") carries up to three
    attrs: `::name`, `::tagline`, `::theme`. Render fns (titles, the
