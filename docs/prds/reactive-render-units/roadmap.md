@@ -41,8 +41,9 @@ parts of the target:
 
 Current page invalidation has sustained-import, newest-value convergence,
 browser morph, reconnect, slow-consumer socket convergence, and
-resource-release proof. The remaining live gap is failed-render repair. The
-execution child
+resource-release proof. Failed-render repair is also live-proven below. The
+remaining program gates are the capacity fanout acceptance and final
+current-artifact browser/test graduation. The execution child
 captures the Datahike-owned read evidence from successful query, pull,
 pull-many, entity, schema, index, and mixed `execute-many` operations in one
 fiber-local scope and returns it on the ordinary invocation result. The writer
@@ -149,6 +150,20 @@ interest references and committed-report queue depth all returned to zero.
 This closes sustained-import, configured maximum-latency, newest convergence,
 and pressure cleanup.
 
+A live `reactive-owner-repair` probe then exercised the general owner without
+an execution or Datastar retry channel. Its first computation delivered a
+visible error value with conservative `:all` evidence at basis transaction
+536870917. A committed transaction at 536870918 reran the computation exactly
+once; the repair delivered `OWNER-REPAIR:REPAIR-FINAL`, captured Datahike's
+exact plan for `:seon.agent/id` and `:seon.agent/purpose`, and atomically
+replaced the `:all` interest. Last completed and installed-interest basis
+transactions both advanced to 536870918, active and pending high-water marks
+remained one, final unobserve returned every reactive owner count to zero, the
+writer queue was empty, and cluster close was clean. The strengthened focused
+regression now starts from a successful narrow plan, fails and widens to
+`:all`, accepts a disjoint repair event, then narrows to exact evidence; the
+focused reactive gate passes 7 tests and 45 assertions.
+
 At source commit `9ab86700`, a disposable cluster rebuilt from the current
 artifact and a real headless Google Chrome page opened the root view. A
 supported `POST /agents` committed a child whose unique purpose marker then
@@ -157,8 +172,7 @@ appeared through the existing Datastar feed. The morph preserved the identical
 outside the morph, left exactly one `#app-view`, and produced no browser console
 or page errors. A full reload opened a fresh feed and painted the newest marker
 without an intermediate stale view. This closes current-source browser morph
-and sole-connection reconnect correctness. Live failed-render repair remains
-the graduation gate.
+and sole-connection reconnect correctness.
 
 The integrated Datastar/reactive gate now attaches two equivalent sockets to
 one normalized computation. An equal later event performs one demanded render

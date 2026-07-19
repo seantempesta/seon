@@ -272,10 +272,12 @@
           (fn [value]
             (let [attempt (swap! computes inc)]
               (js/Promise.resolve
-               (if (= 1 attempt)
-                 {::db/value [:main {:id "app-view"}
-                              [:div {:id "app-error"} "render failed"]]
-                  ::db/read-evidence :all}
+               (case attempt
+                 1 {::db/value [:main {:id "app-view"} "initial"]
+                    ::db/read-evidence (evidence value)}
+                 2 {::db/value [:main {:id "app-view"}
+                                [:div {:id "app-error"} "render failed"]]
+                    ::db/read-evidence :all}
                  {::db/value [:main {:id "app-view"} "repaired"]
                   ::db/read-evidence (evidence value)}))))]
       (set! db/db (fn ([] (js/Promise.resolve @head))
@@ -302,20 +304,35 @@
             ::reactive/notify #(swap! delivered conj %)})
           (.then
            (fn [_]
-             (is (= "app-error" (get-in (first @delivered) [2 1 :id])))
-             (is (= :all (::db/dependency-plan (last @listens)))
-                 "failed computation keeps conservative interest")
+             (is (= [:main {:id "app-view"} "initial"]
+                    (first @delivered)))
+             (is (= (evidence @head)
+                    (::db/read-evidence (last @listens)))
+                 "the established page begins with a narrow exact plan")
              (let [next-db (at-t (inc (:t database)))]
                (reset! head next-db)
                ((::db/handler (last @listens)) {:db-after next-db})
                (next-turn))))
           (.then
            (fn [_]
+             (is (= "app-error" (get-in (last @delivered) [2 1 :id])))
+             (is (= :all (::db/dependency-plan (last @listens)))
+                 "failure replaces the prior narrow plan with :all")
+             (let [next-db (at-t (inc (:t @head)))]
+               (reset! head next-db)
+               ((::db/handler (last @listens))
+                {:db-after next-db
+                 :tx-data [[1 :example/disjoint-repair true
+                            (:t next-db) true]]})
+               (next-turn))))
+          (.then
+           (fn [_]
              (is (= [:main {:id "app-view"} "repaired"]
                     (last @delivered)))
+             (is (= 3 (count @delivered)))
              (is (= (evidence @head)
                     (::db/read-evidence (last @listens)))
-                 "successful repair replaces :all with exact evidence")
+                 "a disjoint repair replaces :all with exact evidence")
              (is (= (:t @head)
                     (::reactive/last-completed-t
                      (reactive/measurements))))
