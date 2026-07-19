@@ -753,7 +753,7 @@
                             :where [?e :seon.ns/name ?ns]]
                           db (keyword ns-sym)))))
 
-(declare persisted-require-edges)
+(declare persisted-require-edges merge-requires-into-ns-source)
 
 (defn- require-specs
   [edges]
@@ -789,7 +789,22 @@
     test-rows :seon.test/_ns}]
   (let [sources (concat (map :seon.fn/source function-rows)
                         (map :seon.test/source test-rows))
-        head (or (when-not (str/blank? source) source)
+        ;; cljs.js retains aliases when an authored namespace is re-entered
+        ;; with a later bare `(ns x)`. The analyzer edges are therefore the
+        ;; effective runtime declaration, while :seon.ns/source is only the
+        ;; latest authored declaration. Merge those effective libspecs back
+        ;; into that declaration for cold loading so a fresh child sees the
+        ;; same namespace the live child used. Preserve all other authored ns
+        ;; clauses; this is reconstruction from analyzer facts, not a second
+        ;; dependency model.
+        effective-source
+        (when-not (str/blank? source)
+          (if (seq require-edges)
+            (or (merge-requires-into-ns-source
+                 source (require-specs require-edges))
+                source)
+            source))
+        head (or effective-source
                  (when (seq sources)
                    (namespace-head name require-edges)))]
     (->> (concat [head] sources)
@@ -874,7 +889,15 @@
                       (map first)))
         fns     (member :seon.fn/source     :seon.fn/ns)
         tests   (member :seon.test/source   :seon.test/ns)
-        head    (or ns-src
+        effective-source
+        (when ns-src
+          (let [edges (persisted-require-edges db ns-kw)]
+            (if (seq edges)
+              (or (merge-requires-into-ns-source
+                   ns-src (require-specs edges))
+                  ns-src)
+              ns-src)))
+        head    (or effective-source
                     (when (seq (concat fns tests))
                       (synthesized-ns-head db ns-kw)))]
     (->> (concat [head] fns tests)

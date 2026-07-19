@@ -44,6 +44,16 @@ The final source-generation gate passed 1,223 tests/5,485 assertions; focused
 parser/eval/turn proof passed 77 tests/476 assertions. Current-artifact live
 proof is the remaining Stage 3 exit before orchestration consumes the seam.
 
+The exact current artifact now proves dependency ordering and top-level Promise
+sequencing through a real execution child. Source authored the consumer before
+its base namespace; the projection evaluated the base first. A Promise form
+resolved to `42` before the following definition read its atom, and consumer
+calls before and after a repeated namespace declaration both returned `43`.
+That proof exposed and closed one cold-restart mismatch: `cljs.js` retained an
+alias after bare namespace reentry while the stored declaration did not.
+Reconstruction now merges the analyzer-derived require edges into the authored
+declaration, with a focused 38-test/148-assertion gate green.
+
 Canonical behavioral-test evidence now follows the same eval seam. The test
 runner writes its native summary counters and selected `:seon.test` refs onto
 the exact `:seon.eval` entity that caused the automatic run. Because that eval

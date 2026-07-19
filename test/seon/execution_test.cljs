@@ -773,6 +773,22 @@
     (is (= 1 (count (re-seq #"\(def shared 1\)" source)))
         "a batch source is deduplicated rather than split per function")))
 
+(deftest namespace-source-reconstructs-effective-aliases-after-bare-reentry
+  (let [source (seval/namespace-source
+                {:seon.ns/name :my.consumer
+                 :seon.ns/source "(ns my.consumer)"
+                 :seon.ns/require-edges
+                 [{:seon.ns.require/target :my.base
+                   :seon.ns.require/alias 'base}]
+                 :seon.fn/_ns
+                 [{:seon.fn/sym 'my.consumer/answer
+                   :seon.fn/source "(defn answer [] (base/value))"}]
+                 :seon.test/_ns []})]
+    (is (.startsWith source
+                     "(ns my.consumer (:require [my.base :as base]))")
+        "cold source reflects the analyzer aliases retained by the live child")
+    (is (.includes source "(defn answer [] (base/value))"))))
+
 (deftest preparation-batches-agents-and-preserves-plan-position
   (async done
     (let [requests (atom [])
