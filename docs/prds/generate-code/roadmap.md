@@ -30,12 +30,19 @@ has one configuration owner, the `:namespaces` block. Cluster
 `:seon.config/namespaces` controls only which framework source is stored, and
 agent-entity namespace render overrides no longer exist.
 
-The pure parser projection is complete at `824575c4`. `parse-program` reads a
-reply once and `project-program` retains entries and spans, groups namespace
-sections, recognizes schema registration through actual aliases/refers, derives
-deterministic generated requirements, fences malformed/duplicate declarations,
-and returns structural cycle errors. Its final changed-test proof passed 1,217
-tests/5,461 assertions. Stage 3 executor composition is now the next seam.
+The pure parser projection began at `824575c4` and the shared ordered evaluator
+landed at `c292ee2d`. `parse-program` reads a reply once and `project-program`
+retains entries and spans, groups repeated declarations as sections of one
+namespace, recognizes schema registration through each section's actual
+aliases/refers, derives deterministic generated requirements, fences malformed
+declarations, and returns structural cycle errors. Ordinary `:batch` turns now
+consume its execution projection through the existing `eval-batch!`: namespace
+dependencies order sections, declarations fence leakage, schemas precede the
+remaining authored forms, independent namespaces survive failure, and ordered
+eval IDs plus skipped entries remain the evidence seam for `generate-code!`.
+The final source-generation gate passed 1,223 tests/5,485 assertions; focused
+parser/eval/turn proof passed 77 tests/476 assertions. Current-artifact live
+proof is the remaining Stage 3 exit before orchestration consumes the seam.
 
 Ordinary agent replies already pass through `parse-forms` once and
 `eval-batch!` evaluates entries sequentially. Each whole top-level Promise is
@@ -416,8 +423,9 @@ Exit:
 
 ### Stage 2 — pure generation projection
 
-**Graduated 2026-07-19 at `824575c4`.** `parse-program` and `project-program`
-landed in the existing parser namespace with the full exit battery below.
+**Graduated 2026-07-19 at `824575c4`, refined at `c292ee2d`.** `parse-program`
+and `project-program` landed in the existing parser namespace with the full
+exit battery below.
 
 Add one pure function beside the existing REPL parser that groups
 `parse-forms` entries into namespace units, classifies actual aliased
@@ -433,6 +441,11 @@ Exit:
 - generated cycles return a structural error before evaluation.
 
 ### Stage 3 — schema-first evaluator composition
+
+**Source-complete at `c292ee2d`; current-artifact live proof pending.** The
+ordinary batch turn consumes `:seon.repl/eval-entries` and the existing
+`eval-batch!` owns all evaluation, Promise resolution, analyzer publication,
+program facts, and ordered eval IDs. No second compiler or recorder exists.
 
 Compose the existing per-form evaluator over a namespace unit: declaration,
 schemas, remaining forms, affected tests. Do not add another compiler state or

@@ -191,14 +191,28 @@ program delta.
   it); compiled-core fns are refused (the override-guard symmetry).
   `ns-unalias` drops an alias from the analyzer, declaration, and edges.
 
-**Batch evaluation is intentionally non-fail-fast.** In `:batch` mode every
-complete parsed form is attempted in source order. Each form receives its own
-real eval/result row; an ordinary read/compile/runtime error is captured as
-data and evaluation continues with the next parsed form. A later form that
-depends on a failed earlier form may therefore fail too, which is honest and
-cheap compared with another model round trip. The next turn's transcript shows
-all successes and failures in their original positions. A worker/process crash
-is different: forms not actually attempted receive no fabricated eval/result.
+**Batch evaluation is namespace-aware and intentionally non-fail-fast.** The
+forgiving parser reads the provider reply once. Its pure projection retains
+every original span, groups repeated declarations as authored sections of one
+namespace, derives generated `:require` edges, and rejects dependency cycles
+before evaluation. Namespace sections run in dependency order. Inside each
+authored section the declaration runs first, recognized `schema/register!`
+forms run next in authored order, and the remaining forms run in authored
+order. Repeating a namespace later in the reply therefore preserves both
+declarations and their local alias context without creating another scheduled
+namespace.
+
+Each attempted form receives its own real eval/result row. An ordinary
+read/compile/runtime error is captured as data, later forms in that namespace
+and independent namespaces remain eligible, and generated dependents wait. A
+failed declaration fences only its following section; a later declaration of
+the same namespace may safely re-establish it. Structurally unowned forms are
+recorded as visible failed evals rather than leaking into the previously active
+namespace. The next turn's transcript therefore contains every attempted
+success and failure, while the ordered eval IDs and skipped source entries give
+goal-driven code generation the same evidence without another evaluator or
+result format. A worker/process crash is different: forms not actually
+attempted receive no fabricated eval/result.
 Only a successfully compiled and evaluated declaration contributes namespace,
 function, schema, test, or require-edge data to the program transaction. A read
 or compile failure records its exact source and error as eval evidence but
@@ -213,6 +227,13 @@ recordable exception: it persists the core-fault eval and continues. If that
 recording transaction itself fails, the batch stops loudly; it never claims the
 later entries ran. There is no outer catch that turns a broken recorder into
 synthetic per-form results.
+
+A Promise returned by one complete top-level form is automatically awaited at
+this same boundary. Its resolved value is recorded before the next form runs;
+if the bounded wait expires, the still-live computation is retained at its
+`result/<id>` handle. The parser never inserts `await` into authored source.
+Inside a `^:async` function, dependencies that must resolve before later local
+expressions still use explicit `await` according to ClojureScript semantics.
 
 ## The loop as data — the FSM table + the fold
 
