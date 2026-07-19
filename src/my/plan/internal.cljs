@@ -11,7 +11,7 @@
     [clojure.string :as str]
     [clojure.walk :as walk]
     [seon.agent.message :as msg]
-    [seon.ai :as ai]
+    [seon.ai.provider :as ai-provider]
     [seon.ai.tokens :as tokens]
     [seon.db :as db]
     [seon.db.protocol :as protocol]
@@ -1331,7 +1331,7 @@
                                       global-provider
                                       override)]
                        (when (and (not= worker-id id)
-                                  (ai/frontier-provider? provider))
+                                  (ai-provider/frontier-provider? provider))
                          id))))
              vec)]
     (or (first (filter authors candidates))

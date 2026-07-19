@@ -48,6 +48,7 @@
             [cljs.reader :as reader]
             ["node:crypto" :as node-crypto]
             [seon.agent.ctx :as ctx]
+            [seon.ai.provider :as provider]
             [seon.config :as config]
             [seon.db :as db]
             [seon.db.protocol :as protocol]
@@ -247,14 +248,8 @@
 ;; enum derives from this map's keys, so a provider CANNOT be added
 ;; without declaring its locality — one definition site, no drift.
 (def provider-locality
-  "Declared locality of every `::provider`, at its definition site."
-  {:deepseek       :frontier
-   :anthropic      :frontier
-   :openai-compat  :frontier
-   :diffusiongemma :local-worker
-   :typeahead      :local-worker})
-
-(schema/register! ::provider (into [:enum] (keys provider-locality)))
+  "Declared locality of every `::provider`, defined by `seon.ai.provider`."
+  provider/provider-locality)
 
 (defn frontier-provider?
   "True when provider `p` is a frontier LLM, not a local worker.
@@ -264,7 +259,7 @@
    frontier provider for the consulted planner."
   {:malli/schema [:=> [:cat ::provider] :boolean]}
   [p]
-  (= :frontier (get provider-locality p)))
+  (provider/frontier-provider? p))
 ;; DiffusionGemma backend selector (env SEON_DG_BACKEND — the SEON_DG_*
 ;; names are kept for continuity; the local process is `diffusion-server`).
 ;; (DB-ownable like

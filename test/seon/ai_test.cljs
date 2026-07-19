@@ -13,6 +13,7 @@
     [cljs.test :refer [deftest is async]]
     [seon.agent.ctx :as ctx]
     [seon.ai :as ai]
+    [seon.ai.provider :as provider]
     [seon.db :as db]
     [seon.db.protocol :as protocol]
     [seon.schema :as schema]))
@@ -20,6 +21,13 @@
 ;; ============================================================
 ;; Pure — sync-tx-data (env/config SEEDS ONCE → the DB OWNS the row).
 ;; ============================================================
+
+(deftest provider-locality-has-one-leaf-definition
+  (is (identical? ai/provider-locality provider/provider-locality))
+  (is (true? (ai/frontier-provider? :openai-compat)))
+  (is (false? (ai/frontier-provider? :diffusiongemma)))
+  (is (= (set (keys provider/provider-locality))
+         (set (drop 1 (schema/schema-definition :seon.ai/provider))))))
 
 (deftest agent-config-pull-pattern-uses-declared-agent-attributes
   (let [entity-attributes
