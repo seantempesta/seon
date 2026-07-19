@@ -316,6 +316,15 @@ proof followed by the remaining web-boundary audit, then the canvas browser
 matrix. This fault-policy proof precedes performance work because a stable
 process that silently renders a core invariant failure is not healthy.
 
+That second exact package terminated the affected execution child as intended,
+but exposed a missing evidence seam: the remote-authority cut had removed the
+only `seon.error/set-db-hooks!` call, leaving the dying child to buffer its fault
+only in memory. `seon.db` now reinstalls that single late-bound hook over the
+ordinary authoritative transaction path; focused remote-database proof passes
+18 tests and 84 assertions. The exact gate is repeated once more and requires
+both process exit and a queryable `:seon.error/fault :core` datom before host
+replacement is credited.
+
 Current-source release application
 `0d8bc9c2ff2088de3103f951d1bd3f94f96d2c80cb4f4ccf6a035aaa9f96197b`
 now passes the source-free runtime boundary from `/Users/sean/seon-release-9df21b23`

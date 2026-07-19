@@ -1209,6 +1209,24 @@
           (swap! !session update ::databases dissoc (:db-name database)))
         released?))))
 
+;;; Error evidence
+
+(defn- persist-error-entities!
+  "Persist `seon.error/record!` projections through this process's ordinary
+   authoritative transaction path and adapt its current report/error contract
+   to the small hook acknowledgment expected by `seon.error`."
+  [entities]
+  (-> (transact! {::tx-data (vec entities)})
+      (.then (fn [result]
+               {::ok? (not (error-value? result))}))
+      (.catch (fn [_] {::ok? false}))))
+
+;; The require direction is db -> error. Install the one late-bound write hook
+;; here after `transact!` exists; early boot faults remain in error's bounded
+;; buffer and flush through this hook on the next record.
+(error/set-db-hooks!
+ {:seon.error/transact! persist-error-entities!})
+
 ;;; Pure schema/transaction transforms
 
 (defn malli->datahike-schema [attr-keys]

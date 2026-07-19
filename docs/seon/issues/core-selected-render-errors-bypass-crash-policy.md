@@ -59,3 +59,13 @@ inside that existing operation scope. Focused proof passes 15 tests and 77
 assertions and explicitly observes `:crash` at the recording boundary. A second
 exact-package crash, host replacement, and the remaining web-boundary audit are
 still required before closing this issue.
+
+The second exact package terminated the execution child, but the expected fault
+datom was absent. Source audit found that the remote-authority refactor removed
+the only call to `seon.error/set-db-hooks!` while its documentation continued to
+claim `seon.db` installed it. The dying child therefore buffered the projection
+only in process-local memory and lost it on exit. `seon.db` now installs one
+late-bound hook over its ordinary authoritative `transact!` path and adapts the
+current transaction-report/error result to the error owner's acknowledgment.
+Focused remote-database proof passes 18 tests and 84 assertions. Exact package
+proof must now show both the child exit and the durable core-fault datom.

@@ -27,6 +27,35 @@
         :seon.error/kind :core-bug
         :seon.error/data {:seon.db.protocol/request-id "request-1"}})))
 
+(deftest error-evidence-uses-the-authoritative-transaction-path
+  (async done
+    (let [persist! (deref #'db/persist-error-entities!)
+          original db/transact!
+          requests (atom [])]
+      (set! db/transact!
+            (fn [& [request]]
+              (swap! requests conj request)
+              (js/Promise.resolve
+               {:db-before database
+                :db-after (update database :t inc)
+                :tx-data []
+                :tempids {}
+                :tx-meta {}})))
+      (-> (js/Promise.resolve
+           (persist! [{:seon.error/fault :core
+                       :seon.error/message "persist me"}]))
+          (.then
+           (fn [result]
+             (is (= {::db/ok? true} result))
+             (is (= [{:seon.error/fault :core
+                      :seon.error/message "persist me"}]
+                    (::db/tx-data (first @requests))))))
+          (.catch (fn [exception] (is false (str exception))))
+          (.finally
+           (fn []
+             (set! db/transact! original)
+             (done)))))))
+
 (defn- success
   [request body]
   (protocol/success (assoc body ::protocol/request-id
