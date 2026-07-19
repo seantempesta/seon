@@ -1,6 +1,6 @@
 ---
 type: issue
-status: active
+status: archived
 tags: [issue, agent, capability, pod]
 ---
 
@@ -30,6 +30,10 @@ separate explicit configurations; the normal operator does not infer or expose
 that authority.
 
 The unauthorized `src/my/ns.cljs` edit was removed before rebuilding. Focused
-configuration proof asserts both environment values. Live proof must confirm
-that `configure!` returns its existing locked error and that an agent filesystem
-write leaves the tracked file digest unchanged.
+configuration proof passes 7 tests/47 assertions. The rebuilt live pod reported
+the repository root with `:seon.agent.fs/read-only? true` and
+`:seon.agent.fs/locked? true`; `configure!` returned its existing locked error,
+the grant remained unchanged, and `edit-file` returned the read-only denial.
+The tracked file remained identical to the committed source.
+
+Closed by commit `4f0d3045` and the exact live proof above.
