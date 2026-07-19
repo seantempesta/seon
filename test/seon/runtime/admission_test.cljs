@@ -464,7 +464,7 @@
                      "closed-run")
                    (schedule/fire-due-schedules!
                      {:seon.agent/now (js/Date.)})
-                   ((deref #'loop/run-tick!) (js/Date.))])
+                   ((deref #'loop/run-tick!) {} (js/Date.))])
             (.then
               (fn [results]
                 (let [[wake-result drive-result loop-result

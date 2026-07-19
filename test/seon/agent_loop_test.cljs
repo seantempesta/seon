@@ -11,6 +11,7 @@
     [seon.db :as db]
     [seon.db.protocol :as db.protocol]
     [seon.execution :as execution]
+    [seon.error :as error]
     [seon.runtime.admission :as admission]
     [seon.runtime.recovery :as recovery]))
 
@@ -38,6 +39,46 @@
   (testing "unknown transitions preserve state"
     (is (= :idle (loop/transition :idle :deadline)))
     (is (= :terminated (loop/transition :terminated :resume)))))
+
+(deftest ticker-records-an-unexpected-rejection-under-its-configuration
+  (async done
+    (let [configuration {:seon.config/on-core-error :log}
+          observed (atom [])
+          original-available? admission/available?
+          original-close-overdue run/close-overdue-runs!
+          original-with-configuration error/with-configuration
+          original-record error/record!]
+      (set! admission/available? (constantly true))
+      (set! run/close-overdue-runs!
+            (fn [_]
+              (js/Promise.reject (js/Error. "watchdog failed"))))
+      (set! error/with-configuration
+            (fn [actual thunk]
+              (swap! observed conj [:configuration actual])
+              (thunk)))
+      (set! error/record!
+            (fn [request]
+              (swap! observed conj [:record request])
+              request))
+      (-> (js/Promise.resolve
+            ((deref #'loop/run-tick!) configuration (js/Date.)))
+          (.then
+            (fn [_]
+              (is (= configuration (second (first @observed))))
+              (let [[_ request] (second @observed)]
+                (is (= :core (::error/fault request)))
+                (is (= "watchdog failed"
+                       (.-message (::error/raw request)))))))
+          (.catch
+            (fn [e]
+              (is false (str "ticker fault recording rejected: " e))))
+          (.finally
+            (fn []
+              (set! admission/available? original-available?)
+              (set! run/close-overdue-runs! original-close-overdue)
+              (set! error/with-configuration original-with-configuration)
+              (set! error/record! original-record)
+              (done)))))))
 
 (deftest next-event-is-pure-over-one-database-projection
   (let [next-event @#'loop/next-event

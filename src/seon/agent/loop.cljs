@@ -56,6 +56,7 @@
     [seon.derive :as derive]
     [seon.eval :as seval]
     [seon.execution :as execution]
+    [seon.error :as error]
     [seon.log :as seon-log]
     [seon.repl.internal :as repl-internal]
     [seon.runtime.admission :as admission]
@@ -1131,9 +1132,10 @@
 ;; via [[exec-scheduled-fns!]] and DRIVING each opened run via [[drive-run!]]
 ;; (both injected so seon.agent.schedule need not require this ns).
 ;; Idempotent + single-instance (the `!ticker` atom holds the interval id;
-;; re-install clears the prior). A throw in one tick is logged, never fatal —
-;; the timer keeps running. Wired at client boot beside `install-wake-trigger!`
-;; and re-armed idempotently on hot reload.
+;; re-install clears the prior). An unexpected rejection is a core fault and
+;; follows the already-acquired database configuration's one fault policy.
+;; Wired at client boot beside `install-wake-trigger!` and re-armed
+;; idempotently on hot reload.
 ;; ============================================================
 
 (defonce ^:private !ticker (atom nil))
@@ -1147,10 +1149,11 @@
 (defn- run-tick!
   "ONE ticker pass at `now`: close overdue runs, close STALE (wedged) runs
    (the heartbeat watchdog — Piece 2c), then fire due schedules (driving each
-   opened run). Returns a Promise; a throw anywhere is caught + logged so the
-   interval survives. The watchdog rides THIS one ticker — no parallel
-   setInterval; the scan core (`run/stale-run-ids`) is pure over acquired rows."
-  [now]
+   opened run). Returns a Promise; an unexpected rejection is recorded once as
+   a core fault under `configuration`. The watchdog rides THIS one ticker — no
+   parallel setInterval; the scan core (`run/stale-run-ids`) is pure over
+   acquired rows."
+  [configuration now]
   (if-not (admission/available?)
     (js/Promise.resolve (admission/unavailable))
     (-> (js/Promise.resolve
@@ -1164,9 +1167,9 @@
                   :seon.agent.schedule/exec-fn! exec-scheduled-fns!
                   :seon.agent.schedule/drive!   drive-run!})))
       (.catch (fn [e]
-                (seon-log/error-console!
-                  "seon.agent.loop/run-tick!"
-                  (str "tick failed (timer continues): " (or (.-message e) e))))))))
+                (error/with-configuration
+                  configuration
+                  #(error/record! {::error/raw e ::error/fault :core})))))))
 
 (defn install-ticker!
   "Install the ONE periodic ticker (idempotent, single instance).
@@ -1176,11 +1179,11 @@
    (default [[default-tick-ms]]). Returns the interval id. Wired at client
    boot beside [[install-wake-trigger!]]; safe to re-run on hot reload — it
    clears the prior interval first, so reloads never stack timers."
-  {:malli/schema [:=> [:catn] :any]}
-  []
+  {:malli/schema [:=> [:catn [:configuration :seon.config/singleton]] :any]}
+  [configuration]
   (when-let [id @!ticker] (js/clearInterval id))
   (let [ms (or (config/tick-ms) default-tick-ms)
-        id (js/setInterval (fn [] (run-tick! (js/Date.))) ms)]
+        id (js/setInterval (fn [] (run-tick! configuration (js/Date.))) ms)]
     (reset! !ticker id)
     (seon-log/info-console! "seon.agent.loop/install-ticker!"
                             "ticker installed" {:seon.agent.loop/tick-ms ms})

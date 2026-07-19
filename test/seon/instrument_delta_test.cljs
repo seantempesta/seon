@@ -109,7 +109,7 @@
                       (swap! !effects conj :publish)
                       {::admission/published? false})
                     agent-loop/install-ticker!
-                    (fn [] (swap! !effects conj :ticker))]
+                    (fn [_configuration] (swap! !effects conj :ticker))]
         (is (true? (client/shadow-build-notify! {:type :build-start})))
         (is (true? (client/shadow-build-notify! {:type :build-failure})))
         (is (true? (client/shadow-build-notify! {:type :build-complete})))

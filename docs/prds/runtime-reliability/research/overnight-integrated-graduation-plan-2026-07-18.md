@@ -57,21 +57,36 @@ source lines in this ledger or the owning successor PRD.
   digest `2cdc32903ca304013b56a6b688adfd06c8962e1177162cdc7290d625bdd79519`.
 - Selected core failures have persisted database evidence before execution-child
   exit while the pod remained available for replacement children.
-- The latest development run is not graduation evidence: reload lost the
-  `:seon.db/db` Malli schema, repeated `SEON-CORE-FAULT`, lost readiness, and
-  required forced pod shutdown. This is the earliest unsettled contract.
+- The apparent reload loss of the `:seon.db/db` Malli schema was caused by a
+  diagnostic call to the execution-child-only `load-authored-program!` inside
+  the pod. That call intentionally replaces the process-local schema
+  projection; clean cold start and ordinary watched reload retain
+  `:seon.db/db`. The remaining atomic-publication concern is exact child
+  artifact admission and Shadow partial-import failure, not schema loss during
+  the supported reload path.
+- Three cold starts and three full supervised restarts against the same
+  database completed ready with application digest `209b23e8…` and the
+  `:seon.db/db` schema resolvable.
+- Focused ticker/configuration proof passes agent-loop 17 tests/71 assertions,
+  client initialization 7/23, runtime admission 16/94, and instrumentation
+  delta 11/129. Exact live crash/persist/restart proof remains.
 
 ## Execution ledger
 
 ### 1. Deterministic startup, reload, and fail-loud development
 
-- [ ] **IN PROGRESS:** reproduce the missing `:seon.db/db` schema from a clean
-  start and identify the exact schema/program/instrumentation ordering defect.
+- [x] Reproduce the missing `:seon.db/db` schema from a clean start and identify
+  it as an unsupported execution-child loader call that replaced the pod's
+  process-local schema projection; prove the supported cold/reload path retains
+  the schema.
 - [ ] Make schema and program publication atomic: ready with the complete
   admitted program or recorded core fault plus process exit.
-- [ ] Apply the database-selected core-fault policy consistently at ticker,
-  reload, publication, render, selected-call, and top-level child boundaries.
-- [ ] Prove three cold starts and three pod restarts against the same database.
+- [ ] **IN PROGRESS:** apply the database-selected core-fault policy
+  consistently at ticker, reload, publication, render, selected-call, and
+  top-level child boundaries. The ticker now retains the already-acquired
+  configuration and records unexpected rejections through `seon.error`; live
+  persist-before-exit proof is next.
+- [x] Prove three cold starts and three pod restarts against the same database.
 - [ ] Inject one deterministic core failure at each affected process boundary;
   prove the database record precedes exit and the supervisor restores only the
   replaceable process.

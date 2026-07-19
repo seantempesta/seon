@@ -330,7 +330,8 @@
                (fn [resolve _]
                  (reset! finish-resume resolve)))))
       (set! agent-loop/install-ticker!
-            (fn [] (swap! effects conj :ticker)))
+            (fn [configuration]
+              (swap! effects conj [:ticker configuration])))
       (set! client/start-heartbeat!
             (fn []
               (swap! effects conj :heartbeat)
@@ -360,7 +361,7 @@
                        ::client/configuration configuration}]
                      :publish
                      [::resume {:seon.agent/id "root"}]
-                     :ticker
+                     [:ticker configuration]
                      :heartbeat]
                     @effects)
                  "reload has one ensure/acquire, publication, and rehost order")))
@@ -435,7 +436,7 @@
               (swap! effects conj :rehost)
               (js/Promise.resolve {:seon.agent.runtime/resumed? true})))
       (set! agent-loop/install-ticker!
-            (fn [] (swap! effects conj :ticker)))
+            (fn [_configuration] (swap! effects conj :ticker)))
       (set! client/start-heartbeat!
             (fn [] (swap! effects conj :heartbeat)))
       (is (true? (client/shadow-build-notify! {:type :build-start})))

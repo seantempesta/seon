@@ -643,14 +643,19 @@
       (-> (acquire-configuration!)
           (.then
            (fn [configuration]
-             (open-database-session!
-              {::initialize? true
-               ::configuration configuration})))
+             (-> (open-database-session!
+                   {::initialize? true
+                    ::configuration configuration})
+                 (.then (fn [_] configuration)))))
           (.then
-           (fn [_]
-             (admission/publish-committed!)))
+           (fn [configuration]
+             (-> (admission/publish-committed!)
+                 (.then
+                  (fn [publication]
+                    {::configuration configuration
+                     ::publication publication})))))
           (.then
-           (fn ^:async publish! [publication]
+           (fn ^:async publish! [{::keys [configuration publication]}]
              (log/info-console!
               "seon.client"
               (str "reload: committed publication "
@@ -663,7 +668,7 @@
                (if (autonomous-runtime?)
                  (do
                    (await (rehost-agent-runtimes!))
-                   (agent-loop/install-ticker!))
+                   (agent-loop/install-ticker! configuration))
                  (do
                    (agent-loop/uninstall-ticker!)
                    (agent-runtime/unhost-all!)))
@@ -2101,7 +2106,9 @@
                     (count (::recovery/agent-ids recovered))
                     " agent(s) to idle")
                recovered))))
-        (let [initial-result
+        (let [configuration (or selected-configuration
+                                (await (acquire-configuration!)))
+              initial-result
               (when (and autonomous? (nil? restore-startup))
                 (await
                  (db/with-tx-context
@@ -2212,7 +2219,7 @@
             (when autonomous?
               (await (ai/sync!))
               (await (web.brand/sync!))
-              (agent-loop/install-ticker!))
+              (agent-loop/install-ticker! configuration))
             (log/info-console! "seon.client" "runtime started"
                                {:autonomous? autonomous?
                                 :resumed resumable-ids

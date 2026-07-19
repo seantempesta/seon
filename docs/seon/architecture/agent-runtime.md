@@ -444,7 +444,11 @@ seconds it:
 
 The ticker is **idempotent** (it acts on db state; safe to re-run) and lives **off
 the runaway's thread** — a sync runaway in a worker cannot block it, which is the
-whole point of enforcing the clock bound externally.
+whole point of enforcing the clock bound externally. It retains the immutable
+database configuration acquired at runtime publication. An unexpected watchdog
+or schedule rejection is recorded as a core fault under that configuration, so
+development crash policy cannot be bypassed by a timer callback that merely
+logs and continues.
 
 ## The derived fingerprint — `derive-status`
 
