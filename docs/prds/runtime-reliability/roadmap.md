@@ -299,6 +299,19 @@ ordered boundary is regenerating and auditing the final source-free package on
 this exact source, then reconciling its restart/reconnect, ACME, multi-cluster,
 and 1/2/4-child evidence against the graduation ledger.
 
+The exact package canvas proof exposed a development fault-policy hole before
+browser graduation. A selected render failure already classified
+`:seon.error/kind :core-bug` was converted into an ordinary canvas error card,
+so the configured `:seon.config/on-core-error :crash` policy never ran and the
+execution child remained alive. [[../../seon/issues/core-selected-render-errors-bypass-crash-policy]]
+owns the correction and exact evidence. The selected-call-to-Hiccup boundary
+now records core failures through the existing `seon.error/record!` owner while
+agent-authored failures remain ordinary values; focused proof passes 14 tests
+and 75 assertions. The ordered gate is an exact-package crash/host-replacement
+proof followed by the remaining web-boundary audit, then the canvas browser
+matrix. This fault-policy proof precedes performance work because a stable
+process that silently renders a core invariant failure is not healthy.
+
 Current-source release application
 `0d8bc9c2ff2088de3103f951d1bd3f94f96d2c80cb4f4ccf6a035aaa9f96197b`
 now passes the source-free runtime boundary from `/Users/sean/seon-release-9df21b23`

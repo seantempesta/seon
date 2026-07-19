@@ -8,6 +8,7 @@
    [seon.db :as db]
    [seon.db.branch :as branch]
    [seon.db.protocol :as protocol]
+   [seon.error :as error]
    [seon.eval :as eval]
    [seon.execution :as execution]
    [seon.execution.runtime :as runtime]
@@ -50,6 +51,44 @@
                 my.canvas/show!
                 seon.agent.fs/read-file]]
     (is (fn? (eval/lookup-value sym)) (str sym " is compiled"))))
+
+(deftest selected-render-failures-apply-the-core-fault-policy
+  (let [html-value (deref #'runtime/html-value)
+        block-error-text (deref #'runtime/block-error-text)
+        original-record! error/record!
+        recorded (atom [])
+        block {:seon.render/html 'my.orders/view}]
+    (set! error/record! #(swap! recorded conj %))
+    (try
+      (html-value
+       "agent-1" block
+       {::execution/ok? false
+        ::execution/error {:seon.error/message "agent renderer failed"
+                           :seon.error/kind :agent}})
+      (is (empty? @recorded)
+          "an authored failure remains an ordinary agent-visible error")
+      (html-value
+       "agent-1" block
+       {::execution/ok? false
+        ::execution/error {:seon.error/message "selected function is absent"
+                           :seon.error/kind :core-bug
+                           :seon.error/data
+                           {::execution/function-symbol 'my.orders/view}}})
+      (is (= :core (::error/fault (first @recorded))))
+      (is (= "selected function is absent"
+             (ex-message (::error/raw (first @recorded)))))
+      (is (= 'my.orders/view
+             (get (ex-data (::error/raw (first @recorded)))
+                  ::execution/function-symbol)))
+      (block-error-text
+       {:seon.agent.ctx/name :transcript}
+       {::execution/ok? false
+        ::execution/error {:seon.error/message "prompt block invariant failed"
+                           :seon.error/kind :core-bug}})
+      (is (= 2 (count @recorded))
+          "prompt blocks and canvas renders share the same core boundary")
+      (finally
+        (set! error/record! original-record!)))))
 
 (defn- call-with-acquired-agent
   ([result request observed]
