@@ -67,6 +67,12 @@ Measured evidence:
 - expanded offline proof: **24 arms**, all declared primary means matched and
   the command exited zero.
 
+The exact-revision rerun at Seon `15acdaf9` supersedes the aggregate count:
+**533 passed, 8 skipped**, with 13 dependency-deprecation warnings in 23.55
+seconds. The 24-arm offline proof again matched every declared primary score
+and exited zero. This keeps the harness graduated while leaving the live
+product scenarios below as the next evidence boundary.
+
 ## Live graduation dependency
 
 Do not run these scenarios until the operator exposes the ownership-fenced

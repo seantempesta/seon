@@ -359,13 +359,14 @@ converged. Exact live replay, bounded root termination, and one-call branch
 release are now the ordered proof gate before the repair scorer itself can
 graduate.
 
-The corresponding complete offline Inspect checkpoint passes 531 tests with
-eight intentional environment-gated skips in 25.25 seconds. Product and
-cleanup failures now remain independently visible, and operator stderr retains
-the writer response required to diagnose the next release reproduction. The
-exact execution artifact cannot yet be rebuilt because the separately owned
-Datahike reactive-read lane has coherent work in progress; no live result is
-claimed from the stale artifact.
+The current complete offline Inspect checkpoint passes 533 tests with eight
+intentional environment-gated skips in 23.55 seconds at `15acdaf9`. The
+expanded 24-arm offline proof also exits zero with every declared good/bad
+primary score matched. Product and cleanup failures remain independently
+visible, and operator stderr retains the writer response required to diagnose
+the next release reproduction. The exact live product scenarios remain the
+unsettled boundary; offline green evidence does not substitute for their
+retained native logs and database-derived scores.
 
 The dependency lane then committed Datahike `6a0386d2` and root pointer
 `dc0a9f99`, allowing a clean integration build. Writer and bootstrap succeeded,
