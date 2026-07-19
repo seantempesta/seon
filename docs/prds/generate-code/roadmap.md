@@ -566,6 +566,16 @@ to the exact full-source set. Workers use the ordinary REPL and affected-test
 surface. The detailed instruction audit and exact contradictions are recorded
 in [[research/repl-teaching-audit-2026-07-19]].
 
+The namespace-block schema prerequisite closed at `49bebaf5`. A specialized
+stored block entity now publishes the established controls before admission,
+and collection child identities no longer leak uniqueness onto presence-set
+attributes. The complete CLJS gate passed 1,239 tests/5,552 assertions and the
+changed writer gate passed 125 tests/791 assertions. After the approved
+destructive reset, fresh basis transaction 536870918 had both namespace sets
+installed as non-unique cardinality-many symbols before readiness and rendered
+the root namespaces block. A config-free restart reopened at 536870919 with
+identical schema and compiled context and no namespace/core errors.
+
 Exit:
 
 - green first-pass units launch no worker;
