@@ -655,7 +655,12 @@
          escape?     (if (some? escape-override)
                        (boolean escape-override)
                        true)
-         small-full? (and ok? (or full? escape?))
+         ;; `:seon.eval/ok?` is optional while an eval row is being assembled
+         ;; and on historical malformed rows.  `cap-result`'s public contract
+         ;; is a boolean, so keep the derived flag boolean too; allowing
+         ;; `(and nil ...)` through instrumentation used to retire the whole
+         ;; execution child while merely rendering prior context.
+         small-full? (boolean (and ok? (or full? escape?)))
          ;; Echoed source + stdout + error/guidance bodies cap at the
          ;; smaller `eval-render-cap` (1500); only the citable result
          ;; body below gets its age-decayed `result-body-cap`.

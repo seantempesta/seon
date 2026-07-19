@@ -89,6 +89,17 @@
   (is (not (str/includes? ctx/system-text ":seon.db/ok?")))
   (is (str/includes? ctx/system-text ":seon.error/message")))
 
+(deftest incomplete-eval-row-remains-renderable
+  ;; A partially assembled or historical row may not yet carry `ok?`.
+  ;; Rendering context must keep that absence inside ordinary data instead of
+  ;; violating cap-result's boolean contract and retiring the execution child.
+  (is (str/includes?
+        (ctx/format-eval-row
+          {:seon.eval/id "pending-eval"
+           :seon.eval/source "(+ 1 2)"}
+          false)
+        "(+ 1 2)")))
+
 (deftest context-transactions-classify-native-database-results
   (is (= {::ctx/ok? false
           ::ctx/error "install! transact failed: writer unavailable"}
