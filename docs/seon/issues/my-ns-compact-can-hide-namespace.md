@@ -49,7 +49,7 @@ renderer.
   rather than accumulating them.
 - A rendered-context regression proves that an unrelated indexed namespace is
   visible in full after `full!`, visible as its schema/function card after
-  `compact!`, and absent only after an explicit removal operation or assignment
-  replacement.
+  `compact!`, and absent again after the block selection is reset or a generated
+  assignment replaces its generated selection.
 - Embedding-ranked augmentation writes only these existing block selections;
   it adds no renderer, fake require edge, or second source payload.
