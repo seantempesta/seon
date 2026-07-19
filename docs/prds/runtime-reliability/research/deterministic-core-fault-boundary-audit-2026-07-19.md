@@ -82,6 +82,31 @@ open checkbox. The final graduation gate remains the complete current-source
 CLJS/writer/operator checkpoint plus browser and exact-package journeys in the
 active roadmap.
 
+## Exact-artifact result
+
+The first proposed injection into `seon.render.value/render-ai` was a useful
+falsifier: the compiled artifact and committed database program both contained
+the throw, but the ordinary prompt path completed. Current eval rendering uses
+`prepare-ai` plus `format-ai` directly, so `render-ai` was not the active seam.
+The exact fault therefore moved to the actual guarded call inside
+`seon.render/render`; no production fault branch was retained.
+
+Artifact `2d1401a968d371ef454df7839849872b99531d2db1d81c871f6b9efa50f32078`
+then drove a fresh execution child through the ordinary `/agents/run` door.
+The database committed core error entity `17690` in transaction `536874764` at
+`2026-07-19T06:26:10.375Z`. Its stack begins at the artifact's
+`seon/render.cljs:778` and continues through the transcript renderer. The pod
+observed the execution-child exit at `06:26:10.609Z`, 234 milliseconds after
+the committed transaction, while the pod and writer remained ready. There was
+exactly one row with message `exact-artifact generic render fixture` and fault
+`:core`.
+
+After removing the temporary throw and rebuilding, the same agent
+`short-dancers-send` started a fresh child, rendered the retained failed-run
+history, evaluated `(complete "clean render recovered")`, returned that exact
+reply in 9.34 seconds, and left watcher, writer, and pod ready. This closes the
+last exact-artifact core-fault boundary.
+
 ## Prepared focused fixture
 
 The prepared focused change adds
@@ -92,10 +117,6 @@ scope, and asserts both the selected `:gate` policy and exactly one core-fault
 transaction through the ordinary late-bound database hook. It deliberately
 does not stub `process.exit` or add a production fault switch.
 
-For the coordinated exact-artifact run, use the same fault at that same seam
-as a temporary source injection in `seon.render.value/render-ai`, build one
-digest-verified artifact, invoke the compiled prompt path with database policy
-`:crash`, and collect the five ordered observations above. Revert the temporary
-injection before rebuilding the graduation artifact. This proves the real
-persist-before-exit behavior without retaining test vocabulary or a dormant
-fault branch in production.
+The completed coordinated run used the actual `seon.render/render` guard, as
+recorded above. The temporary injection was removed before the clean recovery
+artifact was built.

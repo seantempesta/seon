@@ -277,6 +277,12 @@ source lines in this ledger or the owning successor PRD.
   /agents` path. It remains in the one root shim and one database-driven feed;
   focused Datastar proof passes 16 tests and 70 assertions. Live browser and
   database read-back remain the graduation evidence.
+- The last exact-artifact fault cut now passes. Generic render fault entity
+  `17690` committed in transaction `536874764` at
+  `2026-07-19T06:26:10.375Z`; the pod observed its child's exit 234
+  milliseconds later and remained ready. After the temporary fault was
+  removed, the same agent rendered its retained history and completed exact
+  reply `clean render recovered` from a fresh child in 9.34 seconds.
 
 ## Execution ledger
 
@@ -295,7 +301,7 @@ source lines in this ledger or the owning successor PRD.
   Execution children admit only the digest-verified immutable launch artifact;
   changed watched outputs degrade the target until canonical republish rather
   than silently changing a live child.
-- [ ] **IN PROGRESS:** apply the database-selected core-fault policy
+- [x] Apply the database-selected core-fault policy
   consistently at ticker, reload, publication, render, selected-call, and
   top-level child boundaries. The ticker now retains the already-acquired
   configuration and has exact persist-before-exit and pod-only recovery proof.
@@ -303,9 +309,11 @@ source lines in this ledger or the owning successor PRD.
   notification; reload now acquires the database configuration before recording
   either build failure or publication failure. Exact watched proof persisted
   core-fault entity `5923`, exited under `:crash`, retained watcher/writer, and
-  restored only the pod through normal `up`.
+  restored only the pod through normal `up`. The generic-render artifact then
+  committed its core error before child exit and recovered cleanly after the
+  temporary fault was removed.
 - [x] Prove three cold starts and three pod restarts against the same database.
-- [ ] Inject one deterministic core failure at each affected process boundary;
+- [x] Inject one deterministic core failure at each affected process boundary;
   prove the database record precedes exit and the supervisor restores only the
   replaceable process.
 
@@ -457,8 +465,8 @@ modest hardware, with no micro-optimization displacing a correctness boundary.
 
 ## Scheduling clock
 
-- **Ordered spine:** close section 1's exact-artifact generic-render fault cut,
-  then section 5's fixed live Inspect namespace, database-memory, planning,
+- **Ordered spine:** section 5's fixed live Inspect namespace,
+  database-memory, planning,
   multi-agent, and failure-recovery scenarios. The complete section 4 journey
   already has database-derived live proof.
 - **Integrated proof:** three namespace-targeted agents exchange database-backed

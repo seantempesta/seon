@@ -79,14 +79,12 @@ checkbox and evidence ledger for restoring the running system and graduating
 real namespace-moving, namespace-targeted, restart-safe agents through Inspect
 AI and the browser. It does not replace the ten-unit program ledger or unit 9's
 final admission gate; it projects the currently dependency-ready path through
-them. Its earliest unsettled contract is the last exact-artifact fault cut: a
-generic core render failure must record its database evidence before the
-selected `:crash` policy exits the pod, after which the supervisor restores
-only that replaceable process. Cold start, reload, publication, ticker,
-selected-call, and compiled-child boundaries already have their named proof.
-Live Inspect execution through an isolated branch and typed product database
-read, plus the real browser/Datastar journey, are the dependency-ready parallel
-portfolio; the complete live Inspect, browser, package, downstream,
+them. Its earliest unsettled contract is live Inspect execution through an
+isolated branch and typed product database read. The last exact-artifact
+generic-render cut committed its core error 234 milliseconds before the child
+exit and the same agent recovered through a clean artifact. The real
+browser/Datastar journey is the dependency-ready parallel portfolio; the
+complete live Inspect, browser, package, downstream,
 multi-cluster, and modest-hardware matrix remains the final gate.
 
 As of 2026-07-18, one JVM writer has passed the complete autonomous sibling
