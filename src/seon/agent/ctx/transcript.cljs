@@ -887,22 +887,40 @@
    :order-by '[?at :desc ?turn :desc]
    :limit window-size})
 
-(defn- messages-query [cutoff-at]
-  (cond-> {:find [(list 'pull '?message message-selector)]
-           :in '[$ ?agent-id]
-           :where '[[?agent :seon.agent/id ?agent-id]
-                    (or-join [?message ?agent]
-                      [?message :seon.agent.message/from ?agent]
-                      [?message :seon.agent.message/to ?agent])
-                    [?message :seon.agent.message/at ?at]]}
-    cutoff-at
-    (assoc :in '[$ ?agent-id ?cutoff-at]
-           :where '[[?agent :seon.agent/id ?agent-id]
-                    (or-join [?message ?agent]
-                      [?message :seon.agent.message/from ?agent]
-                      [?message :seon.agent.message/to ?agent])
-                    [?message :seon.agent.message/at ?at]
-                    [(>= ?at ?cutoff-at)]])))
+(defn- messages-query [cutoff-at run-id]
+  (let [base {:find [(list 'pull '?message message-selector)]
+              :in '[$ ?agent-id]
+              :where '[[?agent :seon.agent/id ?agent-id]
+                       (or-join [?message ?agent]
+                         [?message :seon.agent.message/from ?agent]
+                         [?message :seon.agent.message/to ?agent])
+                       [?message :seon.agent.message/at ?at]]}]
+    (cond
+      (and cutoff-at run-id)
+      (assoc base
+             :in '[$ ?agent-id ?run-id ?cutoff-at]
+             :where
+             '[[?agent :seon.agent/id ?agent-id]
+               (or-join [?message ?agent]
+                 [?message :seon.agent.message/from ?agent]
+                 [?message :seon.agent.message/to ?agent])
+               (or-join [?message ?run-id ?cutoff-at]
+                 (and [?run :seon.agent.run/id ?run-id]
+                      [?run :seon.agent.run/cause ?message])
+                 (and [?message :seon.agent.message/at ?at]
+                      [(>= ?at ?cutoff-at)]))])
+
+      cutoff-at
+      (assoc base
+             :in '[$ ?agent-id ?cutoff-at]
+             :where '[[?agent :seon.agent/id ?agent-id]
+                      (or-join [?message ?agent]
+                        [?message :seon.agent.message/from ?agent]
+                        [?message :seon.agent.message/to ?agent])
+                      [?message :seon.agent.message/at ?at]
+                      [(>= ?at ?cutoff-at)]])
+
+      :else base)))
 
 (defn- previous-ns-query [cutoff-at]
   {:find '[?ns ?eval-at ?eval]
@@ -935,7 +953,8 @@
         node (:seon.render/node input)
         window-size (or (::turn-window-size node) default-turn-window-size)
         run (:seon.agent/run entity)
-        run-id (:seon.agent.run/id run)
+        run-id (or (:seon.agent.run/id input)
+                   (:seon.agent.run/id run))
         open? (= :open (:seon.agent.run/status run))
         configuration (:seon.config/configuration input)
         stage-one-members
@@ -990,8 +1009,10 @@
             stage-two-members
             (cond-> []
               true
-              (conj (query-member database (messages-query cutoff-at)
-                                  (cond-> [id] cutoff-at (conj cutoff-at))
+              (conj (query-member database (messages-query cutoff-at run-id)
+                                  (cond-> [id]
+                                    (and run-id cutoff-at) (conj run-id)
+                                    cutoff-at (conj cutoff-at))
                                   1000000 1000000 262144))
               rotated?
               (conj (query-member database (previous-ns-query cutoff-at) [id cutoff-at]

@@ -29,5 +29,16 @@ The coordinated reuse/repair diagnostic kept the watcher, writer, and isolated
 branch stable through two 90-second phases. Root queried three agents from its
 previous plan and never called `agent/delegate!`. The retained eval sequence
 showed the stale trajectory continued after `/agents/run` had committed the new
-human message. The focused loop regression proves the replacement run sequence;
-live task-priority proof remains.
+human message. The focused loop regression proves the replacement run sequence.
+
+Commit `1b2e90f6` then made the compiled prompt preserve the current run ID and
+made the plan block anchor the step linked to that run's cause message. A rebuilt
+execution child selected the exact 9c21 task instead of the older 7f4a task, but
+a direct live product request still ignored its instruction for 13 turns. Its
+first retained prompt exposed the remaining cause: the new turn was timestamped
+after its opening message, and the bounded transcript used that turn as the
+message cutoff. The prompt therefore omitted the human message itself and ended
+in stale eval history. The current repair makes the bounded message query admit
+the exact `:seon.agent.run/cause` independently of that timestamp cutoff. Focused
+transcript proof passes 7 tests/27 assertions; rebuilt live task-priority proof
+remains the acceptance gate.

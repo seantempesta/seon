@@ -108,7 +108,9 @@
                          [1 [[101 (js/Date. 1) false 201 "run-1"]] nil]
                          [[] []]))})))
       (-> (transcript/transcript-block
-            {:seon.agent/id "agent" ::db/db database} nil)
+            {:seon.agent/id "agent"
+             :seon.agent.run/id "run-1"
+             ::db/db database} nil)
           (.then (fn [_]
                    (is (every? #(identical? database (::db/db %)) @requests))
                    (is (every?
@@ -124,7 +126,20 @@
                        "the database value is not a Datalog :in argument")
                    (is (some #(= [[101]] (::protocol/arguments %))
                              (mapcat ::db/members @requests))
-                       "a collection binding remains one Datalog argument")))
+                       "a collection binding remains one Datalog argument")
+                   (let [message-member
+                         (->> @requests
+                              (mapcat ::db/members)
+                              (filter #(str/includes?
+                                        (pr-str (::protocol/query-form %))
+                                        ":seon.agent.message/content"))
+                              first)]
+                     (is (= ["agent" "run-1" (js/Date. 1)]
+                            (::protocol/arguments message-member)))
+                     (is (str/includes?
+                           (pr-str (::protocol/query-form message-member))
+                           ":seon.agent.run/cause")
+                         "the bounded transcript always includes the message that opened the current run"))))
           (.catch (fn [error] (is false (str error))))
           (.finally (fn []
                       (set! db/execute-many original-execute)
