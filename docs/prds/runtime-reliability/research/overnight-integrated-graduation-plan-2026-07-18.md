@@ -74,6 +74,10 @@ source lines in this ledger or the owning successor PRD.
   `5907` with `:seon.error/fault :core` before the pod exited. The operator
   retained the watcher and writer and restored only the unexpectedly drained
   pod through the normal `up` path.
+- The complete ClojureScript gate at `671e1777` passes 1,152 tests and 5,118
+  assertions. Its first run exposed one canvas test that signaled completion
+  before restoring a global database stub; the lifecycle fix removed all six
+  downstream false failures.
 
 ## Execution ledger
 
