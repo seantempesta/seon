@@ -180,6 +180,19 @@ source lines in this ledger or the owning successor PRD.
   `kdhmf2xb6rih` ran that exact anonymous-function form in 233 ms, called the
   shared function with exact result `"shared:ordinary-ipc"` in 218 ms, and
   entered `wait` without a core fault.
+- The first three-agent application drive then exposed two product-contract
+  defects. An artificially low eight-turn run bound let all three children
+  exhaust their work while searching source after the documented map form of
+  `my.ns/functions` passed an omitted database as nil. That function now
+  captures one current database value and uses map-based query/pull requests;
+  focused proof passes 5 tests/37 assertions and the live omitted-database call
+  succeeds. Root's attempted repair used `seon.agent.fs/edit-file`, duplicated
+  the function head, and produced an unbalanced tracked file. Fail-loud Shadow
+  publication correctly persisted the core fault and drained the pod, but the
+  editor had already replaced valid bytes. Every Clojure-family mutation now
+  parses the proposed complete file before writing. Focused filesystem proof
+  passes 35/155; a live malformed edit returns an ordinary error, preserves the
+  exact prior SHA, restores the read-only grant, and leaves the pod ready.
 
 ## Execution ledger
 

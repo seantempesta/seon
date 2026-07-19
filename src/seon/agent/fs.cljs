@@ -42,7 +42,8 @@
     [seon.agent.fs.internal :as int]
     [seon.agent.fs.match :as match]
     [seon.code :as code]
-    [seon.schema :as schema]))
+    [seon.schema :as schema]
+    [rewrite-clj.parser :as parser]))
 
 ;; ============================================================
 ;; Schemas
@@ -396,6 +397,20 @@
                 (assoc base :seon.agent.fs/content content)))
             (catch :default e (int/->err path e)))))
 
+(def ^:private clojure-source-suffixes
+  #{".clj" ".cljs" ".cljc" ".edn" ".bb"})
+
+(defn- clojure-syntax-error
+  "Return a parser message when proposed Clojure-family source is malformed."
+  [path content]
+  (when (some #(str/ends-with? path %) clojure-source-suffixes)
+    (try
+      (parser/parse-string-all content)
+      nil
+      (catch :default error
+        (str "refused malformed Clojure source; prior file unchanged: "
+             (ex-message error))))))
+
 (defn ^:seon.fn/agent-facing? write-file
   "Write `:seon.agent.fs/content` to `:seon.agent.fs/path` (sync).
    Overwrites. Returns:
@@ -406,11 +421,16 @@
   (cond
     (int/read-only?)         (int/denied path "filesystem is read-only (:seon.agent.fs/read-only? true)")
     (int/out-of-scope? path) (int/scope-denied path)
-    :else (try
-            (.writeFileSync fs path (code/text content) encoding)
+    :else
+    (try
+      (let [new-content (code/text content)]
+        (if-let [error (clojure-syntax-error path new-content)]
+          (int/denied path error)
+          (do
+            (.writeFileSync fs path new-content encoding)
             {:seon.agent.fs/ok?  true
-             :seon.agent.fs/path path}
-            (catch :default e (int/->err path e)))))
+             :seon.agent.fs/path path})))
+      (catch :default e (int/->err path e)))))
 
 (defn- apply-edit
   "Read `path`, run `edit-fn` (content → new-content facts or error
@@ -426,14 +446,17 @@
               to (if (pos? lines-inserted)
                    (dec (+ from-line lines-inserted))
                    from-line)]
-          (.writeFileSync fs path new-content encoding)
-          (merge {:seon.agent.fs/ok?            true
-                  :seon.agent.fs/path           path
-                  :seon.agent.fs/from-line      from-line
-                  :seon.agent.fs/lines-replaced lines-replaced
-                  :seon.agent.fs/lines-inserted lines-inserted
-                  :seon.agent.fs/total-lines    (count new-lines)}
-                 (int/edit-context-window new-lines from-line to)))))
+          (if-let [error (clojure-syntax-error path new-content)]
+            (int/denied path error)
+            (do
+              (.writeFileSync fs path new-content encoding)
+              (merge {:seon.agent.fs/ok?            true
+                      :seon.agent.fs/path           path
+                      :seon.agent.fs/from-line      from-line
+                      :seon.agent.fs/lines-replaced lines-replaced
+                      :seon.agent.fs/lines-inserted lines-inserted
+                      :seon.agent.fs/total-lines    (count new-lines)}
+                     (int/edit-context-window new-lines from-line to)))))))
     (catch :default e (int/->err path e))))
 
 (defn ^:seon.fn/agent-facing? edit-file
@@ -774,8 +797,11 @@
                                        near           (assoc :seon.agent.fs.match/near near)))]
                       (if (= :apply (:seon.agent.fs.match/action decision))
                         (let [new-content (:seon.agent.fs.match/new-content decision)]
-                          (.writeFileSync fs path new-content encoding)
-                          (edit-success path new-content decision))
+                          (if-let [error (clojure-syntax-error path new-content)]
+                            (->anchored-fail (int/denied path error))
+                            (do
+                              (.writeFileSync fs path new-content encoding)
+                              (edit-success path new-content decision))))
                         (cascade-fail path decision)))))
         (catch :default e (->anchored-fail (int/->err path e)))))))
 
@@ -823,12 +849,15 @@
                           new-content (cond-> (str/join "\n" new-lines)
                                         (and trailing? (seq new-lines)) (str "\n"))
                           range       [(inc idx) (+ idx (count ins-lines))]]
-                      (.writeFileSync fs path new-content encoding)
-                      {:seon.agent.fs/ok?           true
-                       :seon.agent.fs/path          path
-                       :seon.agent.fs/file-sha      (int/file-sha new-content)
-                       :seon.agent.fs/range-after   range
-                       :seon.agent.fs/lines-added   (count ins-lines)
-                       :seon.agent.fs/lines-removed 0
-                       :seon.agent.fs/excerpt       (match/preview new-lines range)})))
+                      (if-let [error (clojure-syntax-error path new-content)]
+                        (->anchored-fail (int/denied path error))
+                        (do
+                          (.writeFileSync fs path new-content encoding)
+                          {:seon.agent.fs/ok?           true
+                           :seon.agent.fs/path          path
+                           :seon.agent.fs/file-sha      (int/file-sha new-content)
+                           :seon.agent.fs/range-after   range
+                           :seon.agent.fs/lines-added   (count ins-lines)
+                           :seon.agent.fs/lines-removed 0
+                           :seon.agent.fs/excerpt       (match/preview new-lines range)})))))
         (catch :default e (->anchored-fail (int/->err path e)))))))

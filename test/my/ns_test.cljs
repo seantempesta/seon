@@ -53,27 +53,36 @@
 
 (defn- with-program-results
   [namespaces body]
-  (let [saved-query db/query
+  (let [saved-db db/db
+        saved-query db/query
         saved-pull db/pull]
+    (set! db/db
+          (fn
+            ([] (js/Promise.resolve database))
+            ([_request] (js/Promise.resolve database))))
     (set! db/query
-          (fn [_query & [selected-db namespace-name]]
-            (is (= database selected-db) "the captured database value is forwarded")
+          (fn [request]
+            (is (= database (:seon.db/db request))
+                "the captured database value is forwarded")
             (js/Promise.resolve
-             (when (contains? namespaces namespace-name) namespace-name))))
+             (when (contains? namespaces (first (:seon.db/args request)))
+               (first (:seon.db/args request))))))
     (set! db/pull
           (fn
-            ([_request]
-             (js/Promise.reject (js/Error. "expected database-first pull")))
-            ([_pattern _ref]
-             (js/Promise.reject (js/Error. "expected database-first pull")))
-            ([selected-db _pattern namespace-name]
-             (is (= database selected-db) "pull uses the same database value")
+            ([request]
+             (is (= database (:seon.db/db request))
+                 "pull uses the same database value")
              (js/Promise.resolve
-              {:seon.fn/_ns (get namespaces namespace-name)}))))
+              {:seon.fn/_ns (get namespaces (:seon.db/ref request))}))
+            ([_pattern _ref]
+             (js/Promise.reject (js/Error. "expected map pull")))
+            ([_database _pattern _ref]
+             (js/Promise.reject (js/Error. "expected map pull")))))
     (-> (js/Promise.resolve)
         (.then (fn [] (body)))
         (.finally
           (fn []
+            (set! db/db saved-db)
             (set! db/query saved-query)
             (set! db/pull saved-pull))))))
 
@@ -139,6 +148,19 @@
                 (let [[by-symbol by-keyword by-string] (js->clj results)]
                   (is (= by-symbol by-keyword by-string)
                       "the three spellings are one question")))))))
+     done)))
+
+(deftest functions-acquires-one-database-value-when-omitted
+  (async done
+    (finish
+     (with-program-results
+       {:my.demo demo-function-rows}
+       (fn []
+         (-> (my-ns/functions {:my.ns/ns 'my.demo})
+             (.then
+              (fn [result]
+                (is (true? (:seon.result/ok? result)))
+                (is (= 3 (:my.ns/count result))))))))
      done)))
 
 (deftest functions-unknown-ns-is-a-legible-error

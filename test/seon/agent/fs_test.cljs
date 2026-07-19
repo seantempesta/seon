@@ -196,8 +196,51 @@
                     :seon.agent.fs/read-only?    false})
     path))
 
+(defn- clojure-edit-fixture!
+  [content]
+  (.rmSync nfs edit-dir #js {:recursive true :force true})
+  (.mkdirSync nfs edit-dir #js {:recursive true})
+  (let [path (.join npath edit-dir "target.cljs")]
+    (.writeFileSync nfs path content "utf-8")
+    (fs/configure! {:seon.agent.fs/allowed-roots [edit-dir]
+                    :seon.agent.fs/read-only? false})
+    path))
+
 (defn- file-content [path]
   (.readFileSync nfs path "utf-8"))
+
+(deftest clojure-file-mutations-refuse-malformed-complete-source
+  (doseq [[operation mutate]
+          [[:write
+            (fn [path]
+              (fs/write-file {:seon.agent.fs/path path
+                              :seon.agent.fs/content "(defn broken ["}))]
+           [:edit
+            (fn [path]
+              (fs/edit-file {:seon.agent.fs/path path
+                             :seon.agent.fs/from-line 1
+                             :seon.agent.fs/to-line 1
+                             :seon.agent.fs/content "(defn broken ["}))]
+           [:replace
+            (fn [path]
+              (fs/replace! {:seon.agent.fs/path path
+                            :seon.agent.fs/find "(defn intact [] 1)"
+                            :seon.agent.fs/replace "(defn broken ["}))]
+           [:insert
+            (fn [path]
+              (fs/insert! {:seon.agent.fs/path path
+                           :seon.agent.fs/after-line 1
+                           :seon.agent.fs/content "("}))]]]
+    (testing (name operation)
+      (let [original "(defn intact [] 1)\n"
+            path (clojure-edit-fixture! original)
+            result (mutate path)]
+        (is (false? (:seon.agent.fs/ok? result)))
+        (is (str/includes? (or (:seon.agent.fs/error result)
+                               (:seon.error/message result))
+                           "malformed Clojure"))
+        (is (= original (file-content path))
+            "the previously valid bytes remain current")))))
 
 (deftest edit-file-line-range-lands-exactly-with-context
   (let [path (edit-fixture! "l1\nl2\nl3\nl4\nl5\nl6\nl7\nl8\nl9\nl10\n")
