@@ -358,6 +358,15 @@ evidence rather than crashing the pod again. Focused execution proof passes 29
 tests/114 assertions. The ordered spine returns to the full canvas browser
 matrix, followed by exact-current CLJS/writer/operator gates.
 
+The first canvas-browser read exposed a public API drift before interaction:
+the state paragraph displayed `#object[Promise …]`. `my.canvas/state` still
+claimed a synchronous map after its sole implementation dependency,
+`seon.db/pull`, moved to the asynchronous JVM authority. The helper is now
+explicitly `^:async` and awaits the remote pull; the maintained canvas skill
+shows async renderers and awaited handler reads. Focused proof passes 6 tests
+and 22 assertions. [[../../seon/issues/canvas-state-returned-a-promise-as-render-data]]
+owns the remaining exact self-host load and browser control matrix.
+
 Current-source release application
 `0d8bc9c2ff2088de3103f951d1bd3f94f96d2c80cb4f4ccf6a035aaa9f96197b`
 now passes the source-free runtime boundary from `/Users/sean/seon-release-9df21b23`

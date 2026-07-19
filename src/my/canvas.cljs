@@ -137,7 +137,7 @@
    [:seon.agent/id {:optional true} :string]])
 (schema/register! ::state-response ::values)
 
-(defn ^:seon.fn/agent-facing? state
+(defn ^{:async true :seon.fn/agent-facing? true} state
   "Read qualified canvas/domain attributes from YOUR agent entity.
 
    `:seon.db/db` and `:seon.agent/id` are injected. Example:
@@ -146,9 +146,10 @@
    `seon.db`; this helper owns the common agent-local state case."
   {:malli/schema [:=> [:cat ::state-request] ::state-response]}
   [{::keys [attributes] dbv :seon.db/db agent-id :seon.agent/id}]
-  (or (db/pull {:seon.db/db dbv
-                :seon.db/pull-pattern attributes
-                :seon.db/ref [:seon.agent/id agent-id]})
+  (or (await
+       (db/pull {:seon.db/db dbv
+                 :seon.db/pull-pattern attributes
+                 :seon.db/ref [:seon.agent/id agent-id]}))
       {}))
 
 (schema/register! ::save-request

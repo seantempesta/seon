@@ -2,9 +2,10 @@
   "The single agent-facing canvas surface: reusable hiccup controls plus one
    canonical final dual-render envelope."
   (:require
-    [cljs.test :refer [deftest is testing]]
+    [cljs.test :refer [async deftest is testing]]
     [clojure.string :as str]
     [my.canvas :as canvas]
+    [seon.db :as db]
     [seon.web.reactive.transform :as transform]))
 
 (deftest button-builds-reusable-hiccup-and-routes-through-call-gate
@@ -62,3 +63,33 @@
          (@#'canvas/qualify-content 'my.shared/dashboard :my.orders)))
   (is (= [:h2 "literal"]
          (@#'canvas/qualify-content [:h2 "literal"] :my.orders))))
+
+(deftest state-awaits-the-remote-pull-before-returning-data
+  (async done
+    (let [original db/pull
+          database {:db-name "test"
+                    :t 42
+                    :as-of nil
+                    :since nil
+                    :history false
+                    :datahike/commit-id
+                    #uuid "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"}
+          request (atom nil)]
+      (set! db/pull
+            (fn
+              ([input]
+               (reset! request input)
+               (js/Promise.resolve {:my.demo/count 3}))
+              ([_database _pattern _ref]
+               (js/Promise.resolve {:my.demo/count 3}))))
+      (-> (canvas/state {:my.canvas/attributes [:my.demo/count]
+                         :seon.db/db database
+                         :seon.agent/id "agent-1"})
+          (.then
+           (fn [value]
+             (is (= {:my.demo/count 3} value))
+             (is (= database (:seon.db/db @request)))
+             (is (= [:seon.agent/id "agent-1"] (:seon.db/ref @request)))
+             (done)))
+          (.catch (fn [exception] (is false (str exception)) (done)))
+          (.finally (fn [] (set! db/pull original)))))))

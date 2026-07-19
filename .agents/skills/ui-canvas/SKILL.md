@@ -29,16 +29,17 @@ For content that changes, define a qualified renderer in the agent's current
 namespace and pin its symbol. A canvas renderer accepts
 :seon.render/system-input and returns :seon.render/html-response:
 
-    (defn dashboard
+    (defn ^:async dashboard
       {:malli/schema
        [:=> [:cat :seon.render/system-input]
         :seon.render/html-response]}
       [{dbv :seon.db/db agent-id :seon.agent/id}]
       (let [values
-            (my.canvas/state
-              {:my.canvas/attributes [::count]
-               :seon.db/db dbv
-               :seon.agent/id agent-id})
+            (await
+              (my.canvas/state
+                {:my.canvas/attributes [::count]
+                 :seon.db/db dbv
+                 :seon.agent/id agent-id}))
             count (get values ::count 0)]
         (my.canvas/view
           {:my.canvas/content
@@ -76,9 +77,10 @@ Write qualified values to that same entity:
     (my.canvas/save!
       {:my.canvas/values {::count 1}})
 
-Both calls receive the current agent id through the normal instrumentation
+Both calls are asynchronous and receive the current agent id through the normal instrumentation
 boundary. In a renderer, pass its explicit :seon.db/db and :seon.agent/id as in
-the example above so the view stays tied to the render snapshot.
+the example above, and `await` `state`, so the view stays tied to the render
+snapshot.
 
 save! returns the standard transaction envelope. Check :seon.db/ok? before
 claiming a click or submission worked.
@@ -97,8 +99,9 @@ qualified handler functions through the existing call gate:
       {:malli/schema
        [:=> [:cat ::empty-request] :seon.db/transact-response]}
       [_]
-      (let [values (my.canvas/state
-                     {:my.canvas/attributes [::count]})
+      (let [values (await
+                     (my.canvas/state
+                      {:my.canvas/attributes [::count]}))
             next-count (inc (get values ::count 0))]
         (await
           (my.canvas/save!
