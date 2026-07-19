@@ -117,7 +117,7 @@ source lines in this ledger or the owning successor PRD.
   `:seon.agent/namespace`, reconciles existing agents to their generated home
   namespace, selects that database ref as the pre-eval starting namespace, and
   extends `start!`/`delegate!` with an optional namespace symbol. Focused
-  multi-agent proof passes 7 tests/51 assertions; the Datahike bridge proof
+  multi-agent proof passes 7 tests/55 assertions; the Datahike bridge proof
   passes 14/81 and confirms the attribute compiles to
   `:db.type/ref` plus `:db.unique/identity`.
 - The first populated-database migration exposed that the historical
@@ -126,6 +126,10 @@ source lines in this ledger or the owning successor PRD.
   had accepted the resulting error value. The query now has a bounded 4,096
   node allowance and autonomous startup fails on either database error values
   or explicit failed responses; focused client initialization passes 9/29.
+- The first live namespace-targeted `delegate!` then falsified one-node scalar
+  budgets on the new resident join and namespace-existence query. Both retain
+  scalar output and small result-weight bounds but now admit 64 bounded
+  intermediate relation nodes before the live retry.
 
 ## Execution ledger
 

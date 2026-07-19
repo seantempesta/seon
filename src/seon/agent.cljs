@@ -853,7 +853,7 @@
                        [?agent :seon.agent/id ?id]
                        (not [?agent :seon.agent/terminated-at _])]
                      ::db/args [namespace-name]
-                     ::db/max-results 1
+                     ::db/max-results 64
                      ::db/max-result-weight 4096})))
                 namespace-eid
                 (when (and namespace-name (not (error-value? resident-id)))
@@ -864,7 +864,7 @@
                      '[:find ?namespace . :in $ ?name :where
                        [?namespace :seon.ns/name ?name]]
                      ::db/args [namespace-name]
-                     ::db/max-results 1
+                     ::db/max-results 64
                      ::db/max-result-weight 4096})))]
             (if (error-value? configuration)
               configuration
