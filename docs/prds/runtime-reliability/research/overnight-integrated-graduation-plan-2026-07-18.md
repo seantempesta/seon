@@ -101,6 +101,12 @@ source lines in this ledger or the owning successor PRD.
   derived plan `yy9b6iocki7j` as done 1/1. The plan status proof also exposed
   and repaired a Datahike pull budget that had treated one entity as one pull
   result node; Datahike charges each pulled attribute and nested result node.
+- Live malformed-source proof retained unterminated heredoc eval
+  `cx8ookzmziks` with its exact source and read error while a database query
+  proved `my.agent.plain-chefs-do/never-admitted` had no `:seon.fn` row. A
+  later turn admitted the repaired definition and returned `:repaired` from
+  eval `qmproratkoif`; failed source therefore cannot poison a fresh child or
+  prevent the agent from repairing its program.
 
 ## Execution ledger
 
@@ -170,7 +176,7 @@ missing schema, or silently rendered core failure.
   in a later turn from the exact earlier immutable database value.
 - [x] Redefine the function in place and prove a fresh child uses the latest
   admitted namespace source without replaying historical forms.
-- [ ] **IN PROGRESS:** reject invalid source from the admitted program while retaining its failed
+- [x] Reject invalid source from the admitted program while retaining its failed
   eval evidence and a functioning repair path.
 - [x] Stop the child, restart the pod, resume the same agent, plan, namespace,
   messages, and database facts, and continue successfully.
