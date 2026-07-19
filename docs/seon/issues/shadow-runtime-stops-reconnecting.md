@@ -44,6 +44,48 @@ virtualization, and backup processes. This is a host-resource blocker, not a
 Shadow compile or focused-test failure; live preserved-pod re-advertisement
 remains open.
 
+### Remaining MCP timing gaps
+
+The source fix makes eventual recovery possible, but the MCP call does not yet
+wait on the same timing contract:
+
+- Shadow schedules the next websocket attempt after 5,000 milliseconds.
+- `execute-agent-eval` tries at most eleven probes separated by 200
+  milliseconds, so it gives up after about two seconds—before Shadow's first
+  scheduled reconnect.
+- The default session's `get-or-create-session!` probes advertisements once.
+  When none exist, it throws before `execute-eval` enters its advertised retry
+  loop. The stale-session path has the same hole because
+  `retry-with-fresh-session!` calls that one-shot function outside a catch.
+- Cluster-pinned `create_session` also probes once. That is acceptable as an
+  explicit creation operation if its error remains actionable, but it should
+  not be confused with the self-healing `eval_cljs` contract.
+- `pin-session!` documents `nil` on failed selection but returns the cloned
+  nREPL session without checking `nrepl-select`'s result. A runtime disconnect
+  between enumeration and selection can therefore cache a session that was
+  never pinned. Later evaluation usually detects it as stale, but the false
+  success adds another retry cycle and weakens the function's stated contract.
+
+The next implementation should have one bounded runtime-acquisition function
+used by default and agent-targeted eval. Its deadline must cover at least one
+Shadow reconnect interval, re-probe current port files and advertisements each
+attempt, preserve ambiguity as an immediate error, and validate the pivot
+before publishing a session. Named sessions should report that their REPL state
+was lost and require explicit recreation; they must not silently become a new
+stateful session.
+
+Focused falsifiers require no live lifecycle operations:
+
+```bash
+bin/seon test operator seon.dev.mcp-test
+```
+
+Add deterministic test clocks/redefs where advertisement probes return empty
+until after 5,000 milliseconds, then return one replacement client ID. The
+default and cluster-qualified evals must each evaluate once on that replacement
+ID. A separate selection test must return `nil`, close the cloned nREPL session,
+and publish no cache entry when `nrepl-select` does not return `:selected`.
+
 ## Owner
 
 Shadow owns the runtime websocket lifecycle. Seon's existing MCP adapter owns
@@ -58,4 +100,7 @@ heartbeat or runtime registry is needed.
 - The Bun pod process identity remains unchanged across a watcher outage and
   return.
 - A cluster-qualified `eval_cljs` succeeds after the runtime re-advertises.
+- Default and agent-targeted eval wait through at least one five-second Shadow
+  reconnect interval without creating divergent retry loops.
+- A failed runtime selection never publishes an unpinned nREPL session.
 - Focused Shadow and Seon MCP tests pass.
