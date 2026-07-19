@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 tags:
   - namespaces
   - schema
@@ -79,8 +79,29 @@ Focused current-source evidence:
 - a later documented namespace transaction advances the database once without
   changing the installed schema.
 
-Fresh current-artifact boot, config-free reopen, and generated-catalog live
-proof remain required before this issue can close.
+## Resolution
+
+Resolved by `f7da0e60`. On a fresh default database, both attribute schemas
+were installed at basis transaction 536870915, before the first ready database
+value at basis transaction 536870917. At readiness, the index already held 120
+namespace metadata rows: `my.kb` retained its full source with exact doc and
+summary, while stub-backed `seon.warn` retained `(ns seon.warn)` plus its real
+doc and summary. Both installed attributes were cardinality-one strings with
+no uniqueness.
+
+A config-free supervised restart reopened the identical database value at
+basis transaction 536870917 and commit ID
+`6a5d4329-1230-5758-b847-1254010db352`. The installed schemas were identical,
+and the sorted 120-row namespace metadata projection retained SHA-256
+`691d6970d5d99b5fce812f6acefcd70ce40366ff7abe4b348b4ea134db313cad`.
+The `my.kb` and `seon.warn` projections were unchanged, and current writer and
+pod logs contained no unknown-attribute, schema, or core errors.
+
+The earlier real Stage 6 cause-graph proof had already acquired the generated
+plan and namespace catalog and retracted its temporary plan, run, message, and
+namespace facts, with four residue queries returning `[[] [] [] []]`. The
+fresh acceptance run made no temporary domain write—the database stayed at
+basis transaction 536870917—so no lazy schema transaction was involved.
 
 ## Acceptance evidence
 
