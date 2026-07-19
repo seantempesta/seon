@@ -300,8 +300,17 @@ eval observations already persisted on each turn—source, status/ok, result,
 output/error, and ending namespace. Durable writes reset the repetition state;
 a distinct observation starts at one; only the identical observation increments
 the bound. No source parsing, digest, watchdog, or work-budget change is added.
-The child-delivery scenario remains separate because neither live model invoked
-`delegate!`.
+Commit `6e3b741d` closes that replacement contract in the live runtime. A fresh
+agent emitted three identical `(my.plan/position {})` observations and closed
+`:no-forms` after 18,244 ms, three turns, and three evals. The prior-style root
+scenario emitted position, position, full-tree, active-plan status, and position
+reads across six turns in 36,456 ms and timed out rather than closing at the
+three-turn repetition bound. Distinct observations therefore remain useful
+while identical polling stays bounded. The root still did not delegate because
+its attention remained on a stale active plan; that is scenario/driver-context
+evidence, not a defect in repetition accounting. The child-delivery scenario
+also remains separate because `delegate!` resolves a child ID rather than
+synchronously awaiting the child's report.
 
 The same controlled branch also reproduced the one-call release race with the
 writer's exact `database-in-use` response. Pod containment completed cleanly

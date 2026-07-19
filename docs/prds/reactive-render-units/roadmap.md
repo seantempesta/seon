@@ -203,8 +203,19 @@ The reopened contract folds the ordered stable source/result/error/namespace
 projection already stored on eval rows: durable writes reset repetition,
 distinct observations remain knowledge, and only an identical observation
 increments the existing three-turn bound. Focused loop regressions cover both
-branches without parsing source or changing the watchdog/work budget. Live
-current-artifact proof and child completion remain pending.
+branches without parsing source or changing the watchdog/work budget.
+
+The replacement graduated live at `6e3b741d`. A fresh agent repeated the exact
+`(my.plan/position {})` read three times and closed `:no-forms` in 18,244 ms
+with three turns and three evals. The prior-style root scenario then ran six
+turns and five evals in 36,456 ms without premature `:no-forms`; its ordered
+sources included position, full-tree, active-plan status, and another position
+read, proving distinct stable observations survive the existing three-turn
+bound. That root timed out without delegating because it attended to a stale
+active plan, which is a separate scenario/driver-context defect rather than a
+reason to weaken the one repetition mechanism. Child completion remains a
+separate driver-phase contract because `delegate!` resolves the child ID rather
+than synchronously awaiting its report.
 
 The gate now also exercises the real timer rather than only the `due-at`
 arithmetic. With a 1,000 ms moving settle edge and 20 ms maximum latency, a
