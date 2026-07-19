@@ -6,6 +6,23 @@ tags: [research, agent, database, cljs, web]
 
 # Overnight integrated graduation plan
 
+## Persistent goal
+
+Graduate Seon as one stable, fail-loud, fast system: deterministic startup and
+reload; database-backed agents that move through and share namespaces;
+namespace-targeted launch, messaging, restart, and recovery; passing live
+Inspect AI namespace, database-memory, planning, multi-agent, and
+failure-recovery scenarios; passing browser/Datastar, complete test,
+multi-cluster, downstream, immutable-package, latency, and modest-hardware
+resource gates; and removal of obsolete mechanisms revealed by the integrated
+proof.
+
+This is the complete-program goal, not the name of the current implementation
+slice. It remains active while any dependency-ready correctness, integration,
+proof, packaging, or measurement work remains. Evidence may improve the plan
+when it reveals a simpler or stronger design, but a local green test selection
+does not shorten the graduation gate.
+
 ## Outcome
 
 Graduate one Seon system whose normal product path and Inspect AI path are the
@@ -193,6 +210,23 @@ source lines in this ledger or the owning successor PRD.
   parses the proposed complete file before writing. Focused filesystem proof
   passes 35/155; a live malformed edit returns an ordinary error, preserves the
   exact prior SHA, restores the read-only grant, and leaves the pod ready.
+- Commit `c0cc1f80` binds changed-test selection to the manifest's program
+  source path and digest instead of testing only the runtime file that happened
+  to trigger the hook. Focused operator and program-index proof passes 17
+  tests/119 assertions.
+- The complete Inspect offline suite passes 498 tests with eight intentional
+  skips. Commits `c007ef49` and `ba95bfa1` close a false-green proof fixture:
+  every oracle arm now asserts its expected metric, decimal weights use the
+  declared `:double` schema, and generated integer variants explicitly retain
+  `:int`. Focused proof passes 56 tests; the real 16-arm offline proof reports
+  exact means for every expected success and failure arm.
+- The browser/Datastar graduation audit is recorded in
+  [[browser-datastar-graduation-matrix-2026-07-19]]. It identifies the existing
+  one-feed behavior and the smallest missing product proofs: namespace plus
+  initial-message creation from `/agents`, visible selected-call validation,
+  rapid-submit cancellation, semantic feed sharing, reconnect, and slow-client
+  isolation. These remain acceptance work, not a reason to add another route,
+  renderer, or reactive channel.
 
 ## Execution ledger
 
@@ -306,7 +340,7 @@ prose is supporting evidence only.
 
 ### 5. Inspect AI graduation
 
-- [ ] Pass the complete offline `src-inspect-ai` tests and oracle liveness proof.
+- [x] Pass the complete offline `src-inspect-ai` tests and oracle liveness proof.
 - [ ] Pass the fixed live namespace and later-turn database-memory scenarios.
 - [ ] Pass generated namespace and database variants without adding scorer
   exceptions for model answers.
@@ -380,8 +414,9 @@ modest hardware, with no micro-optimization displacing a correctness boundary.
   messages, reuse and repair one shared program, survive one child replacement
   and one pod restart, and complete from database state.
 - **Dependency-ready parallel portfolio:** Inspect offline harness verification
-  and browser-scenario preparation remain independent of section 4's agent
-  entities and shared application namespaces.
+  is now green with metric-bearing oracles, and browser-scenario preparation is
+  source-grounded. Their live product gates remain independent of section 4's
+  agent entities and shared application namespaces.
 - **Next refill:** after section 4 closes, section 5's fixed and generated live
   Inspect scenarios become the ordered spine while browser proof advances.
 - **Final graduation gate:** sections 1–8 are checked against one exact source
