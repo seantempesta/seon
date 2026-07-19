@@ -121,6 +121,7 @@
   "Keys shared across all backends. Backend-specific code only fills in
    Datahike's private `:store` value."
   {:keep-history?      true
+   :fuse-index-roots?  true
    :schema-flexibility :write})
 
 ;;; --- Public ----------------------------------------------------------------

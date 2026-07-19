@@ -619,6 +619,31 @@ small additional gain when combined with fusion is not decision-grade. The
 next transaction falsifier is the same comparison against a realistically
 grown database before any production configuration or migration decision.
 
+That grown falsifier now passes. Across mirrored run order and a 5,000-entity
+history-preserving database, root fusion improved warmed transaction p50 by
+about 11%, p95 by about 18%, and growth by 10–16%; file count fell 21%, stored
+bytes rose 1.7%, and cold reconnect regressed by less than 1.5 ms. Current and
+`as-of` values plus the identical commit ID survived cold reopen. The remaining
+decision is whether Datahike can adopt the creation option for existing Seon
+databases without a second database path or migration ambiguity.
+
+Live Datastar slow-client isolation now passes. After a non-reading raw socket
+forced Bun backpressure and six newest-event replacements across more than 1.1
+MiB of serialized updates, two fast feeds received the next commit in the same
+millisecond while the slow socket remained blocked. That update rendered once
+in 71.98 ms and serialized once for all three sockets. Client abort returned
+all view/subscription/pending counts to zero. Application buffering is one
+newest event per blocked connection; automatic stale-client eviction is not a
+current policy.
+
+The next resource sample also separated steady state from child startup.
+Writer CPU was 0.0% median over 60 seconds and pod CPU was 0.8% median; the one
+14.0% writer sample aligned exactly with a demanded execution-child start.
+Current charged physical footprints were 596.7 MiB writer, 274.6 MiB pod, and
+177.1 MiB full execution child. macOS `vmmap` physical footprint is used instead
+of unavailable Linux PSS, and the 1.7 GiB Shadow compiler remains explicitly
+development-only. Event-loop delay and a natural idle-timeout sample remain.
+
 The existing remote query surface now exposes its protocol-native historical
 view, closing the only facade gap needed by coordinate-pinned startup birth.
 LLM configuration and brand startup sync also use bounded coordinate-fenced

@@ -68,6 +68,25 @@
                    (registry/release-database!
                    {::registry/database-name database-name})))))))
 
+(deftest old-unfused-database-fails-loudly-at-the-one-creation-contract
+  (let [database-name (keyword "registry" (str "unfused-" (random-uuid)))
+        fused-config
+        (backend/datahike-config
+         {::backend/database-name database-name
+          ::backend/backend :memory})
+        old-config (dissoc fused-config :fuse-index-roots?)]
+    (d/create-database old-config)
+    (try
+      (is (thrown? clojure.lang.ExceptionInfo
+                   (ensure-database!
+                    {::registry/database-name database-name
+                     ::registry/backend :memory}))
+          "an existing old layout is never silently opened or rewritten")
+      (is (empty? (registry/lookup-connection
+                   {::registry/database-name database-name})))
+      (finally
+        (d/delete-database old-config)))))
+
 (deftest retained-commit-reachability-follows-the-current-lineage
   (let [opened
         (ensure-database!

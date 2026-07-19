@@ -95,6 +95,26 @@ against a realistically grown database is the next falsifier because the live
 database's deeper indexes may retain pending nodes that a fused single-leaf
 root cannot eliminate.
 
+The grown-database falsifier used 5,000 entities, ten durable seed
+transactions, 120 twelve-entity update transactions, and 60 warmed
+single-entity transactions. It mirrored run order as default/fused and
+fused/default. Fusion remained beneficial, but at the realistic scale expected
+from the source model rather than the shallow headline:
+
+- warmed p50 improved from 97.79/92.14 ms to 86.21/82.57 ms, about 11%;
+- p95 improved from 123.23/116.18 ms to 100.44/96.93 ms, about 18%;
+- database growth/replay improved by about 10–16%;
+- file count fell from 3,823 to 3,037, about 21%, while bytes increased 1.7%;
+  and
+- cold reconnect regressed by less than 1.5 ms in absolute terms.
+
+Both fused runs cold-reopened correctly, retained the identical UUID commit ID,
+returned the final current value, and returned the pre-measure value through an
+`as-of` database value. Root fusion therefore survives the grown falsifier as a
+moderate, simple architectural improvement. It must be evaluated against the
+existing-database creation/migration contract before adoption; the evidence
+does not support claiming the shallow database's 60% gain in production.
+
 ## Shared JVM query work
 
 The maintained `seon.authority-density-test` compiled its real Bun client and
@@ -135,6 +155,18 @@ one semantic subscription, render, and serialized event. The roughly 79 KiB
 root event makes configurable gzip valuable for remote clients even though it
 is deliberately disabled on loopback.
 
+A live slow-client proof forced Bun socket backpressure rather than merely
+asserting the queue transformation. One raw root-feed client stopped reading
+while 12 ordinary commits serialized 1,125,968 bytes. The connection recorded
+one backpressured write and replaced its one pending event six times. While it
+remained blocked, two new fast feeds received the next event in the same
+millisecond, about 375 ms after transaction response; that update rendered in
+71.98 ms and serialized once for all three sockets. Closing the slow socket
+returned views, subscriptions, and pending renders to zero. Seon therefore has
+per-connection latest-wins application buffering and fast-client isolation.
+Bun's native in-flight buffer is not exposed by this measurement, and Seon does
+not currently evict a persistently blocked client automatically.
+
 After explicitly reclaiming the root execution child, the next demanded root
 feed measured one cold render at 1,385.77 ms. Warm database-update renders were
 about 75 ms. Cold execution-child startup/program load is therefore material;
@@ -158,6 +190,18 @@ The execution host's maintained idle timeout is 300,000 ms. Explicit
 MiB physical footprint; the next demand created a fresh child. Separately, live
 pod `SIGKILL` proof removed both pod and detached child through Bun no-orphans
 containment, while the writer remained ready.
+
+A later read-only sample separated steady state from one demanded-child start.
+The writer measured 596.7 MiB physical, the pod 274.6 MiB, and the new full
+execution child 177.1 MiB. Over 13 samples at five-second intervals, writer CPU
+had a 0.0% median and 12 samples between 0.0% and 0.2%; its one 14.0% sample
+aligned exactly with child startup. Pod CPU had a 0.8% median and 4.5% maximum.
+The writer's G1 used heap naturally moved from 236.8 MiB to 167.5 MiB while
+committed heap moved from 300 MiB to 290 MiB. macOS has no Linux PSS; `vmmap`
+physical footprint is the appropriate charged-memory measure here. JVM native
+memory tracking was not enabled, and the runtime currently exposes no Bun
+event-loop-delay metric, so those two subdivisions remain unclaimed rather
+than inferred from RSS.
 
 ## Current decision
 

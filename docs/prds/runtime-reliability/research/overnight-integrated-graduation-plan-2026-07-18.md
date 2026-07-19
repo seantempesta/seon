@@ -510,7 +510,7 @@ than a special harness runtime or transcript regex.
 - [ ] Exercise button, input, select, toggle, validation, rapid submission,
   focus preservation, and database read-back.
 - [ ] Verify gzip SSE reconnect and tool reconnect after child and pod restart.
-- [ ] Prove identical active renders share computation where function,
+- [x] Prove identical active renders share computation where function,
   arguments, and database value match; a slow client does not block a fast one.
 - [x] Run multiple browser tabs and concurrent feeds without duplicate actions,
   stale output, Promise rendering, console errors, or leaked interests.
@@ -525,6 +525,17 @@ backed off to 30 seconds before reconnecting; post-reconnect morph delivery is
 the acceptance signal. Root, agent, and database server-side clients each
 received `datastar-patch-elements`; browser pages reported no application
 console faults before the intentional restart.
+
+The slow-client boundary now passes too. One raw root-feed socket stopped
+reading while 12 ordinary commits produced more than 1.1 MiB of serialized
+events. Bun reported one backpressured write and the application replaced its
+single pending event six times. With that socket still blocked, two new fast
+feeds received the next committed event in the same millisecond, about 375 ms
+after the transaction response; the render itself took 71.98 ms and serialized
+once for all three sockets. Closing the slow socket returned views,
+subscriptions, and pending renders to zero. There is no automatic stale-client
+eviction, but application buffering is bounded to one newest event per blocked
+connection and one blocked client does not delay another.
 
 Exit: the real browser journey and server-side gzip client agree on one reactive
 render/feed mechanism.
@@ -606,6 +617,21 @@ reduced durable transaction p50 from 48.08 ms to 19.42 ms and file count from
 337 to 55 while preserving cold reopen, history, and commit IDs. That is strong
 enough to justify the next grown-database falsifier, but not yet a production
 setting.
+
+The grown-database falsifier retained the win at realistic scale: mirrored
+runs improved warmed transaction p50 by about 11%, p95 by about 18%, and growth
+by 10–16%, while file count fell 21%. Stored bytes rose 1.7% and cold reconnect
+regressed by less than 1.5 ms. Current and `as-of` reads, history, and commit ID
+survived cold reopen. Root fusion now merits a migration-contract decision;
+the production expectation is the grown result, not the shallow 60% headline.
+
+The next 60-second resource sample found steady-state writer CPU at 0.0% median
+and pod CPU at 0.8% median. Its only writer spike, 14.0%, aligned exactly with a
+new execution-child start. Charged physical footprint was 596.7 MiB writer,
+274.6 MiB pod, and 177.1 MiB full child; the development-only Shadow compiler
+remained separate at 1.7 GiB. The broad resource checkbox remains open because
+the runtime has no event-loop-delay measure and this sample did not wait solely
+to repeat the already-proven five-minute idle-timeout reclamation.
 
 ## Scheduling clock
 

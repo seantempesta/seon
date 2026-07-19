@@ -62,6 +62,8 @@
       (is (= :db (:branch config)))
       (is (= :write (:schema-flexibility config)))
       (is (true? (:keep-history? config)))
+      (is (true? (:fuse-index-roots? config))
+          "every newly created Seon database uses the measured root layout")
       (is (= initial-tx (:initial-tx config)))
       (is (not (.exists (File. root)))
           "constructing configuration performs no filesystem writes")
