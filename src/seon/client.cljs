@@ -60,6 +60,7 @@
     [seon.agent.ctx]
     [seon.ai :as ai]
     [seon.ai.dispatch :as ai.dispatch]
+    [seon.ai.generate-code :as generate-code]
     [seon.db :as db]
     [seon.db.branch :as db.branch]
     [seon.db.id :as id]
@@ -1836,7 +1837,7 @@
      :seon.db/initial-data (vec (initial-data configuration))}))
 
 (schema/register! ::llm-fn        'fn?)
-(defn- rehost-agent-runtimes!
+(defn ^:async ^:private rehost-agent-runtimes!
   "Reconstruct every nonterminated agent after a code reload.
 
    This is process-local work only: [[seon.agent.runtime/resume!]] per
@@ -1844,21 +1845,38 @@
    program lazily; the pod owns no compiler or program replay."
   []
   (if (db/attached?)
-    (-> (acquire-resumable-agent-ids!)
-        (.then
-         (fn ^:async rehost! [ids]
-           (doseq [id ids]
-             (await (agent-runtime/resume! {:seon.agent/id id})))
-           (log/info-console! "seon.client"
-                              "reload: agent runtimes rehosted"
-                              {:seon.client/reinstalled ids})
-           ids))
-          (.catch
-           (fn [err]
-             (log/error-console! "seon.client"
-                                 "reload: agent runtime rehost FAILED"
-                                 err))))
-    (js/Promise.resolve [])))
+    (let [ids (await (acquire-resumable-agent-ids!))
+          _ (when (:seon.error/message ids)
+              (throw (ex-info "reload: agent acquisition failed" ids)))
+          !results (volatile! [])
+          _ (doseq [id ids]
+              (vswap! !results conj
+                      (await
+                       (agent-runtime/resume!
+                        {:seon.agent/id id}))))
+          results @!results
+          failed
+          (some #(when (false? (:seon.agent.runtime/resumed? %)) %) results)]
+      (when failed
+        (throw (ex-info "reload: agent runtime rehost failed" failed)))
+      (let [database (await (db/db))
+            restored
+            (if (:seon.error/message database)
+              database
+              (await
+               (generate-code/restore-root-schedulers!
+                {::db/db database
+                 :seon.config/model-variant :execution})))]
+        (when (:seon.error/message restored)
+          (throw
+           (ex-info "reload: generated-code scheduler restore failed"
+                    restored)))
+        (log/info-console! "seon.client"
+                           "reload: agent runtimes rehosted"
+                           {:seon.client/reinstalled ids
+                            :seon.ai.generate-code/restored-roots restored})
+        ids))
+    []))
 
 (schema/register! ::apply-config-request
   [:map {:closed true}
@@ -2232,6 +2250,20 @@
                                    results)]
                     (throw (ex-info "start-runtime!: agent resume failed"
                                     failed)))
+                scheduler-database (when autonomous? (await (db/db)))
+                restored-roots
+                (when autonomous?
+                  (if (:seon.error/message scheduler-database)
+                    scheduler-database
+                    (await
+                     (generate-code/restore-root-schedulers!
+                      {::db/db scheduler-database
+                       :seon.config/model-variant :execution}))))
+                _ (when (:seon.error/message restored-roots)
+                    (throw
+                     (ex-info
+                      "start-runtime!: generated-code scheduler restore failed"
+                      restored-roots)))
                 hosted (or (some #(when (= primary (:seon.agent/id %)) %) results)
                            (first results))
                 {:seon.web/keys [port port-file]}

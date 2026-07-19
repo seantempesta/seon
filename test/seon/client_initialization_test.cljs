@@ -6,6 +6,7 @@
    [seon.agent :as agent]
    [seon.agent.loop :as agent-loop]
    [seon.agent.runtime :as agent-runtime]
+   [seon.ai.generate-code :as generate-code]
    [seon.client :as client]
    [seon.config :as config]
    [seon.db :as db]
@@ -346,6 +347,7 @@
           original-publish admission/publish-committed!
           original-unavailable admission/mark-unavailable!
           original-resume agent-runtime/resume!
+          original-restore generate-code/restore-root-schedulers!
           original-install agent-loop/install-ticker!
           original-heartbeat client/start-heartbeat!
           effects (atom [])
@@ -393,6 +395,10 @@
               (js/Promise.
                (fn [resolve _]
                  (reset! finish-resume resolve)))))
+      (set! generate-code/restore-root-schedulers!
+            (fn [request]
+              (swap! effects conj [::restore-schedulers request])
+              (js/Promise.resolve [])))
       (set! agent-loop/install-ticker!
             (fn [configuration]
               (swap! effects conj [:ticker configuration])))
@@ -425,6 +431,9 @@
                        ::client/configuration configuration}]
                      :publish
                      [::resume {:seon.agent/id "root"}]
+                     [::restore-schedulers
+                      {::db/db {:db-name "default"}
+                       :seon.config/model-variant :execution}]
                      [:ticker configuration]
                      :heartbeat]
                     @effects)
@@ -444,6 +453,7 @@
              (set! admission/publish-committed! original-publish)
              (set! admission/mark-unavailable! original-unavailable)
              (set! agent-runtime/resume! original-resume)
+             (set! generate-code/restore-root-schedulers! original-restore)
              (set! agent-loop/install-ticker! original-install)
              (set! client/start-heartbeat! original-heartbeat)
              (done)))))))

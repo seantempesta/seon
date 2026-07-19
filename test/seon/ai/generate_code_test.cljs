@@ -306,3 +306,75 @@
              (set! generate/unobserve-root! original-unobserve)))
           (.then (fn [_] (done)))
           (.catch (fn [error] (is false (str error)) (done)))))))
+
+(deftest restore-replaces-observers-for-durable-nonterminal-roots
+  (async done
+    (let [original-query db/query
+          original-state plan/generated-root-state
+          original-start generate/start-root-scheduler!
+          original-unobserve generate/unobserve-root!
+          queried (atom nil)
+          started (atom [])
+          released (atom [])
+          state-for
+          {"claimed-open"
+           {:my.plan/id "claimed-open"
+            :my.plan/status :open
+            :my.plan/progress
+            {:my.plan/done 0 :my.plan/total 1 :my.plan/done? false}
+            :my.plan/blocked? false
+            :my.plan.internal/namespace-steps
+            [{:my.plan/id "step"
+              :seon.ns/name 'my.claimed
+              :my.plan/status :open
+              :my.plan/claim "assignment"}]
+            :my.plan.internal/ready-steps []}
+           "blocked"
+           {:my.plan/id "blocked"
+            :my.plan/status :open
+            :my.plan/progress
+            {:my.plan/done 0 :my.plan/total 1 :my.plan/done? false}
+            :my.plan/blocked? true
+            :my.plan.internal/namespace-steps
+            [{:my.plan/id "blocked-step"
+              :seon.ns/name 'my.blocked
+              :my.plan/status :blocked}]
+            :my.plan.internal/ready-steps []}}]
+      (set! db/query
+            (fn [request]
+              (reset! queried request)
+              (js/Promise.resolve
+               [["claimed-open" "coordinator"]
+                ["blocked" "coordinator"]])))
+      (set! plan/generated-root-state
+            (fn [{root-id :my.plan/id}]
+              (js/Promise.resolve (get state-for root-id))))
+      (set! generate/unobserve-root!
+            (fn [request]
+              (swap! released conj (:my.plan/id request))
+              (js/Promise.resolve true)))
+      (set! generate/start-root-scheduler!
+            (fn [request]
+              (swap! started conj request)
+              (js/Promise.resolve (:my.plan/id request))))
+      (-> (generate/restore-root-schedulers!
+           {::db/db database :seon.config/model-variant :execution})
+          (.then
+           (fn [restored]
+             (is (= ["claimed-open"] restored))
+             (is (= ["blocked" "claimed-open"] @released)
+                 "hot reload drops every prior root observer before classifying")
+             (is (= ["claimed-open"] (mapv :my.plan/id @started)))
+             (is (= :execution
+                    (:seon.config/model-variant (first @started))))
+             (is (= database (::db/db @queried)))
+             (is (some #{:my.plan/namespace}
+                       (tree-seq coll? seq (::db/query @queried))))))
+          (.finally
+           (fn []
+             (set! db/query original-query)
+             (set! plan/generated-root-state original-state)
+             (set! generate/start-root-scheduler! original-start)
+             (set! generate/unobserve-root! original-unobserve)))
+          (.then (fn [_] (done)))
+          (.catch (fn [error] (is false (str error)) (done)))))))

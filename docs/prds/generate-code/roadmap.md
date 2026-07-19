@@ -521,8 +521,10 @@ Exit:
 
 ### Stage 5 — reactive scheduler and atomic assignment
 
-**In progress 2026-07-19.** The stable root observer, atomic claim transaction,
-and namespace-resident scheduling callback are implemented. One transaction
+**Source-complete 2026-07-19 at `92bfccfd`, `3bfe78da`, `2dbb0fce`, plus the
+startup-recovery slice.** The stable root observer, atomic claim transaction,
+namespace-resident scheduling callback, and cold/hot restoration are
+implemented. One transaction
 contains the claim CAS, ordinary addressed assignment message, and plan-message
 connection. Competing claim attempts reread the committed claim to classify a
 benign loss without parsing writer errors. The namespace's unique resident is
@@ -530,10 +532,13 @@ ensured idle before assignment; only the winning addressed message starts work.
 New residents copy the named execution model variant, while an existing or
 concurrently won resident retains its committed model attributes.
 
-Focused proof passes 183 tests/916 assertions. It covers one committed message
+Focused scheduler proof passes 183 tests/916 assertions; the recovery/client
+gate passes 55 tests/348 assertions. Together they cover one committed message
 under competing claims, concurrent ready-unit dispatch, stable root observation,
-blocked-leaf terminal propagation, and deferred observer release. Startup
-observer restoration remains the unsettled Stage 5 contract.
+blocked-leaf terminal propagation, deferred observer release, claimed-open
+root restoration, and listener-before-observer startup order. Hot reload now
+propagates a failed runtime or observer restoration into the existing admission
+failure boundary instead of logging success and continuing.
 
 Register one root-frontier computation. Compose identity allocation, claim CAS,
 assignment message, and step-message link in one writer transaction. Ensure the
@@ -615,13 +620,13 @@ Exit:
 
 ## Next implementation boundary
 
-Stage 5 startup recovery is the dependency-ready boundary. After every durable
-agent runtime and addressed-message listener resumes, query roots that directly
-parent namespace steps and reinstall one stable observer for each nonterminal
-root before readiness. Claimed open work remains recoverable and must not be
-reassigned; blocked namespace descendants are terminal even when the root row
-itself remains open. Hot reload must explicitly replace the root consumer so a
-stale process-local observer closure cannot survive publication. Prove restart
-restores one observer, creates no second claim/message, exposes the next
-dependency once, and releases the observer at terminal state. Progressive repair
-context remains the following Stage 6 consumer of this settled scheduler.
+Stage 6 progressive repair context is the dependency-ready boundary. Add the
+single `:generate-code` block, derive its phase from the assignment message and
+plan/eval/test connections, and reconcile the existing `:namespaces` block's
+full-source set for the target namespace, selected owners, and their `.internal`
+descendants. Prove an initial planner sees broad summaries and selected source,
+a repair resident sees only its exact durable assignment evidence plus relevant
+full source, reassignment replaces stale source selection, and an inactive
+resident renders no generation block. The scheduler and named execution variant
+are settled inputs; this stage must not add another registry, parser, or worker
+selection path.

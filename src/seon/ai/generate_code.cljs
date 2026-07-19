@@ -51,6 +51,12 @@
    [:my.plan/id :my.plan/id]
    [:seon.agent/id :seon.agent/id]
    [:seon.config/model-variant {:optional true} :seon.config/model-variant]])
+(schema/register! ::restore-schedulers-request
+  [:map {:closed true}
+   [::db/db :seon.db/db]
+   [:seon.config/model-variant {:optional true} :seon.config/model-variant]])
+(schema/register! ::restore-schedulers-response
+  [:or [:vector :my.plan/id] [:map [:seon.error/message :string]]])
 
 (defn- root-key [root-id]
   [::root root-id])
@@ -196,7 +202,8 @@
 
 (defn- terminal-root?
   [root-state]
-  (or (true? (get-in root-state [:my.plan/progress :my.plan/done?]))
+  (or (contains? #{:done :blocked} (:my.plan/status root-state))
+      (true? (get-in root-state [:my.plan/progress :my.plan/done?]))
       (true? (:my.plan/blocked? root-state))))
 
 (defn- root-notify
@@ -231,3 +238,51 @@
     {::db/db database
      :my.plan/id root-id
      ::notify #(root-notify coordinator-id model-variant %)})))
+
+(defn ^:async ^:no-doc restore-root-schedulers!
+  "Replace process-local observers for every durable generated-code root."
+  {:malli/schema [:=> [:cat ::restore-schedulers-request]
+                  ::restore-schedulers-response]}
+  [{database ::db/db model-variant :seon.config/model-variant}]
+  (let [candidates
+        (await
+         (db/query
+          {::db/db database
+           ::db/query
+           '[:find ?root-id ?coordinator-id
+             :where
+             [?step :my.plan/namespace _]
+             [?step :my.plan/parent ?root]
+             [?root :my.plan/id ?root-id]
+             [?root :my.plan/agent ?coordinator]
+             [?coordinator :seon.agent/id ?coordinator-id]]
+           ::db/max-results 10000
+           ::db/max-result-weight 1048576}))]
+    (if (:seon.error/message candidates)
+      candidates
+      (loop [remaining (sort-by first candidates)
+             restored []]
+        (if-let [[root-id coordinator-id] (first remaining)]
+          (let [root-state
+                (await
+                 (plan/generated-root-state
+                  {::db/db database :my.plan/id root-id}))]
+            (if (:seon.error/message root-state)
+              root-state
+              (do
+                (await (unobserve-root! {:my.plan/id root-id}))
+                (if (terminal-root? root-state)
+                  (recur (next remaining) restored)
+                  (let [result
+                        (await
+                         (start-root-scheduler!
+                          (cond->
+                           {::db/db database
+                            :my.plan/id root-id
+                            :seon.agent/id coordinator-id}
+                            model-variant
+                            (assoc :seon.config/model-variant model-variant))))]
+                    (if (:seon.error/message result)
+                      result
+                      (recur (next remaining) (conj restored root-id))))))))
+          restored)))))
