@@ -154,6 +154,10 @@ def test_ns_movement_report_values_needs_both_numbers():
         _NS_GOOD_ROWS, "Total meters 42.5.")["failures"]  # feet missing
 
 
+def test_namespace_contract_teaches_quoted_datalog_query():
+    assert "(db/query {:seon.db/query '[:find ?m" in NS_MOVEMENT_CONTRACT
+
+
 def test_ns_movement_accepts_precise_unrounded_conversion():
     result = check_ns_movement(
         _NS_GOOD_ROWS, "Total meters 42.5, total feet 139.4357.")

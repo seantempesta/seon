@@ -73,6 +73,12 @@ source lines in this ledger or the owning successor PRD.
 
 ## Current evidence
 
+- The first admitted live namespace battery now reaches the real scorer. Native
+  log `…fxN7bWkJXsVehcJBqs9K3B.eval` completed all three samples with two
+  passes, zero fabrication, and one `NaN` failure after repeated unquoted
+  Datalog forms. The retained runs took 13–23 turns, 46–89 evals, and
+  164.5–264.0 seconds. [[live-inspect-contract-audit-2026-07-19]] grounds the
+  task-teaching, context-cost, and next database-scorer corrections.
 - The last complete checkpoint before the most recent focused changes passed
   ClojureScript 1,140 tests/5,078 assertions, JVM writer 219/1,821, and operator
   278/1,570.

@@ -9,165 +9,70 @@ tags: [issue, agent, database, research]
 
 ## Problem
 
-Ordered turn-owned attempt facts now flow losslessly through `POST /agents/run`
-and retained Inspect metadata. A completed log can prove which retained
-database value, resolved request configuration, endpoint, timeout layers,
-outcome, and present response identity governed every provider attempt. It
-can now also admit which immutable MLX revision and weights the separately
-managed model server used. Formal cross-model comparison remains blocked until
-that source boundary participates in one live run and the resulting native
-`.eval` is finalized and reopened. Final intent remains compatibility metadata,
-not per-call provenance.
+Source-admitted live capability runs now retain complete provider-attempt
+evidence and reach the real scorer. Formal local-model comparisons additionally
+need a validated model-server artifact identity. These are different claims:
+ordinary remote-provider capability scoring must not pretend Seon owns or can
+hash externally hosted model weights.
 
-## Evidence
+## Current evidence
 
-The database-derived resolver now includes endpoint, adapter timeout,
-credential-source name, and extra-body digest, and the OpenAI-compatible
-adapter consumes one caller-supplied immutable resolution without rereading
-ambient configuration. Its response also retains bounded response model,
-system fingerprint, and request id when those fields are present; absence
-remains absence.
+`seon.web.serve/project-model-transport-evidence` reads ordered attempt
+components from the run's final immutable database value. Each attempt retains
+its turn ID, ordinal, provider, adapter, requested model, endpoint, adapter and
+outer timeouts, stream mode, response model and request ID when present,
+outcome, and `historical_config_valid`. The latter proves the stored request
+configuration was validated against the historical database value that
+governed the attempt; the external JSON projection does not invent another
+database wrapper for each attempt.
 
-The turn retry thunk now owns the immutable database value and resolution
-before starting the outer timeout race, and dispatch consumes that supplied
-resolution without overwriting it. Each attempt becomes an ordered component
-fact connected to its turn, including outer timeouts that return no adapter
-response. The retained endpoint is reconstructed from parsed URL components,
-so userinfo, query, and fragment bytes never enter evidence. Invalid or
-oversized response identity becomes a bounded evidence error without echoing
-the rejected bytes. Integration review also corrected the zero-temperature
-edge: `0.0` is a present sampling value and remains explicit in attempt facts
-rather than disappearing through a truthiness check.
+`POST /agents/run` returns one ordinary `database` value plus turn, eval, and
+transport evidence. `seon_inspect.solver` retains the database as
+`pod_database_value`. Commit `33fcc17b` removed a stale validator contract that
+demanded test-only `coordinate` and `coordinate_valid` fields never emitted by
+the runtime. The focused validator accepts an ordered retry with identical
+configuration and still rejects absent historical validation, malformed
+identity, inconsistent outcomes, or configuration drift.
 
-`seon.web.serve` now queries these attempt components from the same immutable
-final database value as the rest of `/agents/run`. It resolves every stored
-attempt coordinate through `seon.db/at-coordinate`, rejects an unretained or
-foreign commit, and compares stored request fields and their absence with
-`seon.ai/resolved-config` at that historical value. The response is governed
-by the evidence cap read once from the final frozen database, never from the
-ambient connection after asynchronous validation. It also re-derives the
-adapter from the attempt's canonical resolved configuration and stream mode
-from the linked turn's own frozen rendered database coordinate. A merely
-well-formed but fabricated adapter or stream boolean therefore fails closed.
-The projection carries no provider body, prompt, credential, or raw
-environment value.
+Commit `defe85a2` separates provider capability evidence from local model-server
+artifact evidence. A run against the configured remote provider is admitted
+from its source revision and complete transport identity. When
+`seon_model_server_identity` is present, the stricter join still requires a
+validated immutable local artifact, endpoint/model agreement, and matching
+successful response identity. A malformed present identity fails closed;
+absence never becomes a fabricated local-artifact claim.
 
-The outer attempt timeout is intentionally process-owned rather than a model
-configuration datom. The runtime records the exact integer applied before each
-race, and Inspect rejects a change across comparable attempts in one run. That
-is sufficient to establish the execution bound governing the retained call;
-cross-run reproducibility additionally relies on the admitted operator's
-non-secret process-environment identity. It is not reconstructed from a later
-database value or mislabeled as model identity.
+Native logs retained under `src-inspect-ai/logs/` prove the progression:
 
-`seon_inspect.solver` copies the projection unchanged into native sample
-metadata. Its common capability admission gate requires inline ordered
-evidence for source-admitted runs, exact request-turn membership, complete
-coordinates, required transport identity, a successful final attempt per
-turn, and one comparable configuration across the run. Missing, malformed,
-oversized, foreign, unretained, out-of-order, drifted, or inconsistent evidence
-becomes a sample error before task scoring. Older diagnostic logs remain
-explicitly incomplete and are never repaired or backfilled.
+- `…GeCsGY69cPQimaKyPuXLGZ.eval` reached 61 successful provider calls before the
+  stale per-attempt wrapper validator rejected them;
+- `…c2GEy5hAqDMJH4babEvKLW.eval` passed transport validation and exposed the
+  unrelated mandatory-local-model assumption; and
+- `…4Ebn4FuB9Cug67rqGoEi3n.eval` and
+  `…fxN7bWkJXsVehcJBqs9K3B.eval` are fully source-admitted remote-provider runs
+  that reach the capability scorer.
 
-Inspect's public `read_eval_log` shows that native sample metadata retains a
-complete `pod_database_coordinate` with database id, branch, commit id, and
-`t`; every retained turn's rendered coordinate has the same complete shape.
-`seon.db/at-coordinate` can validate the attachment, retained commit, and exact
-`t`, after which `seon.ai/current` reconstructs the historical global AI row,
-including `:seon.ai/base-url` and `:seon.ai/timeout-ms`. This makes a manual
-forensic reconstruction possible while the referenced Datahike commit remains
-retained, but no public end-to-end helper or run projection performs it.
+The complete live audit is
+[[../../prds/runtime-reliability/research/live-inspect-contract-audit-2026-07-19]].
 
-`seon.ai/resolved-config` is the one database-derived effective model resolver
-consumed per request. It now includes endpoint and adapter timeout alongside
-the other non-secret transport values, plus the optional response-identity and
-endpoint evidence caps from the same immutable `:seon.config` singleton.
-Those policy values exist only in the selected manifest and resulting datoms;
-config-free historical databases preserve absence. Missing caps omit optional
-identity/endpoint evidence without changing the request or model outcome, and
-oversized identities preserve successful text and usage while retaining only
-a generic cap-bounded marker. `seon.web.serve` validates the existing attempt
-components against this resolver; Inspect preserves that projection rather
-than opening a second database client or inventing another configuration
-authority.
+## Remaining owner
 
-The complete grounded contract is in
-[[../../prds/agentic-tool-refinement/research/model-transport-evidence-audit-2026-07-15]].
-It also distinguishes the outer attempt cap from the adapter timeout and run
-deadline; all three remain independently evidenced.
-
-## Owner
-
-Join the ordered request evidence to the separately managed model server's
-declared immutable revision or weights digest and quantization, then finalize
-and reopen one native admitted `.eval` as the end-to-end proof. The dedicated
-launcher and health/request boundary own server identity. Per-call evidence is
-never inferred from final/current state or from `/v1/models` alone.
-
-The source-grounded owner and falsifiers are now fixed in
-[[../../prds/agentic-tool-refinement/research/model-server-identity-audit-2026-07-15]].
-The existing native start/end admission now requires one model-server snapshot
-and joins that map to the ordered attempt endpoint, requested model, response
-model, and fingerprint in the common capability gate. MLX is the first formal
-path: one dedicated PID/start identity, one absolute Hugging Face snapshot in
-both launch and request, and one canonical content-manifest digest. Ollama tags
-remain insufficient without their manifest and loaded digests. The remaining
-owner is the admitted live replay, not another runner, supervisor, or Datahike
-attempt schema.
-
-The invocation-local wiring is proven separately in
-[[../../prds/agentic-tool-refinement/research/mlx-live-wiring-audit-2026-07-15]].
-The owned dedicated listener returned the exact snapshot path and MLX
-fingerprint in a one-token smoke. Two consecutive full observer calls agreed
-on the PID/start/argv, serving module and packages, and a 289,601,531-byte
-artifact manifest with SHA-256
-`5b5a0fa1a9ffa796bad62edf72813ae5665d29307ef54357441fc76681bbec06`.
-That closes callback feasibility, not this issue: the same maps still need to
-survive around the real sample in its finalized and reopened `.eval`.
-
-### Native state wiring gap
-
-The source wiring gap is closed through the existing native runner. Inspect
-initializes `TaskState.metadata` only from `Sample.metadata`; eval metadata is a
-separate log-level channel. `run_native_task` now composes one public Inspect
-setup solver ahead of every task-owned setup. It injects the already validated
-source, static-target, and model-server start maps into each sample state,
-accepts byte-equal preexisting values, and rejects conflicts before task setup
-can act. Caller-supplied eval metadata follows the same exact-equality rule
-rather than being silently overwritten.
-
-A focused real-Inspect run proves task-owned setup observes all three maps in
-its original order, complete inline attempt evidence reaches the unchanged
-capability gate and scorer, and the finalized/reopened sample retains the same
-run-level model identity alongside transport evidence. A conflicting sample
-becomes an unscored sample error before its task setup runs. The issue remains
-open only for the admitted live ACME replay and finalized-log read-back; no
-second runner, scorer, or task-specific metadata mutation is required.
+The issue remains open only for a controlled local-model comparison that
+starts an immutable model server, supplies its validated artifact identity,
+completes a real task, finalizes the native `.eval`, and reopens it to prove the
+source, server, transport attempts, and response identity survived unchanged.
+Remote-provider capability runs do not wait for that optional comparison gate.
 
 ## Acceptance
 
-- Transact AI row A with a distinct endpoint and timeout, retain its complete
-  coordinate, then transact row B with different values.
-- Resolve A through `seon.db/at-coordinate` and prove the effective AI
-  projection returns A's endpoint, timeout, credential-source name, and
-  extra-body digest, never B's.
-- A fake fetch that transacts B after attempt capture still receives and records
-  only A, including A's evidence caps; no field is reread from B while
-  assembling or validating the request and response.
-- A final response projection frozen at cap A remains governed by A after the
-  ambient config advances to cap B. Adapter and stream mutations fail against
-  the attempt coordinate and linked turn-rendered coordinate respectively.
-- `/agents/run` reports ordered per-attempt coordinates, endpoints, adapter and
-  outer timeouts, immutable model identity, outcomes, and present response
-  identity; the Inspect solver retains them unchanged in `.eval` metadata.
-- Formal capability admission rejects mid-run transport/configuration drift
-  rather than treating the final coordinate as proof for every earlier
-  provider call. Runtime retries may capture a newer immutable value as long as
-  both attempts remain ordered facts.
-- Missing coordinate fields, wrong attachment, an unretained commit, or absent
-  required OpenAI-compatible endpoint/timeout fail loudly as evidence errors.
-  An absent evidence cap preserves provider behavior but leaves the optional
-  identity/endpoint projection absent, so formal admission fails closed.
-- Until this closes, the first controlled sample may remain diagnostic only
-  when a manual historical reconstruction is recorded; no formal capability or
-  model-comparison claim relies on that manual exception.
+- A source-admitted remote-provider run with complete transport evidence and no
+  local model-server identity reaches its scorer.
+- Missing or false historical configuration validation, malformed attempt
+  identity, inconsistent retry outcomes, and transport drift fail before
+  scoring.
+- A present local model-server identity is validated and joined to every
+  attempt's endpoint and requested model, plus successful response identity.
+- One controlled immutable local-model task succeeds, its native log is
+  finalized and reopened, and the exact artifact and attempt identities agree.
+- No production path or maintained test introduces a generic database
+  `coordinate`, `point`, or `attachment` wrapper.

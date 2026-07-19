@@ -82,8 +82,14 @@ final admission gate; it projects the currently dependency-ready path through
 them. Its earliest unsettled contract is live Inspect execution through an
 isolated branch and typed product database read. The last exact-artifact
 generic-render cut committed its core error 234 milliseconds before the child
-exit and the same agent recovered through a clean artifact. The real
-browser/Datastar journey is the dependency-ready parallel portfolio; the
+exit and the same agent recovered through a clean artifact. The real namespace
+task now reaches the admitted scorer: its first three-sample battery passed two
+of three with zero fabrication, while the miss and 13–23-turn cost trace to
+unquoted Datalog repair loops rather than database transport. The next database
+scenario is blocked by stale scorer-only database wrapper and operation-evidence
+assumptions; [[research/live-inspect-contract-audit-2026-07-19]] records the
+exact producer contract and ordered correction. The real browser/Datastar
+journey is the dependency-ready parallel portfolio; the
 complete live Inspect, browser, package, downstream,
 multi-cluster, and modest-hardware matrix remains the final gate.
 
