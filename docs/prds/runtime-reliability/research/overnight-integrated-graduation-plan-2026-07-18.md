@@ -529,7 +529,7 @@ render/feed mechanism.
 - [x] Complete JVM writer suite.
 - [x] Complete operator suite.
 - [ ] Complete Inspect AI Python suite and live scenarios.
-- [ ] Concurrent independent-cluster isolation and restart.
+- [x] Concurrent independent-cluster isolation and restart.
 - [ ] ACME downstream application journey.
 - [x] Source-free immutable release, restart/read-back, unchanged recursive
   digest, and clean shutdown with no surviving child.
@@ -554,6 +554,17 @@ fact before and after a clean writer/pod restart. Normal shutdown left both
 release processes absent. The recursive package digest remained exactly
 `8dbbefab82993fd712781ab9af5fd8f91e3fab54bedb7e8ed13cb120ebf67a47`
 before startup, while running, after restart, and after shutdown.
+
+The current default and ACME clusters also passed concurrent isolation. The
+first ACME build exposed and fixed a real ownership error: a changed writer
+artifact tried to send a local stop transition for ACME's external JVM writer.
+Commit `d15097fa` now limits `rebuild-writer` to a live writer owned by the
+selected target; focused operator proof passes 38 tests/100 assertions. ACME
+then restarted its watcher and pod while default watcher PID `61610`, writer
+PID `61939`, and pod PID `62040` remained unchanged and ready. ACME agent
+`curly-lizards-shop` survived the restart and its feed rendered afterward;
+normal ACME shutdown retired only its watcher and pod. The provider-backed
+downstream application journey remains open with the live Inspect matrix.
 
 Exit: one exact source revision passes every maintained gate and product journey.
 

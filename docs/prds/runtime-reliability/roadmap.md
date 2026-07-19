@@ -553,9 +553,23 @@ shutdown left both processes absent, and the complete package-tree digest was
 unchanged at
 `8dbbefab82993fd712781ab9af5fd8f91e3fab54bedb7e8ed13cb120ebf67a47`
 at every pre-start, running, post-restart, and post-shutdown sample. The default
-development cluster was then restored. Current ACME, independent-cluster, and
-architecture-level resource measurements remain; package immutability does
-not.
+development cluster was then restored. Current ACME and independent-cluster
+restart proof follows below; architecture-level resource measurements remain,
+while package immutability does not.
+
+Current ACME startup then found a one-attempt convergence defect. After a
+changed artifact publication, `reconcile-development!` tried to stop `writer`
+from ACME's local process directory even though that writer is an external
+dependency owned by default. The operation failed `containment-uncertain`; the
+same second `up` succeeded because publication had already converged. Commit
+`d15097fa` now schedules `rebuild-writer` only for a live writer owned by the
+selected target. Focused proof passes 38 tests/100 assertions. A subsequent
+ACME restart replaced only its watcher and pod, retained agent
+`curly-lizards-shop`, and left default watcher PID `61610`, writer PID `61939`,
+and pod PID `62040` unchanged and ready. Normal ACME shutdown retired only its
+two owned processes. This closes current independent-cluster restart/isolation;
+the provider-backed downstream agent journey remains coupled to the live
+Inspect credential gate.
 
 The existing remote query surface now exposes its protocol-native historical
 view, closing the only facade gap needed by coordinate-pinned startup birth.
