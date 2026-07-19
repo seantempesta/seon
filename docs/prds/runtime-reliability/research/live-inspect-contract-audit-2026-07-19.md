@@ -104,6 +104,15 @@ aggregate query or a later successful computation that references the query's
 `result/...` value, while final database readback remains mandatory. Focused
 proof is 71 tests; the seeded live rerun remains the next falsifier.
 
+A second seeded row proved every database fact and computation but missed only
+an extra `message/user` call before `complete`. That duplication does not test
+database memory: `complete` already supplies the delivered human reply. The
+database contract and scorer now require one truthful completion after the
+verified computation, and the intentionally frozen `database_workflow`
+artifact and hashes were regenerated through the canonical generator. The
+combined milestone/generator/solver proof passes 156 tests with 11 net lines
+removed in this simplification. A fresh generated run remains required.
+
 ## Ordered next boundary
 
 1. Run the corrected fixed database scenario against its final typed query.

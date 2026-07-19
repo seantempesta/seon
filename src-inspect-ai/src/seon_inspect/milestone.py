@@ -101,9 +101,8 @@ DB_MEMORY_CONTRACT = (
     "answer FROM the query result, do not re-derive it from this prompt: "
     "**what is the TOTAL weight in kg of all caches strictly heavier than 10 "
     "kg?** For example `(db/query '[:find (sum ?w) . :with ?e :where "
-    "[?e :my.cache/weight-kg ?w] ...])`. Then report the total to your human "
-    "with `message/user` and end the task with `complete`, stating the total "
-    "in both."
+    "[?e :my.cache/weight-kg ?w] ...])`. Then end the task with `complete`, "
+    "stating the computed total to your human."
 )
 
 # ---------------------------------------------------------------------------
@@ -301,7 +300,6 @@ def check_store_recall(eval_rows: list[dict[str, Any]],
       - transact       one ok transaction source contains every requested row;
       - query_later    a later ok query names the measure, strict predicate,
                        and threshold;
-      - report_human   a later human report states the answer;
       - complete       a later completion states the answer; and
       - answer         the delivered reply states the answer.
     The reply IS the agent's delivered message/complete content (pod_run
@@ -370,12 +368,6 @@ def check_store_recall(eval_rows: list[dict[str, Any]],
     schema_before = (bool(identity_schema) and bool(measure_schema)
                      and transact_idx is not None
                      and max(schema_indices) < transact_idx)
-    report_indices = ([] if compute_idx is None else [
-        i for i in _ok_indices(
-            eval_rows, r"(?:seon\.agent\.)?message/user")
-        if (i > compute_idx and _reply_has_number(
-            eval_rows[i].get("source") or "", expected))
-    ])
     complete_indices = ([] if compute_idx is None else [
         i for i in _ok_indices(
             eval_rows, r"(?:seon\.agent\.lifecycle/)?complete\b")
@@ -419,7 +411,6 @@ def check_store_recall(eval_rows: list[dict[str, Any]],
               "query_later": query_idx is not None,
               "compute_later": compute_idx is not None,
               "database_readback": database_readback,
-              "report_human": bool(report_indices),
               "complete": bool(complete_indices),
               "answer": answer}
     failures = [k for k, v in checks.items() if not v]

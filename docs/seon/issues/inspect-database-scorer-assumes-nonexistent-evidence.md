@@ -28,7 +28,7 @@ facts were examined.
 ## Acceptance
 
 - Ordered successful eval rows prove the schema, transaction, later query,
-  human report, and completion sequence.
+  computation, and completion sequence.
 - Every retained eval transaction is at or before the final database value's
   basis transaction.
 - One typed final query returns the actual identity/measure pairs, and the
@@ -52,3 +52,11 @@ computing from the returned `result/...` value in a later eval, while the
 scorer required the predicate inside Datalog. The scorer now accepts both
 valid evaluation shapes and keeps the typed final read mandatory; 71 focused
 tests pass. The generated rerun remains the archival gate.
+
+A second generated sample then stored, queried, computed, and read back every
+requested fact correctly but failed only because the scorer required both
+`message/user` and `complete`. Since `complete` is already the delivered human
+reply, that duplicate side effect was removed from this database-specific
+contract. The frozen generated artifact and hashes were intentionally updated;
+the combined focused gate passes 156 tests. A fresh generated run remains the
+archival gate.

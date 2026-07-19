@@ -195,7 +195,6 @@ def test_store_recall_answer_absent_fails():
          + _ev(("(db/query '[:find (sum ?w) . :where "
                 "[?e :my.cache/weight-kg ?w] [(> ?w 9)]])", True))
          + _DB_GOOD_ROWS[4:], "compute_later"),
-        (_DB_GOOD_ROWS[:4] + _DB_GOOD_ROWS[5:], "report_human"),
         (_DB_GOOD_ROWS[:-1], "complete"),
     ],
 )

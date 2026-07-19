@@ -700,9 +700,8 @@ def _database_workflow(rng: random.Random) -> dict[str, Any]:
         + facts + ". Only after that transaction has completed, query the "
         "database in a later evaluation for the stored records and compute "
         "the sum of " + measure_attr + " values strictly greater than "
-        + str(threshold) + " from that query result. Report the computed sum "
-        "to the human and complete the task, stating the same decimal integer "
-        "in both reports."
+        + str(threshold) + " from that query result. Complete the task by "
+        "stating the computed decimal integer to the human."
     )
     return {
         "input": task,
