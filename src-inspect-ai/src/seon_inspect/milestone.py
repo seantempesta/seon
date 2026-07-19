@@ -301,6 +301,7 @@ def check_store_recall(eval_rows: list[dict[str, Any]],
     oracle = oracle or {}
     identity_attr = oracle.get("identity_attr", ":my.cache/name")
     measure_attr = oracle.get("measure_attr", ":my.cache/weight-kg")
+    measure_type = oracle.get("measure_type", ":double")
     records = oracle.get("records", [
         {"identity": "KESTREL", "measure": 42.5},
         {"identity": "MARMOT", "measure": 17.0},
@@ -322,7 +323,7 @@ def check_store_recall(eval_rows: list[dict[str, Any]],
     ]
     measure_schema = [
         i for i in measure_regs
-        if ":int" in (eval_rows[i].get("source") or "")
+        if measure_type in (eval_rows[i].get("source") or "")
     ]
     tx = []
     for i in _ok_indices(eval_rows, r"db/transact!|seon\.db/transact!"):

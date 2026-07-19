@@ -80,7 +80,7 @@ ROWS: dict[str, dict] = {
                 {"source": "(schema/register! :my.cache/name "
                            "[:string {:seon.db/identity true}])",
                  "ok": True},
-                {"source": "(schema/register! :my.cache/weight-kg :int)",
+                {"source": "(schema/register! :my.cache/weight-kg :double)",
                  "ok": True},
                 {"source": "(db/transact! [{:my.cache/name \"KESTREL\" "
                            ":my.cache/weight-kg 42.5} "

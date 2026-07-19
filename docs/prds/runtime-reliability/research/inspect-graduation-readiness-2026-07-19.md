@@ -206,7 +206,8 @@ from the same product doors used by the browser and runtime graduation.
 ## Post-audit correction
 
 The deterministic harness defect identified by this audit is resolved. The
-fixed database good fixture now expresses the complete current workflow, and
+fixed database good fixture now expresses the complete current workflow,
+including the contract's `:double` measure schema for its decimal values, and
 the offline proof declares and checks the expected primary scorer mean for
 each of its sixteen runs. A missing metric, changed metric, or unsuccessful
 Inspect run now makes the command exit nonzero.
@@ -221,7 +222,7 @@ cd src-inspect-ai
   tests/test_milestone.py
 ```
 
-Result: **55 passed with 13 dependency-deprecation warnings in 6.08 seconds**.
+Result: **56 passed with 13 dependency-deprecation warnings in 6.24 seconds**.
 
 The real sixteen-arm offline proof then returned zero in 7.6 seconds. The
 database good and bad arms produced the required `milestone_scorer` mean

@@ -52,7 +52,7 @@ def _generated_db_proof_rows(oracle):
     rows = _ev(
         (f"(schema/register! {identity} "
          "[:string {:seon.db/identity true}])", True),
-        (f"(schema/register! {measure} :int)", True),
+        (f"(schema/register! {measure} {oracle['measure_type']})", True),
         ("(db/transact! [" + " ".join(
             f"{{{identity} {record['identity']!r} "
             f"{measure} {record['measure']}}}"
@@ -161,7 +161,7 @@ def test_ns_movement_report_values_needs_both_numbers():
 _DB_GOOD_ROWS = _ev(
     ("(schema/register! :my.cache/name "
      "[:string {:seon.db/identity true}])", True),
-    ("(schema/register! :my.cache/weight-kg :int)", True),
+    ("(schema/register! :my.cache/weight-kg :double)", True),
     ("(db/transact! [{:my.cache/name \"KESTREL\" :my.cache/weight-kg 42.5} "
      "{:my.cache/name \"MARMOT\" :my.cache/weight-kg 17.0} "
      "{:my.cache/name \"TERN\" :my.cache/weight-kg 8.25} "
@@ -178,6 +178,15 @@ def test_store_recall_good():
     r = check_store_recall(_DB_GOOD_ROWS, _DB_GOOD_REPLY)
     assert r["ok"], r["failures"]
     assert r["transact_idx"] == 2 and r["query_idx"] == 3
+
+
+def test_fixed_database_schema_matches_contract_and_decimal_values():
+    schema_source = _DB_GOOD_ROWS[1]["source"]
+    transact_source = _DB_GOOD_ROWS[2]["source"]
+    assert ":my.cache/weight-kg :double" in DB_MEMORY_CONTRACT
+    assert ":my.cache/weight-kg :double" in schema_source
+    assert all(value in transact_source
+               for value in ("42.5", "17.0", "8.25", "3.75"))
 
 
 def test_store_recall_query_before_transact_fails():

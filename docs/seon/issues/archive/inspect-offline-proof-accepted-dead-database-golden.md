@@ -40,7 +40,8 @@ offline proof contract is owned by
 
 ## Resolution
 
-The resolving commit aligns the good fixture with the complete maintained
-workflow and turns the proof runner into an assertion over all sixteen primary
-mean metrics. The focused suite passes 55 tests. The real proof exits zero,
-including database good at 1.0 and database bad at 0.0.
+The resolving commits align the good fixture with the complete maintained
+workflow, pin its decimal values to the contract's `:double` schema, and turn
+the proof runner into an assertion over all sixteen primary mean metrics. The
+focused suite passes 56 tests. The real proof exits zero, including database
+good at 1.0 and database bad at 0.0.
