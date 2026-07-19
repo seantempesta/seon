@@ -34,6 +34,8 @@
    :seon.render/full? ":boolean"
    :seon.ns/name "[:symbol {:seon.db/identity true}]"
    :seon.ns/source ":string"
+   :seon.ns/doc ":string"
+   :seon.ns/summary "[:string {:min 1}]"
    :seon.fn/sym "[:string {:seon.db/identity true}]"
    :seon.fn/ns ":seon.db/ref"
    :seon.fn/source ":string"
@@ -53,12 +55,15 @@
    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
    :seon.db/attributes
    [:seon.agent/id :seon.db/user :seon.db/process :seon.db.process/id
-    :seon.user/id :seon.ns/name :seon.ns/source :seon.fn/sym :seon.fn/ns
+    :seon.user/id :seon.ns/name :seon.ns/source :seon.ns/doc :seon.ns/summary
+    :seon.fn/sym :seon.fn/ns
     :seon.fn/source :seon.fn/doc :seon.fn/arglists :seon.fn/private?
     :seon.fn/agent-facing? :seon.render/full?]
    :seon.db/program
    (into [{:seon.ns/name 'my.core
-           :seon.ns/source "(ns my.core)"}
+           :seon.ns/source "(ns my.core)"
+           :seon.ns/doc "Own core behavior.\n\nMore detail."
+           :seon.ns/summary "Own core behavior."}
           {:seon.fn/sym "my.core/answer"
            :seon.fn/ns [:seon.ns/name 'my.core]
            :seon.fn/source "(defn answer [] 42)"
@@ -134,6 +139,9 @@
             "stored entity attributes are installed before initial data")
         (is (contains? (:schema (d/db connection)) :seon.render/full?)
             "explicit dataless scalar attributes are installed at initialization")
+        (is (every? #(contains? (:schema (d/db connection)) %)
+                    [:seon.ns/doc :seon.ns/summary])
+            "namespace metadata attributes are installed before later domain writes")
         (is (not (contains? (:schema (d/db connection))
                             :datahike.index-page/cursor))
             "request fields are not installed as Datahike attributes")
@@ -143,7 +151,19 @@
                (set
                 (d/q '[:find [?id ...]
                        :where [_ :seon.db.process/id ?id]]
-                     (d/db connection))))))
+                     (d/db connection)))))
+        (let [before-domain (d/db connection)
+              report
+              (d/transact
+               connection
+               [{:seon.ns/name 'my.later
+                 :seon.ns/source "(ns my.later)"
+                 :seon.ns/doc "Own later behavior."
+                 :seon.ns/summary "Own later behavior."}])
+              after-domain (:db-after report)]
+          (is (= (inc (:max-tx before-domain)) (:max-tx after-domain)))
+          (is (= (:schema before-domain) (:schema after-domain))
+              "the first later namespace write installs no schema lazily")))
       (finally
         (writer/stop! server)
         (.delete socket-file)))))

@@ -129,6 +129,9 @@
     (is (every? (set (:seon.db/attributes forward))
                 [:my.plan/namespace :my.plan/claim])
         "fresh clusters install generated-plan query attrs before first use")
+    (is (every? (set (:seon.db/attributes forward))
+                [:seon.ns/doc :seon.ns/summary])
+        "namespace metadata schema is cold-published independent of program rows")
     (is (some #{:seon.render/full?} (:seon.db/attributes forward)))
     (is (= [:seon.ns/name :seon.fn/sym :seon.schema/key]
            (mapv (fn [row]

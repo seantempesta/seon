@@ -910,6 +910,8 @@
    ;; --- Program graph (v1.md §2.2) ---
    :seon.ns/name
    :seon.ns/source
+   :seon.ns/doc
+   :seon.ns/summary
    :seon.fn/sym
    :seon.fn/ns
    :seon.fn/source
@@ -1305,9 +1307,14 @@
         full? (or (nss/full-source-ns? configuration ns-sym-str)
                   (contains? (extra-core-ns-strs) ns-sym-str)
                   (contains? extra-sources ns-sym-str))
+        ;; Read the real source once even when the stored source remains a
+        ;; compact stub. Namespace documentation is program metadata, not a
+        ;; prompt-density decision; `namespace-info-from-source` is the one
+        ;; parser for both docs and structural requires.
+        real-src (or (get extra-sources ns-sym-str)
+                     (read-ns-source ns-sym-str))
         src   (if full?
-                (or (get extra-sources ns-sym-str)
-                    (read-ns-source ns-sym-str)
+                (or real-src
                     (do (log/error-console!
                           "seon.client/ns-row"
                           (str "full-source ns " ns-sym-str " source file "
@@ -1315,6 +1322,7 @@
                                " unreadable — falling back to the (ns x) stub"))
                         stub))
                 stub)
+        info  (analyzer-info/namespace-info-from-source (or real-src src))
         ;; Reified require edges (M4 persisted facts) for the SCI-
         ;; renderable surface: full-source nses are exactly where an
         ;; agent-authored-sym render fn can live (my.* + downstream), so
@@ -1322,10 +1330,14 @@
         ;; ONCE here at INDEX time from the real file's (ns …) form —
         ;; write-time extraction, never a render-time re-parse. Stub
         ;; nses (compiled seon.* — never SCI-rendered) skip the edges.
-        edges (when full? (analyzer-info/require-edges-from-source src))]
+        edges (when full? (:seon.ns/require-edges info))]
     (cond-> {:seon.ns/name   (symbol ns-sym-str)
              :seon.ns/source src}
-      (seq edges) (assoc :seon.ns/require-edges (vec edges)))))
+      (:seon.ns/doc info) (assoc :seon.ns/doc (:seon.ns/doc info))
+      (:seon.ns/summary info) (assoc :seon.ns/summary
+                                     (:seon.ns/summary info))
+      (seq edges) (assoc :seon.ns/require-edges
+                         (vec (sort-by pr-str edges))))))
 
 (defn- arglists-from-source
   "Parse the pr-str-style arglists string (e.g. \"([{::keys [a b]}])\") from a

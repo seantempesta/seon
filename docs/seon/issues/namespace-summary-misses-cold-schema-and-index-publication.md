@@ -29,6 +29,9 @@ This is one indexing/publication ownership gap:
   `:seon.ns/summary`;
 - the canonical `:seon.ns` database entity schema in `seon.agent` declares
   only name, source, and optional require edges; and
+- cold database initialization publishes the explicit
+  `seon.client/agent-bootstrap-attrs` vector, which also omits both metadata
+  attributes; and
 - the boot indexer's `seon.client/ns-row` writes name/source and independently
   extracts only require edges instead of merging the existing namespace-info
   projection.
@@ -45,6 +48,9 @@ Strengthen the one existing namespace entity/index publication path:
 
 - add optional `:seon.ns/doc` and `:seon.ns/summary` fields to the canonical
   `:seon.ns` entity schema;
+- include those registered attributes in the existing cold bootstrap attribute
+  vector so publication does not depend on whether any desired program row
+  happens to carry documentation;
 - have `seon.client/ns-row` merge the existing
   `seon.analyzer-info/namespace-info-from-source` result rather than parsing or
   deriving namespace documentation a second way;
@@ -52,6 +58,29 @@ Strengthen the one existing namespace entity/index publication path:
   indexed-source/stub policy; and
 - do not add a catalog guard, duplicate schema registration, lazy installer, or
   second namespace index.
+
+## Source and focused proof
+
+The coherent source repair now references the analyzer-owned attributes from
+the canonical `:seon.ns` entity schema, includes both in the cold bootstrap
+attribute vector, and has `ns-row` call `namespace-info-from-source` once over
+the real file source. The persisted full-versus-stub source policy and the
+full-source-only require-edge policy remain unchanged; only documentation is
+independent of prompt source density. Require edges from the shared projection
+are sorted before persistence so rebuilt rows are deterministic.
+
+Focused current-source evidence:
+
+- analyzer, initialization, and index CLJS gate: 39 tests, 204 assertions,
+  zero failures/errors;
+- writer initialization gate: 4 tests, 25 assertions, zero failures/errors;
+- documented full-source and stub-backed namespaces retain real multiline
+  docs and first-line summaries, while an undocumented source omits both; and
+- a later documented namespace transaction advances the database once without
+  changing the installed schema.
+
+Fresh current-artifact boot, config-free reopen, and generated-catalog live
+proof remain required before this issue can close.
 
 ## Acceptance evidence
 
@@ -62,7 +91,8 @@ Strengthen the one existing namespace entity/index publication path:
 - A config-free supervised restart reopens with an identical installed schema
   and identical namespace doc/summary facts.
 - No first namespace-domain transaction adds either attribute schema.
-- Focused analyzer/index tests prove multiline doc extraction, first-line
-  summary clipping, source-stub behavior, and idempotent rebuilt rows.
+- Focused analyzer/index tests prove multiline doc extraction, untruncated
+  first-line summary extraction, source-stub behavior, and idempotent rebuilt
+  rows.
 - The generated namespace catalog renders from those cold-indexed facts without
   causing a schema transaction.

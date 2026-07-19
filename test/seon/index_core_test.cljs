@@ -270,6 +270,45 @@
            (:seon.ns/source (first (filter #(= 'seon.warn (:seon.ns/name %)) ns-rows))))
         "a non-whitelisted framework-bulk ns source is the minimal (ns x) stub")))
 
+(deftest namespace-rows-carry-real-docs-independent-of-source-density
+  (let [rows (filter :seon.ns/name @core-tx)
+        row-for (fn [name]
+                  (first (filter #(= name (:seon.ns/name %)) rows)))
+        kb (row-for 'my.kb)
+        warn (row-for 'seon.warn)
+        undocumented
+        ((deref #'client/ns-row)
+         configuration
+         {"example.undocumented" "(ns example.undocumented)"}
+         "example.undocumented")]
+    (is (= "Model durable knowledge as database attributes and connections."
+           (:seon.ns/summary kb)))
+    (is (= (str "Model durable knowledge as database attributes and connections.\n\n"
+                "   This namespace is the worked agent-facing guide to schema-first knowledge:\n"
+                "   defining identity and reference attributes, transacting source facts, and\n"
+                "   querying them by attribute presence. It demonstrates asynchronous database\n"
+                "   authority operations without supplying a universal domain model or sample\n"
+                "   knowledge; agents own their domain schemas in dedicated namespaces.")
+           (:seon.ns/doc kb))
+        "full-source namespace rows retain the complete namespace docstring")
+    (is (= "(ns seon.warn)" (:seon.ns/source warn))
+        "prompt density still stores an ordinary framework namespace as a stub")
+    (is (= "Derive clustered warnings from the program graph."
+           (:seon.ns/summary warn))
+        "metadata comes from the real source even when persisted source is a stub")
+    (is (str/includes? (:seon.ns/doc warn)
+                       "Each `check-<kind>` is a separate")
+        "the stub-backed row retains the real multiline docstring")
+    (is (not (contains? undocumented :seon.ns/doc)))
+    (is (not (contains? undocumented :seon.ns/summary))
+        "an undocumented namespace omits metadata instead of storing nil")
+    (is (= undocumented
+           ((deref #'client/ns-row)
+            configuration
+            {"example.undocumented" "(ns example.undocumented)"}
+            "example.undocumented"))
+        "the same namespace input projects byte-identical program data")))
+
 (deftest core-ns-rows-stub-bulk-full-source-whitelist
   ;; Curated render (LEAN whitelist): the seon.* FRAMEWORK BULK keeps the
   ;; minimal `(ns x)` stub (it is DROPPED from render, never shown as a body),
@@ -426,6 +465,13 @@
               (drop 2 (schema/schema-definition :seon.ns)))
         edge-form (schema/schema-definition :seon.analyzer-info/require-edge)]
     (is (contains? namespace-attributes :seon.ns/require-edges))
+    (is (contains? namespace-attributes :seon.ns/doc))
+    (is (contains? namespace-attributes :seon.ns/summary))
+    (doseq [attribute [:seon.ns/doc :seon.ns/summary]]
+      (is (= {:db/valueType :db.type/string
+              :db/cardinality :db.cardinality/one}
+             (select-keys (first (db/malli->datahike-schema [attribute]))
+                          [:db/valueType :db/cardinality]))))
     (is (true? (:seon.db/entity (second edge-form)))
         "stored require-edge component attributes install before optional pulls")))
 
@@ -456,7 +502,9 @@
                                (db/malli->datahike-schema
                                 client/agent-bootstrap-attrs))]
     (is (contains? installed-idents :seon.render/full?)
-        "the first transcript prompt can pull the render opt-out before lazy namespace loading")))
+        "the first transcript prompt can pull the render opt-out before lazy namespace loading")
+    (is (every? installed-idents [:seon.ns/doc :seon.ns/summary])
+        "cold publication installs namespace metadata before catalog rendering")))
 
 (deftest malli-bridge-preserves-explicit-avet-indexing
   (is (= {:db/ident ::indexed-value

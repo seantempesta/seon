@@ -68,6 +68,7 @@
     [seon.agent.ctx.namespaces :as ctx-namespaces]
     [seon.agent.ctx.transcript :as ctx-transcript]
     [seon.agent.ctx.warnings :as ctx-warnings]
+    [seon.analyzer-info]
     [seon.config :as config]
     [seon.db :as db]
     [seon.db.id :as db.id]
@@ -272,6 +273,8 @@
          :seon.render/html 'seon.handlers.ns/render-html}
    [:seon.ns/name   :seon.ns/name]
    [:seon.ns/source :seon.ns/source]
+   [:seon.ns/doc {:optional true} :seon.ns/doc]
+   [:seon.ns/summary {:optional true} :seon.ns/summary]
    [:seon.ns/require-edges {:optional true} :seon.ns/require-edges]])
 
 ;; :seon.agent — the agent's OWN entity shape. Its page/canvas operation
