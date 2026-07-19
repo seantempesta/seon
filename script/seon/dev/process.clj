@@ -1745,7 +1745,9 @@
               (let [record (read-process configuration id)
                     application-evidence
                     (when (and (= pod-id id) record)
-                      (pod-application-evidence configuration record deadline))
+                      (pod-application-evidence
+                       configuration record
+                       (phase-deadline deadline lifecycle-reserve-ms)))
                     stop-result (stop! configuration id record deadline)]
                 (classify-stop-result id stop-result application-evidence))
               (catch Throwable error

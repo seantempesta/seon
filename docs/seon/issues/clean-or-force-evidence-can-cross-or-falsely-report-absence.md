@@ -15,8 +15,11 @@ quiescence response with a different generation re-read by `stop!`, accept a
 successful response body under an error HTTP status, and return clean for an
 empty or unknown target set. Its nominal operation deadline also stopped at
 the HTTP boundary, allowing each later containment wait to renew its own
-clock. Any one cut could let restart, reset, or retained branch cleanup proceed
-from a false clean claim or remain wedged past its declared bound.
+clock. After those cuts were repaired, a live overloaded pod exposed that the
+HTTP quiesce phase still inherited the entire selected agent-turn timeout before
+the operator could reach containment drain. Any one cut could let restart,
+reset, or retained branch cleanup proceed from a false clean claim or make a
+forced close wait many minutes before supervision begins reclaiming processes.
 
 ## Evidence
 
@@ -35,6 +38,10 @@ from a false clean claim or remain wedged past its declared bound.
 - `await-terminal!` created a new shutdown-grace deadline for every selected
   process instead of consuming the coordinator's one absolute monotonic
   deadline.
+- A write-saturated disposable pod made `cluster close` wait in the loopback
+  quiesce request for the full operation deadline. The containment owner,
+  workload, and execution child remained live because bounded containment
+  drain had not yet been reached.
 
 ## Owner
 
@@ -57,6 +64,9 @@ the pod supplies it from its containment-injected environment.
   forensics after its private containment directory is removed.
 - Pod quiescence, every containment control exchange, terminal wait, legacy
   inverse, writer, and watcher consume one nonrenewed absolute deadline.
+- Pod application quiescence consumes at most the existing lifecycle reserve;
+  failure then reaches containment drain within the larger operation deadline
+  and classifies the stop as forced.
 - Focused Babashka tests cover those cuts, dependency-safe order, completed
   uncertainty prefixes, and one real bounded loopback EDN exchange before any
   public caller consumes the coordinator.

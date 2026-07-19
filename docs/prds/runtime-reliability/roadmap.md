@@ -1477,6 +1477,22 @@ first implementation unit after documentation reconciliation is the smallest
 owner for eval/query materialization bounds; broad live-agent drives wait until
 that blocker is falsified.
 
+A sustained reactive proof left the disposable `reactive-latency` pod saturated
+on its pre-retry database artifact. Its canonical close then exposed that pod
+HTTP quiescence inherited the full 15-minute selected-turn deadline before the
+operator could reach bounded containment drain. `seon.dev.process` now caps
+that application phase with the existing two-minute lifecycle reserve while
+retaining the one larger absolute operation deadline. The focused operator gate
+passes 61 tests/317 assertions. Live close classified the unresponsive pod as
+forced, drained exact containment generation
+`c9129eaf-df39-42b6-bc9a-9e3d0c367b0a`, reclaimed its Bun workload and execution
+child, and left the cluster down with no pod process. The reactive lane can now
+resume independent writer/browser proof. On the ordered product spine, exact
+human-message priority remains the earliest unsettled contract: the corrected
+bounded transcript query includes the current run-cause message, but the live
+rendered prompt still follows stale completed work, so downstream event/render
+selection must be traced before rerunning the reuse/repair scorer.
+
 ## Active execution ledger
 
 Exactly one slice is `IN PROGRESS`: Slice 0 closes this branch by reconciling

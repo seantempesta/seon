@@ -1489,15 +1489,20 @@
                     nil)]
       (process/clean-or-force!
        {:seon.dev.process/configuration
-        (assoc (operator-config) :seon.dev.config/environment
-               {"SEON_TURN_TIMEOUT_MS" "10"})
+        (assoc (operator-config) :seon.dev.config/environment {})
         :seon.dev.process/operation :seon.dev.process.operation/restart
         :seon.dev.process/targets
         #{process/watcher-id process/writer-id process/pod-id}})
       (is (= [:pod-application
               process/pod-id process/writer-id process/watcher-id]
              (mapv first @calls)))
-      (is (= 1 (count (set (map second @calls))))))))
+      (let [[application-deadline & stop-deadlines] (map second @calls)]
+        (is (= 1 (count (set stop-deadlines))))
+        (is (< application-deadline (first stop-deadlines)))
+        (is (<= (- application-deadline (#'process/monotonic-ms))
+                120000))
+        (is (> (- (first stop-deadlines) application-deadline)
+               800000))))))
 
 (deftest coordinated-absence-rejects-a-newly-published-generation
   (let [replacement {:seon.dev.process/id process/watcher-id
