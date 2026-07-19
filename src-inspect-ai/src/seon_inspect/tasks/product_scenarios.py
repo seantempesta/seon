@@ -11,7 +11,8 @@ from inspect_ai.solver import Generate, TaskState, solver
 from seon_inspect import source_admission
 from seon_inspect.product_scenarios import (PHASES, SCENARIOS,
                                             product_scenario_scorer,
-                                            read_child_recovery_evidence)
+                                            read_child_recovery_evidence,
+                                            read_namespace_evidence)
 
 
 GOOD = {
@@ -82,7 +83,7 @@ def frozen_solver(scenario: str, outcome: str):
 
 
 @solver
-def live_child_recovery_solver(timeout_s: int = 300):
+def live_product_solver(scenario: str, timeout_s: int = 300):
     async def solve(state: TaskState, generate: Generate) -> TaskState:
         import anyio
 
@@ -92,14 +93,28 @@ def live_child_recovery_solver(timeout_s: int = 300):
                                               release_branch_lease)
             from seon_inspect.solver import pod_run
 
-            lease = acquire_branch_lease(bench_cluster_name("inspect-recovery"))
+            lease = acquire_branch_lease(bench_cluster_name(f"inspect-{scenario}"))
             try:
+                if scenario == "namespace":
+                    target_namespace = f"my.inspect.n{lease.name.rsplit('-', 1)[-1]}"
+                    prompts = (
+                        f"From root, send namespace {target_namespace} a task "
+                        "to evaluate (+ 1 1) and report the result.",
+                        f"Send a second message to namespace {target_namespace} "
+                        "asking it to evaluate (+ 20 22). Reuse its resident.")
+                else:
+                    target_namespace = None
+                    prompts = PHASES[scenario]
                 runs = [pod_run(prompt, timeout_s * 1000, lease.cluster_url,
                                 agent_id="root")
-                        for prompt in PHASES["child_recovery"]]
+                        for prompt in prompts]
+                snapshot = (read_namespace_evidence(
+                                lease.cluster_url, target_namespace)
+                            if scenario == "namespace"
+                            else read_child_recovery_evidence(
+                                lease.cluster_url, "root"))
                 return {"runs": runs,
-                        "database_snapshot": read_child_recovery_evidence(
-                            lease.cluster_url, "root")}
+                        "database_snapshot": snapshot}
             finally:
                 release_branch_lease(lease)
 
@@ -131,8 +146,8 @@ def product_scenario(scenario: str = "namespace", outcome: str = "good",
         raise ValueError(f"unknown scenario {scenario!r}")
     if outcome not in {"good", "bad"}:
         raise ValueError("outcome must be 'good' or 'bad'")
-    if live and scenario != "child_recovery":
-        raise ValueError("the first live product row is child_recovery")
+    if live and scenario not in {"namespace", "child_recovery"}:
+        raise ValueError("live product rows are namespace and child_recovery")
     admission = (_admission or source_admission.verify_sources(_identity(scenario))
                  if live else None)
     sample = Sample(id=scenario, input=f"Prove {scenario}", target="correct",
@@ -140,7 +155,7 @@ def product_scenario(scenario: str = "namespace", outcome: str = "good",
                               **({"seon_source_admission": admission}
                                  if admission else {})})
     return Task(dataset=MemoryDataset([sample]),
-                solver=(live_child_recovery_solver(timeout_s)
+                solver=(live_product_solver(scenario, timeout_s)
                         if live else frozen_solver(scenario, outcome)),
                 scorer=product_scenario_scorer(),
                 epochs=Epochs(1, ["mean"]),

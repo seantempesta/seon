@@ -236,6 +236,15 @@ passes 525 tests with eight intentional environment-gated skips. Exact live
 execution is now the earliest Inspect falsifier; host pressure still prevents a
 truthful artifact build.
 
+The same native task now covers namespace-targeted launch without an ID-shaped
+fixture. Each retained branch selects a fresh valid `my.inspect.n<suffix>`
+namespace, root sends two real messages to that namespace, and one current
+database query derives the unique nonterminated resident, its two root message
+refs, and its earliest eval namespace by transaction. The scorer still checks
+one resident, stable reuse, explicit routing, and starting in the requested
+namespace. The expanded product slice passes 23 tests; the exact live namespace
+and recovery rows share the same branch/pod/admission/log mechanism.
+
 The development-tool reconnect defect is source-grounded in the maintained
 Shadow runtime rather than Seon's database advertisement. Shadow commit
 `615430b3` permanently stopped reconnecting after more than three websocket

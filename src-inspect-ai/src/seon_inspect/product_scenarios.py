@@ -19,6 +19,20 @@ from inspect_ai.solver import TaskState
 SCENARIOS = ("namespace", "reuse_repair", "child_recovery", "pod_restart")
 
 CHILD_RECOVERY_SOURCE = "(js/process.exit 17)"
+NAMESPACE_QUERY = """[:find ?agent-id ?namespace ?message-id ?eval-id ?eval-ns
+                              ?eval-tx
+ :where
+ [?namespace-entity :seon.ns/name ?namespace]
+ [?agent :seon.agent/namespace ?namespace-entity]
+ [?agent :seon.agent/id ?agent-id]
+ (not [?agent :seon.agent/terminated-at _])
+ [?message :seon.agent.message/to ?agent]
+ [?message :seon.agent.message/id ?message-id]
+ [?message :seon.agent.message/from ?from]
+ [?from :seon.agent/id "root"]
+ [?eval :seon.eval/agent ?agent]
+ [?eval :seon.eval/id ?eval-id]
+ [?eval :seon.eval/ns ?eval-ns ?eval-tx]]"""
 CHILD_RECOVERY_QUERY = """[:find ?eval-id ?turn-id ?recovery-id ?pid ?digest
                                   ?blob-hash ?later-id ?sibling-id
  :in $ ?agent-id ?source
@@ -277,6 +291,39 @@ def read_child_recovery_evidence(cluster_url: str, agent_id: str, *,
         "crashing_eval_count": 1,
         "later_eval": {"id": later_id, "status": "done"},
         "sibling": {"id": sibling_id, "status": "done"},
+    }
+
+
+def _name(value: Any) -> str:
+    return value[1:] if isinstance(value, str) and value.startswith(":") else value
+
+
+def read_namespace_evidence(cluster_url: str, target_namespace: str, *,
+                            product_reader=query_product_evidence) -> dict:
+    """Project one namespace resident from current database facts."""
+    evidence = product_reader(cluster_url, NAMESPACE_QUERY)
+    rows = evidence.get("database_snapshot")
+    if not isinstance(rows, list):
+        raise RuntimeError("namespace evidence query returned no relation")
+    matching = [row for row in rows if isinstance(row, list) and len(row) == 6
+                and _name(row[1]) == target_namespace]
+    if not matching:
+        raise RuntimeError("namespace evidence query returned no target resident")
+    agent_ids = {row[0] for row in matching}
+    if len(agent_ids) != 1:
+        raise RuntimeError("namespace evidence query returned several residents")
+    agent_id = next(iter(agent_ids))
+    messages = sorted({row[2] for row in matching})
+    evals = sorted({(row[5], row[3], _name(row[4])) for row in matching})
+    return {
+        "database_value": evidence.get("database_value"),
+        "target_namespace": target_namespace,
+        "agents": [{"agent_id": agent_id, "namespace": target_namespace,
+                    "terminated": False,
+                    "first_eval_namespace": evals[0][2]}],
+        "messages": [{"message_id": message_id,
+                      "from_agent_id": "root", "to_agent_id": agent_id}
+                     for message_id in messages],
     }
 
 

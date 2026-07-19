@@ -45,6 +45,11 @@ proof passes in the 21-test product slice; the complete offline Inspect suite
 passes 525 tests with eight intentional environment-gated skips. Exact live
 execution remains the acceptance gate.
 
+The namespace live row is also grounded in current facts: a fresh valid
+namespace per branch, the unique active `:seon.agent/namespace` ref, two
+`:seon.agent.message/from` root messages, and the earliest `:seon.eval/ns` by
+transaction. It no longer depends on a fixed `my.taxes` database fixture.
+
 ## Acceptance
 
 - The live repair scorer consumes real history datoms and their transaction

@@ -8,6 +8,7 @@ from inspect_ai import eval as inspect_eval
 from seon_inspect.product_scenarios import (CHECKS, SCENARIOS,
                                             CHILD_RECOVERY_SOURCE,
                                             read_child_recovery_evidence,
+                                            read_namespace_evidence,
                                             query_execution_processes,
                                             query_product_evidence,
                                             run_product_scenario)
@@ -182,6 +183,24 @@ def test_child_recovery_evidence_joins_database_and_parent_host():
     assert CHECKS["child_recovery"](snapshot)["ok"]
 
 
+def test_namespace_evidence_derives_first_eval_and_two_root_messages():
+    rows = [
+        ["tax-agent", ":my.inspect.ntest", "message-2", "eval-2",
+         ":my.inspect.ntest", 22],
+        ["tax-agent", ":my.inspect.ntest", "message-1", "eval-1",
+         ":my.inspect.ntest", 20],
+        ["tax-agent", ":my.inspect.ntest", "message-2", "eval-1",
+         ":my.inspect.ntest", 20],
+    ]
+    snapshot = read_namespace_evidence(
+        "http://pod/agents/run", "my.inspect.ntest",
+        product_reader=lambda *_: {"database_value": {"t": 42},
+                                   "database_snapshot": rows})
+    assert snapshot["agents"][0]["first_eval_namespace"] == "my.inspect.ntest"
+    assert len(snapshot["messages"]) == 2
+    assert CHECKS["namespace"](snapshot)["ok"]
+
+
 def test_native_live_recovery_task_owns_and_releases_its_branch(monkeypatch):
     from seon_inspect import cluster, solver as pod_solver
 
@@ -213,3 +232,30 @@ def test_native_live_recovery_task_owns_and_releases_its_branch(monkeypatch):
     assert events[0][0] == "open"
     assert [event[0] for event in events].count("run") == 2
     assert events[-1] == ("close", "inspect-recovery-proof")
+
+
+def test_native_live_namespace_task_uses_one_resident_snapshot(monkeypatch):
+    from seon_inspect import cluster, solver as pod_solver
+
+    lease = SimpleNamespace(name="inspect-namespace-abcdef",
+                            cluster_url="http://pod/agents/run")
+    monkeypatch.setattr(cluster, "acquire_branch_lease", lambda _name: lease)
+    monkeypatch.setattr(cluster, "release_branch_lease", lambda _lease: None)
+    monkeypatch.setattr(
+        pod_solver, "pod_run",
+        lambda prompt, timeout, url, *, agent_id:
+        {"reply": "done", "agent_id": agent_id})
+    monkeypatch.setattr(pod_solver, "require_scorable_pod_state",
+                        lambda state: state)
+    observed = []
+    monkeypatch.setattr(
+        product_tasks, "read_namespace_evidence",
+        lambda url, namespace:
+        observed.append((url, namespace)) or copy.deepcopy(GOOD["namespace"]))
+
+    log = inspect_eval(
+        product_scenario(scenario="namespace", live=True,
+                         _admission={"tree_sha256": "a" * 64}),
+        model="mockllm/model", display="none", log_level="warning")[0]
+    assert log.status == "success", log.error
+    assert observed == [("http://pod/agents/run", "my.inspect.nabcdef")]
