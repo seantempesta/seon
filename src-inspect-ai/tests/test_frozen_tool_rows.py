@@ -51,8 +51,7 @@ def _completed_pod_result(reply: str):
     attempt = {
         "turn_id": "turn-1",
         "ordinal": 0,
-        "coordinate": {**final, "commit_id": "attempt", "t": 20},
-        "coordinate_valid": True,
+        "historical_config_valid": True,
         "provider": "deepseek",
         "adapter": "openai-compat",
         "requested_model": identity["artifact"]["request_model"],
@@ -71,7 +70,7 @@ def _completed_pod_result(reply: str):
         "evals": 1,
         "timed_out": False,
         "closed_reason": ":completed",
-        "database_coordinate": final,
+        "database": final,
         "turn_evidence": [{"turn_id": "turn-1"}],
         "model_transport_evidence": {
             "status": "inline",
@@ -109,7 +108,7 @@ def fake_pod(row: str, *, touch_workspace: bool = True,
             "pod_timed_out": infrastructure == "timeout",
             "pod_closed_reason": ":error" if infrastructure == "error"
                                  else ":completed",
-            "pod_database_coordinate": {"basis_t": 42},
+            "pod_database_value": {"db_name": "test", "t": 42},
             "pod_turn_evidence": [{"turn_id": "turn-1"}],
         })
         return state
@@ -175,7 +174,8 @@ def test_each_row_scores_through_native_inspect(
     sample = log.samples[0]
     assert sample.id == generate_rows(row, 1, position + 1)[position]["id"]
     assert sample.metadata["pod_agent_id"] == "test-agent"
-    assert sample.metadata["pod_database_coordinate"] == {"basis_t": 42}
+    assert sample.metadata["pod_database_value"] == {
+        "db_name": "test", "t": 42}
     assert sample.metadata["pod_turn_evidence"] == [{"turn_id": "turn-1"}]
     assert sample.metadata["seon_source_admission"] == ADMISSION
     rendered_messages = "\n".join(message.text for message in sample.messages)

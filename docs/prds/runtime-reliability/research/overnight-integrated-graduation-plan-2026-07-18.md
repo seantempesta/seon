@@ -525,9 +525,9 @@ render/feed mechanism.
 
 ### 7. Complete correctness and distribution gates
 
-- [ ] Complete ClojureScript suite.
-- [ ] Complete JVM writer suite.
-- [ ] Complete operator suite.
+- [x] Complete ClojureScript suite.
+- [x] Complete JVM writer suite.
+- [x] Complete operator suite.
 - [ ] Complete Inspect AI Python suite and live scenarios.
 - [ ] Concurrent independent-cluster isolation and restart.
 - [ ] ACME downstream application journey.
@@ -535,6 +535,14 @@ render/feed mechanism.
   digest, and clean shutdown with no surviving child.
 - [ ] Delete obsolete code and tests revealed by the integrated proof; do not
   preserve compatibility mechanisms.
+
+Current-source complete correctness evidence is CLJS 1,179 tests/5,254
+assertions, JVM writer 221/1,833, and operator 280/1,582. The complete offline
+Inspect gate passes 521 tests with eight environment-gated skips. Its one first
+run failure was a stale frozen-tool fixture using retired database wrapper
+fields; the current ordinary database-value and model-transport contract now
+passes. The combined Inspect checkbox remains open until its provider-backed
+live scenario matrix also graduates.
 
 Exit: one exact source revision passes every maintained gate and product journey.
 

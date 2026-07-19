@@ -158,6 +158,13 @@ all emitted `datastar-patch-elements`. The remaining browser boundary is the
 complete control/validation/read-back matrix, gzip remote-mode proof, shared
 render computation, and slow-client isolation.
 
+The current-source complete local correctness checkpoint now passes CLJS 1,179
+tests/5,254 assertions, JVM writer 221/1,833, operator 280/1,582, and offline
+Inspect 521 tests with eight environment-gated skips. The first writer run
+removed two stale v10 listener assumptions rather than restoring implicit
+broadcasts. The first Inspect run removed one retired database wrapper fixture
+and retained the solver's fail-closed model-transport admission.
+
 As of 2026-07-18, one JVM writer has passed the complete autonomous sibling
 cluster lifecycle: fresh initialization, distinct database values and store
 IDs, concurrent agents and gzip feeds, isolated writes, pod-only restart,
