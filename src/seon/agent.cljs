@@ -433,6 +433,11 @@
      "Agent creation requires the database configuration singleton."
      {:seon.db/ref configuration-ref})))
 
+(defn- agent-from-entity
+  "Decode mixed-union agent attributes at the database acquisition boundary."
+  [entity]
+  (some-> entity db/decode-edn-values))
+
 (defn- initial-agent-tx
   "Complete creation facts for one new agent and its home namespace.
 
@@ -556,7 +561,8 @@
                ::db/max-result-weight 1048576}))]
         (if (error-value? entities)
           (acquisition-failure "Agent creation acquisition failed." entities)
-          (let [[entity home-entity configuration-entity] entities
+          (let [[stored-entity home-entity configuration-entity] entities
+                entity (agent-from-entity stored-entity)
                 configuration (configuration-from-entity configuration-entity)]
             (if (error-value? configuration)
               configuration
@@ -745,7 +751,8 @@
           (error-value? agents-without-namespace) agents-without-namespace
           (error-value? missing-namespace-entities) missing-namespace-entities
           :else
-          (let [[root root-home configuration-entity] root-data
+          (let [[stored-root root-home configuration-entity] root-data
+                root (agent-from-entity stored-root)
                 configuration (configuration-from-entity configuration-entity)]
             (if (error-value? configuration)
               configuration
@@ -761,14 +768,15 @@
                     (loop [pairs (seq (partition 2 missing-namespace-entities))
                            tempid (next-transaction-tempid root-tx)
                            tx []]
-                      (if-let [[agent home-entity] (first pairs)]
-                        (if (= "root" (:seon.agent/id agent))
-                          (recur (next pairs) tempid tx)
-                          (let [rows (missing-namespace-tx
-                                      agent home-entity tempid)]
-                            (recur (next pairs)
-                                   (if home-entity tempid (dec tempid))
-                                   (into tx rows))))
+                      (if-let [[stored-agent home-entity] (first pairs)]
+                        (let [agent (agent-from-entity stored-agent)]
+                          (if (= "root" (:seon.agent/id agent))
+                            (recur (next pairs) tempid tx)
+                            (let [rows (missing-namespace-tx
+                                        agent home-entity tempid)]
+                              (recur (next pairs)
+                                     (if home-entity tempid (dec tempid))
+                                     (into tx rows)))))
                         tx))
                     reconciliation-tx (into root-tx namespace-tx)]
                 (cond
@@ -1267,7 +1275,7 @@
                ::db/max-result-weight 1048576}))
             target (if (error-value? stored-target)
                      stored-target
-                     (db/decode-edn-values stored-target))]
+                     (agent-from-entity stored-target))]
         (cond
           (error-value? target) target
           (not (internal/manages? caller-id target))

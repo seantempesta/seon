@@ -74,6 +74,36 @@
           {:seon.ns/name 'my.agent.historical}
           -7))))
 
+(deftest persisted-home-requires-are-decoded-before-incomplete-agent-recovery
+  (let [requires '[[seon.db :as database]]
+        stored-root {:seon.agent/id "root"
+                     :seon.eval/home-requires (pr-str requires)}
+        root (#'agent/agent-from-entity stored-root)
+        [namespace-row agent-row]
+        (#'agent/initial-agent-tx
+         configuration "root" nil nil nil root)]
+    (is (= requires (:seon.eval/home-requires root))
+        "the mixed-union database slot is decoded once at acquisition")
+    (is (= 'my.agent.root (:seon.ns/name namespace-row)))
+    (is (= #{'seon.db}
+           (into #{} (map :seon.ns.require/target)
+                 (:seon.ns/require-edges namespace-row)))
+        "recovery projects require symbols, not characters from stored EDN")
+    (is (str/includes? (:seon.ns/source namespace-row)
+                       "[seon.db :as database]"))
+    (is (not (contains? agent-row :seon.eval/home-requires))
+        "the recovery transaction preserves the existing datom without rewriting it"))
+  (let [requires '[[seon.schema :as schema]]
+        stored-agent {:seon.agent/id "historical"
+                      :seon.eval/home-requires (pr-str requires)}
+        [namespace-row]
+        (#'agent/missing-namespace-tx
+         (#'agent/agent-from-entity stored-agent) nil -7)]
+    (is (= #{'seon.schema}
+           (into #{} (map :seon.ns.require/target)
+                 (:seon.ns/require-edges namespace-row)))
+        "the missing-namespace repair path uses the same decoded agent data")))
+
 (deftest namespace-assignment-transaction-reuses-existing-namespace
   (is (= [[:db.fn/retractAttribute
            [:seon.agent/id "child"]
