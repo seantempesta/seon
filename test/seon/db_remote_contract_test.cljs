@@ -203,6 +203,30 @@
                      ::db/database-name database-name
                      ::db/backend :memory}))
 
+(deftest invalid-public-query-is-user-input-and-never-reaches-the-writer
+  (async done
+    (-> (with-recording-authority
+          {}
+          (fn [{::keys [requests]}]
+            (-> (open!)
+                (.then
+                 (fn [_]
+                   (reset! requests [])
+                   (db/query (db/db)
+                             '[:find ?e :where [?e :seon.agent/id]])))
+                (.then
+                 (fn [result]
+                   (is (= :user-input (:seon.error/kind result)))
+                   (is (= "The database request is invalid."
+                          (:seon.error/message result)))
+                   (is (empty? @requests)
+                       "an invalid agent call is rejected before transport"))))))
+        (.then (fn [_] (done)))
+        (.catch
+         (fn [error]
+           (is false (str "invalid query classification rejected: " error))
+           (done))))))
+
 (def ^:private initialization
   {:seon.execution/artifact-digest
    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"

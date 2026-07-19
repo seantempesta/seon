@@ -177,6 +177,11 @@
    :seon.error/kind :core-bug
    :seon.error/data data})
 
+(defn- request-error [message data]
+  {:seon.error/message message
+   :seon.error/kind :user-input
+   :seon.error/data data})
+
 (defn- transport-failure-data [value]
   (get-in value [:seon.error/data :seon.error/ex-data]))
 
@@ -249,7 +254,7 @@
 (defn- request-on-session! [session request timeout-ms]
   (if-not (protocol/valid-request? request)
     (js/Promise.resolve
-     (session-error "The database request is invalid."
+     (request-error "The database request is invalid."
                     {::protocol/request-id (::protocol/request-id request)
                      ::protocol/error (protocol/explain-request request)}))
     (-> (uds/request! {::uds/session session
