@@ -151,3 +151,11 @@ canvas-context, and warning proof passes 49 tests/215 assertions. A persisted
 missing selection rendered safely in the live web UI while pod and writer
 remained ready; exact rebuilt guidance plus successful repair/clear is the
 remaining live proof for this inverse case.
+
+The exact rebuild exposed the independent HTML consumer: the web view invokes
+the selected canvas function directly and projected the safe error without the
+prompt canvas formatter. Its one existing `html-value` owner now recognizes the
+same absent-program message for a canvas surface and adds the qualified
+renderer, Malli/Hiccup contract, `my.canvas/view`, and `my.canvas/show!` repair.
+Other selected blocks and core loader failures retain their original messages.
+Focused execution-runtime proof passes 14 tests/74 assertions.

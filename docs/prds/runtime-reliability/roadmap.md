@@ -223,8 +223,13 @@ derives existence from current database program facts rather than the pod's
 JavaScript vars, so healthy child-hosted authored functions are not falsely
 reported and the warning clears with the repair. Focused proof passes
 `seon.execution-test` 31/132, `seon.agent.ctx.canvas-test` 10/39, and
-`seon.warn-test` 8/44. Exact rebuilt browser wording and repair/clear remain the
-next live canvas falsifier before the complete control matrix resumes.
+`seon.warn-test` 8/44. The exact rebuild then proved that the complete web view
+has its own selected-HTML projection: it preserved the safe card but initially
+showed only the producer's generic absent-program message. That existing
+projection now translates the same error fact into canvas-specific guidance;
+focused `seon.execution.runtime-test` proof passes 14/74. Exact rebuilt browser
+wording and repair/clear remain the next live canvas falsifier before the
+complete control matrix resumes.
 
 As of 2026-07-18, one JVM writer has passed the complete autonomous sibling
 cluster lifecycle: fresh initialization, distinct database values and store

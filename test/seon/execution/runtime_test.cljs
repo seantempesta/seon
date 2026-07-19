@@ -51,6 +51,22 @@
                 seon.agent.fs/read-file]]
     (is (fn? (eval/lookup-value sym)) (str sym " is compiled"))))
 
+(deftest absent-canvas-function-renders-exact-repair-guidance
+  (let [renderer 'my.app/orders
+        block {:seon.render.surface/selection "canvas"
+               :seon.render/html renderer}
+        result
+        {::execution/ok? false
+         ::execution/error
+         {:seon.error/message
+          "The selected function is absent from the current database program."
+          :seon.error/kind :agent}}
+        hiccup (@#'runtime/html-value "agent-1" block result)
+        rendered (pr-str hiccup)]
+    (is (str/includes? rendered "Canvas renderer my.app/orders"))
+    (is (str/includes? rendered "returns Hiccup through my.canvas/view"))
+    (is (str/includes? rendered "my.canvas/show!"))))
+
 (defn- call-with-acquired-agent
   ([result request observed]
    (call-with-acquired-agent

@@ -66,14 +66,23 @@
   [:map {:closed true} [:seon.agent/id :string]])
 
 (defn- selected-error-message
-  [result]
-  (or (get-in result [::execution/error :seon.error/message])
-      "selected function failed"))
+  [block result]
+  (let [message (get-in result [::execution/error :seon.error/message])
+        renderer (:seon.render/html block)]
+    (if (and (= "canvas" (:seon.render.surface/selection block))
+             (= "The selected function is absent from the current database program."
+                message))
+      (str "Canvas renderer " renderer
+           " is absent from the current database program. Define that exact "
+           "qualified function with a :malli/schema so it returns Hiccup "
+           "through my.canvas/view, or call my.canvas/show! with an existing "
+           "qualified function or literal Hiccup.")
+      (or message "selected function failed"))))
 
 (defn- block-error-text
   [block result]
   (str "[" (name (:seon.agent.ctx/name block)) "] render failed: "
-       (selected-error-message result)))
+       (selected-error-message block result)))
 
 (defn- ai-value
   [value]
@@ -116,7 +125,7 @@
           (str "expected hiccup from " (:seon.render/html block))})))
     (canvas/error-card
      {:seon.error/message
-      (selected-error-message result)})))
+      (selected-error-message block result)})))
 
 (defn- block-call
   [id entity configuration block]
