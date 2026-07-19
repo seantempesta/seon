@@ -267,6 +267,16 @@ source lines in this ledger or the owning successor PRD.
   selected-call, and top-level compiled-child paths already have focused and
   exact live evidence. The earliest remaining contract is exact-artifact
   persist-before-exit proof for a generic core render failure.
+- Commit `b76ff42f` adds the focused generic-render contract through the real
+  core-error configuration and ordinary database hook: the operation-selected
+  policy is used and exactly one core fault transaction is requested. The
+  coordinated artifact still needs the documented temporary render fault,
+  record-before-exit observation, pod-only recovery, and fault removal.
+- Commit `03afd53b` closes the root web UI source gap with one form for optional
+  namespace, purpose, and initial message posting to the existing `POST
+  /agents` path. It remains in the one root shim and one database-driven feed;
+  focused Datastar proof passes 16 tests and 70 assertions. Live browser and
+  database read-back remain the graduation evidence.
 
 ## Execution ledger
 
@@ -447,16 +457,18 @@ modest hardware, with no micro-optimization displacing a correctness boundary.
 
 ## Scheduling clock
 
-- **Ordered spine:** section 5's fixed live Inspect namespace,
-  database-memory, planning, multi-agent, and failure-recovery scenarios; the
-  complete section 4 journey now has database-derived live proof.
+- **Ordered spine:** close section 1's exact-artifact generic-render fault cut,
+  then section 5's fixed live Inspect namespace, database-memory, planning,
+  multi-agent, and failure-recovery scenarios. The complete section 4 journey
+  already has database-derived live proof.
 - **Integrated proof:** three namespace-targeted agents exchange database-backed
   messages, reuse and repair one shared program, survive one child replacement
   and one pod restart, and complete from database state.
-- **Dependency-ready parallel portfolio:** Inspect offline harness verification
-  is now green with metric-bearing oracles, and browser-scenario preparation is
-  source-grounded. Their live product gates remain independent of section 4's
-  agent entities and shared application namespaces.
+- **Dependency-ready parallel portfolio:** Inspect offline verification is
+  green with metric-bearing oracles; its isolated branch lease plus typed
+  product database read is being closed. The root browser control is committed
+  and its live browser/feed proof remains independent of section 1's temporary
+  render fault cut.
 - **Next refill:** after the fixed live Inspect scenarios close, run their
   generated variants and repeated pass thresholds while browser proof advances.
 - **Final graduation gate:** sections 1–8 are checked against one exact source
