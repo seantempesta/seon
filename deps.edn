@@ -111,7 +111,7 @@
                          ;; The npm 3.4.10 package remains only the CLI shim.
                          thheller/shadow-cljs
                          {:git/url "https://github.com/seantempesta/shadow-cljs"
-                          :git/sha "615430b332fa79bfac27ca4df55bd93b823bc02f"}
+                          :git/sha "c98bf60f70c102abda0fd385f78cc0fcd9c25408"}
                          aero/aero                            {:mvn/version "1.1.6"}
                          com.taoensso/timbre                  {:mvn/version "6.5.0"}
                          parinferish/parinferish              {:mvn/version "0.8.0"}

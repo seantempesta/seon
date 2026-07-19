@@ -210,6 +210,17 @@ received one database message naming recovery `qlme850pqh8g` and its diagnostic
 blob. Pod and writer remained ready. The recovery-evidence issue is resolved;
 the next product-level recovery gate is its Inspect AI scenario.
 
+The development-tool reconnect defect is source-grounded in the maintained
+Shadow runtime rather than Seon's database advertisement. Shadow commit
+`615430b3` permanently stopped reconnecting after more than three websocket
+errors, allowing a healthy Bun pod to remain HTTP-ready while disappearing
+from `repl-runtimes`. Maintained commit `c98bf60f` keeps the existing
+five-second retry bounded per attempt but removes the terminal retry count;
+its Node gate passes 2 tests/6 assertions. Seon's existing MCP discovery
+already re-resolves replacement client IDs, now covered by a focused regression
+in the 18-test/57-assertion MCP gate. Exact pinned-dependency restart and live
+watcher-outage/re-advertisement proof remain before resolving the issue.
+
 The stale-canvas recovery seam is now source-correct and live-safe. A persisted
 selection of absent function `my.agents.canvas-recovery/mistyped` rendered one
 bounded error card while the Datastar feed, Bun pod, and JVM writer remained

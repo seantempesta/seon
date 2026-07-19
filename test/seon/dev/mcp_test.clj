@@ -107,6 +107,34 @@
                (#'mcp/ensure-agent-session! "acme/root")))
         (is (= [[41002 ":acme-client" 2]] @pinned))))))
 
+(deftest agent-session-repins-after-runtime-reconnect
+  (let [sessions (atom {})
+        client-id (atom 2)
+        pinned (atom [])]
+    (with-redefs-fn
+      {#'mcp/agent-sessions sessions
+       #'mcp/all-advertisements!
+       (fn []
+         [{:seon.dev.mcp/port 41002
+           :seon.dev.runtime-id/cluster "default"
+           :seon.dev.runtime-id/ids ["root"]
+           :build ":client"
+           :client-id @client-id}])
+       #'mcp/pin-session!
+       (fn [port build runtime-id]
+         (swap! pinned conj [port build runtime-id])
+         (str "session-" runtime-id))
+       #'mcp/nrepl-close-session (fn [& _] nil)}
+      (fn []
+        (is (= "session-2"
+               (:nrepl-session
+                (#'mcp/ensure-agent-session! "default/root"))))
+        (reset! client-id 9)
+        (is (= "session-9"
+               (:nrepl-session
+                (#'mcp/ensure-agent-session! "default/root"))))
+        (is (= [[41002 ":client" 2] [41002 ":client" 9]] @pinned))))))
+
 (deftest writer-prepl-sessions-are-stateful-bounded-and-restart-aware
   (let [directory (.toFile (java.nio.file.Files/createTempDirectory
                             "seon-mcp-test" (make-array java.nio.file.attribute.FileAttribute 0)))
