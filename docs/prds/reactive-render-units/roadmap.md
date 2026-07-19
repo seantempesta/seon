@@ -139,6 +139,12 @@ cannot retain an obsolete renderer closure. The lifecycle regression raises the
 focused Datastar gate to 15 tests and 72 assertions; the focused web-server gate
 passes 24 tests and 93 assertions.
 
+At the combined reactive/cache boundary, the complete Seon CLJS gate passes
+1,203 tests and 5,379 assertions, and the complete JVM writer gate passes 227
+tests and 1,849 assertions. The writer aggregation exposed two stale fixtures
+that still redefined `datahike.api/pull`; both now exercise the maintained
+`pull-with-evidence` result and dependency-plan shape.
+
 Maintained Datahike revision `2241df17` passes the focused weighted-LRU and
 query-cache suites in all persistent-set, spec-instrumented, and
 hitchhiker-tree profiles: 162 tests and 990 assertions. This directly covers
