@@ -470,6 +470,12 @@
            ::protocol/arguments []})
         targets))
 
+(defn- graph-query-result
+  [member]
+  (when (true? (::protocol/success? member))
+    (or (::protocol/result member)
+        (:datahike.query/result member))))
+
 (defn- ns-row
   "One namespace group → {::ns ::count ::member ::target ::line-text}, sampling
    the FIRST hit (a fn, by target order) for member/target/preview."
@@ -498,16 +504,27 @@
         (let [database (await (db/db))]
           (if (:seon.error/message database)
             database
-            (let [response (await (db/execute-many
-                                   {::db/db database
-                                    ::db/members (graph-query-members targets)}))]
-              (if-let [results (::db/results response)]
+            (let [response
+                  (await
+                   (db/execute-many
+                    {::db/db database
+                     ::db/members (graph-query-members targets)}))
+                  members (::db/results response)]
+              (cond
+                (nil? members)
+                (fail (str "program graph query failed: " (pr-str response)))
+
+                (not-every? #(true? (::protocol/success? %)) members)
+                (fail (str "program graph query failed: "
+                           (pr-str (mapv ::protocol/error members))))
+
+                :else
                 (grouped-envelope
-                 (graph-hits targets results re) ::search/ns ns-row
+                 (graph-hits targets (mapv graph-query-result members) re)
+                 ::search/ns ns-row
                  {:rows ::search/by-ns :group-count ::search/ns-count
                   :hint graph-hint}
-                 cap full?)
-                response))))
+                 cap full?)))))
         compiled))
     (catch :default e
       (fail (str "unexpected error in seon.agent.search/grep-graph: "

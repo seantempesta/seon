@@ -33,6 +33,7 @@
     [seon.agent.fs.internal :as fs-int]
     [seon.agent.search :as search]
     [seon.db :as db]
+    [seon.db.protocol :as protocol]
     [seon.test.async :refer [settle!]]))
 
 ;; ---------------------------------------------------------------------------
@@ -514,7 +515,11 @@
             (is (= (count targets) (count (::db/members request)))
                 "one bounded query is sent for each selected target")
             (js/Promise.resolve
-             {::db/results (mapv graph-rows targets)})))
+             {::db/results
+              (mapv (fn [target]
+                      {::protocol/success? true
+                       :datahike.query/result (graph-rows target)})
+                    targets)})))
     (-> (search/grep-graph request)
         (.then verify)
         (.finally (fn []

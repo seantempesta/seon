@@ -16,6 +16,7 @@
     [clojure.test.check.generators :as gen]
     #?(:clj  [clojure.test.check.properties :as prop]
        :cljs [clojure.test.check.properties :as prop :include-macros true])
+    [seon.db.protocol :as protocol]
     [seon.repl.internal :as parse]))
 
 ;; ============================================================
@@ -1081,6 +1082,15 @@
     (let [in "(identity #code/txt <<END\nreturn END_TOKEN\n    END\nEND\n)"]
       (is (= 1 (count (parse/parse-forms in))))
       (is (= "return END_TOKEN\n    END\n" (one-text in))))))
+
+(deftest reader-expanded-anonymous-function-is-ordinary-eager-data
+  (let [source  "(filter #(clojure.string/includes? (str %) \"graduation\") xs)"
+        entries (parse/parse-forms source)
+        form    (:seon.repl/form (first entries))]
+    (is (= 1 (count entries)))
+    (is (protocol/ordinary-wire-value? entries))
+    (is (= 'filter (first form)))
+    (is (= 'fn* (first (second form))))))
 
 (deftest heredoc-source-is-byte-faithful-and-span-original
   (testing ":source keeps the RAW heredoc; :span indexes the ORIGINAL text"

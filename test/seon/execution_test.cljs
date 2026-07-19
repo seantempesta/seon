@@ -79,6 +79,22 @@
                       [(js/Promise.resolve 1)]))))
   (is (execution/valid-parent-message? invocation)))
 
+(deftest non-ordinary-parent-message-reports-an-ordinary-value-path
+  (let [failure
+        (try
+          (execution/encode-message
+           {::execution/message execution/invoke-message
+            ::execution/arguments [(map identity [1 2])]})
+          nil
+          (catch :default error error))
+        diagnostic (:seon.error/data (ex-data failure))]
+    (is (= "Execution IPC accepts only eager ordinary data."
+           (ex-message failure)))
+    (is (= [::execution/arguments 0]
+           (::execution/value-path diagnostic)))
+    (is (string? (::execution/value-type diagnostic)))
+    (is (protocol/ordinary-wire-value? diagnostic))))
+
 (deftest compiled-identity-refuses-agent-authored-symbols
   (let [messages (atom [])
         state (atom {::execution/startup startup

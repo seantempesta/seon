@@ -158,6 +158,28 @@ source lines in this ledger or the owning successor PRD.
   one current namespace ref, and no resident left on either prior namespace.
   Focused home, multi-agent, namespace, transcript, function-menu, and warning
   proof passes 37 tests and 187 assertions.
+- Cross-child program propagation is live. Agent `blue-banks-swim` committed
+  `my.graduation.shared/greeting`, registered
+  `:my.graduation.shared/label`, and persisted passing test
+  `my.graduation.shared-test/greeting-returns-prefixed-label`. Independent
+  agent `violet-emus-create` did not redefine the function; eval
+  `erg4qqhh0vc3` called it from `my.graduation.concurrent` and returned exact
+  result `"shared:peer"`.
+- The same adversarial journey exposed two core faults after the successful
+  cross-child call. `grep-graph` consumed typed `execute-many` member envelopes
+  as query rows, causing its own output validator to reject keyword
+  `:datahike.query/result`; the owner now unwraps successful member results and
+  focused search/execution/host proof passes 77 tests/330 assertions. A later
+  replacement-child invocation rejected a non-eager parent value without
+  retaining its structural path. IPC encoding and host error projection now
+  retain an ordinary path/type diagnostic. Exact reproduction identified a
+  nested eager `cljs.core/Cons` created by the ClojureScript `#(...)` reader
+  expansion. `parse-forms` now materializes reader-produced seqs as persistent
+  lists while the IPC predicate remains strict. Focused parser, search,
+  execution, and host proof passes 116 tests/660 assertions. Live turn
+  `kdhmf2xb6rih` ran that exact anonymous-function form in 233 ms, called the
+  shared function with exact result `"shared:ordinary-ipc"` in 218 ms, and
+  entered `wait` without a core fault.
 
 ## Execution ledger
 
@@ -248,7 +270,7 @@ and recovery semantics.
   agent remains free to inspect and repair every namespace.
 - [x] Prove reassignment changes ordinary database facts without duplicating
   agents, program entities, runs, turns, plans, or messages.
-- [ ] **IN PROGRESS:** prove newly committed functions, schemas, and tests become available to
+- [x] Prove newly committed functions, schemas, and tests become available to
   every relevant fresh child through the one program mechanism.
 
 Exit: root can launch, find, message, stop, resume, and reassign agents by
@@ -256,7 +278,7 @@ namespace while immutable agent IDs preserve history and refs.
 
 ### 4. Live multi-agent application journey
 
-- [ ] Root delegates `my.orders`, `my.customers`, and `my.fulfillment` work to
+- [ ] **IN PROGRESS:** root delegates `my.orders`, `my.customers`, and `my.fulfillment` work to
   separate agents.
 - [ ] Agents exchange database-backed messages with explicit from/to refs.
 - [ ] One agent uses functions written by another; a different agent finds and
@@ -338,15 +360,17 @@ modest hardware, with no micro-optimization displacing a correctness boundary.
 
 ## Scheduling clock
 
-- **Ordered spine:** section 2's first complete live lifecycle, while the
-  remaining section-1 selected-render injection stays an exact package gate.
-- **Integrated proof:** clean cold/restart repetitions plus deterministic fault
-  record-before-exit and supervisor recovery.
-- **Dependency-ready parallel portfolio:** Inspect offline harness verification,
-  namespace/agent source audit, and browser scenario design may advance without
-  editing the section-1 runtime owners.
-- **Next refill:** after section 2 closes, section 3 becomes the implementation
-  spine and begins with the namespace-targeted lifecycle dependency ledger.
+- **Ordered spine:** section 4's complete multi-agent application journey; the
+  shared-program and ordinary-data child boundary now have focused and live
+  proof.
+- **Integrated proof:** three namespace-targeted agents exchange database-backed
+  messages, reuse and repair one shared program, survive one child replacement
+  and one pod restart, and complete from database state.
+- **Dependency-ready parallel portfolio:** Inspect offline harness verification
+  and browser-scenario preparation remain independent of section 4's agent
+  entities and shared application namespaces.
+- **Next refill:** after section 4 closes, section 5's fixed and generated live
+  Inspect scenarios become the ordered spine while browser proof advances.
 - **Final graduation gate:** sections 1–8 are checked against one exact source
   revision, including live Inspect, browser, downstream, package, and measured
   modest-hardware evidence.

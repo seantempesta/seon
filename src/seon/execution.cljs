@@ -167,13 +167,15 @@
     {::parent-message (m/validator ::parent-message options)
      ::child-message (m/validator ::child-message options)}))
 
+(declare first-non-ordinary)
+
 (defn encode-message
   "Encode one eager ordinary IPC value as Transit JSON."
   {:malli/schema [:=> [:cat :map] :string]}
   [message]
   (when-not (db.protocol/ordinary-wire-value? message)
     (throw (ex-info "Execution IPC accepts only eager ordinary data."
-                    {::message message
+                    {:seon.error/data (first-non-ordinary message)
                      :seon.error/kind :core-bug})))
   (transit/write transit-writer message))
 

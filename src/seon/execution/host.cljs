@@ -555,9 +555,12 @@
                (invoke-once! invocation)))))
         (.catch
          (fn [exception]
-           (host-error invocation
-                       "The execution host invocation failed."
-                       {:seon.error/cause (ex-message exception)}))))))
+           (let [diagnostic (get (ex-data exception) :seon.error/data)]
+             (host-error
+              invocation
+              "The execution host invocation failed."
+              (cond-> {:seon.error/cause (ex-message exception)}
+                (map? diagnostic) (merge diagnostic)))))))))
 
 (defn invoke!
   "Queue one invocation in its agent's child; agents remain parallel."

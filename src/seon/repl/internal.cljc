@@ -954,6 +954,29 @@
             (rcn/children (rcp/parse-string-all (str source)))))
     (catch #?(:clj Exception :cljs :default) _ nil)))
 
+(defn- eager-form
+  "Materialize reader-produced seqs as persistent lists before a form crosses
+   the execution-child boundary. ClojureScript's anonymous-function reader
+   expansion contains `cljs.core/Cons` values; they are eager syntax data, but
+   the wire contract correctly rejects arbitrary sequential values."
+  [value]
+  (cond
+    (map? value)
+    (into (empty value)
+          (map (fn [[key item]] [(eager-form key) (eager-form item)]))
+          value)
+
+    (vector? value)
+    (mapv eager-form value)
+
+    (set? value)
+    (into (empty value) (map eager-form) value)
+
+    (seq? value)
+    (apply list (map eager-form value))
+
+    :else value))
+
 (defn- parse-forms*
   "Read `text` top-to-bottom, pairing each evaluable form with the `;;`
    comment-preamble that precedes it. See the namespace docstring for the
@@ -1039,7 +1062,7 @@
                      (conj out {:seon.repl/kind      :form
                                 :seon.repl/narration (join-narration pending)
                                 :seon.repl/source    (::source token)
-                                :seon.repl/form      (::form token)
+                                :seon.repl/form      (eager-form (::form token))
                                 ;; ABSOLUTE `[start end)` char span of this
                                 ;; form in `text` — the SAME basis the `:read`
                                 ;; entry carries, so the closed-loop renoise /
