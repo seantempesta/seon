@@ -147,9 +147,9 @@ view, like the analyzer state.
 - **The DB as the agent's authoring surface** — agents author via
   REPL evals; detect-and-tee captures them as DB entities. Source
   is the rendering format, not the storage format.
-- **Caching of expensive derivations** — if reconstitute-ns-source
-  becomes a hot path, memoize keyed on the ns's latest tx-id. Same
-  rule as reactive-context: cache, don't bifurcate.
+- **Caching of expensive derivations** — if a namespace-source
+  derivation becomes a hot path, memoize keyed on the ns's latest
+  tx-id. Same rule as reactive-context: cache, don't bifurcate.
 
 ## Cross-references
 
