@@ -85,6 +85,25 @@ tier big enough), Workers (negative). Cross-agent block sharing: measure
 render cost first; prefix byte-identity discipline suffices for the
 provider prompt-cache win without a new mechanism.
 
+## Sci execution-runtime verdict (2026-07-20, measured)
+
+[[research/sci-execution-child-feasibility-2026-07-20]]: sci-JIT in Bun —
+burst retention RETURNS (89-91 MB settled after a 1.5 GB peak; self-host
+stays at 416 MB permanently); small-form eval latency 10-16x FASTER than
+self-host; all four semantic gaps PASS live (native ^:async/await over
+real Promises, agent defmacro works, malli wrapper yields the standard
+envelope, def/redef/in-ns work — better than self-host for value defs);
+sci :interrupt-fn cancels runaway CPU in-process (impossible today). JVM
+sci host (owner extension): 22.7 KB marginal per context at N=100 (true
+structural sharing), Thread/interrupt containment 0 ms, port split of the
+137 my.* fns = 42% pure / 46% db-boundary (become SIMPLER synchronous
+calls) / 12% genuinely js-bound; the UDS transport already has a JVM
+client side. bb-runs-packaged-CLJS: definitively impossible
+(demonstrated). Honest blockers in the doc: sci≠cljs.js general
+semantics, the 91 MB eager-schema band untouched (lazy validators fix it
+orthogonally), ~60 MB bundle-proportional floor, retention unproven at
+production anchoring. Architecture decision pending owner.
+
 ## Independent backlog (87 notes, themed)
 
 See [[research/issues-triage-2026-07-20]] §INDEPENDENT: inspect-ai
