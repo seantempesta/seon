@@ -162,6 +162,14 @@ settled by [[research/value-drill-cap-default-ruling-2026-07-20]] (`38f24f39`):
 `offset + page-size` 1,024, permitting at most 1,025 source touches with the
 tail sentinel.
 
+HTTP path syntax is frozen by
+[[research/value-route-path-codec-boundary-2026-07-20]] (`c932c9e1`). One
+strict local EDN reader accepts only canonical vectors of the ruled scalar
+types and proves equality through the existing Transit codec; it does not use
+the mutable global tag table, a token registry, or `read-string`'s
+first-form-only behavior. All syntax and budget refusals occur before lookup,
+authorization, child send, descent, or realization.
+
 ## Problems this closes
 
 - Three value-rendering leaks bypassing the one mechanism (unbounded

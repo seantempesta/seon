@@ -157,6 +157,14 @@ path segments, 4,096 UTF-8 bytes of raw percent-encoded path, and a maximum
 `offset + page-size` of 1,024 (therefore at most 1,025 touched items including
 the honest tail sentinel). These are independent cardinality/amplification
 bounds, not a latency claim for arbitrary lazy elements.
+The exact path codec is
+[[research/value-route-path-codec-boundary-2026-07-20]] (`c932c9e1`): decoded
+text must be the canonical `pr-str` of one EDN vector; the initial closed
+grammar admits nil, booleans, finite non-negative-zero numbers, strings,
+keywords, and symbols; duplicate fields, tags, trailing forms, non-canonical
+spellings, and malformed encoding refuse before any database or host work.
+Numeric map keys retain their value, while vector descent separately requires
+a non-negative safe integer.
 
 Only after those contracts freeze does
 [[research/execution-child-value-sampling-boundary-2026-07-20]] (`a568deef`)
