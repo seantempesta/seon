@@ -435,6 +435,7 @@
         (do
           (println (str (case (:seon.dev.target/status status)
                           :seon.dev.target.status/ready "●"
+                          :seon.dev.target.status/rebuilding "◐"
                           :seon.dev.target.status/degraded "◐"
                           "○")
                         " Seon " (name (:seon.dev.target/status status))))
@@ -446,7 +447,9 @@
                           (when-let [pid (:seon.dev.process/pid value)]
                             (str "  pid=" pid))
                           (when-not (:seon.dev.process/ready? value)
-                            "  not-ready"))))
+                            (if (:seon.dev.process/rebuild-pending? value)
+                              "  rebuild-pending"
+                              "  not-ready")))))
           (doseq [retained (:seon.dev.target/branches status)]
             (println
              (str "  branch " (::branch/runtime-cluster retained) "  "

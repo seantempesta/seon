@@ -54,7 +54,7 @@ See `README.md` for the convention.
 | [Skip the receipt reread branch after a successful eval write](successful-eval-receipt-called-state-on-nil.md) | blocker | agent |
 | [Supply the execution artifact to the production container launch](container-launch-omits-execution-artifact.md) | blocker | agent |
 
-## Friction (67)
+## Friction (66)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -123,7 +123,6 @@ See `README.md` for the convention.
 | [Transact output schema crashed child on ordinary error](transact-output-schema-crashed-child-on-ordinary-error.md) | friction | agent |
 | [Transcript decay does not bound total context](transcript-decay-does-not-bound-total-context.md) | friction | agent |
 | [Turn debug treated a database error as an entity id](turn-debug-treated-database-error-as-entity-id.md) | friction | Core |
-| [Watcher status conflates artifact drift with failure](watcher-status-conflates-drift-with-failure.md) | friction | general |
 | [`my.ns/compact!` can hide the selected namespace](my-ns-compact-can-hide-namespace.md) | friction | agent |
 
 ## Cleanup (11)

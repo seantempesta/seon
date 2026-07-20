@@ -698,6 +698,28 @@
   (let [text (tail-text (:seon.dev.process/log record))]
     (every? #(build-ready? text %) (watcher-build-ids config))))
 
+(defn- watcher-build-failed?
+  "True when a watcher build's newest terminal log line is a failure."
+  [config record]
+  (let [text (tail-text (:seon.dev.process/log record))]
+    (boolean
+     (some (fn [build-id]
+             (let [prefix (str "[:" (name build-id) "] ")
+                   completed (last-index text (str prefix "Build completed."))
+                   failed (last-index text (str prefix "Build failure:"))]
+               (> failed completed)))
+           (watcher-build-ids config)))))
+
+(defn- rebuild-pending?
+  "True when an alive watcher is merely drifted or mid-compile, not failing."
+  [config spec record ready]
+  (boolean
+   (and record
+        (= :seon.dev.process.readiness/watcher
+           (:seon.dev.process/readiness spec))
+        (not ready)
+        (not (watcher-build-failed? config record)))))
+
 (defn- current-watcher-outputs-ready? [config spec]
   (and
    (if-let [expected (:seon.dev.process/client-digest spec)]
@@ -2254,12 +2276,19 @@
                            process-state
                            (if foreign?
                              :seon.dev.process.status/foreign
-                             (reported-process-status record))]
+                             (reported-process-status record))
+                           process-ready?
+                           (boolean (and record (ready? config spec record)))
+                           drift?
+                           (and (= :seon.dev.process.status/alive
+                                   process-state)
+                                (rebuild-pending? config spec record
+                                                  process-ready?))]
                        [id (cond->
                              {:seon.dev.process/status process-state
-                              :seon.dev.process/ready?
-                              (boolean (and record
-                                            (ready? config spec record)))}
+                              :seon.dev.process/ready? process-ready?}
+                             drift?
+                             (assoc :seon.dev.process/rebuild-pending? true)
                              record
                              (assoc
                                :seon.dev.process/current-spec? current-spec?
@@ -2296,6 +2325,20 @@
                                (:seon.dev.process/status value))
                             (:seon.dev.process/ready? value)))
                      external-dependencies))
+        ;; Drift-aware health: every process alive, every not-ready process
+        ;; is only awaiting an incremental rebuild, dependencies ready.
+        rebuilding?
+        (and (every? (fn [[_ value]]
+                       (and (= :seon.dev.process.status/alive
+                               (:seon.dev.process/status value))
+                            (or (:seon.dev.process/ready? value)
+                                (:seon.dev.process/rebuild-pending? value))))
+                     processes)
+             (every? (fn [[_ value]]
+                       (and (= :seon.dev.process.status/alive
+                               (:seon.dev.process/status value))
+                            (:seon.dev.process/ready? value)))
+                     external-dependencies))
         pod-ready (get-in processes [pod-id :seon.dev.process/ready?])
         port (when (and pod-ready
                         (fs/regular-file?
@@ -2325,6 +2368,7 @@
     {:seon.dev.target/status (cond
                                foreign? :seon.dev.target.status/ownership-conflict
                                all-ready? :seon.dev.target.status/ready
+                               rebuilding? :seon.dev.target.status/rebuilding
                                (some #(= :seon.dev.process.status/alive
                                          (:seon.dev.process/status %))
                                      (vals processes))

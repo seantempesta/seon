@@ -2298,6 +2298,83 @@
                         (vals processes))))))
       (finally (fs/delete-tree directory)))))
 
+(deftest watcher-drift-reports-rebuild-pending-not-failure
+  (let [configuration (test-config)
+        directory (:seon.dev.test/directory configuration)
+        configuration (target-config configuration directory)
+        manifest (target-manifest-for configuration)
+        specs (process/specs configuration manifest)
+        pid (.pid (java.lang.ProcessHandle/current))
+        start-instant (state/process-start-instant pid)
+        build-ids (#'process/watcher-build-ids configuration)
+        watcher-log (fs/path directory "watcher.log")
+        records
+        (into {}
+              (map
+               (fn [[id spec]]
+                 [id
+                  (live-probe-record
+                   configuration
+                   {:seon.dev.process/id id
+                    :seon.dev.process/pid pid
+                    :seon.dev.process/start-instant start-instant
+                    :seon.dev.process/process-group pid
+                    :seon.dev.process/argv (:seon.dev.process/argv spec)
+                    :seon.dev.process/environment-digest
+                    (#'process/environment-digest
+                     (:seon.dev.process/environment spec)
+                     (:seon.dev.process/argv spec))
+                    :seon.dev.process/artifact-digest
+                    (:seon.dev.process/artifact-digest spec)
+                    :seon.dev.process/target :seon.dev.target/development
+                    :seon.dev.process/started-at "test"
+                    :seon.dev.process/log (str watcher-log)})]))
+              specs)
+        ;; Only the watcher fails its readiness probe; everything else is
+        ;; alive and ready, as during an ordinary live edit cycle.
+        drifted-ready?
+        (fn [_ spec _]
+          (not= :seon.dev.process.readiness/watcher
+                (:seon.dev.process/readiness spec)))]
+    (try
+      (spit (str watcher-log)
+            (str/join "\n"
+                      (concat
+                       (map #(str "[:" (name %) "] Build completed.")
+                            build-ids)
+                       [(str "[:" (name (first build-ids))
+                             "] Compiling ...")])))
+      (with-redefs-fn
+        {#'process/read-process (fn [_ id] (get records id))
+         #'process/ready? drifted-ready?
+         #'process/ownership-conflicts (fn [_ _] [])}
+        (fn []
+          (let [status (process/status configuration manifest)
+                watcher (get-in status [:seon.dev.target/processes
+                                        process/watcher-id])]
+            (is (= :seon.dev.target.status/rebuilding
+                   (:seon.dev.target/status status))
+                "drift with a healthy watcher is drift-aware health")
+            (is (false? (:seon.dev.process/ready? watcher)))
+            (is (true? (:seon.dev.process/rebuild-pending? watcher))))))
+      (spit (str watcher-log)
+            (str "\n[:" (name (first build-ids)) "] Build completed."
+                 "\n[:" (name (first build-ids)) "] Build failure:\n")
+            :append true)
+      (with-redefs-fn
+        {#'process/read-process (fn [_ id] (get records id))
+         #'process/ready? drifted-ready?
+         #'process/ownership-conflicts (fn [_ _] [])}
+        (fn []
+          (let [status (process/status configuration manifest)
+                watcher (get-in status [:seon.dev.target/processes
+                                        process/watcher-id])]
+            (is (= :seon.dev.target.status/degraded
+                   (:seon.dev.target/status status))
+                "a genuinely failed build still reports failure")
+            (is (not (:seon.dev.process/rebuild-pending? watcher))))))
+      (finally (fs/delete-tree directory)))))
+
 (deftest artifact-flavor-owns-the-watcher-build-and-cache
   (let [configuration (test-config)
         directory (:seon.dev.test/directory configuration)
