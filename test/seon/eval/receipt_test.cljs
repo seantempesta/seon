@@ -1,6 +1,7 @@
 (ns seon.eval.receipt-test
   "Focused contracts for eval receipts at the database authority boundary."
   (:require
+    [cljs.reader :as reader]
     [cljs.test :refer [async deftest is testing]]
     [malli.core :as m]
     [seon.config :as config]
@@ -66,6 +67,30 @@
   [frozen acquire! compile-tee record!]
   ((deref #'seval/retry-eval-record!)
    frozen acquire! compile-tee record!))
+
+(defn- query-result-framing
+  [form]
+  ((deref #'seval/query-result-framing) form))
+
+(deftest database-query-result-framing-follows-datomic-find-shapes
+  (is (= "; db/query result shape: scalar — one value (or nil)."
+         (query-result-framing
+          '(db/query '[:find (count ?e) . :where [?e :item/id]]))))
+  (is (= "; db/query result shape: tuple — one vector of values (or nil)."
+         (query-result-framing
+          '(seon.db/query {:seon.db/query
+                           [:find [?name ?email]
+                            :where [?e :user/name ?name]
+                                   [?e :user/email ?email]]}))))
+  (is (= "; db/query result shape: collection — one vector of values."
+         (query-result-framing
+          '(db/query "[:find [?name ...] :where [?e :user/name ?name]]"))))
+  (is (= "; db/query result shape: relation — tuple vectors (a set unless ordered)."
+         (query-result-framing
+          '(db/query '[:find ?name ?email
+                       :where [?e :user/name ?name]
+                              [?e :user/email ?email]]))))
+  (is (nil? (query-result-framing '(pull [:user/name] 1)))))
 
 (deftest receipt-schemas-are-closed-and-terminal-states-are-bounded
   (is (m/validate ::receipt/start-request start))
@@ -162,6 +187,36 @@
              (is (not (contains? result ::seval/tee-recorded?)))
              (is (= 3 (::seval/retained-value result)))
              (is (not (contains? result :seon.db/ok?)))))
+          (.catch (fn [error] (is false (str error))))
+          (.finally
+           (fn []
+             (set! db/transact! original)
+             (done)))))))
+
+(deftest record-eval-persists-query-shape-as-readable-edn-comment
+  (async done
+    (let [original db/transact!
+          observed (atom nil)]
+      (set! db/transact!
+            (fn [& [request]]
+              (reset! observed request)
+              (js/Promise.resolve transaction-report)))
+      (-> (seval/record-eval!
+           (assoc record-request
+                  ::seval/result-framing
+                  "; db/query result shape: tuple — one vector of values (or nil)."
+                  ::seval/result
+                  {::seval/ok? true ::seval/value ["Ada" "ada@example.test"]}))
+          (.then
+           (fn [_]
+             (let [result-edn (-> @observed :seon.db/tx-data second
+                                  :seon.eval/result-edn)]
+               (is (= (str "; db/query result shape: tuple — one vector of values (or nil).\n"
+                           "[\"Ada\" \"ada@example.test\"]")
+                      result-edn))
+               (is (= ["Ada" "ada@example.test"]
+                      (reader/read-string result-edn))
+                   "the framing comment preserves the result as readable EDN"))))
           (.catch (fn [error] (is false (str error))))
           (.finally
            (fn []

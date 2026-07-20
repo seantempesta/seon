@@ -3075,8 +3075,8 @@
    which may reacquire and rebuild this transaction from the frozen execution
    result without rerunning the form. No result handle is bound here."
   {:malli/schema [:=> [:catn [::record-request :map]] :any]}
-  [{::keys [at narration source result duration-ms tee output pending? eval-id
-            progress?]
+  [{::keys [at narration source result result-framing duration-ms tee output
+            pending? eval-id progress?]
     configuration :seon.config/configuration
     database ::db/db
     expected-database ::db/expected-db
@@ -3136,10 +3136,12 @@
               (::ok? result)
               (assoc :seon.eval/result-edn
                      (cap-edn
-                       (if pending?
-                         (render-result-edn configuration eval-id stored-value)
-                         (render-prepared-result-edn configuration eval-id
-                                                     prepared-value))
+                       (str (when (seq result-framing)
+                              (str result-framing "\n"))
+                            (if pending?
+                              (render-result-edn configuration eval-id stored-value)
+                              (render-prepared-result-edn configuration eval-id
+                                                          prepared-value)))
                        (config/database-edn-cap configuration))))))
         allocate-record!
         (fn ^:async allocate-record! [accepted-tee]
@@ -3722,6 +3724,7 @@
                ::duration-ms (::duration-ms frozen)
                ::narration (::narration frozen)
                ::source (::source frozen)
+               ::result-framing (::result-framing frozen)
                ::ending-ns (::ending-ns frozen)
                ::result (::result compiled)
                ::pending? (::pending? compiled)
@@ -4257,6 +4260,62 @@
           (some (fn [s] (when (contains? names (name s)) s))
                 @all-syms))))))
 
+(def ^:private query-result-framing-lines
+  {:scalar
+   "; db/query result shape: scalar — one value (or nil)."
+   :tuple
+   "; db/query result shape: tuple — one vector of values (or nil)."
+   :collection
+   "; db/query result shape: collection — one vector of values."
+   :relation
+   "; db/query result shape: relation — tuple vectors (a set unless ordered)."})
+
+(defn- quoted-value
+  [value]
+  (if (and (seq? value) (= 'quote (first value)))
+    (second value)
+    value))
+
+(defn- query-find
+  [query]
+  (let [query (quoted-value query)
+        query (if (string? query)
+                (try (reader/read-string query)
+                     (catch :default _ nil))
+                query)]
+    (cond
+      (map? query)
+      (:find query)
+
+      (vector? query)
+      (when-let [find-index
+                 (first (keep-indexed #(when (= :find %2) %1) query))]
+        (->> (subvec query (inc find-index))
+             (take-while #(not (keyword? %)))
+             vec)))))
+
+(defn- query-result-shape
+  [form]
+  (let [call (first form)]
+    (when (and (seq? form)
+               (contains? #{"db/query" "seon.db/query"} (str call)))
+      (let [argument (second form)
+            query (if (map? argument) (:seon.db/query argument) argument)
+            find (query-find query)]
+        (cond
+          (= '. (last find))
+          :scalar
+
+          (and (= 1 (count find)) (vector? (first find)))
+          (if (= '... (last (first find))) :collection :tuple)
+
+          (seq find)
+          :relation)))))
+
+(defn- query-result-framing
+  [form]
+  (get query-result-framing-lines (query-result-shape form)))
+
 (defn- ^:async eval-form-entry!
   "The normal single-form eval path, extracted from `eval-batch!`'s
    `:else` branch so a parinfer-REPAIRED form (A.2) can reuse the exact
@@ -4282,7 +4341,7 @@
                         repair note here so the diff is always visible).
      ::source          — the source string to eval (repaired or original)."
   [{::keys [compile-state authored-sources current-ns n-ok n-fail
-            failed-defs outer-test-run? narration source]
+            failed-defs outer-test-run? narration source result-framing]
     configuration :seon.config/configuration
     database ::db/db
     turn-id :seon.agent.turn/id-of-turn}]
@@ -4528,6 +4587,7 @@
                ::ending-ns ending-ns
                ::require-edges (or require-edges #{})
                ::result result
+               ::result-framing result-framing
                ::pending? pending?
                ::eval-id eval-id
                ::at at
@@ -5052,6 +5112,8 @@
                 ::failed-defs     failed-defs
                 ::outer-test-run? outer-test-run?
                 ::narration       narration
+                ::result-framing  (query-result-framing
+                                    (:seon.repl/form entry))
                 ::source          source})))))
 
 (defn- program-entry-skipped?
