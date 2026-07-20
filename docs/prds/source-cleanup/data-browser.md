@@ -149,6 +149,16 @@ This ordering prevents the route or IPC layer from inventing projection
 semantics, numeric defaults, drill-key reconstruction, or a second paging
 mechanism.
 
+The exact handoffs are grounded by
+[[research/projected-map-key-drill-boundary-2026-07-20]] (`ddf2b5c2`),
+[[research/value-drill-budget-config-boundary-2026-07-20]] (`3d5943db`), and
+[[research/universal-data-browser-ui-migration-boundary-2026-07-20]]
+(`e7cc6f94`). Display-only map keys are identified by output-local indexes and
+never tokenized; the three budget dimensions remain distinct and are enforced
+before work by both parent and child; and the plan proof deletes its current
+HTML-only database acquisition before property dispatch. The shipped numeric
+budget defaults are the only remaining owner ruling before the config unit.
+
 ## Problems this closes
 
 - Three value-rendering leaks bypassing the one mechanism (unbounded

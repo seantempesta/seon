@@ -141,6 +141,17 @@ incomplete. Before transport, close
 [[../../seon/issues/value-drill-has-no-total-work-bounds]]: drill paths must
 retain original keys, and separate configured maxima must bound path segments,
 encoded path bytes, and total realized page work in both parent and child.
+The projection repair is grounded by
+[[research/projected-map-key-drill-boundary-2026-07-20]] (`ddf2b5c2`): ordered
+entry pairs remain unchanged while one ascending output-local
+`non-drillable-key-indexes` vector identifies display-only keys; no unsafe
+original key, opaque token, or mutable lookup registry crosses a boundary.
+The work/config owner is
+[[research/value-drill-budget-config-boundary-2026-07-20]] (`3d5943db`): three
+independent singleton caps govern decoded segments, encoded bytes, and total
+realized items; parent and child both reject before lookup or realization and
+each page touches at most `offset + n + 1`. Concrete shipped defaults remain
+an explicit owner ruling before that source unit starts.
 
 Only after those contracts freeze does
 [[research/execution-child-value-sampling-boundary-2026-07-20]] (`a568deef`)
@@ -154,6 +165,14 @@ ownership to the route agent before any host send; unauthorized and unknown
 selectors are uniformly absent; retired results remain ordinary honest
 unavailable projections. UI/custom dispatch and integrated browser proof are
 consumers of that frozen chain, not alternate authorities.
+The final consumer cut is grounded by
+[[research/universal-data-browser-ui-migration-boundary-2026-07-20]]
+(`e7cc6f94`). It extends the existing render dispatcher, migrates `/data` and
+eval technical disclosure, and deletes duplicate raw rendering and route
+authority. The plan proof first separates existing structural acquisition
+from pure property renderers and deletes the HTML-only database query;
+registering today's DB-acquiring `plan-block-html` unchanged would preserve a
+second mechanism and cannot satisfy the gate.
 
 ### Stage 1.6 — corrective steering gaps
 
@@ -194,13 +213,15 @@ assertions with zero failures, errors, or compiler warnings. This closes the
 Stage-1.6 integrated code gate only. A status check immediately after readiness
 observed all default processes absent because a second explicit lifecycle
 reconciliation had entered its clean stop phase before publishing replacement
-generations; logs falsify workload crash, control EOF, and record loss. U4 now
-owns active `turn.cljs`/`ai.cljs` edits and the retained `u15` branch, so its
+generations; logs falsify workload crash, control EOF, and record loss. The
+frozen-turn-inputs I6/I7 lane now owns active `turn.cljs`/`ai.cljs` plus tests;
+U4 owns active `db/id.cljc` work and the retained `u15` branch. Their current
 replacement default generation is intentionally not a source-clean checkpoint.
 Fresh directive/narration/query-shape and G11 browser proof remain uncounted
-until U4 releases the lifecycle and tracked source is frozen again.
-The independent full writer gate also passes 259 tests / 1,997 assertions with
-zero failures and errors while U4's dirty paths are CLJS-only. This is useful
+until both owners commit and release their paths and U4 closes `u15` in its
+integration pass. The independent full writer gate also passes 259 tests /
+1,997 assertions with zero failures and errors while the then-active dirty
+paths were CLJS-only. This is useful
 integration evidence, not the final twice-frozen graduation run.
 
 Corrective-steering G10's record-time half is implemented by `418a3844`:
