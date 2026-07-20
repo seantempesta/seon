@@ -451,4 +451,4 @@
                   ["(def plan-rows (vec (range 200)))"
                    "(def total (reduce + plan-rows))"])]
     (is (every? :seon.eval/ok? replayed))
-    (is (pos? (get-in (::context/report base) [::context/loaded])))))
+    (is (pos? (get (::context/report base) ::context/loaded)))))

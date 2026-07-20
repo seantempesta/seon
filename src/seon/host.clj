@@ -144,6 +144,8 @@
   [::socket-path ::socket-path]
   [::context/writer-socket-path ::context/writer-socket-path]
   [::context/database-name ::context/database-name]
+  [::context/backend {:optional true} ::context/backend]
+  [::context/database-path {:optional true} ::context/database-path]
   [::eval-threads {:optional true} ::eval-threads]])
 (schema/register! ::server 'some?)
 (schema/register! ::contexts 'some?)
@@ -486,10 +488,7 @@
                      "The startup names another cluster database.")
 
       :else
-      (let [head (context/resolve-head!
-                  {::context/writer-socket-path
-                   (::context/writer-socket-path host)
-                   ::context/database-name (::context/database-name host)})]
+      (let [head (context/resolve-head! (::writer host))]
         (if (:seon/error head)
           (startup-error session
                          (get-in head [:seon/error :seon.error/message]))
@@ -575,8 +574,11 @@
   {:malli/schema [:=> [:cat ::start-request] ::host]}
   [{::keys [socket-path eval-threads]
     :as request}]
-  (let [writer (select-keys request [::context/writer-socket-path
-                                     ::context/database-name])
+  (let [writer (context/writer-session
+                (select-keys request [::context/writer-socket-path
+                                      ::context/database-name
+                                      ::context/backend
+                                      ::context/database-path]))
         base (context/build-base! writer)
         contexts (atom {})
         eval-pool (Executors/newFixedThreadPool
@@ -586,7 +588,8 @@
         address (UnixDomainSocketAddress/of ^String socket-path)
         server (ServerSocketChannel/open StandardProtocolFamily/UNIX)
         host (merge writer
-                    {::server server
+                    {::writer writer
+                     ::server server
                      ::base base
                      ::contexts contexts
                      ::eval-pool eval-pool
@@ -601,7 +604,7 @@
                (let [channel (.accept server)]
                  (doto (Thread. ^Runnable #(serve-session! host channel)
                                 (str "seon-host-session-"
-                                     (:seon.db/database-name writer)))
+                                     (::context/database-name writer)))
                    (.setDaemon true)
                    (.start))
                  (recur)))
@@ -615,10 +618,11 @@
 (defn stop!
   "Stop the host acceptor and release its pools and socket."
   {:malli/schema [:=> [:cat ::host] :nil]}
-  [{::keys [server eval-pool watchdog socket-path]}]
+  [{::keys [server eval-pool watchdog socket-path writer]}]
   (try (.close ^ServerSocketChannel server) (catch Throwable _))
   (.shutdownNow ^ExecutorService eval-pool)
   (.shutdownNow ^ScheduledExecutorService watchdog)
+  (when writer (context/close-session! writer))
   (when socket-path
     (try (.delete (File. ^String socket-path)) (catch Throwable _)))
   nil)

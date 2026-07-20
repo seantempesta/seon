@@ -178,6 +178,50 @@ surface, never a hand list); dispatch design for pure/db agents to the
 JVM host and js-bound agents to a Bun child; one sync contract across
 both.
 
+### U1 — host-skeleton productionization — DONE (2026-07-20)
+
+`seon.host` (+ `seon.host.context`) is production source: a JVM agent
+host serving the execution child's exact message semantics
+(startup/ready, invoke/result/error, cancel, shutdown) over
+length-prefixed transit-UDS through the one `seon.db.transport.uds`
+codec. Per-agent sci contexts fork one shared base (portable `my.*`
+pure slice from real sources — 25/42 blocks, ledgered failures — plus
+compiled `seon.ai.tokens`/`seon.schema` host fns and a `seon.db`
+binding table over ONE retained writer connection; the writer scopes
+database access to physical connections, so per-call reconnects are
+wrong). Eval runs on pooled threads under the invocation's absolute
+deadline with `Thread/interrupt` -> `:interrupt-fn` ->
+`sci.interrupt`; results are bounded ordinary wire values; every
+failure is a `:seon/error` value. sci is pinned in deps.edn's `:host`
+alias (`:local/root reference-code/sci`, HEAD `be4021d` containing JIT
+`45bcf0f`; a pushed mirror is required for a publishable coordinate).
+
+Gates:
+
+- **Conformance**: `test/seon/host_conformance_writer_test.clj`
+  replays the inventoried pod->child sequences against a fake writer —
+  18 tests / 60 assertions green inside the full `bin/test-writer`
+  gate (251 tests / 1958 assertions, 0 failures).
+- **Kill drill (design §7) PASS, twice**: `tmp/sci-probe/jvm/drill.sh`
+  on a private drill writer. 20 contexts admitted (working state +
+  one writer fact each), runaway wave, `kill -9` mid-wave:
+  20/20 EOFs -> 20 recorded child-exited error values (pod-side
+  synthesis contract); restart -> 20/20 contexts rebuilt from the
+  shared base + replayed def sources and verified; fleet context
+  rebuild **132-133 ms** after host-ready; host cold start 8.2-11.5 s
+  (JVM + clojure + base load dominates downtime); zero fact loss
+  (20/20 facts, head t unchanged across the kill).
+
+Recorded seams (deliberately unbuilt, marked in source): def
+persistence/corpus tee + real `register!` admission (U2 with
+`seon.eval`'s owners — `:seon.eval/ids` stays empty until then);
+authored function invocation; `seon.execution` promotion to `.cljc`
+(the host registers a JVM projection of the wire schemas and echoes
+the startup's artifact identity — its trust root is the JVM
+classpath); render-prompt!/render-agent-view! stay pod-served.
+Favorable divergences: timeout/cancel interrupt in-process without
+poisoning, so contexts survive and only the session ends on cancel.
+
 ### Decision gate
 
 B vs B+C ruled by the owner on: B2's production numbers, C1's scale

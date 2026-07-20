@@ -173,6 +173,18 @@ R-F context guidance drift during migration — step 5 is not optional.
 U1 host-skeleton productionization: the C1 harness grown into
 `seon.host` speaking the execution protocol against a branch cluster;
 gates = protocol conformance suite + the kill drill.
+**DONE (2026-07-20)** — `seon.host` + `seon.host.context` serve the
+child message contract over transit-UDS (per-agent sci contexts over one
+shared base, pooled eval with deadline + sci interrupt, errors as
+values); conformance suite green under `bin/test-writer` (18 tests /
+60 assertions; full writer gate 251/1958 green); §7 kill drill PASS
+twice on a private drill writer (20 contexts mid-wave, kill -9:
+20/20 in-flight child-exited error values, 20/20 fleet restore with
+~130 ms context rebuild after the ~8-10 s JVM restart, zero fact
+loss). Recorded seams: def-persistence/corpus tee + `register!`
+admission (U2), authored invocation, `seon.execution` `.cljc`
+promotion, render entrypoints stay pod-served. Evidence: the U1
+section of [[roadmap]].
 U2 wrapper registry + capability envelope op-id: the seam study's
 registry-backed load-fn as the one provisioning mechanism; gates =
 cross-context lazy provisioning + idempotent-receipt proof.

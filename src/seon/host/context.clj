@@ -35,11 +35,19 @@
 
 (schema/register! ::writer-socket-path [:string {:min 1}])
 (schema/register! ::database-name ::protocol/database-name)
+(schema/register! ::backend ::protocol/backend)
+(schema/register! ::database-path ::protocol/database-path)
+(schema/register! ::channel-state 'some?)
+(schema/register! ::call-lock 'some?)
 (schema/register!
  ::writer
- [:map {:closed true}
+ [:map
   [::writer-socket-path ::writer-socket-path]
-  [::database-name ::database-name]])
+  [::database-name ::database-name]
+  [::backend {:optional true} ::backend]
+  [::database-path {:optional true} ::database-path]
+  [::channel-state ::channel-state]
+  [::call-lock ::call-lock]])
 (schema/register! ::ctx 'some?)
 (schema/register! ::files [:int {:min 0}])
 (schema/register! ::pure-blocks [:int {:min 0}])
@@ -70,11 +78,54 @@
   [:seon.eval/ok? :boolean]])
 (schema/register! ::replay-envelopes [:vector ::replay-envelope])
 
+(defn writer-session
+  "Build one host writer session over one retained physical connection.
+
+   The writer scopes database access to physical connections and releases
+   the shared indexes when the last one closes, so the host keeps ONE
+   standing channel (the connection is genuinely process-local state) and
+   serializes its synchronous round-trips — C1 measured ~2 ms per call."
+  {:malli/schema [:=> [:cat [:map [::writer-socket-path ::writer-socket-path]
+                             [::database-name ::database-name]
+                             [::backend {:optional true} ::backend]
+                             [::database-path {:optional true}
+                              ::database-path]]]
+                  ::writer]}
+  [{::keys [writer-socket-path database-name backend database-path]}]
+  (cond-> {::writer-socket-path writer-socket-path
+           ::database-name database-name
+           ::channel-state (atom nil)
+           ::call-lock (Object.)}
+    backend (assoc ::backend backend)
+    database-path (assoc ::database-path database-path)))
+
+(defn close-session!
+  "Close the writer session's retained connection."
+  {:malli/schema [:=> [:cat ::writer] :nil]}
+  [{::keys [channel-state]}]
+  (when-let [channel @channel-state]
+    (reset! channel-state nil)
+    (try (.close ^java.nio.channels.SocketChannel channel)
+         (catch Throwable _)))
+  nil)
+
 (defn- writer-call!
-  "One request/response round-trip on a fresh writer connection."
-  [{::keys [writer-socket-path]} request]
-  (with-open [channel (uds/connect! writer-socket-path)]
-    (uds/call! {::uds/channel channel ::uds/message request})))
+  "One serialized round-trip on the retained connection; reconnect once."
+  [{::keys [writer-socket-path channel-state call-lock]} request]
+  (locking call-lock
+    (let [call (fn []
+                 (let [channel (or @channel-state
+                                   (reset! channel-state
+                                           (uds/connect! writer-socket-path)))]
+                   (uds/call! {::uds/channel channel ::uds/message request})))]
+      (try
+        (call)
+        (catch Throwable _
+          (when-let [channel @channel-state]
+            (reset! channel-state nil)
+            (try (.close ^java.nio.channels.SocketChannel channel)
+                 (catch Throwable _)))
+          (call))))))
 
 (defn- protocol-error-value
   [response]
@@ -85,15 +136,43 @@
     :seon.error/kind :agent
     :seon.error/data (select-keys response [::protocol/error-kind])}})
 
+(defn- ensure-database!
+  "Ensure the configured database on the writer; explicit config only.
+
+   The writer releases a database when its last physical connection
+   closes; ensuring re-opens it. The backend and path come ONLY from the
+   host's explicit configuration (the same facts the child's
+   database-selection carries) — never guessed from a name."
+  [{::keys [database-name backend database-path] :as writer}]
+  (writer-call!
+   writer
+   (protocol/ensure-database-request
+    (cond-> {::protocol/request-id (str (random-uuid))
+             ::protocol/database-name database-name
+             ::protocol/backend backend}
+      database-path (assoc ::protocol/database-path database-path)))))
+
 (defn resolve-head!
-  "Resolve the writer's current database value for the host's database."
+  "Resolve the writer's current database value for the host's database.
+
+   A not-found answer for a configured backend means the writer released
+   the database; one explicit ensure re-opens it before the retry."
   {:malli/schema [:=> [:cat ::writer] :map]}
-  [{::keys [database-name] :as writer}]
-  (let [response (writer-call!
-                  writer
-                  (protocol/resolve-head-request
-                   {::protocol/request-id (str (random-uuid))
-                    ::protocol/database-name database-name}))]
+  [{::keys [database-name backend] :as writer}]
+  (let [resolve-once
+        (fn []
+          (writer-call!
+           writer
+           (protocol/resolve-head-request
+            {::protocol/request-id (str (random-uuid))
+             ::protocol/database-name database-name})))
+        response (resolve-once)
+        response (if (and backend
+                          (not (::protocol/success? response))
+                          (= :seon.db.protocol.error/not-found
+                             (::protocol/error-kind response)))
+                   (do (ensure-database! writer) (resolve-once))
+                   response)]
     (if (::protocol/success? response)
       (:seon.db/db response)
       (protocol-error-value response))))
