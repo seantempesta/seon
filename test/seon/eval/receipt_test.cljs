@@ -265,13 +265,29 @@
                  (assoc record-request ::seval/tee [tee-row]))))))
           (.then
            (fn [result]
+             ;; Assert on transaction CONTENT, not global call order: the
+             ;; provoked failure legitimately records a fault datom, and when
+             ;; this namespace runs in ISOLATION the seon.db-injected error
+             ;; persist hook is still live, so a `:seon.error/*` persist may
+             ;; follow through the same stubbed transact!. Only RECEIPT
+             ;; (cas-fenced) transactions are the invariant under test.
              (let [transactions (filter #(= :transact (first %)) @calls)
-                   tx-data (get-in (first transactions)
+                   receipt? (fn [[_ request]]
+                              (some #(and (vector? %) (= :db.fn/cas (first %)))
+                                    (:seon.db/tx-data request)))
+                   receipt-transactions (filter receipt? transactions)
+                   tx-data (get-in (first receipt-transactions)
                                    [1 :seon.db/tx-data])]
                (is (= transaction-error result))
-               (is (= [:transact :pull] (mapv first @calls)))
-               (is (= 1 (count transactions))
+               (is (= [:transact :pull] (take 2 (mapv first @calls)))
+                   "one receipt transact, then the settled-status pull")
+               (is (= 1 (count receipt-transactions))
                    "a rejected program row cannot trigger a transcript write")
+               (is (every? (fn [[_ request]]
+                             (every? :seon.error/fault
+                                     (:seon.db/tx-data request)))
+                           (remove receipt? transactions))
+                   "any later transact is the fault-datom persist, never a receipt")
                (is (= :db.fn/cas (ffirst tx-data)))
                (is (= "EVLreceipt0001" (:seon.eval/id (second tx-data))))
                (is (= tee-row (nth tx-data 2))
