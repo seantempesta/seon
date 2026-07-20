@@ -1375,11 +1375,25 @@
                {::ok? (not (error-value? result))}))
       (.catch (fn [_] {::ok? false}))))
 
-;; The require direction is db -> error. Install the one late-bound write hook
-;; here after `transact!` exists; early boot faults remain in error's bounded
-;; buffer and flush through this hook on the next record.
+(defn- current-branch-head
+  "Catch-site Proximum branch head from this session's cached database value.
+
+   `seon.error/record!` stamps this head on every fault datom so
+   `cluster fork <t>` can anchor on the exact commit the process observed at
+   fault time. Returns nil before a session caches its first database value;
+   the error hook treats nil as head-unavailable."
+  []
+  (let [state @!session
+        database (get-in state [::databases (::database-name state)])]
+    (when (db-value? database)
+      (db.branch/head-from-database-value database))))
+
+;; The require direction is db -> error. Install the late-bound write and
+;; branch-head hooks here after `transact!` exists; early boot faults remain
+;; in error's bounded buffer and flush through this hook on the next record.
 (error/set-db-hooks!
- {:seon.error/transact! persist-error-entities!})
+ {:seon.error/transact! persist-error-entities!
+  :seon.error/branch-head current-branch-head})
 
 ;;; Pure schema/transaction transforms
 

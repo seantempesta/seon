@@ -72,16 +72,21 @@ AsyncLocalStorage propagation. The live behavior contradicts that for at
 least the detached-fiber rejection funnel and some instrument-wrapper
 paths reached from Shadow-nREPL MCP evals.
 
-Two adjacent recording defects observed on the same datoms (14/14):
+Two adjacent recording defects observed on the same datoms (14/14) —
+both FIXED 2026-07-20 (source-cleanup register R3):
 
-- No persisted Proximum branch head (`::store-id`/`::branch-name`/
-  `::commit-id`/`::basis-t` all absent) — `branch-head-now` never yields
-  a valid head in the live pod, so `recorded-branch-head` returns
-  `:missing-branch-head` for every fault and `cluster fork <t>` has no
-  anchor.
-- `:seon.error/frames` on every fault are ExceptionInfo-constructor noise
-  (`{:index 0, :file "new"}` + `cljs.core.js` coords), so the
-  Datalog-queryable frame design answers nothing.
+- No persisted Proximum branch head — root cause: `seon.db` installed
+  only the `:seon.error/transact!` hook and never a
+  `:seon.error/branch-head` hook, so `branch-head-now` had nothing to
+  call. The hook now derives the head from the session's cached current
+  database value (`branch/head-from-database-value`). Live-proven: fault
+  datom 6248 carries the complete head and `recorded-branch-head`
+  returns a valid `::branch/head` anchor for `cluster fork <t>`.
+- `:seon.error/frames` were ExceptionInfo-constructor noise — fixed at
+  the recording site: frames now parse the DEEPEST cause's stack, the
+  `at new Ctor (…)`/`at async …` and Bun `undefined.` shapes are
+  repaired before parsing, and the leading error-construction frames are
+  dropped so the top frame is the throw site.
 
 ## Expected owner
 

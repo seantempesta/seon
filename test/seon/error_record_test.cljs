@@ -23,7 +23,7 @@
     [seon.error.instrument :as ei]
     [seon.instrument :as si]))
 
-(declare tick)
+(declare tick install-capture-hooks! clear-error-hooks!)
 
 (deftest operation-configuration-is-isolated-across-async-fibers
   (async done
@@ -291,6 +291,51 @@
     (testing "garbage → nil, never a throw (absent ≠ nil: a stackless
               error never reaches the fn — callers some->)"
       (is (nil? (error/parse-frames "no frames here"))))))
+
+(deftest parse-frames-drops-exception-info-construction-noise
+  ;; The live Bun/V8 shape (captured 2026-07-20 on the default pod): the
+  ;; ExceptionInfo stack opens inside its own constructor, with anonymous
+  ;; cljs.core frames and the ex-info call before the real throw site.
+  (let [stack (str "Error: probe boom\n"
+                   "    at new cljs$core$ExceptionInfo (/x/cljs/core.cljs:11771:13)\n"
+                   "    at undefined.<anonymous> (/x/cljs.core.js:37368:8)\n"
+                   "    at undefined.<anonymous> (/x/cljs.core.js:37364:54)\n"
+                   "    at undefined.cljs$core$ex_info (/x/cljs.core.js:37350:54)\n"
+                   "    at undefined.<anonymous> (<eval>:2:53)\n"
+                   "    at undefined.cljsEval (<eval>:5:3)\n")
+        frames (error/parse-frames stack)]
+    (is (vector? frames))
+    (testing "the top frame is the throw site, not constructor noise"
+      (is (= 0 (:seon.error.frame/index (first frames))))
+      (is (= "<anonymous>" (:seon.error.frame/fn (first frames))))
+      (is (= "<eval>" (:seon.error.frame/file (first frames))))
+      (is (= 2 (:seon.error.frame/line (first frames)))))
+    (testing "Bun's `undefined.` receiver prefix is stripped"
+      (is (= "cljsEval" (:seon.error.frame/fn (second frames)))))
+    (testing "no frame is the `at new …` parse garbage"
+      (is (not-any? #(= "new" (:seon.error.frame/file %)) frames)))))
+
+(deftest record-frames-come-from-the-deepest-cause
+  ;; cljs.js wraps the original throw; the datom's frames must name the
+  ;; ORIGINAL capture, not the wrapper's.
+  (let [batches (atom [])]
+    (try
+      (install-capture-hooks! batches nil)
+      (let [original (js/Error. "deep boom")
+            _ (set! (.-stack original)
+                    (str "Error: deep boom\n"
+                         "    at deepThrowSite (/x/my.agent.js:10:5)\n"))
+            wrapper (ex-info "ERROR" {} original)
+            _ (set! (.-stack wrapper)
+                    (str "Error: ERROR\n"
+                         "    at new cljs$core$ExceptionInfo (/x/core.cljs:11771:13)\n"
+                         "    at wrapLayer (/x/cljs/js.cljs:99:1)\n"))
+            envelope (error/record! {:seon.error/raw wrapper
+                                     :seon.error/fault :agent})]
+        (is (= "deepThrowSite"
+               (:seon.error.frame/fn (first (:seon.error/frames envelope))))
+            "frames parse the deepest cause's stack — the real throw site"))
+      (finally (clear-error-hooks!)))))
 
 (defn- tick
   "Promise resolving after `ms` — lets a fire-and-forget persist settle."

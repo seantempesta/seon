@@ -239,29 +239,82 @@
    4kb stack string keeps the full trace."
   20)
 
-(defn parse-frames
-  "Parse a V8/Node stack string into `:seon.error.frame/*` maps.
+(defn- deepest-stack
+  "The deepest `:seon.error/stack` in a [[->map]] chain — the real capture.
 
-   `cljs.stacktrace/parse-stacktrace :nodejs` under the hood; bounded to
-   [[max-frames]], nil-valued slots ABSENT (optional = absent). Returns
-   nil (not []) when the string yields no frames — errors-as-values, a
-   parse mishap just means no frames on the datom. Absent ≠ nil: an
-   error with no stack never reaches this fn (callers `some->`)."
+   cljs.js wraps an agent throw, so the TOP stack is often the wrapper's
+   own construction; the original throw's capture lives down the
+   `:seon.error/cause` chain. Pairs with [[deepest-message]]. Bounded
+   depth 6; falls back to the shallowest stack present."
+  [err]
+  (loop [e err depth 0 best nil]
+    (let [best (or (:seon.error/stack e) best)]
+      (if (or (nil? (:seon.error/cause e)) (>= depth 6))
+        best
+        (recur (:seon.error/cause e) (inc depth) best)))))
+
+(defn- construction-prefix-count
+  "Leading frames that captured the error VALUE's construction, not the
+   throw site. A V8/Bun stack for an `ExceptionInfo` is captured inside
+   its own constructor, so the trace opens with the constructor and the
+   `cljs.core/ex-info` machinery that called it; the frame AFTER that
+   machinery is where the error was actually made. Computed from the
+   capture point (the first frame IS the constructor), never a domain
+   name list — a plain `js/Error` stack starts at its throw and drops
+   nothing."
+  [frames]
+  (let [construction? (fn [{:keys [function]}]
+                        (boolean (and (string? function)
+                                      (re-find #"ExceptionInfo|ex_info"
+                                               function))))]
+    (if-not (construction? (first frames))
+      0
+      (inc (reduce (fn [last-index [index frame]]
+                     (if (construction? frame) index last-index))
+                   0
+                   (map-indexed vector frames))))))
+
+(defn parse-frames
+  "Parse a V8/Bun stack string into `:seon.error.frame/*` maps.
+
+   `cljs.stacktrace/parse-stacktrace :nodejs` under the hood, with the
+   two Bun/V8 shapes that poison it repaired first: `at new Ctor (…)` /
+   `at async fn (…)` qualifiers are stripped so those frames keep their
+   real coords (the raw parser read the qualifier as the whole frame),
+   and Bun's `undefined.` receiver prefix is dropped from fn names.
+   Leading error-construction frames are removed
+   ([[construction-prefix-count]]) so the top frame is the throw site.
+   Bounded to [[max-frames]], nil-valued slots ABSENT (optional =
+   absent). Returns nil (not []) when the string yields no frames —
+   errors-as-values, a parse mishap just means no frames on the datom.
+   Absent ≠ nil: an error with no stack never reaches this fn (callers
+   `some->`)."
   {:malli/schema [:=> [:cat :string] [:maybe [:vector ::frame]]]}
   [stack-str]
   (when (string? stack-str)
     (try
-      (let [frames (stacktrace/parse-stacktrace
-                     {} stack-str {:ua-product :nodejs} {:output-dir "out"})
+      (let [normalized (str/replace stack-str
+                                    #"(^|\n)(\s+at\s+)(?:new|async)\s+"
+                                    "$1$2")
+            named (mapv (fn [frame]
+                          (if (string? (:function frame))
+                            (update frame :function
+                                    #(str/replace % #"^undefined\." ""))
+                            frame))
+                        (stacktrace/parse-stacktrace
+                          {} normalized {:ua-product :nodejs}
+                          {:output-dir "out"}))
             fs (into []
                      (map-indexed
                        (fn [i {:keys [file function line column]}]
                          (cond-> {:seon.error.frame/index i}
                            (string? file)     (assoc :seon.error.frame/file file)
-                           (string? function) (assoc :seon.error.frame/fn function)
+                           (and (string? function) (seq function))
+                           (assoc :seon.error.frame/fn function)
                            (int? line)        (assoc :seon.error.frame/line line)
                            (int? column)      (assoc :seon.error.frame/column column))))
-                     (take max-frames frames))]
+                     (take max-frames
+                           (drop (construction-prefix-count named) named)))]
         (not-empty fs))
       (catch :default _ nil))))
 
@@ -617,7 +670,7 @@
                      :always  (as-> m (if-let [branch-head (branch-head-now)]
                                         (merge m (branch-head-error-attrs branch-head)) m))
                      args-edn (assoc :seon.error/args-edn args-edn)
-                     :always  (as-> m (if-let [fs (some-> (:seon.error/stack m)
+                     :always  (as-> m (if-let [fs (some-> (deepest-stack m)
                                                           parse-frames)]
                                         (assoc m :seon.error/frames fs) m)))
           projection (datom-projection envelope)
