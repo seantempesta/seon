@@ -248,6 +248,17 @@ shows the same shape; `seon.log/tail` shows a loop fault end-to-end.
 
 ### Stage 4 — config single-owner collapse and reactive fold-in
 
+Current source-grounded boundaries are recorded in
+[[research/route-authority-readiness-reconciliation-2026-07-20]] (`c5900e74`)
+and [[research/config-authority-readiness-reconciliation-2026-07-20]]
+(`69ce49f9`). Route authority goes first as an atomic schema/seed, public Ring
+handler, capability/admission, four-route bootstrap remainder, and `/sse`
+crossing; its Reitit duplicate-path rollback proof is a hard pre-merge gate.
+The reactive router replacement is a second bounded cut. Configuration work
+begins with one per-operation pinned database-value + full-config ALS contract;
+existing Aero reconciliation, high-natural limits, managed identities, and
+additive home-requires are retained rather than rebuilt.
+
 From the config report: collapse duplicated defaults (7890, port files,
 cluster dir) to one declaration consumed by `config.clj`, `launch.cljc`,
 and `db/server.clj`; migrate runtime env gates (`SEON_WEB`, `SEON_SHELL`,

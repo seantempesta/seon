@@ -93,6 +93,7 @@ with zero compiler warnings.
 | Logging format unification, timbre grounding | 3 | [[logging-unification]] |
 | Config through aero, per-op ALS (probe-validated), grants seam | 4 | [[config-through-aero]] |
 | Route-authority collapse + /sse + crossing runbook | 4 | [[research/route-authority-collapse-2026-07-20]] |
+| Route/config readiness reconciliation (current owner groups, rollback and ALS gates) | 4 | [[research/route-authority-readiness-reconciliation-2026-07-20]], [[research/config-authority-readiness-reconciliation-2026-07-20]] |
 | Reactive fold-ins: client advertisement, serve poll, close! at shutdown | 4-5 | [[research/bespoke-reactive-sweep-2026-07-20]] |
 | Envelope-key + ok?-discriminator convergence (**reconciled:** closed schema-derived error predicate for provably disjoint fixed results; closed outer explicit `:seon.result/ok?` union for arbitrary/collision-capable reads and domain responses) | 5 | [[research/envelope-symbol-conformance-2026-07-20]], [[../../seon/issues/arbitrary-database-results-collide-with-error-shape]] |
 | Unresolved-symbol single semantics; render nil-vanish | 5 | same |
