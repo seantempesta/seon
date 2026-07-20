@@ -26,8 +26,10 @@ probes, context measurements, and paid Kimi K3 results live in
 ledger for the staged implementation below.
 
 Stages 1–5, root-only scheduler recovery, and atomic addressed terminal
-delivery are now source-complete and live-proven. The remaining workflow is
-not yet public or end-to-end: evidence-derived namespace completion,
+delivery are now source-complete and live-proven. Evidence-derived namespace
+completion landed at `f457232a`; its stopped-input gate passed 44 tests/183
+assertions and the rebuilt two-namespace live proof remains the acceptance
+checkpoint. The remaining workflow is not yet public or end-to-end:
 embedding-ranked context augmentation, the public wrapper, and live graduation
 remain open.
 
@@ -736,31 +738,29 @@ Exit:
 
 ## Next implementation boundary
 
-The earliest unsettled contract is evidence-derived namespace completion. A
-namespace step closes only from its causally linked immutable evals and the
-behavioral-test facts already stored on those evals. Planner first-pass evidence
-is reached through root message → run cause → turn → eval; repair evidence is
-reached through namespace assignment message → worker run cause → turn → eval.
-The completion projection must use the ordered eval identities, namespace and
-status facts, skipped entries, and native `:seon.test.runner/tests`, `/test`,
-`/pass`, `/fail`, and `/error` attributes. It must never trust worker prose,
-`n-ok`, a latest-test timestamp, or a second test/result entity.
-
-Exit for this boundary:
-
-- a green first-pass namespace closes atomically and launches no repair worker;
-- that transaction exposes newly ready dependents through the existing root
-  observer;
-- failed eval or behavioral-test evidence leaves only its namespace repairable
-  with exact eval/test handles;
-- absent or skipped required evidence remains incomplete rather than passing;
-- restart and replay write no duplicate status, message, or evidence; and
-- the implementation derives completion through existing IDs/refs without a
-  second result schema, runner, callback registry, or timestamp inference.
-
-After completion is settled, add embedding-ranked namespace augmentation
+The earliest unsettled contract is embedding-ranked namespace augmentation
 through the existing namespaces block. Search the existing function-source
 corpus only, filter usable function rows, rank each namespace by its best
 distance with deterministic tie-breaking, and reconcile exact compact/full
-presence sets. Disabled or failed search leaves deterministic selection
-unchanged. The public wrapper remains downstream of both contracts.
+presence sets. Disabled, unavailable, or failed search leaves deterministic
+selection unchanged. Exact full selections still win over compact selections;
+tests stay excluded; compact `.internal` namespaces stay excluded while an
+explicit exact full `.internal` pin remains allowed; warm reassignment replaces
+rather than unions both presence sets; and every other namespaces-block dial is
+preserved.
+
+Exit for this boundary:
+
+- a goal and problem description produce deterministic ranked namespace
+  candidates from the existing function embedding corpus;
+- the ranking groups functions by canonical namespace symbol and uses the best
+  hit per namespace with stable tie-breaking;
+- embedding-disabled, empty, or failed retrieval preserves the deterministic
+  catalog and configured selections without error;
+- the existing `:namespaces` block is the only rendered and persisted source
+  selection mechanism; and
+- focused and live context proof shows the selected compact/full code without
+  clipping, stale warm-agent accumulation, or a second context block.
+
+The public wrapper remains downstream of this contract and the rebuilt live
+A-green/B-repair completion checkpoint.
