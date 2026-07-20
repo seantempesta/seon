@@ -74,6 +74,9 @@ classpath failure is recorded in
 [[../../seon/issues/parser-corpus-babashka-gate-misses-malli-dependency]].
 That gate is subsequently closed by `58fb020d`: Babashka passes 46 tests / 368
 assertions and CLJS retains the transport assertion at 46 / 369.
+The `/agents/run` poll is closed by `6f157a3a`: request settlement now uses one
+released reactive registration with preserved timeout semantics; focused serve
+and reactive proof passed 33 tests / 152 assertions.
 
 ## Scheduled — claimed by a stage, awaiting execution order
 

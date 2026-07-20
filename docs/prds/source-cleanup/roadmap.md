@@ -362,6 +362,12 @@ that return arbitrary user data require a closed outer explicit
 infer failure from keys inside raw domain data. The migration waits for the
 active database/UDS lane and proceeds by inventoried owner groups.
 
+The `/agents/run` polling row is closed by `6f157a3a`: one request-scoped
+`seon.reactive` registration observes the unchanged completion predicate,
+settles on the committing database value, preserves timeout closure as
+`:superseded`, and releases unconditionally. Independent focused proof passed
+serve 26 tests / 103 assertions and reactive 7 / 49; the issue is archived.
+
 Collapse-hunt items (adversarial review 2026-07-20):
 
 - **CLOSED `84ab7097`**: `src/seon/embed.clj:611-679` hand-rolled the complete `seon.retry`
