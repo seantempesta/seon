@@ -18,7 +18,9 @@ B1-B7, B10, B12, B13 (see [[roadmap]] ledger); skills drift x2; my.data
 envelope swallow; writer TERM-race publish loss; release --help; stray
 locks (first path); file-block proven + example; warnings block live,
 15/15 checks verified current; fragile-index H6 render-handler resolution
-completeness (`6246181b`, 12/12 live handlers resolved, focused gate green).
+completeness (`6246181b`, 12/12 live handlers resolved, focused gate green);
+fragile-index H5 config-managed identity derivation (`904cf4ab`, focused
+11 tests / 39 assertions green, live synthetic fourth family derived).
 
 ## Scheduled — claimed by a stage, awaiting execution order
 

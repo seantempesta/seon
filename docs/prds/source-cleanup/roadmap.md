@@ -182,9 +182,11 @@ operator doors; only proven pre-database assets/readiness may remain static.
 
 ### Stage 5 — deletions and small unifications
 
-In progress (2026-07-20): subagent lane `managed_identity_h5` owns fragile
-index unit H5 only, deriving reconciled identity attributes from
-`:seon.entity/id-attr`; route/config and execution owners are protected.
+Outcome (2026-07-20): fragile-index H5 is implemented by `904cf4ab`.
+Config reconciliation derives managed identity attributes from the registered
+entity catalog and the desired population instead of a three-attribute
+literal. Focused proof passed 11 tests / 39 assertions; a live synthetic
+fourth family derived its identity while a registered absent family did not.
 
 Outcome (2026-07-20): fragile-index H6 is implemented by `6246181b`.
 `seon.schema-test` now derives every AI/HTML handler from the complete entity
