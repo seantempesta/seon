@@ -46,6 +46,25 @@ wrapper generation. `eval-batch!` also re-establishes its explicit agent scope
 at the self-host callback boundary instead of relying on host-specific ALS
 retention.
 
+## Status 2026-07-20 (clean-signals lane)
+
+The reconciliation gap is fixed in source: `seon.eval/load-authored-program!`
+activates the projection, loads the targets, then calls
+`seon.instrument/reconcile-projection!` and throws a `:core-bug` value on an
+incomplete generation (`src/seon/eval.cljs:954-962`, landed with bef42a75
+"Restore execution child program contracts"). Focused loader tests in
+`test/seon/execution_test.cljs` pass inside the green full suite
+(2026-07-20: 1293 tests, 0 failures).
+
+The related pod-side "621 specced fns without a live wrapper" census is NOT
+reproducible: live default pod 2026-07-20 18:4x, `coverage-gaps` over all
+726 `:seon.fn/spec` rows returned 0 gaps. Treat that observation as a
+transient post-restart publication state unless it recurs.
+
+Remaining before close: the live acceptance drive — a real agent observing
+its ID and calling `my.plan/step!` without an explicit `:seon.agent/id`
+through an execution child.
+
 ## Acceptance
 
 - Focused program-loading and eval-batch tests pass with complete wrapper
