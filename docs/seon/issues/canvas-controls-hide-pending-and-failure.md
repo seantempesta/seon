@@ -49,3 +49,23 @@ presentation status.
   feed with no redundant action response morph.
 - Focused tests plus narrow/wide real-browser interaction prove pending,
   success, failure, retry, and rapid duplicate submission.
+
+## Implementation evidence
+
+Commit `9778fa86` strengthens the existing control/call path in place:
+
+- `my.canvas` marks its button and form action owners without exposing a new
+  browser API;
+- the render-time Datastar transform derives stable per-action pending/error
+  signals, binds pending to `disabled` and `aria-busy`, renders bounded visible
+  working/failure text, and disables automatic transport retry so a
+  non-idempotent handler is not replayed;
+- the call boundary retains the standard structured `:seon/error` map,
+  including its raw `:seon.error/data`, in the failed HTTP response; and
+- focused canvas/transform/call tests pass: 29 tests, 99 assertions.
+
+The issue remains open until a coordinated source freeze restores a ready pod
+and the required real-browser pending, success, failure, corrected retry, and
+rapid-submit proof is recorded. The current shared runtime is drained and its
+watcher reports `rebuild-pending`; restarting during concurrent source work
+would not produce a valid checkpoint.
