@@ -56,13 +56,13 @@ R14/R15 all GO. R10 investigate-first. R16 keep the 1024 cap.
 | R6 | Load-truth probe (N-agent memory/latency/throughput) + child-containment PRD | New bounded unit after R5 |
 | R7 | Triage NEW GAP units: frozen-turn-input purity; callable-projection correctness; persisted-program-error repair door | Three new PRD chunks; frozen-turn-input first (byte-identity law upstream) |
 | R8 | 13 live `:core` faults + 621 instrumentation gaps (warnings lane observation) | Triage unit; overlaps R1/R2 causes |
-| R9 | Namespaces block ~28k tokens for a fresh agent | Context-budget investigation (compact selection exists — verify config) |
+| R9 | Namespaces block ~28k tokens for a fresh agent | MEASURED 2026-07-20 ([[research/namespaces-block-budget-2026-07-20]]): 28,145 tokens, ALL already compact — the configured 16-ns toolbelt × compact cards; `; schema` lines are 54%. Owner choice: accept, thin card schema density (~13k), or trim toolbelt. No default changed |
 | R10 | konserve pin drift (deps.edn SHA not ancestor of submodule) | Re-pin or resync submodule — genuinely simple, needs direction choice |
 | R11 | UDS reflection warnings (21, writer hot loop) | Type-hint pass — genuinely simple |
 | R12 | 2 kondo errors + tool config (lint-as, tag list as computed rule) | Genuinely simple |
-| R13 | `locks/` second creation path (reappeared post-hardening) | Trace via live detectors' residue data |
+| R13 | `locks/` second creation path (reappeared post-hardening) | CLOSED 2026-07-20: no second path. The "reappearance" was a stale pre-fix git-status snapshot (snapshot HEAD 4f38818f = 07-19 20:41, before the 10:13 hardening 3d4aee61, which itself deleted the stray dir). `rg` shows one creator (`state.clj` `with-lock`, now guarded); no live process loads pre-fix operator code; full 289-test operator suite post-fix leaves no repo-root `locks/` |
 | R14 | Watcher drift-vs-failure status | Issue filed; operator unit |
-| R15 | Garbage: 681 MB unreferenced blobs, 1160 stale tmp files, heapsnapshot | One hygiene sweep + blob GC design question |
+| R15 | Garbage: 681 MB unreferenced blobs, 1160 stale tmp files, heapsnapshot | DONE 2026-07-20: swept (blobs 681 MB→124 KB after live re-verification found 2 referenced hashes, not 0; heapsnapshot 268 MB; 1122 stale tmp probe files ≈2.2 GB). Design question below: [[#blob-gc-design-question-r15]] |
 | R16 | Raise warnings token cap above 1024 for pathological bursts? | Keep 1024 (urgent-first survives); revisit with data |
 
 ## Independent backlog (87 notes, themed)
@@ -70,6 +70,39 @@ R14/R15 all GO. R10 investigate-first. R16 keep the 1024 cap.
 See [[research/issues-triage-2026-07-20]] §INDEPENDENT: inspect-ai
 harness, restore/branch lifecycle, datahike fork internals, downstream/
 acme, diffusion. Not this program's scope; 7 STALE notes ready to close.
+
+## Blob GC design question (R15)
+
+When may an unreferenced blob be collected, given that database values
+support `as-of`, `since`, and `history` reads? A blob file is referenced
+by a `:my.blob/hash` identity datom; turn captures reach it through
+`:seon.agent.turn/prompt-blob` / `reply-blob` refs (and
+`:seon.runtime.recovery/diagnostic-blob`). Datahike never forgets a
+datom, so a hash retracted from the current value is still reachable
+from any historical database value — deleting its file silently breaks
+`as-of` reproduction (turn forensics, frozen-turn-input replays).
+
+The candidate rules, weakest to strongest:
+
+1. **Current-value reachability** — collect when no current datom holds
+   the hash. Unsafe: breaks every historical read.
+2. **History reachability** (used for today's manual sweep) — collect
+   only hashes absent from `(db/history (db/db))` of every database and
+   live branch on the cluster's store. Safe for the store as it exists,
+   but a restore/`cluster fork` of an older commit could resurrect a
+   branch whose history references a collected hash.
+3. **Commit-graph reachability** — collect only hashes unreachable from
+   any retained commit in the store's branch/commit graph (the same
+   boundary Datahike GC uses for konserve nodes). Equivalent to tying
+   blob GC to database GC: a blob may be collected exactly when every
+   commit that could reference it has itself been collected.
+
+Rule 3 is the principled answer: blob lifetime = commit lifetime, one
+retention dial for both. Today there is no automated collection at all
+(the 681 MB was residue from cluster resets — new store, orphaned blob
+dir), so the cheap first mechanism is: on `cluster reset`, delete the
+cluster's blob dir with the store it replaces. Full rule-3 GC belongs
+with a Datahike-GC/retention unit, not a bespoke scanner.
 
 ## System truth (evidence, not defects)
 
