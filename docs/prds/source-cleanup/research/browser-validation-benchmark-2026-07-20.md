@@ -141,7 +141,11 @@ the design doc should not promise misspelling detection as-is.
 
 ## 5. Verdict
 
-**Confirm-ON at the top level is SAFE.** Measured budget:
+**Confirm-ON at the top level is SAFE within the measured domain** — values
+up to the ~4k-token projections benchmarked here; beyond that the
+completeness gate and size gate in the data-browser design govern (see
+[[../data-browser|data-browser]] §validation lifecycle, folded from the
+adversarial review). Measured budget:
 
 - per rendered top value, warm: **4–28 µs** (prefilter 3–17 µs +
   memoized validation of 2–11 candidates);
