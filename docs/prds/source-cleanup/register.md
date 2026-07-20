@@ -61,7 +61,7 @@ R14/R15 all GO. R10 investigate-first. R16 keep the 1024 cap.
 | R11 | UDS reflection warnings (21, writer hot loop) | Type-hint pass — genuinely simple |
 | R12 | 2 kondo errors + tool config (lint-as, tag list as computed rule) | Genuinely simple |
 | R13 | `locks/` second creation path (reappeared post-hardening) | CLOSED 2026-07-20: no second path. The "reappearance" was a stale pre-fix git-status snapshot (snapshot HEAD 4f38818f = 07-19 20:41, before the 10:13 hardening 3d4aee61, which itself deleted the stray dir). `rg` shows one creator (`state.clj` `with-lock`, now guarded); no live process loads pre-fix operator code; full 289-test operator suite post-fix leaves no repo-root `locks/` |
-| R14 | Watcher drift-vs-failure status | Issue filed; operator unit |
+| R14 | Watcher drift-vs-failure status | DONE 2026-07-20 (3a18c4cd): `:seon.dev.target.status/rebuilding` + per-process `rebuild-pending?`; failed build still degrades; 289 operator tests green; issue archived |
 | R15 | Garbage: 681 MB unreferenced blobs, 1160 stale tmp files, heapsnapshot | DONE 2026-07-20: swept (blobs 681 MB→124 KB after live re-verification found 2 referenced hashes, not 0; heapsnapshot 268 MB; 1122 stale tmp probe files ≈2.2 GB). Design question below: [[#blob-gc-design-question-r15]] |
 | R16 | Raise warnings token cap above 1024 for pathological bursts? | Keep 1024 (urgent-first survives); revisit with data |
 

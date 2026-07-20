@@ -54,7 +54,7 @@ See `README.md` for the convention.
 | [Skip the receipt reread branch after a successful eval write](successful-eval-receipt-called-state-on-nil.md) | blocker | agent |
 | [Supply the execution artifact to the production container launch](container-launch-omits-execution-artifact.md) | blocker | agent |
 
-## Friction (66)
+## Friction (67)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -97,6 +97,7 @@ See `README.md` for the convention.
 | [Make the schema tee test assert its owned row](eval-schema-tee-test-assumes-empty-schema-corpus.md) | friction | Core |
 | [Model can ghost-echo runtime scaffolding into the transcript spine](narration-ghost-echo-not-neutralized.md) | friction | agent |
 | [Nested authored render hides child reload](nested-authored-render-hides-child-reload.md) | friction | UI |
+| [Operator trial processes leak across days](operator-trial-processes-leak-across-days.md) | friction | docs |
 | [Persisted program error prevents agent repair](persisted-program-error-prevents-agent-repair.md) | friction | agent |
 | [Plan allocation builder set database value](plan-allocation-builder-set-database-value.md) | friction | agent |
 | [Plan completion has no checkable verification evidence](plan-completion-verification-evidence.md) | friction | agent |
