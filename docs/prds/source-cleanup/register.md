@@ -38,7 +38,12 @@ locks (first path); file-block proven + example; warnings block live,
 
 ## Rulings 2026-07-20 (third round)
 
-R1/R2/R4/R8 APPROVED as one "clean signals" unit (fail-loud stays for
+R1/R2/R4/R8 APPROVED as one "clean signals" unit. STATUS: R1 CLOSED
+`6c9bfe83` (root cause: Bun drops ALS in unhandledRejection; handler now
+on the form's own Promise; live-proven :agent datom 4287, pod survives);
+R4 CLOSED `1846a3ff` (log sink was repo-relative — test runs appended
+into the live log; per-process explicit claim). R2 (program-row
+rejection rule) and R8 residue remain open for a follow-on unit. (fail-loud stays for
 genuine core faults; dev/MCP funnels become agent-scope; fixture noise
 leaves the production error channel; the 13 faults + 621 gaps triaged).
 R5 bisect NOW. R7: frozen-turn-inputs PRD carved first. R9/R11/R12/R13/
