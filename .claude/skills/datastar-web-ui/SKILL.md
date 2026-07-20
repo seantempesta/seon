@@ -7,8 +7,8 @@ description: "The active Seon pod web UI: Datastar SSE over gzip element morphs,
 
 The UI you edit is the **CLJS pod's** loopback web UI on
 `http://127.0.0.1:7890` — hiccup rendered in `.cljs`, streamed to the browser
-as Datastar SSE. There is ONE update model: **`view = f(db-as-of t)`** — every
-datahike commit re-renders a whole element and morphs it in place.
+as Datastar SSE. There is ONE update model: **`view = f(db-as-of t)`** — a
+matching Datahike commit re-renders a whole element and morphs it in place.
 
 > Hand-offs (don't duplicate): db reads/writes inside a handler →
 > **`datahike`**; `^:async`/`await`/Promise (every handler that writes is
@@ -30,17 +30,17 @@ channel:
    negotiate `Accept-Encoding`. Root `/`
    reuses the agent shim for `root`, whose external opener GETs
    `/agent/root/feed`; ordinary agents GET `/agent/{id}/feed`.
-3. `!feeds` normalizes equivalent views into one subscription. One stable
-   Datahike listener key receives transaction reports and a single coalescer
-   retains the earliest `db-before`, latest `db`, effective datoms, and changed
-   attributes. Ordinary work settles near a frame (16 ms), structural work at
-   300 ms, with a hard 500 ms bound under continuous commits.
-4. The execution-child projection reports the database attributes read by the
-   complete view. The normalized subscription retains that attribute set, so
-   unrelated committed attributes skip rendering. An affected subscription
-   derives one complete element, suppresses identical serialized output, and
-   promptly flushes one `datastar-patch-elements` event through the selected
-   response encoding.
+3. `!feeds` normalizes equivalent views into one `seon.reactive` registration.
+   The computation captures Datahike-owned dependency plans from parent and
+   execution-child reads and installs one database-scoped writer interest.
+   Unrelated committed attributes never reach the computation.
+4. A matching report advances the registration to its newest database value.
+   One evaluation may be active and only the newest pending value is retained;
+   configured settle and maximum latency bound progress under continuous
+   commits. An affected registration derives one complete element, suppresses
+   an equal serialized value, and flushes one `datastar-patch-elements` event
+   through the selected response encoding. A fresh socket receives the current
+   established value once.
 5. Datastar's client-side `idiomorph` morphs each complete pushed element into
    the live DOM. Default patch mode is `outer`, so the stable element ID is the
    unit boundary.

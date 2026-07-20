@@ -30,8 +30,9 @@ keys fail startup validation rather than being ignored.
   created agent.
 - :seon.config/root-context is a sparse override for the agent whose
   :seon.agent/id is "root". Block maps merge by :seon.agent.ctx/name.
-- :seon.config/namespaces controls which namespace sources are available and
-  whether the current namespace is shown.
+- :seon.config/namespaces controls which framework namespace sources are
+  available in full. The per-agent namespaces block alone controls which
+  namespaces and tests render at full detail.
 - :seon.config/render supplies cluster-wide rendering limits.
 - :seon.config/skills selects directories scanned into the pull-reference
   corpus. Corpus entries do not become standing context blocks.
@@ -58,10 +59,12 @@ name appends a block. Root is selected by its id, not by an entity kind.
 
 ## Namespace rendering
 
-:seon.config/always is the namespace-source storage superset. The agent's current
-namespace and its requires determine what is shown. Per-agent namespace block
-facts can further select full source. Do not add a second namespace allowlist or
-a second renderer.
+:seon.config/always is the one namespace-source storage superset. The agent's
+current namespace and its requires determine what is shown. The namespaces
+block's :seon.agent.ctx.namespaces/full-source presence-set selects additional
+full source; its other three dials control current/test detail. Namespace render
+config never falls back to attributes on the agent entity. Do not add a second
+namespace allowlist, current-namespace switch, or renderer.
 
 ## Skills stay pull-based
 
