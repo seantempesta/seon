@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 tags: [test, tooling, issue]
 severity: cleanup
 ---
@@ -29,3 +29,9 @@ declarations.
 - The two helper symbols resolve without compiler warnings.
 - The focused error-record tests pass.
 - The canonical test build emits none of these four warnings.
+
+## Resolution
+
+Commit `ab6831a8` declares the two existing forward fixture helpers alongside
+the namespace's other forward references. The focused selector compiles with
+zero warnings and passes 19 tests / 86 assertions.
