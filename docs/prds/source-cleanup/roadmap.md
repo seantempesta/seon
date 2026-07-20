@@ -6,7 +6,8 @@ tags: [prd, architecture, database, agent, web]
 
 # Source cleanup and vocabulary unification roadmap
 
-This is the index of the source-cleanup PRD collection. Each domain PRD lays
+This is the index of the source-cleanup PRD collection. The complete
+decision surface across every detection source is [[register]]. Each domain PRD lays
 out its problems, recommended solutions, acceptance, and the open owner
 questions:
 
