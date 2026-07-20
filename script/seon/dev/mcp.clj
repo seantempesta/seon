@@ -951,6 +951,157 @@
                           (ex-data throwable))))))))
 
 ;;; ---------------------------------------------------------------------------
+;;; Async value bridging — dev-REPL parity with agent auto-await
+;;; ---------------------------------------------------------------------------
+;;
+;; The agent eval surface (seon.eval/maybe-await-value) awaits a form's
+;; returned Promise so agents get DATA. The dev eval_cljs surface goes
+;; through shadow's nREPL CLJS REPL instead, where (a) a top-level
+;; `(await …)` fails the `(:async &env)` macro assert (JVM-side analysis,
+;; cljs/core.cljc:975) and (b) the node client's do-invoke replies
+;; synchronously, so a Promise prints unresolved. Bridge both here, in the
+;; transport, without forking eval semantics:
+;;
+;;   1. an await-assert compile failure re-evals the SAME code inside one
+;;      `(^:async fn [] …)` wrapper (giving the form an async env), and
+;;   2. a returned Promise gets .then/.catch handlers stashing settlement
+;;      on globalThis under a one-shot key; we poll the same pinned
+;;      session and return the RESOLVED value (or the `seon.error/->map`
+;;      envelope on rejection) as the reply.
+;;
+;; The final fetch form returns the raw value, so shadow prints it
+;; normally and `*1` holds the resolved value (not the Promise).
+
+(def async-bridge-poll-interval-ms 150)
+
+(defn- await-assert-failure?
+  "True when the eval failed ONLY because a top-level `await` has no
+   async env. shadow reports this as a REPL error on :err with status
+   done and value nil."
+  [{:keys [err]}]
+  (and (seq err)
+       (str/includes? err "await can only be used in async contexts")))
+
+(defn- promise-value?
+  "True when the eval succeeded but its printed value is an unresolved
+   js/Promise (the node runtime prints `#object[Promise …]`)."
+  [{:keys [value status]}]
+  (and value
+       (not (some #{"error"} status))
+       ;; node prints `#object [Promise [object Promise]]`; pr-str prints
+       ;; `#object[Promise …]` — accept both spacings.
+       (boolean (re-find #"^#object ?\[Promise" value))))
+
+(defn- bridge-key []
+  (str "seon-mcp-await-" (gen-sid)))
+
+(defn- async-wrap-form
+  "Wrap `code` in one ^:async fn so top-level `await` compiles, and stash
+   the settled outcome under `key` on globalThis."
+  [key code]
+  (str "(do (-> ((^:async fn [] (do " code ")))"
+       " (.then (fn [seon-mcp-v] (aset js/globalThis \"" key "\" #js [true seon-mcp-v])))"
+       " (.catch (fn [seon-mcp-e] (aset js/globalThis \"" key "\" #js [false seon-mcp-e]))))"
+       " :seon.dev.mcp/awaiting)"))
+
+(defn- stash-last-value-form
+  "Attach settlement handlers to *1 (the Promise the previous form just
+   returned on this same pinned session) stashing under `key`."
+  [key]
+  (str "(do (-> *1"
+       " (.then (fn [seon-mcp-v] (aset js/globalThis \"" key "\" #js [true seon-mcp-v])))"
+       " (.catch (fn [seon-mcp-e] (aset js/globalThis \"" key "\" #js [false seon-mcp-e]))))"
+       " :seon.dev.mcp/awaiting)"))
+
+(defn- poll-form [key]
+  (str "(let [seon-mcp-s (aget js/globalThis \"" key "\")]"
+       " (cond (undefined? seon-mcp-s) :seon.dev.mcp/pending"
+       " (aget seon-mcp-s 0) :seon.dev.mcp/resolved"
+       " :else :seon.dev.mcp/rejected))"))
+
+(defn- fetch-form
+  "One-shot fetch of the stashed outcome. The resolved branch returns the
+   raw value so shadow prints it and *1 binds it; the rejected branch
+   returns the one :seon/error envelope (seon.error/->map)."
+  [key resolved?]
+  (str "(let [seon-mcp-s (aget js/globalThis \"" key "\")]"
+       " (js-delete js/globalThis \"" key "\")"
+       (if resolved?
+         " (aget seon-mcp-s 1))"
+         " (seon.error/->map (aget seon-mcp-s 1)))")))
+
+(defn- await-bridge!
+  "Poll `key` on the same session until the stashed Promise settles or
+   `deadline` passes. Returns an eval-result map for render-eval-result."
+  [eval! key deadline]
+  (loop []
+    (let [{:keys [value] :as poll} (eval! (poll-form key))]
+      (cond
+        (some #{"error"} (:status poll))
+        poll
+
+        (and value (str/includes? value ":seon.dev.mcp/pending"))
+        (if (< (current-time-ms) deadline)
+          (do (sleep-ms! async-bridge-poll-interval-ms) (recur))
+          {:err (str "async value still pending at the eval timeout — the "
+                     "Promise keeps running. Inspect it later with "
+                     "(aget js/globalThis \"" key "\") on this session.")
+           :status ["error"]})
+
+        (and value (str/includes? value ":seon.dev.mcp/resolved"))
+        (eval! (fetch-form key true))
+
+        (and value (str/includes? value ":seon.dev.mcp/rejected"))
+        (let [fetched (eval! (fetch-form key false))]
+          (assoc fetched
+                 :status (conj (vec (:status fetched)) "error")
+                 :seon.dev.mcp/failure :evaluation))
+
+        :else poll))))
+
+(defn- resolve-async-value
+  "Give eval_cljs the agent surface's async ergonomics: a top-level
+   `(await …)` works and a returned Promise resolves to its value.
+   `eval!` evaluates one code string on the SAME pinned session."
+  [eval! code timeout-ms result]
+  (let [deadline (+ (current-time-ms) timeout-ms)]
+    (cond
+      (await-assert-failure? result)
+      (let [key (bridge-key)
+            wrapped (eval! (async-wrap-form key code))]
+        (cond
+          (await-assert-failure? wrapped)
+          ;; Still asserts inside the wrapper: an INNER non-async fn owns
+          ;; the await (a nested fn resets the :async env). Surface the
+          ;; real rule instead of the bare assert.
+          (-> wrapped
+              (update :err str
+                      "\nseon-mcp hint: `await` needs the ENCLOSING fn to be"
+                      " ^:async, and the meta goes on the fn NAME —"
+                      " (fn ^:async f [] (await …)) — meta on the arg vector"
+                      " ((fn ^:async [] …)) is ignored by the analyzer."
+                      " A top-level (await …) with no fn around it works here.")
+              ;; shadow reports the macroexpand assert with status done and
+              ;; value nil; force error rendering so the failure is loud.
+              (update :status #(conj (vec %) "error"))
+              (assoc :seon.dev.mcp/failure :evaluation))
+
+          (some #{"error"} (:status wrapped))
+          wrapped
+
+          :else
+          (await-bridge! eval! key deadline)))
+
+      (promise-value? result)
+      (let [key (bridge-key)
+            stashed (eval! (stash-last-value-form key))]
+        (if (some #{"error"} (:status stashed))
+          result
+          (await-bridge! eval! key deadline)))
+
+      :else result)))
+
+;;; ---------------------------------------------------------------------------
 ;;; Tool implementations
 ;;; ---------------------------------------------------------------------------
 
@@ -1073,7 +1224,9 @@
                   (sleep-ms! runtime-retry-interval-ms)
                   (recur))
               (render-eval-result
-                result
+                (resolve-async-value
+                 #(nrepl-eval port nrepl-session % timeout)
+                 code timeout result)
                 (str "agent:" (when cluster (str cluster "/")) bare "#" client-id))))
 
           ;; No live runtime for this agent yet — it may be (re)connecting.
@@ -1113,7 +1266,12 @@
                                          reconnect-deadline)]
           (cond
             (not (stale-runtime? retry-result))
-            (render-eval-result retry-result retry-sid)
+            (let [retry-info (get @sessions retry-sid)
+                  eval! #(nrepl-eval (:port retry-info)
+                                     (:nrepl-session retry-info) % timeout)]
+              (render-eval-result
+               (resolve-async-value eval! code timeout retry-result)
+               retry-sid))
 
             ;; Pod might be reconnecting — back off briefly and retry.
             (< (current-time-ms) reconnect-deadline)
@@ -1121,7 +1279,11 @@
 
             :else
             (mcp-error (diagnose-no-runtime)))))
-      (render-eval-result result sid))))))
+      (render-eval-result
+       (resolve-async-value
+        #(nrepl-eval port nrepl-sid % timeout)
+        code timeout result)
+       sid))))))
 
 (defn- execute-create-session [{:keys [build cluster]}]
   (sweep-dead-sessions!)
@@ -1243,7 +1405,7 @@
 
 (def tools
   [{:name "eval_cljs"
-    :description "Evaluate ClojureScript in the current pod through Shadow nREPL. The default session is stateful and pinned to this checkout's cluster; agent_id preserves cluster-qualified pod routing."
+    :description "Evaluate ClojureScript in the current pod through Shadow nREPL. Async matches the agent eval surface: top-level (await ...) works, and a returned Promise is awaited so the resolved value (or its :seon/error envelope on rejection) is the result. The default session is stateful and pinned to this checkout's cluster; agent_id preserves cluster-qualified pod routing."
     :inputSchema {:type "object"
                   :properties {:code {:type "string"}
                                :cluster {:type "string"
