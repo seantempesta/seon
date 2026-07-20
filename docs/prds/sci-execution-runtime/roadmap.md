@@ -39,6 +39,12 @@ Concurrent: outside agents complete the source-cleanup stages; the
 optional Bun sci tier (variant B) is decided at U11 with C2's js-bound
 audit.
 
+## Follow-on (non-blocking, after the U-series)
+
+| # | Unit | State |
+|---|---|---|
+| F1 | Cloud store surfaces (S3/GCS): cloud-primary via konserve tiered store ranked first, replicate-to-cloud as second config; ordered U-cs1..U-cs5 sketch, cost model (3 RTTs/commit, live median commit gap 154 ms), and blockers in [research/cloud-store-surfaces-2026-07-20.md](research/cloud-store-surfaces-2026-07-20.md) | researched; gated on mirroring konserve-s3/gcs into `reference-code/` |
+
 ## Outcome
 
 Replace the execution child's self-host `cljs.js` engine with sci's
