@@ -107,7 +107,13 @@ client side. bb-runs-packaged-CLJS: definitively impossible
 (demonstrated). Honest blockers in the doc: sci≠cljs.js general
 semantics, the 91 MB eager-schema band untouched (lazy validators fix it
 orthogonally), ~60 MB bundle-proportional floor, retention unproven at
-production anchoring. Architecture decision pending owner.
+production anchoring. C1 SCALE GATES PASS (`044c3753`): working-set marginal 117.9 KB/context
+at N=100; 100 real turns in 164 ms wall (p50 12 ms, 4 GC/6 ms); 805
+live UDS round-trips to the real writer at ~2 ms; interrupts 10/10 with
+90/90 bystanders unaffected; OOME 20/20 survivals with all 500
+survivor/concurrent evals ok; N=100 host ≈55 MB used heap. B1 GREEN
+zero blockers, 3.4-3.9x envelope perf. B2 (production anchoring) in
+flight; then the owner's B vs B+C decision.
 
 ## Independent backlog (87 notes, themed)
 
