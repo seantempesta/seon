@@ -222,6 +222,60 @@
               (is false (str "scope test rejected — " e))
               (done)))))))
 
+(deftest dev-eval-settlement-records-agent-fault
+  ;; R1 (2026-07-20): Bun drops AsyncLocalStorage inside the process
+  ;; `unhandledRejection` listener, so a dev form whose value is a rejecting
+  ;; Promise (`((fn ^:async …))` — the live pod-killer probe shape) lost the
+  ;; dev-eval scope there and classified :core. The bracket now settles its
+  ;; own returned Promise: the rejection records :agent IN-FIBER and never
+  ;; reaches the process net.
+  (async done
+    (let [console-warn (.-warn js/console)]
+      (set! (.-warn js/console) (fn [& _] nil))
+      (with-captured-errors
+        nil
+        (fn [batches]
+          (let [e (js/Error. "dev typo settles")
+                value (error/dev-eval! (fn [] (js/Promise.reject e)))]
+            (is (fn? (.-then value))
+                "the bracket returns the form's own Promise unchanged")
+            (-> (tick 50)
+                (.then
+                  (fn []
+                    (is (= [:agent]
+                           (mapv :seon.error/fault
+                                 (captured-errors batches "dev typo settles")))
+                        "an unrecorded dev-eval rejection records ONE :agent datom")
+                    (is (true? (error/recorded? e))
+                        "settlement tags the raw error for outer-funnel dedup"))))))
+        (fn []
+          (set! (.-warn js/console) console-warn)
+          (done))))))
+
+(deftest dev-eval-settlement-defers-to-a-wrapper-recorded-fault
+  ;; ONE error → ONE datom: a rejection an instrumented wrapper arm already
+  ;; recorded (e.g. a core fn's own output breach — the wrapper's :core datom)
+  ;; must NOT gain a second :agent datom at the bracket.
+  (async done
+    (with-captured-errors
+      nil
+      (fn [batches]
+        (let [e (js/Error. "already recorded upstream")]
+          ;; A deliberately-provoked :core fixture — the EXPECTED marker, so
+          ;; bin/test-cljs's unexpected-core gate does not count it.
+          (error/expecting-core-fault!
+            (fn [] (error/record! {:seon.error/raw e :seon.error/fault :core})))
+          (error/dev-eval! (fn [] (js/Promise.reject e)))
+          (-> (tick 50)
+              (.then
+                (fn []
+                  (is (= [:core]
+                         (mapv :seon.error/fault
+                               (captured-errors batches
+                                                "already recorded upstream")))
+                      "exactly the wrapper's datom — settlement skipped it"))))))
+      done)))
+
 (deftest parse-frames-nodejs-stack
   (let [stack (str "Error: boom\n"
                    "    at myFn (/Users/x/seon/out/client/main.js:106:10)\n"

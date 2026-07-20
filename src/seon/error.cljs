@@ -477,6 +477,8 @@
   []
   (in-scope? :seon.error.scope/dev-eval?))
 
+(declare recorded? record!)
+
 (defn dev-eval!
   "CALLER-scope bracket around one dev/MCP REPL-submitted form.
 
@@ -486,13 +488,41 @@
    INPUT-contract violation a dev eval provokes on a core fn is the
    CALLER's mistake → `:agent` population (recorded, never escalates —
    dev probing must not crash the pod), while a genuine internal `:core`
-   bug exposed by the same eval still escalates per the dial. Covers
-   Promise settlement and the Promise's `unhandledRejection` callback through
-   Node async context propagation. Detached async work inherits the scope it was
-   spawned in; unrelated fibers never do."
+   bug exposed by the same eval still escalates per the dial.
+
+   SETTLEMENT (2026-07-20): when the form's value is a Promise (the
+   `((fn ^:async …))` probe shape), this bracket ALSO owns its rejection.
+   Bun does not carry AsyncLocalStorage into the process
+   `unhandledRejection` listener, so a rejection that only surfaced there
+   lost this scope and classified `:core` — the same typo's fault was
+   path-dependent (live datoms 3689/3700/3767/3778/3857 vs 3711–3755).
+   Attaching the `.catch` here records the residue as `:agent` in-fiber
+   (scope intact) and keeps the rejection out of the process net
+   entirely. An error a wrapper arm already recorded ([[recorded?]]) is
+   never re-recorded — a core fn's own output/guard breach stays the
+   wrapper's `:core` datom. Returns the thunk's value unchanged.
+
+   Residue (documented, not covered): a DETACHED fiber the form spawned
+   without returning its Promise still rejects into the process net with
+   the scope lost — coarse `:core`, no crash (the net also has no
+   configuration scope, so the dial reads its `:gate` default)."
   {:malli/schema [:=> [:cat fn?] :any]}
   [thunk]
-  (run-in-scope :seon.error.scope/dev-eval? thunk))
+  (let [value (run-in-scope :seon.error.scope/dev-eval? thunk)]
+    (when (and (some? value) (fn? (.-then value)))
+      (.catch value
+              (fn [e]
+                (when-not (recorded? e)
+                  (js/console.warn
+                    (str "seon.error/dev-eval!: the eval's Promise rejected — "
+                         (->message e)
+                         " — recorded as an :agent fault (a dev REPL mistake"
+                         " never crashes the pod). Fix the form and re-run;"
+                         " remember a `^:async` call returns a Promise that"
+                         " only the agent eval path auto-awaits."))
+                  (record! {::raw e ::fault :agent}))
+                nil)))
+    value))
 
 (defn- escalate!
   "Apply the `:seon.config/on-core-error` dial to a `:core` fault.
