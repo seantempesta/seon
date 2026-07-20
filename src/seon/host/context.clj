@@ -2,26 +2,39 @@
   "Own the JVM agent host's shared sci base and per-agent contexts.
 
    One base context is built once per host process: the portable pure slice
-   of the `my.*` toolkit loaded from its real sources, the compiled host
-   `.cljc` functions (`seon.ai.tokens`, `seon.schema` validation), and a
-   `seon.db` binding table whose reads and writes are synchronous UDS
+   of the `my.*` toolkit loaded from its real sources, plus every capability
+   namespace provisioned through the ONE wrapper registry
+   ([[register-wrappers!]]). The registry backs the base's sci `:load-fn`:
+   registering a namespace makes it lazily require-able in EVERY live
+   context (the load-fn closure is shared by all forks — probed in the seam
+   study), first require injects the cached wrapper vars, and re-registering
+   an implementation upgrades the shared vars in place so existing
+   contexts' next calls use it. The `seon.db` wrappers are synchronous UDS
    round-trips to the cluster writer through the one existing
    `seon.db.transport.uds` client. Every agent context is a `sci/fork` of
    that base (persistent-structure sharing; forked defs stay private).
+
+   Effectful capability calls carry `:seon.capability/op-id`. For
+   `seon.db/transact!` the op-id IS the database protocol's durable
+   idempotency receipt: it crosses the boundary as
+   `:seon.db.protocol/request-id`, the writer stamps it on the committed
+   transaction entity, and a repeated call with the same op-id returns the
+   recorded outcome (`:seon.capability/replayed? true`) instead of
+   re-executing — no second receipt entity exists.
 
    The durable agent is database facts. A context is a cache of those
    facts: park drops it, restore forks the base and replays the agent's def
    sources through [[replay-defs!]].
 
-   TODO SEAM (recorded, deliberately unbuilt in U1 — owner:
-   sci-execution-runtime U2 with `seon.eval`'s corpus machinery):
+   TODO SEAM (recorded, deliberately unbuilt — owner:
+   sci-execution-runtime U4 with `seon.eval`'s corpus machinery):
    - def persistence: successful defs evaluated here must tee into the one
      `:seon.fn`/`:seon.ns` program corpus exactly as
      `seon.eval/eval-batch!` records them today. Until that tee exists the
      caller supplies replay sources from the corpus it already holds.
    - `seon.schema/register!` inside a context records the request and
      returns nil; real admission (validator compilation + Datahike bridge)
-     is the same U2 unit."
+     is the same U4 unit."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [sci.core :as sci]
@@ -49,6 +62,26 @@
   [::channel-state ::channel-state]
   [::call-lock ::call-lock]])
 (schema/register! ::ctx 'some?)
+(schema/register! ::registry 'some?)
+(schema/register! ::lib :symbol)
+(schema/register! ::wrapper-fn 'fn?)
+(schema/register! ::arglists [:sequential [:vector :symbol]])
+(schema/register! ::doc [:string {:min 1}])
+(schema/register!
+ ::wrapper
+ [:map {:closed true}
+  [::wrapper-fn ::wrapper-fn]
+  [::arglists {:optional true} ::arglists]
+  [::doc {:optional true} ::doc]])
+(schema/register! ::wrappers [:map-of :symbol ::wrapper])
+(schema/register!
+ ::register-request
+ [:map {:closed true}
+  [::registry ::registry]
+  [::lib ::lib]
+  [::wrappers ::wrappers]])
+(schema/register! :seon.capability/op-id [:string {:min 1}])
+(schema/register! :seon.capability/replayed? :boolean)
 (schema/register! ::files [:int {:min 0}])
 (schema/register! ::pure-blocks [:int {:min 0}])
 (schema/register! ::loaded [:int {:min 0}])
@@ -70,7 +103,8 @@
  ::base
  [:map {:closed true}
   [::ctx ::ctx]
-  [::report ::report]])
+  [::report ::report]
+  [::registry ::registry]])
 (schema/register! ::def-sources [:vector :string])
 (schema/register!
  ::replay-envelope
@@ -211,24 +245,195 @@
           (::protocol/result response)
           (protocol-error-value response))))))
 
+(defn- receipt-basis
+  "Basis transaction of the committed receipt for `op-id`, or nil.
+
+   The receipt is the writer's own durable idempotency fact: the
+   `:seon.db.protocol/request-id` datom stamped on every committed
+   transaction entity. Its presence answers \"did it happen?\" by query;
+   its basis transaction is the completed-at fact — nothing extra is
+   stored."
+  [writer head op-id]
+  (let [response (writer-call!
+                  writer
+                  (protocol/query-request
+                   {::protocol/request-id (str (random-uuid))
+                    :seon.db/db head
+                    ::protocol/query-form
+                    '[:find ?transaction .
+                      :in $ ?op-id
+                      :where [?transaction :seon.db.protocol/request-id
+                              ?op-id]]
+                    ::protocol/arguments [op-id]}))]
+    (if (::protocol/success? response)
+      {::receipt-transaction (:datahike.query/result response)}
+      (protocol-error-value response))))
+
+(defn- replayed-outcome
+  "Recorded outcome for an op-id whose receipt already committed."
+  [head op-id receipt-transaction]
+  {:seon.db/ok? true
+   :seon.capability/op-id op-id
+   :seon.capability/replayed? true
+   :db-after (cond-> (select-keys head [:db-name :t :datahike/commit-id])
+               (< receipt-transaction (:t head))
+               (assoc :as-of receipt-transaction))})
+
 (defn- db-transact!
-  "Context `seon.db/transact!`: one blocking write at the current head."
-  [writer transaction-data]
-  (let [head (resolve-head! writer)]
+  "Context `seon.db/transact!`: one exactly-once write at the current head.
+
+   Accepts the pod's shapes — raw transaction data, or a map carrying
+   `:seon.db/tx-data` plus an optional `:seon.capability/op-id`. The
+   wrapper generates the op-id when absent and sends it as the protocol's
+   `::protocol/request-id`, so the writer's durable idempotency receipt
+   makes the retained-connection resend in [[writer-call!]] safe: a
+   connection killed between commit and acknowledgement recovers the
+   recorded outcome instead of re-executing. A caller-supplied op-id is
+   first checked against the receipt so an agent-level retry after any
+   crash also returns the recorded outcome (`:seon.capability/replayed?
+   true`) exactly once."
+  [writer request]
+  (let [{tx-data :seon.db/tx-data op-id :seon.capability/op-id}
+        (if (and (map? request) (contains? request :seon.db/tx-data))
+          request
+          {:seon.db/tx-data (vec request)})
+        supplied-op-id? (some? op-id)
+        op-id (or op-id (str (random-uuid)))
+        head (resolve-head! writer)]
     (if (:seon/error head)
       head
-      (let [response (writer-call!
-                      writer
-                      (protocol/transaction-request
-                       {::protocol/request-id (str (random-uuid))
-                        :seon.db/db head
-                        ::protocol/transaction-data (vec transaction-data)}))]
-        (if (::protocol/success? response)
-          {:seon.db/ok? true
-           :db-after (select-keys (:db-after response)
-                                  [:db-name :t :datahike/commit-id])
-           :tempids (:tempids response)}
-          (protocol-error-value response))))))
+      (let [receipt (when supplied-op-id?
+                      (receipt-basis writer head op-id))]
+        (cond
+          (:seon/error receipt)
+          receipt
+
+          (some? (::receipt-transaction receipt))
+          (replayed-outcome head op-id (::receipt-transaction receipt))
+
+          :else
+          (let [response (writer-call!
+                          writer
+                          (protocol/transaction-request
+                           {::protocol/request-id op-id
+                            :seon.db/db head
+                            ::protocol/transaction-data (vec tx-data)}))]
+            (if (::protocol/success? response)
+              (cond-> {:seon.db/ok? true
+                       :seon.capability/op-id op-id
+                       :db-after (select-keys (:db-after response)
+                                              [:db-name :t
+                                               :datahike/commit-id])
+                       :tempids (:tempids response)}
+                (::protocol/recovered? response)
+                (assoc :seon.capability/replayed? true))
+              (protocol-error-value response))))))))
+
+;;; Wrapper registry — the ONE capability-provisioning mechanism.
+
+(defn registry
+  "Create one empty wrapper registry for one host base.
+
+   Process-local derived state: a restart rebuilds it by re-registration
+   from the host's configuration, never from persistence."
+  {:malli/schema [:=> [:cat] ::registry]}
+  []
+  (atom {}))
+
+(defn register-wrappers!
+  "Register or upgrade one capability namespace's wrapper vars.
+
+   Registering a namespace makes it lazily require-able in EVERY live
+   context: the registry backs the shared `:load-fn` closure, so first
+   require injects the cached wrapper vars with `:arglists`/`:doc` live
+   on real sci vars. Re-registering a function alters the shared var's
+   root in place, so every context that already required the namespace
+   uses the new implementation on its next call (the var-epoch upgrade
+   property; plain var alteration on the JVM interpreter)."
+  {:malli/schema [:=> [:cat ::register-request] :nil]}
+  [{::keys [registry lib wrappers]}]
+  (swap! registry
+         (fn [entries]
+           (let [entry (get entries lib)
+                 sci-ns (or (::sci-ns entry) (sci/create-ns lib))
+                 vars
+                 (reduce-kv
+                  (fn [acc fn-sym {::keys [wrapper-fn arglists doc]}]
+                    (if-let [live (get acc fn-sym)]
+                      (do (sci/alter-var-root live (constantly wrapper-fn))
+                          acc)
+                      (assoc acc fn-sym
+                             (sci/new-var
+                              fn-sym wrapper-fn
+                              (cond-> {:ns sci-ns :name fn-sym}
+                                arglists (assoc :arglists arglists)
+                                doc (assoc :doc doc))))))
+                  (or (::vars entry) {})
+                  wrappers)]
+             (assoc entries lib {::sci-ns sci-ns ::vars vars}))))
+  nil)
+
+(defn- registry-load-fn
+  "Shared sci `:load-fn` over the registry; injects wrappers on require.
+
+   Called by sci only on the FIRST require of an unknown lib. The body is
+   a map lookup plus an env swap — it must stay that cheap because the
+   JVM require path holds one process-global load lock. Returning `{}`
+   (no source) leaves the `:as`/`:refer` wiring to sci itself."
+  [registry]
+  (fn [{:keys [libname ctx]}]
+    (when-let [vars (get-in @registry [libname ::vars])]
+      (swap! (:env ctx) assoc-in [:namespaces libname] vars)
+      {})))
+
+(defn- register-host-capabilities!
+  "Seed the registry with the host's capability families over `writer`.
+
+   This is the one provisioning path: `seon.db` reads/writes close over
+   the pure-data writer boundary, `seon.schema` and `seon.ai.tokens` wrap
+   the compiled host functions. Restart re-registers from configuration;
+   nothing here persists."
+  [registry writer]
+  (register-wrappers!
+   {::registry registry
+    ::lib 'seon.db
+    ::wrappers
+    {'query {::wrapper-fn (partial db-query writer)
+             ::arglists '([query-form & arguments])
+             ::doc "Run one Datalog read at the writer's current head."}
+     'pull {::wrapper-fn (partial db-pull writer)
+            ::arglists '([selector entity-id])
+            ::doc "Pull one entity's selection at the current head."}
+     'transact! {::wrapper-fn (partial db-transact! writer)
+                 ::arglists '([request])
+                 ::doc "Commit transaction data exactly once; an op-id retry replays the receipt."}
+     'head {::wrapper-fn (partial resolve-head! writer)
+            ::arglists '([])
+            ::doc "Resolve the writer's current database value."}}})
+  (register-wrappers!
+   {::registry registry
+    ::lib 'seon.schema
+    ::wrappers
+    {'validate {::wrapper-fn (fn [schema-key value]
+                               (schema/valid-candidate-value? schema-key
+                                                              value))
+                ::arglists '([schema-key value])
+                ::doc "True when the value satisfies the registered schema."}
+     ;; TODO SEAM (U4): real admission through the one
+     ;; `seon.schema/register!` bridge; recording only for now.
+     'register! {::wrapper-fn (fn [_key _schema] nil)
+                 ::arglists '([schema-key schema])
+                 ::doc "Record a schema registration request (admission is the U4 seam)."}}})
+  (register-wrappers!
+   {::registry registry
+    ::lib 'seon.ai.tokens
+    ::wrappers
+    {'estimate {::wrapper-fn tokens/estimate
+                ::arglists '([value])
+                ::doc "Estimated token size of one value."}
+     'estimate-chars {::wrapper-fn tokens/estimate-chars
+                      ::arglists '([character-count])
+                      ::doc "Estimated token size of a character count."}}}))
 
 ;;; Portable `my.*` slice, loaded from the real sources.
 
@@ -316,31 +521,24 @@
 (defn build-base!
   "Build the one shared base context for a host serving one cluster.
 
-   Host bindings close over the cluster writer coordinates; the portable
-   `my.*` pure slice loads from its real sources. The returned report is
-   the honest real-vs-failed load ledger."
+   Every capability namespace provisions through the one wrapper
+   registry: [[register-host-capabilities!]] seeds it from the writer
+   coordinates, and the registry-backed `:load-fn` serves first requires
+   lazily in the base and every fork. The portable `my.*` pure slice
+   loads from its real sources (its requires exercise that lazy path).
+   The returned report is the honest real-vs-failed load ledger."
   {:malli/schema [:=> [:cat ::writer] ::base]}
   [writer]
-  (let [ctx (sci/init
-             {:namespaces
-              {'seon.db {'query (partial db-query writer)
-                         'pull (partial db-pull writer)
-                         'transact! (partial db-transact! writer)
-                         'head (partial resolve-head! writer)}
-               'seon.schema
-               {'validate (fn [schema-key value]
-                            (schema/valid-candidate-value? schema-key value))
-                ;; TODO SEAM (U2): real admission through the one
-                ;; `seon.schema/register!` bridge; recording only for now.
-                'register! (fn [_key _schema] nil)}
-               'seon.ai.tokens {'estimate tokens/estimate
-                                'estimate-chars tokens/estimate-chars}}
+  (let [wrapper-registry (registry)
+        _ (register-host-capabilities! wrapper-registry writer)
+        ctx (sci/init
+             {:load-fn (registry-load-fn wrapper-registry)
               :interrupt-fn
               (fn []
                 (when (.isInterrupted (Thread/currentThread))
                   (interrupt/interrupt! "eval deadline exceeded")))})
         report (load-portable-slice! ctx)]
-    {::ctx ctx ::report report}))
+    {::ctx ctx ::report report ::registry wrapper-registry}))
 
 (defn fork-context
   "Fork one private agent context from the shared base."
