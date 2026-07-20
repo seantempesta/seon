@@ -89,11 +89,50 @@ SPLINT_EXIT=0
 # Run clj-kondo
 if [[ "$SPLINT_ONLY" != "true" ]] && [[ "$METRICS_ONLY" != "true" ]]; then
     echo -e "${YELLOW}[clj-kondo]${NC} Checking for bugs and unused code..."
-    if clj-kondo --cache false --lint "${PATHS[@]}" 2>&1; then
+
+    # Computed rule, no name list: a .cljc shadowed by a sibling .cljs is
+    # never CLJS source (the compiler prefers the .cljs), so its CLJS pass
+    # would lint dead branches. The main pass still ANALYZES such files
+    # (consumers need their vars) but hides their findings; a second
+    # CLJ-only pass reports their real findings.
+    SHADOWED_CLJC=()
+    EXCLUDE_REGEXES=""
+    while IFS= read -r f; do
+        SHADOWED_CLJC+=("$f")
+        escaped=$(printf '%s' "$f" | sed 's/\./\\\\./g')
+        EXCLUDE_REGEXES+="\"${escaped}\" "
+    done < <(for path in "${PATHS[@]}"; do
+                 if [[ -d "$path" ]]; then
+                     find "$path" -type f -name '*.cljc'
+                 elif [[ "$path" == *.cljc ]]; then
+                     echo "$path"
+                 fi
+             done | while IFS= read -r f; do
+                 [[ -e "${f%.cljc}.cljs" ]] && echo "$f"
+             done)
+
+    MAIN_CONFIG="{}"
+    if [[ ${#SHADOWED_CLJC[@]} -gt 0 ]]; then
+        MAIN_CONFIG="{:output {:exclude-files [${EXCLUDE_REGEXES}]}}"
+    fi
+
+    if clj-kondo --cache false --config "$MAIN_CONFIG" --lint "${PATHS[@]}" 2>&1; then
         echo -e "${GREEN}clj-kondo: OK${NC}"
     else
         KONDO_EXIT=$?
         echo -e "${RED}clj-kondo: Issues found${NC}"
+    fi
+
+    if [[ ${#SHADOWED_CLJC[@]} -gt 0 ]]; then
+        echo -e "${YELLOW}[clj-kondo]${NC} CLJ-only pass for .cljc shadowed by sibling .cljs..."
+        if clj-kondo --cache false --config '{:cljc {:features [:clj]}}' \
+                     --lint "${SHADOWED_CLJC[@]}" 2>&1; then
+            echo -e "${GREEN}clj-kondo (shadowed .cljc): OK${NC}"
+        else
+            SHADOWED_EXIT=$?
+            [[ $KONDO_EXIT -eq 0 ]] && KONDO_EXIT=$SHADOWED_EXIT
+            echo -e "${RED}clj-kondo (shadowed .cljc): Issues found${NC}"
+        fi
     fi
     echo ""
 fi

@@ -13,7 +13,8 @@
             DataInputStream DataOutputStream InputStream OutputStream]
            [java.net StandardProtocolFamily UnixDomainSocketAddress]
            [java.nio ByteBuffer]
-           [java.nio.channels Channels ServerSocketChannel SocketChannel]
+           [java.nio.channels Channels ServerSocketChannel SocketChannel
+            #?@(:bb [] :clj [Selector SelectionKey])]
            [java.util ArrayDeque]
            [java.util.concurrent ArrayBlockingQueue
             LinkedBlockingQueue ThreadFactory
@@ -23,11 +24,72 @@
 (set! *warn-on-reflection* true)
 
 ;; Babashka's SCI allowlist omits Selector and SelectionKey. Their public
-;; operation bits and reflective construction keep this one transport owner
-;; loadable by the operator as well as the JVM server.
+;; operation bits and the branch-hinted interop wrappers below keep this one
+;; transport owner loadable by the operator while the JVM server runs the
+;; selector hot loop without reflection.
 (def ^:private op-read 1)
 (def ^:private op-write 4)
 (def ^:private op-accept 16)
+
+(defn- selector-wakeup!
+  [selector]
+  #?(:bb (.wakeup selector)
+     :clj (.wakeup ^Selector selector)))
+
+(defn- selector-selected-keys
+  [selector]
+  #?(:bb (.selectedKeys selector)
+     :clj (.selectedKeys ^Selector selector)))
+
+(defn- selector-open?
+  [selector]
+  #?(:bb (.isOpen selector)
+     :clj (.isOpen ^Selector selector)))
+
+(defn- selector-close!
+  [selector]
+  #?(:bb (.close selector)
+     :clj (.close ^Selector selector)))
+
+(defn- key-valid?
+  [selection-key]
+  #?(:bb (.isValid selection-key)
+     :clj (.isValid ^SelectionKey selection-key)))
+
+(defn- key-acceptable?
+  [selection-key]
+  #?(:bb (.isAcceptable selection-key)
+     :clj (.isAcceptable ^SelectionKey selection-key)))
+
+(defn- key-readable?
+  [selection-key]
+  #?(:bb (.isReadable selection-key)
+     :clj (.isReadable ^SelectionKey selection-key)))
+
+(defn- key-writable?
+  [selection-key]
+  #?(:bb (.isWritable selection-key)
+     :clj (.isWritable ^SelectionKey selection-key)))
+
+(defn- key-attachment
+  [selection-key]
+  #?(:bb (.attachment selection-key)
+     :clj (.attachment ^SelectionKey selection-key)))
+
+(defn- key-cancel!
+  [selection-key]
+  #?(:bb (.cancel selection-key)
+     :clj (.cancel ^SelectionKey selection-key)))
+
+(defn- key-interest-ops
+  [selection-key]
+  #?(:bb (.interestOps selection-key)
+     :clj (.interestOps ^SelectionKey selection-key)))
+
+(defn- key-interest-ops!
+  [selection-key ops]
+  #?(:bb (.interestOps selection-key ops)
+     :clj (.interestOps ^SelectionKey selection-key (int ops))))
 
 (schema/register! ::socket-path [:string {:min 1}])
 (schema/register! ::message :map)
@@ -263,16 +325,16 @@
 (defn- enqueue-selector!
   [selector ^LinkedBlockingQueue commands command]
   (.offer commands command)
-  (.wakeup selector)
+  (selector-wakeup! selector)
   nil)
 
 (defn- key-interests!
   [session add remove]
   (when-let [key @(::key session)]
-    (when (.isValid key)
-      (.interestOps key
-                    (bit-and (bit-or (.interestOps key) add)
-                             (bit-not remove))))))
+    (when (key-valid? key)
+      (key-interest-ops! key
+                         (bit-and (bit-or (key-interest-ops key) add)
+                                  (bit-not remove))))))
 
 (declare resume-paused-reads!)
 
@@ -436,7 +498,7 @@
   [connections session]
   (swap! connections dissoc (::channel session))
   (try
-    (.wakeup (::selector session))
+    (selector-wakeup! (::selector session))
     (catch Throwable _))
   nil)
 
@@ -492,7 +554,7 @@
     (swap! (::paused-read-sessions session) disj session)
     (reset! (::paused-frame-length session) nil)
     (when-let [key @(::key session)]
-      (.cancel key))
+      (key-cancel! key))
     (try (.close ^SocketChannel (::channel session)) (catch Throwable _))
     (release-input-reservation! @(::input-reservation session))
     (reset! (::input-reservation session) nil)
@@ -1043,26 +1105,26 @@
 (defn- process-selected!
   [^ServerSocketChannel server selector commands connections workers
    close-connection! shutting-down? open-connection! handler server-capacity]
-  (let [selected (.selectedKeys selector)
-        iterator (.iterator selected)]
+  (let [^java.util.Set selected (selector-selected-keys selector)
+        ^java.util.Iterator iterator (.iterator selected)]
     (while (.hasNext iterator)
       (let [key (.next iterator)]
         (.remove iterator)
-        (when (.isValid key)
+        (when (key-valid? key)
           (try
-            (if (.isAcceptable key)
+            (if (key-acceptable? key)
               (accept-session! server selector commands connections workers
                                close-connection! shutting-down? open-connection!
                                server-capacity)
-              (let [session (.attachment key)]
-                (when (.isReadable key)
+              (let [session (key-attachment key)]
+                (when (key-readable? key)
                   (read-session! connections workers close-connection!
                                  shutting-down? handler session))
-                (when (and (.isValid key) (.isWritable key))
+                (when (and (key-valid? key) (key-writable? key))
                   (write-session! connections workers close-connection!
                                   shutting-down? session))))
             (catch Throwable _
-              (when-let [session (.attachment key)]
+              (when-let [session (key-attachment key)]
                 (close-session! connections workers close-connection!
                                 session)))))))))
 
@@ -1191,12 +1253,12 @@
          (::close-connection! request-server)))
       (.join selector-worker shutdown-timeout-ms))
     (when (.isAlive selector-worker)
-      (.close selector)
+      (selector-close! selector)
       (.interrupt selector-worker)
       (.join selector-worker shutdown-timeout-ms))
     (let [selector-stopped? (not (.isAlive selector-worker))]
-      (when (and selector-stopped? (.isOpen selector))
-        (.close selector))
+      (when (and selector-stopped? (selector-open? selector))
+        (selector-close! selector))
       (when selector-stopped?
         (.shutdown workers))
       (let [codec-stopped?
