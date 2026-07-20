@@ -16,7 +16,7 @@
     [clojure.test.check.generators :as gen]
     #?(:clj  [clojure.test.check.properties :as prop]
        :cljs [clojure.test.check.properties :as prop :include-macros true])
-    [seon.db.protocol :as protocol]
+    #?(:cljs [seon.db.protocol :as protocol])
     [seon.repl.internal :as parse]))
 
 ;; ============================================================
@@ -1247,7 +1247,8 @@
         entries (parse/parse-forms source)
         form    (:seon.repl/form (first entries))]
     (is (= 1 (count entries)))
-    (is (protocol/ordinary-wire-value? entries))
+    #?(:cljs
+       (is (protocol/ordinary-wire-value? entries)))
     (is (= 'filter (first form)))
     (is (= 'fn* (first (second form))))))
 
