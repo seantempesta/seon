@@ -256,6 +256,14 @@ proves the canvas through the public `seon.db/execute-many` boundary (9 tests /
 the Babashka gates passed 74 assertions and the CLJS consumers passed 265
 assertions with zero warnings.
 
+Outcome (2026-07-20): `5ea16b14` archives all 18 superseded namespace-UI
+documents under `docs/prds/namespace-ui/archive/`, marks their frontmatter
+archived, and repairs incoming links; `8dcf64c5` had already removed the
+storage shootout and Integrant submodule. Markdown proof passed 22 tests / 341
+assertions. The integration correction keeps maintained web/CSS authorities
+pointing at `docs/seon/architecture/ui.md` and the live CSS tokens rather than
+teaching an archived PRD as current authority.
+
 Fragile-index H2's safe consumer portion is implemented by `3ebc9e9b`:
 stored eval guidance is no longer reparsed as a serialized error envelope and
 debug reproduction reads EDN before selecting the qualified function symbol.

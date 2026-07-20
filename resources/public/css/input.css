@@ -51,9 +51,8 @@
 @source inline("focus:outline-none focus-visible:border-amber-400 border-amber-{300,400}");
 @source inline("disabled:opacity-50 placeholder:text-text-{400,500}");
 
-/* Custom theme tokens using Tailwind v4 @theme directive.
-   Phosphor Terminal theme - warm blacks, cream text, amber accents.
-   See docs/prds/namespace-ui/archive/design-system.md for details. */
+/* Maintained Phosphor Terminal theme tokens: warm blacks, cream text, and
+   amber accents. The archived namespace-UI PRD is historical, not authority. */
 @theme {
   /* Fonts - JetBrains Mono for terminal aesthetic */
   --font-mono: 'JetBrains Mono', 'SF Mono', ui-monospace, Menlo, Monaco, 'Cascadia Mono', monospace;

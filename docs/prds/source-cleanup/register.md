@@ -55,6 +55,10 @@ name the eval ID and direct a re-run (focused context 11 tests / 44
 assertions). Stage-5 marker-token mirroring is closed by `6920227b`: AI and
 HTML share canonical datom, opaque, clipped-string, and pruned token formatters
 with 52 focused tests / 185 assertions green.
+The ruled namespace-UI archive is closed by `5ea16b14`: 18 documents are
+archived with repaired links and 22 Markdown tests / 341 assertions green;
+storage-shootout and the Integrant submodule were already removed by
+`8dcf64c5`.
 
 ## Scheduled — claimed by a stage, awaiting execution order
 

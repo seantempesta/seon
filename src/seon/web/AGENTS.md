@@ -2,8 +2,8 @@
 
 **Read before editing:** `docs/seon/architecture/ui.md` (the live channel +
 routing + page tree), `observability.md` (cluster lifecycle, the
-`/agents/run` door + debug surfaces),
-`docs/prds/namespace-ui/archive/design-system.md` (Phosphor Terminal theme). Skills:
+`/agents/run` door + debug surfaces), and `resources/public/css/input.css`
+(maintained Phosphor Terminal theme tokens). Skills:
 `datastar-web-ui` (SSE/morph/signals), `browser-automation` (verification —
 note the browser 503s long-lived SSE; verify feeds with a server-side client).
 
