@@ -142,7 +142,7 @@
         #(plan/generated-root-state
           {::db/db current-database :my.plan/id root-id})))
      ::reactive/notify notify
-     ::db/db database})))
+     ::reactive/db database})))
 
 (defn ^:async ^:no-doc unobserve-root!
   "Release the generated-code observer for one plan root."

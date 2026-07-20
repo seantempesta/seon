@@ -87,6 +87,7 @@
     (let [original-observe reactive/observe!
           original-state plan/generated-root-state
           observed (atom nil)
+          state-requests (atom [])
           state {:my.plan/id "root"
                  :my.plan/status :open
                  :my.plan/progress
@@ -95,7 +96,9 @@
                  :my.plan.internal/namespace-steps []
                  :my.plan.internal/ready-steps []}]
       (set! plan/generated-root-state
-            (fn [_request] (js/Promise.resolve state)))
+            (fn [request]
+              (swap! state-requests conj request)
+              (js/Promise.resolve state)))
       (set! reactive/observe!
             (fn [request]
               (reset! observed request)
@@ -113,6 +116,10 @@
                (is (= "root" consumer-key))
                (is (= [:seon.ai.generate-code/root "root"]
                       (::reactive/key @observed)))
+               (is (= database (::reactive/db @observed)))
+               (is (not (contains? @observed ::db/db)))
+               (is (= [{::db/db database :my.plan/id "root"}]
+                      @state-requests))
                (is (= [state] @delivered))))
             (.finally
              (fn []
