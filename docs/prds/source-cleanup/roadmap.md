@@ -174,6 +174,9 @@ owns active `turn.cljs`/`ai.cljs` edits and the retained `u15` branch, so its
 replacement default generation is intentionally not a source-clean checkpoint.
 Fresh directive/narration/query-shape and G11 browser proof remain uncounted
 until U4 releases the lifecycle and tracked source is frozen again.
+The independent full writer gate also passes 259 tests / 1,997 assertions with
+zero failures and errors while U4's dirty paths are CLJS-only. This is useful
+integration evidence, not the final twice-frozen graduation run.
 
 Corrective-steering G10's record-time half is implemented by `418a3844`:
 successful `db/query` results carry a deterministic readable-EDN comment that
