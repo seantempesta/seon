@@ -615,15 +615,15 @@
          ;; body below gets its age-decayed `result-body-cap`.
          limit       eval-render-cap
          comment-only? (str/blank? (str src))
-         ;; Comment-preamble — the agent's `;`/prose thinking, re-prefixed to
-         ;; `;`. Model-authored runtime-like text stays preserved as narration;
-         ;; only committed database facts give results or events authority.
+         ;; Comment-preamble — every line of the agent's prose thinking is
+         ;; prefixed with `;`. The authored bytes remain after that structural
+         ;; boundary, even when they resemble runtime scaffolding; only
+         ;; committed database facts render outside the narration comment.
          ;; `(str narr)` coerces an off-shape stored narration (a non-string
          ;; that slipped past the write boundary) so a bad datom renders
          ;; instead of sinking the whole transcript — never throw into render.
          preamble    (when (and narr (not (str/blank? narr)))
-                       (quote-lines (str narr)
-                                    {:seon.agent.ctx/strip-markers? true}))
+                       (quote-lines (str narr)))
          ;; The form, verbatim (or repaired), capped. Omitted for a
          ;; comment-only row. `(str src)` coerces an off-shape source too.
          form-ln     (when-not comment-only?

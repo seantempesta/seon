@@ -31,6 +31,7 @@
    readable thing the agent wrote."
   (:require
     [clojure.string :as str]
+    [seon.agent.ctx :as ctx]
     [seon.ai.tokens :as tokens]
     [seon.render :as render]))
 
@@ -85,7 +86,7 @@
                     :else            ":error <no detail>")
         lines     (cond-> []
                     (and narration (not (str/blank? narration)))
-                    (conj (str ";; " (str/trim narration)))
+                    (conj (ctx/quote-lines (str/trim narration)))
                     true (conj header)
                     true (conj (tokens/clip-str (str/trim src) source-truncate))
                     tail (conj tail))]
