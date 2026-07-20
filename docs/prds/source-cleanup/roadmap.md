@@ -517,6 +517,14 @@ deprecated function remains eligible for the callable program index.
 
 ## Graduation
 
+The requirement-by-requirement proof ledger is
+[[research/program-graduation-matrix-2026-07-20]] (`e61e90ad` plus the
+cap-ruling reconciliation now branch-visible in `e27ada04`). It projects the
+authorized A-H spine, inherited open issues, successor dispositions, and exact
+freeze order without narrowing this roadmap. Its earlier shared-tree snapshot
+is superseded only for ownership: frozen-turn-inputs committed `df78bb8d`; U4
+currently retains the remaining database/execution-host edits and `u15`.
+
 All ledger rows closed with proof; every evidence report's fix plan either
 executed or explicitly moved to a successor PRD; three suites green
 twice consecutively (intermittents B8 included); one live cluster session

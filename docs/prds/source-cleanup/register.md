@@ -12,6 +12,11 @@ triage, mechanical detectors, live detectors, scale profiling). Rows
 reference their evidence doc; this register is the decision surface —
 nothing here is fixed without an owner ruling or a claiming stage.
 
+The complete remaining-proof projection is
+[[research/program-graduation-matrix-2026-07-20]]; it maps the authorized A-H
+spine, inherited notes, successor dispositions, and final twice-frozen/live
+order without replacing this decision surface.
+
 ## Closed today (proof in ledger/commits)
 
 B1-B7, B10, B12, B13 (see [[roadmap]] ledger); skills drift x2; my.data
