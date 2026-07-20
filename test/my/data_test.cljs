@@ -122,6 +122,25 @@
                            "rows → max-by = the Adobe row"))))))
       done)))
 
+(deftest rows-returns-the-error-value-when-the-query-fails
+  ;; the swallow regression: a failed query yields the `:seon.error/*` map,
+  ;; and (vec <map>) would turn it into MapEntry "rows" reported ok? true.
+  (async done
+    (finish
+      (with-query-result
+        {:seon.error/message "writer unavailable"
+         :seon.error/kind :core-bug}
+        (fn []
+          (-> (data/rows {:my.data/attr :my.subscription/name})
+              (.then (fn [env]
+                       (is (false? (:seon.result/ok? env))
+                           "a failed query is ok? false, never fake rows")
+                       (is (re-find #"writer unavailable" (:my.data/error env))
+                           "the query failure message is carried through")
+                       (is (not (contains? env :seon.items/items))
+                           "no items key — absent, not MapEntry garbage"))))))
+      done)))
+
 (deftest composition-rows-group-sum-max-by-biggest-category
   (async done
     (finish

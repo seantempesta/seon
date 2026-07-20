@@ -25,8 +25,15 @@
 (schema/register! ::total     'number?)             ; output: a per-group sum
 
 (schema/register! ::group-row [:map [::group ::group] [::total ::total]])
+(schema/register! ::error     :string)              ; output: why a fetch failed
 
 (schema/register! ::rows-request   [:map [::attr ::attr]])
+(schema/register! ::rows-response                   ; rows — an envelope OR an error
+  [:map
+   [:seon.result/ok? :seon.result/ok?]
+   [:seon.items/items {:optional true} :seon.items/items]
+   [:seon.items/count {:optional true} :seon.items/count]
+   [::error {:optional true} ::error]])
 (schema/register! ::reduce-request  ; sum-by / max-by — items + the field
   [:map [:seon.items/items :seon.items/items] [::key ::key]])
 (schema/register! ::group-request
@@ -45,16 +52,23 @@
          totals (group-sum (merge exp {:my.data/group-key :my.expense/category
                                        :my.data/key       :my.expense/amount-usd}))]
      (max-by (merge totals {:my.data/key :my.data/total})))
-   ; returns «map: :my.data/group :dining, :my.data/total 106»"
-  {:malli/schema [:=> [:cat ::rows-request] :seon.items/envelope]}
+   ; returns «map: :my.data/group :dining, :my.data/total 106»
+
+   A failed query returns an ok?-false envelope whose `::error` carries
+   the failure message — read `:seon.result/ok?` before reducing."
+  {:malli/schema [:=> [:cat ::rows-request] ::rows-response]}
   [{::keys [attr]}]
-  (let [items (vec (await
-                    (db/query
-                     '[:find [(pull ?e [*]) ...] :in $ ?a :where [?e ?a]]
-                     attr)))]
-    {:seon.result/ok?  true
-     :seon.items/items items
-     :seon.items/count (count items)}))
+  (let [result (await
+                (db/query
+                 '[:find [(pull ?e [*]) ...] :in $ ?a :where [?e ?a]]
+                 attr))]
+    (if (:seon.error/message result)
+      {:seon.result/ok? false
+       ::error (str "rows query failed: " (:seon.error/message result))}
+      (let [items (vec result)]
+        {:seon.result/ok?  true
+         :seon.items/items items
+         :seon.items/count (count items)}))))
 
 (defn ^:seon.fn/agent-facing? sum-by
   "Total a numeric `key` across the given item maps.
