@@ -2,7 +2,7 @@
 type: issue
 status: open
 tags: [web, rendering, issue]
-severity: reliability
+severity: blocker
 ---
 
 # Projected map keys are not drill paths

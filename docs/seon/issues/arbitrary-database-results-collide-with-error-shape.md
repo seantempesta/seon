@@ -2,7 +2,7 @@
 type: issue
 status: open
 tags: [database, schema, issue]
-severity: reliability
+severity: blocker
 ---
 
 # Arbitrary database results collide with the error shape

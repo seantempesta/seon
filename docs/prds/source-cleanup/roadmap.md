@@ -421,6 +421,14 @@ Follow-up `58fb020d` closes that gate without widening the parser runtime: the
 single transport-specific require/assertion is CLJS-only, while Babashka and
 CLJS continue to share the same parser corpus. `bin/test-parser` passed 46
 tests / 368 assertions and the CLJS selector passed 46 / 369.
+The current re-audit
+[[research/parse-forms-entry-boundary-2026-07-20]] (`84b35090`) confirms the
+original entry-envelope issue is fully implemented and archives it with the
+same current green counts plus frozen CLJS checkpoint `286180f7`. The adjacent
+public options map still uses bare `:strip-fences?`; that different defect is
+now isolated in [[../../seon/issues/parse-forms-option-map-uses-bare-key]] and
+will migrate atomically to `:seon.repl/strip-fences?` without a compatibility
+branch.
 
 Fragile-index H2's safe consumer portion is implemented by `3ebc9e9b`:
 stored eval guidance is no longer reparsed as a serialized error envelope and

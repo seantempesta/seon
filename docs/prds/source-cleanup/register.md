@@ -79,6 +79,10 @@ classpath failure is recorded in
 [[../../seon/issues/parser-corpus-babashka-gate-misses-malli-dependency]].
 That gate is subsequently closed by `58fb020d`: Babashka passes 46 tests / 368
 assertions and CLJS retains the transport assertion at 46 / 369.
+Audit `84b35090` confirms the original parse-entry issue is fully implemented
+and archives it with current focused reruns plus frozen checkpoint `286180f7`.
+The separate bare public options key is tracked by
+[[../../seon/issues/parse-forms-option-map-uses-bare-key]].
 The `/agents/run` poll is closed by `6f157a3a`: request settlement now uses one
 released reactive registration with preserved timeout semantics; focused serve
 and reactive proof passed 33 tests / 152 assertions.
@@ -104,7 +108,8 @@ with zero compiler warnings.
 | Unresolved-symbol single semantics; render nil-vanish and error-card schema repair | 5 | [[research/envelope-symbol-conformance-2026-07-20]], [[research/unresolved-render-symbol-boundary-2026-07-20]], [[../../seon/issues/render-entity-converters-silently-vanish-on-unresolved-symbol]] |
 | Deletions: ctx.usage wiring (Muse shape first), docstring-predicate .cljc, canvas test B9, embed retry collapse, marker-token mirror, rows->projection dedup | 5 | [[deletions-and-wiring]], roadmap stage 5, [[research/stored-rows-schema-projection-boundary-2026-07-20]] |
 | Data-browser implementation (Unit 0 closed; ordered 1A projection, 1B rendering, drill-cap/key fixes, child transport, route/auth, then UI proof) | 1.5 | [[data-browser]], [[research/activated-schema-projection-boundary-2026-07-20]], [[research/schema-aware-value-projection-boundary-2026-07-20]], [[research/projected-map-key-drill-boundary-2026-07-20]], [[research/value-drill-budget-config-boundary-2026-07-20]], [[research/value-drill-cap-default-ruling-2026-07-20]], [[research/value-route-path-codec-boundary-2026-07-20]], [[research/execution-child-value-sampling-boundary-2026-07-20]], [[research/value-route-authorization-boundary-2026-07-20]], [[research/universal-data-browser-ui-migration-boundary-2026-07-20]] |
-| Triage FOLD rows (10: [:maybe] regs inside G2, transact-response union, home-requires merge, ALS tx-meta unify, parse-forms keys, debug-feed threading, turn-debug ref projection, 2 test fixes) | named stages | [[research/issues-triage-2026-07-20]] |
+| Remaining triage FOLD rows (the parse-entry contract is closed; [:maybe] regs inside G2, transact-response union, home-requires merge, ALS tx-meta unify, debug-feed threading, turn-debug ref projection, 2 test fixes remain by owner) | named stages | [[research/issues-triage-2026-07-20]], [[research/parse-forms-entry-boundary-2026-07-20]] |
+| parse-forms public options-map bare key | 5 | [[research/parse-forms-entry-boundary-2026-07-20]], [[../../seon/issues/parse-forms-option-map-uses-bare-key]] |
 
 ## Rulings 2026-07-20 (third round)
 

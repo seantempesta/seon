@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: cleanup
 tags: [issue, agent, schema, architecture]
 ---
@@ -49,3 +49,22 @@ real convention decision, not a bounded cleanup. Needs a deliberate call.
 
 - `seon.repl.internal/parse-forms` (the segmenter)
 - Data Rules — "Maps with namespaced keywords. Every key. No exceptions." (CLAUDE.md)
+
+## Resolution (2026-07-20)
+
+Commit `150bb6036` atomically namespaced the public parse-entry envelope under
+`:seon.repl/*`, moved read failures onto the one nested `:seon/error` value,
+and migrated every maintained consumer. Commit `3a0dbd31` added the exact
+closed discriminator-driven entry union and fence-strip function schema.
+Commit `58fb020d` restored the portable Babashka gate without adding Malli or
+another parser to the portable owner.
+
+Current closure proof recorded in
+[[../../../prds/source-cleanup/research/parse-forms-entry-boundary-2026-07-20]]:
+`bin/test-parser` passes 46 tests / 368 assertions and the focused CLJS parser
+namespace passes 46 / 369 with zero warnings. Frozen CLJS checkpoint
+`286180f7`, which contains all three commits, passed 1,331 tests / 6,151
+assertions with zero failures, errors, or warnings. The adjacent bare public
+option key is tracked independently in
+[[../parse-forms-option-map-uses-bare-key]] and does not reopen this completed
+entry-envelope contract.
