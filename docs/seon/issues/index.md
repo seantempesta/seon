@@ -55,7 +55,7 @@ See `README.md` for the convention.
 | [Skip the receipt reread branch after a successful eval write](successful-eval-receipt-called-state-on-nil.md) | blocker | agent |
 | [Supply the execution artifact to the production container launch](container-launch-omits-execution-artifact.md) | blocker | agent |
 
-## Friction (72)
+## Friction (71)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -130,7 +130,6 @@ See `README.md` for the convention.
 | [Watcher status conflates artifact drift with failure](watcher-status-conflates-drift-with-failure.md) | friction | general |
 | [`my.ns/compact!` can hide the selected namespace](my-ns-compact-can-hide-namespace.md) | friction | agent |
 | [`my.ns/functions` points to a removed namespace renderer](my-ns-functions-points-to-removed-renderer.md) | friction | general |
-| [my.data/rows swallows the query error envelope](my-data-rows-swallows-query-error-envelope.md) | friction | agent |
 
 ## Cleanup (13)
 
