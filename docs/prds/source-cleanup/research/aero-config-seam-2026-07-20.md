@@ -159,8 +159,14 @@ listening port or an already-connected socket):
 - HTTP port + port file, request socket path, cluster dir, process/log
   dirs, writer REPL port file, build ids, artifact flavor — the exact
   field set of `launch.cljc` `default-process-descriptor` (:489-520).
-  Owner of defaults: operator `config.clj:387-416` (PRD problem 2); the
-  pod fallback block shrinks to test-runner-only use.
+  Owner of defaults: operator `config.clj:387-416` (PRD problem 2). The
+  pod's env-fallback descriptor block does NOT shrink to test-runner-only
+  use: it is the launch seam for every direct-launch pod — the docker
+  entrypoint (`docker/seon-entrypoint:110-125` execs the client with env
+  only, no operator) and the inspect-ai harnesses
+  (`src-inspect-ai/src/seon_inspect/tb_agent.py:159`,
+  `swebench_arm.py:219`) — as well as the test runner. See the PRD's
+  "Grants for direct-launch pods" design.
 - Host capability grants `SEON_WEB` / `SEON_SHELL` — recommended
   **launch-descriptor fields**, not singleton datoms (see table; rationale
   there).
@@ -172,10 +178,16 @@ listening port or an already-connected socket):
 **Live-adjustable — singleton datoms** (all already are, or migrate to
 be): render caps + explicit-character knobs, run limits, repair dial,
 watchdog/breaker, spawn depth, root recent-limit, repl-mode, web
-*policy*/search backend, reactive timings, model-transport caps, database
+*policy*/search backend, model-transport caps, database
 query/pull ceilings (after the ambient-snapshot fix), system-text,
 context-profiles, model-variants, agent/root context, skills dir, brand
-row.
+row. Reactive timings are NOT live-adjustable today: they are a
+process-local boot capture (`serve.cljs:1721` `datastar/configure!` →
+`reactive.cljs` `!policy` :43-45, :73-78 — the same snapshot class as the
+ticker row); they join this list only after the PRD's "Boot `configure!`
+snapshots" fix, and `execution.host/configure!` (client.cljs:2112) and
+`log/configure!` (client.cljs:2808) are boot-only launch-descriptor
+consumers under the dividing rule.
 
 The dividing rule stated once: **process identity and OS resources bind at
 launch (descriptor); behavior policy binds at acquisition (database)**.
@@ -184,8 +196,9 @@ launch (descriptor); behavior policy binds at acquisition (database)**.
 
 | Env read | Location | Manifest key (namespaced) | Aero expression | Database attribute / home | Consumer change |
 |---|---|---|---|---|---|
-| `SEON_WEB` | agent/web/internal.cljs:43 (`granted?`, read live per call) | none — **launch descriptor** `:seon.launch/web-granted?` `:boolean` | n/a (operator computes it once from env, config.clj:301, and puts it in the descriptor) | launch descriptor field, not a datom | `granted?` reads `launch/process-launch-descriptor`; delete the `platform/env-val` probe. Envelope text (internal.cljs:101, 121-122) updates to name the launcher grant. |
-| `SEON_SHELL` | agent/shell/internal.cljs:58-63 (`granted?`) | none — launch descriptor `:seon.launch/shell-granted?` `:boolean` | n/a (config.clj:300) | launch descriptor field | same as SEON_WEB; shell.cljs:208-344 docstrings updated. |
+| `SEON_WEB` | agent/web/internal.cljs:43 (`granted?`, read live per call) | none — **launch descriptor** `:seon.launch/web-granted?` `:boolean` | n/a (operator config.clj:301 AND the env-fallback descriptor both compute it through the one shared `launch/env-grant?` fn — "any non-blank value other than `\"0\"` grants") | launch descriptor field, not a datom | `granted?` reads `launch/process-launch-descriptor`; delete its `platform/env-val` probe (the env read moves into descriptor construction, never disappears — direct-launch pods still grant via env through the fallback descriptor). Envelope text (internal.cljs:101, 121-122) updates to name the launcher grant. |
+| `SEON_SHELL` | agent/shell/internal.cljs:58-63 (`granted?`) | none — launch descriptor `:seon.launch/shell-granted?` `:boolean` | n/a (config.clj:300, same shared `env-grant?`) | launch descriptor field | same as SEON_WEB; shell.cljs:208-344 docstrings updated. |
+| `SEON_WEB`/`SEON_SHELL` at direct launch | docker/seon-entrypoint:110-125; src-inspect-ai/src/seon_inspect/tb_agent.py:159; src-inspect-ai/src/seon_inspect/swebench_arm.py:219 | n/a | n/a | env consumed by the fallback descriptor via `env-grant?` | none — these launchers keep exporting env; the fallback descriptor is their grant seam. Regression gate: one shell-dependent inspect-ai smoke bench in the container (uniform 0 = default-deny defect). |
 | `SEON_RENDER_STRICT` | config.cljs:1355-1378 (`render-strict?`, zero-arity env read); exported by bin/test-cljs:97, changed_test.clj:521-522, operator child env config.clj:302-304 | `:seon.config/render` → `:seon.config.render/strict?` | `#boolean #or [#env SEON_RENDER_STRICT "false"]` — **wrappers must export `"true"`/`"false"`, not `"1"`** (aero CLJS `#boolean` is `= "true"`, core.cljc:82) | `:seon.config.render/strict?` `:boolean` on the singleton | `render-strict?` becomes 1-arity over the singleton; `seon.render` guards receive the acquired configuration (they already flow a configuration for the caps). Test wrappers keep working because each test pod boots with its own manifest apply. |
 | `SEON_BRAND_NAME` / `_TAGLINE` / `_THEME` | web/brand.cljs:82-97 (`env-row`), synced env→row at boot (`sync!` :190+) | acme.edn overlay only (owner ruling): `:seon.config/brand` `{:seon.web.brand/name … :seon.web.brand/tagline … :seon.web.brand/theme …}` | plain strings in acme.edn; optionally `#or [#env SEON_BRAND_NAME "Acme"]` during transition | existing brand row `[:seon.web.brand/id "brand"]` — add the row to `apply-config!`'s desired set (identity attr `:seon.web.brand/id` joins the managed-identity set) | delete `env-row` + `sync!`'s env input (the reconcile replaces the bespoke sync); `info` (brand.cljs:101-106) unchanged — it already merges an acquired row over defaults, so brand is live-adjustable by ordinary transaction. system.edn carries **no** brand section. |
 | `SEON_BRAND_CSS` | brand.cljs:133 (`css-text` 0-arity), datastar.cljs:556, operator packaging config.clj:369, release.clj:1013, bin/acme:96 | `:seon.config/brand` → `:seon.web.brand/css-path` | acme.edn: `"acme/branding/acme.css"` (relative resolves via `platform/artifact-path`, the skills-dir precedent config.cljs:1034-1040) | `:seon.web.brand/css-path` `:string` on the brand row | `css-text` 0-arity is deleted; callers pass the path from the acquired brand row. File *content* stays a fresh per-call read (content is not config data). Packaging keeps its own descriptor-side copy step. |

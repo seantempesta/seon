@@ -1,7 +1,7 @@
 ---
 type: research
 status: active
-tags: [research, architecture, naming]
+tags: [research, architecture]
 ---
 
 # Retiring "pod": complete site inventory and migration plan
@@ -26,6 +26,17 @@ the cluster. Unified mapping:
 | `src-inspect-ai` `pod_api`, solver/catalog prose | `client_api` / cluster prose | per-meaning mapping above |
 | `docs/seon/pod/` directory | fold into `docs/seon/architecture/` | one doc, `REPL-WORKFLOW.md` |
 | `pod-host/` (wasm era tree) | unchanged for now | separate owner decision; frozen |
+| RunPod vendor tokens — `RunPod`, `runpod`, `RUNPOD_*` (incl. `RUNPOD_API_KEY` and the process.clj:121 env-passthrough prefix `"RUNPOD_"`), `api.runpod.ai`, `runpod-root`, `RunPodEndpoint`, the `"runpod"` endpoint-mode string, and the `runpod/flash` container base | **untouched** | these name a third-party GPU vendor (the DiffusionGemma backend), not the Seon process; renaming them silently breaks credential passthrough and the vendor URL with no test coverage until the next paid GPU run |
+
+`:seon.dev.process/pod` is NOT a pure code identity anywhere in this plan:
+it has persisted forms on disk and in the database that the rename cannot
+cross. Their dispositions:
+
+| Persisted form | Where | Disposition |
+|---|---|---|
+| on-disk process records (`pod.edn`) | `tmp/seon-operator/processes/`, acme's process dir, any `branch-processes/<cluster>/processes/` dirs from `script/seon/dev/branch.clj` | **verified-empty at freeze** — quiesced with the PRE-rename operator (see Freeze protocol); process records are resolved by id name only (script/seon/dev/process.clj state-file), so no post-rename operator command can see or stop a pre-rename `pod` record |
+| restore intents (`::restore/consumer-generations` keyed by process id) | database + disk, read by `restore_state.clj:1222-1311` | **verified-absent at freeze** — at the freeze base, prove no retained restore intent exists (`retained-intent` returns nil / restore status clean); if one exists, complete or abort it BEFORE the rename. The intent and process-record schemas enum-lock ids, so old-keyword data read post-rename throws validation — verify-empty is strictly better than a read-side migration; do not add one |
+| release-manifest member keys (`:seon.release.member/pod "runtime/pod.js"`) | every package built pre-rename (`tmp/package-v*`; v10..v14 exist), baked by `release.clj:52-123` | **regenerate-and-reprove** — pre-rename packages are invalidated; step 1's gate must regenerate one package and prove readback/verify with the renamed member key; any downstream consumer of a pre-rename package repackages rather than mixing operator generations |
 
 Scope per owner: active source and build/config files, this branch's PRDs
 (`runtime-reliability`, `database-authority-mesh`), `docs/seon/`, skills, and
@@ -40,20 +51,48 @@ The rename is one orchestrator-owned atomic unit. Entry gate, in order:
    and reviewed) AND separately launched Codex tasks. Identify Codex tasks
    through the app thread list by checkout and purpose, and request a
    coherent commit or explicit path handoff via thread message — do not
-   infer ownership from `git status`.
+   infer ownership from `git status`. Additionally enumerate every entry of
+   `git worktree list` on a branch (a computed rule, never a hand-kept
+   list) and record a disposition for each: disposable, merge-before-rename,
+   or translate-after. For the pinned `seon-stable` worktree (branch
+   `repl-autosuggest/stable`, planned cherry-pick merge-back at cutover):
+   either sequence the rename AFTER the repl-autosuggest cutover
+   cherry-pick, or record the rename's completing commit range in that
+   lane's anchor doc
+   (`docs/prds/repl-autosuggest/root-cause-fixes-2026-07-13.md`) as the
+   mandatory translation point — noting `acme/src/acme/pod.cljs` is both
+   dirty there and renamed here, so its cherry-picks will conflict on both
+   path and identifiers.
 2. Receive an explicit ack (thread reply or completed commit) from every
-   lane that owns files inside the rename scope. A lane that cannot ack
-   pauses the freeze; the rename does not start around it.
-3. `git status` clean except acked handoffs; all three suites green at the
-   freeze base commit; record that commit hash in this plan.
-4. Execute the four steps below without interleaving other work; each step
+   lane that owns files inside the rename scope, with a deadline: a lane
+   that has not acked by the deadline is escalated to the owner instead of
+   pausing the freeze indefinitely; the rename does not start around an
+   unresolved lane.
+3. Quiesce both clusters under PRE-rename code: `bin/seon down` and
+   `bin/acme down`. Verify absence evidence, not just exit 0: `bin/seon
+   status` reports nothing running; `tmp/seon-operator/processes/` (and
+   acme's process dir, plus any `branch-processes/<cluster>/processes/`
+   dirs) contain no `pod.edn` or restore-admin record; ports 7890/7891
+   (and acme's 7980/7981) are unbound; no `locks/` residue remains; no
+   retained restore intent exists (per the persisted-forms table above).
+   Record this evidence with the freeze base commit hash. Rationale:
+   process records are resolved by id name only, so restart cannot cross
+   the identity rename.
+4. `git status` clean except acked handoffs (gitignored paths never count
+   against "clean"); all three suites green at the freeze base commit;
+   record that commit hash in this plan.
+5. Execute the four steps below without interleaving other work; each step
    commits path-limited and reruns its gate before the next.
-5. Release: announce the completing commit range on the same threads,
+6. Release: announce the completing commit range on the same threads,
    then other lanes rebase/continue.
 
 Abort rule: any non-rename commit landing mid-freeze from an unacked
-source stops the unit; reconcile, re-green, restart from the last
-completed step.
+source stops the unit; reconcile, re-green, then restart by re-running
+gates 3-4 — re-verifying quiesce/absence evidence and RE-RECORDING the
+freeze-base commit (never resume against a superseded base) — before
+continuing from the last completed step. Recovery from any mid-freeze
+failure restarts from `bin/seon down` executed under whatever code state
+is actually on disk at that moment.
 
 ## Execution order
 
@@ -64,28 +103,55 @@ affected files, with a coordinated freeze around the build-artifact rename.
 1. **Code identities** (`src/`, `script/`, `bin/`, `config/`, `test/`,
    `shadow-cljs.edn`, `bb.edn`, `.mcp.json`): rename identifiers, process
    ids, artifact names, log paths. Gate: full `bin/test-cljs`,
-   `bin/test-writer`, `bin/seon test operator`, then `bin/seon restart` and a
-   live `bin/seon status`/web-UI proof (the operator must supervise
-   `watcher → writer → client`).
+   `bin/test-writer`, `bin/seon test operator`, then `bin/seon up` from the
+   proven-clean quiesced state (never `restart` — restart cannot cross the
+   identity rename) and a live `bin/seon status`/web-UI proof (the operator
+   must supervise `watcher → writer → client`); one MCP `eval_cljs`
+   round-trip against the renamed cluster after restarting the MCP client
+   (already-running clients do not reload stdio server definitions);
+   regenerate one release package and prove readback/verify with the
+   renamed member key (persisted-forms table). Vendor tripwire: `rg -c
+   'RUNPOD_API_KEY|api\.runpod\.ai' src/seon/ai/diffusiongemma.cljs
+   config/system.edn script/seon/dev/process.clj` must return the
+   pre-freeze counts, proving the vendor surface is byte-identical without
+   a paid GPU run.
 2. **Downstream + eval harness** (`acme/`, `src-inspect-ai/`): rename
    `acme.pod`, `pod_api`, solver/catalog/test prose; prove with the acme
-   cluster and one smoke eval.
+   cluster started via `bin/acme up` from its quiesced state (not
+   `restart`) and one smoke eval.
 3. **Living docs** (`AGENTS.md`, `docs/seon/architecture|components|
    reference|vision|concepts`, `docs/seon/process-management.md`, skills,
    this branch's two PRD roadmaps): rewrite prose to the mapping; fold
    `docs/seon/pod/REPL-WORKFLOW.md` into the architecture tree.
-4. **Sweep**: `rg -i pod` over the scoped tree must return only
-   `pod-host/` and deliberate historical citations.
+4. **Sweep** (vendor-excluded): `rg -in pod --glob '!pod-host/**'` over the
+   scoped tree, piped through `rg -vi 'runpod'`, must return only
+   deliberate historical citations. A residual hit matching `runpod` is
+   never a rename target — it names the third-party GPU vendor per the
+   frozen mapping row.
 
 Renamed-file gotchas recorded during inventory: `logs/pod-events.log` is
-rotated (`.1` sibling); `data/seon-pod/` appears in `.gitignore` twice; the
-`seon-skills` corpus and generated `.claude/skills` adapters must be
+rotated (`.1` sibling); `data/seon-pod/` appears in `.gitignore` twice —
+both duplicate rows flip to `data/seon-client` in the same path-limited
+step-1 commit so the step-4 sweep and `.gitignore` agree; the old
+`tmp/seon-pod/` and `data/seon-pod/` run stores and
+`logs/pod-events.log(.1)` are **abandoned**, never migrated (recreated as
+`seon-client`/`client-events.log` on first `up`; step 1 may delete them);
+the `seon-skills` corpus and generated `.claude/skills` adapters must be
 resynced with `bin/seon skills sync` after step 3, never hand-edited.
 
 ## Complete in-scope site inventory (occurrences per file)
 
 Generated 2026-07-20 by `rg -in pod` over active source, this branch's
 PRDs, and `docs/seon/`. Historical PRDs and archives are out of scope.
+Corrected 2026-07-20 (adversarial review): RunPod vendor tokens are
+excluded per the frozen mapping row — vendor-only files
+(`src/seon/ai/diffusiongemma.cljs` 20→0,
+`src-inspect-ai/src/seon_inspect/worker_endpoints.py` 10→0,
+`test/seon/ai/diffusiongemma_test.cljs` 4→0, `tasks/skill_lift.py`,
+`tasks/e1_spec_fn.py`, `tasks/ladder_lift.py`) are dropped below, and
+mixed files are shrunk to their non-vendor counts (`config/system.edn`
+7→5, `script/seon/dev/process.clj` 33→32, `src/seon/ai.cljs` 2→1,
+`docs/seon/reference/llm-adapters.md` 8→6).
 
 ```
  138 test/seon/dev/process_test.clj
@@ -102,7 +168,7 @@ PRDs, and `docs/seon/`. Historical PRDs and archives are out of scope.
   38 src-inspect-ai/src/seon_inspect/swebench_arm.py
   34 script/seon/dev/restore_state.clj
   33 test/seon/dev/restore_test.clj
-  33 script/seon/dev/process.clj
+  32 script/seon/dev/process.clj
   31 docs/prds/runtime-reliability/research/seon-cli-lifecycle-audit-2026-07-13.md
   28 src-inspect-ai/tests/test_product_scenarios.py
   26 test/seon/dev/cli_test.clj
@@ -114,7 +180,6 @@ PRDs, and `docs/seon/`. Historical PRDs and archives are out of scope.
   21 src/seon/web/serve.cljs
   21 src-inspect-ai/src/seon_inspect/tb_agent.py
   21 docs/prds/database-authority-mesh/research/datahike-resource-lifetime-2026-07-15.md
-  20 src/seon/ai/diffusiongemma.cljs
   20 src-inspect-ai/src/seon_inspect/product_scenarios.py
   20 shadow-cljs.edn
   20 docs/seon/issues/archive/seon-port-non-namespaced.md
@@ -171,7 +236,6 @@ PRDs, and `docs/seon/`. Historical PRDs and archives are out of scope.
   11 docs/prds/database-authority-mesh/research/duplicate-runtime-owner-audit-2026-07-16.md
   10 src/seon/config.cljs
   10 src-inspect-ai/tests/test_scorecard.py
-  10 src-inspect-ai/src/seon_inspect/worker_endpoints.py
   10 docs/seon/process-management.md
   10 docs/seon/issues/multi-form-eval-order-is-not-durable.md
   10 docs/seon/issues/archive/tx-feed-pump-timeouts.md
@@ -194,7 +258,7 @@ PRDs, and `docs/seon/`. Historical PRDs and archives are out of scope.
    8 src-inspect-ai/tests/test_planning.py
    8 src-inspect-ai/src/seon_inspect/typeahead_corpus.py
    8 script/seon/dev/cluster.clj
-   8 docs/seon/reference/llm-adapters.md
+   6 docs/seon/reference/llm-adapters.md
    8 docs/seon/issues/pod-remains-ready-after-web-listener-loss.md
    8 docs/seon/issues/execution-children-retain-hundreds-of-megabytes.md
    8 docs/seon/issues/clean-or-force-evidence-can-cross-or-falsely-report-absence.md
@@ -222,7 +286,7 @@ PRDs, and `docs/seon/`. Historical PRDs and archives are out of scope.
    7 docs/prds/runtime-reliability/research/architecture-performance-current-2026-07-19.md
    7 docs/prds/database-authority-mesh/research/shadow-bun-runtime-internals-2026-07-16.md
    7 docs/prds/database-authority-mesh/research/final-product-runtime-graduation-audit-2026-07-18.md
-   7 config/system.edn
+   5 config/system.edn
    7 bin/acme
    6 src/seon/agent/web/internal.cljs
    6 src/seon/agent/ctx.cljs
@@ -264,7 +328,6 @@ PRDs, and `docs/seon/`. Historical PRDs and archives are out of scope.
    5 .agents/skills/browser-automation/SKILL.md
    4 test/seon/web/serve_test.cljs
    4 test/seon/log_test.cljs
-   4 test/seon/ai/diffusiongemma_test.cljs
    4 src/seon/web/router.cljs
    4 src/seon/repair/candidates.cljs
    4 src/seon/agent/shell/internal.cljs
@@ -363,7 +426,7 @@ PRDs, and `docs/seon/`. Historical PRDs and archives are out of scope.
    2 src/seon/dev/restore/schema.cljc
    2 src/seon/dev/markdown.clj
    2 src/seon/ai/AGENTS.md
-   2 src/seon/ai.cljs
+   1 src/seon/ai.cljs
    2 src/seon/agent/ctx/transcript.cljs
    2 src-inspect-ai/tests/test_cluster.py
    2 src-inspect-ai/src/seon_inspect/generators.py
@@ -475,9 +538,6 @@ PRDs, and `docs/seon/`. Historical PRDs and archives are out of scope.
    1 src-inspect-ai/src/seon_inspect/tool_rows.py
    1 src-inspect-ai/src/seon_inspect/tasks/typeahead_replay.py
    1 src-inspect-ai/src/seon_inspect/tasks/swe_bench_seon.py
-   1 src-inspect-ai/src/seon_inspect/tasks/skill_lift.py
-   1 src-inspect-ai/src/seon_inspect/tasks/ladder_lift.py
-   1 src-inspect-ai/src/seon_inspect/tasks/e1_spec_fn.py
    1 src-inspect-ai/src/seon_inspect/oracle_scorers.py
    1 src-inspect-ai/src/seon_inspect/__init__.py
    1 seon-skills/datahike/references/querying.md
@@ -597,4 +657,5 @@ PRDs, and `docs/seon/`. Historical PRDs and archives are out of scope.
    1 acme/gym/diffusion_gym.bb
    1 .agents/skills/datahike/references/querying.md
    1 .agents/skills/data-modeling/SKILL.md
+
 ```

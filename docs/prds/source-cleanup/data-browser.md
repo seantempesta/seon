@@ -17,26 +17,53 @@ tags: [prd, web, agent, architecture]
 - Validation status renders green/red; hover reveals the humanized
   explanation with zero round-trips; click dives via the existing
   `<details>` + path re-sample.
-- Validation confirm-dial ON at the top level; hover payloads share the
-  standard token cap; the new read-only value route also serves `/data`
-  entity drill-down (one transport).
-- **Confirm-ON is measured safe** (live pod, 2026-07-20,
-  [[research/browser-validation-benchmark-2026-07-20]]): warm confirm
-  4–28 µs per rendered top value, ~12–14 µs per SSE re-render (validator
-  memo hit rate 100% between registry changes), 100-value page morph
-  7.7 ms; prefilter-only 3–17 µs; explain+humanize warm ≤52 µs and
-  invalid-only. Memo policy the numbers support: unbounded
-  single-generation process-local cache keyed
-  `[projection-fingerprint schema-key]` (≤489 entries at the current
-  registry; drop the generation on projection change) — no LRU, no
-  value-level result memo. Two measured caveats for implementation:
-  `me/with-spell-checking` is a no-op on Seon's open maps (needs
-  `:closed`), so do not promise misspelling detection; and entity-shaped
-  values validly match many open request schemas (9 for an agent value),
-  so specificity ordering among valid matches is load-bearing.
+- Validation confirm-dial ON at the top level, gated by sample
+  completeness: full confirm/explain runs only when the bounded sample is
+  complete (no elision marker anywhere in the skeleton); an elided value
+  reports `:shape-only` with the hollow-dot rendering. Explain is an
+  explicit drill action running on the drilled `get-in` slice (bounded by
+  the drill contract), never on the raw top value with post-hoc trimming;
+  the new read-only value route also serves `/data` entity drill-down
+  (one transport), with `?offset` and path length validated against
+  config maxima in the parent before the child request.
+- **Confirm-ON is measured safe within its measured domain** (live pod,
+  2026-07-20, [[research/browser-validation-benchmark-2026-07-20]]): warm
+  confirm 4–28 µs per rendered top value, ~12–14 µs per SSE re-render
+  (validator memo hit rate 100% between registry changes), 100-value page
+  morph 7.7 ms; prefilter-only 3–17 µs; explain+humanize warm ≤52 µs and
+  invalid-only. Those numbers were measured only on values ≤ ~4k tokens
+  (largest case 85 nodes / 3,956 tokens); they must not be cited against
+  unmeasured sizes — full confirm/explain runs ONLY when the bounded
+  sample is complete (see the size gate ruling below); an elided value
+  reports `:shape-only`. Memo policy: one process-local generation cache
+  whose authority is the ACTIVATED projection value itself, compared by
+  `identical?` — never the mutable candidate registry, and never keyed by
+  the 32-bit fingerprint alone (a hash collision would silently retain a
+  stale validator generation; the fingerprint remains a display/debug
+  label). No LRU, no value-level result memo. Two measured caveats for
+  implementation: `me/with-spell-checking` is a no-op on Seon's open maps
+  (needs `:closed`), so do not promise misspelling detection; and
+  entity-shaped values validly match many open request schemas (9 for an
+  agent value), so specificity ordering among valid matches is
+  load-bearing.
+- **Validation lifecycle (settled).** Browser validation artifacts derive
+  from the last ACTIVATED projection, full stop: `register!` outside an
+  eval batch updates candidate forms only; browser status, badges, and
+  renderer properties change only at the next admission activation;
+  `restore!` requires no cache invalidation because the generation follows
+  the projection object identity; mid-batch renders always see the last
+  activated projection, never in-flight candidates. The browser never
+  calls `candidate-validator`/`candidate-explainer`.
 - The generic bounded tree is unconditional: a value with no registered
   schema match still renders and drills normally. Schema matches only add
-  labels, validation, and an optional custom renderer.
+  labels, validation, and an optional custom renderer. Precondition for
+  "unconditional": the `opaque-marker` bounded-summary fix in
+  [[research/universal-data-browser-design-2026-07-20]] §6 must land
+  before the migration steps that route `/data` entities,
+  `generic-default-renderer` output, and every eval card through `sample`
+  — today `opaque-marker` materializes the FULL `pr-str`/`str` before
+  clipping, so a large record or `clj->js` value can OOM the client
+  process, and the migration multiplies that exposure.
 
 ## Corrections from adversarial review (2026-07-20)
 

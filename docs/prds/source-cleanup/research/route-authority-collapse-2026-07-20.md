@@ -11,8 +11,9 @@ ONE truth system. Route datoms are the single authority; handlers are named by
 SYMBOL in the datom and resolved at dispatch; the reitit router is a pure
 derivation that re-derives on route-datom transactions through the existing
 `seon.reactive` registration mechanism; the only static remainder is a fixed,
-tested-closed bootstrap set (readiness + static assets) that must route before
-a database session exists. Operator doors gate on launch-bound capabilities at
+tested-closed bootstrap set (readiness + static assets + the config-apply
+repair door) that must route before a database session exists or
+independently of the database route state it repairs. Operator doors gate on launch-bound capabilities at
 dispatch. The `/agent/{id}/feed` → `/agent/{id}/sse` rename is a seed-row edit
 riding this collapse in stage 4, not the stage-2 freeze.
 
@@ -58,7 +59,7 @@ rows upserted by `:seon.route/name`; new attributes are defined in §2.
 | `/log` | POST | **datom** (product) | `{… ::name ::log ::handler 'seon.web.serve/handle-log! ::admitted? true}` | |
 | `/agents/run` | POST | **datom** (product/composition door) | `{… ::name ::agents-run ::handler 'seon.web.serve/handle-agent-run! ::admitted? true}` | downstream clusters may drop it via manifest `:removes` |
 | `/agent/{id}/complete` | POST | **datom** (lifecycle) | `{::pattern "/agent/{id}/complete" ::method :post ::name ::agent-complete ::handler 'seon.web.serve/handle-complete-agent!}` | not admitted today; handler reads id from `:path-params` after refactor |
-| `/_seon/operator/config` | POST | **capability datom** | `{… ::name ::operator-config ::handler 'seon.web.serve/handle-config-apply! ::admitted? true ::capability :seon.launch/operator-doors?}` | today same-origin+admitted but NOT loopback; the capability gate adds loopback-peer — a deliberate tightening (the only caller is `bin/seon config apply` on loopback). Flagged in §Risks |
+| `/_seon/operator/config` | POST | **bootstrap** (repair door) | — stays in the fixed bootstrap set (§5) | the repair door must route independently of the database route state it repairs — same justification class as `/_seon/ready`. It keeps same-origin + admitted + (per this design) loopback/capability gating, applied statically in the bootstrap row. This closes the forward crossing: `bin/seon config apply` works on any old-database boot and seeds the new rows non-destructively. Loopback tightening flagged in §Risks |
 | `/_seon/operator/quiesce` | POST | **capability datom** | `{… ::name ::operator-quiesce ::handler 'seon.web.serve/handle-operator-quiesce! ::capability :seon.launch/operator-doors?}` | unadmitted by design (test pins it) |
 | `/_seon/operator/blobs` | POST | **capability datom** | `{… ::name ::operator-blobs ::handler 'seon.web.serve/handle-operator-blobs! ::capability :seon.launch/operator-doors?}` | |
 | `/_seon/operator/processes` | GET | **capability datom** | `{… ::method :get ::name ::operator-processes ::handler 'seon.web.serve/handle-operator-processes! ::capability :seon.launch/operator-doors?}` | |
@@ -83,6 +84,18 @@ feed rows take the §6 rename.
 `::route` gains `[::admitted? {:optional true} ::admitted?]` and
 `[::capability {:optional true} ::capability]`. Absent = no gate (no stored
 nil, no `[:maybe]`).
+
+**Propagation is load-bearing.** The two new attributes must flow through
+every stage of the existing projection or the `:compile` middleware never
+sees them: `route-query` (router.cljs:183-188) pulls only
+pattern/method/handler/middleware today and must additionally pull
+`:seon.route/admitted?` and `:seon.route/capability`; `route-projection`'s
+canonical sort (router.cljs:190-198) must include both in its sort key so
+the exact cache fingerprint (`cache-key`, router.cljs:332-336) changes when
+a gate changes; and `projection->routes` (router.cljs:200-213) must project
+both into the per-method route-data map the `:compile` middleware reads. A
+gate edit that does not reach all three points silently leaves the old
+compiled handler serving ungated routes.
 
 Two gates become **computed structural rules** instead of per-row middleware
 literals (no hand-maintained lists):
@@ -186,6 +199,20 @@ suppression, writer-interest ownership):
   `reactive/unobserve!`. The `::desired-db`/`::accepted-db`/`settle-routes!`
   machinery is deleted (~100 lines): `seon.reactive` owns exactly that
   scheduling.
+- **Owner-token semantics must survive the swap.** Today's `attach!` guards
+  every late async continuation with an `owner` js-obj token
+  (router.cljs:348, 361, 410-423): a detached or replaced owner's in-flight
+  `reconcile-cache!` cannot write into a re-attached generation. After the
+  swap, that protection must come from `seon.reactive`'s consumer-key
+  replacement semantics — a re-`observe!` under the same
+  `::consumer-key` replaces the registration, and a stale registration's
+  `notify` must not call `accept-projection!` into the new generation.
+  Verify this under a hot-reload storm (the B10 reload-storm class:
+  repeated detach!/attach! cycles during rapid reloads), not only a single
+  attach/detach round-trip; if `seon.reactive` does not already drop a
+  replaced registration's pending notify, keep a generation token around
+  `accept-projection!` — inside the one router owner, not a second
+  scheduler.
 - **Compile cost.** Grounded in
   `reference-code/reitit/perf-test/clj/reitit/router_creation_perf_test.clj`:
   100 random routes compile in ~11 ms with default conflict resolution on a
@@ -204,9 +231,10 @@ After migration `static-supplement` shrinks to a pure `bootstrap-routes` fn
 producing exactly:
 
 ```clojure
-[["/css/{*path}"  {:get …}]
- ["/js/{*path}"   {:get …}]
- ["/_seon/ready"  {:get …}]]
+[["/css/{*path}"           {:get …}]
+ ["/js/{*path}"            {:get …}]
+ ["/_seon/ready"           {:get …}]
+ ["/_seon/operator/config" {:post …}]]
 
 ```
 
@@ -214,9 +242,10 @@ Closure test (in `test/seon/web/router_test.cljs`):
 
 ```clojure
 (deftest bootstrap-set-is-closed
-  (is (= {"/css/{*path}" #{:get}
-          "/js/{*path}"  #{:get}
-          "/_seon/ready" #{:get}}
+  (is (= {"/css/{*path}"           #{:get}
+          "/js/{*path}"            #{:get}
+          "/_seon/ready"           #{:get}
+          "/_seon/operator/config" #{:post}}
          (into {} (map (fn [[pattern data]] [pattern (set (keys data))]))
                (#'router/bootstrap-routes fixture-config)))))
 
@@ -230,10 +259,16 @@ nothing: `db->routes` remains the only other route source feeding
 scan is satisfied structurally — there is no third `into`).
 
 Justification for each member: readiness must answer 503 before any database
-session exists (the readiness-only server path bypasses the router entirely,
-and the derived router's first value requires a database); static assets are
-disk build artifacts required by every page including pre-admission ones and
-have zero database dependency.
+session exists (the readiness-only server serves ONLY `GET /_seon/ready` and
+503s everything else — `serve.cljs:1756-1763` — so it neither serves static
+assets nor consults the router); static assets are disk build artifacts with
+zero database dependency that the NORMAL server must route during the
+pre-database window before the derived router's first value exists — not
+because the readiness-only server needs them; the config-apply door must
+route independently of the database route state it repairs, so that
+`bin/seon config apply` works on any old-database boot (same class as
+readiness). The door keeps its same-origin + admitted + loopback/capability
+gating applied statically in its bootstrap row.
 
 ## 6. The `/feed` → `/sse` rename (seed-row edit, stage 4)
 
@@ -302,14 +337,45 @@ proof).
    refusal (403 without `:seon.launch/operator-doors?`), unresolved-symbol
    fault datom + 500, live router re-derivation on a route transaction,
    reverse-routing by the new names, manifest `:removes` retraction of a
-   migrated row.
+   migrated row, and duplicate-path build behavior across the version
+   crossing (old static supplement row + new datom row for the same
+   pattern — pin what `install!`/the router build does with the conflict).
    Owns: `test/seon/web/router_test.cljs`, `test/seon/web/serve_test.cljs`.
 6. **Docs + verification** — update ui.md §routes (supplement paragraph),
    `src/seon/web/AGENTS.md` route truth, `datastar-web-ui` skill route list,
-   `route.cljs`/`router.cljs` docstrings; live proof on the default cluster:
+   `route.cljs`/`router.cljs` docstrings; document the crossing runbook
+   (below) in the same pass; live proof on the default cluster:
    `bin/seon cluster reset default`, drive `/chat`, `/stop`, `/data`, an
    operator door, and the renamed `/sse` feeds; close the issue with evidence.
    Owns: docs listed, `docs/seon/issues/static-routes-bypass-database-route-authority.md`.
+
+**Crossing runbook (both directions).** Boot-time reconciliation of
+`core-routes-tx` is NOT the answer and is rejected: `load-manifest`'s
+contract (config.cljs:712-721) is that absence means preserve, so boot-time
+reconciliation without the manifest cannot apply the manifest's `:removes`
+— it would resurrect manifest-removed routes and violate the config design.
+
+- **Forward crossing (new code + old database).** Migrated routes 302-home
+  until an explicit `config apply` or an explicit-manifest boot seeds the
+  new rows; `POST /_seon/operator/config` itself routes from the bootstrap
+  set (§5), so the repair door is always reachable. Non-destructive
+  alternatives: `bin/seon config apply <manifest>`, or `bin/seon up
+  <manifest>` / `restart <manifest>` with the manifest explicitly selected.
+  `bin/seon cluster reset` remains the destructive path, never the only
+  one.
+- **Rollback crossing (old code + new database).** Old code's static
+  supplement and the new datoms produce duplicate reitit route paths, and
+  new one-arg seed rows dispatch into old two-arg `(req res)` handlers
+  (`res` undefined at `write-status!`). Rollback therefore requires an
+  old-code `config apply` — the old `core-routes-tx` desired set retracts
+  the new rows via reconcile's managed identity `:seon.route/name` —
+  BEFORE relying on the old router. Duplicate-path build behavior across
+  the crossing is pinned by the step-5 test.
+- **Legibility fallback** (only if the owner rejects the bootstrap door):
+  `apply-live-config!` (cli.clj:339-358) must treat a 3xx/empty response
+  from the door as the specific "route catalog predates the collapse —
+  reboot with the manifest selected" error rather than a nil-response
+  throw.
 
 Each step is one path-limited commit; steps 1-3 must land within one build
 checkpoint (the seeded symbols and the refactored handler shapes must ship
@@ -319,18 +385,25 @@ CLAUDE.md checkpoint rules.
 
 ## Risks and open questions
 
-- **Two-arity window (highest risk).** A cluster whose database already holds
-  the OLD seed rows running NEW code (or vice versa) crosses handler-shape
-  changes only for the pre-existing core rows — those handlers keep their
-  Ring shape, so the window is limited to the NEW rows, which old databases
-  simply don't have (their static supplement still serves them only if old
-  code runs). Mitigation: land steps 1-3 atomically per checkpoint; the
-  operator boundary is the normal `config apply`/reset.
-- **`/_seon/operator/config` tightening.** Adding loopback-peer to the config
-  door is a deliberate behavior change (today same-origin+admitted only). The
-  only known caller is `bin/seon config apply` on loopback. If a remote
-  config-apply consumer exists downstream, the row's `::capability` can be
-  dropped by that cluster's manifest — surfaced for owner confirmation.
+- **Version crossing (highest risk).** New code reopening an existing
+  cluster config-free leaves the old datoms in place while the static
+  supplement is gone: migrated routes (`/chat`, `/stop`, operator doors)
+  302-home until a config apply or explicit-manifest boot. This is a real,
+  user-visible window, not a safe no-op; the bootstrap config door (§5)
+  keeps the repair path reachable, and the crossing runbook above is the
+  operator recipe for both directions. The reverse crossing additionally
+  produces duplicate route paths and two-arity dispatch mismatches and
+  requires an old-code `config apply` first. Mitigation: land steps 1-3
+  atomically per checkpoint; follow the runbook at every deploy/rollback
+  boundary.
+- **`/_seon/operator/config` loopback tightening.** Adding loopback-peer to
+  the config door is a deliberate behavior change (today
+  same-origin+admitted only). The only known caller is `bin/seon config
+  apply` on loopback. Loopback here is a containment contract — the server
+  already binds 127.0.0.1, so the predicate adds defense-in-depth against
+  same-host cross-origin callers, not a new security boundary. If a remote
+  config-apply consumer exists downstream, that cluster overrides at its
+  own boundary — surfaced for owner confirmation.
 - **Same-origin-on-all-POST.** Behavior-preserving for every current row
   (operator doors gain a check that passes for header-less callers), but it
   is a structural rule replacing explicit per-row middleware; ui.md should

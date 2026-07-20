@@ -80,13 +80,19 @@ remaining transaction-fault verification and sync reads belong to Stage 1.
 ### Stage 1 — finish the async-facade migration (B3-B5)
 
 Fix every remaining synchronous consumer from the duplicate-interfaces
-report in place: `seon.warn` (collapse its dual acquisition path to the
-pre-acquired `::data` branch while there), `seon.eval` clusters,
-`seon.render:684`, `testrun`, `web.internal`, `handlers.message`,
-`my.skills`, `my.canvas/pinned`. Rewrite the `warn.cljs:1064` guidance to
-the current facade idiom. Gate: full CLJS suite plus one live cluster
-proof that a warn check, a render, and an eval each round-trip through the
-authority; the report's inventory rechecked to zero.
+report per [[async-facade]]'s two-idiom split: async-plane consumers get
+`^:async`/`await`; sync-render-plane sites (`seon.warn` checks,
+`handlers.message` renderers) are fixed acquisition-side — no `^:async`
+may escape into `seon.render/render` or `seon.warn/run-checks`. While in
+`seon.warn`, collapse its dual acquisition path to the pre-acquired
+`::data` branch and rewrite the `warn.cljs:1064` and `warn.cljs:720`
+guidance to the current facade idiom. Reachability-gate every site first:
+the caller-less superseded `seon.eval` cluster, `seon.render:684`, and
+`testrun/latest-run` are deleted, not asyncified. Gate: full CLJS suite
+plus one live cluster proof that a warn check, a render, and an eval each
+round-trip through the authority; the report's inventory rechecked to
+zero, including zero `^:async` fns reachable from `seon.render/render` or
+`seon.warn/run-checks`.
 
 ### Stage 1.5 — universal data browser contract and transport
 
@@ -106,10 +112,17 @@ steps 1-4 as one orchestrator-owned unit during a lane freeze: code
 identities (`client`/`cluster` mapping, `pod.js` -> `client.js`,
 `pod-events.log` -> `client-events.log`, `:seon.dev.process/pod` ->
 `/client`), then `acme`/`src-inspect-ai`, then living docs, localized
-`AGENTS.md` authorities, and skills (resync adapters), then the sweep. Gate:
-three suites, `bin/seon restart` live proof, and a sweep returning only
-`pod-host/`, dated research/history, and dependency-owned terminology. No
-active authority may continue teaching “pod” as the current process name.
+`AGENTS.md` authorities, and skills (resync adapters), then the sweep.
+Prerequisite (plan's freeze gate 3): quiesce both clusters under PRE-rename
+code (`bin/seon down`, `bin/acme down`) with recorded absence evidence —
+the rename cannot cross persisted `:seon.dev.process/pod` records, restore
+intents, or pre-rename release manifests. Gate: three suites, `bin/seon up`
+from the quiesced state (never `restart` across the rename) with live
+status/web-UI proof, one MCP `eval_cljs` round-trip after restarting the
+MCP client, and a vendor-excluded sweep (`rg -vi runpod` — RunPod vendor
+tokens are frozen) returning only `pod-host/`, dated research/history, and
+dependency-owned terminology. No active authority may continue teaching
+“pod” as the current process name.
 
 ### Stage 3 — one logging convention
 
@@ -152,6 +165,42 @@ converge the failure-payload key on `:seon.error/message` and the
 unresolved-symbol semantics (one warning derivation; fix render.cljs
 silent nil-vanish); decide the ok?-discriminator ruling
 (recommended: bless message-presence for concise domain results).
+
+Collapse-hunt items (adversarial review 2026-07-20):
+
+- `src/seon/embed.clj:611-679` hand-rolls the complete `seon.retry`
+  strategy stack (exponential base, jitter, cap, max-retries) with a
+  drifted curve (embed jitters a post-cap value, so it can exceed its own
+  30 s cap by 50%) and no `max-duration` bound. Fix: rename
+  `src/seon/retry.cljs` -> `retry.cljc` (jitter via reader conditionals;
+  keep the `^:async` `sleep!`/`with-retry!` executor CLJS-only); embed
+  builds its delay seq from the shared combinators in turn.cljs's exact
+  composition order plus `(retry/max-duration 60000)`, walking it in its
+  existing `Thread/sleep` loop with the interrupt handling preserved
+  verbatim; ground the JVM driver shape against
+  `reference-code/again/src` before writing it. Verify: `bin/test-cljs`
+  stays green (turn.cljs + diffusiongemma consume the promoted `.cljc`
+  unchanged), `bin/test-writer` for embed, one writer REPL probe that the
+  strategy seq realizes (~500/1000/2000/4000/8000 within jitter bounds).
+- `seon.render/value-leaf` (render.cljs:414-443) and `pruned-marker`
+  (:496-510) hand-mirror `seon.render.value/emit-leaf`'s marker token
+  strings and have already drifted (leading-space `" ⟨"` vs `"⟨"`). Fix:
+  extract the four emit-leaf branches into pure formatters
+  (datom/opaque/clipped-string/pruned token fns) in `seon.render.value`;
+  the html view wraps the exact returned strings in its styled spans; the
+  compact no-leading-space `"⟨"` form is canonical (the ai token budget's
+  shape) with the html gap restored via CSS; one render test pins that the
+  html leaf's flattened text equals the corresponding emit-leaf string.
+- The stored-rows -> schema-projection decode is duplicated between
+  `seon.runtime.admission/committed-projection`
+  (admission.cljs:209-232) and the execution-child load path
+  (eval.cljs:1019-1026), with a third single-form site at eval.cljs:2709.
+  Fix: `seon.schema` gains one private `read-stored-form` (the single
+  reader-table/decode-error policy for stored `:seon.schema/form` and
+  `:seon.fn/spec` strings) and one public `rows->projection`; all three
+  sites call it; query/transport stays with each caller — only the pure
+  decode+build collapses. `typeahead.cljs:795` may follow (lowest
+  priority, try-wrapped best-effort site).
 
 Retain and wire `src/seon/agent/ctx/usage.cljs` into the debug turn projection
 and compact agent-page usage, with validated non-negative provider counts and

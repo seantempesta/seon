@@ -140,33 +140,82 @@ DERIVED from the one authority, per projection, never stored.
 ### 3.1 When explain runs (cost-settled)
 
 Grounded costs: `m/validate`/`m/explain` recompile per call
-(`core.cljc:2635`, `:2660`); compiled fns are cheap to reuse. The prior
-report's memo design stands: process-local cache atom keyed
-`[projection-fingerprint schema-key]` (fingerprint: `schema.cljc:361-365`)
-holding `{::validator f ::explainer f}` built lazily from
-`candidate-validator`/`candidate-explainer` (`schema.cljc:536-550`).
+(`core.cljc:2635`, `:2660`); compiled fns are cheap to reuse.
+
+**Compiler and cache authority: the activated projection value, not the
+candidate registry.** `candidate-validator`/`candidate-explainer`
+(`schema.cljc:536-550`) compile against `candidate-registry`, which
+`register!` mutates immediately (:278) while the fingerprint changes only
+at activation — a shadow-nREPL/MCP `register!` that never activates would
+serve a stale compiled validator as green, and `restore!` after a failed
+eval (schema.cljc:444-452) reverts candidate forms with no fingerprint
+change. The browser therefore never calls them. Instead:
+
+1. `seon.schema` gains projection-scoped compilers — e.g. `(defn
+   projection-validator [projection k] (m/validator (m/deref-recursive k
+   {:registry (:seon.schema.projection/registry projection)})))` and the
+   analogous explainer; the projection already stores its own composite
+   registry (`build-projection`, schema.cljc:310-313/367).
+2. The inverted required-key shape index (§4) derives from
+   `(:seon.schema.projection/forms projection)`, never from
+   `registered-schemas`/candidate forms.
+3. Cache shape: one process-local atom holding `{:projection <the
+   projection value> :validators {k f} :explainers {k f} :index …}`; on
+   each use compare `(identical? cached-projection
+   (schema/current-projection))` and rebuild the whole generation on
+   mismatch. `identical?` is correct because `activate-projection!`
+   publishes one immutable object. The 32-bit `hash(pr-str …)` fingerprint
+   (schema.cljc:361-365) is strictly a display/debug label — a
+   generation-boundary hash collision must not be able to retain a stale
+   validator generation.
+4. Pre-activation window: `current-projection` is nil during module
+   loading. Ruling: build one candidate projection on demand (mirroring
+   `entity-catalog`'s fallback at schema.cljc:417-418) and cache it under
+   that object; the first admission activation replaces the generation.
+
+Lifecycle consequence (documented in [[../data-browser]]): `register!`
+outside an eval batch updates candidate forms only; browser status,
+badges, and renderer properties change only at the next admission
+activation; `restore!` needs no cache invalidation; mid-batch renders see
+the last activated projection, never in-flight candidates.
 
 Pipeline, per rendered value (top level + drilled nodes only, never every
 node of the walk):
 
-1. **Candidate lookup** (free set ops, §4) → bounded plausible schema keys.
-2. **Validate** candidates with memoized validators. Successful validations
-   become `matching-shapes`; failed candidates remain diagnostic-only and can
-   never select a custom renderer. The primary diagnostic candidate yields
-   status enum
+1. **Completeness gate.** Full confirm/explain runs ONLY when the bounded
+   sample is COMPLETE — no elision/prune marker
+   (`:seon.render.value/elided`, `::elided-keys`, `::pruned`) anywhere in
+   the skeleton, checked by a cheap walk of the already-small skeleton (or
+   a flag threaded out of `sample*`, which emits those markers exactly
+   when the raw value exceeds the render bounds). Any elided value reports
+   `:shape-only` (prefilter-only, 3–17 µs measured) with the existing
+   hollow-dot rendering. Never probe size via `pr-str`/token estimate over
+   the raw value — `tokens/estimate` takes a string, so such a probe would
+   itself be O(value), the exact cost being gated. If a finer dial is ever
+   wanted, add a node-budget variant (bounded countdown walk, O(budget)
+   worst case). The benchmark's SAFE verdict holds only in this domain
+   (values whose sample is complete / ≤ ~4k tokens measured).
+2. **Candidate lookup** (free set ops, §4) → bounded plausible schema keys.
+3. **Validate** candidates with the projection-generation validators.
+   Successful validations become `matching-shapes`; failed candidates
+   remain diagnostic-only and can never select a custom renderer. The
+   primary diagnostic candidate yields status enum
    `:seon.render.value/status` ∈ `#{:valid :invalid}`; when the confirm
-   dial is off (prior report open-Q1 default), status is `:shape-only`.
-3. **Explain only on invalid**: run the memoized explainer, then
-   `me/humanize` + `me/error-value` (`error.cljc:374,392`), following
-   malli's own `dev.pretty` recipe (`pretty.cljc:41-46`) including
-   `with-spell-checking` — misspelled-key detection is exactly the class of
-   agent mistake this surface exists to show. Bounded: explain runs on the
-   raw node the person is looking at, which the drill contract already
-   bounds (top value, or one `get-in` path slice).
+   dial is off (prior report open-Q1 default) or the completeness gate
+   demoted the value, status is `:shape-only`.
+4. **Explain only on invalid, on the drilled slice**: run the
+   projection-generation explainer, then `me/humanize` + `me/error-value`
+   (`error.cljc:374,392`), following malli's own `dev.pretty` recipe
+   (`pretty.cljc:41-46`) including `with-spell-checking` — misspelled-key
+   detection is exactly the class of agent mistake this surface exists to
+   show. Deeper explanation is an explicit drill action whose explainer
+   runs on the drilled `get-in` slice (which the drill contract already
+   bounds) — humanize output is bounded by construction, never computed
+   in full and capped afterward.
 
 Because explain is invalid-only and the invalid case is the rare case, the
 steady-state cost of the green path is one cached-validator call per
-rendered top value.
+rendered complete top value.
 
 ### 3.2 What ships in the projection
 
@@ -192,9 +241,10 @@ stored):
   `:shape-only`) + badges for the remaining matches. Dot+text status is the
   house UI idiom (`src/seon/web/CLAUDE.md` rules).
 - **Hover = zero round-trips.** The humanized explanation ships IN the
-  morph (it exists only when invalid, and it is small — humanize output
-  mirrors the value's failing paths, and the value itself is already
-  bounded). Reveal is a pure CSS affordance (the same class of client-side
+  morph (it exists only when invalid AND the sample is complete per the
+  §3.1 gate, so it is small by construction — humanize output mirrors the
+  failing paths of a value the bounds already admitted; elided values are
+  `:shape-only` and carry no explanation). Reveal is a pure CSS affordance (the same class of client-side
   behavior as the existing `<details>` expand — no Datastar signal, no
   server state). This deliberately does NOT use `/call`: the capability
   gate (`call.cljs:63-98`) refuses core functions by design, and widening
@@ -212,7 +262,14 @@ stored):
   **elided-tail paging** — the `… +129 more` marker becomes a control that
   re-samples the same path with an offset (`:seon.render.value/offset` in
   the re-sample request), giving next/prev-page over a long collection
-  instead of only "the first N".
+  instead of only "the first N". The offset is untrusted input: the PARENT
+  validates `?offset` and path length against config maxima before the
+  child IPC request (an uncapped `offset=10^9` against a lazy seq would
+  force O(offset) realization inside the execution child from one GET);
+  inside the child, realization generalizes the existing head+1 idiom to
+  `(take (inc n) (drop offset ...))` under a total realization budget
+  (`offset + n ≤` the config bound), returning the existing honest
+  elided/prior-session marker beyond it.
 - **Transport for the re-sample**: the prior report routed expansion
   "through the existing `/call` door". That cannot hold as written — the
   gate refuses core fns (disagreement §8.1). Two lawful options:
@@ -264,7 +321,9 @@ extends their coverage beyond maps so "any value" holds:
   that key set once; the result annotates the collection as
   `[:vector-of :seon.agent.turn]`-style ("96 items each :seon.agent.turn").
   No per-element validation; the confirm dial validates only the sampled
-  head elements.
+  head elements. Element head-sampling AND whole-value gating use the SAME
+  §3.1 completeness signal: an element whose own sample is elided is
+  `:shape-only`, exactly like an elided top value.
 - **Scalars**: NOT fingerprinted standalone (running every registered
   scalar validator against every leaf is O(schemas×leaves), the rejected
   cost class). A scalar's schema identity comes from CONTEXT: when its
@@ -329,9 +388,11 @@ dispatch edits, no new namespace.
 Extends the prior report's 7 steps (its 1–3 remain the contract base);
 each step is a small path-limited commit with its named gate.
 
-1. **`schema.cljc`** — shape index over ALL registered map forms +
-   `candidate-shapes` + validated `matching-shapes` + validator/explainer memo keyed
-   `[fingerprint schema-key]` (prior step 1, unchanged).
+1. **`schema.cljc`** — shape index over ALL registered map forms (derived
+   from the activated projection's forms) + `candidate-shapes` + validated
+   `matching-shapes` + the projection-scoped
+   `projection-validator`/`projection-explainer` compilers and the
+   projection-identity generation cache (§3.1).
 2. **`schema.cljc`** — widen the catalog derivation: rows for ANY map form
    carrying a render property (entity rows keep `entity?`+id-attr extras).
    Gate: existing entity dispatch behavior identical.
@@ -341,8 +402,28 @@ each step is a small path-limited commit with its named gate.
    map (additive).
 4. **`value.cljs`** — `::schemas`/`::status`/`::explanation` on
    `render-html-data` per §3.2; schema-aware `summary`; `render-ai` top-
-   match hint (prior step 3 + validation additions). Gate: token-cost check
-   on transcript rows.
+   match hint (prior step 3 + validation additions). ALSO in this step,
+   before steps 5–7 widen exposure: fix `opaque-marker`, which today
+   materializes the FULL `pr-str`/`str` before `tokens/clip-str` — a large
+   record or `(clj->js {:rows (vec (range 1e7))})` builds a
+   multi-hundred-MB string, and OOM is not catchable, so the try/catch net
+   does not save the process. Two layers, both in the existing owner:
+   (a) bind the printer — wrap the record/object/`:else` summary prints in
+   `(binding [*print-length* 8 *print-level* 3] ...)`; CLJS `pr-writer`
+   honors both, bounding collection breadth/depth and fixing the lazy-seq
+   hang (only N+1 elements are forced); (b) `*print-length*` does not
+   bound a single huge string/symbol field, so print into a capped writer
+   instead of `pr-str`: a small `IWriter` impl appending to a StringBuffer
+   that, past the clip budget's char equivalent, stops appending or throws
+   a local sentinel caught inside `opaque-marker`, yielding the partial
+   buffer + truncation marker. Reuse the capped-writer helper for any
+   future summary print of a non-sampled node. Tests (`bin/test-cljs`,
+   value ns): record with a 10 MB string field → marker produced, summary
+   ≤ budget, and the writer's write-count proves fewer than ~budget×8
+   chars were ever appended (no full materialization); deep/wide `#js`
+   from `(clj->js {:rows (vec (range 1e5))})` → bounded marker, fast;
+   record with an infinite lazy-seq field (`(range)`) → returns within the
+   bound instead of hanging. Gate: token-cost check on transcript rows.
 5. **`render.cljs`** — `data-panel` header: primary key + status dot +
    badges + hover explanation reveal; `block`'s `:else` branches resolve a
    registered renderer via §2.2 before falling to the generic tree;
@@ -408,10 +489,12 @@ New:
    render; `:shape-only` reserved for the dial-off/prod-cost case), or stay
    presence-only until measured? Recommendation: ON at top level, measure,
    per-node stays presence-only.
-2. **Hover payload cap**: humanized explanations of a badly-invalid large
-   value can be sizeable. Cap by the same token budget as the value body
-   (estimate via `seon.ai.tokens/estimate`) with a "full explanation" link
-   through the §3.3 route? Recommendation: yes, one shared cap.
+2. **Hover payload cap**: settled by the §3.1 completeness gate — explain
+   runs only on complete-sample values (small by construction) or on a
+   drilled bounded slice, so humanize output is bounded before it is
+   computed; no post-hoc token cap is needed. The shared token cap remains
+   only as a display backstop, never the mechanism that makes explain
+   affordable.
 3. **The value route's scope**: `/agent/{id}/value` reads `result/<id>`
    vars of that agent. Should it also serve entity drill (`/data`'s rows)
    by eid, unifying the two browsers' expansion transport? Recommendation:

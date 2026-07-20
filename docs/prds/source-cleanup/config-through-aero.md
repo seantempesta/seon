@@ -90,6 +90,80 @@ runtime env reads outside the aero manifest boundary and process bootstrap.
    identity and OS resources bind at launch; behavior policy binds at
    acquisition.
 
+## Grants for direct-launch pods (design, 2026-07-20)
+
+Not every pod is operator-launched: `docker/seon-entrypoint:110-125` execs
+`bun out/client/main.js` with env only, and the inspect-ai harnesses grant
+the same way (`src-inspect-ai/src/seon_inspect/tb_agent.py:159` sets
+`SEON_SHELL` `'1'`/`'0'`; `swebench_arm.py:219` likewise). A
+descriptor-only `granted?` with no env path would default-deny every
+container/eval pod — shell-dependent benches would uniformly fail (the
+"uniform 0 = harness defect" class). The design that keeps the descriptor
+authority AND the direct-launch seam:
+
+1. `src/seon/launch.cljc` gains `::launch/web-granted?` /
+   `::launch/shell-granted?` `:boolean` descriptor fields, and defines the
+   coercion ONCE as a shared cljc fn — `(defn env-grant? [v] (boolean (and
+   v (not (str/blank? v)) (not= "0" v))))` — preserving today's exact edge
+   in both `granted?` fns: any non-blank value other than `"0"` grants;
+   absent/blank/`"0"` = deny. A naive boolean coercion would flip `"1"` or
+   `"yes"` to deny.
+2. `default-process-descriptor` populates both fields via
+   `(env-grant? (platform/env-val "SEON_WEB"))` / `"SEON_SHELL"`. This is
+   the process-bootstrap seam the acceptance already exempts ("zero runtime
+   env reads outside the aero manifest boundary and process bootstrap"), so
+   no acceptance change is needed. The env-fallback descriptor branch
+   (launch.cljc:489-520) is the launch seam for the test runner AND every
+   direct-launch pod (docker entrypoint, inspect-ai harnesses) — it does
+   not shrink to test-runner-only use.
+3. Operator `config.clj:300-301` computes the same two fields into the
+   encoded descriptor using the SAME `env-grant?` fn (required from
+   launch.cljc), so operator and fallback coercion cannot drift.
+4. Both `granted?` fns then read `launch/process-launch-descriptor` only;
+   their direct env probes are deleted; envelope text updates to name the
+   launcher grant.
+5. Direct-launch consumers change nothing: `docker/seon-entrypoint:110-125`,
+   `tb_agent.py:159`, and `swebench_arm.py:219` keep exporting env, which
+   the fallback descriptor consumes.
+
+Acceptance addition for this unit: rerun one shell-dependent inspect-ai
+smoke bench inside the container after the change; a uniform-0 score is
+the regression signature.
+
+## Boot `configure!` snapshots (classification, 2026-07-20)
+
+Several knobs are captured once at boot into process-local atoms by
+`configure!` calls, so a transacted datom changes the database while the
+atom serves stale values until restart. These are NOT live-adjustable
+today and must be classified honestly:
+
+- **Reactive timings** — `serve.cljs:1721` calls `datastar/configure!`
+  once at boot, resetting `reactive.cljs` `!policy` (:43-45, :73-78).
+  Transacting `:seon.config/reactive` datoms has no effect until restart.
+  Fix options (one mechanism, pick after costing): (a) when a committed
+  transaction touches `[:seon.config/id "cluster"]`, the client's existing
+  committed-transaction handling re-calls `datastar/configure!
+  (config/reactive-policy configuration)` — valid because `configure!`
+  resets an ordinary atom, not an ALS context (the probe's
+  refresh-in-place death applies only to `enterWith` contexts); or
+  (b) cleaner: delete `!policy` + both `configure!` fns and have
+  `settle-delay`/max-latency (reactive.cljs:153-162) read
+  `config/reactive-policy` off the configuration acquired with the
+  delivered database value — evaluate cost first since it runs per
+  delivered transaction, not per timer tick.
+- **`execution.host/configure!`** (client.cljs:2112) and
+  **`log/configure!`** (client.cljs:2808) consume launch-descriptor facts:
+  boot-only under the dividing rule — classification only, no mechanism
+  change.
+- **`agent/fs`, `agent/shell/internal`, `agent/search` `configure!`
+  sites**: sweep with `rg -n "configure!" src/` and record a one-line
+  disposition each in the implementation plan.
+
+Acceptance addition: transact a larger `:seon.config/reactive-settle-ms`
+and observe the next feed coalesce window widen (reactive.cljs:153-156)
+with no restart — the falsifier that distinguishes the fixed system from
+today's.
+
 ## Research grounding (settled)
 
 [[research/aero-config-seam-2026-07-20]] carries the full dependency
