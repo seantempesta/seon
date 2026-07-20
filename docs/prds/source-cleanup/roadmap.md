@@ -121,7 +121,7 @@ contract; prune stray bench/probe/`.eval` files from `logs/` and gitignore
 their patterns. Gate: writer + CLJS suites; one log line from each process
 shows the same shape; `seon.log/tail` shows a loop fault end-to-end.
 
-### Stage 4 — config single-owner collapse
+### Stage 4 — config single-owner collapse and reactive fold-in
 
 From the config report: collapse duplicated defaults (7890, port files,
 cluster dir) to one declaration consumed by `config.clj`, `launch.cljc`,
@@ -139,6 +139,19 @@ lifecycle, debug, and data-browser routes; launch capabilities own optional
 operator doors; only proven pre-database assets/readiness may remain static.
 
 ### Stage 5 — deletions and small unifications
+
+Additional stage-5 items from
+[[research/bespoke-reactive-sweep-2026-07-20]] and
+[[research/envelope-symbol-conformance-2026-07-20]]: replace the
+`serve.cljs:1223-1290` 1500 ms run poll with a request-scoped registration
+(preserve the done predicate and `:superseded` timeout close); after the
+stage-4 router collapse lands, replace the `client.cljs:344-539`
+advertisement machinery with one `observe!` over resumable agent ids and
+call the never-called `reactive/close!` from `drain-runtime-owners!`;
+converge the failure-payload key on `:seon.error/message` and the
+unresolved-symbol semantics (one warning derivation; fix render.cljs
+silent nil-vanish); decide the ok?-discriminator ruling
+(recommended: bless message-presence for concise domain results).
 
 Retain and wire `src/seon/agent/ctx/usage.cljs` into the debug turn projection
 and compact agent-page usage, with validated non-negative provider counts and
