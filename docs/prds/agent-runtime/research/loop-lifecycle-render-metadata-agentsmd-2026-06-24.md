@@ -138,7 +138,7 @@ Why fragile: the stop condition was a *relationship between two message rows* PL
 The owner is right on both counts, and the current code already implements his model — there is no `register-renderer!` ceremony in `src/`:
 
 1. **The render fn IS just a symbol**, declared as **metadata on the schema's `:map` properties** (`:seon.render/ai`, `:seon.render/html`), stored verbatim. `register!` decomposes it into a `:seon.schema` DB entity (`:seon.schema/render-fn` / `:seon.schema/render-html-fn`), resolved at render time via `eval/lookup-value`.
-2. **`register-renderer!` does NOT exist** anywhere in `src/`. It appears only in stale docs (`docs/prds/spec-driven-rendering/prd.md`, `docs/prds/namespace-ui/research/*`) describing an old, rejected design with a separate `*renderers` atom. The current system already superseded it.
+2. **`register-renderer!` does NOT exist** anywhere in `src/`. It appears only in stale docs (`docs/prds/spec-driven-rendering/prd.md`, `docs/prds/namespace-ui/archive/research/*`) describing an old, rejected design with a separate `*renderers` atom. The current system already superseded it.
 3. Both override paths reduce to **"upsert a symbol."** No new mechanism is warranted.
 
 The PRD line the owner reacted to ("requires explicit `register-renderer!` calls") describes the system *before* the schema-property pattern landed — the problem that was already solved, not current reality.
@@ -194,7 +194,7 @@ Stored shape (one `:seon.schema` row per kind):
 `grep -rn "register-renderer" src/` → **zero hits.** Only docs:
 
 - `docs/prds/spec-driven-rendering/prd.md:18` describes it as the *friction to remove*; `:469` lists "Remove old manual registry (`*renderers` atom, `register-renderer!`, `get-renderer`, `clear-renderers!`)" as a completed-design goal.
-- `docs/prds/namespace-ui/research/*` show it as an old proposed API.
+- `docs/prds/namespace-ui/archive/research/*` show it as an old proposed API.
 
 The owner's instinct is correct — it's a ghost from a superseded design.
 
@@ -239,7 +239,7 @@ The simplest design with zero new ceremony already exists and is deployed:
 
 Both are upsert-a-symbol. A `register-renderer!` would (1) reintroduce the friction the PRD already removed, (2) bifurcate the source of truth (parallel `*renderers` atom vs. schema props), and (3) violate "code as data — one mechanism."
 
-**Action item:** the stale `register-renderer!` language in `docs/prds/spec-driven-rendering/prd.md:18` and `namespace-ui/research/*` is what's misleading — they describe the pre-schema-property design. Update or archive them.
+**Action item:** the stale `register-renderer!` language in `docs/prds/spec-driven-rendering/prd.md:18` and `namespace-ui/archive/research/*` is what's misleading — they describe the pre-schema-property design. Update or archive them.
 
 Key citations: `src/seon/schema.cljc:158-161,431-444,502-533`; `src/seon/agent.cljs:254-317`; `src/seon/render.cljs:158-183,202-240,300-318`; `grep -rn "register-renderer" src/` → 0 hits.
 
@@ -356,7 +356,7 @@ Sources:
 2. **(Loop) Resolve the dormant handler registry** (`seon.handler` + `seon.handlers.wake/wake-on-message` + seeded `:wake/on-message` at `client.cljs:2024-2032`) — it never fires in the pod; the real wake is the `db/listen!` closure. **Decision: wire the dispatcher OR delete the registry seed from CLJS boot — pick one wake path.** (Recommend delete; the listener is the live mechanism.)
 3. **(Loop) Unify the duplicated inbound predicate** — move `agent/inbound-msg-datom?` to a cycle-free ns and have `transcript/inbound-msg?` (`transcript.cljs:88-102`) call it. Two copies of the wake rule will drift.
 4. **(Loop, no action) The wake is already pure DB-reactive** (datahike `d/listen` + state on the record + episode-token sliding cap). No atoms/flags hold wake/stop state. Keep it.
-5. **(Render) Do NOT add `register-renderer!`** — it does not exist in `src/` and would reintroduce removed friction. Keep `schema/register!` with `:seon.render/ai`/`:seon.render/html` symbols in props. Per-kind change = re-`register!` (upsert via `:seon.schema/key`); per-entity = transact a symbol onto the entity. **Decision: update/archive the stale `register-renderer!` docs** (`docs/prds/spec-driven-rendering/prd.md:18`, `namespace-ui/research/*`).
+5. **(Render) Do NOT add `register-renderer!`** — it does not exist in `src/` and would reintroduce removed friction. Keep `schema/register!` with `:seon.render/ai`/`:seon.render/html` symbols in props. Per-kind change = re-`register!` (upsert via `:seon.schema/key`); per-entity = transact a symbol onto the entity. **Decision: update/archive the stale `register-renderer!` docs** (`docs/prds/spec-driven-rendering/prd.md:18`, `namespace-ui/archive/research/*`).
 6. **(Order) Reject "system then soul then agents."** Deployed order is correct: **soul (system role) first, `:system`/system-text section second, transcript always last.** No reordering.
 7. **(Order) Rename the `:system` context section** to `:repl-manual` / `:mechanics` to end the `:system`-section vs `system`-role collision that produced the confusion.
 8. **(AGENTS.md) Fix the bug + adopt the standard:** `my.soul` looks for `AGENTS.md` but only `AGENT.md` exists. Industry standard is plural `AGENTS.md`. **Decision needed:** create a real pod-side `AGENTS.md` (pod work-instructions, distinct content from the subagent `AGENT.md`) and point `my.soul/agents-md-path` at it — OR delete the `agents-md-path` plumbing and make soul = SOUL.md only. Separately, rename the root `AGENT.md` → `AGENTS.md` (optional `AGENT.md` symlink) for cross-tool portability; CLAUDE.md stays primary for Claude Code. Do NOT feed the existing JVM-track-subagent `AGENT.md` into a pod agent's prompt.

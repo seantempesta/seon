@@ -1,6 +1,6 @@
 ---
 type: reference
-status: draft
+status: archived
 tags: [prd, reference, web]
 ---
 # Implementation Notes: Example Feature

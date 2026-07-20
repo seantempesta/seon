@@ -1,6 +1,6 @@
 ---
 type: prd
-status: active
+status: archived
 tags: [prd, database, flow, web]
 ---
 # PRD: Namespace UI - Vision Document
@@ -14,17 +14,17 @@ tags: [prd, database, flow, web]
 | 0 | Cleanup + Dashboard | Done | - |
 | 0.5 | Live Agent Widgets | Done | - |
 | 1a | Render convention + view system | Done | - |
-| 1b.1-7 | Observatory tool renderers, hover, pairing | Done | [`observatory-polish`](../observatory-polish/prd.md) |
-| 1b.8 | Truncated log view (4-line max) | Done | [`truncated-log-view`](../truncated-log-view/prd.md) |
-| 1b.9 | Namespace render toggle | Done | [`namespace-render-toggle`](../namespace-render-toggle/prd.md) |
-| 1b.10 | **Datalevin-based Observatory** | **Active** | [`observatory-xtdb`](../observatory-xtdb/prd.md) |
-| 1c | Agent robustness | Done | [`stability-improvements`](../stability-improvements/prd.md) |
-| 2 | Expand/collapse + styling | Pending | [`data-viewer`](../data-viewer/prd.md) |
-| 3 | Malli schema viewer | Pending | [`schema-viewer`](../schema-viewer/prd.md) |
+| 1b.1-7 | Observatory tool renderers, hover, pairing | Done | [`observatory-polish`](../../observatory-polish/prd.md) |
+| 1b.8 | Truncated log view (4-line max) | Done | [`truncated-log-view`](../../truncated-log-view/prd.md) |
+| 1b.9 | Namespace render toggle | Done | [`namespace-render-toggle`](../../namespace-render-toggle/prd.md) |
+| 1b.10 | **Datalevin-based Observatory** | **Active** | [`observatory-xtdb`](../../observatory-xtdb/prd.md) |
+| 1c | Agent robustness | Done | [`stability-improvements`](../../stability-improvements/prd.md) |
+| 2 | Expand/collapse + styling | Pending | [`data-viewer`](../../data-viewer/prd.md) |
+| 3 | Malli schema viewer | Pending | [`schema-viewer`](../../schema-viewer/prd.md) |
 | 4 | Datalevin entity browser | Pending | - |
-| 5 | Live atom updates | Pending | [`live-updates`](../live-updates/prd.md) |
-| 6 | Dashboard polish | Pending | [`dashboard-polish`](../dashboard-polish/prd.md) |
-| 7 | Custom renderers | Pending | [`custom-renderers`](../custom-renderers/prd.md) |
+| 5 | Live atom updates | Pending | [`live-updates`](../../live-updates/prd.md) |
+| 6 | Dashboard polish | Pending | [`dashboard-polish`](../../dashboard-polish/prd.md) |
+| 7 | Custom renderers | Pending | [`custom-renderers`](../../custom-renderers/prd.md) |
 | 8 | Flow-routed namespace rendering | Pending | - |
 
 **Implementation details live in focused PRDs.** This document defines vision, philosophy, and shared context.
@@ -49,7 +49,7 @@ Think of Seon as an OS where namespaces are apps:
 
 **All introspection is runtime** - no hardcoded table names, schema keys, or function names.
 
-**Flow-routed rendering:** In the flow architecture, agent JVMs return domain data maps (not hiccup). The orchestrator resolves the appropriate renderer via spec-driven resolution (see [`spec-driven-rendering`](../spec-driven-rendering/prd.md)), caches the rendered output, and serves it via SSE. This means agent JVMs stay free of UI dependencies -- the orchestrator owns all rendering.
+**Flow-routed rendering:** In the flow architecture, agent JVMs return domain data maps (not hiccup). The orchestrator resolves the appropriate renderer via spec-driven resolution (see [`spec-driven-rendering`](../../spec-driven-rendering/prd.md)), caches the rendered output, and serves it via SSE. This means agent JVMs stay free of UI dependencies -- the orchestrator owns all rendering.
 
 ---
 
@@ -175,14 +175,14 @@ Browser → GET /ns/seon.trading?instance=a1b2
 
 The `topology/request!` function (in `seon.flow.topology`) is the blocking entry point for cross-namespace calls. It creates a promise, injects a request into the flow via `flow/inject`, and derefs the promise with a timeout. Replies are delivered by the `reply-router-step` which matches reply envelopes to waiting promises by request ID. For agent JVMs, cross-namespace relay go-loops forward requests from the agent's TCP bridge through the same `request!` mechanism.
 
-Renderer resolution uses the spec-driven algorithm from [`spec-driven-rendering`](../spec-driven-rendering/prd.md): the code index matches data keys against `:seon.fn/render-input-keys`, picking the most specific function. No per-namespace `render` function is required.
+Renderer resolution uses the spec-driven algorithm from [`spec-driven-rendering`](../../spec-driven-rendering/prd.md): the code index matches data keys against `:seon.fn/render-input-keys`, picking the most specific function. No per-namespace `render` function is required.
 
 ### Render Convention
 
 Rendering is spec-driven, not per-namespace. There is no explicit `render` function per namespace. Instead:
 
 1. **Agent JVMs return domain data maps** -- plain maps with namespaced keys (e.g. `{:seon.trading/positions [...]}`)
-2. **The orchestrator resolves a renderer** via the code index (see [`spec-driven-rendering`](../spec-driven-rendering/prd.md)) -- matching data keys against `:seon.fn/render-input-keys`
+2. **The orchestrator resolves a renderer** via the code index (see [`spec-driven-rendering`](../../spec-driven-rendering/prd.md)) -- matching data keys against `:seon.fn/render-input-keys`
 3. **Render functions live in `.render` companion namespaces** by convention (e.g. `seon.trading.render`), keeping domain code free of UI dependencies
 4. **Fallback** -- if no renderer matches, `pprint-clipped` provides a default view
 
@@ -291,9 +291,9 @@ The capstone phase where `/ns/` routes go through the flow topology to agent JVM
 
 ## Related PRDs
 
-- [`datalevin-migration`](../datalevin-migration/prd.md) — Database layer migration from XTDB to Datalevin
-- [`super-repl`](../super-repl/prd.md) — Flow harness, namespace isolation, agent JVM pool, cross-ns calls via `topology/request!`
-- [`spec-driven-rendering`](../spec-driven-rendering/prd.md) — Code index, automatic renderer discovery, resolution algorithm
+- [`datalevin-migration`](../../datalevin-migration/prd.md) — Database layer migration from XTDB to Datalevin
+- [`super-repl`](../../super-repl/prd.md) — Flow harness, namespace isolation, agent JVM pool, cross-ns calls via `topology/request!`
+- [`spec-driven-rendering`](../../spec-driven-rendering/prd.md) — Code index, automatic renderer discovery, resolution algorithm
 
 ---
 

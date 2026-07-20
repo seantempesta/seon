@@ -1,6 +1,6 @@
 ---
 type: research
-status: completed
+status: archived
 tags: [prd, research, web]
 ---
 # Research: Datafy/Nav and Multi-Format Rendering

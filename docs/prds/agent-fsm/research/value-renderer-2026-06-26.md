@@ -276,7 +276,7 @@ lane (do not touch `src/seon/web/**`). The ask:
   view" badge with a "copy `result/<id>`" affordance so the human can hand the
   handle back to the agent.
 - **Phosphor Terminal theme** (warm blacks, amber accents, monospace, density over
-  whitespace) per `docs/prds/namespace-ui/design-system.md`.
+  whitespace) per `docs/prds/namespace-ui/archive/design-system.md`.
 
 Coordination: this ns commits only PLAIN-DATA producers; U owns the hiccup, the
 SSE wiring, and the expansion endpoint. The contract (the marker vocabulary) is

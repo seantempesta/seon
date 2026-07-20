@@ -1,6 +1,6 @@
 ---
 type: research
-status: draft
+status: archived
 tags: [prd, research, web]
 ---
 # Research PRD: Multi-Format Data Rendering

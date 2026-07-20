@@ -1,6 +1,6 @@
 ---
 type: prd
-status: draft
+status: archived
 tags: [prd, web]
 ---
 # Transition: Namespace UI - Interactive Views

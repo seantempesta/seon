@@ -332,5 +332,5 @@ View transitions are **disabled by default** in `render-handler`. Opt in only fo
 - **Ground truth:** `docs/conventions.md` (SSE patterns section)
 - **Datastar docs:** <https://data-star.dev/>
 - **Deep dive:** `docs/reference/datastar-deep-dive.md`
-- **Design system:** `docs/prds/namespace-ui/design-system.md`
+- **Design system:** `docs/prds/namespace-ui/archive/design-system.md`
 - **Hyperlith examples:** `reference-code/hyperlith/examples/`

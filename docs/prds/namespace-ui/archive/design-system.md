@@ -1,6 +1,6 @@
 ---
 type: prd
-status: draft
+status: archived
 tags: [prd, web]
 ---
 # Seon Design System: Phosphor Terminal

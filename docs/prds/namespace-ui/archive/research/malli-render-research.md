@@ -1,6 +1,6 @@
 ---
 type: research
-status: completed
+status: archived
 tags: [prd, research, schema, web]
 ---
 # Research: Malli Schema Properties for Render Definitions

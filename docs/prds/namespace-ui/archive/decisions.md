@@ -1,6 +1,6 @@
 ---
 type: decision
-status: draft
+status: archived
 tags: [prd, decision, web]
 ---
 # Architectural Decisions: Example Feature

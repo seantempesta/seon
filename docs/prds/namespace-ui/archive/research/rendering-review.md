@@ -1,6 +1,6 @@
 ---
 type: research
-status: completed
+status: archived
 tags: [prd, research, web]
 ---
 # Architecture Review: Multi-Tier Rendering System

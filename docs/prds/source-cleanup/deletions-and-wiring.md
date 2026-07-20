@@ -75,7 +75,7 @@ No new block family unless the owner wants usage as its own block.
 
 **`src/seon/ui/components.cljc` (278 lines) — delete, do not wire.**
 Readable but built for the removed "future adapter" era: it references the
-superseded `docs/prds/namespace-ui/design-system.md`, duplicates styling
+superseded `docs/prds/namespace-ui/archive/design-system.md`, duplicates styling
 the live `seon.ui.*`/render fns evolved independently (its `card`,
 `page-header`, `status-styles` have zero consumers while live equivalents
 exist), and its `type-colors` keys ("LAUNCH"/"MESSAGE"/...) belong to a log

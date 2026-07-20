@@ -1,6 +1,6 @@
 ---
 type: prd
-status: completed
+status: archived
 tags: [prd, flow, web]
 ---
 # SSE Live Reload: Analysis and core.async.flow Solution

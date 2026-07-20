@@ -21,7 +21,7 @@ can preserve the original ambition.
   `spec-driven-rendering/prd.md`, `unified-namespace-flow/design.md`, `render-pipeline/prd.md`,
   `datahike-migration/prd.md`, `schema-unification/design.md`, `unified-flow/design.md`,
   `datalevin-reactive/design.md`, `logging-system/prd.md`, `test-infrastructure/design.md`,
-  `graph-cleanup/prd.md`, `namespace-ui/prd.md`, `data-viewer/prd.md`,
+  `graph-cleanup/prd.md`, `namespace-ui/archive/prd.md`, `data-viewer/prd.md`,
   `agent-runtime/{README,v1,v2,v3,platform}.md` (v1 read across multiple long ranges).
   PRDs NOT individually read past summary: `dashboard-polish`, `datalevin-migration`,
   `datalevin-reactive` (only intro), `flow-datalevin-writer`, `mcp-resilience`,

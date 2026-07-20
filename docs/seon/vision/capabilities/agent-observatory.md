@@ -21,4 +21,4 @@ None.
 ## Related
 
 - Components: [[components/web-layer]], [[components/agent-system]]
-- PRDs: [[prds/namespace-ui/prd]]
+- PRDs: [[prds/namespace-ui/archive/prd]]

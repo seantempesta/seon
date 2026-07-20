@@ -294,7 +294,7 @@ request/reply, state persistence, SSE push out of the box.
   current architectural framing of M7.
 - **PRD:** `docs/prds/namespace-isolation/prd.md` (on `feature/namespace-isolation`
   branch) — the working specification for per-namespace processes.
-- **PRD:** `docs/prds/namespace-ui/decisions.md` — the UI-side decisions for
+- **PRD:** `docs/prds/namespace-ui/archive/decisions.md` — the UI-side decisions for
   what a "namespace as living process" looks like to the browser/agent.
 - **Predecessor `seon-biff/src/seon/router.clj`** (125 lines) — the
   pre-flow incarnation of M7: every namespace has a `ctx` atom, HTTP

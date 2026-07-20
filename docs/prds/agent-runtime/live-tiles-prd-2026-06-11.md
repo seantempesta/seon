@@ -34,7 +34,7 @@ route swap (user: achievable for tomorrow).
 | Section twins: one section, `:seon.render/ai` + optional `:seon.render/html` | `:seon.ctx/section` schema (ctx.cljs:90) |
 | Capabilities teaching of the tile (raw transact of `:seon.render/html`) | ctx.cljs ~908 "Your live tile" block |
 | ONE composer for prompt text, sections sorted by `:seon.ctx/priority` | `seon.ctx/assemble-context` + `substrate-default-ctx` |
-| Phosphor Terminal design system | `docs/prds/namespace-ui/design-system.md`, `seon.ui.components` |
+| Phosphor Terminal design system | `docs/prds/namespace-ui/archive/design-system.md`, `seon.ui.components` |
 
 What's missing: the consumer view (bubbles + expanded tile), the
 root-grid default tile worth glancing at, the awareness section, the
