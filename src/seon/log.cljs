@@ -3,10 +3,14 @@
 
      1. stdout/stderr via `console!` (captured by the supervisor into
         `logs/pod.log` as raw text — human-readable, grep-friendly).
-     2. An NDJSON-EDN file (default `logs/pod-events.log`, configurable
-        via `:seon.log/file` in [[!config]]). One `pr-str`'d entry map per line.
+     2. An NDJSON-EDN file — ONLY in a process that explicitly claimed one
+        via [[configure!]] `:seon.log/file` (the pod's `-main` claims
+        `logs/pod-events.log`). One `pr-str`'d entry map per line.
         Size-rotated (5 MB cap, last 3 kept). Agents read this via
-        `seon.agent.fs/read-file` as a normal file.
+        `seon.agent.fs/read-file` as a normal file. A process that never
+        configured a file (a `bin/test-cljs` run, an execution child, a
+        script) emits console lines only — test fixtures must never land
+        in the live pod's structured log.
 
    ## tail reads the file
 
@@ -30,9 +34,11 @@
 
    ## Path configuration — single source of truth
 
-   The log file path is held in [[!config]] under `:seon.log/file`
-   (default `\"logs/pod-events.log\"`). Override via [[configure!]].
-   (Was a `^:dynamic` Var in Phase 1.5 but dynvars
+   The log file path is held in [[!config]] under `:seon.log/file`.
+   ABSENT by default (optional = absent): the file sink is off until the
+   one process that owns a log file claims it via [[configure!]]
+   (`seon.client/-main` claims the pod's `logs/pod-events.log` from its
+   launch descriptor). (Was a `^:dynamic` Var in Phase 1.5 but dynvars
    don't reliably survive `await` boundaries in CLJS over Promises;
    app-wide config belongs in the atom alongside `:seon.log/file-cap`
    and `:seon.log/keep`.)
@@ -234,12 +240,14 @@
 ;; ============================================================
 ;; Configuration — single source of truth for the log file path.
 ;;
-;; [[!config]] holds the canonical path under `:seon.log/file`. Both
-;; writers (`error!`, `info!`, ...) and the reader ([[tail]]) resolve
-;; through it. To migrate to the WASI sidecar's dedicated `/logs/`
-;; preopen, change ONE value:
-;;
-;;   (seon.log/configure! {:seon.log/file \"/logs/pod-events.log\"})
+;; [[!config]] holds the canonical path under `:seon.log/file` — ABSENT
+;; until the process that owns a log file claims one via [[configure!]]
+;; (the pod's `-main` does; every writer here shares the SAME cwd, so a
+;; repo-relative default made every test/child/script process append its
+;; fixture noise into the LIVE pod's structured log — the 2026-07-20
+;; error-channel flood). Both writers (`error!`, `info!`, ...) and the
+;; reader ([[tail]]) resolve through it; with no configured file both
+;; are console-only/empty.
 ;;
 ;; `:seon.log/file-cap` and `:seon.log/keep` control file-size
 ;; rotation. No ring buffer config — there is no ring buffer.
@@ -251,18 +259,18 @@
 ;; ============================================================
 
 (defonce !config
-  (atom {:seon.log/file     "logs/pod-events.log"
-         :seon.log/file-cap (* 5 1024 1024)
+  (atom {:seon.log/file-cap (* 5 1024 1024)
          :seon.log/keep     3}))
 
 (defn configure!
   "Merge `updates` into the active log config.
 
    Recognized keys:
-     :seon.log/file     — path to the active log file. Default
-                          `\"logs/pod-events.log\"`; the WASI sidecar
-                          will set this to `\"/logs/pod-events.log\"`
-                          (its own preopen, separate from `/scratch/`).
+     :seon.log/file     — path to the active log file. ABSENT by
+                          default — the file sink stays off until the
+                          owning process claims a path (the pod's
+                          `-main` claims `logs/pod-events.log`); an
+                          unconfigured process logs to the console only.
      :seon.log/file-cap — file size cap in bytes; rotation triggers
                           when the file exceeds this on append.
      :seon.log/keep     — number of rotated files retained.
@@ -319,10 +327,11 @@
 
 (defn- append-file!
   "Write one NDJSON-EDN line to the event file. Best-effort — failure
-   degrades to stderr, never throws."
+   degrades to stderr, never throws. A no-op when this process never
+   configured `:seon.log/file` (console-only process)."
   [entry]
   (try
-    (let [path (event-file-path)]
+    (when-let [path (event-file-path)]
       (ensure-dir! path)
       (rotate-if-needed! path)
       (.appendFileSync fs path (str (pr-str entry) "\n") "utf-8"))
@@ -400,15 +409,16 @@
 ;; ============================================================
 
 (defn- read-active-file
-  "Read the active log file as a string. Empty string if missing or
-   unreadable. Never throws."
+  "Read the active log file as a string. Empty string if missing,
+   unreadable, or no file is configured. Never throws."
   []
-  (let [path (event-file-path)]
+  (if-let [path (event-file-path)]
     (try
       (if (.existsSync fs path)
         (.readFileSync fs path "utf-8")
         "")
-      (catch :default _ ""))))
+      (catch :default _ ""))
+    ""))
 
 (defn- parse-line
   "Read one NDJSON-EDN line into an entry map. Returns nil if the line

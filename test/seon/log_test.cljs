@@ -50,16 +50,16 @@
 
 (defn- with-log-file*
   "Test helper — set `:seon.log/file` to `path` in !config, run `f`,
-   then restore the prior value. Replaces the pre-2026-05-27
-   `(binding [log/*log-file* path] ...)` idiom, which no longer works
-   now that the path lives in !config (the dynvar was removed because
-   it didn't survive `await` boundaries)."
+   then restore the complete prior config snapshot. `:seon.log/file` is
+   ABSENT by default (a test process must never claim the live pod's
+   file), so restore resets the snapshot map instead of re-configuring
+   a possibly-absent key with nil."
   [path f]
-  (let [old (:seon.log/file @log/!config)]
+  (let [saved @log/!config]
     (try
       (log/configure! {:seon.log/file path})
       (f)
-      (finally (log/configure! {:seon.log/file old})))))
+      (finally (reset! log/!config saved)))))
 
 ;; ============================================================
 ;; Tests
@@ -228,12 +228,31 @@
   ;; Direct contract test for the new behavior — :seon.log/file lives
   ;; in !config, not in a dynvar. This is the regression guard for the
   ;; Phase 1.5 -> Phase 2 migration.
-  (let [old  (:seon.log/file @log/!config)
-        path "logs/configure-bang-probe.log"]
+  (let [saved @log/!config
+        path  "logs/configure-bang-probe.log"]
     (try
       (log/configure! {:seon.log/file path})
       (is (= path (:seon.log/file @log/!config))
           ":seon.log/file is read from !config")
       (is (contains? @log/!config :seon.log/file-cap)
           "configure! preserves other keys")
-      (finally (log/configure! {:seon.log/file old})))))
+      (finally (reset! log/!config saved)))))
+
+(deftest unconfigured-process-has-no-file-sink
+  ;; The regression guard for the 2026-07-20 error-channel flood: every
+  ;; bin/test-cljs process shared the pod's repo-relative default file, so
+  ;; provider-failure fixtures ("500 boom", CUDA OOM) and receipt-test
+  ;; "tx FAILED: program row rejected" lines drowned the LIVE
+  ;; logs/pod-events.log at :error level. A process that never claimed a
+  ;; file must be console-only: no write target, an empty tail, no throw.
+  (let [saved @log/!config]
+    (try
+      (reset! log/!config (dissoc saved :seon.log/file))
+      (is (not (contains? @log/!config :seon.log/file))
+          "pristine config carries NO file — optional = absent")
+      (is (some? (log/error! {:seon.log/source ::probe
+                              :seon.log/message "console-only fixture noise"}))
+          "logging without a configured file still succeeds (console sink)")
+      (is (= [] (log/tail {:seon.log/n 5}))
+          "tail over no configured file is empty, never a throw")
+      (finally (reset! log/!config saved)))))
