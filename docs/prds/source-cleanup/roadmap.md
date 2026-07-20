@@ -202,6 +202,17 @@ tokens are frozen) returning only `pod-host/`, dated research/history, and
 dependency-owned terminology. No active authority may continue teaching
 “pod” as the current process name.
 
+Readiness re-audit (2026-07-20): Stage 2 is not freeze-ready. Active SCI/B2,
+database, UDS, execution, REPL, and web owners still overlap the rename; the
+default operator reports a retained branch source-intent mismatch; two named
+branch clusters retain `processes/pod.edn`; ten worktrees need explicit
+merge/discard/translate dispositions; and every existing `tmp/package-v*`
+artifact predates the rename and must be invalidated. Recent SCI-host files
+add active terminology absent from the dated inventory, so the exact sweep is
+recomputed only at the recorded freeze HEAD. Skill sources are edited first,
+then adapters regenerated with `bin/seon skills sync`/`skills check`; the MCP
+client restarts before its renamed round-trip can count as proof.
+
 ### Stage 3 — one logging convention
 
 Outcome (2026-07-20): logging source/test unit C is implemented by `51f28046`.
@@ -272,6 +283,9 @@ storage shootout and Integrant submodule. Markdown proof passed 22 tests / 341
 assertions. The integration correction keeps maintained web/CSS authorities
 pointing at `docs/seon/architecture/ui.md` and the live CSS tokens rather than
 teaching an archived PRD as current authority.
+Commit `bb5c8cd6` also repairs the hidden Datastar skill and synchronized
+adapter that still cited the archived PRD as current authority; a hidden-file
+sweep leaves only historical evidence references.
 
 Outcome (2026-07-20): `b819df26` retains and wires `seon.agent.ctx.usage`.
 Provider usage normalization now covers agreeing DeepSeek cache fields,
