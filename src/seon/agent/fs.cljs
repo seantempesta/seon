@@ -28,6 +28,7 @@
 (schema/register! :seon.agent.fs/content  :seon.code/value)
 (schema/register! :seon.agent.fs/ok?      :boolean)
 (schema/register! :seon.agent.fs/error    :string)
+(schema/register! :seon.agent.fs/denial  [:enum :allowlist])
 (schema/register! :seon.agent.fs/entries  [:vector :string])
 (schema/register! :seon.agent.fs/dir?     :boolean)
 (schema/register! :seon.agent.fs/file?    :boolean)
@@ -88,6 +89,7 @@
    [:seon.agent.fs/lines-returned {:optional true} :int]
    [:seon.agent.fs/total-lines    {:optional true} :int]
    [:seon.agent.fs/file-sha       {:optional true} :seon.agent.fs/file-sha]
+   [:seon.agent.fs/denial         {:optional true} :seon.agent.fs/denial]
    [:seon.agent.fs/error          {:optional true} :string]])
 
 (schema/register! :seon.agent.fs/write-request
@@ -100,6 +102,7 @@
   [:map
    [:seon.agent.fs/ok?     :boolean]
    [:seon.agent.fs/path    :string]
+   [:seon.agent.fs/denial  {:optional true} :seon.agent.fs/denial]
    [:seon.agent.fs/error   {:optional true} :string]])
 
 ;; edit-file — in-place edits: line-range OR unique exact-match replace.
@@ -132,6 +135,7 @@
    [:seon.agent.fs/context           {:optional true} :string]
    [:seon.agent.fs/context-from-line {:optional true} :int]
    [:seon.agent.fs/truncated?        {:optional true} :boolean]
+   [:seon.agent.fs/denial            {:optional true} :seon.agent.fs/denial]
    [:seon.agent.fs/error             {:optional true} :string]])
 
 (schema/register! :seon.agent.fs/list-request
@@ -143,6 +147,7 @@
    [:seon.agent.fs/ok?     :boolean]
    [:seon.agent.fs/path    :string]
    [:seon.agent.fs/entries {:optional true} [:vector :string]]
+   [:seon.agent.fs/denial  {:optional true} :seon.agent.fs/denial]
    [:seon.agent.fs/error   {:optional true} :string]])
 
 (schema/register! :seon.agent.fs/stat-request
@@ -156,6 +161,7 @@
    [:seon.agent.fs/dir?   {:optional true} :boolean]
    [:seon.agent.fs/file?  {:optional true} :boolean]
    [:seon.agent.fs/mtime  {:optional true} :any]
+   [:seon.agent.fs/denial {:optional true} :seon.agent.fs/denial]
    [:seon.agent.fs/error  {:optional true} :string]])
 
 (schema/register! :seon.agent.fs/match-ext   :string)
@@ -189,6 +195,7 @@
    [:seon.agent.fs/total-found {:optional true} :int]
    [:seon.agent.fs/truncated?  {:optional true} :boolean]
    [:seon.agent.fs/hint        {:optional true} :seon.agent.fs/hint]
+   [:seon.agent.fs/denial      {:optional true} :seon.agent.fs/denial]
    [:seon.agent.fs/error       {:optional true} :string]])
 
 ;; ── view — a line-numbered, bounded, sha-stamped read (the edit surface).
@@ -208,6 +215,7 @@
    [:seon.agent.fs/lines-returned {:optional true} :int]
    [:seon.agent.fs/total-lines    {:optional true} :int]
    [:seon.agent.fs/file-sha       {:optional true} :seon.agent.fs/file-sha]
+   [:seon.agent.fs/denial         {:optional true} :seon.agent.fs/denial]
    [:seon.agent.fs/error          {:optional true} :string]])
 
 ;; ── anchored edits — replace! / insert!. Deterministic-only mutation:

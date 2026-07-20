@@ -110,10 +110,11 @@
 
 (defn scope-denied [path]
   (let [roots (allowed-roots)]
-    (denied path
-            (if (empty? roots)
-              "seon.agent.fs has no allowed-roots configured (default-deny). Call (seon.agent.fs/configure! {:seon.agent.fs/allowed-roots [...]}) or set SEON_FS_ROOT."
-              (str "path outside allowed-roots " (pr-str roots))))))
+    (assoc (denied path
+                   (if (empty? roots)
+                     "seon.agent.fs has no allowed-roots configured (default-deny). Call (seon.agent.fs/configure! {:seon.agent.fs/allowed-roots [...]}) or set SEON_FS_ROOT."
+                     (str "path outside allowed-roots " (pr-str roots))))
+           :seon.agent.fs/denial :allowlist)))
 
 ;; ============================================================
 ;; read-file paging + recursive walk.

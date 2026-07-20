@@ -84,7 +84,10 @@
       (is (not (str/includes? (str (:seon.agent.fs/error in-scope))
                               "allowed-roots"))
           "under the granted root → past the allowlist (fails ENOENT, not denied)")
+      (is (nil? (:seon.agent.fs/denial in-scope))
+          "ordinary I/O failure carries no denial discriminator")
       (is (false? (:seon.agent.fs/ok? out-scope)))
+      (is (= :allowlist (:seon.agent.fs/denial out-scope)))
       (is (str/includes? (:seon.agent.fs/error out-scope) "allowed-roots")
           "outside the granted root → the allowlist denial"))))
 

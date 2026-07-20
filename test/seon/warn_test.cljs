@@ -51,8 +51,13 @@
    ::warn/fs-results
    [["EVLwarnFSDENY1"
      (str "{:seon.agent.fs/ok? false, :seon.agent.fs/path \"/etc/passwd\", "
-          ":seon.agent.fs/error \"path outside allowed-roots [\\\"/Users/x/work\\\"]\"}")
+          ":seon.agent.fs/denial :allowlist, "
+          ":seon.agent.fs/error \"host policy refused this path\"}")
      (js/Date. 230)]
+    ["EVLwarnFSIO001"
+     (str "{:seon.agent.fs/ok? false, :seon.agent.fs/path \"/Users/x/work/allowed-roots-notes\", "
+          ":seon.agent.fs/error \"EIO reading allowed-roots-notes\"}")
+     (js/Date. 235)]
     ["EVLwarnFSGRANT"
      "{:seon.agent.fs/allowed-roots [\"/Users/x/work\"], :seon.agent.fs/read-only? false}"
      (js/Date. 240)]]
@@ -184,7 +189,7 @@
       (is (= #{"EVLwarnFSDENY1"} (affected-syms response)))
       (is (str/includes?
            (:seon.warn/where (first (:seon.warn/affected response)))
-           "path outside allowed-roots"))))
+           "host policy refused this path"))))
   (testing "hop, slow-eval, and failing-test relations retain exact identity"
     (is (= #{"MSGwarntestHOP"}
            (affected-syms (warn/check-hop-exhausted (request)))))

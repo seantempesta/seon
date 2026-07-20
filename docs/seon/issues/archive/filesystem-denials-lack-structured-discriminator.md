@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, agent, architecture]
 ---
@@ -44,3 +44,17 @@ and select that attribute directly.
   attribute, with no substring or regex over rendered prose.
 - Tests prove that denial-message rewording does not change classification
   and that an ordinary filesystem failure is not reported as a grant denial.
+
+## Resolution
+
+Resolved on 2026-07-20. `seon.agent.fs/scope-denied` now adds the registered
+`:seon.agent.fs/denial :allowlist` attribute, and every direct filesystem
+response schema that can return that result admits the shared attribute.
+Caught I/O failures still come from `->err` without the discriminator.
+
+`seon.warn/check-fs-denied` reads each result as EDN, finds the nested response
+map by the discriminator, and uses error text only for display. The regression
+fixture deliberately rewords the denial without `allowed-roots`; a separate
+ordinary I/O failure includes `allowed-roots` in its prose and remains
+unclassified. Focused proof: `seon.agent.fs-test` passed 35 tests/157
+assertions and `seon.warn-test` passed 9 tests/78 assertions.

@@ -648,30 +648,14 @@
         ";; ⟹ #{[42]} — then use the returned eid directly:\n"
         "{:kb.note/doc 42}  ; NOT {:kb.note/doc [:kb.doc/path \"a.md\"]}")})
 
-(def ^:private fs-error-key-marker
-  "The pr-str'd `:seon.agent.fs/error` key — its presence in a result
-   projection marks an fs op that returned a failure envelope."
-  ":seon.agent.fs/error")
-
-(def ^:private fs-denial-marker
-  "Substring present in BOTH allowlist-denial messages seon.agent.fs
-   produces (`scope-denied`): \"path outside allowed-roots …\" and
-   \"…no allowed-roots configured…\". A grants-response also mentions
-   allowed-roots but never carries `:seon.agent.fs/error`, so the two
-   markers TOGETHER identify a denial."
-  "allowed-roots")
-
-(defn- fs-denial-text
-  "Extract the `:seon.agent.fs/error` denial string from a result-edn
-   projection (the result may nest the fs response inside a larger
-   value). Falls back to a clip of the raw edn when unparseable."
+(defn- fs-denial-response
+  "Return the first structured allowlist denial nested in result EDN."
   [edn-str]
   (let [v (try (edn/read-string edn-str) (catch :default _ nil))]
-    (or (->> (tree-seq coll? seq v)
-             (keep #(when (map? %) (:seon.agent.fs/error %)))
-             (filter #(and (string? %) (str/includes? % fs-denial-marker)))
-             first)
-        (clip edn-str 120))))
+    (->> (tree-seq coll? seq v)
+         (filter map?)
+         (filter #(= :allowlist (:seon.agent.fs/denial %)))
+         first)))
 
 (defn- fs-denied-eval-rows
   "[eval-id denial-text] rows for evals since the latest user message
@@ -680,14 +664,14 @@
    SUCCEEDS), so this scans the acquired `:seon.eval/result-edn` rows,
    not `:seon.eval/error`. The user-message cutoff is applied by the
    acquisition query; marker filtering happens here in Clojure, not in a
-   :where predicate (datahike-cljs string predicates in :where are a
-   known trap)."
+   :where predicate. Classification is exclusively the producer's
+   registered discriminator; error prose is display-only."
   [{data ::data}]
   (->> (::fs-results data)
-       (filter (fn [[_ edn _]]
-                 (and (str/includes? edn fs-error-key-marker)
-                      (str/includes? edn fs-denial-marker))))
-       (map (fn [[eid edn _]] [eid (fs-denial-text edn)]))))
+       (keep (fn [[eid edn _]]
+               (when-let [response (fs-denial-response edn)]
+                 [eid (or (:seon.agent.fs/error response)
+                          "filesystem path denied by allowlist")])))))
 
 (defn check-fs-denied
   "fs calls DENIED by the capability allowlist since the last user msg.
