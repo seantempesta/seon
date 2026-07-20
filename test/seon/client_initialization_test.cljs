@@ -14,6 +14,7 @@
    [seon.launch :as launch]
    [seon.runtime.admission :as admission]
    [seon.runtime.recovery :as recovery]
+   [seon.schema :as schema]
    [seon.state :as state]
    [shadow.cljs.devtools.client.env :as shadow-env]
    [shadow.cljs.devtools.client.node :as shadow-node]))
@@ -45,6 +46,27 @@
 
 (def ^:private configuration
   (config/resolve-config-singleton {}))
+
+(deftest managed-identity-attrs-follow-desired-registered-entities
+  (let [identity-attrs (deref #'client/desired-identity-attrs)
+        desired [{:seon.route/name :root}
+                 {:my.skills/name :search}
+                 {:seon.config/id :seon.config/system}
+                 {:example.managed/id "fourth"}]
+        catalog [{:seon.schema.catalog/id-attr :seon.route/name}
+                 {:seon.schema.catalog/id-attr :my.skills/name}
+                 {:seon.schema.catalog/id-attr :seon.config/id}
+                 {:seon.schema.catalog/id-attr :example.managed/id}
+                 {:seon.schema.catalog/id-attr :example.absent/id}]]
+    (with-redefs [schema/entity-catalog (constantly catalog)]
+      (is (= #{:seon.route/name
+               :my.skills/name
+               :seon.config/id
+               :example.managed/id}
+             (identity-attrs desired))
+          "a newly registered desired entity family joins reconciliation")
+      (is (not (contains? (identity-attrs desired) :example.absent/id))
+          "registered families absent from this desired population stay out"))))
 
 (deftest initial-agent-errors-fail-startup
   (is (true? (#'client/initial-agent-failure?

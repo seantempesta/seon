@@ -1919,6 +1919,16 @@
    [:seon.config/manifest :seon.config/manifest]
    [::configuration {:optional true} ::configuration]])
 
+(defn- desired-identity-attrs
+  "Registered entity identity attrs present in the desired population."
+  [desired]
+  (into #{}
+        (comp
+          (map :seon.schema.catalog/id-attr)
+          (filter (fn [identity-attr]
+                    (some #(contains? % identity-attr) desired))))
+        (schema/entity-catalog)))
+
 (defn ^:async apply-config!
   "Reconcile one resolved manifest into the config-managed database subset.
 
@@ -1951,7 +1961,7 @@
                  :seon.db/managed-scope
                  #{:seon.db.process/boot :seon.db.process/config}
                  :seon.db/managed-identity-attrs
-                 #{:seon.route/name :my.skills/name :seon.config/id}}))))))))
+                 (desired-identity-attrs desired)}))))))))
 
 (schema/register! ::start-runtime-request
   [:map {:closed true}
