@@ -70,10 +70,6 @@
 	path = reference-code/claude-code-lsps
 	url = https://github.com/boostvolt/claude-code-lsps.git
 	ignore = dirty
-[submodule "reference-code/integrant"]
-	path = reference-code/integrant
-	url = https://github.com/weavejester/integrant.git
-	ignore = dirty
 [submodule "reference-code/nippy"]
 	path = reference-code/nippy
 	url = https://github.com/taoensso/nippy.git
