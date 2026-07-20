@@ -299,6 +299,104 @@
           (.catch (fn [error] (is false (str "threw — " error))))
           (.finally done)))))
 
+(deftest later-run-presence-is-awaited-not-a-truthy-promise
+  ;; Regression: the sync form was `(boolean (db/query ...))` over a Promise,
+  ;; which is ALWAYS true — every notice vanished. Absence must return false.
+  (async done
+    (let [later-run? (deref #'recovery/later-run?)
+          original-query db/query]
+      (set! db/query (fn [_] (js/Promise.resolve nil)))
+      (-> (later-run? database "alpha" 70)
+          (.then (fn [absent]
+                   (is (false? absent)
+                       "no later run must derive false, not a truthy Promise")
+                   (set! db/query (fn [_] (js/Promise.resolve 9001)))
+                   (later-run? database "alpha" 70)))
+          (.then (fn [present]
+                   (is (true? present))
+                   (set! db/query
+                         (fn [_]
+                           (js/Promise.resolve
+                            {:seon.error/message "database unavailable"
+                             :seon.error/kind :core-bug})))
+                   (later-run? database "alpha" 70)))
+          (.then (fn [failed]
+                   (is (= "database unavailable"
+                          (:seon.error/message failed)))))
+          (.catch (fn [error] (is false (str "threw — " error))))
+          (.finally (fn []
+                      (set! db/query original-query)
+                      (done)))))))
+
+(defn- notice-query-stub
+  "Dispatch a recovery notice query on its distinguishing where clause."
+  [{later-run-result :later-run}]
+  (fn [{query :seon.db/query}]
+    (js/Promise.resolve
+     (let [text (pr-str query)]
+       (cond
+         (re-find #":db/txInstant" text)
+         #{["r12345678901" 70 #inst "2026-07-20T00:00:00.000-00:00"]}
+         (re-find #":seon.agent.run/agent" text) later-run-result
+         (re-find #":seon.agent.turn/status" text)
+         #{["run-a" "turn-a"] ["run-x" "turn-x"]}
+         (re-find #":seon.agent/run" text)
+         #{["alpha" "run-a"]}
+         :else (throw (ex-info "unexpected query" {:query query})))))))
+
+(deftest pending-notices-derive-and-clear-on-a-later-run
+  (async done
+    (let [original-query db/query
+          original-entity db/entity]
+      ;; Multi-arity like the real fn so the compiled arity-1 dispatch resolves.
+      (set! db/entity
+            (fn stub-entity
+              ([_]
+               (js/Promise.resolve
+                {:seon.runtime.recovery/id "r12345678901"
+                 :seon.runtime.recovery/reason :unexpected-exit
+                 :seon.runtime.recovery/detail "pod exited"}))
+              ([_ _] (stub-entity nil))))
+      (set! db/query (notice-query-stub {:later-run nil}))
+      (-> (recovery/pending-notices {:seon.db/db database})
+          (.then
+           (fn [notices]
+             (is (= 1 (count notices)))
+             (let [notice (first notices)]
+               (is (= "r12345678901" (:seon.runtime.recovery/id notice)))
+               (is (= :unexpected-exit
+                      (:seon.runtime.recovery/reason notice)))
+               (is (= "pod exited" (:seon.runtime.recovery/detail notice)))
+               (is (= 70 (::recovery/transaction notice)))
+               (is (= ["alpha"] (::recovery/agents notice)))
+               (is (= ["run-a"] (::recovery/runs notice)))
+               (is (= ["turn-a"] (::recovery/turns notice))
+                   "turns outside the pending run set are excluded"))
+             ;; A later run for the affected agent clears the notice.
+             (set! db/query (notice-query-stub {:later-run 9001}))
+             (recovery/pending-notices {:seon.db/db database})))
+          (.then (fn [notices]
+                   (is (= [] notices))))
+          (.catch (fn [error] (is false (str "threw — " error))))
+          (.finally (fn []
+                      (set! db/query original-query)
+                      (set! db/entity original-entity)
+                      (done)))))))
+
+(deftest pending-notices-return-a-query-failure-as-data
+  (async done
+    (let [original-query db/query
+          failure {:seon.error/message "history read failed"
+                   :seon.error/kind :core-bug}]
+      (set! db/query (fn [_] (js/Promise.resolve failure)))
+      (-> (recovery/pending-notices {:seon.db/db database})
+          (.then (fn [result]
+                   (is (= failure result))))
+          (.catch (fn [error] (is false (str "threw — " error))))
+          (.finally (fn []
+                      (set! db/query original-query)
+                      (done)))))))
+
 (deftest concurrent-write-stale-fence-is-terminal-data
   (async done
     (let [!requests (atom [])

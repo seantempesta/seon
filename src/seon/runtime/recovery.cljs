@@ -546,111 +546,150 @@
    [::turns ::turns]])
 (schema/register! ::pending-notices-request
   [:map [:seon.db/db :seon.db/db]])
-(schema/register! ::pending-notices-response [:vector ::notice])
+(schema/register! ::pending-notices-response
+  [:or [:vector ::notice] ::db/error])
 
-(defn- anchor-rows
+(defn- ^:async anchor-rows
   [history]
-  (db/query
+  (await
+   (db/query
     {:seon.db/db history
      :seon.db/query
      '[:find ?id ?tx ?at
        :where
        [?anchor :seon.runtime.recovery/id ?id ?tx true]
-       [?tx :db/txInstant ?at]]}))
+       [?tx :db/txInstant ?at]]})))
 
-(defn- repaired-agent-runs
+(defn- ^:async repaired-agent-runs
   [history transaction]
-  (->> (db/query
-         {:seon.db/db history
-          :seon.db/query
-          '[:find ?agent-id ?run-id
-            :in $ ?transaction
-            :where
-            [?agent :seon.agent/run ?run ?transaction false]
-            [?agent :seon.agent/id ?agent-id _ true]
-            [?run :seon.agent.run/id ?run-id _ true]]
-          :seon.db/args [transaction]})
-       (sort-by (juxt first second))
-       vec))
+  (let [rows (await
+              (db/query
+               {:seon.db/db history
+                :seon.db/query
+                '[:find ?agent-id ?run-id
+                  :in $ ?transaction
+                  :where
+                  [?agent :seon.agent/run ?run ?transaction false]
+                  [?agent :seon.agent/id ?agent-id _ true]
+                  [?run :seon.agent.run/id ?run-id _ true]]
+                :seon.db/args [transaction]}))]
+    (if (error-value? rows)
+      rows
+      (->> rows (sort-by (juxt first second)) vec))))
 
-(defn- interrupted-run-turns
+(defn- ^:async interrupted-run-turns
   [history transaction]
-  (->> (db/query
-         {:seon.db/db history
-          :seon.db/query
-          '[:find ?run-id ?turn-id
-            :in $ ?transaction
-            :where
-            [?turn :seon.agent.turn/status :interrupted ?transaction true]
-            [?turn :seon.agent.turn/id ?turn-id _ true]
-            [?turn :seon.agent.turn/run ?run _ true]
-            [?run :seon.agent.run/id ?run-id _ true]]
-          :seon.db/args [transaction]})
-       (sort-by (juxt first second))
-       vec))
+  (let [rows (await
+              (db/query
+               {:seon.db/db history
+                :seon.db/query
+                '[:find ?run-id ?turn-id
+                  :in $ ?transaction
+                  :where
+                  [?turn :seon.agent.turn/status :interrupted ?transaction true]
+                  [?turn :seon.agent.turn/id ?turn-id _ true]
+                  [?turn :seon.agent.turn/run ?run _ true]
+                  [?run :seon.agent.run/id ?run-id _ true]]
+                :seon.db/args [transaction]}))]
+    (if (error-value? rows)
+      rows
+      (->> rows (sort-by (juxt first second)) vec))))
 
-(defn- later-run?
+(defn- ^:async later-run?
   [history agent-id recovery-transaction]
-  (boolean
-    (db/query
-      {:seon.db/db history
-       :seon.db/query
-       '[:find ?run .
-         :in $ ?agent-id ?recovery-transaction
-         :where
-         [?agent :seon.agent/id ?agent-id _ true]
-         [?run :seon.agent.run/agent ?agent ?later-transaction true]
-         [(> ?later-transaction ?recovery-transaction)]]
-       :seon.db/args [agent-id recovery-transaction]})))
+  (let [run (await
+             (db/query
+              {:seon.db/db history
+               :seon.db/query
+               '[:find ?run .
+                 :in $ ?agent-id ?recovery-transaction
+                 :where
+                 [?agent :seon.agent/id ?agent-id _ true]
+                 [?run :seon.agent.run/agent ?agent ?later-transaction true]
+                 [(> ?later-transaction ?recovery-transaction)]]
+               :seon.db/args [agent-id recovery-transaction]}))]
+    (if (error-value? run)
+      run
+      (boolean run))))
 
-(defn pending-notices
+(defn- ^:async pending-agent-runs
+  [history transaction agent-runs]
+  (loop [remaining agent-runs
+         pending []]
+    (if (empty? remaining)
+      pending
+      (let [[agent-id _ :as row] (first remaining)
+            later (await (later-run? history agent-id transaction))]
+        (if (error-value? later)
+          later
+          (recur (rest remaining)
+                 (if later pending (conj pending row))))))))
+
+(defn- ^:async notice-for-anchor
+  [db history [recovery-id transaction at]]
+  (let [agent-runs (await (repaired-agent-runs history transaction))]
+    (if (error-value? agent-runs)
+      agent-runs
+      (let [pending (await (pending-agent-runs history transaction agent-runs))]
+        (if (error-value? pending)
+          pending
+          (let [pending-agent-ids (->> pending (map first) distinct vec)]
+            (when (seq pending-agent-ids)
+              (let [pending-run-ids (->> pending (map second) distinct vec)
+                    pending-run-set (set pending-run-ids)
+                    run-turns (await (interrupted-run-turns history transaction))]
+                (if (error-value? run-turns)
+                  run-turns
+                  (let [pending-turn-ids
+                        (->> run-turns
+                             (keep (fn [[run-id turn-id]]
+                                     (when (contains? pending-run-set run-id)
+                                       turn-id)))
+                             distinct
+                             sort
+                             vec)
+                        anchor
+                        (await
+                         (db/entity
+                          {:seon.db/db db
+                           :seon.db/ref
+                           [:seon.runtime.recovery/id recovery-id]}))]
+                    (if (error-value? anchor)
+                      anchor
+                      (cond->
+                       {:seon.runtime.recovery/id recovery-id
+                        :seon.runtime.recovery/reason
+                        (:seon.runtime.recovery/reason anchor)
+                        ::transaction transaction
+                        ::at at
+                        ::agents pending-agent-ids
+                        ::runs pending-run-ids
+                        ::turns pending-turn-ids}
+                        (:seon.runtime.recovery/detail anchor)
+                        (assoc :seon.runtime.recovery/detail
+                               (:seon.runtime.recovery/detail anchor))))))))))))))
+
+(defn ^:async pending-notices
   "Recovery facts whose affected agents still have no later run.
 
    Each result is derived from the anchor transaction's pointer retractions,
    interrupted-turn assertions, and the current history. Once an affected
    agent opens a later run it disappears from that notice; when none remain,
-   the notice disappears. This is the root canvas/AI-twin read model."
+   the notice disappears. This is the root canvas/AI-twin read model.
+   Database failures return as direct `:seon/error` values."
   {:malli/schema
    [:=> [:cat ::pending-notices-request] ::pending-notices-response]}
   [{:seon.db/keys [db]}]
-  (let [history (db/history db)]
-    (->> (anchor-rows history)
-         (sort-by second >)
-         (keep
-           (fn [[recovery-id transaction at]]
-             (let [agent-runs (repaired-agent-runs history transaction)
-                   pending-agent-runs
-                   (remove
-                     (fn [[agent-id _]]
-                       (later-run? history agent-id transaction))
-                     agent-runs)
-                   pending-agent-ids (->> pending-agent-runs (map first) distinct vec)
-                   pending-run-ids (->> pending-agent-runs (map second) distinct vec)
-                   pending-run-set (set pending-run-ids)
-                   pending-turn-ids
-                   (->> (interrupted-run-turns history transaction)
-                        (keep (fn [[run-id turn-id]]
-                                (when (contains? pending-run-set run-id)
-                                  turn-id)))
-                        distinct
-                        sort
-                        vec)]
-               (when (seq pending-agent-ids)
-                 (let [anchor
-                       (db/entity
-                         {:seon.db/db db
-                          :seon.db/ref
-                          [:seon.runtime.recovery/id recovery-id]})]
-                   (cond->
-                     {:seon.runtime.recovery/id recovery-id
-                      :seon.runtime.recovery/reason
-                      (:seon.runtime.recovery/reason anchor)
-                      ::transaction transaction
-                      ::at at
-                      ::agents pending-agent-ids
-                      ::runs pending-run-ids
-                      ::turns pending-turn-ids}
-                     (:seon.runtime.recovery/detail anchor)
-                     (assoc :seon.runtime.recovery/detail
-                            (:seon.runtime.recovery/detail anchor))))))))
-         vec)))
+  (let [history (db/history db)
+        rows (await (anchor-rows history))]
+    (if (error-value? rows)
+      rows
+      (loop [anchors (sort-by second > rows)
+             notices []]
+        (if (empty? anchors)
+          notices
+          (let [notice (await (notice-for-anchor db history (first anchors)))]
+            (cond
+              (error-value? notice) notice
+              (nil? notice) (recur (rest anchors) notices)
+              :else (recur (rest anchors) (conj notices notice)))))))))
