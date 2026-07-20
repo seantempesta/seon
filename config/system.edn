@@ -448,7 +448,13 @@
    ;; machinery — root/human decides per case with the existing functions.
    {:seon.agent.ctx/name :orphaned-agents :seon.agent.ctx/priority 43
     :seon.agent.ctx/token-cap 512
-    :seon.render/ai seon.agent.ctx.subagents/orphaned-agents-block}]}
+    :seon.render/ai seon.agent.ctx.subagents/orphaned-agents-block}
+   ;; The only deliberately live prompt bytes. Root-only, ordered after every
+   ;; cacheable/volatile body, and hard-capped by the shared block cap owner.
+   {:seon.agent.ctx/name :free-dynamic-tail
+    :seon.agent.ctx/priority 1000
+    :seon.agent.ctx/token-cap 128
+    :seon.render/ai seon.agent.ctx.transcript/readline-block}]}
 
  ;; ── MULTI-AGENT dials (multiagent-context-spec) — all OPTIONAL; each absent
  ;; key falls back to the accessor default (byte-identical to today). Shown

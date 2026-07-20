@@ -418,9 +418,10 @@
                   [:orphaned-agents 43]
                   [:plan 45]
                   [:canvas 90]
-                  [:transcript 100]]
+                  [:transcript 100]
+                  [:free-dynamic-tail 1000]]
                  (order root))
-              "root is one additive tree with its dynamic fleet canvas near the tail")))))
+              "root ends with one capped free dynamic tail")))))
 
 (deftest acme-manifest-inherits-context-and-adds-only-product-tools
   (with-env

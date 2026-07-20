@@ -42,6 +42,11 @@
     [?schema :seon.schema/key ?attr]
     [?entity ?attr _]])
 
+(def ^:private database-instant-query
+  '[:find (max ?instant) .
+    :where
+    [?transaction :db/txInstant ?instant]])
+
 (defn- since-query
   [find where cutoff]
   (if cutoff
@@ -127,7 +132,8 @@
               {::protocol/operation protocol/schema-operation}
               (query-member schema-provenance-query [] 3000000 65536 2097152)
               (query-member schema-forms-query [] 3000000 65536 2097152)
-              (query-member attribute-counts-query [] 5000000 65536 2097152)]
+              (query-member attribute-counts-query [] 5000000 65536 2097152)
+              (query-member database-instant-query [] 100000 1 1024)]
              ::db/max-result-weight 3670016}))
         first-members (::db/results first-result)]
     (if-not (and (not (:seon.error/message first-result))
@@ -136,9 +142,9 @@
        :seon.error/data first-members}
       (let [[cutoff-member eval-ns-member assignment-member fn-member
              schema-member provenance-member
-             forms-member counts-member] first-members
+             forms-member counts-member instant-member] first-members
             cutoff (ffirst (member-result cutoff-member))
-            now (js/Date.)
+            now (member-result instant-member)
             runtime-result
             (await (db/execute-many
                      {::db/db database

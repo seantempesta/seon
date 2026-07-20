@@ -16,7 +16,6 @@
     [seon.db :as db]
     [seon.db.protocol :as protocol]
     [seon.derive :as derive]
-    [seon.eval :as seval]
     [seon.handlers.eval :as eval-handler]
     [seon.render :as render]
     [seon.schema :as schema]))
@@ -92,21 +91,16 @@
 (def ^:private default-turn-eviction-size (schema-default ::turn-eviction-size))
 (def ^:private default-settled-token-cap  (schema-default ::settled-token-cap))
 
-;; The folded live readline at the very bottom — the ONE line of the block
-;; that reads the live `now`. Default true (byte-parity). `false` drops it:
-;; the `seon.repl.autocomplete` projection profile renders the transcript
-;; as a byte-exact function of the db VALUE alone (as-of replay), so the
-;; one moving line is switched off there.
-(schema/register! ::readline? [:boolean {:default true}])
+;; The transcript body is pure over its database value. The deliberately live
+;; readline is a separate root-only terminal block ([[readline-block]]), so it
+;; cannot contaminate this cacheable body.
+(schema/register! ::readline? [:boolean {:default false}])
 
-;; RUNTIME-CACHE bytes — the `⟸ result/<id>` handles depend on exact
-;; membership in the bounded result runtime
-;; (`seval/result-live?`): the same db value renders different bytes after
-;; eviction or a pod restart. Default true (byte-parity). `false` renders
-;; every eval in the runtime-INDEPENDENT form (no handles), so an as-of export
-;; reproduces inference bytes regardless of process/cache state — the
-;; `seon.repl.autocomplete` profile sets it off.
-(schema/register! ::result-handles? [:boolean {:default true}])
+;; Result handles are an execution optimization, never prompt truth. Ordinary
+;; context therefore renders the database-stable inline form by default; an
+;; explicit true is retained only as a stored/profile compatibility dial and
+;; still cannot consult process-local result membership.
+(schema/register! ::result-handles? [:boolean {:default false}])
 
 ;; ============================================================
 ;; Config-driven agent-init CP-3 — reactive config-on-record reads.
@@ -559,7 +553,7 @@
 (defn- eval->event
   "Convert one eval row into a transcript event at its optional turn index."
   ([turn-idx e]
-   (eval->event turn-idx e (seval/result-live? (:seon.eval/id e))))
+   (eval->event turn-idx e false))
   ([turn-idx e result-live?]
   (cond->
     {::at           (:seon.eval/at e)
@@ -680,6 +674,12 @@
          (when (= "root" id) (str (host-telemetry) "\n"))
          ns-str "=> ")))
 
+(defn readline-block
+  "Render the root-only free dynamic tail."
+  {:malli/schema [:=> [:cat :seon.render/section-request] :string]}
+  [{:seon.agent/keys [id] :as input}]
+  (if (= "root" id) (readline input) ""))
+
 (defn- ordered-events
   "The agent's full flat event stream — messages + evals UNIONed, sorted
    by FIXED stored `:at` (byte-stable), with `; in <ns>` markers threaded
@@ -712,8 +712,7 @@
                (for [{turn-idx ::turn-idx :as turn} turns
                      e (sort-by (juxt :seon.eval/at :db/id)
                                 (:seon.agent.turn/evals turn))]
-                 (eval->event turn-idx e
-                              (seval/result-live? (:seon.eval/id e)))))
+                 (eval->event turn-idx e false)))
         kind-rank {:message 0 :eval 1}
         sorted (sort-by (juxt #(.getTime ^js (::at %))
                               #(kind-rank (::kind %) 9)

@@ -45,7 +45,8 @@
      {::protocol/success? true ::protocol/schema {}}
      (member [[:seon.agent/id :seon.db.process/boot]])
      (member [])
-     (member [])]}
+     (member [])
+     (member (js/Date. 7200000))]}
    {::db/results (vec (repeat 6 (member [])))}])
 
 (defn- block-for

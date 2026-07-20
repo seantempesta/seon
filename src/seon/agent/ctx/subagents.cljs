@@ -148,6 +148,11 @@
 (def ^:private breaker-selector
   [:seon.config.breaker/crash-count :seon.config.breaker/window-ms])
 
+(def ^:private database-instant-query
+  '[:find (max ?instant) .
+    :where
+    [?transaction :db/txInstant ?instant]])
+
 (defn- query-member
   ([query-form arguments]
    (query-member query-form arguments 4096 524288))
@@ -249,14 +254,17 @@
                    ::db/members
                    [(query-member direct-children-query [id] 4096 262144)
                     (pull-member breaker-selector
-                                 [:seon.config/id config/cluster-config-id])]
+                                 [:seon.config/id config/cluster-config-id])
+                    (query-member database-instant-query [] 1 1024)]
                    ::db/max-result-weight 524288})))
-        [children-member breaker-member] (::db/results stage-one)
+        [children-member breaker-member instant-member] (::db/results stage-one)
         children-result (member-result children-member)
-        breaker-row (or (member-result breaker-member) {})]
+        breaker-row (or (member-result breaker-member) {})
+        database-instant (member-result instant-member)]
     (cond
       (or (not (true? (::protocol/success? children-member)))
-          (not (true? (::protocol/success? breaker-member))))
+          (not (true? (::protocol/success? breaker-member)))
+          (not (true? (::protocol/success? instant-member))))
       (str "[subagents] render failed: " (pr-str (::db/results stage-one)))
 
       (empty? children-result)
@@ -266,7 +274,7 @@
       (let [overflow? (> (count children-result) max-children)
             children (vec (take max-children children-result))
             child-ids (mapv first children)
-            now (js/Date.)
+            now database-instant
             breaker-n (get breaker-row :seon.config.breaker/crash-count 3)
             breaker-w (get breaker-row :seon.config.breaker/window-ms 1800000)
             since (js/Date. (- (.getTime now) breaker-w))

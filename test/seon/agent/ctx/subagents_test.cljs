@@ -91,7 +91,8 @@
             [{::db/results
               [(success [["child" "compute" absent]])
                (success {:seon.config.breaker/crash-count 4
-                         :seon.config.breaker/window-ms 60000})]}
+                         :seon.config.breaker/window-ms 60000})
+               (success now)]}
              {::db/results
               [(success [["child" "run" 6 absent absent]])
                (success [["child" 1]])
@@ -110,7 +111,7 @@
           (.then
             (fn [out]
               (is (str/includes? out "child [running]"))
-              (is (= [2 4] (mapv (comp count ::db/members) @requests)))
+              (is (= [3 4] (mapv (comp count ::db/members) @requests)))
               (is (every? #(identical? database (::db/db %)) @requests)
                   "both batches use the inherited database value")
               (is (every? #(identical? database (::db/db %)) @contexts)
@@ -131,7 +132,7 @@
             (fn [_]
               (swap! calls inc)
               (js/Promise.resolve
-                {::db/results [(success []) (success {})]})))
+                {::db/results [(success []) (success {}) (success now)]})))
       (-> (sub/subagents-block {:seon.agent/id "parent" ::db/db database} nil)
           (.then (fn [out]
                    (is (= "" out))

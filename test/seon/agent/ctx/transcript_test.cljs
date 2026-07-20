@@ -23,6 +23,24 @@
    :seon.agent.run/turn-count 0
    :seon.agent.run/form-count 0})
 
+(deftest eval-events-are-independent-of-process-local-result-membership
+  (let [event ((deref #'transcript/eval->event)
+               0 {:seon.eval/id "stable-result"
+                  :seon.eval/at (js/Date. 1)
+                  :seon.eval/ok? true
+                  :seon.eval/source "(+ 1 1)"
+                  :seon.eval/result-edn "2"})]
+    (is (false? (:seon.agent.ctx.transcript/result-live? event))
+        "ordinary context derives handle absence from stored data only")))
+
+(deftest live-readline-is-confined-to-the-root-tail
+  (is (= "" (transcript/readline-block
+              (assoc acquired-empty :seon.agent/id "worker"))))
+  (is (str/includes?
+       (transcript/readline-block
+        (assoc acquired-empty :seon.agent/id "root"))
+       "root")))
+
 (defn- member-result [result]
   {:seon.db.protocol/success? true
    :datahike.query/result result})
