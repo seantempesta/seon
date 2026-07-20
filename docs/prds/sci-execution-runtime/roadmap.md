@@ -6,6 +6,39 @@ tags: [prd, agent, architecture, database]
 
 # Sci execution runtime roadmap
 
+## Program goal (owner, 2026-07-20 night)
+
+**Complete the transition: Seon runs fully on this architecture.** The
+graduation gate is a working system — every agent on a context/host, the
+child fleet deleted, three suites green, the drills passing at
+integration level, and one live demonstration: a cluster of 100 agents
+doing real work (defs, db, capabilities, canvas) surviving a host kill
+and a pod restart without fact loss or operator intervention. Exploration
+is over (B1/B2/C1/seam all PASS); this roadmap is now the active
+transition ledger.
+
+## Transition ledger (dependency order)
+
+| # | Unit | State |
+|---|---|---|
+| U1 | seon.host skeleton + kill drill | **DONE** `cd239b79` |
+| U2 | wrapper registry + capability op-id receipts | ready |
+| U1.5 | pod dials the host: tier-as-data dispatch, one REAL turn end-to-end (pod renders, host evals) | ready |
+| U4 | eval-record/receipt/corpus integration over the marked seams (subsumes register R2 — the program-row rejection diagnosis) | after U1.5 |
+| U5 | toolkit port: .cljc the db-boundary 46%; capability proxies for the js-bound tail | parallel-safe |
+| U3 | graduation walking skeleton (one corpus fn: fingerprint → both-tier tests → JVM eval → epoch re-link) | after U2 |
+| U6 | instrumentation over sci vars (B1 deferred item 5) | after U4 |
+| U7 | park/idle policy + warm spares (owner-ruled shape) | after U1.5 |
+| U8 | steering/context re-alignment: all agent-facing guidance teaches the sync idiom | before cutover |
+| U9 | await-corpus migration pass (measured, small) | before cutover |
+| U10 | integration drills: host kill + pod restart with live agents, derived notices proven | gate |
+| U11 | children retirement, deletion commit, architecture docs + one-mechanism table | cutover |
+| U12 | graduation demo: N=100 live fleet, real work, kill + restart survival | **the gate** |
+
+Concurrent: outside agents complete the source-cleanup stages; the
+optional Bun sci tier (variant B) is decided at U11 with C2's js-bound
+audit.
+
 ## Outcome
 
 Replace the execution child's self-host `cljs.js` engine with sci's
