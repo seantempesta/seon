@@ -25,7 +25,7 @@
 (schema/register! ::hint :string)
 (schema/register! ::full? :boolean)
 (schema/register! ::functions-request
-  [:map
+  [:map {:closed true}
    [::ns ::ns]
    [:seon.db/db {:optional true} :seon.db/db]])
 (schema/register!
@@ -36,7 +36,7 @@
    [::count {:optional true} ::count]
    [::error {:optional true} ::error]
    [::hint  {:optional true} ::hint]])
-(schema/register! ::selection-request [:map [::ns ::ns]])
+(schema/register! ::selection-request [:map {:closed true} [::ns ::ns]])
 (schema/register!
   ::selection-response
   [:map

@@ -55,7 +55,7 @@
 
 ;; ── status-line ─────────────────────────────────────────────────────
 (schema/register! ::status-line-request
-  [:map
+  [:map {:closed true}
    [::label ::label]
    [::value ::value]
    [::tone {:optional true} ::tone]])
@@ -79,7 +79,7 @@
 
 ;; ── kv-table ────────────────────────────────────────────────────────
 (schema/register! ::kv-table-request
-  [:map
+  [:map {:closed true}
    [::title {:optional true} ::title]
    [::rows  ::rows]])
 
@@ -109,7 +109,7 @@
 
 ;; ── badge ───────────────────────────────────────────────────────────
 (schema/register! ::badge-request
-  [:map
+  [:map {:closed true}
    [::label ::label]
    [::tone {:optional true} ::tone]])
 
@@ -133,7 +133,7 @@
 
 ;; ── bullets ─────────────────────────────────────────────────────────
 (schema/register! ::bullets-request
-  [:map
+  [:map {:closed true}
    [::title {:optional true} ::title]
    [::items ::items]])
 
@@ -158,7 +158,7 @@
 
 ;; ── progress ────────────────────────────────────────────────────────
 (schema/register! ::progress-request
-  [:map
+  [:map {:closed true}
    [::label   ::label]
    [::current ::current]
    [::total   ::total]
@@ -191,7 +191,7 @@
 
 ;; ── table ───────────────────────────────────────────────────────────
 (schema/register! ::table-request
-  [:map
+  [:map {:closed true}
    [::title {:optional true} ::title]
    [::columns    ::columns]
    [::table-data ::table-data]])
@@ -244,7 +244,7 @@
 
 ;; ── section ─────────────────────────────────────────────────────────
 (schema/register! ::section-request
-  [:map
+  [:map {:closed true}
    [::title  ::title]
    [::blocks ::blocks]])
 

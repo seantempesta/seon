@@ -39,7 +39,7 @@
 (schema/register! ::source :string)
 (schema/register!
   ::remember-request
-  [:map
+  [:map {:closed true}
    [::claim      ::claim]
    [::source     ::source]
    [::confidence ::confidence]])
@@ -66,7 +66,7 @@
 (schema/register! ::about [:string {:min 1}])
 (schema/register! ::limit [:int {:min 1 :max 50}])
 (schema/register! ::recall-request
-  [:map
+  [:map {:closed true}
    [::about ::about]
    [::limit {:optional true} ::limit]])
 (schema/register! ::match [:enum :text :semantic])

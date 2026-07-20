@@ -27,7 +27,7 @@
 (schema/register! ::group-row [:map [::group ::group] [::total ::total]])
 (schema/register! ::error     :string)              ; output: why a fetch failed
 
-(schema/register! ::rows-request   [:map [::attr ::attr]])
+(schema/register! ::rows-request   [:map {:closed true} [::attr ::attr]])
 (schema/register! ::rows-response                   ; rows — an envelope OR an error
   [:map
    [:seon.result/ok? :seon.result/ok?]
@@ -35,9 +35,12 @@
    [:seon.items/count {:optional true} :seon.items/count]
    [::error {:optional true} ::error]])
 (schema/register! ::reduce-request  ; sum-by / max-by — items + the field
-  [:map [:seon.items/items :seon.items/items] [::key ::key]])
+  [:map {:closed true} [:seon.items/items :seon.items/items] [::key ::key]])
 (schema/register! ::group-request
-  [:map [:seon.items/items :seon.items/items] [::group-key ::group-key] [::key ::key]])
+  [:map {:closed true}
+   [:seon.items/items :seon.items/items]
+   [::group-key ::group-key]
+   [::key ::key]])
 
 (defn ^{:async true :seon.fn/agent-facing? true} rows
   "Fetch every entity carrying `attr` as self-describing maps.

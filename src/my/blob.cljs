@@ -126,7 +126,7 @@
 (schema/register! ::total-lines    :int)
 
 (schema/register! ::put-request
-  [:map
+  [:map {:closed true}
    [::content ::content]
    [::media   {:optional true} ::media]])
 
@@ -140,12 +140,12 @@
 (schema/register! ::hashes [:vector {:min 1} ::hash])
 
 (schema/register! ::concat-request
-  [:map
+  [:map {:closed true}
    [::hashes ::hashes]
    [::media  {:optional true} ::media]])
 
 (schema/register! ::get-request
-  [:map [::hash ::hash]])
+  [:map {:closed true} [::hash ::hash]])
 
 (schema/register! ::get-response
   [:map
@@ -156,7 +156,7 @@
    [::error   {:optional true} ::error]])
 
 (schema/register! ::text-request
-  [:map
+  [:map {:closed true}
    [::hash      ::hash]
    [::from-line {:optional true} ::from-line]
    [::max-lines {:optional true} ::max-lines]
@@ -177,7 +177,7 @@
    [:seon.error/data    {:optional true} [:map [::media {:optional true} ::media]]]])
 
 (schema/register! ::stat-request
-  [:map
+  [:map {:closed true}
    [::hash ::hash]
    [::db/db {:optional true} :seon.db/db]])
 
