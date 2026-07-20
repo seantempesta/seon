@@ -39,6 +39,9 @@ share the existing structural comment boundary with authored bytes intact.
 G8's non-canvas checkpoint `d883bb05` covers 25 request maps and closes 19
 public schemas (55 tests / 289 assertions); its issue remains open for the ten
 `my.canvas` request schemas.
+G8 is subsequently closed by `94e38e15`+`ee6dde8c`: all 35 audited request
+maps reject extra keys through Malli, with the final canvas/audit gate passing
+9 tests / 104 assertions.
 
 ## Scheduled — claimed by a stage, awaiting execution order
 
@@ -54,7 +57,7 @@ public schemas (55 tests / 289 assertions); its issue remains open for the ten
 | Envelope-key + ok?-discriminator convergence (**ruling flipped: explicit ok? key** — triage counterevidence `installed-schema-map-misclassified`; lane B's live bug confirmed the class) | 5 | [[research/envelope-symbol-conformance-2026-07-20]] |
 | Unresolved-symbol single semantics; render nil-vanish | 5 | same |
 | Deletions: ctx.usage wiring (Muse shape first), docstring-predicate .cljc, canvas test B9, embed retry collapse, marker-token mirror, rows->projection dedup | 5 | [[deletions-and-wiring]], roadmap stage 5 |
-| Data-browser implementation (measured, corrected) | 1.5 | [[data-browser]] |
+| Data-browser implementation (measured, corrected); bounded-walk Unit 0 first | 1.5 | [[data-browser]], [[research/data-browser-readiness-audit-2026-07-20]] |
 | Triage FOLD rows (10: [:maybe] regs inside G2, transact-response union, home-requires merge, ALS tx-meta unify, parse-forms keys, debug-feed threading, turn-debug ref projection, 2 test fixes) | named stages | [[research/issues-triage-2026-07-20]] |
 
 ## Rulings 2026-07-20 (third round)

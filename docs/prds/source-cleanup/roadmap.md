@@ -106,6 +106,15 @@ the same projection. Gate: invalid missing-key and wrong-type probes, ambiguous
 valid matches, a no-schema value, a large child-owned value with paging, route
 ownership refusal, and honest unavailable rendering after child retirement.
 
+Readiness audit `2961b193` adds a mandatory Unit 0 before that migration:
+`seon.render.value` currently bounds retained map keys only after recursively
+sampling every entry, while opaque summaries can materialize complete printed
+values before clipping. The new blocker issue
+`data-browser-map-sampler-walks-unbounded-input` records the first mechanism.
+Bounded traversal and non-materializing summaries must be proven before the
+schema projection, UI, route, or protected child-sampling transport widens
+this path's fanout.
+
 ### Stage 1.6 — corrective steering gaps
 
 In progress (2026-07-20): root task `/root` owns the strict directive-error
@@ -128,6 +137,11 @@ and all reject unknown keys through Malli's schema rule. The five owner suites
 plus the audit passed 55 tests / 289 assertions. The issue remains open until
 the ten `my.canvas` request maps, now free of the G11 ownership collision, pass
 the same derived acceptance gate.
+
+G8 is now closed by `94e38e15`+`ee6dde8c`: the ten canvas request maps use the
+same Malli closed-map semantics, the registry-derived audit covers all 35
+request maps, and the combined canvas/audit gate passed 9 tests / 104
+assertions. No parallel runtime key guard was introduced.
 
 From [[research/corrective-steering-audit-2026-07-20]] (all persist-time or
 pure-render, single execution, byte-identity safe):
