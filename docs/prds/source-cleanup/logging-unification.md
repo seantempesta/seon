@@ -50,8 +50,10 @@ Writer + CLJS suites; one log line from each process shows the same shape;
 events log pair and operator logs after one full `bin/seon restart` +
 Inspect smoke.
 
-## Open questions for the owner
+## Round-trip disposition (explained to owner 2026-07-20)
 
-1. Round-trip rewrites (item 3): do them now, or record-and-defer?
-   (Recommended: do the two `turn.cljs` sites now while the file is quiet;
-   defer canvas/transcript to their next touch.)
+The sites throw an already-formed error VALUE purely as an internal
+early-return between `run-turn!` pipeline steps; the outer catch converts
+it back to the documented `{:seon.agent.turn/status :error}` value. Contract
+is respected. Restructuring means refactoring the most load-bearing engine
+function — deferred to each file's next natural touch; recorded here.

@@ -41,15 +41,21 @@ gates). Item 4 is downstream-owned: rename during a quiet acme window.
 Update `CLAUDE.md`/`AGENTS.md` §Vocabulary with the revised glossary from
 the audit report in the same series.
 
-## Open questions for the owner
+## Owner rulings 2026-07-20 (second round)
 
-1. **"panel"** (28 uses; the interactive value drill-down in
-   `render/value.cljs`, `my/plan/internal.cljs`): legislate it as the term
-   for that component (recommended — it is coherent and distinct from
-   surface/card/canvas), or rename to an existing word?
-2. **feed vs stream vs subscription** (227/215/51 uses): recommend "feed"
-   for database-derived channels (`:seon.web.feed/*` already owns it) and
-   "stream" ONLY at SSE/LLM seams where it is the dependency's word.
-   Confirm?
-3. **`docs/seon/pod/REPL-WORKFLOW.md`**: fold into
-   `docs/seon/architecture/` (recommended) or `docs/seon/reference/`?
+1. **"panel" is not legislated — it is a design smell.** The owner wants ONE
+   schema-aware data inspector: a component that detects the registered
+   Malli schemas present in a structure (a single structure may carry more
+   than one) and renders values with that understanding, used everywhere a
+   value is shown to a person. Research lane owns the design
+   ([[value-inspector-research assignment|research/]] — report lands under
+   `research/`). Until it lands, no panel renames.
+2. **feed/stream must be grounded seam names, not abstractions.** The owner
+   rejects naming without a grounded reason. Research lane resolves: what
+   the Datahike side actually is (transaction reports through `listen!`,
+   writer interests, `seon.reactive` registrations), what Datastar's own
+   vocabulary calls the wire behavior (`datastar-patch-elements` etc.), and
+   proposes names copied from those seams. Until it lands, no feed/stream
+   renames.
+3. `docs/seon/pod/REPL-WORKFLOW.md` folds into `docs/seon/architecture/`
+   (ruled).

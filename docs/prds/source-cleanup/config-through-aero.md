@@ -79,10 +79,8 @@ idempotence (re-apply writes nothing when converged); live proof that
 transacting a config fact changes behavior without restart; `rg` shows zero
 runtime env reads outside the aero manifest boundary and process bootstrap.
 
-## Open questions for the owner
+## Owner rulings 2026-07-20 (second round)
 
-1. `SEON_BRAND_*` appears designed for downstream white-labeling — should
-   brand keys live in the downstream overlay manifest (acme.edn) rather than
-   system.edn? (Recommended: yes.)
-2. Should `bin/seon config apply` gain a `--watch` (re-apply on manifest
-   change) or stay explicit-only? (Recommended: explicit-only.)
+1. Brand keys live in the downstream overlay manifest (acme.edn), never
+   system.edn.
+2. `bin/seon config apply` stays explicit-only.

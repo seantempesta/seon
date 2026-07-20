@@ -56,9 +56,15 @@ usage line renders live for one real turn (and omits for a turn without
 usage); submodule removal leaves `git submodule status` clean and
 `bin/seon up` unaffected.
 
-## Open questions for the owner
+## Owner rulings 2026-07-20 (second round)
 
-1. Usage wiring surface: inline line in the transcript block (recommended)
-   or a separate ctx block family with its own priority?
-2. `docs/prds/namespace-ui/design-system.md` is superseded by deletion of
-   its implementation — archive the PRD folder or leave as history?
+1. What `ctx.usage` actually does (owner asked): it parses the persisted
+   per-turn `:seon.agent.turn/llm-usage` provider response EDN and
+   normalizes it to a `{total, cached, output, provider-shape}` TOKEN
+   triple (provider ground truth — DeepSeek `prompt_tokens` includes
+   cached, Anthropic `input_tokens` excludes + cache fields add). It is
+   tokens, not characters — it complements `seon.ai.tokens/estimate`
+   (estimates) with provider-reported actuals. Owner direction: likely the
+   debug view; the observability researcher confirms the exact surface
+   (debug turn projection + agent page) before wiring.
+2. Archive the namespace-ui PRD folder (ruled).
