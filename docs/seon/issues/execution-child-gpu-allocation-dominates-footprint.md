@@ -5,7 +5,7 @@ severity: friction
 tags: [issue, agent, architecture]
 ---
 
-# Execution-child GPU allocation dominates its memory footprint
+# Execution-child native heap mislabeled as GPU dominates footprint
 
 ## Problem
 
@@ -33,13 +33,26 @@ objects: 7.0 MB. The runtime is NOT the cost; the execution child's
 inflation with a proven ~6 MB floor. The bisect below now has a clean
 baseline on both ends.
 
+## Root identification (2026-07-20, from vendored Bun source)
+
+The "IOAccelerator" label is a mislabel: Bun's mimalloc tags every OS
+allocation `VM_MAKE_TAG(os_tag)` with default `os_tag` 100
+(`reference-code/bun/vendor/mimalloc/src/options.c:143`,
+`src/prim/unix/prim.c:369-373`), and macOS VM tag 100 is
+`VM_MEMORY_IOACCELERATOR` — vmmap renders mimalloc arenas (128 MB
+chunks + 512 MB reserved tail, observed exactly) as GPU memory. The
+child's real cost is ~160 MB of ordinary native heap.
+
 ## Investigation (plan work, not yet a fix)
 
-Find what triggers the IOAccelerator mapping at child startup: suspects
-are a graphics-adjacent API touched during bootstrap (canvas/WebGPU/
-CoreGraphics via a transitive dependency) or a vendored-Bun default that
-can be disabled headless. Probe: bisect child startup with vmmap after
-each phase; try JSC/Bun flags; compare a bare `bun -e ""` footprint.
+Prime suspect: the child loads the DEV artifact — 933 files / 46 MB of
+`.shadow-cljs/builds/execution/dev/out/cljs-runtime` — with shadow's
+module map, retained source strings, and self-host analysis state
+resident. Candidate simple fix: a compact release-style child artifact
+(single bundle, no dev module graph, trimmed bootstrap cache). Bisect:
+vmmap after artifact load vs compiler init vs database session; compare a
+release-build child. Optionally set `mi_option_os_tag` to an app tag so
+future profiles label the heap honestly.
 
 ## Why it matters
 
