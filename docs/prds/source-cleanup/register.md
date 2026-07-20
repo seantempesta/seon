@@ -30,7 +30,9 @@ Stage-5 dead UI deletion (`4ac2902e`), public-boundary canvas test B9
 (`87d415e8`, Babashka 74 assertions, CLJS 265 assertions); fragile-index H2
 consumer cleanup (`3ebc9e9b`, focused 8 tests / 29 assertions, all three full
 gates green). H2's filesystem-denial classifier remains open behind a missing
-producer discriminator.
+producer discriminator. Corrective-steering G11 source/tests are implemented
+by `9778fa86` (29 tests / 99 assertions); its issue remains open for the frozen
+real-browser lifecycle gate.
 
 ## Scheduled — claimed by a stage, awaiting execution order
 

@@ -228,6 +228,15 @@ remaining filesystem-denial match is correctly left open: its producer gives
 denials and ordinary I/O failures the same keys, so the open issue owns the
 required producer contract rather than adding another prose heuristic.
 
+Corrective-steering G11 is implemented by `9778fa86` with evidence in
+`bf0f4bef`: canvas controls use the existing Datastar indicator/fetch lifecycle
+for stable pending, disabled, busy, and bounded failure states; automatic
+transport retry is disabled for non-idempotent calls; and failed calls preserve
+the standard structured error value through the HTTP response. Focused proof
+passed 29 tests / 99 assertions. The issue remains open pending the coordinated
+real-browser pending/success/failure/corrected-retry/rapid-submit gate on a
+frozen ready client.
+
 Additional stage-5 items from
 [[research/bespoke-reactive-sweep-2026-07-20]] and
 [[research/envelope-symbol-conformance-2026-07-20]]: replace the
