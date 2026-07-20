@@ -228,6 +228,13 @@ remaining filesystem-denial match is correctly left open: its producer gives
 denials and ordinary I/O failures the same keys, so the open issue owns the
 required producer contract rather than adding another prose heuristic.
 
+That remaining H2 producer contract is closed by `431ce8a7`: filesystem scope
+denials carry the registered `:seon.agent.fs/denial :allowlist` attribute,
+ordinary I/O failures do not, and `seon.warn` parses stored EDN and selects the
+attribute rather than prose. Inverted-wording regressions prove the boundary;
+the focused filesystem and warning gates passed 44 tests / 235 assertions, and
+the issue is archived.
+
 Corrective-steering G11 is implemented by `9778fa86` with evidence in
 `bf0f4bef`: canvas controls use the existing Datastar indicator/fetch lifecycle
 for stable pending, disabled, busy, and bounded failure states; automatic

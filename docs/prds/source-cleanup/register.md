@@ -30,7 +30,8 @@ Stage-5 dead UI deletion (`4ac2902e`), public-boundary canvas test B9
 (`87d415e8`, Babashka 74 assertions, CLJS 265 assertions); fragile-index H2
 consumer cleanup (`3ebc9e9b`, focused 8 tests / 29 assertions, all three full
 gates green). H2's filesystem-denial classifier remains open behind a missing
-producer discriminator. Corrective-steering G11 source/tests are implemented
+producer discriminator; `431ce8a7` subsequently closes and archives that
+producer contract with 44 tests / 235 assertions green. Corrective-steering G11 source/tests are implemented
 by `9778fa86` (29 tests / 99 assertions); its issue remains open for the frozen
 real-browser lifecycle gate. Corrective-steering G9 is closed by
 `f84a9efc`+`147acef8` (focused 13 tests / 47 assertions): all narration lines
