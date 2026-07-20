@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 tags: [database, issue, pod, web]
 severity: friction
 ---

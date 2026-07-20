@@ -10,7 +10,7 @@ GENERATED FILE — do not hand-edit. Regenerate with `bin/issues-index`.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (45)
+## Blocker (41)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -25,12 +25,10 @@ See `README.md` for the convention.
 | [Content-pin the Inspect source dependency](inspect-source-dependency-is-not-content-pinned.md) | blocker | agent |
 | [Datahike force branch does not preserve secondary root](datahike-force-branch-does-not-preserve-secondary-root.md) | blocker | Core |
 | [Derive read dependencies from Datahike's parsed semantics](datahike-read-dependencies-miss-valid-query-and-pull-inputs.md) | blocker | UI |
-| [Duplicate allowed-domain schemas crash hot reload](duplicate-allowed-domains-schema-crashes-hot-reload.md) | blocker | Core |
 | [Fence accepted writes before retained-head preparation](restore-intent-lacks-exclusive-writer-fence.md) | blocker | Core |
 | [Freeze one turn input across provider retries](turn-retries-reread-provider-inputs.md) | blocker | agent |
 | [Freeze the restore pod artifact in confirmed intent](restore-intent-does-not-freeze-client-artifact.md) | blocker | Core |
 | [Give the execution configuration pull retained-node headroom](execution-config-pull-had-one-node-budget.md) | blocker | agent |
-| [Human messages renew stale open runs instead of superseding them](human-message-renews-stale-open-run.md) | blocker | agent |
 | [Implement browser-session navigation provenance](web-session-navigation-provenance-is-missing.md) | blocker | UI |
 | [Invalidate a cached failed Datastar render after its owner reloads](datastar-feed-retains-failed-render-after-hot-reload.md) | blocker | UI |
 | [Keep a running target's bootstrap artifact immutable](shared-bootstrap-output-mutates-running-artifact.md) | blocker | Core |
@@ -44,11 +42,9 @@ See `README.md` for the convention.
 | [Pass a valid config singleton to final agent evidence](final-agent-evidence-pulled-a-partial-config-without-identity.md) | blocker | UI |
 | [Pass the agent entity through the renderer's system-input key](welcome-canvas-received-the-agent-under-the-wrong-key.md) | blocker | UI |
 | [Pod remains ready after losing its web listener](pod-remains-ready-after-web-listener-loss.md) | blocker | UI |
-| [Preserve cache revisions for materialized database values](materialized-database-query-cache-lost-revisions.md) | blocker | agent |
 | [Project a turn's rendered transaction ref as its basis transaction](turn-debug-must-project-rendered-transaction-ref.md) | blocker | agent |
 | [Pull run defaults from their owning agent attributes](run-opening-pulls-obsolete-run-default-attributes.md) | blocker | agent |
 | [Put the database value in every transcript query member](transcript-grouped-reads-omitted-their-database-source.md) | blocker | agent |
-| [Recovery notice derivation read the async db facade synchronously](recovery-notice-sync-reads-of-async-facade.md) | blocker | Core |
 | [Reduce retained memory in each execution child](execution-children-retain-hundreds-of-megabytes.md) | blocker | agent |
 | [Reload rehost crash-loops while admission is publishing](reload-rehost-crash-loop-on-publishing-admission.md) | blocker | agent |
 | [Restore writer admin transition is unimplemented](restore-writer-admin-transition-is-unimplemented.md) | blocker | Core |
@@ -60,7 +56,7 @@ See `README.md` for the convention.
 | [Skip the receipt reread branch after a successful eval write](successful-eval-receipt-called-state-on-nil.md) | blocker | agent |
 | [Supply the execution artifact to the production container launch](container-launch-omits-execution-artifact.md) | blocker | agent |
 
-## Friction (72)
+## Friction (68)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -83,7 +79,6 @@ See `README.md` for the convention.
 | [Cross-agent planners can reopen worker-completed steps](plan-reopen-cross-agent-authority.md) | friction | agent |
 | [Database query tuple results are hard for agents to read](database-query-tuple-shape-legibility.md) | friction | agent |
 | [Datahike execute-many predicate query fails](datahike-execute-many-predicate-query-fails.md) | friction | Core |
-| [Dev eval_cljs could not await async values](dev-eval-cljs-could-not-await-async-values.md) | friction | general |
 | [Edit-hook feedback can target a different checkout](worktree-edit-hook-checkout-drift.md) | friction | general |
 | [Embedding boot noise — 232 `:entity-id/missing` errors on fresh seed](embedding-first-write-lookup-noise.md) | friction | agent |
 | [Execution child program load omitted instrumentation](execution-child-program-load-omitted-instrumentation.md) | friction | agent |
@@ -96,7 +91,6 @@ See `README.md` for the convention.
 | [Inspect product snapshot assumes nonexistent evidence](inspect-product-snapshot-assumes-nonexistent-evidence.md) | friction | agent |
 | [Installed schema map misclassified as database error](installed-schema-map-misclassified-as-database-error.md) | friction | agent |
 | [Legacy replica load blocks CLJS tests](legacy-replica-load-blocks-cljs-tests.md) | friction | Core |
-| [Let Babashka load the selector-based UDS transport](changed-test-babashka-cannot-load-uds-selector.md) | friction | Core |
 | [LoRA audit runner depends on a retired Shadow target and pinned checkout](lora-audit-runner-drift.md) | friction | general |
 | [Make UDS frame accumulation linear](uds-fragment-accumulation-recopies-complete-prefix.md) | friction | Core |
 | [Make dependency preparation deterministic under concurrent development](dependency-preparation-can-crash-inside-clojure-hashmap.md) | friction | Core |
@@ -109,7 +103,6 @@ See `README.md` for the convention.
 | [Plan allocation builder set database value](plan-allocation-builder-set-database-value.md) | friction | agent |
 | [Plan completion has no checkable verification evidence](plan-completion-verification-evidence.md) | friction | agent |
 | [Plan reconcile scope can delete unseen work](plan-reconcile-scope-can-delete-unseen-work.md) | friction | agent |
-| [Pod database session capacity was smaller than real feed concurrency](pod-database-session-capacity-was-smaller-than-real-feed-concurrency.md) | friction | UI |
 | [Preflight repair consumed referred macros](preflight-repair-consumed-referred-macros.md) | friction | agent |
 | [Prepare selected git dependencies before test compilation](test-runner-does-not-prepare-selected-git-dependencies.md) | friction | Core |
 | [Preserve distinct large BigInts in cardinality-many attributes](datahike-cljs-cardinality-many-collapses-large-bigints.md) | friction | Core |
@@ -128,7 +121,6 @@ See `README.md` for the convention.
 | [Share concurrent database session opening](database-session-concurrent-open-is-not-shared.md) | friction | Core |
 | [Share exact temporal query work in Datahike](temporal-query-work-is-not-shared.md) | friction | Core |
 | [Single-entity pulls budgeted as one result node](single-entity-pulls-budgeted-as-one-result-node.md) | friction | agent |
-| [Stray repo-root `locks/stack.lock` from operator test](stray-repo-root-locks-directory-from-operator-test.md) | friction | docs |
 | [Thread one database value through debug and data feeds](debug-feed-captures-foreign-database-reads.md) | friction | UI |
 | [Transact output schema crashed child on ordinary error](transact-output-schema-crashed-child-on-ordinary-error.md) | friction | agent |
 | [Transcript decay does not bound total context](transcript-decay-does-not-bound-total-context.md) | friction | agent |
