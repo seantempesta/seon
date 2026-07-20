@@ -1,6 +1,6 @@
 ---
 type: research
-status: in-progress
+status: complete
 tags: [research, database, health]
 ---
 
@@ -10,7 +10,7 @@ Read-only interrogation of the LIVE default cluster and its durable data for
 defect signals static audits cannot see. Probes run through the repository MCP
 eval tools (`eval_cljs` pod, `eval_clj` writer) against the running system.
 
-Sections fill in incrementally as probes complete.
+All seven probes complete; committed with live evidence.
 
 ## Headline: a read-only MCP probe crashed the live pod
 
