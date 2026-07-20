@@ -20,6 +20,30 @@
 (defn- s [hiccup] (html/->string hiccup))
 (def configuration (config/resolve-config-singleton {}))
 
+(defn- flat-text [hiccup]
+  (->> (flatten hiccup)
+       (filter string?)
+       (apply str)))
+
+(deftest html-marker-leaves-use-the-canonical-ai-token-bytes
+  (let [datom {:seon.eval/datom [42 :demo/name "Jane"]}
+        opaque {:seon.eval/opaque "datahike/DB"
+                :seon.eval/summary "max-tx=9"}
+        clipped {:seon.render.value/head "payload"
+                 :seon.render.value/string-len 400}
+        pruned {:seon.render.value/pruned :map
+                :seon.render.value/count 7}]
+    (doseq [[marker formatter]
+            [[datom rv/datom-token]
+             [opaque rv/opaque-token]
+             [clipped rv/clipped-string-token]]]
+      (is (= (formatter marker)
+             (flat-text (@#'render/value-leaf marker)))))
+    (is (= (rv/pruned-token pruned)
+           (flat-text (get (@#'render/pruned-marker pruned) 2))))
+    (is (not (str/includes? (rv/clipped-string-token clipped) " ⟨"))
+        "the shared token has no HTML-only leading space")))
+
 ;; `block-throwing-delegate-yields-error-card` asserts the graceful PROD
 ;; fallback (throw → error card, never an exception). Under the harness
 ;; strict default (SEON_RENDER_STRICT=1) that render THROWS by design, so

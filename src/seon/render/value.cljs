@@ -494,26 +494,45 @@
 
 (declare emit-inline)
 
+(defn datom-token
+  "Format one sampled datom marker as its canonical leaf token."
+  {:malli/schema [:=> [:cat :map] :string]}
+  [x]
+  (let [[e a v] (:seon.eval/datom x)]
+    (str "#datom[" (tokens/bounded-pr-str e 20) " "
+         (tokens/bounded-pr-str a 20) " " (emit-inline v) "]")))
+
+(defn opaque-token
+  "Format one sampled opaque marker as its canonical leaf token."
+  {:malli/schema [:=> [:cat :map] :string]}
+  [x]
+  (str "#‹" (:seon.eval/opaque x)
+       (when-some [s (:seon.eval/summary x)] (str " " s)) "›"))
+
+(defn pruned-token
+  "Format one sampled pruned marker as its canonical leaf token."
+  {:malli/schema [:=> [:cat :map] :string]}
+  [x]
+  (let [k (:seon.render.value/pruned x)
+        c (:seon.render.value/count x)
+        [o cl] (case k :map ["{" "}"] :set ["#{" "}"]
+                     :vector ["[" "]"] ["(" ")"])
+        unit (if (= k :map) "keys" "items")]
+    (str o "…" (when c (str c " " unit)) cl)))
+
+(defn clipped-string-token
+  "Format one sampled clipped string as its canonical leaf token."
+  {:malli/schema [:=> [:cat :map] :string]}
+  [x]
+  (str (pr-str (str (:seon.render.value/head x) "…"))
+       "⟨" (tokens/chars->tokens (:seon.render.value/string-len x)) " tokens⟩"))
+
 (defn- emit-leaf [x]
   (cond
-    (:seon.eval/datom x)
-    (let [[e a v] (:seon.eval/datom x)]
-      (str "#datom[" (tokens/bounded-pr-str e 20) " "
-           (tokens/bounded-pr-str a 20) " " (emit-inline v) "]"))
-
-    (:seon.eval/opaque x)
-    (str "#‹" (:seon.eval/opaque x)
-         (when-some [s (:seon.eval/summary x)] (str " " s)) "›")
-
-    (:seon.render.value/pruned x)
-    (let [k (:seon.render.value/pruned x) c (:seon.render.value/count x)
-          [o cl] (case k :map ["{" "}"] :set ["#{" "}"] :vector ["[" "]"] ["(" ")"])
-          unit   (if (= k :map) "keys" "items")]
-      (str o "…" (when c (str c " " unit)) cl))
-
-    (:seon.render.value/string-len x)
-    (str (pr-str (str (:seon.render.value/head x) "…"))
-         "⟨" (tokens/chars->tokens (:seon.render.value/string-len x)) " tokens⟩")))
+    (:seon.eval/datom x)                  (datom-token x)
+    (:seon.eval/opaque x)                 (opaque-token x)
+    (:seon.render.value/pruned x)         (pruned-token x)
+    (:seon.render.value/string-len x)     (clipped-string-token x)))
 
 (defn- map-parts [m]
   (let [wrapped? (contains? m :seon.render.value/map-entries)

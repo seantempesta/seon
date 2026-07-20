@@ -418,21 +418,18 @@
   [x]
   (cond
     (and (map? x) (contains? x :seon.eval/datom))
-    (let [[e a v] (:seon.eval/datom x)]
-      [:span {:class "text-keyword font-mono"}
-       (str "#datom[" (tokens/bounded-pr-str e 20) " "
-            (tokens/bounded-pr-str a 20) " "
-            (tokens/bounded-pr-str v 20) "]")])
+    [:span {:class "text-keyword font-mono"} (value/datom-token x)]
 
     (and (map? x) (contains? x :seon.eval/opaque))
     [:span {:class "text-text-400 font-mono italic"}
-     (str "#‹" (:seon.eval/opaque x)
-          (when-some [s (:seon.eval/summary x)] (str " " s)) "›")]
+     (value/opaque-token x)]
 
     (and (map? x) (contains? x :seon.render.value/string-len))
-    [:span {:class "text-success font-mono break-all"}
-     (str (pr-str (str (:seon.render.value/head x) "…"))
-          " ⟨" (tokens/chars->tokens (:seon.render.value/string-len x)) " tokens⟩")]
+    (let [token (value/clipped-string-token x)
+          suffix-start (.lastIndexOf token "⟨")]
+      [:span {:class "text-success font-mono break-all"}
+       (subs token 0 suffix-start)
+       [:span {:class "ml-1"} (subs token suffix-start)]])
 
     :else
     [:span {:class (str "font-mono break-all "
@@ -516,13 +513,10 @@
   "A depth/breadth boundary the sampler stopped at — the deeper value is NOT
    in the tree. Rendered as a passive 'deeper' hint."
   [x]
-  (let [k (:seon.render.value/pruned x) c (:seon.render.value/count x)
-        [o cl] (case k :map ["{" "}"] :set ["#{" "}"] :vector ["[" "]"] ["(" ")"])
-        unit   (if (= k :map) "keys" "items")]
-    [:span {:class "inline-flex items-center gap-1 text-2xs text-text-500 font-mono"
-            :title "deeper than the bounded view — drill the live result/<id> var"}
-     [:span {:class "text-text-600"} (str o "…" (when c (str c " " unit)) cl)]
-     [:span {:class "text-text-700"} "▸ deeper"]]))
+  [:span {:class "inline-flex items-center gap-1 text-2xs text-text-500 font-mono"
+          :title "deeper than the bounded view — drill the live result/<id> var"}
+   [:span {:class "text-text-600"} (value/pruned-token x)]
+   [:span {:class "text-text-700"} "▸ deeper"]])
 
 (defn- value-node
   "Recursively render one `render-html-data` `:tree` node to hiccup. Containers
