@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: cleanup
 tags: [issue, agent, schema]
 ---
@@ -42,7 +42,15 @@ Focused proof passes 55 tests and 289 assertions across the five owning tool
 test namespaces plus the completeness test. The default live cluster was not
 running, so no live agent-call evidence is claimed.
 
-The issue remains open. `my.plan` retains its existing schema-derived directive
-guard. The ten `my.canvas` request maps (`view`, `show`, `canvas`, `state`,
-`save`, `button`, `input`, `select`, `toggle`, and `form`) are owned by the
-concurrent G11 canvas/reactive unit and remain the final G8 dependency.
+## Resolution
+
+Commit `94e38e15` closes the ten `my.canvas` request maps (`view`, `show`,
+`canvas`, `state`, `save`, `button`, `input`, `select`, `toggle`, and `form`)
+after the G11 lifecycle work settled. The same registry-derived completeness
+test now covers 35 map request schemas across all six audited namespaces and
+proves every extra key is classified as Malli `:malli.core/extra-key`.
+
+The combined canvas and request-schema gate passes 9 tests and 104 assertions.
+`my.plan` retains its existing schema-derived directive guard; no new runtime
+key guard or hand-maintained accepted-key list was introduced. The live client
+was drained and not ready, so no restart or live proof was claimed.
