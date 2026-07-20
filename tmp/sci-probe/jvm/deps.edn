@@ -1,0 +1,5 @@
+{;; JVM sci agent-host feasibility probe (research harness).
+ :paths ["src"]
+ :deps  {org.clojure/clojure {:mvn/version "1.12.1"}
+         org.babashka/sci    {:local/root "../../../reference-code/sci"}
+         metosin/malli       {:mvn/version "0.20.0"}}}

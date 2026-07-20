@@ -1,0 +1,6 @@
+{;; sci execution-child feasibility probe (research harness, not production).
+ ;; See docs/prds/source-cleanup/research/sci-execution-child-feasibility-2026-07-20.md
+ :paths ["src" "../../src"]
+ :deps  {org.clojure/clojurescript {:mvn/version "1.12.145"}
+         org.babashka/sci          {:local/root "../../reference-code/sci"}
+         metosin/malli             {:mvn/version "0.20.0"}}}
