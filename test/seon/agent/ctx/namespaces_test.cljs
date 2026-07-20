@@ -19,6 +19,7 @@
     [clojure.string :as str]
     [cljs.test :refer [deftest is testing async]]
     [seon.agent.ctx :as ctx]
+    [seon.agent.ctx.ns-name :as ns-name]
     [seon.agent.ctx.namespaces :as nss]
     [seon.agent.home :as home]
     [seon.db :as db]
@@ -109,6 +110,13 @@
 
 (defn- fail-on-db-io [& _]
   (throw (js/Error. "pure namespace tail attempted database I/O")))
+
+(deftest namespace-name-policy-is-portable-and-structural
+  (is (true? (ns-name/hidden-ns-name? 'my.helper.internal.child)))
+  (is (true? (ns-name/test-ns-name? "my.helper-test")))
+  (is (false? (ns-name/included-ns? 'my.helper.internal.child)))
+  (is (false? (ns-name/included-ns? "my.helper-test")))
+  (is (true? (ns-name/included-ns? 'downstream.helper))))
 
 (deftest eager-namespace-tail-does-zero-database-io
   (let [original-execute-many db/execute-many

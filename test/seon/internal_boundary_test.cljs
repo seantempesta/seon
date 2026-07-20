@@ -14,6 +14,7 @@
   (:require
     [cljs.test :refer [deftest is]]
     [seon.agent.internal :as agent.internal]
+    [seon.agent.ctx.ns-name :as ns-name]
     [seon.agent.ctx.namespaces :as ns]
     [seon.config :as config]))
 
@@ -44,14 +45,14 @@
   (doseq [[internal parent] '[[seon.db.internal           seon.db]
                               [seon.agent.search.internal seon.agent.search]
                               [seon.agent.fs.internal     seon.agent.fs]]]
-    (is (false? (ns/included-ns? internal))
+    (is (false? (ns-name/included-ns? internal))
         (str internal " is excluded from the agent prompt (.internal suffix)"))
-    (is (true? (ns/included-ns? parent))
+    (is (true? (ns-name/included-ns? parent))
         (str "the PUBLIC parent " parent " IS included — the boundary is the "
              "suffix, not a blanket exclusion")))
   ;; The source-string boundary and canonical symbol agree.
-  (is (false? (ns/included-ns? "seon.db.internal")))
-  (is (false? (ns/included-ns? 'seon.db.internal))))
+  (is (false? (ns-name/included-ns? "seon.db.internal")))
+  (is (false? (ns-name/included-ns? 'seon.db.internal))))
 
 (deftest agent-management-is-one-pure-rule-over-a-pulled-parent-tree
   (let [tree {:seon.agent/id "child"

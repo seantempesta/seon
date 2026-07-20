@@ -10,6 +10,7 @@
     [cljs.reader :as edn]
     [clojure.string :as str]
     [seon.agent.ctx :as ctx]
+    [seon.agent.ctx.ns-name :as ns-name]
     [seon.agent.home :as home]
     [seon.config :as config]
     [seon.db :as db]
@@ -66,7 +67,7 @@
 ;; The namespace-display rules. Two SEPARATE concerns, both pure
 ;; string/symbol boundary fns (no dependency on anything in `seon.agent.ctx`):
 ;;
-;;   - WHICH rows are indexable/renderable at all — [[included-ns?]]
+;;   - WHICH rows are indexable/renderable at all — [[ns-name/included-ns?]]
 ;;     (`*.internal` / `*-test` excluded). Shared by the boot indexer and
 ;;     [[namespaces-block]].
 ;;   - The BOOT-STORAGE rule — [[full-source-ns?]] — which rows the boot
@@ -77,19 +78,6 @@
 ;;     ∪ ::full-source).
 ;; ============================================================
 
-(defn hidden-ns-name?
-  "Rule 1: a `*.internal` namespace is indexed but ordinarily hidden.
-
-   Applies to the ns or any of its children — the naming convention IS
-   the default filter. An exact per-block `::full-source` pin may reveal it
-   for a generated-development assignment; incidental prefix matches never
-   do. Source strings convert only at the database boundary."
-  {:malli/schema [:=> [:cat [:or :string :symbol]] :boolean]}
-  [ns-name]
-  (let [s (str ns-name)]
-    (boolean (or (str/ends-with? s ".internal")
-                 (str/includes? s ".internal.")))))
-
 (defn my-ns-name?
   "Rule 2: `my.*` is human-authored code and data — always shown.
 
@@ -99,43 +87,16 @@
   (let [s (str ns-name)]
     (boolean (or (= s "my") (str/starts-with? s "my.")))))
 
-(defn test-ns-name?
-  "Rule 1b: a `*-test` namespace is indexed but never rendered.
-
-   Never enters the agent prompt — its `deftest`s are noise to the working
-   agent, and the per-fn `:test` usage example already rides the fn's attr-map in
-   the compact head. Full tests stay searchable as indexed database data.
-   STRUCTURAL, like [[hidden-ns-name?]]: the
-   suffix IS the filter. Source strings and namespace symbols are accepted."
-  {:malli/schema [:=> [:cat [:or :string :symbol]] :boolean]}
-  [ns-name]
-  (let [s (str ns-name)]
-    (str/ends-with? s "-test")))
-
-(defn included-ns?
-  "The ordinary selection rule for namespace sections.
-
-   EVERY indexed :seon.ns row renders EXCEPT *.internal (hidden-ns-name?) and *-test
-   (test-ns-name?) ones — both STRUCTURAL naming conventions that apply
-   to seon, my.*, and downstream code alike. No prefix allow-list: the
-   library gate lives on the INDEX side (only first-party + SEON_EXTRA_SRC
-   code ever gets a :seon.ns row — seon.indexing/first-party-file?)."
-  {:malli/schema [:=> [:cat [:or :string :symbol]] :boolean]}
-  [ns-name]
-  (let [s (str ns-name)]
-    (boolean (and (not (hidden-ns-name? s))
-                  (not (test-ns-name? s))))))
-
 (defn- selected-ns?
   "True when `ns-name` may enter this block's exact selection.
 
-   Ordinary namespaces follow [[included-ns?]]. A namespace hidden only by
+   Ordinary namespaces follow [[ns-name/included-ns?]]. A namespace hidden only by
    the `.internal` convention may enter when its exact symbol is present in
    `full-source`; test namespaces remain excluded even when explicitly pinned.
    This is the narrow generated-development override, not prefix expansion."
   [full-source ns-name]
-  (and (not (test-ns-name? ns-name))
-       (or (included-ns? ns-name)
+  (and (not (ns-name/test-ns-name? ns-name))
+       (or (ns-name/included-ns? ns-name)
            (contains? full-source ns-name))))
 
 (defn- base-ns-name
@@ -173,7 +134,7 @@
    what any one agent renders full, so a per-agent `::full-source` pin (or
    the current ns) has real source to show. It does NOT drive per-agent
    SELECTION — that is [[namespaces-block]]'s three-rule model
-   ([[included-ns?]] keeps `.internal` out of the prompt regardless of what
+   ([[ns-name/included-ns?]] keeps `.internal` out of the prompt regardless of what
    is stored). `my.*.internal` MUST store real source even though it never
    renders: its fns are agent-editable render fns
    (`seon.error/agent-authored-sym?` routes every `my.*` fn through
@@ -190,7 +151,7 @@
   (let [s    (str ns-name)
         base (base-ns-name s)]
     (boolean (or (my-ns-name? base)
-                 (and (not (hidden-ns-name? s))
+                 (and (not (ns-name/hidden-ns-name? s))
                       (always-full? configuration base))))))
 
 (defn- seon-framework-ns?
@@ -217,7 +178,7 @@
       (fn [selections
            {:seon.ns.require/keys
             [target alias refers refer-all? as-alias?]}]
-        (if (or as-alias? (not (included-ns? target)))
+        (if (or as-alias? (not (ns-name/included-ns? target)))
           selections
           (let [whole? (or alias refer-all? (not (seq refers)))
                 present? (contains? selections target)
@@ -732,7 +693,7 @@
              (seq
               (into []
                     (comp
-                     (remove (fn [[name _summary]] (test-ns-name? name)))
+                     (remove (fn [[name _summary]] (ns-name/test-ns-name? name)))
                      (map (fn [[name summary]]
                             (str "; " name
                                  (when-not (str/blank? summary)

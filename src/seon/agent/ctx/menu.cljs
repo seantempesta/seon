@@ -7,6 +7,7 @@
   (:require
     [clojure.string :as str]
     [seon.agent.home :as home]
+    [seon.agent.ctx.ns-name :as ns-name]
     [seon.agent.ctx.namespaces :as ns-cards]
     [seon.db :as db]
     [seon.db.protocol :as protocol]
@@ -324,7 +325,7 @@
                      (some #(when (= current-ns (:seon.ns/name %)) %))
                      :seon.ns/require-edges
                      (map :seon.ns.require/target)
-                     (filter ns-cards/included-ns?) set)
+                     (filter ns-name/included-ns?) set)
         exclude (into #{} (map first) recent)
         per-ns (->> targets
                     (map (fn [ns-name]

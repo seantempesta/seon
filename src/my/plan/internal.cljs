@@ -1800,7 +1800,7 @@
 ;; --- The `:seon.render/html` twin — the human's live plan surface. --------
 ;; --- Colocated with [[plan-block]] (the transcript precedent). Zero prompt
 ;; --- cost: `*.internal` nses never render into agent context
-;; --- (seon.agent.ctx.namespaces/hidden-ns-name?). Where the :ai block
+;; --- (seon.agent.ctx.ns-name/hidden-ns-name?). Where the :ai block
 ;; --- Windows (anchor + capped frontier + recent-done tail), the surface shows
 ;; --- the WHOLE forest — the human explores what the prompt windows away.
 ;; ---

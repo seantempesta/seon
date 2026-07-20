@@ -49,6 +49,7 @@
             [clojure.string :as str]
             [rewrite-clj.node :as n]
             [rewrite-clj.parser :as p]
+            [seon.agent.ctx.ns-name :as ns-name]
             [seon.schema :as schema]))
 
 ;;; ---------------------------------------------------------------------------
@@ -189,24 +190,6 @@
                    [::findings ::findings]])
 
 ;;; ---------------------------------------------------------------------------
-;;; Namespace naming skips (STRUCTURAL, mirrors
-;;; seon.agent.ctx.namespaces/{hidden-ns-name?,test-ns-name?} — reimplemented
-;;; here because that ns is .cljs and unreachable from this JVM linter.)
-;;; ---------------------------------------------------------------------------
-
-(defn- hidden-ns?
-  "A `*.internal` namespace (or a child of one) — never rendered, never linted."
-  [ns-name]
-  (boolean (and ns-name
-                (or (str/ends-with? ns-name ".internal")
-                    (str/includes? ns-name ".internal.")))))
-
-(defn- test-ns?
-  "A `*-test` namespace — its deftests are not public functions, skip linting."
-  [ns-name]
-  (boolean (and ns-name (str/ends-with? ns-name "-test"))))
-
-;;; ---------------------------------------------------------------------------
 ;;; Source analysis (rewrite-clj — purely syntactic, no eval)
 ;;; ---------------------------------------------------------------------------
 
@@ -338,8 +321,10 @@
   (let [top-nodes (try (n/children (p/parse-string-all source))
                        (catch Exception _ nil))
         nm (or ns-name (some-> top-nodes extract-ns-name))]
-    (if (or (nil? top-nodes) (hidden-ns? nm) (test-ns? nm))
-      {::clean? true ::skipped? (boolean (or (hidden-ns? nm) (test-ns? nm)))
+    (if (or (nil? top-nodes)
+            (some-> nm ns-name/included-ns? not))
+      {::clean? true
+       ::skipped? (boolean (some-> nm ns-name/included-ns? not))
        ::findings []}
       (let [findings (into []
                            (comp (keep public-defn)
@@ -411,7 +396,8 @@
                top-nodes (try (n/children (p/parse-string-all source))
                               (catch Exception _ nil))
                nm (some-> top-nodes extract-ns-name)]
-           (if (or (nil? top-nodes) (hidden-ns? nm) (test-ns? nm))
+           (if (or (nil? top-nodes)
+                   (some-> nm ns-name/included-ns? not))
              acc
              (let [defns (into [] (keep public-defn) top-nodes)
                    findings (into []

@@ -286,10 +286,9 @@
    `seon.agent.run/default-form-limit` without introducing the run→ctx cycle."
   (:seon.config.run/stream-form-limit (config/default-run-policy)))
 
-;; The namespace-display selection rules (hidden-ns-name?,
-;; included-ns?, full-source-ns?, …) live in their rightful home,
-;; [[seon.agent.ctx.namespaces]] — the ns that owns the namespaces section
-;; body and shares the rules with the boot indexer.
+;; The structural namespace-name rules live in
+;; [[seon.agent.ctx.ns-name]]; the section and boot-storage rules live in
+;; [[seon.agent.ctx.namespaces]].
 
 ;; ------------------------------------------------------------
 ;; Pretty-print + truncation helpers.

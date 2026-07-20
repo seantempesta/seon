@@ -1,6 +1,7 @@
 (ns seon.dev.docstring-test
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
+            [seon.agent.ctx.ns-name :as ns-name]
             [seon.dev.docstring :as d]))
 
 (defn- rules
@@ -135,6 +136,13 @@
     (is (empty? (rules "(ns foo)\n(def x 1)\n(defmacro m [x] x)\n(defmethod f :k [x] x)")))))
 
 (deftest test-and-internal-ns-skipped-test
+  (testing "the shared leaf owns the complete structural policy"
+    (is (true? (ns-name/hidden-ns-name? 'foo.internal.child)))
+    (is (true? (ns-name/test-ns-name? "foo.bar-test")))
+    (is (false? (ns-name/included-ns? 'foo.internal.child)))
+    (is (false? (ns-name/included-ns? "foo.bar-test")))
+    (is (true? (ns-name/included-ns? 'foo.bar))))
+
   (testing "*-test namespaces are skipped wholesale"
     (let [r (d/check-source {::d/source "(ns foo-test)\n(defn bar [x] x)"})]
       (is (true? (::d/skipped? r)))
