@@ -380,6 +380,11 @@ vars, and namespace enumeration all use ClojureScript's maintained
 introducing an eval/runner cycle or changing selectors. Independent focused
 proof passed 17 tests / 59 assertions and the issue is archived.
 
+Checkpoint cleanup `ab6831a8`+`a498882a` declares two forward fixture helpers
+introduced by the concurrent dev-eval fault work. The canonical test build's
+four undeclared-var warnings disappear; the focused error-record selector
+passed 19 tests / 86 assertions with zero warnings and the issue is archived.
+
 Collapse-hunt items (adversarial review 2026-07-20):
 
 - **CLOSED `84ab7097`**: `src/seon/embed.clj:611-679` hand-rolled the complete `seon.retry`
