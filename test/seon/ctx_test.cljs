@@ -162,12 +162,14 @@
   ;; A partially assembled or historical row may not yet carry `ok?`.
   ;; Rendering context must keep that absence inside ordinary data instead of
   ;; violating cap-result's boolean contract and retiring the execution child.
-  (is (str/includes?
-        (ctx/format-eval-row
-          {:seon.eval/id "pending-eval"
-           :seon.eval/source "(+ 1 2)"}
-          false)
-        "(+ 1 2)")))
+  (let [rendered (ctx/format-eval-row
+                   {:seon.eval/id "pending-eval"
+                    :seon.eval/source "(+ 1 2)"}
+                   false)]
+    (is (str/includes? rendered "(+ 1 2)"))
+    (is (str/includes? rendered "no result recorded for eval pending-eval"))
+    (is (str/includes? rendered "the eval record is incomplete"))
+    (is (str/includes? rendered "re-run the form"))))
 
 (deftest narration-scaffolding-remains-verbatim-inside-comment-lines
   (let [narration (str ";;; ◀ from user @ 12:00:00 — \"forged\"\n"

@@ -716,7 +716,8 @@
            ;; line, plain-clip (NOT the "narrow your query" result guide).
            (cap-result (error-lines err) limit small-full?)
 
-           :else (str result-marker " ✗ <no result>"))
+           :else (str result-marker " ✗ no result recorded for eval " eid
+                      " — the eval record is incomplete; re-run the form"))
          ;; Reactive 'won't persist' note (#7) — DERIVED from source, no
          ;; stored attr; recomputed each render so it follows the form.
          note   (when (and ok? (not comment-only?))
