@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 tags: [agent, context, issue]
 severity: friction
 ---
@@ -29,3 +29,10 @@ records this as gap G6.
   result was recorded.
 - The projection tells the agent to re-run the form.
 - Focused context tests pass.
+
+## Resolution
+
+Commit `cd7ffdf0` replaces the anonymous placeholder with an honest message
+that names the eval ID, says the record is incomplete, and tells the agent to
+re-run the form. The focused context gate passes 11 tests / 44 assertions with
+zero failures and zero errors.
