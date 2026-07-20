@@ -68,7 +68,7 @@
    "babashka-1.12.218-macos-aarch64.tar.gz"
    :seon.dev.release/babashka-asset-sha-256
    "5bc992f39692b707403fc322e860fc82017da7de4a84a32267abb4d50a0c5f9d"
-   :seon.dev.release/database-protocol-version 11
+   :seon.dev.release/database-protocol-version 12
    :seon.dev.release/execution-protocol-version 3
    :seon.dev.release/bun-member :seon.release.member/bun
    :seon.dev.release/writer-member :seon.release.member/writer

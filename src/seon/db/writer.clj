@@ -18,6 +18,7 @@
             [datahike.db.interface :as dbi]
             [datahike.db.utils :as datahike.db]
             [datahike.impl.entity :as datahike.entity]
+            [datahike.lru :as lru]
             [hasch.core :as hasch]
             [seon.db.branch :as branch]
             [seon.db.datahike.schema :as datahike.schema]
@@ -806,6 +807,87 @@
   [request]
   {::protocol/request-id (::protocol/request-id request)})
 
+;;; Read-spend attribution — bounded most-recently-active rollup
+
+(schema/register!
+ ::read-identity
+ [:map {:closed true}
+  [:seon.db/user {:optional true} :seon.db/ref]
+  [:seon.db/process {:optional true} :seon.db/ref]])
+(schema/register! ::read-spend-requests [:int {:min 1}])
+(schema/register! ::read-spend-work [:int {:min 0}])
+(schema/register! ::read-spend-results [:int {:min 0}])
+(schema/register! ::read-spend-result-weight [:int {:min 0}])
+(schema/register! ::read-spend-nanos [:int {:min 0}])
+(schema/register!
+ ::read-spend-totals
+ [:map {:closed true}
+  [::read-spend-requests ::read-spend-requests]
+  [::read-spend-work ::read-spend-work]
+  [::read-spend-results ::read-spend-results]
+  [::read-spend-result-weight ::read-spend-result-weight]
+  [::read-spend-nanos ::read-spend-nanos]])
+(schema/register!
+ ::read-spend-sample
+ [:map
+  [:datahike.resource/work {:optional true} [:int {:min 0}]]
+  [:datahike.resource/result-count {:optional true} [:int {:min 0}]]
+  [:datahike.resource/result-weight {:optional true} [:int {:min 0}]]
+  [::read-spend-nanos {:optional true} ::read-spend-nanos]])
+
+(def ^:private read-spend-window-limit
+  "Distinct requesting identities retained by the read-spend rollup."
+  256)
+
+(defonce ^:private !read-spend
+  ;; Process-local diagnostic state: the fork's own bounded LRU keyed by
+  ;; requesting identity, so an unbounded population of identities cannot
+  ;; grow writer memory. Durable truth stays in the database; this window
+  ;; answers "which requester is hammering the writer right now".
+  (atom (lru/weighted-lru read-spend-window-limit 0)))
+
+(defn accrue-read-spend
+  "Fold one metered read sample into a bounded per-identity spend window."
+  {:malli/schema [:=> [:catn
+                       [::read-spend-window :any]
+                       [::read-identity ::read-identity]
+                       [::read-spend-sample ::read-spend-sample]]
+                  :any]}
+  [window read-identity sample]
+  (let [totals (get window read-identity)
+        add (fn [total-key amount]
+              (+ (long (get totals total-key 0)) (long (or amount 0))))]
+    (assoc window read-identity
+           {::read-spend-requests (inc (long (get totals
+                                                  ::read-spend-requests 0)))
+            ::read-spend-work (add ::read-spend-work
+                                   (:datahike.resource/work sample))
+            ::read-spend-results (add ::read-spend-results
+                                      (:datahike.resource/result-count sample))
+            ::read-spend-result-weight
+            (add ::read-spend-result-weight
+                 (:datahike.resource/result-weight sample))
+            ::read-spend-nanos (add ::read-spend-nanos
+                                    (::read-spend-nanos sample))})))
+
+(defn- record-read-spend!
+  "Attribute one completed protocol read to its requesting identity."
+  [request resource-evidence duration-nanos]
+  (let [read-identity (select-keys request [:seon.db/user :seon.db/process])]
+    (swap! !read-spend accrue-read-spend read-identity
+           (assoc (or resource-evidence {}) ::read-spend-nanos duration-nanos))
+    nil))
+
+(defn read-spend
+  "Per-identity spend totals for recently completed protocol reads.
+
+   Unattributed requests aggregate under the empty identity. The window is
+   most-recently-active bounded ([[read-spend-window-limit]] identities);
+   totals reset with the writer process."
+  {:malli/schema [:=> [:cat] [:map-of ::read-identity ::read-spend-totals]]}
+  []
+  (lru/weighted-entries @!read-spend))
+
 (def ^:private read-operations
   #{protocol/query-operation
     protocol/pull-operation
@@ -926,18 +1008,26 @@
     (resolve-execute-many-plan! (::transport-connection work)
                                 (::execute-many-plan work))
     (::transport-connection work)
-    (let [resolved
+    (let [started-nanos (System/nanoTime)
+          resolved
           (resolve-database-value! (::transport-connection work)
                                    (:seon.db/db request)
                                    false)]
       (try
-        (merge (read-response-base request)
-               (execute-db-read (::database-value resolved) request))
+        (let [response
+              (merge (read-response-base request)
+                     (execute-db-read (::database-value resolved) request))]
+          (record-read-spend! request nil
+                              (- (System/nanoTime) started-nanos))
+          response)
         (finally
           (release-resolved-database-values! [resolved]))))
     (::database-value work)
-    (protocol/success
-     (execute-db-read (::database-value work) request))
+    (let [started-nanos (System/nanoTime)
+          response (protocol/success
+                    (execute-db-read (::database-value work) request))]
+      (record-read-spend! request nil (- (System/nanoTime) started-nanos))
+      response)
     :else
     (throw
      (ex-info "The database read reached execution without a resolved value."
@@ -2862,7 +2952,8 @@
                     transport-connection]
             prepared-query-arguments ::query-arguments
             :as work}]
-  (let [resolved-plan (when query-plan
+  (let [started-nanos (System/nanoTime)
+        resolved-plan (when query-plan
                         (resolve-query-plan! transport-connection query-plan))
         arguments (cond
                     resolved-plan (::query-arguments resolved-plan)
@@ -2906,6 +2997,11 @@
              call
              (fn [completion]
                (when (.compareAndSet completed? false true)
+                 (record-read-spend!
+                  request
+                  (when (= :ok (:status completion))
+                    (:datahike.query/resource-evidence (:value completion)))
+                  (- (System/nanoTime) started-nanos))
                  (complete-query-call! runtime request-id (::owner work) job-id
                                        request execute-many?
                                        (not= :run state)

@@ -30,6 +30,37 @@ evidence is the producer authority. The existing agent debug page is the
 consumer. Do not add a log scraper, profiler registry, second database, or
 public-function wrapper census.
 
+## Current state (2026-07-20)
+
+Read requests now carry the requesting identity and the writer attributes
+spend per requester:
+
+- Protocol v12: `query`/`pull`/`pull-many`/`schema`/`index-page` requests and
+  every `execute-many` member accept optional `:seon.db/user` and
+  `:seon.db/process` — the exact write-side provenance vocabulary
+  (`src/seon/db/protocol.cljc`).
+- The pod attaches the ambient fiber identity
+  (`seon.db.internal/selected-provenance` over tx-context + agent scope) to
+  every outgoing read (`seon.db/query`, `pull`, `pull-many`, `execute-many`
+  members).
+- The writer records per-request spend (engine `:datahike.resource/*`
+  evidence for queries, duration for every read) into one bounded
+  most-recently-active rollup keyed by identity —
+  `seon.db.writer/read-spend`, LRU-bounded via the fork's existing
+  `datahike.lru/weighted-lru` (256 identities, structural eviction).
+- Callers already see their own query cost on the response envelope
+  (`:datahike.query/resource-evidence`; `seon.db/query-with-evidence` on the
+  pod, and the same-named wrapper in the JVM host context).
+
+Remaining for full acceptance below: pull-path resource evidence (the fork's
+`pull-spec` charges the budget but never publishes evidence — mirror
+`datahike.query`'s `publish-evidence!` at
+`reference-code/datahike/src/datahike/query.cljc:4519` into
+`pull_api.cljc/pull-spec`), turn-level aggregation onto the durable turn, the
+`:off`/`:aggregate`/`:trace` dial, and the debug-page waterfall. Host-context
+reads are still identity-less (the shared wrapper closure has no per-agent
+scope) and aggregate under the empty identity.
+
 ## Acceptance
 
 - Database configuration plus environment override selects `:off`,

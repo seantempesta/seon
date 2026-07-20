@@ -742,6 +742,16 @@
       {::protocol/request-id (or (::request-id request) (str (random-uuid)))
        ::db database})))
 
+(defn- read-attribution
+  "Requesting identity for one metered read, from the ambient fiber scope.
+
+   Reuses the exact write-side provenance selection — `:seon.db/user` and
+   `:seon.db/process` lookup refs — so the writer attributes read spend with
+   the same vocabulary transactions already carry."
+  []
+  (internal/selected-provenance (or (internal/current-tx-context) {})
+                                (internal/current-agent-id)))
+
 (defn- read-resource-options [policy request]
   (let [configuration (:seon.config/configuration
                        (internal/current-tx-context))
@@ -940,6 +950,7 @@
                  (or (::request-id request) (str (random-uuid)))
                  ::protocol/query-form (::query request)
                  ::protocol/arguments arguments}
+                (read-attribution)
                 (read-resource-options :query request))
          database (assoc ::db database))))))
 
@@ -1009,6 +1020,7 @@
                 (merge base
                        {::protocol/selector (::pull-pattern request)
                         ::protocol/entity-id (::ref request)}
+                       (read-attribution)
                        (read-resource-options :pull request)))
                30000))]
          (cond
@@ -1037,6 +1049,7 @@
                 (merge base
                        {::protocol/selector (::pull-pattern request)
                         ::protocol/entity-ids (::refs request)}
+                       (read-attribution)
                        (read-resource-options :pull request)))
                30000))]
          (cond
@@ -1104,7 +1117,10 @@
                    (cond-> {::protocol/request-id
                             (or (::request-id request) (str (random-uuid)))
                             ::protocol/members
-                            (mapv #(assoc % ::db database) members)}
+                            (let [attribution (read-attribution)]
+                              (mapv #(merge attribution
+                                            (assoc % ::db database))
+                                    members))}
                      (::max-result-weight request)
                      (assoc :datahike.resource/max-result-weight
                             (::max-result-weight request))))

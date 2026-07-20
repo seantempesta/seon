@@ -35,7 +35,7 @@
      (transit/reader (ByteArrayInputStream. (.toByteArray output)) :json))))
 
 (deftest database-values-are-complete-closed-and-temporally-unambiguous
-  (is (= 11 protocol/current-version))
+  (is (= 12 protocol/current-version))
   (is (protocol/database-value? db))
   (is (protocol/database-value? (assoc db :as-of 536870928)))
   (is (protocol/database-value? (assoc db :since #inst "2026-07-16")))
@@ -72,6 +72,52 @@
          (protocol/valid-request?
           (assoc query :seon.db/db
                  (assoc db :as-of 536870928 :since 536870927)))))))
+
+(deftest reads-carry-optional-requesting-identity
+  (testing "query, pull, and members accept write-vocabulary provenance refs"
+    (doseq [request
+            [(protocol/query-request
+              {::protocol/request-id "query/attributed"
+               :seon.db/db db
+               ::protocol/query-form '[:find ?e :where [?e :person/name]]
+               ::protocol/arguments []
+               :seon.db/user [:seon.agent/id "agent-a"]
+               :seon.db/process [:seon.db.process/id :seon.db.process/repl]})
+             (protocol/pull-request
+              {::protocol/request-id "pull/attributed"
+               :seon.db/db db
+               ::protocol/selector [:person/name]
+               ::protocol/entity-id 17
+               :seon.db/user [:seon.user/id "user"]
+               :seon.db/process [:seon.db.process/id :seon.db.process/repl]})
+             (protocol/execute-many-request
+              {::protocol/request-id "many/attributed"
+               ::protocol/members
+               [{::protocol/operation protocol/query-operation
+                 :seon.db/db db
+                 ::protocol/query-form '[:find ?e :where [?e :person/name]]
+                 ::protocol/arguments []
+                 :seon.db/user [:seon.agent/id "agent-a"]
+                 :seon.db/process
+                 [:seon.db.process/id :seon.db.process/repl]}
+                {::protocol/operation protocol/pull-operation
+                 :seon.db/db db
+                 ::protocol/selector [:person/name]
+                 ::protocol/entity-id 17
+                 :seon.db/user [:seon.agent/id "agent-a"]
+                 :seon.db/process
+                 [:seon.db.process/id :seon.db.process/repl]}]})]]
+      (is (protocol/valid-request? request)
+          (pr-str (protocol/explain-request request)))
+      (is (protocol/valid-request? (transit-roundtrip request))
+          "attributed reads stay ordinary wire values")))
+  (testing "unattributed reads remain valid"
+    (is (protocol/valid-request?
+         (protocol/query-request
+          {::protocol/request-id "query/anonymous"
+           :seon.db/db db
+           ::protocol/query-form '[:find ?e :where [?e :person/name]]
+           ::protocol/arguments []})))))
 
 (deftest ensure-database-carries-optional-ordinary-package-initialization
   (let [initialization

@@ -95,7 +95,7 @@
 (def unknown-status :seon.db.protocol.status/unknown)
 (def feed-behind-status :seon.db.protocol.status/feed-behind)
 
-(def current-version 11)
+(def current-version 12)
 
 ;; One wire contract must reject the same legal frame on every host. Paging and
 ;; operation-level result bounds remain the preferred way to stay well below it.
@@ -462,6 +462,8 @@
   [:seon.db/db {:optional true} :seon.db/db]
   [::query-form ::query-form]
   [::arguments ::arguments]
+  [:seon.db/user {:optional true} :seon.db/ref]
+  [:seon.db/process {:optional true} :seon.db/ref]
   [:datahike.resource/max-work {:optional true}
    :datahike.resource/max-work]
   [:datahike.resource/max-results {:optional true}
@@ -476,6 +478,8 @@
   [:seon.db/db :seon.db/db]
   [::selector ::selector]
   [::entity-id ::entity-id]
+  [:seon.db/user {:optional true} :seon.db/ref]
+  [:seon.db/process {:optional true} :seon.db/ref]
   [:datahike.resource/max-work {:optional true}
    :datahike.resource/max-work]
   [:datahike.resource/max-results {:optional true}
@@ -490,6 +494,8 @@
   [:seon.db/db :seon.db/db]
   [::selector ::selector]
   [::entity-ids ::entity-ids]
+  [:seon.db/user {:optional true} :seon.db/ref]
+  [:seon.db/process {:optional true} :seon.db/ref]
   [:datahike.resource/max-work {:optional true}
    :datahike.resource/max-work]
   [:datahike.resource/max-results {:optional true}
@@ -501,7 +507,9 @@
  [:map {:closed true}
   [::operation [:= schema-operation]]
   [::request-id ::request-id]
-  [:seon.db/db :seon.db/db]])
+  [:seon.db/db :seon.db/db]
+  [:seon.db/user {:optional true} :seon.db/ref]
+  [:seon.db/process {:optional true} :seon.db/ref]])
 (schema/register!
  ::index-page-request
  [:map {:closed true}
@@ -513,6 +521,8 @@
   [::direction ::direction]
   [::limit ::index-page-limit]
   [::cursor {:optional true} ::cursor]
+  [:seon.db/user {:optional true} :seon.db/ref]
+  [:seon.db/process {:optional true} :seon.db/ref]
   [:datahike.resource/max-result-weight {:optional true}
    :datahike.resource/max-result-weight]])
 (schema/register!
@@ -522,6 +532,8 @@
   [:seon.db/db {:optional true} :seon.db/db]
   [::query-form ::query-form]
   [::arguments ::arguments]
+  [:seon.db/user {:optional true} :seon.db/ref]
+  [:seon.db/process {:optional true} :seon.db/ref]
   [:datahike.resource/max-work {:optional true} :datahike.resource/max-work]
   [:datahike.resource/max-results {:optional true} :datahike.resource/max-results]
   [:datahike.resource/max-result-weight {:optional true}
@@ -533,6 +545,8 @@
   [:seon.db/db :seon.db/db]
   [::selector ::selector]
   [::entity-id ::entity-id]
+  [:seon.db/user {:optional true} :seon.db/ref]
+  [:seon.db/process {:optional true} :seon.db/ref]
   [:datahike.resource/max-work {:optional true} :datahike.resource/max-work]
   [:datahike.resource/max-results {:optional true} :datahike.resource/max-results]
   [:datahike.resource/max-result-weight {:optional true}
@@ -544,6 +558,8 @@
   [:seon.db/db :seon.db/db]
   [::selector ::selector]
   [::entity-ids ::entity-ids]
+  [:seon.db/user {:optional true} :seon.db/ref]
+  [:seon.db/process {:optional true} :seon.db/ref]
   [:datahike.resource/max-work {:optional true} :datahike.resource/max-work]
   [:datahike.resource/max-results {:optional true} :datahike.resource/max-results]
   [:datahike.resource/max-result-weight {:optional true}
@@ -552,7 +568,9 @@
  ::schema-member
  [:map {:closed true}
   [::operation [:= schema-operation]]
-  [:seon.db/db :seon.db/db]])
+  [:seon.db/db :seon.db/db]
+  [:seon.db/user {:optional true} :seon.db/ref]
+  [:seon.db/process {:optional true} :seon.db/ref]])
 (schema/register!
  ::index-page-member
  [:map {:closed true}
@@ -563,6 +581,8 @@
   [::direction ::direction]
   [::limit ::index-page-limit]
   [::cursor {:optional true} ::cursor]
+  [:seon.db/user {:optional true} :seon.db/ref]
+  [:seon.db/process {:optional true} :seon.db/ref]
   [:datahike.resource/max-result-weight {:optional true}
    :datahike.resource/max-result-weight]])
 (schema/register!
@@ -993,6 +1013,8 @@
   [:seon.db/db {:optional true} :seon.db/db]
   [::query-form ::query-form]
   [::arguments ::arguments]
+  [:seon.db/user {:optional true} :seon.db/ref]
+  [:seon.db/process {:optional true} :seon.db/ref]
   [:datahike.resource/max-work {:optional true}
    :datahike.resource/max-work]
   [:datahike.resource/max-results {:optional true}
@@ -1006,6 +1028,8 @@
   [:seon.db/db :seon.db/db]
   [::selector ::selector]
   [::entity-id ::entity-id]
+  [:seon.db/user {:optional true} :seon.db/ref]
+  [:seon.db/process {:optional true} :seon.db/ref]
   [:datahike.resource/max-work {:optional true}
    :datahike.resource/max-work]
   [:datahike.resource/max-results {:optional true}
@@ -1019,6 +1043,8 @@
   [:seon.db/db :seon.db/db]
   [::selector ::selector]
   [::entity-ids ::entity-ids]
+  [:seon.db/user {:optional true} :seon.db/ref]
+  [:seon.db/process {:optional true} :seon.db/ref]
   [:datahike.resource/max-work {:optional true}
    :datahike.resource/max-work]
   [:datahike.resource/max-results {:optional true}
@@ -1029,7 +1055,9 @@
  ::schema-request-input
  [:map {:closed true}
   [::request-id ::request-id]
-  [:seon.db/db :seon.db/db]])
+  [:seon.db/db :seon.db/db]
+  [:seon.db/user {:optional true} :seon.db/ref]
+  [:seon.db/process {:optional true} :seon.db/ref]])
 (schema/register!
  ::index-page-request-input
  [:map {:closed true}
@@ -1040,6 +1068,8 @@
   [::direction ::direction]
   [::limit ::index-page-limit]
   [::cursor {:optional true} ::cursor]
+  [:seon.db/user {:optional true} :seon.db/ref]
+  [:seon.db/process {:optional true} :seon.db/ref]
   [:datahike.resource/max-result-weight {:optional true}
    :datahike.resource/max-result-weight]])
 (schema/register!

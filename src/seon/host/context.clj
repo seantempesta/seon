@@ -211,8 +211,12 @@
       (:seon.db/db response)
       (protocol-error-value response))))
 
-(defn- db-query
-  "Context `seon.db/query`: one blocking Datalog read at the current head."
+(defn- db-query-with-evidence
+  "Context `seon.db/query-with-evidence`: one read plus its own cost.
+
+   Mirrors the pod surface of the same name: the returned map carries the
+   result together with the writer's dependency, cache, and resource
+   evidence, so an agent can see what its own query charged."
   [writer query-form & arguments]
   (let [head (resolve-head! writer)]
     (if (:seon/error head)
@@ -225,8 +229,21 @@
                         ::protocol/query-form query-form
                         ::protocol/arguments (vec arguments)}))]
         (if (::protocol/success? response)
-          (:datahike.query/result response)
+          (select-keys response
+                       [:datahike.query/result
+                        :datahike.read/dependency-plan
+                        :datahike.query/attribute-dependencies
+                        :datahike.query/cache-evidence
+                        :datahike.query/resource-evidence])
           (protocol-error-value response))))))
+
+(defn- db-query
+  "Context `seon.db/query`: one blocking Datalog read at the current head."
+  [writer query-form & arguments]
+  (let [response (apply db-query-with-evidence writer query-form arguments)]
+    (if (:seon/error response)
+      response
+      (:datahike.query/result response))))
 
 (defn- db-pull
   "Context `seon.db/pull`: one blocking pull read at the current head."
@@ -401,6 +418,10 @@
     {'query {::wrapper-fn (partial db-query writer)
              ::arglists '([query-form & arguments])
              ::doc "Run one Datalog read at the writer's current head."}
+     'query-with-evidence
+     {::wrapper-fn (partial db-query-with-evidence writer)
+      ::arglists '([query-form & arguments])
+      ::doc "Run one Datalog read and return its result with its own cost evidence."}
      'pull {::wrapper-fn (partial db-pull writer)
             ::arglists '([selector entity-id])
             ::doc "Pull one entity's selection at the current head."}
