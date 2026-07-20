@@ -28,6 +28,36 @@ change; C is the deeper simplification decided on B's usage data. The
 Bun client pod (web UI, LLM, loop, rendering) is out of scope and
 remains the application host under every variant.
 
+## Design thesis (owner, 2026-07-20 evening)
+
+Deep sci integration at the eval boundary — the harness owns the
+interpreter, not merely hosts it:
+
+- **Agents are CONTEXTS on HOSTS with BINDING TABLES** (sci's own
+  vocabulary; never "sandbox"). A context is the agent's private state
+  between evals; hosts are the JVM agent host and the Bun pod (the
+  cluster's shared JS host); binding tables are the allowlisted
+  capability surfaces packages are provisioned into.
+- **Placement is derived from requires.** The persisted require graph
+  (:seon.ns/require-edges) maps each namespace to its host; the eval
+  boundary synthesizes remote-call crossings so cross-platform calls
+  need no agent-visible FFI. The agent perceives ONE platform; every
+  non-local capability (db, npm, Java, OS tools) is a remote function
+  call with a pure-data transit boundary and the standard envelope.
+- **The REPL concept is the interception seam**: parse -> repair ->
+  route -> execute -> envelope -> persist-corrected. Platform routing is
+  one more rewrite at the seam that already owns auto-await and
+  augment-ns-source.
+- Why: control (in-process interrupt, allowlisted tables), speed (JIT
+  tier, 12 ms p50 turns, 3.4-3.9x envelope perf), reuse (one shared
+  immutable program across contexts; 118 KB working marginal), and
+  crash/restart behavior (contained failures; contexts rebuild from
+  database facts; park/restore instead of process churn).
+- Sci is EPL-1.0 (verified) — forkable on the existing
+  datahike/shadow-cljs mirror model; prefer minimal upstreamable
+  patches. Seam selection: [[research/sci-routing-seam-2026-07-20]]
+  (in flight).
+
 ## Evidence base
 
 [[../source-cleanup/research/sci-execution-child-feasibility-2026-07-20]]
