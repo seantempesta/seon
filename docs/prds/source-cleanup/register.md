@@ -143,8 +143,15 @@ proven incl. identical error envelopes; iso-context caveat and deferred
 adapter punch list recorded in the research doc. Bonus: a my.plan
 find-clause bug silently erroring EVERY run-attached turn close since
 `f457232a` found and fixed in passing. ALL exploration gates (B1, B2,
-C1, seam) now PASS — the decision packet is complete; U1 (seon.host)
-building.
+C1, seam) now PASS — the decision packet is complete. U1 SHIPPED
+(`cd239b79`+`5b65ddc6`+`b9d45346`): `seon.host` real — UDS transport over
+the one codec owner, 8+4-message protocol conformance (18/60 green, full
+writer gate 251/1958), sci eval with deadline/interrupt, db boundary over
+one retained connection, fork/replay restore. KILL DRILL PASS ×2: 20
+contexts, kill -9 mid-runaway-wave, 20/20 contract error values, 20/20
+rebuilt in 132 ms, zero fact loss. Seams for U2/U3 marked in source.
+Hazard found + filed: the writer silently creates a fresh store for any
+requested path (ensure-database-creates-fresh-store-at-any-path).
 
 ## Independent backlog (87 notes, themed)
 
