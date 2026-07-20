@@ -78,6 +78,29 @@
   :seon.config/reactive-max-latency-ms
   #long #or [#env SEON_REACTIVE_MAX_LATENCY_MS 500]}
 
+ ;; ── DATABASE READ SAFETY CEILINGS — these are deliberately high runaway
+ ;; guards, not pagination, application result limits, or performance targets.
+ ;; Datahike `max-work` counts charged execution steps. `max-results` counts
+ ;; retained result NODES, including nested pull values—not top-level rows or
+ ;; requested entities. `max-result-weight` counts Datahike's shallow scalar
+ ;; and container weight, not bytes; the default remains below the 4 MiB wire
+ ;; frame ceiling. A caller may explicitly request a smaller bound for a known
+ ;; operation. Aero resolves environment overrides once before these become
+ ;; ordinary attributes on the database configuration singleton.
+ :seon.config/database
+ {:seon.config.database.query/max-work
+  #long #or [#env SEON_DB_QUERY_MAX_WORK 100000000]
+  :seon.config.database.query/max-results
+  #long #or [#env SEON_DB_QUERY_MAX_RESULTS 1000000]
+  :seon.config.database.query/max-result-weight
+  #long #or [#env SEON_DB_QUERY_MAX_RESULT_WEIGHT 3000000]
+  :seon.config.database.pull/max-work
+  #long #or [#env SEON_DB_PULL_MAX_WORK 25000000]
+  :seon.config.database.pull/max-results
+  #long #or [#env SEON_DB_PULL_MAX_RESULTS 1000000]
+  :seon.config.database.pull/max-result-weight
+  #long #or [#env SEON_DB_PULL_MAX_RESULT_WEIGHT 3000000]}
+
  ;; ── MODEL-TRANSPORT EVIDENCE BOUNDS — immutable cluster policy.
  ;; These cap non-secret provider identities and normalized endpoint evidence;
  ;; they do not limit model output or alter provider request bytes. Aero owns

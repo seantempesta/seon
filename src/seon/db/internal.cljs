@@ -60,6 +60,12 @@
   [context f]
   (.run tx-context (merge (current-tx-context) context) f))
 
+(defn enter-tx-context!
+  "Make `context` available to async work created from the current fiber."
+  [context]
+  (.enterWith tx-context (merge (current-tx-context) context))
+  nil)
+
 (defn run-with-agent
   "Run `f` with `agent-id` as the current agent."
   [agent-id f]

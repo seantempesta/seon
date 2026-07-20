@@ -545,15 +545,27 @@ manifest, which overrides defaults), and the exact population reconciler
 restores the declared config singleton/routes/root-context/skill-import subset. Omitted managed attributes and
 stale exclusive rows retract; outside facts remain untouched; equal state emits
 no transaction. A config-free boot skips this transition. The write is
-`{user root, process config}`. After database acquisition every
-runtime read is an ordinary singleton acquisition at the operation's immutable
-database value. The operation decodes its EDN slots once and passes that map to
-pure accessors such as `config/eval-render-cap`, `config/on-core-error`,
-`config/web-policy`, and `config/namespaces-policy`. No accessor owns an atom,
-injected reader, manifest fallback, or second projection cache. Explicitly
-selected manifest data or resolved code defaults are valid only before
-database initialization; afterward missing required config is a typed readiness
-error.
+`{user root, process config}`. After database acquisition runtime startup
+acquires the singleton once, decodes its EDN slots, and installs that ordinary
+map in the existing async transaction context alongside the current database
+value and provenance. Descendant work inherits it without another database
+read or configuration argument. Pure accessors such as
+`config/eval-render-cap`, `config/on-core-error`, `config/web-policy`, and
+`config/namespaces-policy` read the acquired map; a central operation boundary
+may merge an explicit request override over it. No accessor owns an atom,
+additional async context, injected reader, manifest fallback, or second
+projection cache. Explicitly selected manifest data or resolved code defaults
+are valid only before database initialization; afterward missing required
+config is a typed readiness error.
+
+Database read resource fields are safety ceilings rather than result-shaping
+controls. Datahike `max-work` counts charged execution steps, `max-results`
+counts retained result nodes (including nested pull values), and
+`max-result-weight` counts shallow scalar/container weight rather than bytes.
+Normal query and pull work inherits generous database configuration values;
+an individual operation may explicitly request a smaller ceiling. Pagination,
+top-level row limits, and application semantics use their own query shape or
+API fields and never overload these resource counters.
 Collection knobs
 (`:seon.config/always`, `:seon.config.repair/classes`,
 `:seon.agent.web/allowed-domains`) ride the mixed-`:or` EDN-slot bridge (the

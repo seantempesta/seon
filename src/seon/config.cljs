@@ -156,6 +156,33 @@
 (schema/register! :seon.config/reactive-structural-settle-ms :seon.config/cap)
 (schema/register! :seon.config/reactive-max-latency-ms :seon.config/cap)
 
+;;; DATABASE READ RESOURCE POLICY — runaway-work ceilings, not pagination.
+;;; Datahike defines `max-work` as charged execution steps, `max-results` as
+;;; retained result nodes (including nested pull values), and
+;;; `max-result-weight` as shallow scalar/container weight. The latter is not a
+;;; byte count; the shipped value stays below the protocol's 4 MiB frame cap so
+;;; a successful bounded read can still be encoded and delivered.
+(schema/register! :seon.config.database.query/max-work :seon.config/cap)
+(schema/register! :seon.config.database.query/max-results :seon.config/cap)
+(schema/register! :seon.config.database.query/max-result-weight :seon.config/cap)
+(schema/register! :seon.config.database.pull/max-work :seon.config/cap)
+(schema/register! :seon.config.database.pull/max-results :seon.config/cap)
+(schema/register! :seon.config.database.pull/max-result-weight :seon.config/cap)
+(schema/register! :seon.config/database
+  [:map {:closed true}
+   [:seon.config.database.query/max-work
+    {:optional true} :seon.config.database.query/max-work]
+   [:seon.config.database.query/max-results
+    {:optional true} :seon.config.database.query/max-results]
+   [:seon.config.database.query/max-result-weight
+    {:optional true} :seon.config.database.query/max-result-weight]
+   [:seon.config.database.pull/max-work
+    {:optional true} :seon.config.database.pull/max-work]
+   [:seon.config.database.pull/max-results
+    {:optional true} :seon.config.database.pull/max-results]
+   [:seon.config.database.pull/max-result-weight
+    {:optional true} :seon.config.database.pull/max-result-weight]])
+
 ;;; RENDER BOUNDS — the GLOBAL, cluster-wide render/value display caps (#46).
 ;;; These are NOT per-agent: they bound the value/eval/message renderers for
 ;;; the whole cluster, seeded from this manifest section into the
@@ -367,7 +394,19 @@
    [:seon.config/reactive-structural-settle-ms
     {:optional true} :seon.config/reactive-structural-settle-ms]
    [:seon.config/reactive-max-latency-ms
-    {:optional true} :seon.config/reactive-max-latency-ms]])
+    {:optional true} :seon.config/reactive-max-latency-ms]
+   [:seon.config.database.query/max-work
+    {:optional true} :seon.config.database.query/max-work]
+   [:seon.config.database.query/max-results
+    {:optional true} :seon.config.database.query/max-results]
+   [:seon.config.database.query/max-result-weight
+    {:optional true} :seon.config.database.query/max-result-weight]
+   [:seon.config.database.pull/max-work
+    {:optional true} :seon.config.database.pull/max-work]
+   [:seon.config.database.pull/max-results
+    {:optional true} :seon.config.database.pull/max-results]
+   [:seon.config.database.pull/max-result-weight
+    {:optional true} :seon.config.database.pull/max-result-weight]])
 
 ;;; REPL MODE (repl-mode Phase 1) — how the agent's REPL turn resolves a
 ;;; form's result. The DEFAULT is per-MODEL ([[default-repl-mode]]); an
@@ -538,6 +577,7 @@
    [:seon.config/schedule-breaker  {:optional true} :seon.config/schedule-breaker]
    [:seon.config/root              {:optional true} :seon.config/root]
    [:seon.config/reactive          {:optional true} :seon.config/reactive]
+   [:seon.config/database          {:optional true} :seon.config/database]
    [:seon.config/agent-context {:optional true} :seon.config/agent-context]
    [:seon.config/root-context  {:optional true} :seon.config/root-context]])
 
@@ -767,6 +807,18 @@
    :seon.config/reactive-structural-settle-ms 300
    :seon.config/reactive-max-latency-ms 500})
 
+(def default-database-query-policy
+  "Generous query ceilings used only to stop runaway database work."
+  {:seon.config.database.query/max-work 100000000
+   :seon.config.database.query/max-results 1000000
+   :seon.config.database.query/max-result-weight 3000000})
+
+(def default-database-pull-policy
+  "Generous pull ceilings used only to stop runaway database work."
+  {:seon.config.database.pull/max-work 25000000
+   :seon.config.database.pull/max-results 1000000
+   :seon.config.database.pull/max-result-weight 3000000})
+
 (defn resolve-config-singleton
   "The FLAT `:seon.config` singleton entity map for `manifest`.
 
@@ -785,6 +837,7 @@
         web (get manifest :seon.config/web {})
         root (get manifest :seon.config/root {})
         reactive (get manifest :seon.config/reactive {})
+        database (get manifest :seon.config/database {})
         nsp (resolve-namespaces manifest)]
     (cond-> {:seon.config/id cluster-config-id
              :seon.config/repl-mode
@@ -848,7 +901,25 @@
                   (:seon.config/reactive-structural-settle-ms default-reactive-policy))
              :seon.config/reactive-max-latency-ms
              (get reactive :seon.config/reactive-max-latency-ms
-                  (:seon.config/reactive-max-latency-ms default-reactive-policy))}
+                  (:seon.config/reactive-max-latency-ms default-reactive-policy))
+             :seon.config.database.query/max-work
+             (get database :seon.config.database.query/max-work
+                  (:seon.config.database.query/max-work default-database-query-policy))
+             :seon.config.database.query/max-results
+             (get database :seon.config.database.query/max-results
+                  (:seon.config.database.query/max-results default-database-query-policy))
+             :seon.config.database.query/max-result-weight
+             (get database :seon.config.database.query/max-result-weight
+                  (:seon.config.database.query/max-result-weight default-database-query-policy))
+             :seon.config.database.pull/max-work
+             (get database :seon.config.database.pull/max-work
+                  (:seon.config.database.pull/max-work default-database-pull-policy))
+             :seon.config.database.pull/max-results
+             (get database :seon.config.database.pull/max-results
+                  (:seon.config.database.pull/max-results default-database-pull-policy))
+             :seon.config.database.pull/max-result-weight
+             (get database :seon.config.database.pull/max-result-weight
+                  (:seon.config.database.pull/max-result-weight default-database-pull-policy))}
       (contains? manifest :seon.config/system-text)
       (assoc :seon.config/system-text (:seon.config/system-text manifest))
       (contains? transport :seon.config.model-transport/response-identity-cap)
@@ -875,6 +946,20 @@
   [configuration]
   (merge default-reactive-policy
          (select-keys configuration (keys default-reactive-policy))))
+
+(defn database-query-policy
+  "Return runaway-work ceilings for one Datahike query."
+  {:malli/schema [:=> [:cat :seon.config/singleton] :seon.config/database]}
+  [configuration]
+  (merge default-database-query-policy
+         (select-keys configuration (keys default-database-query-policy))))
+
+(defn database-pull-policy
+  "Return runaway-work ceilings for one Datahike pull operation."
+  {:malli/schema [:=> [:cat :seon.config/singleton] :seon.config/database]}
+  [configuration]
+  (merge default-database-pull-policy
+         (select-keys configuration (keys default-database-pull-policy))))
 
 (defn namespaces-policy
   "The resolved full-source storage policy from ordinary singleton data.

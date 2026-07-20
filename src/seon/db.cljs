@@ -6,6 +6,7 @@
    request/response data and one multiplexed transport session."
   (:require
    [cljs.reader :as reader]
+   [seon.config :as config]
    [seon.db.branch :as db.branch]
    [seon.db.id.schema]
    [seon.db.internal :as internal]
@@ -698,6 +699,12 @@
   [tx-context thunk]
   (internal/run-with-tx-context tx-context thunk))
 
+(defn ^:no-doc install-configuration-context!
+  "Install resolved database configuration for descendant async work."
+  [configuration]
+  (internal/enter-tx-context!
+   {:seon.config/configuration configuration}))
+
 (defn- ^:async resolve-db! [database-name acquire?]
   (let [state (await (active-or-reconnect!))]
     (if (error-value? state)
@@ -735,14 +742,28 @@
       {::protocol/request-id (or (::request-id request) (str (random-uuid)))
        ::db database})))
 
-(defn- read-resource-options [request]
-  (cond-> {}
-    (::max-work request)
-    (assoc :datahike.resource/max-work (::max-work request))
-    (::max-results request)
-    (assoc :datahike.resource/max-results (::max-results request))
-    (::max-result-weight request)
-    (assoc :datahike.resource/max-result-weight (::max-result-weight request))))
+(defn- read-resource-options [policy request]
+  (let [configuration (:seon.config/configuration
+                       (internal/current-tx-context))
+        inherited (case policy
+                    :query (if configuration
+                             (config/database-query-policy configuration)
+                             config/default-database-query-policy)
+                    :pull (if configuration
+                            (config/database-pull-policy configuration)
+                            config/default-database-pull-policy))
+        [max-work max-results max-result-weight]
+        (case policy
+          :query [(:seon.config.database.query/max-work inherited)
+                  (:seon.config.database.query/max-results inherited)
+                  (:seon.config.database.query/max-result-weight inherited)]
+          :pull [(:seon.config.database.pull/max-work inherited)
+                 (:seon.config.database.pull/max-results inherited)
+                 (:seon.config.database.pull/max-result-weight inherited)])]
+    {:datahike.resource/max-work (or (::max-work request) max-work)
+     :datahike.resource/max-results (or (::max-results request) max-results)
+     :datahike.resource/max-result-weight
+     (or (::max-result-weight request) max-result-weight)}))
 
 (defn ^{:async true :seon.fn/agent-facing? true} db
   "Return the latest immutable database value for this process's session."
@@ -919,7 +940,7 @@
                  (or (::request-id request) (str (random-uuid)))
                  ::protocol/query-form (::query request)
                  ::protocol/arguments arguments}
-                (read-resource-options request))
+                (read-resource-options :query request))
          database (assoc ::db database))))))
 
 (defn- ^:async query-response! [request]
@@ -988,7 +1009,7 @@
                 (merge base
                        {::protocol/selector (::pull-pattern request)
                         ::protocol/entity-id (::ref request)}
-                       (read-resource-options request)))
+                       (read-resource-options :pull request)))
                30000))]
          (cond
            (error-value? response) response
@@ -1016,7 +1037,7 @@
                 (merge base
                        {::protocol/selector (::pull-pattern request)
                         ::protocol/entity-ids (::refs request)}
-                       (read-resource-options request)))
+                       (read-resource-options :pull request)))
                30000))]
          (cond
            (error-value? response) response

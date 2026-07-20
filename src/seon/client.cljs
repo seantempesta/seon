@@ -2163,6 +2163,7 @@
                recovered))))
         (let [configuration (or selected-configuration
                                 (await (acquire-configuration!)))
+              _ (db/install-configuration-context! configuration)
               initial-result
               (when (and autonomous? (nil? restore-startup))
                 (await

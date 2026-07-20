@@ -489,6 +489,30 @@
             :seon.config/reactive-max-latency-ms 700}
            (config/reactive-policy configured)))))
 
+(deftest database-read-policy-is-resolved-into-the-config-singleton
+  (let [defaults (config/resolve-config-singleton {})
+        configured
+        (config/resolve-config-singleton
+         {:seon.config/database
+          {:seon.config.database.query/max-work 7000000
+           :seon.config.database.query/max-results 70000
+           :seon.config.database.query/max-result-weight 700000
+           :seon.config.database.pull/max-work 8000000
+           :seon.config.database.pull/max-results 80000
+           :seon.config.database.pull/max-result-weight 800000}})]
+    (is (= config/default-database-query-policy
+           (config/database-query-policy defaults)))
+    (is (= config/default-database-pull-policy
+           (config/database-pull-policy defaults)))
+    (is (= {:seon.config.database.query/max-work 7000000
+            :seon.config.database.query/max-results 70000
+            :seon.config.database.query/max-result-weight 700000}
+           (config/database-query-policy configured)))
+    (is (= {:seon.config.database.pull/max-work 8000000
+            :seon.config.database.pull/max-results 80000
+            :seon.config.database.pull/max-result-weight 800000}
+           (config/database-pull-policy configured)))))
+
 (deftest reactive-environment-overrides-resolve-before-database-seeding
   (with-env
     "SEON_REACTIVE_SETTLE_MS" "8"

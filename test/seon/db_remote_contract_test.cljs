@@ -273,6 +273,57 @@
   [function-name]
   (instrument/find-js-var 'seon.db function-name))
 
+(defn- configured-read-proof [requests]
+  (-> (open!)
+      (.then
+       (fn [_]
+         (reset! requests [])
+         (db/with-tx-context
+          {:seon.config/configuration
+           {:seon.config.database.query/max-work 7000000
+            :seon.config.database.query/max-results 70000
+            :seon.config.database.query/max-result-weight 700000
+            :seon.config.database.pull/max-work 8000000
+            :seon.config.database.pull/max-results 80000
+            :seon.config.database.pull/max-result-weight 800000}}
+          (fn []
+            (-> (db/query
+                 {::db/query '[:find ?e :where [?e :example/id]]
+                  ::db/db database
+                  ::db/max-results 9})
+                (.then
+                 (fn [_]
+                   (db/pull {::db/db database
+                             ::db/pull-pattern '[*]
+                             ::db/ref 1}))))))))
+      (.then
+       (fn [_]
+         (let [query-request
+               (first (operation-requests @requests protocol/query-operation))
+               pull-request
+               (first (operation-requests @requests protocol/pull-operation))]
+           (is (= 7000000 (:datahike.resource/max-work query-request)))
+           (is (= 9 (:datahike.resource/max-results query-request))
+               "an explicit operation limit overrides config")
+           (is (= 700000
+                  (:datahike.resource/max-result-weight query-request)))
+           (is (= 8000000 (:datahike.resource/max-work pull-request)))
+           (is (= 80000 (:datahike.resource/max-results pull-request)))
+           (is (= 800000
+                  (:datahike.resource/max-result-weight pull-request))))))))
+
+(deftest database-read-limits-inherit-configuration-and-allow-request-overrides
+  (async done
+    (-> (with-recording-authority
+          {'[:find ?e :where [?e :example/id]] [[1]]}
+          (fn [{::keys [requests]}]
+            (configured-read-proof requests)))
+        (.then (fn [_] (done)))
+        (.catch
+         (fn [error]
+           (is false (str error "\n" (.-stack error)))
+           (done))))))
+
 (deftest database-values-are-ordinary-immutable-maps
   (async done
     (-> (with-recording-authority

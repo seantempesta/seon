@@ -34,13 +34,18 @@ keys fail startup validation rather than being ignored.
   available in full. The per-agent namespaces block alone controls which
   namespaces and tests render at full detail.
 - :seon.config/render supplies cluster-wide rendering limits.
+- :seon.config/database supplies generous Datahike query and pull runaway-work
+  ceilings. `max-results` counts retained result nodes, not top-level rows;
+  `max-result-weight` is shallow Datahike weight, not bytes.
 - :seon.config/skills selects directories scanned into the pull-reference
   corpus. Corpus entries do not become standing context blocks.
 - :seon.config/routes adds or removes database-backed route facts.
 
 The boot seed also reconciles the :seon.config singleton. Once the database is
-attached, accessors read that singleton instead of repeatedly treating the file
-as runtime state.
+attached, runtime startup acquires it once and installs the decoded ordinary
+map in the existing async transaction context. Accessors and centralized
+request normalization inherit it without rereading the database or treating
+the file as runtime state; an explicit operation option wins.
 
 ## Agent context is explicit
 
