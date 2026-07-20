@@ -156,8 +156,11 @@ The exact handoffs are grounded by
 (`e7cc6f94`). Display-only map keys are identified by output-local indexes and
 never tokenized; the three budget dimensions remain distinct and are enforced
 before work by both parent and child; and the plan proof deletes its current
-HTML-only database acquisition before property dispatch. The shipped numeric
-budget defaults are the only remaining owner ruling before the config unit.
+HTML-only database acquisition before property dispatch. Numeric policy is
+settled by [[research/value-drill-cap-default-ruling-2026-07-20]] (`38f24f39`):
+32 decoded segments, 4,096 raw percent-encoded UTF-8 bytes, and total
+`offset + page-size` 1,024, permitting at most 1,025 source touches with the
+tail sentinel.
 
 ## Problems this closes
 

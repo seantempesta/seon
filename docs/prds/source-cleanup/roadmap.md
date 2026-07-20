@@ -151,7 +151,12 @@ The work/config owner is
 independent singleton caps govern decoded segments, encoded bytes, and total
 realized items; parent and child both reject before lookup or realization and
 each page touches at most `offset + n + 1`. Concrete shipped defaults remain
-an explicit owner ruling before that source unit starts.
+an explicit owner ruling before that source unit starts. That ruling is now
+[[research/value-drill-cap-default-ruling-2026-07-20]] (`38f24f39`): 32 decoded
+path segments, 4,096 UTF-8 bytes of raw percent-encoded path, and a maximum
+`offset + page-size` of 1,024 (therefore at most 1,025 touched items including
+the honest tail sentinel). These are independent cardinality/amplification
+bounds, not a latency claim for arbitrary lazy elements.
 
 Only after those contracts freeze does
 [[research/execution-child-value-sampling-boundary-2026-07-20]] (`a568deef`)
