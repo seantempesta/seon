@@ -13,6 +13,8 @@ tags: [prd, agent, research]
 > long-term planning, autocomplete, default tools, small-model evidence, and
 > the ACME handback is
 > [[research/integrated-agent-testing-evidence-reconciliation-2026-07-15]].
+> The current product-graduation task/scorer coverage and ordered live matrix
+> are [[research/product-graduation-scenario-audit-2026-07-19]].
 
 ## Outcome
 
@@ -43,8 +45,10 @@ These mechanisms are not yet one reproducible evidence path:
   Inspect Evals, exact Python OpenAI `2.45.0`, admitted Python/task/scorer paths,
   Python/dataset locks, and committed Seon harness source. A mismatch rejects
   task construction or a prebuilt run before model/pod work;
-- per-sample create/restart/release correctly fail because the operator has no
-  ownership-fenced lease; static URL mode is not isolation;
+- the ownership-fenced branch lease is implemented and used by the live
+  namespace, reuse/repair, and child-recovery scenarios. The pod-restart and
+  durable-planning drivers still use or exclude retired cluster lifecycle
+  calls and must migrate to that same lease; static URL mode is not isolation;
 - static runs retain exact turn bytes and complete database coordinates, and
   every accepted catalog run now requires a readable native `.eval` carrying
   the complete admitted source map; evidence-directory copies are digest-
@@ -94,11 +98,12 @@ not code to cherry-pick. Training and paid model trials remain paused.
 1. Source/run admission is complete. In parallel, freeze the ordinary-work
    development/milestone/blind battery and define the schema-registered,
    content-addressed autocomplete manifest.
-2. Publish one token-fenced operator lease returning artifact/config/source and
-   dynamic web/CLJ/CLJS/database coordinates.
-3. After their respective prerequisites, migrate live Inspect/typeahead callers
-   through the lease while implementing canonical export, replay, and layered
-   scoring through current render/eval/database boundaries.
+2. Use the implemented token-fenced branch lease returning artifact/config/
+   source and dynamic web/CLJ/CLJS/database coordinates; migrate the remaining
+   pod-restart and durable-planning drivers from retired lifecycle calls.
+3. After their respective prerequisites, migrate the remaining live Inspect
+   and typeahead callers through the lease while implementing canonical export,
+   replay, and layered scoring through current render/eval/database boundaries.
 4. Run deterministic fixtures, offline calibration, local simple-model rungs,
    then the bounded large-planner/small-executor reference.
 5. In parallel under its own evidence gates, promote/read back accepted old-lane
@@ -113,9 +118,12 @@ not code to cherry-pick. Training and paid model trials remain paused.
    task construction and run finalization. The native log carries the admitted
    source map. Focused proof is 27 tests; the complete offline gate is 403
    passed/eight skipped.
-2. **Live ownership.** Implement the operator lease, then prove concurrent
-   disjoint samples, dynamic CLJ/CLJS discovery, identity-preserving restart,
-   cancellation, and token-fenced idempotent cleanup.
+2. **Live ownership — branch lease implemented, caller migration incomplete.**
+   Namespace delivery, reuse/repair, and child recovery use the branch lease.
+   Move pod restart and durable planning to the same lease, then prove
+   concurrent disjoint samples, dynamic CLJ/CLJS discovery,
+   identity-preserving restart, cancellation, and token-fenced idempotent
+   cleanup.
 3. **Canonical export — observed artifact complete.** The existing
    ClojureScript exporter emits serving cards plus deduplicated referenced
    schemas, content-addressed rows/manifest, deterministic splits, and retained
@@ -134,6 +142,12 @@ not code to cherry-pick. Training and paid model trials remain paused.
    tasks. Begin with mocks and local simple models. Change schemas/functions
    only for general discoverability/contract failures and rerun the whole frozen
    battery after every accepted refinement.
+7. **Product graduation matrix.** Reuse the namespace-movement, database-recall,
+   namespace-resident, durable-planning, and child-recovery scorers in the
+   order defined by the 2026-07-19 audit. Add only one new product scenario:
+   the settled public generate-code operation repairing an implementation and
+   test namespace in place, scored from its durable plan, Datahike history, and
+   fresh test result.
 
 ## Parallelizable research
 
