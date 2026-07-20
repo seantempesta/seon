@@ -326,12 +326,13 @@
         eid        (await (db/query '[:find ?e . :in $ ?n
                                       :where [?e :my.skills/name ?n]]
                                     db skill-name))
-        row        (when (and eid (not (:seon.error/message eid)))
+        row        (when (and eid (not (string? (:seon.error/message eid))))
                      (await (db/pull {:seon.db/db db
                                       :seon.db/pull-pattern
                                       '[:my.skills/body :seon.agent.ctx/file-path]
                                       :seon.db/ref eid})))
-        error      (or (:seon.error/message eid) (:seon.error/message row))
+        error      (first (filter string? [(:seon.error/message eid)
+                                           (:seon.error/message row)]))
         body       (when-not error (skill-body row))]
     (cond
       error

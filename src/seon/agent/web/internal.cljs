@@ -532,11 +532,11 @@
                                 :where [?e :seon.agent.web/url ?u]
                                        [?e :seon.agent.web/fetched-at ?at]]
                               url))]
-    (when (and (not (:seon.error/message rows)) (seq rows))
+    (when (and (not (string? (:seon.error/message rows))) (seq rows))
       (let [[e at] (apply max-key #(.getTime ^js (second %)) rows)]
         (when (< (- (.now js/Date) (.getTime ^js at)) max-age-ms)
           (let [row (await (db/entity e))]
-            (when-not (:seon.error/message row)
+            (when-not (string? (:seon.error/message row))
               row)))))))
 
 ;; ============================================================

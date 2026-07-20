@@ -152,7 +152,10 @@
     {}
     (let [installed (await (db/installed-schema dbv))]
       (cond
-        (:seon.error/message installed) installed
+        ;; the facade's error contract: a STRING :seon.error/message. The
+        ;; installed-schema map itself carries :seon.error/message as an
+        ;; attribute IDENT key, so bare key-presence would false-positive.
+        (string? (:seon.error/message installed)) installed
 
         (not (contains? installed :seon.render.canvas/content)) {}
 
@@ -160,12 +163,12 @@
         (let [row (await (db/pull dbv [:seon.render.canvas/content]
                                   [:seon.agent/id agent-id]))]
           (cond
-            (:seon.error/message row) row
+            (string? (:seon.error/message row)) row
 
             :else
-            (if-some [content (some-> (:seon.render.canvas/content row)
-                                      (db/decode-edn-value
-                                        :seon.render.canvas/content))]
+            (if-some [content (some->> (:seon.render.canvas/content row)
+                                       (db/decode-edn-value
+                                         :seon.render.canvas/content))]
               {::content content}
               {})))))))
 
