@@ -276,7 +276,8 @@
 
       :else
       (let [policy (int/policy configuration)]
-        (if-let [cached (and (pos? max-age-ms) (int/fresh-projection url max-age-ms))]
+        (if-let [cached (and (pos? max-age-ms)
+                             (await (int/fresh-projection url max-age-ms)))]
           (projection->response cached max-preview-tokens)
           (let [res (await (int/transport policy url timeout-ms
                                           int/default-max-bytes

@@ -521,19 +521,23 @@
 ;; (derive-don't-store). No TTL store, no eviction.
 ;; ============================================================
 
-(defn fresh-projection
+(defn ^:async fresh-projection
   "The newest fetch-projection entity for `url` younger than `max-age-ms`,
-   or nil. A DB query at call time — no cache subsystem."
+   or nil. A DB query at call time — no cache subsystem. A database ERROR
+   reads as nil (a cache miss): the caller's live fetch is the safe
+   degradation, and the fetch's own reads surface the fault."
   [url max-age-ms]
-  (let [rows (db/query '[:find ?e ?at
-                         :in $ ?u
-                         :where [?e :seon.agent.web/url ?u]
-                                [?e :seon.agent.web/fetched-at ?at]]
-                       url)]
-    (when (seq rows)
+  (let [rows (await (db/query '[:find ?e ?at
+                                :in $ ?u
+                                :where [?e :seon.agent.web/url ?u]
+                                       [?e :seon.agent.web/fetched-at ?at]]
+                              url))]
+    (when (and (not (:seon.error/message rows)) (seq rows))
       (let [[e at] (apply max-key #(.getTime ^js (second %)) rows)]
         (when (< (- (.now js/Date) (.getTime ^js at)) max-age-ms)
-          (db/entity e))))))
+          (let [row (await (db/entity e))]
+            (when-not (:seon.error/message row)
+              row)))))))
 
 ;; ============================================================
 ;; WEB SEARCH — the `seon.agent.web/search` backend. Backend + model are

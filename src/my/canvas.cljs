@@ -137,23 +137,37 @@
          :seon.render.canvas/content]]})))
 
 (schema/register! ::pinned-response
-  [:map [::content {:optional true} :seon.render.canvas/content]])
+  [:or
+   [:map [::content {:optional true} :seon.render.canvas/content]]
+   :seon.db/error])
 
-(defn ^:seon.fn/agent-facing? pinned
+(defn ^{:async true :seon.fn/agent-facing? true} pinned
   "Return YOUR explicit canvas pin, or an empty map when none is pinned.
 
-   Call `(pinned {})`; agent id and db are injected."
+   Call `(pinned {})`; agent id and db are injected. A database error is
+   a VALUE (`:seon.error/message`), never a throw."
   {:malli/schema [:=> [:cat ::canvas-request] ::pinned-response]}
   [{dbv :seon.db/db agent-id :seon.agent/id}]
-  (if (and dbv agent-id
-           (contains? (db/installed-schema dbv) :seon.render.canvas/content))
-    (if-some [content (some-> (db/pull dbv [:seon.render.canvas/content]
-                                      [:seon.agent/id agent-id])
-                              :seon.render.canvas/content
-                              (db/decode-edn-value :seon.render.canvas/content))]
-      {::content content}
-      {})
-    {}))
+  (if-not (and dbv agent-id)
+    {}
+    (let [installed (await (db/installed-schema dbv))]
+      (cond
+        (:seon.error/message installed) installed
+
+        (not (contains? installed :seon.render.canvas/content)) {}
+
+        :else
+        (let [row (await (db/pull dbv [:seon.render.canvas/content]
+                                  [:seon.agent/id agent-id]))]
+          (cond
+            (:seon.error/message row) row
+
+            :else
+            (if-some [content (some-> (:seon.render.canvas/content row)
+                                      (db/decode-edn-value
+                                        :seon.render.canvas/content))]
+              {::content content}
+              {})))))))
 
 (schema/register! ::state-request
   [:map

@@ -305,7 +305,7 @@
                 "% of your ~" total-tok "-tok context)"))
          "\n;    done? (my.skills/unload :" (name skill-name) ") ──")))
 
-(defn skill-block
+(defn ^:async skill-block
   "The loaded-skill body block: the full SKILL.md, `;`-commented.
 
    The `:seon.render/ai` slot [[load]] installs as the agent's
@@ -313,24 +313,33 @@
    Eval-safe via [[seon.agent.ctx/quote-lines]], with a DERIVED token-cost
    footer. The skill name comes from the block's own `:skill/<name>` name;
    the row is pulled FRESH each render (REACTIVE: if the row is retracted,
-   or the file vanished, the body resolves blank → \"\" → the block drops)."
+   or the file vanished, the body resolves blank → \"\" → the block drops).
+   A database ERROR is a value — the block renders a legible one-line
+   failure comment instead of silently dropping."
   {:malli/schema [:=> [:cat :map] :string]}
   [{:seon.db/keys [db] node :seon.render/node}]
   (let [skill-name (keyword (name (:seon.agent.ctx/name node)))
-        ;; Resolve the eid via a GUARDED query (returns nil — never throws —
-        ;; when the row is gone), THEN pull by eid: a non-resolving lookup-ref
+        ;; Resolve the eid via a GUARDED query (an absent row yields nil,
+        ;; never a throw), THEN pull by eid: a non-resolving lookup-ref
         ;; `[:my.skills/name …]` throws `:entity-id/missing`, but the block
         ;; must DROP (\"\") when its skill row is retracted, not error.
-        eid        (db/query '[:find ?e . :in $ ?n
-                               :where [?e :my.skills/name ?n]]
-                             db skill-name)
-        row        (when eid
-                     (db/pull {:seon.db/db db
-                               :seon.db/pull-pattern
-                               '[:my.skills/body :seon.agent.ctx/file-path]
-                               :seon.db/ref eid}))
-        body       (skill-body row)]
-    (if (str/blank? body)
+        eid        (await (db/query '[:find ?e . :in $ ?n
+                                      :where [?e :my.skills/name ?n]]
+                                    db skill-name))
+        row        (when (and eid (not (:seon.error/message eid)))
+                     (await (db/pull {:seon.db/db db
+                                      :seon.db/pull-pattern
+                                      '[:my.skills/body :seon.agent.ctx/file-path]
+                                      :seon.db/ref eid})))
+        error      (or (:seon.error/message eid) (:seon.error/message row))
+        body       (when-not error (skill-body row))]
+    (cond
+      error
+      (str "; skill " (name skill-name) " block read failed: " error)
+
+      (str/blank? body)
       ""
+
+      :else
       (str (ctx/quote-lines body) "\n"
            (footer-line skill-name body nil)))))

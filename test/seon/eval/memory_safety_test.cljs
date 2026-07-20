@@ -21,7 +21,7 @@
      (require 'seon.eval.memory-safety-test :reload)
      (cljs.test/run-tests 'seon.eval.memory-safety-test)"
   (:require
-    [cljs.test :as t :refer [deftest is testing]]
+    [cljs.test :as t :refer [async deftest is testing]]
     [clojure.string :as str]
     [seon.ai.tokens :as tokens]
     [seon.config :as config]
@@ -112,30 +112,39 @@
     (js/Reflect.set js/globalThis (str seval/result-ns-sym)
                     (js/Object.create nil))
     (seval/bind-result-var! compile-state eval-id big-value)
-    (try
+    (async done
       (testing "persisted datom is bounded"
         (is (<= (count persisted) (+ database-edn-cap 64)))
         (is (< (count persisted) (count big-value))))
-      (testing "the public var and internal lookup share one bounded descriptor"
-        (let [retained (seval/lookup-result eval-id)]
-          (is (false? (:seon.eval/retained? retained)))
-          (is (= :seon.eval/weight-cap-exceeded
-                 (:seon.eval/retained-reason retained)))
-          (is (< (count (pr-str retained)) 1000))
-          (is (= retained (seval/lookup-result (keyword eval-id)))))
-        (is (contains?
-              (get-in @compile-state
-                      [:cljs.analyzer/namespaces seval/result-ns-sym :defs])
-              (symbol eval-id))))
-      (testing "the retired unbounded property is not recreated"
-        (is (false? (js/Reflect.has js/globalThis legacy-key))))
-      (finally
-        ((deref #'seval/unbind-result-var!) compile-state eval-id)
-        (if prior-results
-          (js/Reflect.set js/globalThis (str seval/result-ns-sym)
-                          prior-results)
-          (js/Reflect.deleteProperty js/globalThis
-                                     (str seval/result-ns-sym)))))))
+      (-> (js/Promise.all
+            #js [(seval/lookup-result eval-id)
+                 (seval/lookup-result (keyword eval-id))])
+          (.then
+           (fn [results]
+             (let [retained (aget results 0)]
+               (testing "the public var and internal lookup share one bounded descriptor"
+                 (is (false? (:seon.eval/retained? retained)))
+                 (is (= :seon.eval/weight-cap-exceeded
+                        (:seon.eval/retained-reason retained)))
+                 (is (< (count (pr-str retained)) 1000))
+                 (is (= retained (aget results 1)))
+                 (is (contains?
+                       (get-in @compile-state
+                               [:cljs.analyzer/namespaces
+                                seval/result-ns-sym :defs])
+                       (symbol eval-id)))))
+             (testing "the retired unbounded property is not recreated"
+               (is (false? (js/Reflect.has js/globalThis legacy-key))))))
+          (.catch (fn [error] (is false (str error))))
+          (.finally
+           (fn []
+             ((deref #'seval/unbind-result-var!) compile-state eval-id)
+             (if prior-results
+               (js/Reflect.set js/globalThis (str seval/result-ns-sym)
+                               prior-results)
+               (js/Reflect.deleteProperty js/globalThis
+                                          (str seval/result-ns-sym)))
+             (done)))))))
 
 (deftest small-live-result-round-trips-identically
   (let [value {:seon.demo/total 42

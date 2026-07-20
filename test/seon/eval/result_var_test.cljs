@@ -100,15 +100,19 @@
                                                  'probe.resultcap (last ids))])
                           (.then
                            (fn [results]
-                             (testing "evicted values become readable misses"
-                               (is (string? (:seon.eval/value
-                                             (aget results 0))))
-                               (is (false? (:seon.eval/ok?
-                                           (eval/lookup-result (first ids))))))
-                             (testing "surviving values resolve"
-                               (is (= 500 (:seon.eval/value (aget results 1))))
-                               (is (= (* 100 (dec n))
-                                      (:seon.eval/value (aget results 2))))))))))))))
+                             (-> (eval/lookup-result (first ids))
+                                 (.then
+                                  (fn [evicted]
+                                    (testing "evicted values become readable misses"
+                                      (is (string? (:seon.eval/value
+                                                    (aget results 0))))
+                                      (is (false? (:seon.eval/ok? evicted))))
+                                    (testing "surviving values resolve"
+                                      (is (= 500 (:seon.eval/value
+                                                  (aget results 1))))
+                                      (is (= (* 100 (dec n))
+                                             (:seon.eval/value
+                                              (aget results 2)))))))))))))))))
           (.catch (fn [error] (is false (str error))))
           (.finally
            (fn []
@@ -123,21 +127,27 @@
              (done)))))))
 
 (deftest pending-settlement-applies-retained-value-admission
-  (let [eval-id "settled-oversize-9999999999"
-        compile-state (atom {:cljs.analyzer/namespaces {}})
-        prior-results (js/Reflect.get js/globalThis (str eval/result-ns-sym))]
-    (js/Reflect.set js/globalThis (str eval/result-ns-sym)
-                    (js/Object.create nil))
-    (eval/bind-result-var! compile-state eval-id :pending)
-    (try
+  (async done
+    (let [eval-id "settled-oversize-9999999999"
+          compile-state (atom {:cljs.analyzer/namespaces {}})
+          prior-results (js/Reflect.get js/globalThis (str eval/result-ns-sym))]
+      (js/Reflect.set js/globalThis (str eval/result-ns-sym)
+                      (js/Object.create nil))
+      (eval/bind-result-var! compile-state eval-id :pending)
       (is (true? (replace-live-result!
                   eval-id (apply str (repeat (* 1024 1024) "z")))))
-      (is (= :seon.eval/weight-cap-exceeded
-             (:seon.eval/retained-reason (eval/lookup-result eval-id))))
-      (finally
-        (unbind-result-var! compile-state eval-id)
-        (if prior-results
-          (js/Reflect.set js/globalThis (str eval/result-ns-sym)
-                          prior-results)
-          (js/Reflect.deleteProperty js/globalThis
-                                     (str eval/result-ns-sym)))))))
+      (-> (eval/lookup-result eval-id)
+          (.then
+           (fn [retained]
+             (is (= :seon.eval/weight-cap-exceeded
+                    (:seon.eval/retained-reason retained)))))
+          (.catch (fn [error] (is false (str error))))
+          (.finally
+           (fn []
+             (unbind-result-var! compile-state eval-id)
+             (if prior-results
+               (js/Reflect.set js/globalThis (str eval/result-ns-sym)
+                               prior-results)
+               (js/Reflect.deleteProperty js/globalThis
+                                          (str eval/result-ns-sym)))
+             (done)))))))

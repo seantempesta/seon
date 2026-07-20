@@ -93,12 +93,14 @@
     (set! db/query (as-query-fn query-fn))
     (set! db/pull (as-pull-fn pull-fn))
     (set! ctx/read-file-text read-file-fn)
-    (try
-      (body)
-      (finally
-        (set! db/query (::query-fn saved))
-        (set! db/pull (::pull-fn saved))
-        (set! ctx/read-file-text (::read-file-fn saved))))))
+    ;; skill-block is ^:async: restore the fakes only after its Promise
+    ;; settles, or the awaits inside it would see the REAL db fns.
+    (-> (js/Promise.resolve (body))
+        (.finally
+          (fn []
+            (set! db/query (::query-fn saved))
+            (set! db/pull (::pull-fn saved))
+            (set! ctx/read-file-text (::read-file-fn saved)))))))
 
 (deftest schema-shapes-are-registered
   (is (= [:keyword {:seon.db/identity true}]
@@ -180,45 +182,53 @@
         done))))
 
 (deftest skill-render-keeps-file-content-derived-and-drops-missing-rows
-  (let [database {:db-name "default" :t 16}
-        queries (atom [])
-        pulls (atom [])
-        rendered
-        (with-skill-render-fakes
-          {::query-fn
-           (fn [& args]
-             (swap! queries conj args)
-             101)
-           ::pull-fn
-           (fn [request]
-             (swap! pulls conj request)
-             {:seon.agent.ctx/file-path datahike-skill-path})
-           ::read-file-fn
-           (fn [_]
-             "---\nname: datahike\ndescription: DB patterns.\n---\n# Datahike\nUse immutable database values.")}
-          #(skills/skill-block
-             {:seon.db/db database
-              :seon.render/node
-              {:seon.agent.ctx/name :skill/datahike}}))]
-    (is (str/includes? rendered "; # Datahike"))
-    (is (not (str/includes? rendered "name: datahike"))
-        "frontmatter is not duplicated into agent context")
-    (is (every? #(or (str/blank? %) (str/starts-with? % ";"))
-                (str/split-lines rendered))
-        "the rendered body remains eval-safe comment data")
-    (is (= 1 (count @queries)))
-    (is (= 1 (count @pulls)))
-    (is (identical? database (:seon.db/db (first @pulls))))
-    (is (= ""
-           (with-skill-render-fakes
-             {::query-fn (fn [& _] nil)
-              ::pull-fn (fn [_] (throw (js/Error. "must not pull")))
-              ::read-file-fn (fn [_] nil)}
-             #(skills/skill-block
-                {:seon.db/db database
-                 :seon.render/node
-                 {:seon.agent.ctx/name :skill/missing}})))
-        "a missing skill row omits the render")))
+  (async done
+    (let [database {:db-name "default" :t 16}
+          queries (atom [])
+          pulls (atom [])]
+      (finish
+        (-> (with-skill-render-fakes
+              {::query-fn
+               (fn [& args]
+                 (swap! queries conj args)
+                 101)
+               ::pull-fn
+               (fn [request]
+                 (swap! pulls conj request)
+                 {:seon.agent.ctx/file-path datahike-skill-path})
+               ::read-file-fn
+               (fn [_]
+                 "---\nname: datahike\ndescription: DB patterns.\n---\n# Datahike\nUse immutable database values.")}
+              #(skills/skill-block
+                 {:seon.db/db database
+                  :seon.render/node
+                  {:seon.agent.ctx/name :skill/datahike}}))
+            (.then
+             (fn [rendered]
+               (is (str/includes? rendered "; # Datahike"))
+               (is (not (str/includes? rendered "name: datahike"))
+                   "frontmatter is not duplicated into agent context")
+               (is (every? #(or (str/blank? %) (str/starts-with? % ";"))
+                           (str/split-lines rendered))
+                   "the rendered body remains eval-safe comment data")
+               (is (= 1 (count @queries)))
+               (is (= 1 (count @pulls)))
+               (is (identical? database (:seon.db/db (first @pulls))))))
+            (.then
+             (fn [_]
+               (with-skill-render-fakes
+                 {::query-fn (fn [& _] nil)
+                  ::pull-fn (fn [_] (throw (js/Error. "must not pull")))
+                  ::read-file-fn (fn [_] nil)}
+                 #(skills/skill-block
+                    {:seon.db/db database
+                     :seon.render/node
+                     {:seon.agent.ctx/name :skill/missing}}))))
+            (.then
+             (fn [rendered]
+               (is (= "" rendered)
+                   "a missing skill row omits the render"))))
+        done))))
 
 (deftest list-reuses-one-immutable-database-value
   (async done

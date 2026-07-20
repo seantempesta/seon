@@ -1520,7 +1520,7 @@
 ;; insertion-order branch rather than the integer-index ordering branch.
 ;; ============================================================
 
-(defn lookup-result
+(defn ^:async lookup-result
   "The live value of a prior eval, keyed by its `result/<id>`.
 
    The id on its value line
@@ -1529,7 +1529,9 @@
    any value type round-trips. INTERNAL reader — the agent's
    value-reuse surface is the `result/<id>` var;
    `lookup-result` is used by core code that needs an eval's live value
-   programmatically (e.g. seon.agent.message's batch-failure check).
+   programmatically (e.g. the data-browser's eval-result reader).
+   `^:async` — resolves to the value (or miss map); the live-slot read
+   itself needs no database, the MISS diagnosis does.
 
    ERRORS ARE VALUES: a miss never throws — it returns an error map
    that says exactly why there is no value:
@@ -1545,11 +1547,13 @@
         robj   (js/Reflect.get js/globalThis (str result-ns-sym))]
     (if (result-live? id-str)
       (js/Reflect.get robj munged)
-      (let [row (try (db/entity {:seon.db/ref [:seon.eval/id id-str]})
-                     ;; probe: a lookup-ref to a NON-EXISTENT eval id
-                     ;; throws in datahike — that IS the expected
-                     ;; "no such id" signal (an agent typo'd an id); the
-                     ;; nil row falls to the legible miss messages below.
+      (let [row (try (let [r (await (db/entity
+                                      {:seon.db/ref [:seon.eval/id id-str]}))]
+                       ;; a lookup-ref to a NON-EXISTENT eval id comes back
+                       ;; as an error VALUE — that IS the expected "no such
+                       ;; id" signal (an agent typo'd an id); the nil row
+                       ;; falls to the legible miss messages below.
+                       (when-not (:seon.error/message r) r))
                      (catch :default _ nil))]
         (cond
           (nil? (:seon.eval/id row))
