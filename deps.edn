@@ -101,10 +101,21 @@
          ;; a 128 GiB workstation otherwise commit a 2 GiB initial heap and
          ;; permit ~30 GiB per concurrent compiler. Keep one explicit bounded
          ;; policy here; do not duplicate heap flags in launch scripts.
+         ;;
+         ;; B2-EXPERIMENTAL (sci-execution-runtime PRD): the sci dependency
+         ;; enters here per the chunk runbook, pinned as :local/root against
+         ;; the reference checkout (HEAD be4021d, which contains the CLJS
+         ;; JIT commit 45bcf0f). PACKAGING IMPLICATION: :local/root is not a
+         ;; publishable coordinate — a production cutover needs a git dep on
+         ;; a pushed mirror. "tmp/sci-probe/exec-src" carries ONLY the
+         ;; B2-experimental child variant namespaces; no production build
+         ;; requires anything from it.
          :jvm-opts      ["--sun-misc-unsafe-memory-access=allow"
                          "-Xms256m" "-Xmx3g"]
-         :extra-paths   ["test" "script"]
-         :extra-deps    {org.clojure/clojurescript            {:mvn/version "1.12.145"}
+         :extra-paths   ["test" "script" "tmp/sci-probe/exec-src"]
+         :extra-deps    {;; B2-EXPERIMENTAL sci pin — see the alias comment above.
+                         org.babashka/sci                     {:local/root "reference-code/sci"}
+                         org.clojure/clojurescript            {:mvn/version "1.12.145"}
                          org.clojure/core.async               {:mvn/version "1.10.870-alpha2"}
                          ;; Maintained upstream 3.4.11 fork with the exact-selector
                          ;; symbol/hash fix and truthful Node reload completion.

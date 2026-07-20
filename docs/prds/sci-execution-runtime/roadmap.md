@@ -120,6 +120,29 @@ One real agent driven end-to-end on a sci child (branch cluster):
 memory per phase, burst retention, turn latency vs today's child. Gate:
 retention returns at production anchoring; no eval-latency regression.
 
+**Status: DONE, gate PASS (2026-07-20).** Evidence:
+[[research/b2-production-anchoring-2026-07-20]]. A sci-engined child
+ARTIFACT VARIANT (`:execution-sci`, `seon.execution.sci-runtime` in the
+harness source root; sci pinned in deps.edn as `:local/root` on the
+reference checkout — packaging implication noted) boots through the
+production `seon.execution/-main` (real IPC, session, admission), reuses
+the production render entries, and swaps only the `eval-batch!` compiled
+entry. One real agent on branch cluster `default-b2` drove 21 REAL
+turns through `seon.agent.turn/run-turn!` with a scripted llm-fn, A/B
+against the normal child on the same branch: 21/21 `:done` both, same
+eval counts, errors-as-values parity. Footprint: settled **231M vs
+442M** (−211M), peak 419M vs 701M, retention holds through a 202-form
+burst + gc + 60 s. Latency: non-burst median **2728 ms vs 4258 ms**,
+burst **64.3 s vs 345.9 s** (5.4×) — no regression (iso-context caveat:
+final ctx 33.2k vs 47.1k tokens from the minimal tee). Implemented B1
+items: 1, 2, 3 (computed binding provisioning), 6 (per-form), 7, 9.
+Deferred punch list for the decision gate: 4, 5, 8, full program-graph
+tee, result-var caps, failed-defs fencing, ALS-spanning print capture.
+Blocker 3 closes; blocker 4 (bundle floor — the variant still ships
+cljs.js unused) is the next B-side measurement. Fixed in passing: the
+unparseable `my.plan` generated-namespace find clause that errored every
+run-attached turn close on this branch.
+
 ### C1 — JVM host skeleton — DONE, gate PASS (2026-07-20)
 
 The probe's JVM harness grown to: sci context per agent, admitted

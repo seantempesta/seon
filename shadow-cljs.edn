@@ -368,4 +368,35 @@
    ;; (refer-global / require-global each have both a def AND a defmacro
    ;; of the same name — intentional in ClojureScript). Not our code.
    :compiler-options {:warnings-as-errors false
-                      :warnings           {:redef false}}}}}
+                      :warnings           {:redef false}}}
+
+  ;; B2-EXPERIMENTAL (docs/prds/sci-execution-runtime, stage B2). A sci-engined
+  ;; execution-child ARTIFACT VARIANT: identical to :execution except the
+  ;; compiled-function map routes eval-batch! through a sci engine
+  ;; (seon.execution.sci-runtime, source under tmp/sci-probe/exec-src — a
+  ;; harness path, not src/). NO operator flavor selects this build; it is
+  ;; compiled one-off in a separate Shadow cache (SHADOW_CLJS cache-root
+  ;; override) and driven only by the B2 measurement driver below. Delete both
+  ;; blocks when the PRD's decision gate lands.
+  :execution-sci
+  {:target           :node-script
+   :output-to        "out-b2/execution-sci/main.js"
+   :main             seon.execution.sci-runtime/-main
+   :devtools         {:enabled false}
+   :compiler-options {:warnings-as-errors false
+                      :optimizations      :simple
+                      :externs           ["externs/node_fs.js"]}}
+
+  ;; B2-EXPERIMENTAL measurement driver: spawns the production execution host
+  ;; against an explicit execution artifact (normal or sci) on a BRANCH
+  ;; database and drives real turns through seon.agent.turn/run-turn! with a
+  ;; scripted llm-fn, sampling vmmap per phase. Mirrors the maintained
+  ;; :execution-integration-client pattern; never a production entrypoint.
+  :b2-driver
+  {:target           :node-script
+   :output-to        "out-b2/driver/main.js"
+   :main             seon.execution.b2-driver/-main
+   :devtools         {:enabled false}
+   :compiler-options {:warnings-as-errors false
+                      :optimizations      :simple
+                      :externs           ["externs/node_fs.js"]}}}}
