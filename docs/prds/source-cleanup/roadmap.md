@@ -264,6 +264,17 @@ assertions. The integration correction keeps maintained web/CSS authorities
 pointing at `docs/seon/architecture/ui.md` and the live CSS tokens rather than
 teaching an archived PRD as current authority.
 
+Outcome (2026-07-20): `b819df26` retains and wires `seon.agent.ctx.usage`.
+Provider usage normalization now covers agreeing DeepSeek cache fields,
+Muse's nested cache shape, Anthropic's additive input semantics, and explicitly
+estimated stream-abort values; malformed, unknown, conflicting, or negative
+counts produce diagnostics instead of plausible zeroes. The existing debug
+turn projection and transcript HTML surface consume the one derived
+projection. Independent focused proof passed usage 4 tests / 18 assertions,
+debug 7 / 28, and transcript 12 / 38. Live agent-page proof waits for the
+coordinated frozen client because the default operator currently reports a
+retained source-intent ownership mismatch and port 7890 is down.
+
 Fragile-index H2's safe consumer portion is implemented by `3ebc9e9b`:
 stored eval guidance is no longer reparsed as a serialized error envelope and
 debug reproduction reads EDN before selecting the qualified function symbol.
@@ -348,7 +359,7 @@ Collapse-hunt items (adversarial review 2026-07-20):
   decode+build collapses. `typeahead.cljs:795` may follow (lowest
   priority, try-wrapped best-effort site).
 
-Retain and wire `src/seon/agent/ctx/usage.cljs` into the debug turn projection
+- **CLOSED `b819df26`**: retain and wire `src/seon/agent/ctx/usage.cljs` into the debug turn projection
 and compact agent-page usage, with validated non-negative provider counts and
 diagnostics for malformed/unknown shapes. Delete `src/seon/ui/components.cljc`
 (dead parallel UI layer); fix B9 to go through

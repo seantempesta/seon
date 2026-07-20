@@ -59,6 +59,10 @@ The ruled namespace-UI archive is closed by `5ea16b14`: 18 documents are
 archived with repaired links and 22 Markdown tests / 341 assertions green;
 storage-shootout and the Integrant submodule were already removed by
 `8dcf64c5`.
+Stage-5 usage wiring is closed in source/tests by `b819df26`: provider-correct
+actual/estimated normalization feeds the debug projection and compact agent
+page, with focused usage/debug/transcript proof totaling 23 tests / 84
+assertions. Coordinated live browser proof remains in the frozen-client gate.
 
 ## Scheduled — claimed by a stage, awaiting execution order
 
@@ -96,7 +100,7 @@ R14/R15 all GO. R10 investigate-first. R16 keep the 1024 cap.
 |---|---|---|
 | R1 | Dev/MCP fault scope: a REPL typo can crash the pod (proven live); scoping is path-dependent | Classify all dev/MCP funnels `:agent`-scope; acceptance in `dev-eval-fault-scope-misses-mcp-funnels` — small, high-value, candidate for "genuinely simple" fix |
 | R2 | Dev/MCP eval history silently unrecorded (27x program-row rejections) | Diagnose-first unit; likely one rejection rule; pairs with R1 |
-| R3 | Fault forensics: no branch head on fault datoms; frames are constructor noise | One observability unit; blocks the fault→`cluster fork` chain |
+| R3 | Fault forensics: no branch head on fault datoms; frames are constructor noise | CLOSED: `seon.db` never installed the `:seon.error/branch-head` hook (only `:seon.error/transact!`) — now derived from the session's cached database value via `branch/head-from-database-value`. Frames now parse the DEEPEST cause's stack, repair the `at new Ctor (…)` / `undefined.` Bun shapes, and drop the ExceptionInfo construction prefix so the top frame is the throw site. Live proof: fault datom with complete branch head + meaningful frames, `cluster fork <basis-t>` derivable from the row |
 | R4 | `:seon.ai/complete` 61% error-channel flood, 7:1 fixture noise | Route fixture noise out of production error path; small |
 | R5 | Child footprint | **BISECTED** ([[research/child-footprint-bisect-2026-07-20]]): dev-artifact hypothesis FALSIFIED (release bundle loads larger); composition = ~90 MB program load + 91 MB session/admission projection + 34 MB prompt render; **peak-shaped retention** — one heavy turn inflates 220→416 MB permanently (JSC capacity + mimalloc dirty never released; `BUN_JSC_forceRAMSize` cut load ~15%). NOT simple; three bounded units sized in the doc (require-closure trim, leaner child admission, JSC heap cap). N=100 ≈ 18-22 GB steady |
 | R6 | Load-truth probe + child containment | R5 bisect supplies the memory model; the containment PRD should lead with the JSC heap-cap lever (burst retention is the dominant term — same pattern as the MLX cache-limit law) |
