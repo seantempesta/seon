@@ -26,6 +26,17 @@ theory: the runtime scope existed, but `my.plan/step!` was not wrapped.
 unlike `seon.runtime.admission`, it did not call
 `seon.instrument/reconcile-projection!`.
 
+Related live observation (2026-07-20, warnings-block re-enable lane, default
+cluster after `bin/seon restart` at f85e68da's parent): root's derived
+`instrumentation-gaps-block` rendered "621 specced fns without a live
+wrapper" on the POD side, and `core-faults-block` showed 13 `:core` faults
+since the last user message (at least two were that lane's own REPL probes:
+an unallocated-generated-identity `create!` refusal and a
+`:malli.core/invalid-input`, both recorded `:core-bug`). The 621-gap census
+was observed, not diagnosed — it may be this issue's pod-side sibling or a
+separate publication fault after restart; whoever picks this up should read
+the census via `seon.instrument/coverage-gaps` on the live pod first.
+
 ## Owner
 
 `seon.eval/load-authored-program!` owns reconstruction of one complete program
