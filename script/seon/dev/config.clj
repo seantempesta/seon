@@ -384,26 +384,38 @@
         environment (if source-checkout?
                       (shadow-environment environment artifact)
                       environment)
+        ;; Env-supplied coordinates may arrive relative (bin/acme exports
+        ;; SEON_PROC_DIR=tmp/proc-acme). Every downstream consumer — locks,
+        ;; child cwds, socket binds — requires absolute paths, so resolve
+        ;; against the operator root at the single load boundary.
         state-dir (if source-checkout?
                     root
-                    (get environment "SEON_STATE_DIR"
-                         (str (fs/path (System/getProperty "user.home") ".seon"))))
-        cluster-dir (get environment "SEON_CLUSTER_DIR"
-                         (str (fs/path state-dir "data/clusters/default")))
+                    (root-path root
+                               (get environment "SEON_STATE_DIR"
+                                    (str (fs/path (System/getProperty "user.home") ".seon")))))
+        cluster-dir (root-path root
+                               (get environment "SEON_CLUSTER_DIR"
+                                    (str (fs/path state-dir "data/clusters/default"))))
         cluster-name (str (fs/file-name cluster-dir))
-        proc-dir (get environment "SEON_PROC_DIR"
-                      (str (fs/path state-dir "tmp/seon-operator")))
-        writer-proc-dir (get environment "SEON_WRITER_PROC_DIR" proc-dir)
-        log-dir (get environment "SEON_LOG_DIR"
-                     (str (fs/path state-dir "logs/operator")))
-        req-sock (get environment "SEON_REQ_SOCK"
-                      (str (fs/path state-dir "tmp/seon-cluster-default-req.sock")))
-        port-file (get environment "SEON_PORT_FILE"
-                       (str (fs/path state-dir "tmp/seon-port")))
+        proc-dir (root-path root
+                            (get environment "SEON_PROC_DIR"
+                                 (str (fs/path state-dir "tmp/seon-operator"))))
+        writer-proc-dir (root-path root
+                                   (get environment "SEON_WRITER_PROC_DIR" proc-dir))
+        log-dir (root-path root
+                           (get environment "SEON_LOG_DIR"
+                                (str (fs/path state-dir "logs/operator"))))
+        req-sock (root-path root
+                            (get environment "SEON_REQ_SOCK"
+                                 (str (fs/path state-dir "tmp/seon-cluster-default-req.sock"))))
+        port-file (root-path root
+                             (get environment "SEON_PORT_FILE"
+                                  (str (fs/path state-dir "tmp/seon-port"))))
         writer-port-file
-        (get environment "SEON_WRITER_REPL_PORT_FILE"
-             (str (fs/path state-dir
-                           (str "tmp/seon-writer-repl-port-" cluster-name))))
+        (root-path root
+                   (get environment "SEON_WRITER_REPL_PORT_FILE"
+                        (str (fs/path state-dir
+                                      (str "tmp/seon-writer-repl-port-" cluster-name)))))
         environment (assoc environment
                       "SEON_CLUSTER_DIR" cluster-dir
                       "SEON_REQ_SOCK" req-sock
