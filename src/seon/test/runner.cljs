@@ -327,13 +327,12 @@
 
    `obj` itself is the last-resort fallback (a non-deftest, non-example
    callable the caller explicitly asked us to run). Returns nil if the
-   symbol doesn't resolve to any global."
+   symbol doesn't resolve through ClojureScript's namespace owner."
   [sym]
-  (let [ns-part (some-> (namespace sym) (cljs.core/munge))
+  (let [ns-part (some-> (namespace sym) symbol)
         nm-part (cljs.core/munge (name sym))]
-    (when (and ns-part nm-part)
-      (let [obj  (try (js/goog.getObjectByName (str ns-part "." nm-part))
-                      (catch :default _ nil))
+    (when-let [ns-obj (and ns-part (cljs.core/find-ns-obj ns-part))]
+      (let [obj  (unchecked-get ns-obj nm-part)
             ;; Unwrap malli instrumentation: the real fn (carrying the
             ;; `cljs$lang$test` thunk) is stashed under the wrapper.
             base (or (when obj (unchecked-get obj "malli$instrument$original"))
@@ -454,8 +453,8 @@
 
    The `use-fixtures` macro defs `cljs-test-once-fixtures` /
    `cljs-test-each-fixtures` (Var-less in our self-host path — they're
-   plain vars on the ns object). We fetch via the munged ns object on
-   globalThis. Returns nil when no fixture of that kind was registered.
+   plain vars on the ns object). We fetch through ClojureScript's namespace
+   owner. Returns nil when no fixture of that kind was registered.
 
    Only the MAP fixture form (`{:before fn :after fn}`) is supported.
    The fn-wrapping form (`(defn my-fixture [f] … (f) …)`) is
@@ -465,9 +464,8 @@
   (let [sym  (case kind
                :once "cljs_test_once_fixtures"
                :each "cljs_test_each_fixtures")
-        path (str (cljs.core/munge (str ns-sym)) "." sym)
-        v    (try (js/goog.getObjectByName path)
-                  (catch :default _ nil))]
+        ns-obj (cljs.core/find-ns-obj ns-sym)
+        v    (when ns-obj (unchecked-get ns-obj sym))]
     (when (and v (sequential? v))
       (vec v))))
 
@@ -715,15 +713,13 @@
 
    cljs.test's `deftest` macro sets `cljs$lang$test` on the emitted fn
    object (and stashes the full Var, with intact :test meta, under
-   `cljs$lang$var`). We walk the munged ns object on globalThis, pick
+   `cljs$lang$var`). We walk ClojureScript's live namespace object, pick
    out properties whose value has the `cljs$lang$test` marker, and
    reconstruct the FQ sym via the var's own :ns / :name meta when
    present (falling back to demunging the property key)."
   {:malli/schema [:=> [:cat [:map [::ns ::ns]]] ::vars]}
   [{::keys [ns]}]
-  (let [ns-munged (cljs.core/munge (str ns))
-        ns-obj    (try (js/goog.getObjectByName ns-munged)
-                       (catch :default _ nil))]
+  (let [ns-obj (cljs.core/find-ns-obj ns)]
     (if-not ns-obj
       []
       (let [ks (js-keys ns-obj)
