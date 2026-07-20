@@ -90,6 +90,7 @@
     [proximum.writing :as pwr]
     [seon.ai.tokens :as tokens]
     [seon.db.datahike.schema :as dh-schema]
+    [seon.retry :as retry]
     [seon.schema :as schema]
     [taoensso.timbre :as log])
   (:import [com.google.genai Client]
@@ -616,6 +617,15 @@
   "Base delay for exponential backoff: retry `n` waits ~`base`*2^n ms + jitter."
   500)
 
+(defn- embed-retry-strategy
+  "Return the bounded shared delay sequence for one embedding batch."
+  []
+  (-> (retry/multiplicative-strategy embed-base-backoff-ms 2)
+      (retry/randomize-strategy 0.5)
+      (retry/clamp-delay 30000)
+      (retry/max-retries embed-max-retries)
+      (retry/max-duration 60000)))
+
 (defn- truncate-to-token-cap
   "Truncate `text` so its estimated tokens never exceed `max-text-tokens` (the
   per-input model cap). Logs when it truncates. Returns `text` unchanged when
@@ -664,19 +674,6 @@
          true
          (recur (.getCause e)))))))
 
-(defn- backoff-sleep!
-  "Sleep ~`embed-base-backoff-ms`*2^attempt ms plus up to 50% jitter (capped at
-   30s) — the wait before retrying a rate-limited batch."
-  [attempt]
-  (let [base   (* embed-base-backoff-ms (long (Math/pow 2 attempt)))
-        capped (min base 30000)
-        jitter (long (* (rand) 0.5 capped))]
-    (try
-      (Thread/sleep (+ capped jitter))
-      (catch InterruptedException interrupted
-        (.interrupt (Thread/currentThread))
-        (throw interrupted)))))
-
 (defn- embed-batch!
   "Embed ONE batch of (already-truncated) `texts` in a single Gemini request,
    retrying retryable (429 / 5xx) errors with exponential backoff. Returns a
@@ -684,7 +681,8 @@
    `:seon.embed/embed-request-failed` error after `embed-max-retries`."
   [^Client client texts]
   (let [jtexts (java.util.ArrayList. ^java.util.Collection (vec texts))]
-    (loop [attempt 0]
+    (loop [delays (seq (embed-retry-strategy))
+           attempt 0]
       (when (.isInterrupted (Thread/currentThread))
         (throw (InterruptedException. "Embedding request interrupted.")))
       (let [outcome (try
@@ -706,12 +704,16 @@
                 (throw (if (instance? InterruptedException t)
                          t
                          (InterruptedException. "Embedding request interrupted."))))
-              (if (and retryable (< attempt embed-max-retries))
+              (if (and retryable delays)
                 (do (log/warn "embed: retryable error on batch (attempt"
                               (inc attempt) "of" (inc embed-max-retries) ") —"
                               (.getMessage t) "— backing off")
-                    (backoff-sleep! attempt)
-                    (recur (inc attempt)))
+                    (try
+                      (Thread/sleep (long (first delays)))
+                      (catch InterruptedException interrupted
+                        (.interrupt (Thread/currentThread))
+                        (throw interrupted)))
+                    (recur (next delays) (inc attempt)))
                 (throw (ex-info (str "seon.embed/embed-batch!: Gemini request failed"
                                      (when retryable
                                        (str " after " (inc embed-max-retries) " attempts")))

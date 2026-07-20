@@ -87,8 +87,9 @@
    non-negative and rounded to an int."
   [delay-ms factor]
   (let [span (* delay-ms factor)
-        d    (- (* 2 span (js/Math.random)) span)]
-    (max 0 (js/Math.round (+ delay-ms d)))))
+        d    (- (* 2 span (rand)) span)]
+    (max 0 (#?(:clj Math/round :cljs js/Math.round)
+            #?(:clj (double (+ delay-ms d)) :cljs (+ delay-ms d))))))
 
 (defn randomize-strategy
   "Jitter each delay by ± `factor` (0.0–1.0).
@@ -133,6 +134,8 @@
 ;;; EXECUTOR — run a thunk against a strategy, ^:async.
 ;;; ============================================================
 
+#?(:cljs
+   (do
 (defn ^:async ^:private sleep!
   "A `js/Promise` that resolves after `ms` — the non-blocking backoff wait
    (no core.async, no blocking sleep)."
@@ -189,4 +192,4 @@
                        :seon.retry/delay-ms wait
                        :seon.retry/result   result}))
           (await (sleep! wait))
-          (recur (next delays) (inc retries)))))))
+          (recur (next delays) (inc retries)))))))))

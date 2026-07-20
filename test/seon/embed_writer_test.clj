@@ -7,6 +7,7 @@
    [datahike.db :as datahike-db]
    [seon.ai.tokens :as tokens]
    [seon.embed :as embed]
+   [seon.retry :as retry]
    [taoensso.timbre :as log]))
 
 (defn- one-batch-text
@@ -149,6 +150,20 @@
         (is (= 6 (count @calls)))
         (is (= (range 12) (mapcat identity @calls)))
         (is (= 1 (count @threads)))))))
+
+(deftest embed-retry-strategy-uses-the-shared-bounded-composition
+  (testing "the JVM consumes the ordinary five-retry exponential curve"
+    (with-redefs [clojure.core/rand (constantly 0.5)]
+      (is (= [500 1000 2000 4000 8000]
+             (vec (#'embed/embed-retry-strategy))))))
+  (testing "jitter precedes the hard delay and cumulative duration caps"
+    (with-redefs [clojure.core/rand (constantly 1.0)]
+      (is (= [30000 30000]
+             (vec (-> (retry/multiplicative-strategy 20000 2)
+                      (retry/randomize-strategy 0.5)
+                      (retry/clamp-delay 30000)
+                      (retry/max-retries 5)
+                      (retry/max-duration 60000))))))))
 
 (deftest failed-batch-does-not-start-later-batches
   (let [calls (atom [])
