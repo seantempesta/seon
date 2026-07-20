@@ -43,24 +43,35 @@ allocation `VM_MAKE_TAG(os_tag)` with default `os_tag` 100
 chunks + 512 MB reserved tail, observed exactly) as GPU memory. The
 child's real cost is ~160 MB of ordinary native heap.
 
-## Investigation (plan work, not yet a fix)
+## Bisect result (2026-07-20, live default cluster + controlled loads)
 
-Prime suspect: the child loads the DEV artifact — 933 files / 46 MB of
-`.shadow-cljs/builds/execution/dev/out/cljs-runtime` — with shadow's
-module map, retained source strings, and self-host analysis state
-resident. Candidate simple fix: a compact release-style child artifact
-(single bundle, no dev module graph, trimmed bootstrap cache). Bisect:
-vmmap after artifact load vs compiler init vs database session; compare a
-release-build child. Optionally set `mi_option_os_tag` to an app tag so
-future profiles label the heap honestly.
+Full phase bisect in
+`docs/prds/source-cleanup/research/child-footprint-bisect-2026-07-20.md`.
+The dev-artifact hypothesis is FALSIFIED: a release `:simple` single
+bundle (7.5 MB, built with the existing release machinery) loads to a
+HIGHER footprint (104.6 MB) than the 933-file dev artifact (89.1 MB), and
+node is no better (114–118 MB). The measured phases: bun floor 5.9 →
+artifact load 89 → child ready (db session + admission projection) 180 →
+first rendered prompt 214 → first eval 221 MB; a heavy eval burst then
+permanently inflates the child to 416 MB (JSC heap capacity and mimalloc
+dirty pages are never returned — footprint is peak-shaped, not
+live-shaped). `MIMALLOC_OS_TAG=240` confirmed the honest relabel;
+`BUN_JSC_forceRAMSize=64Mi` cut load footprint ~15%. No genuinely-simple
+fix exists: the levers are the child's full seon.* require closure
+(~85–100 MB), leaner child admission projection (~91 MB), and a GC/heap
+cap for burst retention — each a bounded PRD unit, sized in the research
+doc.
 
 ## Why it matters
 
-Hundreds-of-agents scaling: at ~20-40 MB private per child (GPU
-allocation avoided), 100 children ≈ 2-4 GB — the goal is reachable on one
-host. The open notes execution-children-retain-hundreds-of-megabytes and
-eval-process-isolation-memory-containment should be re-read against this
-finding: the retained hundreds of MB are mostly not JS-heap retention.
+Hundreds-of-agents scaling: measured per-child cost is ~180 MB
+idle-ready / ~220 MB after one prompt+eval, degrading toward ~400 MB
+with heavy turns — N=100 projects to 18–22 GB steady (worst ~40 GB), so
+the 2–4 GB goal needs the closure/admission/heap-cap units, not
+packaging. The open notes execution-children-retain-hundreds-of-megabytes
+and eval-process-isolation-memory-containment are explained by the
+peak-shaped retention finding: live JS heap returns to ~124 MB after GC
+while JSC capacity and mimalloc dirty pages stay at the high-water mark.
 
 ## Acceptance
 
