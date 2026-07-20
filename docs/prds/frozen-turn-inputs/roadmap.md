@@ -49,6 +49,35 @@ projection is deliberately pure, so the file/blob hash and provenance must be
 transacted at an existing creation/install/config-application boundary. It is
 assigned to that later owner rather than hidden as render-time filesystem I/O.
 
+Stage 1 outcome (2026-07-20, retry-pinning lane): I6-I8 closed in place.
+`seon.ai/resolved-config-from-rows` now resolves the per-attempt cap once at
+acquisition (`:seon.ai/agent-attempt-timeout-ms` = agent override, else the
+`SEON_LLM_ATTEMPT_TIMEOUT_MS` process default), and
+`seon.agent.turn/effective-llm-attempt-timeout-ms` consumes only the frozen
+resolution — no config/env read inside the retry loop. `close-turn!` attaches
+the close transaction's `:db-after` to the body result and `run-turn-body!`
+pins the final pull to exactly that value (a failed close-tx now fails the
+turn loudly instead of pulling unpinned). The `(or db (await (db/db)))` door
+is gone: `run-turn!` rejects a missing `:seon.db/db` as a `:core-bug` error
+value with zero renders and zero provider calls; the loop (`loop.cljs:459`)
+is the sole caller and always passes its pinned projection value. Falsifiers:
+`retry-attempts-share-one-frozen-attempt-cap` (env moved between attempts →
+identical attempt rows), `run-turn-pins-the-final-pull-to-the-close-transaction`,
+`run-turn-without-a-pinned-database-value-fails-loudly`,
+`resolution-carries-the-attempt-cap-once-at-acquisition`. Live proof on the
+default cluster (2026-07-20): child acquisition resolution carries the cap
+(120000); a `run-turn!` drive with a forced 429 and a REAL concurrent
+transaction (db-after t 536871291) landed before retry two produced two
+attempt rows with identical `outer-timeout-ms`/`requested-model`, retries 1,
+ONE `rendered-tx`; a pull pinned to a transaction's `:db-after`
+(t 536871293) returned the pre-later-write value while the ambient pull saw
+the later write; the unpinned `run-turn!` call returned the `:core-bug`
+value. During the drive an unrelated blocker surfaced:
+[[../../seon/issues/eval-host-tier-pull-fails-on-uninstalled-schema]]
+(the U1.5 tier pull errors on a database where
+`:seon.execution.host/eval-socket-path` was never transacted, failing every
+live eval-batch turn on this cluster — not caused by this lane).
+
 Source audit 2026-07-20 on `codex/runtime-reliability-refactor`. Much of the
 original issue evidence is already fixed in place and is recorded here so
 the acceptance sweep does not re-litigate it.
@@ -105,15 +134,18 @@ passed configuration map (`config.cljs:769-777,1100-1130`);
    the two full prompts differ at most in the free-tail line. With the tail
    off, the blobs are byte-identical, full stop. Assert with
    `seon.agent.debug/turn-diff`: `::prompt-lines-added`/`-removed` = 0.
-2. **Frozen retry**: force a transient provider error while landing a
-   concurrent transaction (moving head, changed model config) before retry
-   two → every `:seon.ai.attempt/*` row of the turn carries the same
-   requested model, endpoint, timeouts, and the turn's single
-   `rendered-tx`; the retry sends the original prompt bytes (prompt blob
-   unchanged, one blob per turn).
-3. **Pinned return**: the final pull consumes the close transaction's
-   returned database value; a transaction landed between close and pull
-   does not alter the returned turn map.
+2. **Frozen retry** — GREEN (2026-07-20): committed regressions
+   `retry-attempts-share-one-frozen-attempt-cap` +
+   `transient-error-then-success-keeps-one-resolution`
+   (`test/seon/agent_retry_test.cljs`) and the live 429-plus-concurrent-
+   transaction drive recorded in Current position: identical attempt rows,
+   retries 1, one `rendered-tx`, one prompt blob per turn.
+3. **Pinned return** — GREEN (2026-07-20): committed regression
+   `run-turn-pins-the-final-pull-to-the-close-transaction`
+   (`test/seon/agent/turn_test.cljs`) plus the live pinned-vs-ambient pull
+   at `:db-after` t 536871293; the final pull consumes the close
+   transaction's returned database value, so a transaction landed between
+   close and pull does not alter the returned turn map.
 4. **Free-tail confinement**: live clock/load/memory bytes appear only
    after every cache boundary, under a hard token cap, root-only; the
    prompt blob preserves the exact tail bytes sent.
@@ -158,16 +190,16 @@ recorded as a collision rather than worked around.
 Each stage is one coherent commit series; gates are `bin/test-cljs` focused
 suites plus the named live proof. One stage in progress at a time.
 
-### Stage 1 — pin the turn spine (I6, I7, I8)
+### Stage 1 — pin the turn spine (I6, I7, I8) — DONE 2026-07-20
 
-Resolve the attempt timeout once into the turn's config resolution (the
-child's acquisition already merges the config rows; the env default becomes
-the resolution's fallback at acquisition time, read once per turn). The
-final pull passes the close transaction's `db-after` value; the
-`run-turn-body!` fallback either disappears (loop is the only caller and
-always pins) or becomes a loud error value. Gate: acceptance 2 and 3 as
-focused regressions; live proof via a REPL-forced 429 with a concurrent
-transaction.
+Implemented exactly as planned: the attempt timeout resolves once into the
+turn's config resolution (env default as the acquisition-time fallback in
+`seon.ai/resolved-config-from-rows`); the final pull passes the close
+transaction's `db-after` value; the `run-turn-body!` fallback became a loud
+`:core-bug` error value at the `run-turn!` door (loop audited as the only
+caller, always pinning). Gates green: acceptance 2 and 3 as focused
+regressions plus the live REPL-forced 429 with a concurrent transaction
+(evidence in Current position).
 
 ### Stage 2 — database-stable result handles (I1)
 

@@ -713,7 +713,12 @@
   "Resolve effective LLM configuration from ordinary pulled maps.
 
    Both maps must come from the same immutable database value. This is
-   the process-independent form used by execution children and turn retries."
+   the process-independent form used by execution children and turn retries.
+   The per-attempt wall-clock cap is resolved HERE, once per acquisition:
+   the agent's own `::agent-attempt-timeout-ms` override, else
+   [[seon.config/llm-attempt-timeout-ms]] (`SEON_LLM_ATTEMPT_TIMEOUT_MS`,
+   default 2 min). The retry loop consumes only this frozen resolution, so
+   every attempt of one turn carries the identical cap."
   {:malli/schema
    [:=> [:catn [::config-row ::row] [::agent-row :map]]
     ::resolved-config-response]}
@@ -729,9 +734,10 @@
           model-transport-cap-attrs))
     (some? (agent-row-max-retries agent-row))
     (assoc ::agent-max-retries (agent-row-max-retries agent-row))
-    (some? (agent-row-attempt-timeout-ms agent-row))
+    true
     (assoc ::agent-attempt-timeout-ms
-           (agent-row-attempt-timeout-ms agent-row))))
+           (or (agent-row-attempt-timeout-ms agent-row)
+               (config/llm-attempt-timeout-ms)))))
 
 (defn bounded-evidence-error
   "Bound an evidence error using one resolved positive cap."

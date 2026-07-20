@@ -10,7 +10,6 @@
     [my.plan :as plan]
     [seon.ai :as ai]
     [seon.ai.tokens :as tokens]
-    [seon.config :as config]
     [seon.retry :as retry]
     [seon.agent.home :as home]
     [my.blob :as blob]
@@ -501,7 +500,13 @@
            :seon.log/agent id
            :seon.log/message (str "turn close-tx FAILED for turn " id-of-turn)
            :seon.log/data {::close close}}))
-      result)
+      ;; Pin the close transaction's returned database value onto the body
+      ;; result: the final turn pull consumes exactly this value, so a
+      ;; transaction landing between close and pull cannot alter the
+      ;; returned turn (frozen-turn-inputs acceptance 3). Absent on a
+      ;; failed close-tx — run-turn-body! then fails the turn loudly.
+      (cond-> result
+        (:db-after close) (assoc ::close-db-after (:db-after close))))
     (catch :default e
       ;; Mark the turn :error best-effort, then preserve the pre-allocation
       ;; propagation contract. Scheduled/direct callers still observe a
@@ -660,10 +665,10 @@
 
 ;; LLM retry tuning. The agent loop is the SOLE retry authority (the
 ;; adapters ship `maxRetries 0`); these shape the exponential-backoff
-;; strategy fed to [[seon.retry/with-retry!]]. `SEON_AI_MAX_RETRIES`
-;; (default 4) caps the retry COUNT; the per-wait clamp + total-duration
-;; ceiling bound worst-case latency so a transient blip never hangs the
-;; run loop.
+;; strategy fed to [[seon.retry/with-retry!]]. The turn's frozen config
+;; resolution carries the retry COUNT (`:seon.ai/agent-max-retries`,
+;; default 4); the per-wait clamp + total-duration ceiling bound
+;; worst-case latency so a transient blip never hangs the run loop.
 (def ^:private llm-retry-base-ms      500)
 (def ^:private llm-retry-factor       2)
 (def ^:private llm-retry-jitter       0.5)
@@ -786,19 +791,29 @@
       (seq usage)
       (assoc :seon.ai.attempt/usage (pr-str usage)))))
 
+;; Mirror of the [[seon.config/llm-attempt-timeout-ms]] default for a
+;; resolution that predates the builder guarantee (hand-built test
+;; resolutions). Production resolutions always carry the cap.
+(def ^:private llm-attempt-timeout-default-ms 120000)
+
 (defn- effective-llm-attempt-timeout-ms
-  "The launch-selected outer attempt fence, else the process default."
+  "The turn's FROZEN per-attempt fence from its config resolution.
+
+   [[seon.ai/resolved-config-from-rows]] resolves the cap once at the turn's
+   one acquisition (agent override, else the `SEON_LLM_ATTEMPT_TIMEOUT_MS`
+   process default). The retry loop never re-reads config or env, so every
+   attempt row of one turn carries the identical `outer-timeout-ms`."
   [resolution]
   (or (:seon.ai/agent-attempt-timeout-ms resolution)
-      (config/llm-attempt-timeout-ms)))
+      llm-attempt-timeout-default-ms))
 
 (defn ^:async ^:private bounded-llm-attempt!
   "ONE adapter attempt under the per-attempt wall-clock cap.
 
    Races one signal-bearing request against
-   the launch-selected `:seon.ai/agent-attempt-timeout-ms`, falling back to
-   [[seon.config/llm-attempt-timeout-ms]] (`SEON_LLM_ATTEMPT_TIMEOUT_MS`,
-   default 2 min), via the ONE racer
+   the resolution's frozen `:seon.ai/agent-attempt-timeout-ms` (resolved once
+   at the turn's acquisition — see [[effective-llm-attempt-timeout-ms]]),
+   via the ONE racer
    ([[seon.eval/race-timeout]]) — the inner bound that keeps a single attempt
    from parking the turn when the adapter's own `:seon.ai/timeout-ms` is
    unset/huge. A timed-out attempt resolves to a `:seon.ai/error` VALUE
@@ -937,8 +952,10 @@
                                 passes its run-id; stamped on the turn)
      :seon.db/db                the FROZEN db value the loop pinned for this
                                 turn (§8a — the prompt render + the loop's
-                                bound-checks share ONE basis-t); defaults to
-                                the session's cached latest value when absent
+                                bound-checks share ONE basis-t); REQUIRED —
+                                [[run-turn!]] rejects a missing value as a
+                                `:core-bug` error value (no silent unpinned
+                                fallback)
 
    Wraps the pipeline in a `with-tx-context` scope so every transact (incl.
    the per-form txs inside `eval-batch!`) auto-tags with the causality
@@ -948,7 +965,7 @@
    `:seon.agent.turn/id` when the turn row was already committed."
   {:malli/schema [:=> [:catn [:input :map]] :map]}
   [{:seon.agent/keys [id llm-fn] run-id :seon.agent.run/id db :seon.db/db}]
-  (let [database   (or db (await (db/db)))
+  (let [database   db
         ;; repl-mode read off the DB DATOM (config-through-DB), pinned to
         ;; the SAME frozen db the prompt renders from — the turn loop never
         ;; reads the config accessor.
@@ -1021,15 +1038,33 @@
               {:seon.agent.turn/status :error
                :seon.error/data        (pr-str result)})
           (let [turn-id (:seon.agent.turn/id result)
-                n-ok (or (:seon.agent/eval-count result) 0)]
+                n-ok (or (:seon.agent/eval-count result) 0)
+                close-db (::close-db-after result)]
             (log id (name (or (:seon.agent.turn/status result) :done)) n-ok
                  (if (:seon.agent.turn/status result) "llm-error" "ok"))
-            (assoc (await
-                     (db/pull {:seon.db/pull-pattern
-                               '[* {:seon.agent.turn/evals [*]}
-                                    {:seon.agent.turn/llm-attempts [*]}]
-                               :seon.db/ref [:seon.agent.turn/id turn-id]}))
-                   :seon.agent/eval-count n-ok))))
+            (if (nil? close-db)
+              ;; The close-tx FAILED (close-turn! logged it) — there is no
+              ;; database value that shows the closed turn, so an unpinned
+              ;; pull would return a coordinate-dependent map. Fail loudly
+              ;; instead of returning silently unpinned data.
+              (do (log id "close-tx failed → turn :error" turn-id)
+                  {:seon.agent.turn/status :error
+                   :seon.agent.turn/id     turn-id
+                   :seon.error/data
+                   (str "The turn close transaction failed — no returned "
+                        "database value pins the final pull for turn "
+                        turn-id)})
+              ;; The final pull is PINNED to the close transaction's returned
+              ;; database value: a transaction landed between close and pull
+              ;; does not alter the returned turn map (§8a, frozen retries
+              ;; issue acceptance).
+              (assoc (await
+                       (db/pull {:seon.db/pull-pattern
+                                 '[* {:seon.agent.turn/evals [*]}
+                                      {:seon.agent.turn/llm-attempts [*]}]
+                                 :seon.db/ref [:seon.agent.turn/id turn-id]
+                                 :seon.db/db close-db}))
+                     :seon.agent/eval-count n-ok)))))
       (catch :default e
         ;; Catastrophic turn failure → return the :error shape. State is the
         ;; loop's concern (its finally resets :idle); the turn never touches it.
@@ -1038,11 +1073,23 @@
         (turn-failure e)))))
 
 (defn ^:async run-turn!
-  "Run one complete turn and convert every outer orchestration failure to data."
+  "Run one complete turn and convert every outer orchestration failure to data.
+
+   Requires the loop's pinned `:seon.db/db` database value (§8a). A missing
+   value is a `:core-bug` error value — never a silent render from the
+   session's latest value — so an unpinned turn cannot happen quietly."
   {:malli/schema [:=> [:catn [:input :map]] :map]}
-  [{:seon.agent/keys [id] :as input}]
-  (try
-    (await (run-turn-body! input))
-    (catch :default exception
-      (log id "run-turn! orchestration error" (error/->message exception))
-      (turn-failure exception))))
+  [{:seon.agent/keys [id] db :seon.db/db :as input}]
+  (if (nil? db)
+    (do (log id "run-turn! called without a pinned database value → :error")
+        {:seon.agent.turn/status :error
+         :seon.error/kind :core-bug
+         :seon.error/data
+         (str "run-turn! requires the loop's pinned :seon.db/db database "
+              "value (§8a one-value-per-turn); refusing to render from the "
+              "session's latest value.")})
+    (try
+      (await (run-turn-body! input))
+      (catch :default exception
+        (log id "run-turn! orchestration error" (error/->message exception))
+        (turn-failure exception)))))

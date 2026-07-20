@@ -284,6 +284,28 @@
                    [::ai/provenance
                     :seon.config.model-transport/response-identity-cap])))))
 
+(deftest resolution-carries-the-attempt-cap-once-at-acquisition
+  ;; I6 (frozen-turn-inputs): the per-attempt wall-clock cap is resolved by
+  ;; the builder — agent override, else the SEON_LLM_ATTEMPT_TIMEOUT_MS
+  ;; process default — so the turn's retry loop never re-reads env.
+  (let [env (.-env js/process)
+        saved (aget env "SEON_LLM_ATTEMPT_TIMEOUT_MS")]
+    (try
+      (aset env "SEON_LLM_ATTEMPT_TIMEOUT_MS" "7777")
+      (is (= 7777
+             (::ai/agent-attempt-timeout-ms
+              (ai/resolved-config-from-rows {} {})))
+          "a no-override resolution still carries the process default")
+      (is (= 3333
+             (::ai/agent-attempt-timeout-ms
+              (ai/resolved-config-from-rows
+               {} {::ai/agent-attempt-timeout-ms (pr-str 3333)})))
+          "the agent's own override wins over the process default")
+      (finally
+        (if (some? saved)
+          (aset env "SEON_LLM_ATTEMPT_TIMEOUT_MS" saved)
+          (js-delete env "SEON_LLM_ATTEMPT_TIMEOUT_MS"))))))
+
 (deftest compatible-gateway-settings-are-independent-per-agent
   (let [global {::ai/provider :deepseek
                 ::ai/model "deepseek-v4-pro"}

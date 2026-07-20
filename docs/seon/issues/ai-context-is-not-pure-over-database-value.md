@@ -9,7 +9,11 @@ tags: [issue, agent, architecture, database]
 
 Owned by the [[../../prds/frozen-turn-inputs/roadmap]] chunk (impurity rows
 I1-I5; closes at its stage 5 byte-identity gate). Stays open until that
-chunk lands commit plus live proof.
+chunk lands commit plus live proof. The sibling turn-spine rows I6-I8
+landed 2026-07-20 (stage 1, see
+[[turn-retries-reread-provider-inputs]]), so the retry/return side no
+longer reintroduces unpinned reads around whatever this issue's block
+purity work settles.
 
 ## Problem
 

@@ -482,6 +482,137 @@
              (set! db/with-tx-context original-with-context)
              (done)))))))
 
+(deftest run-turn-pins-the-final-pull-to-the-close-transaction
+  ;; I7 falsifier (frozen-turn-inputs acceptance 3): the final turn pull
+  ;; consumes the close transaction's returned database value. A head move
+  ;; landing between close and pull must not alter the returned map.
+  (async done
+    (let [original-render turn/render-prompt
+          original-put blob/put!
+          original-eval turn/eval-parsed!
+          original-allocate db.id/allocate!
+          original-transact db/transact!
+          original-context db/with-tx-context
+          original-agent db/with-agent
+          original-pull db/pull
+          !t (atom 42)
+          last-db-after (atom nil)
+          pulled (atom nil)]
+      (set! turn/render-prompt
+            ;; multi-arity like the real fn — the in-ns call site compiles
+            ;; to direct arity-4 dispatch
+            (fn stub-render
+              ([_ _] (js/Promise.resolve prompt-value))
+              ([_ _ _] (js/Promise.resolve prompt-value))
+              ([_ _ _ _] (js/Promise.resolve prompt-value))))
+      (set! blob/put!
+            (fn [_]
+              (js/Promise.resolve
+               {:my.blob/ok? false :my.blob/error "test capture omitted"})))
+      (set! turn/eval-parsed!
+            (fn [& _]
+              (js/Promise.resolve
+               {:seon.eval/ids [] :seon.eval/n-ok 0 :seon.eval/n-fail 0})))
+      (set! db.id/allocate!
+            (fn [request]
+              (js/Promise.resolve
+               {:db-before (assoc database :t @!t)
+                :db-after (assoc database :t (swap! !t inc))
+                :tx-data (:seon.db/tx-data
+                          ((::db.id/transaction-builder request)
+                           {::turn/turn-allocation "turn-pinned"}))
+                :tempids {}
+                :tx-meta {}
+                ::db.id/ids {::turn/turn-allocation "turn-pinned"}
+                ::db.id/eids {::turn/turn-allocation 101}})))
+      (set! db/transact!
+            (fn [& [request]]
+              (let [db-after (assoc database :t (inc @!t))]
+                (swap! !t inc)
+                (reset! last-db-after db-after)
+                (js/Promise.resolve
+                 {:db-before (assoc database :t (dec (:t db-after)))
+                  :db-after db-after
+                  :tx-data (:seon.db/tx-data request)
+                  :tempids {}
+                  :tx-meta {}}))))
+      (set! db/with-tx-context (fn [_context thunk] (thunk)))
+      (set! db/with-agent (fn [_id thunk] (thunk)))
+      (set! db/pull
+            (fn stub-pull
+              ([request]
+               (reset! pulled request)
+               ;; a concurrent transaction lands between close and pull
+               (swap! !t inc)
+               (js/Promise.resolve
+                {:seon.agent.turn/id (second (:seon.db/ref request))
+                 :seon.agent.turn/status :done}))
+              ([selector entity-id]
+               (stub-pull {:seon.db/pull-pattern selector
+                           :seon.db/ref entity-id}))
+              ([database-value selector entity-id]
+               (stub-pull {:seon.db/db database-value
+                           :seon.db/pull-pattern selector
+                           :seon.db/ref entity-id}))))
+      (-> (turn/run-turn!
+           {:seon.agent/id "agent-1"
+            :seon.agent/llm-fn (fn [_] (js/Promise.resolve {:text ""}))
+            :seon.db/db database})
+          (.then
+           (fn [result]
+             (let [close-db (:seon.db/db @pulled)]
+               (is (= "turn-pinned" (:seon.agent.turn/id result)))
+               (is (= :done (:seon.agent.turn/status result)))
+               (is (= 0 (:seon.agent/eval-count result)))
+               (is (some? close-db)
+                   "the final pull carries an explicit pinned value")
+               (is (= @last-db-after close-db)
+                   "the pinned value is the CLOSE transaction's db-after"))))
+          (.catch (fn [error] (is false (str error))))
+          (.finally
+           (fn []
+             (set! turn/render-prompt original-render)
+             (set! blob/put! original-put)
+             (set! turn/eval-parsed! original-eval)
+             (set! db.id/allocate! original-allocate)
+             (set! db/transact! original-transact)
+             (set! db/with-tx-context original-context)
+             (set! db/with-agent original-agent)
+             (set! db/pull original-pull)
+             (done)))))))
+
+(deftest run-turn-without-a-pinned-database-value-fails-loudly
+  ;; I8 falsifier: the unpinned door is closed — a missing :seon.db/db is a
+  ;; :core-bug error value, zero prompt renders, zero provider calls.
+  (async done
+    (let [original-render turn/render-prompt
+          renders (atom 0)
+          llm-calls (atom 0)]
+      (set! turn/render-prompt
+            (fn stub-render
+              ([_ _] (swap! renders inc) (js/Promise.resolve prompt-value))
+              ([_ _ _] (swap! renders inc) (js/Promise.resolve prompt-value))
+              ([_ _ _ _]
+               (swap! renders inc)
+               (js/Promise.resolve prompt-value))))
+      (-> (turn/run-turn!
+           {:seon.agent/id "agent-1"
+            :seon.agent/llm-fn (fn [_]
+                                 (swap! llm-calls inc)
+                                 (js/Promise.resolve {:text ""}))})
+          (.then
+           (fn [result]
+             (is (= :error (:seon.agent.turn/status result)))
+             (is (= :core-bug (:seon.error/kind result)))
+             (is (string? (:seon.error/data result)))
+             (is (zero? @renders) "no prompt render without a pinned value")
+             (is (zero? @llm-calls) "no provider call without a pinned value")))
+          (.catch (fn [error] (is false (str error))))
+          (.finally
+           (fn []
+             (set! turn/render-prompt original-render)
+             (done)))))))
+
 (deftest open-turn-propagates-a-direct-allocation-error
   (async done
     (let [original db.id/allocate!

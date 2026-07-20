@@ -12,6 +12,18 @@ I6-I8; the named `bounded-llm-attempt!` conn-deref evidence is recorded
 there as already fixed in source). Stays open until that chunk's stage 1
 and 5 land commit plus live proof.
 
+Stage 1 landed 2026-07-20 (retry-pinning lane): I6-I8 closed with commit
+plus live proof — the attempt cap resolves once into the turn's frozen
+resolution (`seon.ai/resolved-config-from-rows`), the final pull pins to
+the close transaction's returned `:db-after` database value, and a missing
+pinned `:seon.db/db` is a loud `:core-bug` error value at `run-turn!`.
+Acceptance items three and four below are green (regressions
+`retry-attempts-share-one-frozen-attempt-cap`,
+`run-turn-pins-the-final-pull-to-the-close-transaction`,
+`run-turn-without-a-pinned-database-value-fails-loudly`; live 429 drive
+with a concurrent transaction, evidence in the roadmap's Current
+position). Remains open for the chunk's stage 5 byte-identity gate.
+
 ## Problem
 
 One agent turn does not currently consume one immutable database-derived

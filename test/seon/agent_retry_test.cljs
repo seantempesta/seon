@@ -196,6 +196,45 @@
           (.then (fn [_] (done)))
           (.catch (fn [error] (is false (str error)) (done)))))))
 
+(deftest retry-attempts-share-one-frozen-attempt-cap
+  ;; I6 falsifier (frozen-turn-inputs): the retry loop must consume the
+  ;; turn's frozen resolution, never re-read SEON_LLM_ATTEMPT_TIMEOUT_MS
+  ;; per attempt. The env moves between attempt one and attempt two; both
+  ;; attempt rows must still carry the identical outer-timeout-ms and
+  ;; neither may equal either env value.
+  (async done
+    (let [env (.-env js/process)
+          saved (aget env "SEON_LLM_ATTEMPT_TIMEOUT_MS")
+          calls (atom [])
+          llm-fn
+          (fn [arg]
+            (swap! calls conj arg)
+            ;; a concurrent env change lands before retry two
+            (aset env "SEON_LLM_ATTEMPT_TIMEOUT_MS" "60")
+            (js/Promise.resolve
+             (if (= 1 (count @calls)) (transport-failure) {:text ""})))]
+      (aset env "SEON_LLM_ATTEMPT_TIMEOUT_MS" "30")
+      (-> (with-compiled-result
+            #(invoke-turn! llm-fn
+                           (assoc base-resolution
+                                  :seon.ai/agent-max-retries 1)))
+          (.then
+           (fn [result]
+             (let [caps (mapv :seon.ai.attempt/outer-timeout-ms
+                              (:seon.agent.turn/llm-attempts result))]
+               (is (= 2 (count caps)))
+               (is (= 1 (count (distinct caps)))
+                   "every attempt of one turn carries the identical cap")
+               (is (not-any? #{30 60} caps)
+                   "the retry loop never re-reads the env attempt cap"))))
+          (.finally
+           (fn []
+             (if (some? saved)
+               (aset env "SEON_LLM_ATTEMPT_TIMEOUT_MS" saved)
+               (js-delete env "SEON_LLM_ATTEMPT_TIMEOUT_MS"))))
+          (.then (fn [_] (done)))
+          (.catch (fn [error] (is false (str error)) (done)))))))
+
 (deftest provider-error-retains-truncation-and-usage-evidence
   (async done
     (let [usage {:prompt_tokens 3 :completion_tokens 4093 :total_tokens 4096}
