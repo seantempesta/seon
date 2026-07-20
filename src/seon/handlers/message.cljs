@@ -14,34 +14,21 @@
    `assistant`, any other agent → `agent-<id>`. The `:seon.agent.message/*`
    attr + kind schemas are owned by `seon.agent`.
 
-   ## Ref resolution
+   ## Ref resolution is acquisition-side
 
-   `d/pull '[*]` (how the transcript twin materializes message
-   entities) returns refs as bare `{:db/id n}` maps — they carry NO
-   `:seon.user/id`/`:seon.agent/id`, so `agent/message-label` on the
-   raw pull said `unknown` for every message. `resolve-ref` re-pulls
-   the identifying attrs through `:seon.db/db` before labeling.
-   Pull-by-eid works on FilteredDB (lookup-ref `d/entity` does not —
-   known datahike-cljs limitation)."
+   These renderers are SYNC render-plane fns — pure projections of the
+   already-acquired node; they perform no database read (`seon.db` is
+   async; a mid-render read would put a Promise into the label). The
+   INVOKING acquisition must nest the identity attrs on the message's
+   from/to refs — `{:seon.agent.message/from [:db/id :seon.user/id
+   :seon.agent/id]}` — as `seon.agent.ctx.transcript/message-selector`
+   and `seon.agent.message/recent-pull-pattern` already do. A ref pulled
+   without them labels `unknown`; fix the acquiring pull pattern, never
+   this renderer."
   (:require
     [clojure.string :as str]
     [seon.agent :as agent]
-    [seon.db :as db]
     [seon.render :as render]))
-
-(defn- resolve-ref
-  "Materialize a `{:db/id n}` ref into its identifying attrs. Returns
-   the input unchanged when it already carries an identity attr (older
-   write paths stored the full map) or when `db` is nil. Routes
-   through guarded `seon.db/pull` (65dfc90): registered-but-never-
-   installed attrs are filtered (→ `{}` for a fresh store, labeled
-   `unknown`), typos throw legibly — the former bare try masked them."
-  [db-val ref]
-  (cond
-    (or (:seon.user/id ref) (:seon.agent/id ref)) ref
-    (and db-val (:db/id ref))
-    (or (db/pull db-val '[:seon.user/id :seon.agent/id] (:db/id ref)) ref)
-    :else ref))
 
 (defn- hh-mm-ss
   "`17:44:53` from a js/Date. Empty string when not a date."
@@ -56,10 +43,10 @@
 
    `[<from>] <content>`  — e.g. `[user] Define a fn that adds two numbers.`"
   {:malli/schema [:=> [:cat :seon.render/section-request] [:maybe :string]]}
-  [{:seon.db/keys [db] :seon.render/keys [node entity]
+  [{:seon.render/keys [node entity]
     :seon.agent/keys [id]}]
   (let [entity (or node entity)
-        from (resolve-ref db (:seon.agent.message/from entity))
+        from (:seon.agent.message/from entity)
         body (or (:seon.agent.message/content entity) "")]
     (str "[" (agent/message-label from id) "] " body)))
 
@@ -79,14 +66,14 @@
      `data-markdown`/marked.js pass — the agent-view shim loads only
      datastar.js, so the markdown must be hiccup by the time it ships."
   {:malli/schema [:=> [:cat :seon.render/section-request] [:maybe :seon.render.canvas/hiccup]]}
-  [{:seon.db/keys [db] :seon.render/keys [node entity]
+  [{:seon.render/keys [node entity]
     :seon.agent/keys [id] :as input}]
   (let [configuration (:seon.config/configuration input)
         entity (or node entity)
-        from   (resolve-ref db (:seon.agent.message/from entity))
+        from   (:seon.agent.message/from entity)
         label  (agent/message-label from id)
         tos    (->> (:seon.agent.message/to entity)
-                    (map #(agent/message-label (resolve-ref db %) id))
+                    (map #(agent/message-label % id))
                     distinct
                     vec)
         body   (or (:seon.agent.message/content entity) "")
