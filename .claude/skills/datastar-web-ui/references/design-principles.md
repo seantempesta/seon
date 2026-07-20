@@ -110,7 +110,7 @@ variables in `input.css` when a surface opts into `prose prose-sm max-w-none`.
 
 | File | Purpose |
 |------|---------|
-| `docs/prds/namespace-ui/design-system.md` | Full design system spec |
+| `resources/public/css/input.css` | Maintained Tailwind theme tokens and animations |
 | `src/seon/ui/agent_view.cljs` · `header.cljs` | Live Phosphor agent layout, context surfaces, and status bar |
 | `src/seon/render.cljs` | `block`/`slot` — the shared typed-value renderer |
 | `resources/public/css/input.css` | Tailwind v4 theme source (`@theme` + `@source`) |

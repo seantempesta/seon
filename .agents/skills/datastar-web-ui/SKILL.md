@@ -179,7 +179,8 @@ monospace everywhere; dot+text status (`● running`), never pill badges.
   editing `input.css`, rebuild (`npm run css:build`).
 
 Full palette, type scale, density rules, component patterns, and anti-patterns:
-`references/design-principles.md` + `docs/prds/namespace-ui/design-system.md`.
+`references/design-principles.md`. Maintained Tailwind tokens live in
+`resources/public/css/input.css`; the namespace-UI PRD is archived history.
 
 ## Key files
 
@@ -198,7 +199,7 @@ Full palette, type scale, density rules, component patterns, and anti-patterns:
 
 - `references/design-principles.md` — the full Phosphor palette, type scale,
   density rules, status/log/table component patterns, anti-patterns.
-- `docs/prds/namespace-ui/design-system.md` — the design-system spec (philosophy,
-  Tailwind v4 `@theme`, animations).
+- `resources/public/css/input.css` — the maintained Tailwind v4 `@theme`
+  tokens and animation definitions.
 - `reference-code/datastar-clojure/src/dev/examples/tiny_gzip.clj` — a minimal
   separate-GET gzip SSE stream (the shape `open-feed!` mirrors).

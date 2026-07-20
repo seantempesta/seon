@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 tags: [web, issue]
 severity: friction
 ---
@@ -32,3 +32,10 @@ in the skill's own `references/design-principles.md`.
 - No active source, localized authority, or skill cites the archived PRD as
   current design authority.
 - The repository Markdown validator passes for the changed documents.
+
+## Resolution
+
+The canonical `.agents` skill and its tracked `.claude` adapter now cite the
+skill's maintained design principles and `resources/public/css/input.css`.
+Their reference files are synchronized, and a hidden-file-inclusive sweep
+finds no remaining pre-archive design-system path outside this evidence note.
