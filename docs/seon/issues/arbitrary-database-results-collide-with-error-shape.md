@@ -38,3 +38,16 @@ outer explicit success/failure discriminator used by collision-capable APIs.
   legitimate error-shaped domain map remains success data.
 - Consumers migrate atomically without a second facade or compatibility path.
 - Existing historical eval/result EDN remains untouched.
+
+## Grounded implementation boundary
+
+[[../../prds/source-cleanup/research/database-result-union-boundary-2026-07-20]]
+(`25c9fdf3`) inventories the complete public facade. Only `query`, `pull`, and
+`entity` expose collision-capable outer values and therefore receive the
+closed `:seon.result/ok?` union. `pull-many` remains a disjoint outer vector;
+installed schema remains a bare success after its schema is strengthened to
+the actual map-of schema maps. One closed `:seon.db/error` and one
+schema-derived `db/error?` predicate govern fixed results. `my.canvas/state`
+is the identified arbitrary domain response that needs its own explicit
+outer union. Closure requires the exact-collision, atomic caller migration,
+three-suite, and frozen live proofs in that report.

@@ -473,6 +473,16 @@ that return arbitrary user data require a closed outer explicit
 infer failure from keys inside raw domain data. The migration waits for the
 active database/UDS lane and proceeds by inventoried owner groups.
 
+The exact inventory and atomic migration are grounded by
+[[research/database-result-union-boundary-2026-07-20]] (`25c9fdf3`). Only
+`query`, `pull`, and `entity` require the outer union; `pull-many` remains a
+disjoint vector, and installed schema remains bare after its concrete map-of
+schema is registered. One closed database error and one schema-derived
+`db/error?` predicate own fixed-result discrimination. `my.canvas/state` is
+the one identified arbitrary domain response needing its own outer union.
+The facade and all direct consumers move in one frozen owner-group cut after
+U4 releases database/host paths.
+
 The unresolved-symbol owner is grounded by
 [[research/unresolved-render-symbol-boundary-2026-07-20]] (`4f4dbd95`). A
 selected symbol must resolve to a function; absence and non-function values
