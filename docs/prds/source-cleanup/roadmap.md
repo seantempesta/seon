@@ -172,9 +172,15 @@ operator doors; only proven pre-database assets/readiness may remain static.
 
 ### Stage 5 — deletions and small unifications
 
-Claim (2026-07-20): Codex task `/root` owns fragile-index H6, the
-render-handler symbol-resolution completeness test, through focused/full CLJS
-proof and live default-cluster resolution evidence.
+Outcome (2026-07-20): fragile-index H6 is implemented by `6246181b`.
+`seon.schema-test` now derives every AI/HTML handler from the complete entity
+catalog and requires each qualified symbol to resolve to a function. The live
+default cluster resolved 12/12 handlers; the focused selector passed 25
+assertions and the changed namespace passed 87 assertions. The one full CLJS
+checkpoint ran 1,294 tests / 5,914 assertions with one unrelated failure:
+`my.plan-test/generated-program-publication-no-ops-only-without-a-cause-linked-root`
+expects max-results `[2 2]` while the concurrent uncommitted `src/my/plan.cljs`
+change supplies `[2 4]`. H6 covers no issue note in the triage's COVERED list.
 
 Additional stage-5 items from
 [[research/bespoke-reactive-sweep-2026-07-20]] and
