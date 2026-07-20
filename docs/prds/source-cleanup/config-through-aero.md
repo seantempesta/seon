@@ -84,3 +84,20 @@ runtime env reads outside the aero manifest boundary and process bootstrap.
 1. Brand keys live in the downstream overlay manifest (acme.edn), never
    system.edn.
 2. `bin/seon config apply` stays explicit-only.
+3. **Capability grants (`SEON_WEB`, `SEON_SHELL`) live in the launch
+   descriptor, not database facts** — a grant-as-datom would be
+   agent-widenable through ordinary `db/transact!`. Boundary rule: process
+   identity and OS resources bind at launch; behavior policy binds at
+   acquisition.
+
+## Research grounding (settled)
+
+[[research/aero-config-seam-2026-07-20]] carries the full dependency
+ledger, tag-semantics gotchas (`#boolean` is strictly `"true"` in CLJS —
+wrapper `"1"` exports must flip; missing `#include` resolves silently, the
+closed manifest schema stays the backstop), the per-violation migration
+table, and the one adjustability gap: `db/install-configuration-context!`
+is a boot snapshot — refresh it from the existing committed-transaction
+delivery when a transaction touches the singleton. Every other consumer
+already acquires per operation, so live transaction adjustability already
+works there.

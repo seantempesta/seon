@@ -15,6 +15,7 @@ questions:
 - [[logging-unification]] — one line shape, agent-readable faults
 - [[vocabulary-unification]] — pod retirement + remaining term rulings
 - [[deletions-and-wiring]] — orphans: wire `ctx.usage`, delete the rest
+- [[data-browser]] — one schema-aware rendering mechanism for every value
 
 ## Outcome
 

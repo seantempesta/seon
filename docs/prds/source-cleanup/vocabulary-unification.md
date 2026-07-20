@@ -50,12 +50,18 @@ the audit report in the same series.
    value is shown to a person. Research lane owns the design
    ([[value-inspector-research assignment|research/]] — report lands under
    `research/`). Until it lands, no panel renames.
-2. **feed/stream must be grounded seam names, not abstractions.** The owner
-   rejects naming without a grounded reason. Research lane resolves: what
-   the Datahike side actually is (transaction reports through `listen!`,
-   writer interests, `seon.reactive` registrations), what Datastar's own
-   vocabulary calls the wire behavior (`datastar-patch-elements` etc.), and
-   proposes names copied from those seams. Until it lands, no feed/stream
-   renames.
+2. **feed/stream resolved by seam research**
+   ([[research/reactive-seam-names-2026-07-20]], all names grounded
+   file:line): database side uses the fork's own nouns — transaction
+   report, committed report, interest; `seon.reactive`'s "registration"
+   stays; Datastar side adopts `sse-gen` / patch vocabulary and
+   `:seon.web.feed/*` is renamed accordingly (process atom, no persisted
+   datoms); datastar.cljs "subscription" → registration (stage 1, rides the
+   async-facade files); dead `feed-behind-status` deleted after
+   `bin/test-writer` proof; "stream" survives only at seams that own it
+   (LLM stream/chunk/delta, SSE transport, Web Streams). **Owner ruled
+   2026-07-20: the public URL `/agent/{id}/feed` renames to `/sse`** in the
+   stage-2 freeze (route facts + shipped shim + downstream acme in the same
+   series).
 3. `docs/seon/pod/REPL-WORKFLOW.md` folds into `docs/seon/architecture/`
    (ruled).
