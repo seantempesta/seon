@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, web, architecture]
 ---
@@ -61,3 +61,23 @@ browser or post-hoc output cap.
 - The existing opaque summaries become non-materializing in the same Unit 0.
 - Focused tests and live large-value paging prove the bound before Stage 1.5
   sends additional consumers through the sampler.
+
+## Resolution
+
+Resolved on 2026-07-20 by `d42a88de`. Map sampling inspects one explicit
+candidate window plus an unsampled tail sentinel, recursively touches only
+that window, and reports exact counted-map omission or honest `:more` for an
+unknown tail. Elided maps carry a separate entry vector, so every user key is
+data rather than renderer metadata. Opaque, collection, and huge scalar keys
+become safe labels and force a partial view; no host key crosses into the
+ordinary HTML projection. Datom values use the same child sampler.
+
+Opaque records and JavaScript objects are never printed. Ordinary bounded
+printing uses a capped CLJS writer with identity sentinel and early
+string/keyword/symbol interception. The million-entry counted and uncounted
+fixtures measure visits and recursive touches, poison the first value beyond
+the work budget, and prove it remains untouched. A logical 100 MiB custom
+printer is never invoked. Focused proof passed `seon.render.value-test` at 39
+tests / 132 assertions and `seon.render-test` at 6 tests / 25 assertions, both
+with zero compiler warnings. Live paging remains the later integrated Stage
+1.5 transport gate, not evidence required to establish this local work bound.

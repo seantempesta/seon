@@ -64,6 +64,14 @@ tags: [prd, web, agent, architecture]
   — today `opaque-marker` materializes the FULL `pr-str`/`str` before
   clipping, so a large record or `clj->js` value can OOM the client
   process, and the migration multiplies that exposure.
+- The same precondition includes traversal work: map sampling examines only a
+  bounded candidate window plus one unsampled tail sentinel, never every value
+  before retaining a page. Elided maps carry renderer metadata outside their
+  original `[key value]` entries, opaque or huge keys become safe partial-view
+  labels, and datom values pass through the same child sampler. Commit
+  `d42a88de` closes this Unit 0 contract with counted/uncounted million-entry,
+  poisoned-tail, opaque-printer, huge-key, determinism, and byte-identity
+  regressions.
 
 ## Corrections from adversarial review (2026-07-20)
 

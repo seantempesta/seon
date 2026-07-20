@@ -115,6 +115,15 @@ Bounded traversal and non-materializing summaries must be proven before the
 schema projection, UI, route, or protected child-sampling transport widens
 this path's fanout.
 
+Unit 0 is implemented by `d42a88de`: counted and uncounted million-entry map
+fixtures prove candidate visits and recursive touches remain within the work
+budget, the poisoned tail is untouched, omission is exact or honestly `:more`,
+map metadata cannot collide with user keys, datom values share the child
+sampler, and arbitrary opaque printers are never invoked. Focused sampler and
+HTML gates passed 39 tests / 132 assertions and 6 tests / 25 assertions with
+zero warnings. The issue is archived; Stage 1.5 may now advance to the
+activated schema projection after Stage 1.6's frozen integration gate.
+
 ### Stage 1.6 — corrective steering gaps
 
 In progress (2026-07-20): root task `/root` owns the strict directive-error
@@ -289,7 +298,7 @@ silent nil-vanish); decide the ok?-discriminator ruling
 
 Collapse-hunt items (adversarial review 2026-07-20):
 
-- `src/seon/embed.clj:611-679` hand-rolls the complete `seon.retry`
+- **CLOSED `84ab7097`**: `src/seon/embed.clj:611-679` hand-rolled the complete `seon.retry`
   strategy stack (exponential base, jitter, cap, max-retries) with a
   drifted curve (embed jitters a post-cap value, so it can exceed its own
   30 s cap by 50%) and no `max-duration` bound. Fix: rename

@@ -42,6 +42,14 @@ public schemas (55 tests / 289 assertions); its issue remains open for the ten
 G8 is subsequently closed by `94e38e15`+`ee6dde8c`: all 35 audited request
 maps reject extra keys through Malli, with the final canvas/audit gate passing
 9 tests / 104 assertions.
+Data-browser bounded-walk Unit 0 is closed by `d42a88de`: focused sampler 39
+tests / 132 assertions and HTML consumer 6 tests / 25 assertions prove bounded
+map work, safe opaque/scalar projection, collision-free metadata, and bounded
+datom children.
+Stage-5 retry collapse is closed by `84ab7097`: portable `retry.cljc` owns the
+turn/JVM embedding delay strategy, focused CLJS 14 tests / 31 assertions and
+JVM 6 tests / 18 assertions are green, and the full CLJS gate passed 1,304
+tests / 6,021 assertions.
 
 ## Scheduled — claimed by a stage, awaiting execution order
 
