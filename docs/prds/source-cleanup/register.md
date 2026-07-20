@@ -36,6 +36,9 @@ by `9778fa86` (29 tests / 99 assertions); its issue remains open for the frozen
 real-browser lifecycle gate. Corrective-steering G9 is closed by
 `f84a9efc`+`147acef8` (focused 13 tests / 47 assertions): all narration lines
 share the existing structural comment boundary with authored bytes intact.
+G8's non-canvas checkpoint `d883bb05` covers 25 request maps and closes 19
+public schemas (55 tests / 289 assertions); its issue remains open for the ten
+`my.canvas` request schemas.
 
 ## Scheduled — claimed by a stage, awaiting execution order
 

@@ -121,6 +121,14 @@ optionality at their function slots; and database failures return copyable
 database-remote, home, Datastar, and plan tests are green. Fresh-start/live
 proof and the G8-G11 extensions remain before Stage 1.6 graduates.
 
+G8's non-canvas checkpoint is `d883bb05` with issue evidence in `f14219a3`:
+the registry-derived audit covers 25 request maps across `my.blob`, `my.data`,
+`my.kb`, `my.ns`, and `my.ui`; 19 formerly open public schemas are now closed
+and all reject unknown keys through Malli's schema rule. The five owner suites
+plus the audit passed 55 tests / 289 assertions. The issue remains open until
+the ten `my.canvas` request maps, now free of the G11 ownership collision, pass
+the same derived acceptance gate.
+
 From [[research/corrective-steering-audit-2026-07-20]] (all persist-time or
 pure-render, single execution, byte-identity safe):
 
