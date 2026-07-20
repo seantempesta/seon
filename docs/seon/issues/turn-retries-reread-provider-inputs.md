@@ -7,6 +7,11 @@ tags: [issue, agent, database, architecture]
 
 # Freeze one turn input across provider retries
 
+Owned by the [[../../prds/frozen-turn-inputs/roadmap]] chunk (impurity rows
+I6-I8; the named `bounded-llm-attempt!` conn-deref evidence is recorded
+there as already fixed in source). Stays open until that chunk's stage 1
+and 5 land commit plus live proof.
+
 ## Problem
 
 One agent turn does not currently consume one immutable database-derived

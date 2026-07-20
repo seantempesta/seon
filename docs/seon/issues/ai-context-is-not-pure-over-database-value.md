@@ -7,6 +7,10 @@ tags: [issue, agent, architecture, database]
 
 # AI context is not pure over its database value
 
+Owned by the [[../../prds/frozen-turn-inputs/roadmap]] chunk (impurity rows
+I1-I5; closes at its stage 5 byte-identity gate). Stays open until that
+chunk lands commit plus live proof.
+
 ## Problem
 
 Rendering the same agent from the same immutable database value can change the
