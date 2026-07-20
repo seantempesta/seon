@@ -14,6 +14,7 @@
     [seon.db.id :as db.id]
     [seon.db.protocol :as db.protocol]
     [seon.error :as error]
+    [seon.log :as seon-log]
     [seon.schema :as schema]))
 
 ;; ============================================================
@@ -588,10 +589,11 @@
 
 (defn- log-notice-error! [child-id recipient result]
   (when (error-value? result)
-    (js/console.error
-     (str "seon.agent.run/notify-outcome!: " recipient
-          " notice FAILED for " child-id ": "
-          (:seon.error/message result)))))
+    (seon-log/error!
+     {:seon.log/source ::notify-outcome
+      :seon.log/agent child-id
+      :seon.log/message
+      (str recipient " notice FAILED: " (:seon.error/message result))})))
 
 (defn ^:async ^:private notify-outcome!
   "Message the parent (or the user) that the run closed with `reason`.
@@ -615,13 +617,14 @@
       (if (or (error-value? acquired)
               (not= 2 (count members))
               (not (every? successful-member? members)))
-        (js/console.error
-         (str "seon.agent.run/notify-outcome!: outcome acquisition FAILED for "
-              run-id ": "
-              (or (:seon.error/message acquired)
-                  (::db.protocol/error
-                   (first (remove successful-member? members)))
-                  "invalid result")))
+        (seon-log/error!
+         {:seon.log/source ::notify-outcome
+          :seon.log/message
+          (str "outcome acquisition FAILED for run " run-id ": "
+               (or (:seon.error/message acquired)
+                   (::db.protocol/error
+                    (first (remove successful-member? members)))
+                   "invalid result"))})
         (let [[run root] (map member-result members)
           child     (:seon.agent.run/agent run)
           child-id  (:seon.agent/id child)

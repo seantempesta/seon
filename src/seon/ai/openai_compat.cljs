@@ -53,6 +53,7 @@
             [seon.ai :as ai]
             [seon.ai.tokens :as tokens]
             [seon.error :as error]
+            [seon.log :as seon-log]
             [seon.platform :as platform]
             [seon.repl.internal :as repl-internal]
             [seon.schema :as schema]))
@@ -278,11 +279,13 @@
     ;; the reasoning field was present and dropped.
     (when (and (zero? (count (or msg "")))
                (pos? (count (or reasoning ""))))
-      (js/console.debug
-        (str "seon.ai.openai-compat: completion content EMPTY but"
-             " reasoning_content present (~" (tokens/estimate reasoning)
-             " tokens) — thinking-mode tokens landed in the reasoning"
-             " field; dropping it (parsed as before)")))
+      (seon-log/debug!
+        {:seon.log/source ::empty-completion
+         :seon.log/message
+         (str "completion content EMPTY but"
+              " reasoning_content present (~" (tokens/estimate reasoning)
+              " tokens) — thinking-mode tokens landed in the reasoning"
+              " field; dropping it (parsed as before)")}))
     (cond-> {:seon.ai/text                        (or msg "")
              :seon.ai.openai-compat/finish-reason finish-reason}
       truncated? (assoc :seon.ai/truncated? true)

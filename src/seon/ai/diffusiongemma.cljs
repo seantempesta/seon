@@ -44,6 +44,7 @@
             [seon.ai :as ai]
             [seon.config :as config]
             [seon.error :as error]
+            [seon.log :as seon-log]
             [seon.platform :as platform]
             [seon.schema :as schema]))
 
@@ -484,13 +485,17 @@
           (str base "/cancel/" jid)
           #js{:method "POST" :headers (auth-headers key)})
         (.catch (fn [e]
-                  (js/console.warn
-                    (str "[seon.ai.diffusiongemma] remote cancel failed for " jid ":")
-                    e))))
+                  (seon-log/warn!
+                    {:seon.log/source ::remote-cancel
+                     :seon.log/message
+                     (str "remote cancel failed for " jid ": "
+                          (or (some-> e .-message) (str e)))}))))
     (catch :default e
-      (js/console.warn
-        (str "[seon.ai.diffusiongemma] remote cancel threw for " jid ":")
-        e)))
+      (seon-log/warn!
+        {:seon.log/source ::remote-cancel
+         :seon.log/message
+         (str "remote cancel threw for " jid ": "
+              (or (some-> e .-message) (str e)))})))
   nil)
 
 (defn- ^:async poll-to-terminal!

@@ -15,6 +15,7 @@
     [seon.ai.tokens :as tokens]
     [seon.db :as db]
     [seon.db.protocol :as protocol]
+    [seon.log :as seon-log]
     [seon.repair.candidates :as cand]
     [seon.repl.internal :as repl-internal]
     [seon.schema :as schema]))
@@ -1213,8 +1214,10 @@
                 (merge env {:my.plan/consulted?     false
                             :my.plan/consult-reason :send-failed})))))))
     (catch :default e
-      (js/console.error "my.plan.internal/maybe-consult! failed:"
-                        (or (.-message e) e))
+      (seon-log/error!
+        {:seon.log/source ::maybe-consult
+         :seon.log/message
+         (str "maybe-consult! failed: " (or (.-message e) (str e)))})
       {:my.plan/consulted? false :my.plan/consult-reason :send-failed})))
 
 ;; --- The WINDOWED plan-block render (`:plan` context section). ------------

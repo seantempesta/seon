@@ -7,6 +7,7 @@
     [seon.db :as db]
     [seon.db.id :as db.id]
     [seon.db.protocol :as protocol]
+    [seon.error :as error]
     [seon.eval :as seval]
     [seon.eval.internal :as receipt]
     [seon.runtime.admission :as admission]))
@@ -255,8 +256,13 @@
       (-> (js/Promise.resolve nil)
           (.then
            (fn [_]
-             (call-record-eval!
-              (assoc record-request ::seval/tee [tee-row]))))
+             ;; The provoked tx failure is recorded as a :core fault by
+             ;; record-eval!'s errors-as-data branch; mark it EXPECTED so
+             ;; the bin/test-cljs core-fault gate does not count it.
+             (error/expecting-core-fault!
+              (fn []
+                (call-record-eval!
+                 (assoc record-request ::seval/tee [tee-row]))))))
           (.then
            (fn [result]
              (let [transactions (filter #(= :transact (first %)) @calls)

@@ -55,6 +55,7 @@
     [seon.ai.tokens :as tokens]
     [seon.db :as db]
     [seon.instrument :as instrument]
+    [seon.log :as seon-log]
     [seon.schema :as schema]))
 
 ;; ============================================================
@@ -904,8 +905,10 @@
                        [:seon.agent/id (db/current-agent-id)]))
           res (await (db/transact! {:seon.db/tx-data [row]}))]
       (when (:seon.error/message res)
-        (js/console.warn "[seon.ai.typeahead] step projection failed:"
-                         (pr-str res)))))
+        (seon-log/warn!
+         {:seon.log/source ::step-projection
+          :seon.log/message "step projection failed"
+          :seon.log/data {::result res}}))))
   nil)
 
 (defn- ^:async run-plan-pass!
@@ -930,8 +933,11 @@
                         opts)
         resp     (await (dg/complete wire))]
     (if (:seon.ai/error resp)
-      (do (js/console.warn "[seon.ai.typeahead] plan pass skipped —"
-                           (pr-str (:seon.ai/msg (:seon.ai/error resp))))
+      (do (seon-log/warn!
+           {:seon.log/source ::plan-pass
+            :seon.log/message
+            (str "plan pass skipped — "
+                 (pr-str (:seon.ai/msg (:seon.ai/error resp))))})
           nil)
       (let [out        (::dg/worker-output resp)
             form       (first (mapv str (:locked out)))

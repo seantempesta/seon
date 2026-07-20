@@ -208,13 +208,17 @@
                              :my.blob/media   media}))]
       (if ok?
         [:my.blob/hash hash]
-        (do (js/console.warn
-              "[seon.agent.turn] blob capture failed (turn continues):" err)
+        (do (seon-log/warn!
+              {:seon.log/source ::blob-capture
+               :seon.log/message
+               (str "blob capture failed (turn continues): " err)})
             nil)))
     (catch :default e
-      (js/console.warn
-        "[seon.agent.turn] blob capture failed (turn continues):"
-        (or (some-> e .-message) (str e)))
+      (seon-log/warn!
+        {:seon.log/source ::blob-capture
+         :seon.log/message
+         (str "blob capture failed (turn continues): "
+              (or (some-> e .-message) (str e)))})
       nil)))
 
 (def ^:private turn-error-max-chars 4096)
@@ -492,9 +496,11 @@
                                                    :seon.agent.turn/reply-blob
                                                    :seon.agent.turn/error]))]}))]
       (when (:seon.error/message close)
-        (js/console.error
-          (str "seon.agent.turn/close-turn!: turn close-tx FAILED for "
-               id " turn " id-of-turn ". " (pr-str close))))
+        (seon-log/error!
+          {:seon.log/source ::close-turn
+           :seon.log/agent id
+           :seon.log/message (str "turn close-tx FAILED for turn " id-of-turn)
+           :seon.log/data {::close close}}))
       result)
     (catch :default e
       ;; Mark the turn :error best-effort, then preserve the pre-allocation
@@ -573,9 +579,11 @@
                                  [{:seon.agent.turn/id         id-of-turn
                                    :seon.agent.turn/reply-blob reply-blob}]}))
                        (catch :default e
-                         (js/console.warn
-                           "[seon.agent.turn] eager reply-blob link failed (turn continues):"
-                           e))))
+                         (seon-log/warn!
+                           {:seon.log/source ::reply-blob-link
+                            :seon.log/message
+                            (str "eager reply-blob link failed (turn continues): "
+                                 (or (some-> e .-message) (str e)))}))))
         program    (reply-program raw-reply stream?
                                   (or start-ns (home/home-ns id)))
         parsed     (:seon.repl/eval-entries program)

@@ -62,6 +62,7 @@
             [seon.diffusion.grammar :as grammar]
     [seon.error :as error]
     [seon.instrument :as instrument]
+            [seon.log :as seon-log]
             [seon.eval.bootstrap-cache :as bootstrap-cache]
             [seon.eval.internal :as eval.internal]
             [seon.error.instrument :as einstrument]
@@ -261,9 +262,11 @@
                             (catch :default e
                               ;; Cleanup failure must not throw from a timer
                               ;; callback and crash the pod.
-                              (js/console.error
-                                "seon.eval/race-timeout cleanup failed:"
-                                e))))
+                              (seon-log/error!
+                                {:seon.log/source ::race-timeout
+                                 :seon.log/message
+                                 (str "cleanup failed: "
+                                      (or (some-> e .-message) (str e)))}))))
                         ms))))]
      (try
        (await (js/Promise.race #js [inner timer]))
@@ -2970,8 +2973,8 @@
 
    The override guard: drop any `:seon.fn` row
    whose `:seon.fn/sym` is in `blocked` (a set of core-boot syms from
-   [[core-boot-fn-syms]]) and, for each dropped sym, `js/console.warn`
-   a specific, actionable one-liner. Non-`:seon.fn` rows (`:seon.ns`,
+   [[core-boot-fn-syms]]) and, for each dropped sym, log a specific,
+   actionable warning through `seon.log/warn!`. Non-`:seon.fn` rows (`:seon.ns`,
    `:seon.schema`, `:seon.test`, the diff-tx retract vectors)
    pass through untouched. Returns the filtered vector. Pure except for
    the warn side effect; never throws."
@@ -2986,12 +2989,14 @@
         (fn [entity]
           (let [sym (and (map? entity) (:seon.fn/sym entity))]
             (when (and sym (contains? blocked sym))
-              (js/console.warn
-                (str "[seon.eval] agent cannot override compiled core fn "
-                     sym " — its :seon.fn row is ignored (not persisted). "
-                     "Agents define/redefine in their OWN namespaces; core "
-                     "is changed via a build-time third-party override "
-                     "(see examples/third-party-override)."))
+              (seon-log/warn!
+                {:seon.log/source ::blocked-core-override
+                 :seon.log/message
+                 (str "agent cannot override compiled core fn "
+                      sym " — its :seon.fn row is ignored (not persisted). "
+                      "Agents define/redefine in their OWN namespaces; core "
+                      "is changed via a build-time third-party override "
+                      "(see examples/third-party-override).")})
               true)))
         tee-entities))))
 
@@ -3391,13 +3396,18 @@
 
       :else
       (do
-        (js/console.error "[seon.eval/record-eval!] tx FAILED:"
-                          (cap-edn
-                            (:seon.error/message primary)
-                            (config/eval-render-cap configuration))
-                          "— source:"
-                          (cap-edn source
-                                   (config/eval-render-cap configuration)))
+        ;; Nothing caught without becoming data: the eval record itself was
+        ;; dropped, so persist the fault datom through the ONE fault path
+        ;; (buffered when the database write path is the thing failing).
+        (error/record! {:seon.error/raw primary :seon.error/fault :core})
+        (seon-log/error!
+          {:seon.log/source ::record-eval
+           :seon.log/message
+           (str "tx FAILED: "
+                (cap-edn (:seon.error/message primary)
+                         (config/eval-render-cap configuration))
+                " — source: "
+                (cap-edn source (config/eval-render-cap configuration)))})
         primary))))
 
 ;; ============================================================
@@ -4770,9 +4780,11 @@
                                :seon.repair/to
                                (str/join " ; " (map :seon.repair/to fixes))}]}))]
               (when (database-error? r)
-                (js/console.error
-                  "[seon.eval/preflight-repair] fix datoms failed for eval"
-                  eval-id ":" (:seon.error/message r)))))
+                (seon-log/error!
+                  {:seon.log/source ::preflight-repair
+                   :seon.log/message
+                   (str "fix datoms failed for eval " eval-id ": "
+                        (:seon.error/message r))}))))
           ;; Tests run only after the declaration transaction and exact
           ;; program projection publication both complete.
           (when (and (not (database-error? recorded))

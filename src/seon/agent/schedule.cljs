@@ -13,6 +13,7 @@
     [seon.db.id :as db.id]
     [seon.db.protocol :as db.protocol]
     [seon.derive :as derive]
+    [seon.log :as seon-log]
     [seon.runtime.admission :as admission]
     [seon.schema :as schema]))
 
@@ -490,12 +491,16 @@
                         (due-functions rows (get starts-by-id id []) now)
                         _
                         (when (and tripped? (seq due-raw))
-                          (js/console.warn
-                           (str "seon.agent.schedule: schedule wake refused for "
-                                id " — circuit breaker tripped (≥" breaker-n
-                                " crashed closes in the last " breaker-w
-                                "ms). A human or agent message still wakes it; "
-                                "the sliding window re-enables schedules.")))
+                          (seon-log/warn!
+                           {:seon.log/source ::breaker
+                            :seon.log/agent id
+                            :seon.log/message
+                            (str "schedule wake refused — circuit breaker "
+                                 "tripped (≥" breaker-n
+                                 " crashed closes in the last " breaker-w
+                                 "ms). A human or agent message still wakes "
+                                 "it; the sliding window re-enables "
+                                 "schedules.")}))
                         due-fns (when-not tripped? due-raw)]
                     (if-not (seq due-fns)
                       (recur more fired)

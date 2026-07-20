@@ -305,7 +305,8 @@
       (let [msg (str label " exceeded the per-turn bound (" ms
                      "ms, SEON_TURN_TIMEOUT_MS) — awaiter freed; late "
                      "writes are CAS-fenced")]
-        (js/console.error (str "seon.agent.loop: " msg))
+        (seon-log/error! {:seon.log/source ::step-bound
+                          :seon.log/message msg})
         {:seon.error/message msg})
       v)))
 
@@ -736,9 +737,12 @@
                (await (open-recovery-run! input)))))
            (.catch
             (fn [exception]
-              (js/console.error
-               (str "seon.agent.loop: recovery run failed for " id ": "
-                    (or (.-message exception) exception)))))))
+              (seon-log/error!
+               {:seon.log/source ::recovery-run
+                :seon.log/agent id
+                :seon.log/message
+                (str "recovery run failed: "
+                     (or (.-message exception) exception))})))))
      0)))
 
 (defn- schedule-recovery-notice! [agent-id recovered]
@@ -766,9 +770,12 @@
                   :seon.agent.message/to [recipient]})))))
            (.catch
             (fn [exception]
-              (js/console.error
-               (str "seon.agent.loop: recovery notice failed for " agent-id
-                    ": " (or (.-message exception) exception)))))))
+              (seon-log/error!
+               {:seon.log/source ::recovery-notice
+                :seon.log/agent agent-id
+                :seon.log/message
+                (str "recovery notice failed: "
+                     (or (.-message exception) exception))})))))
      0)))
 
 (defn- schedule-renew! [id run-id]
@@ -781,9 +788,12 @@
                 (await (renew-current-run! id run-id)))))
           (.catch
             (fn [exception]
-              (js/console.error
-                (str "seon.agent.loop: wake renew threw for " id ": "
-                     (or (.-message exception) exception)))))))
+              (seon-log/error!
+                {:seon.log/source ::wake-renew
+                 :seon.log/agent id
+                 :seon.log/message
+                 (str "wake renew threw: "
+                      (or (.-message exception) exception))})))))
     0))
 
 (defn ^:async ^:private open-or-renew-message-run!
@@ -800,14 +810,18 @@
       (await (drive-run-loop! input (:seon.agent.run/id opened)))
       (let [latest (await (acquire-agent-state id))]
         (if (database-error? latest)
-          (js/console.error
-           (str "seon.agent.loop: open-run! FAILED for " id ": "
-                (pr-str opened) "; refresh failed: " (pr-str latest)))
+          (seon-log/error!
+           {:seon.log/source ::open-run
+            :seon.log/agent id
+            :seon.log/message "open-run! FAILED; refresh failed"
+            :seon.log/data {::opened opened ::refresh latest}})
           (if-let [winner (::current-run-id latest)]
             (await (renew-current-run! id winner))
-            (js/console.error
-             (str "seon.agent.loop: open-run! FAILED for " id ": "
-                  (pr-str opened)))))))))
+            (seon-log/error!
+             {:seon.log/source ::open-run
+              :seon.log/agent id
+              :seon.log/message "open-run! FAILED"
+              :seon.log/data {::opened opened}})))))))
 
 (defn- schedule-human-message-run! [input run-id cause-eid]
   (let [id (:seon.agent/id input)]
@@ -824,9 +838,12 @@
                (await (open-or-renew-message-run! input cause-eid)))))
            (.catch
             (fn [exception]
-              (js/console.error
-               (str "seon.agent.loop: human-message supersede threw for " id
-                    ": " (or (.-message exception) exception)))))))
+              (seon-log/error!
+               {:seon.log/source ::human-message-supersede
+                :seon.log/agent id
+                :seon.log/message
+                (str "human-message supersede threw: "
+                     (or (.-message exception) exception))})))))
      0)))
 
 (defn- schedule-message-run! [input cause-eid]
@@ -840,9 +857,12 @@
                   (await (open-or-renew-message-run! input cause-eid)))))
             (.catch
               (fn [exception]
-                (js/console.error
-                  (str "seon.agent.loop: wake loop threw for " id ": "
-                       (or (.-message exception) exception))))))
+                (seon-log/error!
+                  {:seon.log/source ::wake-loop
+                   :seon.log/agent id
+                   :seon.log/message
+                   (str "wake loop threw: "
+                        (or (.-message exception) exception))}))))
       0))))
 
 (defn wake-handler
@@ -911,13 +931,16 @@
                               (:seon.agent.run/paused-at current-run))))]
                 (doseq [[eid] exhausted]
                   (let [msg (get message-by-eid eid)]
-                    (js/console.error
-                     (str "seon.agent.loop: WAKE REFUSED for agent " id
-                          " — message " (:seon.agent.message/id msg)
-                          " hops=" (:seon.agent.message/hops msg)
-                          " reached hop-cap " warn/hop-cap
-                          " (agent↔agent ping-pong guard). A human message"
-                          " resets the chain (hops 0)."))))
+                    (seon-log/error!
+                     {:seon.log/source ::wake-refused
+                      :seon.log/agent id
+                      :seon.log/message
+                      (str "WAKE REFUSED — message "
+                           (:seon.agent.message/id msg)
+                           " hops=" (:seon.agent.message/hops msg)
+                           " reached hop-cap " warn/hop-cap
+                           " (agent↔agent ping-pong guard). A human message"
+                           " resets the chain (hops 0).")})))
                 (when (seq waking)
                   (case state
                     :terminated
@@ -969,9 +992,11 @@
                (let [work (await (acquire-committed-work id))]
                  (cond
                    (database-error? work)
-                   (js/console.error
-                    (str "seon.agent.loop: committed work acquisition FAILED for "
-                         id ": " (pr-str work)))
+                   (seon-log/error!
+                    {:seon.log/source ::drive-run
+                     :seon.log/agent id
+                     :seon.log/message "committed work acquisition FAILED"
+                     :seon.log/data {::work work}})
 
                    (= :running (::state work))
                    (await (drive-run-loop! input (::current-run-id work)))
@@ -983,14 +1008,18 @@
                      input (::pending-inbound-eid work))))))))
           (.catch
            (fn [e]
-             (js/console.error
-              (str "seon.agent.loop: drive-run! threw for "
-                   id ": " (or (.-message e) e)))))))
+             (seon-log/error!
+              {:seon.log/source ::drive-run
+               :seon.log/agent id
+               :seon.log/message
+               (str "drive-run! threw: " (or (.-message e) e))})))))
        0)
-      (js/console.warn
-       (str "seon.agent.loop: drive-run! — no live loop input for agent " id
-            " (the wake trigger was never armed in this process); cannot drive "
-            "committed work.")))))
+      (seon-log/warn!
+       {:seon.log/source ::drive-run
+        :seon.log/agent id
+        :seon.log/message
+        (str "drive-run! — no live loop input (the wake trigger was never "
+             "armed in this process); cannot drive committed work.")}))))
 
 ;; ============================================================
 ;; Scheduled-fn execution — the action half of cron. Injected into
