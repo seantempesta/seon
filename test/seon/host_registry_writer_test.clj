@@ -224,3 +224,54 @@
         (context/close-session! session)
         (writer/stop! server)
         (.delete (File. ^String request-path))))))
+
+(deftest uninstalled-attribute-query-is-no-fact-while-pull-rejects
+  ;; The execution tier lookup (`seon.execution.host`) and every other
+  ;; presence read of an OPTIONAL registered attribute rely on this
+  ;; boundary contract: on a database where the attribute was never
+  ;; transacted (so never installed), a Datalog query treats it as zero
+  ;; datoms — no fact, not an error — while a pull SELECTOR naming it is
+  ;; rejected by the engine. The tier dispatch therefore queries; if this
+  ;; contract ever changes, the lookup must be redesigned with it
+  ;; (issue eval-host-tier-pull-fails-on-uninstalled-schema).
+  (let [database-name (str "host-registry-" (random-uuid))
+        request-path (socket-path "uninstalled")
+        server (writer/start! {::writer/dependencies (dependencies)
+                               ::writer/database-name database-name
+                               ::writer/backend :memory
+                               ::writer/request-socket-path request-path})
+        session (context/writer-session
+                 {::context/writer-socket-path request-path
+                  ::context/database-name database-name
+                  ::context/backend :memory})
+        base (context/build-base! session)
+        ctx (context/fork-context base)]
+    (try
+      (sci/eval-string*
+       ctx
+       (str "(require 'seon.db)"
+            "(seon.db/transact!"
+            " {:seon.db/tx-data"
+            "  [{:seon.schema/key :seon.schema/key"
+            "    :seon.schema/form \"[:keyword {:seon.db/identity true}]\"}"
+            "   {:seon.schema/key :seon.schema/form"
+            "    :seon.schema/form \":string\"}]})"))
+      (is (nil? (sci/eval-string*
+                 ctx
+                 (str "(seon.db/query"
+                      " (quote [:find ?v ."
+                      "         :where [?e"
+                      "                 :seon.execution.host/eval-socket-path"
+                      "                 ?v]]))")))
+          "query over the uninstalled attribute is NO FACT, never an error")
+      (let [pulled (sci/eval-string*
+                    ctx
+                    (str "(seon.db/pull"
+                         " [:seon.execution.host/eval-socket-path]"
+                         " [:seon.schema/key :seon.schema/form])"))]
+        (is (some? (:seon/error pulled))
+            "a pull selector naming the uninstalled attribute is rejected"))
+      (finally
+        (context/close-session! session)
+        (writer/stop! server)
+        (.delete (File. ^String request-path))))))

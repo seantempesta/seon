@@ -684,16 +684,31 @@
                          ::execution/function-symbol])))
 
 (defn- ^:async pull-eval-host-coordinate!
-  "Read the agent's eval host coordinate fact at the pinned database value."
+  "Read the agent's eval host coordinate fact at the pinned database value.
+
+   A presence QUERY, deliberately not a pull: the tier attribute is
+   optional and registered pod-side, so a database where no agent was
+   ever host-tier has never installed it — Datahike rejects a pull
+   SELECTOR naming an uninstalled attribute, while the query engine
+   treats the unknown attribute as zero datoms. Absence of the fact
+   (including absence of the attribute itself) routes to the child lane;
+   a real read failure (writer down, malformed request) still returns
+   its error envelope and fails the turn loudly."
   [invocation]
-  (let [pulled (await
-                (db/pull (:seon.db/db invocation)
-                         [::eval-socket-path]
-                         [:seon.agent/id
-                          (::execution/agent-id invocation)]))]
-    (if (:seon.error/message pulled)
-      {::coordinate-error pulled}
-      (::eval-socket-path pulled))))
+  (let [result (await
+                (db/query
+                 {:seon.db/db (:seon.db/db invocation)
+                  :seon.db/query
+                  '[:find ?socket-path .
+                    :in $ ?agent-id
+                    :where
+                    [?agent :seon.agent/id ?agent-id]
+                    [?agent :seon.execution.host/eval-socket-path
+                     ?socket-path]]
+                  :seon.db/args [(::execution/agent-id invocation)]}))]
+    (if (and (map? result) (:seon.error/message result))
+      {::coordinate-error result}
+      result)))
 
 (defn- invoke-in-lane!
   "Run the head invocation on one lane, replacing a source-stale child once."

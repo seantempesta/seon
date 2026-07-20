@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, agent, database, architecture]
 ---
@@ -52,3 +52,29 @@ boundary for `::eval-socket-path`).
   loudly — the fix must distinguish "attribute uninstalled → no fact → child
   lane" from "read failed".
 - One regression covering the uninstalled-attribute case.
+
+## Resolution (2026-07-20, U4 lane)
+
+Root cause: the tier lookup used a PULL, and Datahike rejects a pull
+selector naming an uninstalled attribute; a Datalog query treats the same
+unknown attribute as zero datoms. Reading a possibly-never-installed
+optional attribute is legitimate presence semantics, so the one owner
+(`seon.execution.host/pull-eval-host-coordinate!`) now reads the fact with
+a presence query at the pinned database value. No error-string matching,
+no swallowed failures: a real read failure still returns its error
+envelope and fails the turn loudly, exactly as before.
+
+Proof, live default cluster (basis after the fix, agent
+`few-months-clap` minted via `POST /agents`): a real
+`seon.agent.turn/run-turn!` drive with a scripted llm-fn closed
+`{:seon.agent.turn/status :done, :seon.agent/eval-count 1}` where the
+identical drive previously failed "The agent's execution tier fact could
+not be read"; the recorded eval row reads back
+`["(+ 20 22)" true "42"]`. A direct live probe confirmed the split: the
+presence query returns `nil` while the old pull returns the
+`:transact/schema` rejection envelope.
+
+Regression: `uninstalled-attribute-query-is-no-fact-while-pull-rejects`
+in `test/seon/host_registry_writer_test.clj` pins the boundary contract
+against the real memory-backend writer (query → no fact; pull selector →
+error value). Green inside the focused run (5 tests / 26 assertions).
