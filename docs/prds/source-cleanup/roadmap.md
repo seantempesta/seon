@@ -528,6 +528,16 @@ Collapse-hunt items (adversarial review 2026-07-20):
   decode+build collapses. `typeahead.cljs:795` may follow (lowest
   priority, try-wrapped best-effort site).
 
+  The implementation boundary is now grounded by
+  [[research/stored-rows-schema-projection-boundary-2026-07-20]] (`784a3e01`).
+  Because cross-namespace consumers must call the decoder, it is a public
+  `^:no-doc`, non-agent-facing pure function rather than the earlier proposed
+  private helper. It reads through a fixed local EDN tag table, rejects
+  duplicate identities and trailing/corrupt data deterministically, and never
+  depends on `cljs.reader`'s mutable global tag table. U4's host recorder may
+  move the incremental caller, so implementation waits for its release and
+  re-inventories every surviving stored-form decode before editing.
+
 - **CLOSED `b819df26`**: retain and wire `src/seon/agent/ctx/usage.cljs` into the debug turn projection
 and compact agent-page usage, with validated non-negative provider counts and
 diagnostics for malformed/unknown shapes. Delete `src/seon/ui/components.cljc`
