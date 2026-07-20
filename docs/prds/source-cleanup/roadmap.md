@@ -158,6 +158,13 @@ agent to re-run the form instead of emitting the dead-end `<no result>`
 placeholder. The focused context gate passed 11 tests / 44 assertions and the
 issue is archived.
 
+Corrective-steering G10's record-time half is implemented by `418a3844`:
+successful `db/query` results carry a deterministic readable-EDN comment that
+distinguishes scalar, tuple, collection, and relation find shapes without
+coercing the value. Independent focused receipt proof passed 18 tests / 75
+assertions. The existing query-shape issue remains open for the Stage 1.5
+generic-render consumer and behavioral agent probe.
+
 From [[research/corrective-steering-audit-2026-07-20]] (all persist-time or
 pure-render, single execution, byte-identity safe):
 
@@ -167,9 +174,11 @@ pure-render, single execution, byte-identity safe):
   stored nil, `:any`) at registration with a shared predicate and a
   directive message — the standing register!-accepted-banned-shape smell
   closes here.
-- **Stream-tail visibility (G3)**: a deterministic narration line frozen at
-  record time states which forms after the first were not run; rides the
-  stream/turn work.
+- **CLOSED `8e008470` (G3)**: a deterministic narration line frozen at record
+  time states how many complete forms after the first were not run and directs
+  the agent to resend the next one. Independent focused proof passed 15 tests /
+  40 assertions; provider reply/blob bytes remain untouched and the issue is
+  archived.
 - **Transact coercion contract (G4, ruled 2026-07-20)**: strict rejection
   with a directive message naming the canonical shape — never a silent
   coercion that teaches non-canonical calls, never ok-on-wrong-input.

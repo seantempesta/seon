@@ -63,6 +63,11 @@ Stage-5 usage wiring is closed in source/tests by `b819df26`: provider-correct
 actual/estimated normalization feeds the debug projection and compact agent
 page, with focused usage/debug/transcript proof totaling 23 tests / 84
 assertions. Coordinated live browser proof remains in the frozen-client gate.
+Corrective-steering G3 is closed by `8e008470`: persisted narration honestly
+counts unexecuted complete stream-tail forms while preserving reply/blob bytes
+(15 tests / 40 assertions). G10's record-time query-shape framing is
+implemented by `418a3844` (18 tests / 75 assertions); its Stage-1.5 renderer
+consumer and behavioral agent acceptance remain open.
 
 ## Scheduled — claimed by a stage, awaiting execution order
 

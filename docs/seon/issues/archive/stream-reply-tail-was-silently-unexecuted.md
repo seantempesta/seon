@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 tags: [agent, runtime, issue]
 severity: friction
 ---
@@ -32,3 +32,10 @@ parsed entry without adding durable narration to the retained eval row.
 - Single-form replies gain no extra narration.
 - Provider reply and blob bytes remain unchanged.
 - Focused turn tests pass.
+
+## Resolution
+
+Commit `8e008470` annotates only the retained parsed form's narration with the
+number of later complete forms not executed and the directive to resend the
+next form. It never rewrites the provider reply or blob. Independent focused
+proof passed 15 tests / 40 assertions with zero failures and zero errors.
