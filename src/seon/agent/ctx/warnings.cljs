@@ -82,13 +82,6 @@
                   cutoff)
      (cond-> [] cutoff (conj cutoff)) 3000000 65536 2097152)
    (query-member
-     (since-query '[?eid ?err ?at]
-                  '[[?e :seon.eval/record-error ?err]
-                    [?e :seon.eval/id ?eid]
-                    [?e :seon.eval/at ?at]]
-                  cutoff)
-     (cond-> [] cutoff (conj cutoff)) 3000000 65536 2097152)
-   (query-member
      '[:find ?eid ?dur
        :in $ ?threshold ?cutoff
        :where
@@ -156,7 +149,7 @@
                      (every? #(true? (::protocol/success? %)) runtime))
           {:seon.error/message "Warning runtime acquisition failed."
            :seon.error/data runtime}
-          (let [[failed fs-results hops record-errors slow failing canvases]
+          (let [[failed fs-results hops slow failing canvases]
                 (map member-result runtime)]
             {::warn/current-ns
              (home/current-ns
@@ -172,7 +165,6 @@
               ::warn/failed-evals failed
               ::warn/fs-results fs-results
               ::warn/hop-messages hops
-              ::warn/record-errors record-errors
               ::warn/slow-evals slow
               ::warn/failing-tests failing
               ::warn/canvases canvases}}))))))

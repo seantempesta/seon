@@ -99,7 +99,7 @@
 ;; ── Persisted fix datoms (the A/B substrate — a projection of a real
 ;; repair event on the eval entity, one Datalog query for fix volume /
 ;; class mix / revert rate). Stamped by `seon.eval` in a separate
-;; top-level tx (the `:seon.eval/record-error` precedent).
+;; top-level tx.
 
 (schema/register! :seon.repair/applied-class :keyword)
 (schema/register! :seon.repair/from :string)

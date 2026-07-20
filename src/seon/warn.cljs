@@ -1,9 +1,11 @@
 (ns seon.warn
   "Derive clustered warnings from the program graph.
 
-   Each `check-<kind>` is a separate, independently-testable fn:
+   Each `check-<kind>` is a separate, independently-testable PURE fn
+   over pre-acquired ordinary data (`:seon.warn/data`, supplied by
+   `seon.agent.ctx.warnings/warnings-block` — the one acquisition owner):
 
-     (check-return-is-any {:seon.db/db db :seon.warn/ns :my.domain})
+     (check-return-is-any {:seon.warn/data acquired :seon.warn/ns :my.domain})
      ;; → {:seon.warn/kind     :return-is-any
      ;;    :seon.warn/affected [{:seon.warn/sym \"my.domain/f\"
      ;;                          :seon.warn/where \"return\"} …]
@@ -70,10 +72,15 @@
 (schema/register! :seon.warn/affected
   [:vector :seon.warn/affected-entry])
 
+;; Checks are PURE over ::data — the invoking operation (the warnings
+;; context block) pre-acquires every relation at ONE database value and
+;; passes ordinary data. No check reads the database itself, so no
+;; `^:async` can ever reach [[run-checks]] (a Promise leaking into
+;; `(seq :seon.warn/affected)` would throw OUTSIDE the per-check
+;; try/catch and kill the whole WARNINGS block).
 (schema/register! ::check-request
   [:map
-   [:seon.db/db   {:optional true} :seon.db/db]
-   [::data {:optional true} ::data]
+   [::data ::data]
    [:seon.warn/ns {:optional true} :seon.warn/ns]
    ;; When truthy, dev-only clusters are KEPT (the dev/web-UI surface
    ;; opts in). The agent render path passes nothing → dev-only suppressed.
@@ -104,21 +111,10 @@
    Each row is a projection speaking the PERSISTED attr keys
    (`:seon.fn/sym`/`:seon.ns/name`/`:seon.fn/spec`/`:seon.fn/fn-var?`/
    `:seon.fn/private?`/`:seon.fn/schema-error` — C39, no bare twins).
-   Absent attrs come back as \"\" / sentinel defaults via get-else."
-  [{:seon.db/keys [db] data ::data} ns-kw]
-  (let [rows (or (::function-rows data)
-                 (db/query
-                  {:seon.db/db db
-                   :seon.db/query
-                   '[:find ?sym ?nm ?spec ?fnvar ?priv ?err
-                     :where
-                     [?f :seon.fn/sym ?sym]
-                     [?f :seon.fn/ns ?ns]
-                     [?ns :seon.ns/name ?nm]
-                     [(get-else $ ?f :seon.fn/spec "") ?spec]
-                     [(get-else $ ?f :seon.fn/fn-var? true) ?fnvar]
-                     [(get-else $ ?f :seon.fn/private? false) ?priv]
-                     [(get-else $ ?f :seon.fn/schema-error "") ?err]]}))
+   Absent attrs come back as \"\" / sentinel defaults via get-else in the
+   acquisition query (seon.agent.ctx.warnings)."
+  [{data ::data} ns-kw]
+  (let [rows (::function-rows data)
         all  (map (fn [[sym nm spec fnvar priv err]]
                     {:seon.fn/sym sym :seon.ns/name nm :seon.fn/spec spec
                      :seon.fn/fn-var? fnvar :seon.fn/private? priv
@@ -317,46 +313,16 @@
 ;; Domain attrs — the agent-created reuse surface.
 ;; ============================================================
 
-(defn agent-registered-attrs
-  "Attr keywords an AGENT registered — tx lacks a `:core-seed` origin.
-
-   PUBLIC: the `seon.agent.ctx/context-model` classifier consumes this as its
-   `:seon.agent.ctx/agent-attrs` leg — ONE provenance query for the attr
-   surface, shared by domain-attrs and the classifier.
-
-   The set of attr keywords whose `:seon.schema/key` row did not land through
-   the boot process — i.e. attrs
-   registered by an AGENT (every agent `register!` eval is teed into a
-   `:seon.schema` row by `seon.eval/build-tee-entities`, in an
-   agent-origin tx), as opposed to the core's own registrations
-   (boot-seeded by `seon.client/index-schemas`, always inside the unscoped
-   root/boot transaction context).
-
-   Provenance — not a keyword-namespace pattern — is the rule, so
-   agent-authored `seon.*` data domains (e.g. `:my.workout/*`) stay
-   visible on the reuse surface. It stays correct as the core grows with
-   NO list to maintain: new core registrations arrive via the boot seed
-   (seed origin → hidden), and anything an agent registers is teed in its
-   own tx (→ visible), whatever keyword namespace it picks."
-  {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db]] [:set :keyword]]}
-  [db]
-  (let [seed-txs (into #{}
-                       (map first)
-                       (db/query {:seon.db/db db
-                                  :seon.db/query
-                                  '[:find ?tx
-                                    :where
-                                    [?tx :seon.db/process ?process]
-                                    [?process :seon.db.process/id
-                                     :seon.db.process/boot]]}))]
-    (into #{}
-          (keep (fn [[k tx]] (when-not (contains? seed-txs tx) k)))
-          (db/query {:seon.db/db db
-                     :seon.db/query
-                     '[:find ?k ?tx
-                       :where [?s :seon.schema/key ?k ?tx]]}))))
-
 (defn- acquired-agent-registered-attrs
+  "Attr keywords an AGENT registered — provenance outside the boot seed.
+
+   Reads the acquired `::schema-provenance` rows ([attr process-id]):
+   every agent `register!` eval is teed into a `:seon.schema` row in an
+   agent-origin tx, while the core's own registrations land through the
+   boot process (`seon.client/index-schemas`). Provenance — not a
+   keyword-namespace pattern — is the rule, so agent-authored `seon.*`
+   data domains (e.g. `:my.workout/*`) stay visible on the reuse surface
+   with NO list to maintain."
   [data]
   (into #{}
         (keep (fn [[attr process-id]]
@@ -366,23 +332,23 @@
 (defn domain-attrs
   "Every DOMAIN attr installed on `db` — agent-registered, not core.
 
-   The db's datahike schema attrs
-   intersected with [[agent-registered-attrs]] (provenance: the attr's
+   The acquired datahike schema attrs
+   intersected with [[acquired-agent-registered-attrs]] (provenance: the
+   attr's
    `:seon.schema/key` row was asserted OUTSIDE the boot seed). These
    are the attrs agents registered for the human's data — INCLUDING
    `seon.*` data domains like `:my.workout/*` — the reuse surface
    [[check-parallel-attr]] guards.
    Core attrs (`:seon.db/*`, `:seon.agent/*`, …) stay hidden
    because their rows land through the boot process.
-   Derived from the db value itself (NOT the live registry), so it
+   Derived from the acquired database value's schema (NOT the live
+   registry), so it
    survives pod restarts and stays per-conn. An attr appears once data
    (or schema installation via the first transact!) has landed."
   {:malli/schema [:=> [:cat ::check-request] [:vector :keyword]]}
-  [{:seon.db/keys [db] data ::data}]
-  (let [schema      (or (::installed-schema data) (db/installed-schema db))
-        agent-attrs (if data
-                      (acquired-agent-registered-attrs data)
-                      (agent-registered-attrs db))]
+  [{data ::data}]
+  (let [schema      (::installed-schema data)
+        agent-attrs (acquired-agent-registered-attrs data)]
     (->> (keys schema)
          (filter keyword?)
          (filter namespace)
@@ -409,12 +375,9 @@
       [(str/join "-" (butlast tokens)) (last tokens)])))
 
 (defn- attr-instance-count
-  "Count of entities carrying `attr` — one AEVT count."
-  [{:seon.db/keys [db] data ::data} attr]
-  (if data
-    (get (::attribute-counts data) attr 0)
-    (count (db/query {:seon.db/db db
-                      :seon.db/query [:find '?e :where ['?e attr '_]]}))))
+  "Count of entities carrying `attr` — the acquired AEVT count."
+  [{data ::data} attr]
+  (get (::attribute-counts data) attr 0))
 
 (defn check-parallel-attr
   "DOMAIN attrs naming the SAME quantity in DIFFERENT units.
@@ -467,12 +430,12 @@
           "{:workout/duration-seconds (* 35 60)}  ; NOT :workout/duration-minutes 35")}))
 
 (defn- identity-attrs
-  "Every identity attr installed on `db`'s datahike schema
+  "Every identity attr on the acquired datahike schema
    (`:db/unique :db.unique/identity`), excluding datahike's own `:db/*`
    attrs (`:db/ident` is unique-identity by construction and carries a
    datom per installed attr — it is schema plumbing, not a kind)."
-  [{:seon.db/keys [db] data ::data}]
-  (->> (or (::installed-schema data) (db/installed-schema db))
+  [{data ::data}]
+  (->> (::installed-schema data)
        (keep (fn [[k v]]
                (when (and (keyword? k)
                           (not= "db" (namespace k))
@@ -497,17 +460,15 @@
   [data]
   (into #{}
         (map :seon.schema.catalog/id-attr)
-        (if data
-          (:seon.schema.projection/catalog
-           (schema/build-projection (acquired-schema-forms data)))
-          (schema/entity-catalog))))
+        (:seon.schema.projection/catalog
+         (schema/build-projection (acquired-schema-forms data)))))
 
 (defn- unmarked-map-schemas-carrying
   "Registered `:map` schemas that have an entry for `attr` but NO
    `{:seon.db/entity true}` marker — the schema(s) an author most
    likely MEANT to mark. Sorted for stable rendering."
   [data attr]
-  (->> (if data (acquired-schema-forms data) (schema/registered-schemas))
+  (->> (acquired-schema-forms data)
        (keep (fn [[k v]]
                (when (and (vector? v) (= :map (first v)))
                  (let [props   (when (map? (second v)) (second v))
@@ -611,52 +572,13 @@
    rounds (parent→A then parent→B) never accumulate."
   4)
 
-(defn latest-user-at
-  "Wall-clock of the latest message FROM the user anywhere, or nil.
-
-   Identity is the ref: a user message is one whose
-   `:seon.agent.message/from` resolves to a `:seon.user/id` entity. THE
-   \"since the latest user message\" cutoff every runtime check (and the
-   root-agent-view core-faults section) shares — public so section fns
-   outside this registry reuse it instead of forking the query."
-  {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db]] [:maybe :inst]]}
-  [db]
-  (ffirst (db/query
-            {:seon.db/db db
-             :seon.db/query
-             '[:find (max ?at)
-               :where
-               [?m :seon.agent.message/from ?u]
-               [?u :seon.user/id _]
-               [?m :seon.agent.message/at ?at]]})))
-
 (defn- failed-eval-rows
   "[eval-id error-string] rows for failed evals since the latest user
-   message (every failed eval when no user message exists yet)."
-  [{:seon.db/keys [db] data ::data}]
-  (if data
-    (::failed-evals data)
-    (if-let [cutoff (latest-user-at db)]
-    (db/query
-      {:seon.db/db db
-       :seon.db/query
-       '[:find ?eid ?err
-         :in $ ?cutoff
-         :where
-         [?e :seon.eval/ok? false]
-         [?e :seon.eval/at ?e-at]
-         [(> ?e-at ?cutoff)]
-         [?e :seon.eval/id ?eid]
-         [(get-else $ ?e :seon.eval/error "") ?err]]
-       :seon.db/args [cutoff]})
-      (db/query
-      {:seon.db/db db
-       :seon.db/query
-       '[:find ?eid ?err
-         :where
-         [?e :seon.eval/ok? false]
-         [?e :seon.eval/id ?eid]
-         [(get-else $ ?e :seon.eval/error "") ?err]]}))))
+   message (every failed eval when no user message exists yet). The
+   \"since the latest user message\" cutoff is applied by the acquisition
+   queries in seon.agent.ctx.warnings; every row here is already in scope."
+  [{data ::data}]
+  (::failed-evals data))
 
 (defn- clip [s n]
   (let [s (str s)]
@@ -685,9 +607,12 @@
                   (assoc :seon.warn/where (clip err 120))))))
    :seon.warn/explain
    (str "Evals FAILED since the latest user message (cross-agent). "
-        "Errors are values — (result <eval-id>) holds the full error "
-        "data; inspect it and adapt instead of retrying blind.")
-   :seon.warn/example "(result :<eval-id>)"})
+        "Errors are values — the eval row holds the full error data; "
+        "inspect it and adapt instead of retrying blind.")
+   :seon.warn/example
+   (str "(seon.db/pull {:seon.db/pull-pattern [:seon.eval/source :seon.eval/error\n"
+        "                                      :seon.eval/error-data]\n"
+        "               :seon.db/ref [:seon.eval/id \"<eval-id>\"]})")})
 
 (defn check-bad-ref
   "Failed evals whose error is datahike's cryptic lookup-ref message.
@@ -716,10 +641,12 @@
         "to add identity — that mutates a shared data model. Identity "
         "is only for a NEW attr that is the kind's natural key.")
    :seon.warn/example
-   (str ";; reference by eid instead of a lookup-ref on a non-identity attr:\n"
-        "(def eid (ffirst (seon.db/query {:seon.db/query\n"
-        "                                 '[:find ?e :where [?e :kb.doc/path \"a.md\"]]})))\n"
-        "{:kb.note/doc eid}  ; NOT {:kb.note/doc [:kb.doc/path \"a.md\"]}")})
+   (str ";; reference by eid instead of a lookup-ref on a non-identity attr.\n"
+        ";; First, query for the eid as its OWN top-level form (the runtime\n"
+        ";; awaits it and returns the rows):\n"
+        "(seon.db/query {:seon.db/query '[:find ?e :where [?e :kb.doc/path \"a.md\"]]})\n"
+        ";; ⟹ #{[42]} — then use the returned eid directly:\n"
+        "{:kb.note/doc 42}  ; NOT {:kb.note/doc [:kb.doc/path \"a.md\"]}")})
 
 (def ^:private fs-error-key-marker
   "The pr-str'd `:seon.agent.fs/error` key — its presence in a result
@@ -750,28 +677,17 @@
   "[eval-id denial-text] rows for evals since the latest user message
    whose RESULT carries an fs allowlist denial. seon.agent.fs ops never
    throw — a denial is an ok? false RESULT map (the eval itself
-   SUCCEEDS), so this scans `:seon.eval/result-edn`, not
-   `:seon.eval/error`. Marker filtering happens in Clojure, not in a
+   SUCCEEDS), so this scans the acquired `:seon.eval/result-edn` rows,
+   not `:seon.eval/error`. The user-message cutoff is applied by the
+   acquisition query; marker filtering happens here in Clojure, not in a
    :where predicate (datahike-cljs string predicates in :where are a
    known trap)."
-  [{:seon.db/keys [db] data ::data}]
-  (let [cutoff (when-not data (latest-user-at db))
-        rows   (or (::fs-results data)
-                   (db/query
-                 {:seon.db/db db
-                  :seon.db/query
-                  '[:find ?eid ?edn ?at
-                    :where
-                    [?e :seon.eval/result-edn ?edn]
-                    [?e :seon.eval/at ?at]
-                    [?e :seon.eval/id ?eid]]}))]
-    (->> rows
-         (filter (fn [[_ edn at]]
-                   (and (or (nil? cutoff)
-                            (> (.getTime ^js at) (.getTime ^js cutoff)))
-                        (str/includes? edn fs-error-key-marker)
-                        (str/includes? edn fs-denial-marker))))
-         (map (fn [[eid edn _]] [eid (fs-denial-text edn)])))))
+  [{data ::data}]
+  (->> (::fs-results data)
+       (filter (fn [[_ edn _]]
+                 (and (str/includes? edn fs-error-key-marker)
+                      (str/includes? edn fs-denial-marker))))
+       (map (fn [[eid edn _]] [eid (fs-denial-text edn)]))))
 
 (defn check-fs-denied
   "fs calls DENIED by the capability allowlist since the last user msg.
@@ -815,30 +731,11 @@
    deadlock. GLOBAL (cross-agent) on purpose. A fresh human message resets
    the chain and scopes these out — self-healing, nothing to clear."
   {:malli/schema [:=> [:cat ::check-request] ::check-response]}
-  [{:seon.db/keys [db] data ::data}]
-  (let [cutoff (when-not data (latest-user-at db))
-        rows   (or (::hop-messages data)
-                   (db/query
-                 {:seon.db/db db
-                  :seon.db/query
-                  '[:find ?mid ?hops ?at ?fid ?tid
-                    :in $ ?cap
-                    :where
-                    [?m :seon.agent.message/hops ?hops]
-                    [(>= ?hops ?cap)]
-                    [?m :seon.agent.message/id ?mid]
-                    [?m :seon.agent.message/at ?at]
-                    [?m :seon.agent.message/from ?f]
-                    [?m :seon.agent.message/to ?t]
-                    [(get-else $ ?f :seon.agent/id "user") ?fid]
-                    [(get-else $ ?t :seon.agent/id "user") ?tid]]
-                  :seon.db/args [hop-cap]}))]
+  [{data ::data}]
+  (let [rows (::hop-messages data)]
     {:seon.warn/kind :hop-exhausted
      :seon.warn/affected
      (->> rows
-          (filter (fn [[_ _ at]]
-                    (or (nil? cutoff) (> (.getTime ^js at)
-                                         (.getTime ^js cutoff)))))
           (sort-by first)
           (mapv (fn [[mid hops _ fid tid]]
                   {:seon.warn/sym   (str mid)
@@ -856,101 +753,44 @@
      :seon.warn/example
      "(seon.agent/message! {:seon.agent.message/content \"summary for you — …\"})  ; to defaults to the user"}))
 
-(defn check-record-errors
-  "Evals whose RECORDING partially failed since the last user message.
-
-   Stamped `:seon.eval/record-error` by seon.eval/record-eval! when the
-   program-graph tee rows were dropped and only the bare eval row could
-   be recovered. Each one is a registration/def that will
-   NOT survive a pod restart — the transcript alone looks fine, which
-   is exactly the dishonest-record class this check makes loud.
-   DERIVED at render; scoped out by the next user message. GLOBAL —
-   :seon.warn/ns is ignored."
-  {:malli/schema [:=> [:cat ::check-request] ::check-response]}
-  [{:seon.db/keys [db] data ::data}]
-  (let [cutoff (when-not data (latest-user-at db))
-        rows   (or (::record-errors data)
-                   (db/query
-                 {:seon.db/db db
-                  :seon.db/query
-                  '[:find ?eid ?err ?at
-                    :where
-                    [?e :seon.eval/record-error ?err]
-                    [?e :seon.eval/id ?eid]
-                    [?e :seon.eval/at ?at]]}))]
-    {:seon.warn/kind :record-errors
-     :seon.warn/affected
-     (->> rows
-          (filter (fn [[_ _ at]]
-                    (or (nil? cutoff) (> (.getTime ^js at)
-                                         (.getTime ^js cutoff)))))
-          (sort-by first)
-          (mapv (fn [[eid err _]]
-                  {:seon.warn/sym   (str eid)
-                   :seon.warn/where (clip err 120)})))
-     :seon.warn/explain
-     (str "These evals were only PARTIALLY recorded: the core could "
-          "not persist their program-graph tee rows (fn/schema/test "
-          "registrations), so whatever they defined exists in-memory "
-          "ONLY and will NOT survive a restart. Re-run the defining form "
-          "after fixing the cause in :seon.eval/record-error — a fresh "
-          "successful eval re-tees it durably.")
-     :seon.warn/example
-     (str "(seon.db/pull {:seon.db/pull-pattern '[*]\n"
-          "               :seon.db/ref [:seon.eval/id \"<eval-id>\"]})")}))
+;; NOTE: there is deliberately NO record-errors check. The partial-record
+;; class it guarded (a stamped `:seon.eval/record-error` beside a bare eval
+;; row) was removed when eval publication became atomic (346e70fa): a
+;; dropped eval record now persists NOTHING transcript-shaped, and
+;; record-eval!'s tx-failure branch records the drop through the ONE fault
+;; path (`seon.error/record!`, fault `:core` — b109266e). Those fault
+;; datoms already have their one derived surface:
+;; `seon.agent.ctx.warnings/core-faults-block` (root-only by the 2026-07-04
+;; error-blame ruling — core faults are ours to fix, not any agent's task).
 
 (defn check-slow-evals
   "Evals over the slow threshold in the last hour, anywhere.
 
-   Stops surfacing when new evals are fast and the offenders age out."
+   Stops surfacing when new evals are fast and the offenders age out.
+   The threshold + last-hour window are applied by the acquisition query."
   {:malli/schema [:=> [:cat ::check-request] ::check-response]}
-  [{:seon.db/keys [db] data ::data}]
-  (let [cutoff (js/Date. (- (js/Date.now) (* 60 60 1000)))]
-    {:seon.warn/kind :slow-evals
-     :seon.warn/affected
-     (->> (or (::slow-evals data)
-              (db/query
-            {:seon.db/db db
-             :seon.db/query
-             '[:find ?eid ?dur
-               :in $ ?threshold ?cutoff
-               :where
-               [?e :seon.eval/duration-ms ?dur]
-               [(>= ?dur ?threshold)]
-               [?e :seon.eval/at ?at]
-               [(> ?at ?cutoff)]
-               [?e :seon.eval/id ?eid]]
-             :seon.db/args [slow-eval-threshold-ms cutoff]}))
-          (sort-by first)
-          (mapv (fn [[eid dur]]
-                  {:seon.warn/sym   (str eid)
-                   :seon.warn/where (str dur "ms")})))
-     :seon.warn/explain
-     (str "Evals took ≥" slow-eval-threshold-ms "ms in the last hour. "
-          "Narrow the query (specific attrs, not [*]) or compute less "
-          "per form.")
-     :seon.warn/example
-     ";; pull named attrs, not '[*]; add :where clauses to narrow"}))
+  [{data ::data}]
+  {:seon.warn/kind :slow-evals
+   :seon.warn/affected
+   (->> (::slow-evals data)
+        (sort-by first)
+        (mapv (fn [[eid dur]]
+                {:seon.warn/sym   (str eid)
+                 :seon.warn/where (str dur "ms")})))
+   :seon.warn/explain
+   (str "Evals took ≥" slow-eval-threshold-ms "ms in the last hour. "
+        "Narrow the query (specific attrs, not [*]) or compute less "
+        "per form.")
+   :seon.warn/example
+   ";; pull named attrs, not '[*]; add :where clauses to narrow"})
 
 (defn check-failing-tests
   "Tests whose last run failed (last-failed-at > last-passed-at)."
   {:malli/schema [:=> [:cat ::check-request] ::check-response]}
-  [{:seon.db/keys [db] data ::data}]
+  [{data ::data}]
   {:seon.warn/kind :failing-tests
    :seon.warn/affected
-   (->> (or (::failing-tests data)
-            (db/query
-          {:seon.db/db db
-           :seon.db/query
-           '[:find ?sym
-             :where
-             [?t :seon.test/sym ?sym]
-             [?t :seon.test/last-failed-at ?f-at]
-             (or-join [?t ?f-at]
-                      (and (not [?t :seon.test/last-passed-at _])
-                           [(identity ?f-at) _])
-                      (and [?t :seon.test/last-passed-at ?p-at]
-                           [(> ?f-at ?p-at)]))]}))
+   (->> (::failing-tests data)
         (map first)
         sort
         (mapv (fn [sym] {:seon.warn/sym (str sym)})))
@@ -970,15 +810,8 @@
    compiled core functions produce nothing. DERIVED at render; self-heals the
    moment the fn is defined. GLOBAL — :seon.warn/ns is ignored."
   {:malli/schema [:=> [:cat ::check-request] ::check-response]}
-  [{:seon.db/keys [db] data ::data :as request}]
-  (let [rows (or (::canvases data)
-                 (db/query
-               {:seon.db/db db
-                :seon.db/query
-                '[:find ?aid ?content
-                  :where
-                  [?e :seon.agent/id ?aid]
-                  [?e :seon.render.canvas/content ?content]]}))
+  [{data ::data :as request}]
+  (let [rows (::canvases data)
         current-authored-symbols
         (into #{} (map (comp symbol :seon.fn/sym)) (fn-rows request nil))]
     {:seon.warn/kind :canvas-unresolved
@@ -1033,7 +866,6 @@
    check-unmarked-entity-kinds
    check-bad-ref
    check-failed-evals
-   check-record-errors
    check-fs-denied
    check-hop-exhausted
    check-slow-evals
@@ -1060,8 +892,9 @@
                               (or (ex-message e) (str e))
                               " — its warnings are MISSING this render; "
                               "every other check rendered normally.")
-     :seon.warn/example  (str ";; reproduce the throw, then fix the check:\n"
-                              "(" nm " {:seon.db/db (deref seon.db/*conn*)})")}))
+     :seon.warn/example  (str ";; checks are PURE over pre-acquired data — reproduce the throw\n"
+                              ";; with plain data (no database read), then fix the check:\n"
+                              "(" nm " {:seon.warn/data {}})")}))
 
 (defn run-checks
   "Run every registered check; return the non-clean responses.

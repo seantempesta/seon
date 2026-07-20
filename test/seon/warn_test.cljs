@@ -59,7 +59,6 @@
    ::warn/hop-messages
    [["MSGwarntestHOP" warn/hop-cap (js/Date. 400)
      "warntest-agent" "warntest-peer"]]
-   ::warn/record-errors []
    ::warn/slow-evals [["EVLwarnSLOW001" slow-eval-duration-ms]]
    ::warn/failing-tests [["warntest.main/broken-test"]]
    ::warn/canvases []})
@@ -223,6 +222,23 @@
             (warn/check-canvas-unresolved {::warn/data healthy})))
         "a resolving symbol or literal canvas is clean")))
 
+(deftest guidance-examples-teach-current-idioms
+  ;; Examples are string literals rendered into agent context —
+  ;; bin/test-cljs cannot catch a stale idiom any other way. Invariant:
+  ;; no example names a removed var, and every db read an example
+  ;; teaches is its own TOP-LEVEL form (whole-form auto-await), never
+  ;; composed inside another call.
+  (let [examples (map (comp :seon.warn/example #(% (request))) warn/checks)]
+    (doseq [example examples]
+      (is (not (str/includes? example "*conn*"))
+          "no example may name the removed seon.db/*conn* var")
+      (is (not (re-find #"\(\s*(?:ffirst|first|def)\s+\(seon\.db/(?:query|pull)" example))
+          "db reads in examples are top-level forms, never composed")))
+  (testing "the bad-ref fix example uses the whole-form-await idiom"
+    (let [example (:seon.warn/example (warn/check-bad-ref (request)))]
+      (is (str/includes? example "(seon.db/query"))
+      (is (not (str/includes? example "(def eid"))))))
+
 (defn- healthy-fake-check [_request]
   {:seon.warn/kind :fake-healthy
    :seon.warn/affected [{:seon.warn/sym "warntest.main/fake-defect"}]
@@ -246,5 +262,9 @@
                          "boom from fake check"))
       (is (str/includes? (:seon.warn/explain synthetic)
                          "throwing-fake-check"))
+      (is (str/includes? (:seon.warn/example synthetic) ":seon.warn/data")
+          "the repro example teaches the pure pre-acquired-data idiom")
+      (is (not (str/includes? (:seon.warn/example synthetic) "*conn*"))
+          "the repro example must not name the removed seon.db/*conn* var")
       (is (str/includes? text "fake-healthy"))
       (is (str/includes? text "warn-check-error")))))

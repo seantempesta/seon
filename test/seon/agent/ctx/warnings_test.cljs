@@ -46,7 +46,7 @@
      (member [[:seon.agent/id :seon.db.process/boot]])
      (member [])
      (member [])]}
-   {::db/results (vec (repeat 7 (member [])))}])
+   {::db/results (vec (repeat 6 (member [])))}])
 
 (defn- block-for
   [scope-kw]
