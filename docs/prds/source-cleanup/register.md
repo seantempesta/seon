@@ -94,7 +94,7 @@ with zero compiler warnings.
 |---|---|---|
 | Adversarial strengthened fixes (20, folded) | per PRD | [[research/adversarial-review-findings-2026-07-20]] |
 | Steering gaps G1-G4 + proposed G8-G11 extensions | 1.6 | [[research/corrective-steering-audit-2026-07-20]], triage §gaps |
-| Pod→client/cluster rename (freeze protocol, persisted forms) | 2 | pod plan |
+| Pod→client/cluster rename (freeze protocol, persisted forms; current owner/process/worktree/port blockers) | 2 | pod plan, [[research/stage2-freeze-readiness-delta-2026-07-20]] |
 | Logging format unification, timbre grounding | 3 | [[logging-unification]] |
 | Config through aero, per-op ALS (probe-validated), grants seam | 4 | [[config-through-aero]] |
 | Route-authority collapse + /sse + crossing runbook | 4 | [[research/route-authority-collapse-2026-07-20]] |
