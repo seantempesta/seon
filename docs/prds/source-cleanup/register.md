@@ -80,7 +80,7 @@ consumer and behavioral agent acceptance remain open.
 | Config through aero, per-op ALS (probe-validated), grants seam | 4 | [[config-through-aero]] |
 | Route-authority collapse + /sse + crossing runbook | 4 | [[research/route-authority-collapse-2026-07-20]] |
 | Reactive fold-ins: client advertisement, serve poll, close! at shutdown | 4-5 | [[research/bespoke-reactive-sweep-2026-07-20]] |
-| Envelope-key + ok?-discriminator convergence (**ruling flipped: explicit ok? key** — triage counterevidence `installed-schema-map-misclassified`; lane B's live bug confirmed the class) | 5 | [[research/envelope-symbol-conformance-2026-07-20]] |
+| Envelope-key + ok?-discriminator convergence (**reconciled:** closed schema-derived error predicate for provably disjoint fixed results; closed outer explicit `:seon.result/ok?` union for arbitrary/collision-capable reads and domain responses) | 5 | [[research/envelope-symbol-conformance-2026-07-20]], [[../../seon/issues/arbitrary-database-results-collide-with-error-shape]] |
 | Unresolved-symbol single semantics; render nil-vanish | 5 | same |
 | Deletions: ctx.usage wiring (Muse shape first), docstring-predicate .cljc, canvas test B9, embed retry collapse, marker-token mirror, rows->projection dedup | 5 | [[deletions-and-wiring]], roadmap stage 5 |
 | Data-browser implementation (measured, corrected); bounded-walk Unit 0 first | 1.5 | [[data-browser]], [[research/data-browser-readiness-audit-2026-07-20]] |

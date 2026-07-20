@@ -341,8 +341,13 @@ advertisement machinery with one `observe!` over resumable agent ids and
 call the never-called `reactive/close!` from `drain-runtime-owners!`;
 converge the failure-payload key on `:seon.error/message` and the
 unresolved-symbol semantics (one warning derivation; fix render.cljs
-silent nil-vanish); decide the ok?-discriminator ruling
-(recommended: bless message-presence for concise domain results).
+silent nil-vanish). **Ruling reconciled 2026-07-20:** message presence is not a
+discriminator. Make the database error schema closed and use one schema-derived
+predicate only where a fixed success schema is provably disjoint. Public reads
+that return arbitrary user data require a closed outer explicit
+`:seon.result/ok?` union; do not wrap every fixed-shape database operation or
+infer failure from keys inside raw domain data. The migration waits for the
+active database/UDS lane and proceeds by inventoried owner groups.
 
 Collapse-hunt items (adversarial review 2026-07-20):
 
