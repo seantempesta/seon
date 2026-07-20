@@ -420,7 +420,9 @@
     (and (map? x) (contains? x :seon.eval/datom))
     (let [[e a v] (:seon.eval/datom x)]
       [:span {:class "text-keyword font-mono"}
-       (str "#datom[" e " " (pr-str a) " " (pr-str v) "]")])
+       (str "#datom[" (tokens/bounded-pr-str e 20) " "
+            (tokens/bounded-pr-str a 20) " "
+            (tokens/bounded-pr-str v 20) "]")])
 
     (and (map? x) (contains? x :seon.eval/opaque))
     [:span {:class "text-text-400 font-mono italic"}
@@ -455,20 +457,37 @@
          child-rows)])
 
 (defn- map-node [m depth]
-  (let [elided (:seon.render.value/elided-keys m)
-        m      (dissoc m :seon.render.value/elided-keys)
-        pairs  (seq m)
+  (let [wrapped? (contains? m :seon.render.value/map-entries)
+        elided (when wrapped? (:seon.render.value/elided-keys m))
+        projected (when wrapped? (:seon.render.value/projected-keys m))
+        pairs  (if wrapped?
+                 (:seon.render.value/map-entries m)
+                 (seq m))
         n      (count pairs)
         rows   (cond-> (vec (for [[k v] pairs]
                               [:div {:class "flex items-start gap-1.5 text-xs min-w-0"}
-                               [:span {:class "text-keyword shrink-0 font-mono"} (pr-str k)]
+                               [:span {:class "text-keyword shrink-0 font-mono"}
+                                (tokens/bounded-pr-str k 20)]
                                (value-node v (inc depth))]))
-                 elided (conj [:div {:class "text-2xs text-text-600 font-mono"}
-                               (str "… +" elided " more key" (when (not= 1 elided) "s"))]))]
+                 elided
+                 (conj [:div {:class "text-2xs text-text-600 font-mono"}
+                        (if (= :more elided)
+                          "… +more keys"
+                          (str "… +" elided " more key"
+                               (when (not= 1 elided) "s")))])
+                 projected
+                 (conj [:div {:class "text-2xs text-text-600 font-mono"}
+                        (str projected " non-scalar key"
+                             (when (not= 1 projected) "s")
+                             " shown safely")]))]
     (value-details
       [:span {:class "text-text-400 font-mono"}
        (str "{} " n " key" (when (not= 1 n) "s")
-            (when elided (str " +" elided " hidden")))]
+            (when elided (if (= :more elided)
+                           " +more hidden"
+                           (str " +" elided " hidden")))
+            (when projected (str " · " projected " safe key label"
+                                 (when (not= 1 projected) "s"))))]
       rows depth)))
 
 (defn- seqish-node [m depth]

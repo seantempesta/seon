@@ -46,7 +46,8 @@
       :seon.render.value/shown   [...]            ; bounded sample
       :seon.render.value/elided  n | :more        ; tail count (or :more)
       :seon.render.value/shape   [:k …]}          ; shared keys, if homogeneous
-     {<k> <v> … :seon.render.value/elided-keys n}  ; map w/ elided tail
+     {:seon.render.value/map-entries [[<k> <v>] …] ; map w/ elided tail
+      :seon.render.value/elided-keys n}
      {:seon.render.value/pruned :map|:vector|:set|:seq
       :seon.render.value/count  n}                 ; depth-limit prune
      {:seon.render.value/string-len n :seon.render.value/head \"…\"}
@@ -110,11 +111,13 @@
 ;; ============================================================
 
 (defn- render-options [configuration]
-  {:max-depth    (config/value-max-depth configuration)
-   :max-keys     (config/value-max-keys configuration)
-   :max-items    (config/value-max-items configuration)
-   :max-string   (config/value-max-string configuration)
-   :shape-sample (config/value-shape-sample configuration)})
+  (let [max-keys (config/value-max-keys configuration)]
+    {:max-depth      (config/value-max-depth configuration)
+     :max-keys       max-keys
+     :max-map-visits (* 4 max-keys)
+     :max-items      (config/value-max-items configuration)
+     :max-string     (config/value-max-string configuration)
+     :shape-sample   (config/value-shape-sample configuration)}))
 
 (defn- verbatim-probe-options
   "Generous bounds used ONLY to test — LAZY-SAFELY — whether `value` is small
@@ -124,7 +127,7 @@
    nor blow up. Bounds far exceed anything a verbatim-cap-sized value reaches,
    so the char count stays the real gate."
   [verbatim-cap]
-  {:max-depth 64 :max-keys 256 :max-items 256
+  {:max-depth 64 :max-keys 256 :max-map-visits 1024 :max-items 256
    :max-string verbatim-cap :shape-sample 8})
 
 ;; ============================================================
@@ -144,6 +147,13 @@
   (and (not (coll? x)) (not (record? x))
        (number? (:e x)) (keyword? (:a x))))
 
+(defn- bounded-record-label
+  "Compiler-owned record constructor label without invoking record printing."
+  [x]
+  (let [ctor (type x)
+        label (or (.-cljs$lang$ctorStr ctor) (.-name ctor) "record")]
+    (subs label 0 (min 80 (count label)))))
+
 (defn opaque?
   "True when `x` is a runtime handle rather than ordinary immutable data.
 
@@ -162,35 +172,38 @@
 
 (defn- opaque-marker
   "Reader-safe marker for one non-plain node. Never throws."
-  [x]
+  [x project-child]
   (try
     (cond
       (datom-shape? x)
-      {:seon.eval/datom [(:e x) (:a x) (:v x)]}
+      {:seon.eval/datom [(:e x) (:a x) (project-child (:v x))]}
 
       (and (record? x) (some? (:max-tx x)))
-      {:seon.eval/opaque "datahike/DB"
-       :seon.eval/summary (str "max-tx=" (:max-tx x)
-                               (when-some [me (:max-eid x)] (str " max-eid=" me)))}
+      (cond-> {:seon.eval/opaque "datahike/DB"}
+        (number? (:max-tx x))
+        (assoc :seon.eval/summary
+               (str "max-tx=" (:max-tx x)
+                    (when (number? (:max-eid x))
+                      (str " max-eid=" (:max-eid x))))))
 
       (and (not (map? x)) (not (record? x)) (some? (:db/id x)))
-      {:seon.eval/opaque "datahike/Entity"
-       :seon.eval/summary (str ":db/id=" (:db/id x))}
+      (let [eid (:db/id x)]
+        (cond-> {:seon.eval/opaque "datahike/Entity"}
+          (or (number? eid) (keyword? eid) (string? eid))
+          (assoc :seon.eval/summary
+                 (str ":db/id=" (tokens/bounded-pr-str eid 20)))))
 
       (record? x)
-      {:seon.eval/opaque (or (some-> (type x) pr-str) "record")
-       :seon.eval/summary (tokens/clip-str (pr-str x) 20)}
+      {:seon.eval/opaque (bounded-record-label x)}
 
       (fn? x)
       {:seon.eval/opaque "fn"}
 
       (object? x)
-      {:seon.eval/opaque "js/Object"
-       :seon.eval/summary (tokens/clip-str (pr-str x) 20)}
+      {:seon.eval/opaque "js/Object"}
 
       :else
-      {:seon.eval/opaque "unknown"
-       :seon.eval/summary (tokens/clip-str (str x) 20)})
+      {:seon.eval/opaque "unknown"})
     (catch :default _
       {:seon.eval/opaque "unknown" :seon.eval/summary "<unprintable>"})))
 
@@ -200,7 +213,7 @@
   [value]
   (cond
     ;; opaque handles FIRST — a datahike DB is also map?/coll?.
-    (opaque? value) (opaque-marker value)
+    (opaque? value) (opaque-marker value project-plain*)
 
     ;; plain map — recurse over keys AND values.
     (map? value)
@@ -228,7 +241,7 @@
   {:malli/schema [:=> [:catn [:seon.render.value/value :any]] :any]}
   [value]
   (try (project-plain* value)
-       (catch :default _ (opaque-marker value))))
+       (catch :default _ (opaque-marker value project-plain*))))
 
 ;; ============================================================
 ;; SAMPLE — depth + breadth bounded skeleton of plain data + markers.
@@ -251,6 +264,40 @@
     {:seon.render.value/string-len (count s)
      :seon.render.value/head       (subs s 0 (max 0 (dec max-string)))}
     s))
+
+(defn- map-key-projection
+  "Safe display/path projection plus whether the original key was replaced."
+  [k {:keys [max-string]}]
+  (cond
+    (opaque? k)
+    [(opaque-marker k identity) true]
+
+    (and (string? k) (> (count k) max-string))
+    [{:seon.eval/opaque "map-key/string"
+      :seon.eval/summary (tokens/bounded-pr-str k 20)} true]
+
+    (or (keyword? k) (symbol? k))
+    (let [n (+ (count (name k))
+               (if-some [ns (namespace k)] (inc (count ns)) 0))]
+      (if (> n max-string)
+        [{:seon.eval/opaque (str "map-key/" (if (keyword? k) "keyword" "symbol"))
+          :seon.eval/summary (tokens/bounded-pr-str k 20)} true]
+        [k false]))
+
+    (coll? k)
+    [{:seon.eval/opaque "map-key/collection"} true]
+
+    :else [k false]))
+
+(defn- named-scalar-marker
+  "Bounded marker for a huge keyword or symbol, otherwise nil."
+  [x max-string]
+  (when (or (keyword? x) (symbol? x))
+    (let [n (+ (count (name x))
+               (if-some [ns (namespace x)] (inc (count ns)) 0))]
+      (when (> n max-string)
+        {:seon.eval/opaque (if (keyword? x) "keyword" "symbol")
+         :seon.eval/summary (tokens/bounded-pr-str x 20)}))))
 
 ;; ============================================================
 ;; Explicit-whitespace rendering — the CENTRAL capability for surgical edits
@@ -346,12 +393,15 @@
           shape           (assoc :seon.render.value/shape shape))))))
 
 (defn- sample*
-  [x {:keys [max-depth max-keys max-string] :as opts} depth]
+  [x {:keys [max-depth max-keys max-map-visits max-string] :as opts} depth]
   (cond
     ;; opaque handles FIRST — a datahike DB is also map?/coll?.
-    (opaque? x) (opaque-marker x)
+    (opaque? x) (opaque-marker x #(sample* % opts (inc depth)))
 
     (string? x) (clip-string x max-string)
+
+    (or (keyword? x) (symbol? x))
+    (or (named-scalar-marker x max-string) x)
 
     ;; depth limit — prune NON-EMPTY nested colls to a typed+counted marker
     ;; so the agent still sees "a map of 12 keys lives here" and can drill
@@ -362,24 +412,35 @@
      :seon.render.value/count  (counted-count x)}
 
     (map? x)
-    ;; Over the `max-keys` bound, keep the SMALLEST entries — ranked by
-    ;; RENDERED size (the bounded skeleton's pr-str length), ties broken by
-    ;; original position. A first-N cut drops tiny load-bearing keys (a blob
-    ;; hash, a count, a recovery handle) whenever they sit past the first N,
-    ;; while keeping bulk payload strings; ranking by size elides the bulk and
-    ;; keeps the navigation/handle keys. The KEPT entries then render in the
-    ;; map's NATURAL key order (REPL-faithful — ordinary maps keep the order
-    ;; in which their retained keys were presented, and every retained get-in
-    ;; path stays valid). The `+N more keys` marker
-    ;; stays honest.
-    (let [sampled  (mapv (fn [[k v]] [k (sample* v opts (inc depth))]) x)
-          ranked   (sort-by (fn [[i [_ sv]]] [(count (pr-str sv)) i])
+    ;; Inspect a bounded candidate window plus one unsampled tail sentinel.
+    ;; Ranking the entire map by rendered size made output small only AFTER
+    ;; recursively visiting every value. The explicit visit budget preserves
+    ;; the useful small-value preference within a bounded window. Retained
+    ;; entries stay in the immutable map's iteration order, so repeated renders
+    ;; are byte-stable and every original key remains a valid drill path.
+    (let [visit-limit (max max-keys (or max-map-visits max-keys))
+          candidates+1 (into [] (take (inc visit-limit)) x)
+          candidates (take visit-limit candidates+1)
+          sampled  (mapv (fn [[k v]]
+                           (let [[display-key projected?] (map-key-projection k opts)]
+                             [display-key (sample* v opts (inc depth)) projected?]))
+                         candidates)
+          ranked   (sort-by (fn [[i [_ sv _]]]
+                              [(count (tokens/bounded-pr-str sv 20)) i])
                             (map-indexed vector sampled))
           keep-idx (into #{} (map first) (take max-keys ranked))
           kept     (keep-indexed (fn [i kv] (when (contains? keep-idx i) kv)) sampled)
-          elided   (max 0 (- (count x) max-keys))]
-      (cond-> (into {} kept)
-        (pos? elided) (assoc :seon.render.value/elided-keys elided)))
+          projected-keys (count (filter #(nth % 2) kept))
+          kept     (mapv (fn [[k v _]] [k v]) kept)
+          total    (counted-count x)
+          over-window? (> (count candidates+1) visit-limit)
+          elided   (cond
+                     total (max 0 (- total (count kept)))
+                     over-window? :more
+                     :else (max 0 (- (count candidates) (count kept))))]
+      (cond-> {:seon.render.value/map-entries (vec kept)}
+        (not= 0 elided) (assoc :seon.render.value/elided-keys elided)
+        (pos? projected-keys) (assoc :seon.render.value/projected-keys projected-keys)))
 
     (vector? x) (sample-seqish x opts depth :vector)
     (set? x)    (sample-seqish x opts depth :set)
@@ -396,7 +457,9 @@
                              [:seon.render.value/x :any]
                              [:seon.render.value/opts :map]] :any]}
   [configuration x opts]
-  (sample* x (merge (render-options configuration) opts) 0))
+  (let [opts (merge (render-options configuration) opts)]
+    (sample* x (update opts :max-map-visits
+                       #(max (:max-keys opts) (or % (:max-keys opts)))) 0)))
 
 ;; ============================================================
 ;; EMIT — render the skeleton to structure-revealing comment text.
@@ -417,19 +480,26 @@
   [skel]
   (boolean
     (some #(and (map? %)
-                (some #{:seon.render.value/elided :seon.render.value/elided-keys
-                        :seon.render.value/pruned :seon.eval/opaque
-                        :seon.eval/datom :seon.render.value/string-len}
-                      (keys %)))
+                (or (contains? % :seon.render.value/elided)
+                    (and (contains? % :seon.render.value/map-entries)
+                         (not= 0 (or (:seon.render.value/elided-keys %) 0)))
+                    (pos? (or (:seon.render.value/projected-keys %) 0))
+                    (contains? % :seon.render.value/pruned)
+                    (contains? % :seon.eval/opaque)
+                    (contains? % :seon.eval/datom)
+                    (contains? % :seon.render.value/string-len)))
           (tree-seq coll? #(if (map? %) (vals %) (seq %)) skel))))
 
 (defn- ind [depth] (apply str (repeat depth "  ")))
+
+(declare emit-inline)
 
 (defn- emit-leaf [x]
   (cond
     (:seon.eval/datom x)
     (let [[e a v] (:seon.eval/datom x)]
-      (str "#datom[" e " " (pr-str a) " " (pr-str v) "]"))
+      (str "#datom[" (tokens/bounded-pr-str e 20) " "
+           (tokens/bounded-pr-str a 20) " " (emit-inline v) "]"))
 
     (:seon.eval/opaque x)
     (str "#‹" (:seon.eval/opaque x)
@@ -446,10 +516,23 @@
          "⟨" (tokens/chars->tokens (:seon.render.value/string-len x)) " tokens⟩")))
 
 (defn- map-parts [m]
-  (let [elided (:seon.render.value/elided-keys m)
-        m      (dissoc m :seon.render.value/elided-keys)]
-    [(map (fn [[k v]] [(pr-str k) v]) m)
-     (when elided (str "… +" elided " more keys"))]))
+  (let [wrapped? (contains? m :seon.render.value/map-entries)
+        elided   (when wrapped? (:seon.render.value/elided-keys m))
+        projected (when wrapped? (:seon.render.value/projected-keys m))
+        entries  (if wrapped?
+                   (:seon.render.value/map-entries m)
+                   m)]
+    [(map (fn [[k v]] [(tokens/bounded-pr-str k 20) v]) entries)
+     (str/join " · "
+               (remove nil?
+                       [(when elided
+                          (if (= :more elided)
+                            "… +more keys"
+                            (str "… +" elided " more keys")))
+                        (when projected
+                          (str projected " non-scalar key"
+                               (when (not= 1 projected) "s")
+                               " shown safely"))]))]))
 
 (defn- seqish-parts [m]
   (let [{:seon.render.value/keys [shown elided shape]} m]
@@ -563,7 +646,11 @@
     ;; propagate (the throw here would crash the pod via render-result-edn).
     (try
       (let [sized   (map (fn [[k v]]
-                           [k v (+ (count (pr-str k)) (count (pr-str v)))])
+                           (let [[display-key _] (map-key-projection k options)]
+                             [k v (+ (count (tokens/bounded-pr-str display-key 20))
+                                   (if (string? v)
+                                     (count v)
+                                     (count (tokens/bounded-pr-str v 20))))]))
                          value)
             total   (reduce + (map peek sized))
             [k v n] (apply max-key peek sized)]
@@ -586,8 +673,14 @@
                 ;; re-clip only the dominant key's value to the body cap —
                 ;; every retained get-in path stays valid; the header keys
                 ;; render verbatim (all kept, since the map is ≤ max-keys).
-                (assoc (sample configuration value {})
-                       dk (clip-string s verbatim-cap))
+                (update (sample configuration value {})
+                        :seon.render.value/map-entries
+                        (fn [entries]
+                          (mapv (fn [[k v]]
+                                  [k (if (= k dk)
+                                       (clip-string s verbatim-cap)
+                                       v)])
+                                entries)))
                 (sample configuration value {}))
         clip? (truncated? skel)
         body  (emit skel 0 width)
@@ -629,11 +722,17 @@
                           (verbatim-probe-options verbatim-cap))]
         (if (truncated? probe)
           (prepare-bounded-view configuration value)
-          ;; probe untruncated ⇒ value is finite, opaque-free, bounded ⇒ pr-str
-          ;; cannot hang. Print it WHOLE when it fits the char budget.
-          (let [edn (pr-str value)]
-            (if (<= (count edn) verbatim-cap)
-              {::body edn}
+          ;; Probe untruncated means the structure is finite and ordinary. The
+          ;; capped printer remains the character-work gate, including huge
+          ;; keyword/symbol/map-key scalars that structural breadth alone does
+          ;; not bound.
+          (let [{printed ::tokens/text
+                 print-truncated? ::tokens/character-truncated?}
+                (tokens/bounded-pr-str-result
+                  value (quot (+ verbatim-cap 3) tokens/chars-per-token))]
+            (if (and (not print-truncated?)
+                     (<= (count printed) verbatim-cap))
+              {::body printed}
               (prepare-bounded-view configuration value))))))
       (catch :default e
         {::body (emit (sample configuration value {}) 0 width)

@@ -60,6 +60,82 @@
 ;; (fn [budget-tokens total-tokens] -> string) appended at the cut — a
 ;; caller's LOUD marker (e.g. seon.agent.ctx's truncation guides).
 (schema/register! ::marker-fn 'fn?)
+(schema/register! ::character-truncated? :boolean)
+(schema/register! ::bounded-print-result
+                  [:map {:closed true}
+                   [::text ::text]
+                   [::character-truncated? ::character-truncated?]])
+
+#?(:cljs
+   (def ^:private bounded-print-sentinel
+     (js/Error. "bounded print complete")))
+
+#?(:cljs
+   (deftype CappedWriter [chunks limit written truncated? sentinel]
+     IWriter
+     (-write [_ s]
+       (let [remaining (max 0 (- limit @written))
+             n         (count s)
+             retained  (min remaining n)]
+         (when (pos? retained)
+           (.push chunks (subs s 0 retained))
+           (vswap! written + retained))
+         (when (> n retained)
+           (vreset! truncated? true)
+           (throw sentinel))))
+     (-flush [_] nil)))
+
+#?(:cljs
+   (defn- capped-pr-str
+     "Print `value` through a bounded writer without expanding huge strings."
+     [value limit]
+     (let [chunks     (array)
+           written    (volatile! 0)
+           truncated? (volatile! false)
+           writer     (CappedWriter. chunks limit written truncated?
+                                     bounded-print-sentinel)
+           bounded-part (fn [s]
+                          (subs s 0 (min (count s) limit)))
+           alt-impl   (fn [x w opts]
+                        (let [fallback (:fallback-impl opts)]
+                          (cond
+                            (string? x)
+                            ;; CLJS's ordinary quote-string expands the complete
+                            ;; escaped string before IWriter sees it. Quote only a
+                            ;; bounded prefix so one huge field cannot duplicate
+                            ;; itself upstream of the capped writer.
+                            (fallback (bounded-part x)
+                                      w (dissoc opts :alt-impl))
+
+                            (keyword? x)
+                            (do (-write w ":")
+                                (when-some [ns (namespace x)]
+                                  (-write w (bounded-part ns))
+                                  (-write w "/"))
+                                (-write w (bounded-part (name x))))
+
+                            (symbol? x)
+                            (do (when-some [ns (namespace x)]
+                                  (-write w (bounded-part ns))
+                                  (-write w "/"))
+                                (-write w (bounded-part (name x))))
+
+                            :else
+                            (fallback x w opts))))]
+       (try
+         (binding [*print-level* 64]
+           (pr-seq-writer [value] writer
+                          {:readably true
+                           :meta false
+                           :dup false
+                           :print-length 256
+                           :alt-impl alt-impl}))
+         (catch :default e
+           (when-not (and @truncated?
+                          (identical? e bounded-print-sentinel))
+             (throw e))))
+       {::text (str (.join chunks "") (when @truncated? "…"))
+        ::character-truncated? @truncated?})))
 
 (defn- ellipsis-marker
   "The default cut marker — a bare ellipsis."
@@ -85,11 +161,27 @@
        (str (subs s 0 limit) (marker budget (estimate s)))
        s))))
 
-(defn bounded-pr-str
-  "`pr-str` of `v` clipped to a token `budget` (`…` marks the cut).
+(defn bounded-pr-str-result
+  "Bounded printed summary and character-cap fact for `v`.
 
-   The one bounded-print for quoting a value in an error message or a
-   glance surface without dumping the whole structure."
+   CLJS is work-bounded for ordinary data: a capped `IWriter`, bounded
+   collection breadth/depth, and string/keyword/symbol hooks prevent huge
+   scalar expansion before the cap. Arbitrary host printers are intentionally
+   outside this contract and must never be used as opaque summaries. The JVM
+   branch retains the historical bounded-output behavior. The returned flag
+   reports only the character/writer cap; callers derive structural
+   completeness from their bounded sampler."
+  {:malli/schema [:=> [:catn [::value :any] [::budget ::budget]]
+                  ::bounded-print-result]}
+  [v budget]
+  #?(:cljs (capped-pr-str v (estimate-chars budget))
+     :clj  (binding [*print-length* 256 *print-level* 64]
+             (let [full (pr-str v)
+                   clipped (clip-str full budget)]
+               {::text clipped ::character-truncated? (not= full clipped)}))))
+
+(defn bounded-pr-str
+  "Bounded printed text for `v` within token `budget`."
   {:malli/schema [:=> [:catn [::value :any] [::budget ::budget]] ::text]}
   [v budget]
-  (clip-str (pr-str v) budget))
+  (::text (bounded-pr-str-result v budget)))

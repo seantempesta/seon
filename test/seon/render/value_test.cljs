@@ -7,6 +7,7 @@
   (:require
     [cljs.test :as t :refer [deftest is testing]]
     [clojure.string :as str]
+    [seon.ai.tokens :as tokens]
     [seon.config :as config]
     [seon.render.value :as v]))
 
@@ -19,6 +20,57 @@
   (-lookup [_ k] (case k :e e :a a :v vv nil))
   (-lookup [_ k nf] (case k :e e :a a :v vv nf)))
 
+(deftype CountingMap [n visits value-at]
+  IMap
+  (-dissoc [this _] this)
+  ICounted
+  (-count [_] n)
+  ISeqable
+  (-seq [_]
+    (letfn [(entries [i]
+              (lazy-seq
+                (when (< i n)
+                  (swap! visits inc)
+                  (cons [(keyword (str "k" i)) (value-at i)]
+                        (entries (inc i))))))]
+      (entries 0))))
+
+(deftype UncountedMap [n visits value-at]
+  IMap
+  (-dissoc [this _] this)
+  ISeqable
+  (-seq [_]
+    (letfn [(entries [i]
+              (lazy-seq
+                (when (< i n)
+                  (swap! visits inc)
+                  (cons [(keyword (str "u" i)) (value-at i)]
+                        (entries (inc i))))))]
+      (entries 0))))
+
+(deftype HugePrintedRecord [writes]
+  IRecord
+  IPrintWithWriter
+  (-pr-writer [_ writer _]
+    (let [chunk (apply str (repeat 1024 "x"))]
+      (dotimes [_ 102400]
+        (swap! writes + (count chunk))
+        (-write writer chunk)))))
+
+(deftype ThrowingPrintedValue []
+  IPrintWithWriter
+  (-pr-writer [_ _ _]
+    (throw (js/Error. "unrelated printer failure"))))
+
+(defn- sampled-map [sampled]
+  (into {}
+        (map (fn [[k v]]
+               [k (if (and (map? v)
+                           (contains? v :seon.render.value/map-entries))
+                    (sampled-map v)
+                    v)]))
+        (:seon.render.value/map-entries sampled)))
+
 ;; ============================================================
 ;; sample — depth + breadth bounds, marker shapes.
 ;; ============================================================
@@ -27,7 +79,8 @@
   (testing "a small value samples to itself (no markers)"
     (is (= [1 2 3]
            (:seon.render.value/shown (v/sample configuration [1 2 3] {}))))
-    (is (= {:a 1 :b 2} (v/sample configuration {:a 1 :b 2} {})))))
+    (is (= {:a 1 :b 2}
+           (sampled-map (v/sample configuration {:a 1 :b 2} {}))))))
 
 (deftest breadth-bound-on-vectors
   (testing "a wide vector keeps max-items elements + an exact elided tail"
@@ -39,14 +92,92 @@
   (testing "a wide map keeps max-keys entries + an elided-keys count"
     (let [m    (into {} (map (fn [i] [(keyword (str "k" i)) i]) (range 20)))
           skel (v/sample configuration m {:max-keys 6})]
-      (is (= 6 (count (dissoc skel :seon.render.value/elided-keys))))
+      (is (= 6 (count (:seon.render.value/map-entries skel))))
       (is (= 14 (:seon.render.value/elided-keys skel))))))
+
+(deftest million-entry-map-work-is-bounded
+  (let [entry-visits  (atom 0)
+        child-touches (atom 0)
+        poison-touches (atom 0)
+        n 1000000
+        k 8
+        work-budget 32
+        value-at (fn [i]
+                   (if (< i work-budget)
+                     (map (fn [x] (swap! child-touches inc) x) [i])
+                     (map (fn [_]
+                            (swap! poison-touches inc)
+                            (throw (js/Error. "poison beyond map budget")))
+                          [i])))
+        m (CountingMap. n entry-visits value-at)
+        skel (v/sample configuration m {:max-keys k
+                                        :max-map-visits work-budget})]
+    (is (<= @entry-visits (inc work-budget))
+        "only the bounded candidate window plus tail sentinel is enumerated")
+    (is (<= @child-touches work-budget)
+        "only candidate values are recursively sampled")
+    (is (zero? @poison-touches)
+        "the tail sentinel and every later value remain untouched")
+    (is (= k (count (:seon.render.value/map-entries skel))))
+    (is (= (- n k) (:seon.render.value/elided-keys skel)))))
+
+(deftest uncounted-map-work-is-bounded-with-an-honest-unknown-tail
+  (let [entry-visits (atom 0)
+        child-touches (atom 0)
+        work-budget 12
+        m (UncountedMap. 1000000 entry-visits
+                         (fn [i]
+                           (map (fn [x] (swap! child-touches inc) x) [i])))
+        skel (v/sample configuration m {:max-keys 4
+                                        :max-map-visits work-budget})]
+    (is (<= @entry-visits (inc work-budget)))
+    (is (<= @child-touches work-budget))
+    (is (= 4 (count (:seon.render.value/map-entries skel))))
+    (is (= :more (:seon.render.value/elided-keys skel)))))
+
+(deftest bounded-map-projection-is-deterministic-and-collision-free
+  (let [pairs (mapv (fn [i] [(keyword (str "k" i)) {:row/id i}]) (range 1000))
+        render #(pr-str (v/sample configuration % {:max-keys 8
+                                                   :max-map-visits 32}))
+        a (into {} pairs)
+        b (into {} (reverse pairs))
+        reserved {:seon.render.value/elided-keys 99 :ordinary/value 1}
+        reserved-out (v/render-ai configuration "reserved" reserved)]
+    (is (= (render a) (render b))
+        "ordinary persistent hash-map iteration is insertion-independent")
+    (is (= 1 (count (set (repeatedly 25 #(render a))))))
+    (is (= reserved (sampled-map (v/sample configuration reserved {})))
+        "every user key stays inside the explicit entry collection")
+    (is (= (pr-str reserved) reserved-out)
+        "the reserved-looking user key does not fabricate a partial view")))
+
+(deftest opaque-and-huge-map-keys-force-safe-bounded-projections
+  (let [writes (atom 0)
+        opaque-key (HugePrintedRecord. writes)
+        opaque-ai (v/render-ai configuration "opaque-key" {opaque-key 1})
+        opaque-html (v/render-html-data configuration "opaque-key" {opaque-key 1})
+        projected-key (-> opaque-html
+                          :seon.render.value/tree
+                          :seon.render.value/map-entries
+                          first first)
+        huge-key (apply str (repeat 1000000 "k"))
+        huge-ai (v/render-ai configuration "huge-key" {huge-key 1})]
+    (is (zero? @writes) "opaque map-key printers are never invoked")
+    (is (str/includes? opaque-ai "partial view"))
+    (is (= "seon.render.value-test/HugePrintedRecord"
+           (:seon.eval/opaque projected-key)))
+    (is (not (identical? opaque-key projected-key))
+        "the ordinary HTML projection carries no host-object key")
+    (is (zero? @writes))
+    (is (< (count huge-ai) 600))
+    (is (str/includes? huge-ai "map-key/string"))
+    (is (str/includes? huge-ai "partial view"))))
 
 (deftest direct-error-maps-use-ordinary-map-sampling
   (let [error {:seon.error/message "writer unavailable"
                :seon.error/kind :system
                :seon.error/data {:operation :transact}}
-        sampled (v/sample configuration error {})]
+        sampled (sampled-map (v/sample configuration error {}))]
     (is (= error sampled))
     (is (not (contains? sampled :seon.db/ok?)))
     (is (not (contains? sampled :seon.db/error)))))
@@ -55,22 +186,24 @@
   (testing "nesting past max-depth becomes a typed+counted prune marker"
     (let [skel (v/sample configuration {:a {:b {:c {:d 1 :e 2}}}}
                          {:max-depth 3})
-          c    (get-in skel [:a :b :c])]
+          c    (get-in (sampled-map skel) [:a :b :c])]
       (is (= :map (:seon.render.value/pruned c)))
       (is (= 2 (:seon.render.value/count c))))))
 
 (deftest empty-colls-not-pruned-at-depth
   (testing "an empty coll at the depth boundary renders verbatim, not a marker"
-    (let [skel (v/sample configuration {:a {:b {:c []}}} {:max-depth 3})]
-      (is (= [] (:seon.render.value/shown (get-in skel [:a :b :c])))))))
+    (let [skel (v/sample configuration {:a {:b {:c []}}} {:max-depth 3})
+          c (get-in (sampled-map skel) [:a :b :c])]
+      (is (= [] (:seon.render.value/shown c))))))
 
 (deftest navigation-paths-preserved
   (testing "a path read off the skeleton resolves on the LIVE value"
     (let [live {:api/results [{:user/id 1 :user/name "John"}
                               {:user/id 2 :user/name "Jane"}]}
-          skel (v/sample configuration live {})]
+          skel (v/sample configuration live {})
+          results (:api/results (sampled-map skel))]
       ;; key + index retained → get-in path is identical on both
-      (is (= 1 (get-in skel [:api/results :seon.render.value/shown 0 :user/id])))
+      (is (= 1 (-> results :seon.render.value/shown first sampled-map :user/id)))
       (is (= "John" (get-in live [:api/results 0 :user/name]))))))
 
 ;; ============================================================
@@ -135,11 +268,54 @@
     (let [skel (v/sample configuration [(->FakeDB 7 7) :ok] {})]
       (is (= "datahike/DB" (:seon.eval/opaque (first (:seon.render.value/shown skel))))))))
 
+(deftest opaque-values-never-invoke-arbitrary-printers
+  (let [writes (atom 0)
+        marker (v/sample configuration (HugePrintedRecord. writes) {})]
+    (is (string? (:seon.eval/opaque marker)))
+    (is (<= (count (:seon.eval/opaque marker)) 80))
+    (is (nil? (:seon.eval/summary marker)))
+    (is (zero? @writes)
+        "a logical 100 MiB printer is never entered for an opaque value")))
+
+(deftest capped-printer-bounds-ordinary-data-and-propagates-real-failures
+  (let [huge (apply str (repeat 1000000 "x"))
+        nested {:payload huge :after :still-bounded}
+        out (tokens/bounded-pr-str nested 20)]
+    (is (<= (count out) 81))
+    (is (str/ends-with? out "…"))
+    (is (= "…" (tokens/bounded-pr-str nested 0)))
+    (is (try
+          (tokens/bounded-pr-str (ThrowingPrintedValue.) 20)
+          false
+          (catch :default e
+            (= "unrelated printer failure" (.-message e)))))))
+
+(deftest datom-value-is-sampled-through-the-same-bounds
+  (let [payload (apply str (repeat 1000 "x"))
+        marker (v/sample configuration (FakeDatom. 42 :demo/value payload)
+                         {:max-string 20})
+        sampled-value (get-in marker [:seon.eval/datom 2])]
+    (is (= 1000 (:seon.render.value/string-len sampled-value)))
+    (is (<= (count (:seon.render.value/head sampled-value)) 20))
+    (let [rendered (v/render-ai configuration "datom-long"
+                                (FakeDatom. 42 :demo/value payload))]
+      (is (< (count rendered) 500))
+      (is (str/includes? rendered "tokens⟩")))))
+
 (deftest long-string-clipped-with-length
   (let [skel (v/sample configuration (apply str (repeat 300 "x"))
                        {:max-string 80})]
     (is (= 300 (:seon.render.value/string-len skel)))
     (is (<= (count (:seon.render.value/head skel)) 80))))
+
+(deftest huge-named-scalars-never-reach-raw-pr-str
+  (let [huge-name (apply str (repeat 1000000 "n"))
+        huge-keyword (keyword "demo" huge-name)
+        huge-symbol (symbol "demo" huge-name)]
+    (doseq [x [huge-keyword huge-symbol]]
+      (let [out (v/render-ai configuration "huge-named" x)]
+        (is (< (count out) 500))
+        (is (str/includes? out "partial view"))))))
 
 ;; ============================================================
 ;; project-plain — the UNBOUNDED reader-safe projection (the read-side net
