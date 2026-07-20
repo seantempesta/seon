@@ -80,8 +80,10 @@ trap 'stop_writer_test TERM' TERM
 trap 'stop_writer_test INT' INT
 trap 'stop_writer_test HUP' HUP
 
+# :host adds the pinned sci dependency the seon.host conformance tests load;
+# it composes onto the same :writer basis and changes nothing else.
 SEON_WRITER_TEST_NAMESPACES="$WRITER_TEST_LIST" \
-  clojure -M:writer:writer-test -e "$RUNNER" &
+  clojure -M:writer:host:writer-test -e "$RUNNER" &
 writer_pid=$!
 
 set +e
