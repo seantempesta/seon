@@ -25,6 +25,14 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# A socket FILE can outlive its writer process (kill/reboot); reusing it
+# skips the writer start and every connect fails. Only a socket with a
+# live drill writer behind it counts as running.
+if [[ -S tmp/host-drill/writer.sock ]] \
+   && ! pgrep -f 'seon.db.server.*host-drill' >/dev/null 2>&1; then
+  rm -f tmp/host-drill/writer.sock
+fi
+
 if [[ ! -S tmp/host-drill/writer.sock ]]; then
   clojure -M:writer -m seon.db.server \
     --db-name u1-drill --backend file \

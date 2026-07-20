@@ -22,7 +22,7 @@ transition ledger.
 | # | Unit | State |
 |---|---|---|
 | U1 | seon.host skeleton + kill drill | **DONE** `cd239b79` |
-| U2 | wrapper registry + capability op-id receipts | ready |
+| U2 | wrapper registry + capability op-id receipts | **DONE** |
 | U1.5 | pod dials the host: tier-as-data dispatch, one REAL turn end-to-end (pod renders, host evals) | ready |
 | U4 | eval-record/receipt/corpus integration over the marked seams (subsumes register R2 — the program-row rejection diagnosis) | after U1.5 |
 | U5 | toolkit port: .cljc the db-boundary 46%; capability proxies for the js-bound tail | parallel-safe |
@@ -254,6 +254,47 @@ the startup's artifact identity — its trust root is the JVM
 classpath); render-prompt!/render-agent-view! stay pod-served.
 Favorable divergences: timeout/cancel interrupt in-process without
 poisoning, so contexts survive and only the session ends on cancel.
+
+### U2 — wrapper registry + capability op-id receipts — DONE (2026-07-20)
+
+`seon.host.context` now provisions EVERY capability namespace through
+one wrapper registry (`registry` + `register-wrappers!`) backing the
+base's sci `:load-fn`: first require injects cached wrapper vars
+(real sci vars, `:arglists`/`:doc` live), the shared load-fn closure
+makes a namespace registered after forks exist require-able in every
+live context, and re-registering a function alters the shared var's
+root so already-required contexts use the new implementation on their
+next call (plain JVM var alteration; the probed var-epoch property).
+The U1 eager `:namespaces` binding path is DELETED — the
+db/schema/tokens families ride the registry, and the registry-var an
+agent context resolves is `identical?` to the registry's cached var.
+Registries are process-local derived state: restart rebuilds them by
+re-registration from the host's configuration
+(`register-host-capabilities!` in `build-base!`), never persistence.
+
+Receipts: `seon.db/transact!` accepts the pod's shapes plus an
+optional `:seon.capability/op-id` (wrapper-generated when absent) and
+translates it at the boundary to the database protocol's
+`::protocol/request-id` — the writer's EXISTING durable idempotency
+receipt (the `:seon.db.protocol/request-id` datom on the committed
+transaction entity; `seon.db.writer` recovery replays the recorded
+outcome). No second receipt entity was added: the prescribed
+`:seon.capability/receipt` fact already exists as that protocol fact
+(one mechanism; writer.clj's "the durable receipt, not the delivery
+failure, is authoritative"). A caller-supplied op-id is pre-checked
+against the receipt, so a retry after any crash returns the recorded
+outcome with `:seon.capability/replayed? true`; the completed-at
+basis is the receipt datom's own transaction (derived, not stored).
+
+Gates (`test/seon/host_registry_writer_test.clj`, real memory-backend
+`seon.db.writer`): cross-context post-fork provisioning, live wrapper
+upgrade without re-require, registry-var identity, and the crash
+drill — transaction delivered and committed, connection killed before
+the acknowledgement, same-op-id retry replayed the receipt with the
+fact count still 1 (4 tests / 24 assertions). Full `bin/test-writer`
+255 tests / 1982 assertions green; the §7 kill drill re-ran PASS on
+the registry-backed host (fleet restore + zero fact loss, registry
+rebuilt by re-registration).
 
 ### Decision gate
 

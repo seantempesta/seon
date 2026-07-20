@@ -188,5 +188,19 @@ section of [[roadmap]].
 U2 wrapper registry + capability envelope op-id: the seam study's
 registry-backed load-fn as the one provisioning mechanism; gates =
 cross-context lazy provisioning + idempotent-receipt proof.
+**DONE (2026-07-20)** — `seon.host.context` provisions every capability
+namespace through one wrapper registry backing the shared sci
+`:load-fn` (U1's eager `:namespaces` path deleted); registering after
+contexts exist reaches every live context, and re-registration
+upgrades shared vars in place (proven live, two forks). Effectful
+`seon.db/transact!` carries `:seon.capability/op-id`, translated at
+the boundary to the writer's EXISTING durable idempotency receipt
+(`:seon.db.protocol/request-id` on the committed transaction) — no
+second receipt entity; a mid-call connection kill + same-op-id retry
+returned the recorded outcome (`:seon.capability/replayed? true`)
+with the effect exactly once, against the real memory-backend writer.
+Gates: full `bin/test-writer` 255/1982 green; §7 kill drill re-run
+PASS (registry rebuilt by re-registration on restart). Evidence: the
+U2 section of [[roadmap]].
 U3 graduation gate walking skeleton: fingerprint → both-tier test run →
 JVM eval install → epoch re-link, for ONE real corpus fn end-to-end.
