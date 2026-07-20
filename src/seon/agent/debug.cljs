@@ -10,6 +10,7 @@
     [my.blob :as blob]
     [seon.ai :as ai]
     [seon.ai.tokens :as tokens]
+    [seon.agent.ctx.usage :as usage]
     [seon.agent.turn :as turn]
     [seon.db :as db]
     [seon.schema :as schema]))
@@ -128,6 +129,11 @@
    [:seon.agent.turn/at             {:optional true} :seon.agent.turn/at]
    [:seon.agent.turn/rendered-tx    {:optional true} :seon.agent.turn/rendered-tx]
    [:seon.agent.turn/error          {:optional true} :seon.agent.turn/error]
+   [:seon.agent.turn/usage-estimated? {:optional true}
+    :seon.agent.turn/usage-estimated?]
+   [::usage/usage {:optional true} ::usage/usage]
+   [::usage/line {:optional true} ::usage/line]
+   [::usage/diagnostic {:optional true} ::usage/diagnostic]
    [::prompt        {:optional true} ::prompt]
    [::prompt-tokens {:optional true} ::prompt-tokens]
    [::reply         {:optional true} ::reply]
@@ -190,6 +196,8 @@
                                      :seon.agent.turn/status
                                      :seon.agent.turn/rendered-tx
                                      :seon.agent.turn/error
+                                     :seon.agent.turn/llm-usage
+                                     :seon.agent.turn/usage-estimated?
                                      {:seon.agent.turn/prompt-blob [:my.blob/hash]}
                                      {:seon.agent.turn/reply-blob  [:my.blob/hash]}]
                                     :seon.db/ref eid}))]
@@ -203,12 +211,15 @@
                              ::prompt ::prompt-tokens)
                 r (blob-text t :seon.agent.turn/reply-blob
                              ::reply ::reply-tokens)
+                usage-projection (usage/turn-projection t)
                 errs (vec (keep ::error [p r]))]
             (cond-> (merge (select-keys t [:seon.agent.turn/id
                                            :seon.agent.turn/at
                                            :seon.agent.turn/status
                                            :seon.agent.turn/rendered-tx
-                                           :seon.agent.turn/error])
+                                           :seon.agent.turn/error
+                                           :seon.agent.turn/usage-estimated?])
+                           usage-projection
                            (dissoc p ::error)
                            (dissoc r ::error)
                            {::ok? (empty? errs)})

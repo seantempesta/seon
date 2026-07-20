@@ -3,6 +3,7 @@
   (:require
     [cljs.test :refer [async deftest is]]
     [clojure.string :as str]
+    [seon.agent.ctx.usage :as usage]
     [seon.agent.debug :as debug]
     [seon.agent.turn :as turn]
     [seon.db :as db]))
@@ -89,6 +90,10 @@
                (js/Promise.resolve
                 {:seon.agent.turn/id "turn-1"
                  :seon.agent.turn/status :done
+                 :seon.agent.turn/llm-usage
+                 (pr-str {:prompt_tokens 9000
+                          :completion_tokens 200
+                          :prompt_tokens_details {:cached_tokens 8400}})
                  :seon.agent.turn/rendered-tx {:db/id 40}}))
               ([_selector _eid] (js/Promise.resolve nil))
               ([_database _selector _eid] (js/Promise.resolve nil))))
@@ -98,6 +103,13 @@
            (fn [result]
              (is (true? (:seon.agent.debug/ok? result)))
              (is (= 40 (:seon.agent.turn/rendered-tx result)))
+             (is (= {::usage/total 9000
+                     ::usage/cached 8400
+                     ::usage/output 200
+                     ::usage/provider-shape :openai-compat}
+                    (::usage/usage result)))
+             (is (= "usage · total 9000 · cached 8400 · output 200"
+                    (::usage/line result)))
              (is (= database
                     (get-in @observed [0 1 :seon.db/db])))
              (is (= database

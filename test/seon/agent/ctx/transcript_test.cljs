@@ -221,13 +221,18 @@
           (.then
             (fn [hiccup]
               (is (vector? hiccup))
-              (let [eval-query (->> @requests
+              (let [turn-query (-> @requests first ::db/members second
+                                   ::protocol/query-form pr-str)
+                    eval-query (->> @requests
                                     (mapcat ::db/members)
                                     (map ::protocol/query-form)
                                     (filter #(and (str/includes? (pr-str %) "seon.eval/id")
                                                   (str/includes? (pr-str %) "pull")))
                                     first
                                     pr-str)]
+                (is (str/includes? turn-query "seon.agent.turn/llm-usage"))
+                (is (str/includes? turn-query
+                                   "seon.agent.turn/usage-estimated?"))
                 (is (str/includes? eval-query "seon.eval/duration-ms"))
                 (is (not (str/includes? eval-query "seon.eval/source")))
                 (is (not (str/includes? eval-query "seon.eval/output")))
@@ -238,6 +243,42 @@
           (.finally (fn []
                       (set! db/execute-many original-execute-many)
                       (done)))))))
+
+(deftest html-transcript-renders-actual-and-estimated-usage-honestly
+  (let [actual {:seon.agent.ctx.transcript/turn-idx 0
+                :seon.agent.turn/at (js/Date. 1)
+                :seon.agent.turn/evals []
+                :seon.agent.turn/llm-usage
+                (pr-str {:prompt_tokens 9000
+                         :completion_tokens 200
+                         :prompt_tokens_details {:cached_tokens 8400}})}
+        estimated {:seon.agent.ctx.transcript/turn-idx 1
+                   :seon.agent.turn/at (js/Date. 2)
+                   :seon.agent.turn/evals []
+                   :seon.agent.turn/llm-usage
+                   (pr-str {:prompt_tokens 120 :completion_tokens 8})
+                   :seon.agent.turn/usage-estimated? true}
+        hiccup (@#'transcript/format-transcript-html
+                 (assoc acquired-empty
+                        :seon.agent.ctx.transcript/turn-count 2
+                        :seon.agent.ctx.transcript/turns [actual estimated]
+                        :seon.agent.ctx.transcript/events []))
+        rendered (pr-str hiccup)]
+    (is (str/includes? rendered
+                       "usage · total 9000 · cached 8400 · output 200"))
+    (is (str/includes? rendered "est. (stream abort)"))
+    (is (str/includes? rendered "no cache data"))))
+
+(deftest html-transcript-omits-usage-when-the-turn-has-none
+  (let [turn {:seon.agent.ctx.transcript/turn-idx 0
+              :seon.agent.turn/at (js/Date. 1)
+              :seon.agent.turn/evals []}
+        hiccup (@#'transcript/format-transcript-html
+                 (assoc acquired-empty
+                        :seon.agent.ctx.transcript/turn-count 1
+                        :seon.agent.ctx.transcript/turns [turn]
+                        :seon.agent.ctx.transcript/events []))]
+    (is (not (str/includes? (pr-str hiccup) "usage ·")))))
 
 (deftest max-content-evals-are-read-in-bounded-cacheable-pages
   (async done

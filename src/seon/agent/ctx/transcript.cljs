@@ -10,6 +10,7 @@
     [malli.core :as m]
     [seon.agent.message :as msg]
     [seon.agent.ctx :as ctx]
+    [seon.agent.ctx.usage :as usage]
     [seon.agent.home :as home]
     [seon.ai.tokens :as tokens]
     [seon.config :as config]
@@ -887,14 +888,17 @@
     {:seon.agent.message/to [:db/id :seon.user/id :seon.agent/id]}])
 
 (defn- turns-query [window-size]
-  {:find '[?turn ?at ?scheduled? ?run ?run-id]
+  {:find '[?turn ?at ?scheduled? ?run ?run-id ?usage ?usage-estimated?]
    :in '[$ ?agent-id]
    :where '[[?agent :seon.agent/id ?agent-id]
             [?run :seon.agent.run/agent ?agent]
             [?run :seon.agent.run/id ?run-id]
             [?turn :seon.agent.turn/run ?run]
             [?turn :seon.agent.turn/at ?at]
-            [(get-else $ ?turn :seon.agent.turn/scheduled? false) ?scheduled?]]
+            [(get-else $ ?turn :seon.agent.turn/scheduled? false) ?scheduled?]
+            [(get-else $ ?turn :seon.agent.turn/llm-usage "") ?usage]
+            [(get-else $ ?turn :seon.agent.turn/usage-estimated? false)
+             ?usage-estimated?]]
    :order-by '[?at :desc ?turn :desc]
    :limit window-size})
 
@@ -1006,13 +1010,19 @@
                                                  default-turn-eviction-size))
             turns (->> newest-rows
                        (map-indexed
-                         (fn [offset [turn at scheduled? run-eid row-run-id]]
-                           {::turn-idx (+ first-index offset)
-                            :db/id turn
-                            :seon.agent.turn/at at
-                            :seon.agent.turn/scheduled? scheduled?
-                            :seon.agent.turn/run
-                            {:db/id run-eid :seon.agent.run/id row-run-id}}))
+                         (fn [offset [turn at scheduled? run-eid row-run-id
+                                     usage-edn usage-estimated?]]
+                           (cond->
+                             {::turn-idx (+ first-index offset)
+                              :db/id turn
+                              :seon.agent.turn/at at
+                              :seon.agent.turn/scheduled? scheduled?
+                              :seon.agent.turn/run
+                              {:db/id run-eid :seon.agent.run/id row-run-id}}
+                             (seq usage-edn)
+                             (assoc :seon.agent.turn/llm-usage usage-edn)
+                             usage-estimated?
+                             (assoc :seon.agent.turn/usage-estimated? true))))
                        (filterv #(>= (::turn-idx %) cutoff-index)))
             cutoff-at (:seon.agent.turn/at (first turns))
             rotated? (pos? cutoff-index)
@@ -1283,6 +1293,7 @@
                              (fn [ev]
                                (case (::kind ev)
                                  :eval (>= (or (::turn-idx ev) -1) first-turn-idx)
+                                 :usage (>= (or (::turn-idx ev) -1) first-turn-idx)
                                  :message (>= (.getTime ^js (::at ev)) cutoff-ms)
                                  false))
                              events)]
@@ -1314,13 +1325,34 @@
        (render/block :html configuration
                      {:seon.render/markdown (str/trim body)})]]]))
 
+(defn- html-events
+  "Transcript events plus one derived usage row for each captured turn."
+  [{turns ::turns :as input}]
+  (let [usage-events
+        (keep (fn [turn]
+                (when (:seon.agent.turn/llm-usage turn)
+                  {::at (or (some->> (:seon.agent.turn/evals turn)
+                                     (keep :seon.eval/at)
+                                     last)
+                            (:seon.agent.turn/at turn))
+                   ::kind :usage
+                   ::turn-idx (::turn-idx turn)
+                   ::entity turn}))
+              turns)
+        kind-rank {:message 0 :eval 1 :usage 2}]
+    (->> (concat (ordered-events input) usage-events)
+         (sort-by (juxt #(.getTime ^js (::at %))
+                        #(kind-rank (::kind %) 9)
+                        #(or (::turn-idx %) 0)))
+         vec)))
+
 (defn- format-transcript-html
   [{:seon.agent/keys [id] turns ::turns :as input}]
   (let [configuration (:seon.config/configuration input)
         node (:seon.render/node input)
         retained (or (::turns-retained node) default-turns-retained)
         turn-ats (mapv :seon.agent.turn/at turns)
-        events (->> (ordered-events input)
+        events (->> (html-events input)
                     (recent-html-events turn-ats retained))
         render-message
         (fn [event]
@@ -1334,6 +1366,7 @@
                    :eval (eval-handler/render-activity-html
                            {:seon.config/configuration configuration
                             :seon.render/node (::entity event)})
+                   :usage (usage/render-html (::entity event))
                    nil)))
              vec)
         latest-reply (some->> events
