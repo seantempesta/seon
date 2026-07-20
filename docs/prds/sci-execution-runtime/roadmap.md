@@ -90,13 +90,32 @@ One real agent driven end-to-end on a sci child (branch cluster):
 memory per phase, burst retention, turn latency vs today's child. Gate:
 retention returns at production anchoring; no eval-latency regression.
 
-### C1 — JVM host skeleton
+### C1 — JVM host skeleton — DONE, gate PASS (2026-07-20)
 
 The probe's JVM harness grown to: sci context per agent, admitted
 bindings loaded once and shared, UDS client to the writer, thread-per-
 eval with interrupt + deadline. Gate: N=100 contexts, one real turn's
 worth of eval work each, marginal-memory and interrupt proofs repeated
 at that scale; OOME blast-radius test repeated 20x.
+
+Verdict ([[research/c1-jvm-host-scale-2026-07-20]], harness
+`tmp/sci-probe/jvm/{src/probe/host.clj,host-run.sh}` on the exact
+`:writer` basis against the LIVE default writer): **PASS**. N=100
+one-real-turn wave 100/100 ok in 164 ms wall, **117.9 KB working-set
+marginal**/context (18.6 KB idle); 805 real UDS
+ping/head/query/pull round-trips at ~2 ms mean through the one
+existing `seon.db.transport.uds` client; 10 runaways among 90 healthy
+all interrupted **≤5 ms past a 500 ms deadline** with healthy p99
+3 ms; OOME blast radius **20/20 process survivals**, 200/200 survivor
+pure + 200/200 survivor live-db evals ok, 100/100 concurrent evals ok
+during bombs; N=100 host ~55 MB used heap / ~505 MB Physical
+footprint (Xmx512m commit + full writer classpath — an upper bound).
+Honest limits carried to the decision gate: OOME containment is
+strong evidence not kill-certainty; the shared base is the real
+25-of-42 pure `my.*` slice plus host bindings (db-boundary port and
+`register!` admission not yet real); the js-bound 12% tier is C2's
+scope. Blocker 5's GC blast-radius item is closed by this evidence;
+its tier-design and dispatch-protocol items remain open for C2.
 
 ### C2 — tier split design
 

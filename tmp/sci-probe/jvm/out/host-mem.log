@@ -1,0 +1,24 @@
+== baseline (pid 14482)
+Physical footprint:         497.2M
+Physical footprint (peak):  796.4M
+== base-loaded (pid 14482)
+Physical footprint:         494.4M
+Physical footprint (peak):  796.4M
+== transport-proof (pid 14482)
+Physical footprint:         495.0M
+Physical footprint (peak):  796.4M
+== ctx-100 (pid 14482)
+Physical footprint:         496.2M
+Physical footprint (peak):  796.4M
+== wave-100 (pid 14482)
+Physical footprint:         500.4M
+Physical footprint (peak):  796.4M
+== interrupt-scale (pid 14482)
+Physical footprint:         833.1M
+Physical footprint (peak):  835.2M
+== oome-20 (pid 14482)
+Physical footprint:         513.1M
+Physical footprint (peak):  841.4M
+== footprint (pid 14482)
+Physical footprint:         505.7M
+Physical footprint (peak):  841.4M
