@@ -43,7 +43,7 @@
        (.toString (.from js/Buffer (str field) "utf8") "base64url")))
 
 (schema/register! ::view-request
-  [:map
+  [:map {:closed true}
    [::content ::content]
    [::ai {:optional true} ::ai]])
 
@@ -60,7 +60,7 @@
     (some? ai) (assoc :seon.render/ai ai)))
 
 (schema/register! ::show-request
-  [:map
+  [:map {:closed true}
    [::content :seon.render.canvas/content]
    [:seon.db/db {:optional true} :seon.db/db]
    [:seon.agent/id {:optional true} :string]
@@ -119,7 +119,7 @@
            :seon.render.canvas/content renderer}]})))))
 
 (schema/register! ::canvas-request
-  [:map
+  [:map {:closed true}
    [:seon.db/db {:optional true} :seon.db/db]
    [:seon.agent/id {:optional true} :string]])
 (schema/register! ::clear-response :seon.db/transact-response)
@@ -173,7 +173,7 @@
               {})))))))
 
 (schema/register! ::state-request
-  [:map
+  [:map {:closed true}
    [::attributes ::attributes]
    [:seon.db/db {:optional true} :seon.db/db]
    [:seon.agent/id {:optional true} :string]])
@@ -195,7 +195,7 @@
       {}))
 
 (schema/register! ::save-request
-  [:map
+  [:map {:closed true}
    [::values ::values]
    [:seon.agent/id {:optional true} :string]])
 (schema/register! ::save-response :seon.db/transact-response)
@@ -215,7 +215,7 @@
        [(assoc values :seon.db/ref [:seon.agent/id agent-id])]})))
 
 (schema/register! ::button-request
-  [:map
+  [:map {:closed true}
    [::label ::label]
    [::handler ::handler]
    [::data {:optional true} ::data]])
@@ -237,7 +237,7 @@
    label])
 
 (schema/register! ::input-request
-  [:map
+  [:map {:closed true}
    [::field ::field]
    [::label {:optional true} ::label]
    [::placeholder {:optional true} ::placeholder]])
@@ -255,7 +255,7 @@
              placeholder (assoc :placeholder placeholder))]])
 
 (schema/register! ::select-request
-  [:map
+  [:map {:closed true}
    [::field ::field]
    [::options ::options]
    [::label {:optional true} ::label]])
@@ -272,7 +272,7 @@
          options)])
 
 (schema/register! ::toggle-request
-  [:map
+  [:map {:closed true}
    [::field ::field]
    [::label {:optional true} ::label]])
 
@@ -286,7 +286,7 @@
    (when label [:span {:class "text-xs text-text-200"} label])])
 
 (schema/register! ::form-request
-  [:map
+  [:map {:closed true}
    [::handler ::handler]
    [::label ::label]
    [::controls ::controls]])

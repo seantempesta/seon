@@ -4,6 +4,7 @@
     [cljs.test :refer [deftest is testing]]
     [malli.core :as m]
     [my.blob]
+    [my.canvas]
     [my.data]
     [my.kb]
     [my.ns]
@@ -22,6 +23,16 @@
     :my.blob/retained-observation-request
     :my.blob/stat-request
     :my.blob/text-request
+    :my.canvas/button-request
+    :my.canvas/canvas-request
+    :my.canvas/form-request
+    :my.canvas/input-request
+    :my.canvas/save-request
+    :my.canvas/select-request
+    :my.canvas/show-request
+    :my.canvas/state-request
+    :my.canvas/toggle-request
+    :my.canvas/view-request
     :my.data/group-request
     :my.data/reduce-request
     :my.data/rows-request
@@ -41,7 +52,7 @@
   []
   (->> (keys (schema/registered-schemas))
        (filter #(let [definition (schema/schema-definition %)]
-                  (and (re-find #"^my\.(blob|data|kb|ns|ui)$"
+                  (and (re-find #"^my\.(blob|canvas|data|kb|ns|ui)$"
                                 (or (namespace %) ""))
                        (.endsWith (name %) "-request")
                        (= :map (first definition)))))
