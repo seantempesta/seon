@@ -20,6 +20,20 @@ tags: [prd, web, agent, architecture]
 - Validation confirm-dial ON at the top level; hover payloads share the
   standard token cap; the new read-only value route also serves `/data`
   entity drill-down (one transport).
+- **Confirm-ON is measured safe** (live pod, 2026-07-20,
+  [[research/browser-validation-benchmark-2026-07-20]]): warm confirm
+  4–28 µs per rendered top value, ~12–14 µs per SSE re-render (validator
+  memo hit rate 100% between registry changes), 100-value page morph
+  7.7 ms; prefilter-only 3–17 µs; explain+humanize warm ≤52 µs and
+  invalid-only. Memo policy the numbers support: unbounded
+  single-generation process-local cache keyed
+  `[projection-fingerprint schema-key]` (≤489 entries at the current
+  registry; drop the generation on projection change) — no LRU, no
+  value-level result memo. Two measured caveats for implementation:
+  `me/with-spell-checking` is a no-op on Seon's open maps (needs
+  `:closed`), so do not promise misspelling detection; and entity-shaped
+  values validly match many open request schemas (9 for an agent value),
+  so specificity ordering among valid matches is load-bearing.
 - The generic bounded tree is unconditional: a value with no registered
   schema match still renders and drills normally. Schema matches only add
   labels, validation, and an optional custom renderer.
