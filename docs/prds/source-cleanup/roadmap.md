@@ -130,6 +130,31 @@ required-attribute index plus `candidate-shapes`/`matching-shapes` APIs, keyed
 by projection object identity. Render/value/web/execution consumers wait until
 that two-file contract and its ambiguity/open-map/elision falsifiers pass.
 
+The remaining Stage 1.5 dependency spine is now grounded rather than left to
+consumer inference. Unit 1B's plain-data projection contract is
+[[research/schema-aware-value-projection-boundary-2026-07-20]] (`817a821f`):
+`render.value` samples exactly once, preserves the existing strict
+`:truncated?` completeness signal, validates every deterministically ordered
+match only when complete, and emits bounded `:shape-only` candidates when
+incomplete. Before transport, close
+[[../../seon/issues/projected-map-keys-are-not-drill-paths]] and
+[[../../seon/issues/value-drill-has-no-total-work-bounds]]: drill paths must
+retain original keys, and separate configured maxima must bound path segments,
+encoded path bytes, and total realized page work in both parent and child.
+
+Only after those contracts freeze does
+[[research/execution-child-value-sampling-boundary-2026-07-20]] (`a568deef`)
+extend the existing execution protocol with closed, correlated ordinary-data
+request/result/error frames. The parent never performs child result lookup,
+retries a retired child, or returns an unbounded value. Finally,
+[[research/value-route-authorization-boundary-2026-07-20]] (`7b6e2243`)
+adds the single read-only GET route: database entities sample from the same
+acquired immutable database value in the parent; eval selectors join eval
+ownership to the route agent before any host send; unauthorized and unknown
+selectors are uniformly absent; retired results remain ordinary honest
+unavailable projections. UI/custom dispatch and integrated browser proof are
+consumers of that frozen chain, not alternate authorities.
+
 ### Stage 1.6 — corrective steering gaps
 
 In progress (2026-07-20): root task `/root` owns the strict directive-error

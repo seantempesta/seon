@@ -127,6 +127,28 @@ rotation, deterministic all-match ordering, bounded near matches, open-map
 wrong-type rejection, and elision honesty. It does not reopen Unit 0 or touch
 rendering, web routes, database access, or execution-child transport.
 
+## Ordered implementation boundaries
+
+1. Implement and freeze Unit 1A from
+   [[research/activated-schema-projection-boundary-2026-07-20]].
+2. Implement the single-sample plain-data Unit 1B projection from
+   [[research/schema-aware-value-projection-boundary-2026-07-20]].
+3. Close [[../../seon/issues/projected-map-keys-are-not-drill-paths]] and
+   [[../../seon/issues/value-drill-has-no-total-work-bounds]] by preserving
+   original drill keys and enforcing configured path-segment, encoded-byte,
+   and total-realization budgets in every producer.
+4. Add the closed correlated execution-child frames specified by
+   [[research/execution-child-value-sampling-boundary-2026-07-20]].
+5. Add the selector, ownership, cache, admission, and outward-status contract
+   from [[research/value-route-authorization-boundary-2026-07-20]].
+6. Migrate the generic UI and custom dispatch only after the preceding
+   contracts are frozen, then run the pure, server, child-retirement, and real
+   browser acceptance matrix as one integrated gate.
+
+This ordering prevents the route or IPC layer from inventing projection
+semantics, numeric defaults, drill-key reconstruction, or a second paging
+mechanism.
+
 ## Problems this closes
 
 - Three value-rendering leaks bypassing the one mechanism (unbounded
