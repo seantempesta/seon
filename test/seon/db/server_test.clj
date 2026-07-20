@@ -7,7 +7,8 @@
             [seon.db.protocol :as protocol]
             [seon.db.registry :as registry]
             [seon.db.server :as server]
-            [seon.schema :as schema])
+            [seon.schema :as schema]
+            [taoensso.timbre :as log])
   (:import [java.io PushbackReader]
            [java.net InetAddress Socket]
            [java.util.concurrent TimeUnit]))
@@ -22,6 +23,42 @@
         (predicate) true
         (< (System/nanoTime) deadline) (do (Thread/sleep 25) (recur))
         :else false))))
+
+(deftype ThrowingPrintable [])
+
+(defmethod print-method ThrowingPrintable
+  [_ _]
+  (throw (ex-info "injected print failure" {})))
+
+(deftest writer-log-format-matches-client-and-contains-print-failures
+  (let [lines (atom [])
+        config (assoc log/default-config
+                      :output-fn #'server/writer-log-output
+                      :appenders
+                      {:capture
+                       {:enabled? true
+                        :async? false
+                        :fn #(swap! lines conj (force (:output_ %)))}})
+        returned (log/with-config config
+                   (log/info "ordinary" {:seon.test/value 1})
+                   (log/warn "hostile" (ThrowingPrintable.))
+                   :returned)]
+    (is (= :returned returned)
+        "a print failure never escapes back through the writer call site")
+    (is (= 2 (count @lines)))
+    (is (re-matches
+         #"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z  INFO  \[seon\.db\.server-test\] ordinary #:seon\.test\{:value 1\}"
+         (first @lines)))
+    (is (re-matches
+         #"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z  WARN  \[seon\.db\.server-test\] hostile seon\.db\.server_test\.ThrowingPrintable@.*"
+         (second @lines)))
+    (is (= "<log-format-error> ERROR [seon.db.server-test]"
+           (#'server/writer-log-output
+            {:level :error
+             :?ns-str "seon.db.server-test"
+             :vargs ["unreachable"]
+             :timestamp_ (delay (throw (ex-info "timestamp failed" {})))}))
+        "the outer formatter guard returns a minimal line")))
 
 (defn- release-result [released?]
   (cond->

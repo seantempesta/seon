@@ -300,3 +300,6 @@
 [submodule "reference-code/babashka"]
 	path = reference-code/babashka
 	url = https://github.com/babashka/babashka.git
+[submodule "reference-code/timbre"]
+	path = reference-code/timbre
+	url = https://github.com/taoensso/timbre.git

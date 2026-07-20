@@ -6,6 +6,7 @@
   (:require [clojure.core.server :as core-server]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
+            [clojure.string :as str]
             ;; Register the optional Proximum index before any database opens.
             [datahike.index.secondary.proximum]
             [seon.db.protocol :as protocol]
@@ -13,7 +14,8 @@
             [seon.db.writer :as writer]
             [seon.dev.restore :as restore]
             [seon.embed :as embed]
-            [seon.schema :as schema])
+            [seon.schema :as schema]
+            [taoensso.timbre :as log])
   (:import [java.io BufferedWriter FileInputStream FileOutputStream
             OutputStreamWriter]
            [java.nio.charset StandardCharsets]
@@ -60,6 +62,44 @@
   "SEON_APPLICATION_RESULT_PATH")
 (def ^:private stop-error-limit 4096)
 (def ^:private admin-input-limit (* 1024 1024))
+
+(defn- safe-log-string
+  [value]
+  (cond
+    (nil? value) ""
+    (string? value) value
+    (number? value) (str value)
+    (boolean? value) (str value)
+    (instance? Throwable value) (.toString ^Throwable value)
+    :else (try
+            (pr-str value)
+            (catch Throwable _
+              (try
+                (str value)
+                (catch Throwable _ "<unprintable>"))))))
+
+(defn- writer-log-output
+  [{:keys [level ?ns-str ?file vargs timestamp_ ?err]}]
+  (try
+    (let [level-name (str/upper-case (name level))
+          padded-level (format "%-5s" level-name)
+          source (or ?ns-str ?file "?")
+          arguments (cond-> vargs ?err (conj ?err))
+          body (str/join " " (map safe-log-string arguments))]
+      (str (force timestamp_) "  " padded-level " [" source "] " body))
+    (catch Throwable _
+      (str "<log-format-error> "
+           (try (str/upper-case (name level)) (catch Throwable _ "?"))
+           " ["
+           (try (or ?ns-str ?file "?") (catch Throwable _ "?"))
+           "]"))))
+
+(defn configure-logging!
+  "Configure writer logs to use the client log-line format."
+  {:malli/schema [:=> [:cat] :nil]}
+  []
+  (log/merge-config! {:output-fn writer-log-output})
+  nil)
 
 (defn- terminal-configuration
   [environment]
@@ -335,8 +375,8 @@
   "Start one fully composed database server."
   {:malli/schema [:=> [:catn [::arguments ::arguments]] ::server]}
   [arguments]
-  (println "[database] booting pid="
-           (.pid (java.lang.ProcessHandle/current)))
+  (configure-logging!)
+  (log/info "booting pid=" (.pid (java.lang.ProcessHandle/current)))
   (let [{::keys [database-name backend database-path request-socket-path
                  repl-port]
          :as options}
@@ -358,16 +398,16 @@
           (when repl-port
             (let [server (start-repl-server! repl-port
                                              resolved-repl-port-file)]
-              (println "[database] dev REPL:"
-                       (str "127.0.0.1:"
-                            (.getLocalPort ^java.net.ServerSocket server))
-                       "port-file:" resolved-repl-port-file)
+              (log/info "dev REPL:"
+                        (str "127.0.0.1:"
+                             (.getLocalPort ^java.net.ServerSocket server))
+                        "port-file:" resolved-repl-port-file)
               server))
           (catch Throwable throwable
             (writer/stop! writer-server)
             (throw throwable)))]
-    (println "[database] request socket:" request-socket-path)
-    (println "[database] ready")
+    (log/info "request socket:" request-socket-path)
+    (log/info "ready")
     (cond-> {::writer-server writer-server}
       repl-server
       (assoc ::repl-server repl-server
@@ -425,9 +465,7 @@
            (fn []
              (let [server (deref started (* 5 60 1000) ::start-timed-out)]
                (if-not (map? server)
-                 (binding [*out* *err*]
-                   (println "[database] shutdown before start completed:"
-                            (name server)))
+                 (log/error "shutdown before start completed:" (name server))
                  (try
                    (let [result (run-shutdown! server terminal-config)
                          stop-response
@@ -437,18 +475,13 @@
                      (cond
                        (and terminal-config
                             (false? (:seon.db.terminal/completed? result)))
-                       (binding [*out* *err*]
-                         (println "[database] shutdown failed:"
-                                  (:seon.db.terminal/stop-error result)))
+                       (log/error "shutdown failed:"
+                                  (:seon.db.terminal/stop-error result))
 
                        (not (::stopped? stop-response))
-                       (binding [*out* *err*]
-                         (println "[database] shutdown incomplete:"
-                                  (pr-str stop-response)))))
+                       (log/error "shutdown incomplete:" stop-response)))
                    (catch Throwable throwable
-                     (binding [*out* *err*]
-                       (println "[database] shutdown failed:"
-                                (.toString throwable))))))))
+                     (log/error throwable "shutdown failed"))))))
            "seon-database-shutdown")]
       (.addShutdownHook (Runtime/getRuntime) shutdown-hook)
       (try
