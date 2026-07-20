@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: closed
 severity: friction
 tags: [issue, agent]
 ---
@@ -69,3 +69,19 @@ were unchanged, and Inspect score history records the reviewed classification
 but can still form a model-feedback attractor when narration is reinserted.
 Acceptance still requires an unambiguous structural rendering, not output
 rewriting or a reserved-text blocklist.
+
+## Resolution (2026-07-20, source-cleanup G9)
+
+Commit `f84a9efc` closes the remaining render ambiguity through the existing
+`seon.agent.ctx/quote-lines` mechanism. Every narration line now receives one
+outer comment boundary while retaining the complete authored line after that
+prefix. Message, masthead, transcript-box, readline, and result-shaped text
+therefore stays visibly model-authored narration and cannot become a bare
+runtime event. The technical eval renderer uses the same quoter, so its
+multiline narration cannot bypass the boundary.
+
+Focused proof passed 13 tests / 47 assertions. The full CLJS checkpoint ran
+1,304 tests / 5,989 assertions; the only failure was the independently owned
+G8 request-schema inventory, while both G9 namespaces passed. Live proof was
+deferred because the shared pod was drained with a rebuild pending during the
+coordinated source work.
