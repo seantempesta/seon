@@ -65,6 +65,23 @@ R14/R15 all GO. R10 investigate-first. R16 keep the 1024 cap.
 | R15 | Garbage: 681 MB unreferenced blobs, 1160 stale tmp files, heapsnapshot | DONE 2026-07-20: swept (blobs 681 MB→124 KB after live re-verification found 2 referenced hashes, not 0; heapsnapshot 268 MB; 1122 stale tmp probe files ≈2.2 GB). Design question below: [[#blob-gc-design-question-r15]] |
 | R16 | Raise warnings token cap above 1024 for pathological bursts? | Keep 1024 (urgent-first survives); revisit with data |
 
+## Shared-runtime verdict (2026-07-20)
+
+[[research/bun-shared-memory-options-2026-07-20]]: live JS heap graphs
+CANNOT be shared between VMs, Workers, or processes (every mechanism
+grounded in vendored Bun source; fork-after-warm definitively impossible;
+Workers strictly worse for containment). The 91 MB "projection" band is
+not shipped data (wire caps at 6 MB) — it is `schema/build-projection`
+EAGERLY compiling every Malli schema (`schema.cljc:307-315`). Efficient
+"sharing" therefore means not duplicating: (1) turn-scoped child pool —
+memory proportional to concurrent turns, not agents; (2) burst-retention
+fix + `BUN_JSC_forceRAMSize` backstop; (3) lazy validator compilation at
+admission (kills most of the 91 MB Seon-side); (4) require-closure
+shrink. Deferred as non-major: bytecode (latency only), mmap (no byte
+tier big enough), Workers (negative). Cross-agent block sharing: measure
+render cost first; prefix byte-identity discipline suffices for the
+provider prompt-cache win without a new mechanism.
+
 ## Independent backlog (87 notes, themed)
 
 See [[research/issues-triage-2026-07-20]] §INDEPENDENT: inspect-ai
