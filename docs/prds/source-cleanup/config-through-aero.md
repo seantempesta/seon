@@ -95,21 +95,47 @@ runtime env reads outside the aero manifest boundary and process bootstrap.
 [[research/aero-config-seam-2026-07-20]] carries the full dependency
 ledger, tag-semantics gotchas (`#boolean` is strictly `"true"` in CLJS —
 wrapper `"1"` exports must flip; missing `#include` resolves silently, the
-closed manifest schema stays the backstop), the per-violation migration
-table, and the one adjustability gap: `db/install-configuration-context!`
-is a boot snapshot — refresh it from the existing committed-transaction
-delivery when a transaction touches the singleton. Every other consumer
-already acquires per operation, so live transaction adjustability already
-works there.
+closed manifest schema stays the backstop), and the per-violation migration
+table. Its "refresh the installed context from committed-transaction
+delivery" option for the ambient snapshot is superseded by the validated
+design below.
 
-## Async-context proof required
+## Ambient configuration design (validated by probe, 2026-07-20)
 
-The proposed committed-transaction refresh of
-`db/install-configuration-context!` is not settled merely because
-`AsyncLocalStorage.enterWith` exists. It updates the current async context and
-work descended from it; existing independent fibers may retain the prior map.
-Before implementation, an executable probe must create two long-lived fibers,
-install the initial configuration, refresh from a separate committed-delivery
-fiber, and prove both original fibers read the replacement. If that falsifier
-fails, live configuration belongs at the operation/session acquisition owner;
-do not add a second ambient configuration cache or listener-specific fallback.
+**Owner ruling**: AsyncLocalStorage is the right carrier for ambient
+operation context — facts a database request intrinsically needs attached
+recursively (agent id, provenance, config). Configuration stops being a
+once-at-boot `enterWith` snapshot and joins the SAME per-operation context
+entry the identity/provenance ambient already uses: at each operation
+boundary (turn start, web request, scheduled fire, execution invocation,
+boot phases) the owner acquires one database value and enters
+{identity + config-at-that-basis} together through the existing
+`db/with-tx-context`. Descendants inherit; the next operation acquires
+anew; no live-context mutation is ever needed.
+
+Validated by executable probe —
+[[research/als-config-probe-2026-07-20]]:
+
+- **Refresh-in-place is dead**: two pre-existing independent fibers never
+  observe a later `enterWith` replacement (Bun 1.3.14 and Node v26.4.0,
+  identical output). The previously proposed committed-delivery refresh of
+  `db/install-configuration-context!` cannot work; do not resurrect it.
+- **Per-operation `run` is fully inherited** by awaited chains, `.then`
+  chains, nested async fns, and `setTimeout` continuations, and does not
+  leak to the caller. `run-with-tx-context` merges the current context, so
+  nested `with-tx-context` scopes carry the boundary's configuration
+  automatically.
+- **`read-resource-options` (db.cljs:745) works unchanged**, proven live:
+  a query inside `with-tx-context {:seon.config/configuration <decoded
+  singleton>}` observed the entered ceiling; with no operation context the
+  default policies (`config/default-database-query-policy` and the pull
+  twin) governed — the correct fallback for early boot and operator probes.
+  Boundaries must enter the full decoded singleton; a partial map fails the
+  `:seon.config/singleton` instrumentation (observed).
+- `execution/runtime.cljs:589-604` (`eval-batch!`) already implements the
+  target idiom; the probe report's boundary inventory table names every
+  other boundary with file:line and its exact change, plus the two
+  deletions (`db/install-configuration-context!`,
+  `internal/enter-tx-context!` — after which `seon.db` contains no
+  `enterWith`, also sidestepping the Bun `enterWith` segfault recorded at
+  [[../../seon/issues/bun-enterwith-toplevel-segfault]]).
