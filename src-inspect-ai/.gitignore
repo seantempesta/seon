@@ -4,3 +4,4 @@ __pycache__/
 logs/
 e1_inspect_samples.jsonl
 .pytest_cache/
+evals/

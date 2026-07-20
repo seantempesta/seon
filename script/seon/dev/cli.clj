@@ -643,9 +643,14 @@
                         (name (:seon.dev.doctor/artifact-status result)))))))))
 
 (defn- release! [configuration arguments]
-  (when-not (or (= 1 (count arguments))
-                (and (= 3 (count arguments))
-                     (= "--sdk" (second arguments))))
+  (when-not (and (or (= 1 (count arguments))
+                     (and (= 3 (count arguments))
+                          (= "--sdk" (second arguments))))
+                 ; A flag-like token is never a package directory; `release
+                 ; --help` once built a complete package into `./--help/`.
+                 (not (str/starts-with? (first arguments) "-"))
+                 (or (= 1 (count arguments))
+                     (not (str/starts-with? (nth arguments 2) "-"))))
     (throw (ex-info "`release` requires a runtime directory and optional `--sdk` directory."
                     {:seon.dev.cli/arguments (vec arguments)})))
   (let [root (:seon.dev.config/root configuration)
