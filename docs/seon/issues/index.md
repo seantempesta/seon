@@ -55,7 +55,7 @@ See `README.md` for the convention.
 | [Skip the receipt reread branch after a successful eval write](successful-eval-receipt-called-state-on-nil.md) | blocker | agent |
 | [Supply the execution artifact to the production container launch](container-launch-omits-execution-artifact.md) | blocker | agent |
 
-## Friction (69)
+## Friction (72)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -69,6 +69,7 @@ See `README.md` for the convention.
 | [Atomic client authority cut is in progress](atomic-client-authority-cut-in-progress.md) | friction | Core |
 | [Autocomplete datasets and scoring bypass canonical runtime projections](autocomplete-data-quality-pipeline-drift.md) | friction | agent |
 | [Autocomplete worktrees contain unclassified database and model evidence](autocomplete-worktree-evidence-preservation.md) | friction | Core |
+| [Bespoke reactive loops duplicate seon.reactive outside its owner](bespoke-reactive-loops-outside-seon-reactive.md) | friction | UI |
 | [Bound temporal index-page work](bound-temporal-index-page-work.md) | friction | Core |
 | [Canvas controls hide pending and handler failure](canvas-controls-hide-pending-and-failure.md) | friction | UI |
 | [Canvas state returned a Promise as render data](canvas-state-returned-a-promise-as-render-data.md) | friction | UI |
@@ -111,6 +112,7 @@ See `README.md` for the convention.
 | [Remove local Datahike ownership from execution children](execution-artifact-packages-local-datahike.md) | friction | agent |
 | [Remove the Node module-register deprecation from CSS builds](tailwind-node-module-register-deprecation.md) | friction | UI |
 | [Remove undeclared-var warnings from the self-host bootstrap build](bootstrap-analyzer-api-emits-undeclared-var-warnings.md) | friction | agent |
+| [Render entity converters silently vanish on unresolved symbols](render-entity-converters-silently-vanish-on-unresolved-symbol.md) | friction | UI |
 | [Render logical Malli arities for pure-variadic functions](compact-pure-variadic-contract-mislabels-logical-arities.md) | friction | agent |
 | [Restore focused agent edge-case coverage](removed-embedded-multiagent-coverage-needs-owner.md) | friction | agent |
 | [Root context replaces inherited capability requirements](root-context-replaces-base-capability-requires.md) | friction | agent |
@@ -128,6 +130,7 @@ See `README.md` for the convention.
 | [Watcher status conflates artifact drift with failure](watcher-status-conflates-drift-with-failure.md) | friction | general |
 | [`my.ns/compact!` can hide the selected namespace](my-ns-compact-can-hide-namespace.md) | friction | agent |
 | [`my.ns/functions` points to a removed namespace renderer](my-ns-functions-points-to-removed-renderer.md) | friction | general |
+| [my.data/rows swallows the query error envelope](my-data-rows-swallows-query-error-envelope.md) | friction | agent |
 
 ## Cleanup (13)
 
