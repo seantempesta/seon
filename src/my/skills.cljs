@@ -306,10 +306,10 @@
          "\n;    done? (my.skills/unload :" (name skill-name) ") ──")))
 
 (defn skill-block
-  "DEPRECATED — reference for the `canvas` milestone; see context-rebuild.
+  "The loaded-skill body block: the full SKILL.md, `;`-commented.
 
-   The L2 loaded-body block — the skill's full SKILL.md, `;`-commented.
-
+   The `:seon.render/ai` slot [[load]] installs as the agent's
+   `:skill/<name>` context block.
    Eval-safe via [[seon.agent.ctx/quote-lines]], with a DERIVED token-cost
    footer. The skill name comes from the block's own `:skill/<name>` name;
    the row is pulled FRESH each render (REACTIVE: if the row is retracted,

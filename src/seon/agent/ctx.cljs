@@ -187,47 +187,41 @@
         (str/join "\n"))))
 
 (defn file-block-ai
-  "DEPRECATED — reference for the `soul` milestone; see context-rebuild.
+  "The `:seon.render/ai` slot for a file-block section.
 
-   The `:seon.render/ai` slot for a file-block.
-
-   The node's file read
-   FRESH and `;`-commented (via [[quote-lines]]). Blank when the file
-   vanished between wiring and render (the section then renders empty and
-   is dropped upstream)."
+   The node's `:seon.agent.ctx/file-path` read FRESH and `;`-commented
+   (via [[quote-lines]]). Blank when the file vanished between wiring and
+   render (the section then renders empty and is dropped upstream)."
   {:malli/schema [:=> [:cat :seon.render/section-request] :string]}
   [{{path :seon.agent.ctx/file-path} :seon.render/node}]
   (let [text (read-file-text path)]
     (if (str/blank? text) "" (quote-lines text))))
 
 (defn file-block-html
-  "DEPRECATED — reference for the `soul` milestone; see context-rebuild.
+  "The `:seon.render/html` slot for a file-block section.
 
-   The `:seon.render/html` slot for a file-block.
-
-   The node's file read
-   FRESH and rendered as markdown hiccup. Empty `[:div]` when the file
-   vanished."
+   The node's `:seon.agent.ctx/file-path` read FRESH and rendered as
+   markdown hiccup. Empty `[:div]` when the file vanished."
   {:malli/schema [:=> [:cat :seon.render/section-request] :seon.render.canvas/content]}
   [{{path :seon.agent.ctx/file-path} :seon.render/node}]
   (md/md->hiccup (or (read-file-text path) "")))
 
 (defn file-block
-  "DEPRECATED — reference for the `soul` milestone; see context-rebuild.
+  "A renderable context SECTION backed by a markdown file.
 
-   A renderable context SECTION backed by a markdown file.
+   At `:seon.agent.ctx/file-path`, named `:seon.agent.ctx/name`, ordered
+   at `:seon.agent.ctx/priority` — when the file currently exists; else
+   `nil` (REACTIVE, NO fallback: absent file → no section).
 
-   At
-   `:seon.agent.ctx/file-path`, named `:seon.agent.ctx/name`, ordered at
-   `:seon.agent.ctx/priority` — when the file currently exists; else `nil`
-   (REACTIVE, NO fallback: absent file → no section).
-
-   The returned section carries the path + a SYMBOL slot per view; the
-   slot fns ([[file-block-ai]] / [[file-block-html]]) re-read the file
-   fresh on every render so a user's edit lands next turn with no
-   seed/restart. GENERIC: any markdown file is a section — SOUL.md and
-   AGENTS.md may each be declared as `file-block`s in a manifest; nothing
-   file-name-specific lives here."
+   The returned section is block DATA for a config manifest or
+   [[install!]]: the path + a SYMBOL slot per view. The slot fns
+   ([[file-block-ai]] / [[file-block-html]]) re-read the file fresh on
+   every render so a user's edit lands next turn with no seed/restart.
+   GENERIC: any markdown file is a section — SOUL.md and AGENTS.md may
+   each be declared as `file-block`s in a manifest; nothing
+   file-name-specific lives here. No shipped manifest declares one (the
+   default cluster runs soul-off), so a file section exists only where a
+   manifest or install! call named it."
   {:malli/schema [:=> [:cat [:map
                              [:seon.agent.ctx/file-path :seon.agent.ctx/file-path]
                              [:seon.agent.ctx/name :keyword]

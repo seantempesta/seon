@@ -128,13 +128,12 @@ See `README.md` for the convention.
 | [`my.ns/compact!` can hide the selected namespace](my-ns-compact-can-hide-namespace.md) | friction | agent |
 | [`my.ns/functions` points to a removed namespace renderer](my-ns-functions-points-to-removed-renderer.md) | friction | general |
 
-## Cleanup (13)
+## Cleanup (12)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
 | [Address resident agents by namespace](namespace-addressed-resident-agents.md) | cleanup | agent |
 | [Agent tools may silently accept unknown request keys](agent-tool-unknown-key-acceptance.md) | cleanup | agent |
-| [Deprecated skills and context functions remain eligible for program indexing](deprecated-skill-render-functions-indexed.md) | cleanup | agent |
 | [Inspect concurrent attributed agent messages](inspect-concurrent-agent-messages.md) | cleanup | agent |
 | [Make the preflight repair test declare its schema dependencies](preflight-repair-focused-selector-relies-on-ambient-schemas.md) | cleanup | agent |
 | [Move product routes out of the static router supplement](static-routes-bypass-database-route-authority.md) | cleanup | UI |
