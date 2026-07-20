@@ -36,6 +36,14 @@ locks (first path); file-block proven + example; warnings block live,
 | Data-browser implementation (measured, corrected) | 1.5 | [[data-browser]] |
 | Triage FOLD rows (10: [:maybe] regs inside G2, transact-response union, home-requires merge, ALS tx-meta unify, parse-forms keys, debug-feed threading, turn-debug ref projection, 2 test fixes) | named stages | [[research/issues-triage-2026-07-20]] |
 
+## Rulings 2026-07-20 (third round)
+
+R1/R2/R4/R8 APPROVED as one "clean signals" unit (fail-loud stays for
+genuine core faults; dev/MCP funnels become agent-scope; fixture noise
+leaves the production error channel; the 13 faults + 621 gaps triaged).
+R5 bisect NOW. R7: frozen-turn-inputs PRD carved first. R9/R11/R12/R13/
+R14/R15 all GO. R10 investigate-first. R16 keep the 1024 cap.
+
 ## Needs an owner ruling (new since last rulings)
 
 | # | Item | Recommendation |
