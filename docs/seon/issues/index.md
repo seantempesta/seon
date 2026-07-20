@@ -10,7 +10,7 @@ GENERATED FILE — do not hand-edit. Regenerate with `bin/issues-index`.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (41)
+## Blocker (40)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -46,7 +46,6 @@ See `README.md` for the convention.
 | [Pull run defaults from their owning agent attributes](run-opening-pulls-obsolete-run-default-attributes.md) | blocker | agent |
 | [Put the database value in every transcript query member](transcript-grouped-reads-omitted-their-database-source.md) | blocker | agent |
 | [Reduce retained memory in each execution child](execution-children-retain-hundreds-of-megabytes.md) | blocker | agent |
-| [Reload rehost crash-loops while admission is publishing](reload-rehost-crash-loop-on-publishing-admission.md) | blocker | agent |
 | [Restore writer admin transition is unimplemented](restore-writer-admin-transition-is-unimplemented.md) | blocker | Core |
 | [Retain complete model transport evidence in Inspect logs](inspect-model-transport-evidence-is-incomplete.md) | blocker | agent |
 | [Score reachability from real context transitions](inspect-reachability-assumes-nonexistent-evidence.md) | blocker | agent |

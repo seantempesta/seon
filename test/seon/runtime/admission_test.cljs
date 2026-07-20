@@ -71,6 +71,21 @@
       (is (= 1 (count @!recorded))
           "recovery does not duplicate the rejected generation's fault"))))
 
+(deftest owned-publication-failure-with-its-token-still-records-one-fault
+  (let [!recorded (atom [])]
+    (with-redefs [error/record! #(swap! !recorded conj %)]
+      (is (true? (admission/begin-publication!)))
+      (let [publication (::admission/publication (admission/state))]
+        (is (true?
+              (admission/mark-unavailable!
+                {:seon.error/raw (js/Error. "owned failure")
+                 ::admission/publication publication
+                 ::admission/reason "owned failure"})))
+        (is (= 1 (count @!recorded)))
+        (is (= :unavailable (::admission/status (admission/state))))
+        (is (= publication (::admission/publication (admission/state)))
+            "the failed publication's identity survives the transition")))))
+
 (deftest planned-quiesce-has-one-owner-and-preserves-generation
   (restore-test-admission!)
   (is (true? (admission/begin-quiesce!)))
@@ -132,6 +147,69 @@
             (set! instrument/reconcile-projection!
                   original-reconcile-projection!)
             (set! error/record! original-record!))))))
+
+(deftest superseded-publication-failure-cannot-poison-the-newer-publication
+  (async done
+    (let [!recorded (atom [])]
+      (-> (with-publication-seams
+            {::reconcile-projection! (constantly {::instrument/ok? true})
+             ::record! #(swap! !recorded conj %)}
+            (fn []
+              (is (true? (admission/begin-publication!)))
+              (let [stale (::admission/publication (admission/state))]
+                (-> (admission/publish-committed!)
+                    (.then
+                      (fn [result]
+                        (is (true? (::admission/published? result)))
+                        (is (true? (admission/begin-publication!))
+                            "a newer build acquires the next publication")
+                        (is (false?
+                              (admission/mark-unavailable!
+                                {:seon.error/raw
+                                 (js/Error. "stale rehost failure")
+                                 ::admission/publication stale
+                                 ::admission/reason "superseded"}))
+                            "a superseded failure transitions nothing")
+                        (is (= :publishing
+                               (::admission/status (admission/state)))
+                            "the newer publication remains open")
+                        (is (empty? @!recorded)
+                            "no core fault records for a superseded occurrence")))))))
+          (.then (fn [_] (done)))
+          (.catch (fn [e]
+                    (is false (str "superseded publication threw — " e))
+                    (done)))))))
+
+(deftest concurrent-prepare-loses-retention-as-ordinary-supersession
+  (async done
+    (let [!recorded (atom [])]
+      (-> (with-publication-seams
+            {::reconcile-projection! (constantly {::instrument/ok? true})
+             ::record! #(swap! !recorded conj %)}
+            (fn []
+              (is (true? (admission/begin-publication!)))
+              (js/Promise.all
+                #js [(admission/prepare-committed! {})
+                     (admission/prepare-committed! {})])))
+          (.then
+            (fn [results]
+              (let [[a b] (array-seq results)
+                    prepared (filter ::admission/prepared? [a b])
+                    refused (remove ::admission/prepared? [a b])]
+                (is (= 1 (count prepared))
+                    "exactly one concurrent settlement retains the generation")
+                (is (= 1 (count refused)))
+                (is (map? (:seon/error (first refused)))
+                    "the loser receives an ordinary refusal value")
+                (is (empty? @!recorded)
+                    "lost retention is supersession, never a core fault")
+                (let [publication (admission/admit-prepared! (first prepared))]
+                  (is (true? (::admission/published? publication)))
+                  (is (admission/available?))))
+              (done)))
+          (.catch (fn [e]
+                    (is false (str "concurrent prepare threw — " e))
+                    (done)))))))
 
 (deftest committed-publication-opens-only-after-verification
   (async done
@@ -287,7 +365,7 @@
               "the repeated detach starts from the activated empty projection")
           (is (= {} (:seon.schema.projection/forms second-empty)))
           (is (identical? second-empty @!active)))
-        (is (= {::admission/status :starting} (admission/state)))))))
+        (is (= :starting (::admission/status (admission/state))))))))
 
 (deftest failed-detach-keeps-the-old-projection-retryable
   (let [projection-a {:seon.schema.projection/fingerprint 1

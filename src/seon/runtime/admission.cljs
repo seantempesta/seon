@@ -16,6 +16,7 @@
 (schema/register! ::status
   [:enum :starting :publishing :available :quiescing :unavailable])
 (schema/register! ::generation :int)
+(schema/register! ::publication :int)
 (schema/register! ::reason :string)
 (schema/register! ::admitted? :boolean)
 (schema/register! ::prepared? :boolean)
@@ -32,6 +33,7 @@
   [:map
    [::status ::status]
    [::generation {:optional true} ::generation]
+   [::publication {:optional true} ::publication]
    [::reason {:optional true} ::reason]])
 
 (defonce ^:private !state
@@ -44,7 +46,7 @@
    a second counter or durable program identity."
   {:malli/schema [:=> [:cat] ::state]}
   []
-  (select-keys @!state [::status ::generation ::reason]))
+  (select-keys @!state [::status ::generation ::publication ::reason]))
 
 (defn available?
   "True only after the process has verified one committed generation."
@@ -116,6 +118,7 @@
             (if (#{:starting :available :unavailable} status)
               (cond->
                 {::status :publishing
+                 ::publication (inc (get current ::publication 0))
                  ::previous-projection (schema/current-projection)}
                 (contains? current ::instrument?)
                 (assoc ::instrument? (::instrument? current))
@@ -127,36 +130,47 @@
          (= :publishing (::status after)))))
 
 (defn- transition-unavailable!
-  [reason generation]
-  (let [[before after]
-        (swap-vals!
-          !state
-          (fn [{::keys [status] :as current}]
-            (if (= :publishing status)
-              (cond-> {::status :unavailable ::reason reason}
-                (contains? current ::instrument?)
-                (assoc ::instrument? (::instrument? current))
+  ([reason generation]
+   (transition-unavailable! reason generation nil))
+  ([reason generation publication]
+   (let [[before after]
+         (swap-vals!
+           !state
+           (fn [{::keys [status] :as current}]
+             (if (and (= :publishing status)
+                      (or (nil? publication)
+                          (= publication (::publication current))))
+               (cond-> {::status :unavailable ::reason reason}
+                 (contains? current ::publication)
+                 (assoc ::publication (::publication current))
 
-                generation (assoc ::generation generation))
-              current)))]
-    (and (= :publishing (::status before))
-         (= :unavailable (::status after)))))
+                 (contains? current ::instrument?)
+                 (assoc ::instrument? (::instrument? current))
+
+                 generation (assoc ::generation generation))
+               current)))]
+     (and (= :publishing (::status before))
+          (= :unavailable (::status after))))))
 
 (defn mark-unavailable!
   "Fail closed after an owned publication occurrence.
 
    The first transition from `:publishing` records one core fault. Repeated
-   calls and boundary refusals are idempotent and never create an error census."
+   calls and boundary refusals are idempotent and never create an error census.
+   An optional `::publication` scopes the failure to the acquisition observed
+   by the caller: when a newer publication owns admission, the stale caller's
+   failure is a superseded occurrence and transitions nothing."
   {:malli/schema
    [:=>
     [:cat
      [:map
       [:seon.error/raw :any]
       [::reason ::reason]
-      [::generation {:optional true} ::generation]]]
+      [::generation {:optional true} ::generation]
+      [::publication {:optional true} ::publication]]]
     :boolean]}
-  [{raw :seon.error/raw ::keys [reason generation]}]
-  (let [owned? (transition-unavailable! reason generation)]
+  [{raw :seon.error/raw ::keys [reason generation publication]}]
+  (let [owned? (transition-unavailable! reason generation publication)]
     (when owned?
       (error/record! {:seon.error/raw raw :seon.error/fault :core}))
     owned?))
@@ -171,6 +185,9 @@
             (if (and (= :publishing status)
                      (= generation (::prepared-generation current)))
               (cond-> {::status :available ::generation generation}
+                (contains? current ::publication)
+                (assoc ::publication (::publication current))
+
                 (contains? current ::instrument?)
                 (assoc ::instrument? (::instrument? current)))
               current)))]
@@ -317,16 +334,19 @@
         (try
           (let [{::keys [generation instrumentation]}
                 (await (reconcile-committed! old-projection instrument?))]
-            (when-not (retain-prepared-generation! generation)
-              (throw
-                (ex-info
-                  "Verified program generation lost publication ownership"
-                  {::generation generation
-                   ::state (state)})))
-            {::prepared? true
-             ::recovered? false
-             ::generation generation
-             ::instrumentation instrumentation})
+            (if-not (retain-prepared-generation! generation)
+              ;; Another settlement (a concurrent prepare or a newer
+              ;; publication) closed this window first. Losing retention is
+              ;; ordinary supersession, never a core fault: the winning
+              ;; settlement owns admission over the same committed facts.
+              (assoc (unavailable)
+                     ::prepared? false
+                     ::recovered? false
+                     ::generation generation)
+              {::prepared? true
+               ::recovered? false
+               ::generation generation
+               ::instrumentation instrumentation}))
           (catch :default original
             ;; The occurrence is one fault whether reconstruction repairs it
             ;; or the process remains unavailable. Boundary refusals never
@@ -337,16 +357,15 @@
             (try
               (let [{::keys [generation instrumentation]}
                     (await (reconcile-committed! old-projection instrument?))]
-                (when-not (retain-prepared-generation! generation)
-                  (throw
-                    (ex-info
-                      "Repaired program generation lost publication ownership"
-                      {::generation generation
-                       ::state (state)})))
-                {::prepared? true
-                 ::recovered? true
-                 ::generation generation
-                 ::instrumentation instrumentation})
+                (if-not (retain-prepared-generation! generation)
+                  (assoc (unavailable)
+                         ::prepared? false
+                         ::recovered? false
+                         ::generation generation)
+                  {::prepared? true
+                   ::recovered? true
+                   ::generation generation
+                   ::instrumentation instrumentation}))
               (catch :default repair
                 (let [generation
                       (or (::generation (ex-data repair))
@@ -433,6 +452,7 @@
               current
               (cond->
                 {::status :publishing
+                 ::publication (inc (get current ::publication 0))
                  ::previous-projection (schema/current-projection)}
                 (contains? current ::instrument?)
                 (assoc ::instrument? (::instrument? current))))))
@@ -464,7 +484,9 @@
                   "Detached projection failed complete wrapper removal"
                   {:seon.instrument/stats instrumentation})))
             (schema/activate-projection! empty-projection)
-            (reset! !state {::status :starting ::instrument? instrument?})
+            (reset! !state {::status :starting
+                            ::publication (get after ::publication 0)
+                            ::instrument? instrument?})
             {::detached? true
              ::instrumentation instrumentation})
           (catch :default detach-error

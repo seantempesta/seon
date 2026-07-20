@@ -657,47 +657,54 @@
                "Shadow build and configuration acquisition failed"}))))
 
       :build-complete
-      (-> (acquire-configuration!)
-          (.then
-           (fn [configuration]
-             (error/with-configuration
-              configuration
-              #(-> (open-database-session!
-                    {::initialize? true
-                     ::configuration configuration})
-                   (.then (fn [_] (admission/publish-committed!)))
-                   (.then
-                    (fn ^:async publish! [publication]
-                      (log/info-console!
-                       "seon.client"
-                       (str "reload: committed publication "
-                            (pr-str
-                             (instrumentation-summary
-                              (::admission/instrumentation publication)))))
-                      (when (::admission/published? publication)
-                        ;; Reinstall listeners/ticker only after the reloaded
-                        ;; program is one verified generation. Web feeds re-arm
-                        ;; lazily.
-                        (if (autonomous-runtime?)
-                          (do
-                            (await (rehost-agent-runtimes!))
-                            (agent-loop/install-ticker! configuration))
-                          (do
-                            (agent-loop/uninstall-ticker!)
-                            (agent-runtime/unhost-all!)))
-                        (start-heartbeat!))))
-                   (.catch
-                    (fn [publication-error]
-                      (admission/mark-unavailable!
-                       {:seon.error/raw publication-error
-                        ::admission/reason
-                        "Committed reload initialization or publication failed"})))))))
-          (.catch
-           (fn [configuration-error]
-             (admission/mark-unavailable!
-              {:seon.error/raw configuration-error
-               ::admission/reason
-               "Reload configuration acquisition failed"}))))
+      ;; Scope every failure in this chain to the publication acquired by this
+      ;; build's :build-start. A newer :build-start supersedes this chain, and
+      ;; a superseded failure must never mark the newer publication
+      ;; unavailable — the newest build owns publication and rehosting.
+      (let [publication (::admission/publication (admission/state))]
+        (-> (acquire-configuration!)
+            (.then
+             (fn [configuration]
+               (error/with-configuration
+                configuration
+                #(-> (open-database-session!
+                      {::initialize? true
+                       ::configuration configuration})
+                     (.then (fn [_] (admission/publish-committed!)))
+                     (.then
+                      (fn ^:async publish! [published]
+                        (log/info-console!
+                         "seon.client"
+                         (str "reload: committed publication "
+                              (pr-str
+                               (instrumentation-summary
+                                (::admission/instrumentation published)))))
+                        (when (::admission/published? published)
+                          ;; Reinstall listeners/ticker only after the reloaded
+                          ;; program is one verified generation. Web feeds
+                          ;; re-arm lazily.
+                          (if (autonomous-runtime?)
+                            (do
+                              (await (rehost-agent-runtimes!))
+                              (agent-loop/install-ticker! configuration))
+                            (do
+                              (agent-loop/uninstall-ticker!)
+                              (agent-runtime/unhost-all!)))
+                          (start-heartbeat!))))
+                     (.catch
+                      (fn [publication-error]
+                        (admission/mark-unavailable!
+                         {:seon.error/raw publication-error
+                          ::admission/publication publication
+                          ::admission/reason
+                          "Committed reload initialization or publication failed"})))))))
+            (.catch
+             (fn [configuration-error]
+               (admission/mark-unavailable!
+                {:seon.error/raw configuration-error
+                 ::admission/publication publication
+                 ::admission/reason
+                 "Reload configuration acquisition failed"})))))
 
       nil))
   true)
@@ -1868,26 +1875,43 @@
                         {:seon.agent/id id}))))
           results @!results
           failed
-          (some #(when (false? (:seon.agent.runtime/resumed? %)) %) results)]
-      (when failed
-        (throw (ex-info "reload: agent runtime rehost failed" failed)))
-      (let [database (await (db/db))
-            restored
-            (if (:seon.error/message database)
-              database
-              (await
-               (generate-code/restore-root-schedulers!
-                {::db/db database
-                 :seon.config/model-variant :execution})))]
-        (when (:seon.error/message restored)
-          (throw
-           (ex-info "reload: generated-code scheduler restore failed"
-                    restored)))
-        (log/info-console! "seon.client"
-                           "reload: agent runtimes rehosted"
-                           {:seon.client/reinstalled ids
-                            :seon.ai.generate-code/restored-roots restored})
-        ids))
+          (some #(when (false? (:seon.agent.runtime/resumed? %)) %) results)
+          superseded?
+          (and failed
+               (= :seon.runtime/unavailable
+                  (get-in failed [:seon/error :seon.error/kind]))
+               (not (admission/available?)))]
+      (if superseded?
+        ;; Admission closed mid-rehost: a newer publication began (or a fault
+        ;; owner already recorded its occurrence). The newest publication's
+        ;; own :build-complete rehosts every agent, so this pass simply ends.
+        (do
+          (log/info-console!
+           "seon.client"
+           "reload: rehost superseded by a newer publication"
+           {:seon.agent/id (:seon.agent/id failed)
+            ::admission/state (admission/state)})
+          [])
+        (do
+          (when failed
+            (throw (ex-info "reload: agent runtime rehost failed" failed)))
+          (let [database (await (db/db))
+                restored
+                (if (:seon.error/message database)
+                  database
+                  (await
+                   (generate-code/restore-root-schedulers!
+                    {::db/db database
+                     :seon.config/model-variant :execution})))]
+            (when (:seon.error/message restored)
+              (throw
+               (ex-info "reload: generated-code scheduler restore failed"
+                        restored)))
+            (log/info-console! "seon.client"
+                               "reload: agent runtimes rehosted"
+                               {:seon.client/reinstalled ids
+                                :seon.ai.generate-code/restored-roots restored})
+            ids))))
     []))
 
 (schema/register! ::apply-config-request
