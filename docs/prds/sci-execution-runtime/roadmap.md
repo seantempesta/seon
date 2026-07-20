@@ -33,6 +33,7 @@ transition ledger.
 | U9 | await-corpus migration pass (measured, small) | before cutover |
 | U10 | integration drills: host kill + pod restart with live agents, derived notices proven | gate |
 | U11 | children retirement, deletion commit, architecture docs + one-mechanism table | cutover |
+| U13 | agent package provisioning: `my.pkg/install` for :npm (pod host, `bun add` + wrapper gen) and :maven (JVM host, runtime classloader + allowlisted binding table), gated by config-fact policy with provenance, delivered through the U2 registry (lazy to all contexts, epoch-upgradeable wrappers). C2's admission guard steers js-form attempts toward the capability | after U4; demo-able before U11 |
 | U12 | graduation demo: N=100 live fleet, real work, kill + restart survival | **the gate** |
 
 Concurrent: outside agents complete the source-cleanup stages; the
