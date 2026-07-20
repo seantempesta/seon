@@ -19,8 +19,10 @@
     [seon.db :as db]
     [seon.db.branch :as branch]
     [seon.db.restore :as restore]
+    [seon.derive :as derive]
     [seon.eval :as seval]
     [seon.execution.host :as execution-host]
+    [seon.reactive :as reactive]
     [seon.render.system :as system]
     [seon.runtime.admission :as admission]
     [seon.web.debug :as debug]
@@ -278,6 +280,142 @@
           (.finally
            (fn []
              (set! db/query original)
+             (done)))))))
+
+(deftest agent-run-settlement-is-commit-driven-and-released
+  (async done
+    (let [original-capture db/with-read-evidence
+          original-query db/query
+          original-state derive/derive-state
+          original-observe reactive/observe!
+          original-unobserve reactive/unobserve!
+          injected-at (js/Date.now)
+          committed-database (assoc database :t 31)
+          observed (atom nil)
+          notifications (atom [])
+          registrations (atom #{})
+          released (atom nil)]
+      (set! db/with-read-evidence
+            (fn [f]
+              (-> (js/Promise.resolve nil)
+                  (.then (fn [_] (f)))
+                  (.then (fn [value]
+                           {::db/value value ::db/read-evidence []})))))
+      (set! db/query
+            (fn [{database-value ::db/db query ::db/query}]
+              (let [settled? (= 31 (:t database-value))]
+                (js/Promise.resolve
+                 (if (str/includes? (pr-str query) "?status")
+                   [[(if settled? :done :running)]]
+                   [[(js/Date. (if settled? injected-at 0))]])))))
+      (set! derive/derive-state
+            (fn [database-value _]
+              (js/Promise.resolve
+               (if (= 31 (:t database-value)) :idle :running))))
+      (set! reactive/observe!
+            (fn [request]
+              (reset! observed request)
+              (swap! registrations conj
+                     [(::reactive/key request)
+                      (::reactive/consumer-key request)])
+              (-> ((::reactive/compute request) database)
+                  (.then (fn [value]
+                           (swap! notifications conj (::db/value value))
+                           ((::reactive/notify request) (::db/value value))))
+                  (.then
+                   (fn [_]
+                     ((::reactive/compute request) committed-database)))
+                  (.then (fn [value]
+                           (swap! notifications conj (::db/value value))
+                           ((::reactive/notify request) (::db/value value))))
+                  (.then (constantly (::reactive/consumer-key request))))))
+      (set! reactive/unobserve!
+            (fn [request]
+              (reset! released request)
+              (swap! registrations disj
+                     [(::reactive/key request)
+                      (::reactive/consumer-key request)])
+              (js/Promise.resolve true)))
+      (-> (js/Promise.resolve
+           ((deref #'serve/await-agent-task-settlement!)
+            database "agent-1" injected-at 1000))
+          (.then
+           (fn [result]
+             (is (= [:running :idle]
+                    (mapv :seon.web.serve/agent-state @notifications)))
+             (is (= :idle (:seon.web.serve/agent-state result)))
+             (is (true? (:seon.web.serve/turns-settled? result)))
+             (is (= [::serve/agent-task-settlement "agent-1" injected-at]
+                    (::reactive/key @observed)))
+             (is (= (select-keys @observed
+                                 [::reactive/key ::reactive/consumer-key])
+                    @released)
+                 "the request registration is structurally released")
+             (is (empty? @registrations)
+                 "no request-scoped reactive consumer remains")))
+          (.catch (fn [error] (is false (str error))))
+          (.finally
+           (fn []
+             (set! db/with-read-evidence original-capture)
+             (set! db/query original-query)
+             (set! derive/derive-state original-state)
+             (set! reactive/observe! original-observe)
+             (set! reactive/unobserve! original-unobserve)
+             (done)))))))
+
+(deftest agent-run-settlement-timeout-releases-and-supersedes
+  (async done
+    (let [original-db db/db
+          original-current run/current-run
+          original-close run/close-run!
+          original-observe reactive/observe!
+          original-unobserve reactive/unobserve!
+          injected-at (js/Date.now)
+          released (atom 0)
+          closed (atom nil)]
+      (set! reactive/observe!
+            (fn [request]
+              (js/Promise.resolve (::reactive/consumer-key request))))
+      (set! reactive/unobserve!
+            (fn [_]
+              (swap! released inc)
+              (js/Promise.resolve true)))
+      (set! run/current-run
+            (fn [_]
+              (js/Promise.resolve {:seon.agent.run/id "run-1"})))
+      (set! run/close-run!
+            (fn [request]
+              (reset! closed request)
+              (js/Promise.resolve {})))
+      (set! db/db
+            (fn
+              ([] (js/Promise.resolve
+                   {:seon.error/message "stop before final projection"}))
+              ([_] (db/db))))
+      (-> (js/Promise.resolve
+           ((deref #'serve/await-agent-task-settlement!)
+            database "agent-1" injected-at 10))
+          (.then
+           (fn [settlement]
+             (is (true? (:seon.web.serve/timed-out? settlement)))
+             (is (= 1 @released))
+             (js/Promise.resolve
+              ((deref #'serve/finish-agent-task!)
+               database "agent-1" injected-at 10 true))))
+          (.then
+           (fn [result]
+             (is (= {:seon.agent.run/id "run-1"
+                     :seon.agent.run/closed-reason :superseded}
+                    @closed))
+             (is (= {:error "stop before final projection"} result))))
+          (.catch (fn [error] (is false (str error))))
+          (.finally
+           (fn []
+             (set! db/db original-db)
+             (set! run/current-run original-current)
+             (set! run/close-run! original-close)
+             (set! reactive/observe! original-observe)
+             (set! reactive/unobserve! original-unobserve)
              (done)))))))
 
 (deftest eval-evidence-is-request-scoped-and-stably-ordered

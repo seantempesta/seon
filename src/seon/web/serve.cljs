@@ -43,6 +43,7 @@
     [seon.execution.host :as execution-host]
     [seon.log :as log]
     [seon.platform :as platform]
+    [seon.reactive :as reactive]
     [seon.repl :as repl]
     [seon.runtime.admission :as admission]
     [seon.schema :as schema]
@@ -488,11 +489,11 @@
 
 (defn- ^:async latest-run-start-ms
   "Wall-clock ms of the agent's MOST-RECENTLY-STARTED run (open or closed) over
-   the db value `db`, or 0 when none. The /agents/run poll uses this to reject
-   the agent's PRE-INJECTION state: `:idle` alone is ambiguous (an idle agent
-   has no open run BEFORE our message wakes it), so we only accept an idle
-   whose latest run started at/after the injection — i.e. the run our message
-   woke has opened and closed."
+   the database value, or 0 when none. The /agents/run observation uses this
+   to reject the agent's PRE-INJECTION state: `:idle` alone is ambiguous (an
+   idle agent has no open run BEFORE our message wakes it), so we only accept
+   an idle whose latest run started at/after the injection — i.e. the run our
+   message woke has opened and closed."
   [database aid]
   (let [rows (await
               (db/query {::db/db database
@@ -530,6 +531,71 @@
     (if (:seon.error/message rows)
       rows
       (every? terminal-turn-statuses (map first rows)))))
+
+(defn- ^:async agent-task-observation
+  "Derive one request's completion facts from an immutable database value."
+  [database agent-id injected-at]
+  (let [observed
+        (await
+         (db/with-read-evidence
+          (fn []
+            (js/Promise.all
+             #js [(derive/derive-state database agent-id)
+                  (latest-run-start-ms database agent-id)
+                  (task-turns-settled? database agent-id injected-at)]))))
+        values (::db/value observed)
+        [state latest-start turns-settled?] (array-seq values)
+        failure (some #(when (:seon.error/message %) %)
+                      [state latest-start turns-settled?])]
+    (assoc observed ::db/value
+           (or failure
+               {::agent-state state
+                ::latest-run-start-ms latest-start
+                ::turns-settled? turns-settled?}))))
+
+(defn- agent-task-done?
+  [{::keys [agent-state latest-run-start-ms turns-settled?]} injected-at]
+  (and (= :idle agent-state)
+       (>= latest-run-start-ms injected-at)
+       turns-settled?))
+
+(defn- ^:async await-agent-task-settlement!
+  "Wait for the committing database value that settles one agent task."
+  [database agent-id injected-at timeout-ms]
+  (let [key [::agent-task-settlement agent-id injected-at]
+        consumer-key (random-uuid)
+        resolve-result (atom nil)
+        result (js/Promise. (fn [resolve _] (reset! resolve-result resolve)))
+        remaining-ms (max 0 (- timeout-ms (- (js/Date.now) injected-at)))
+        timer (js/setTimeout #(when-let [resolve @resolve-result]
+                               (resolve {::timed-out? true}))
+                             remaining-ms)
+        notify (fn [observation]
+                 (when (or (:seon.error/message observation)
+                           (agent-task-done? observation injected-at))
+                   (when-let [resolve @resolve-result]
+                     (resolve observation))))]
+    (try
+      (let [observing
+            (reactive/observe!
+             {::reactive/key key
+              ::reactive/consumer-key consumer-key
+              ::reactive/compute
+              #(agent-task-observation % agent-id injected-at)
+              ::reactive/notify notify
+              ::db/db database})]
+        (.then observing
+               (fn [value]
+                 (when (:seon.error/message value)
+                   (when-let [resolve @resolve-result]
+                     (resolve value)))))
+        (await result))
+      (finally
+        (js/clearTimeout timer)
+        (await
+         (reactive/unobserve!
+          {::reactive/key key
+           ::reactive/consumer-key consumer-key}))))))
 
 (defn- database-json
   "JSON-safe external projection of one ordinary database value."
@@ -1168,6 +1234,33 @@
                    :closed_reason (if timeout? "timeout" (str closed-reason))}
             timeout? (assoc :timed_out true)))))))
 
+(defn- ^:async finish-agent-task!
+  "Close a timed-out run and project the task's final database value."
+  [database agent-id injected-at elapsed timeout?]
+  (let [current
+        (when (and timeout? (not (:seon.error/message database)))
+          (await
+           (run/current-run
+            {::db/db database :seon.agent/id agent-id})))
+        close-result
+        (cond
+          (:seon.error/message database) database
+          (:seon.error/message current) current
+          current
+          (await
+           (run/close-run!
+            {:seon.agent.run/id (:seon.agent.run/id current)
+             :seon.agent.run/closed-reason :superseded}))
+          :else nil)]
+    (if (:seon.error/message close-result)
+      {:error (:seon.error/message close-result)}
+      (let [final-database (await (db/db))]
+        (if (:seon.error/message final-database)
+          {:error (:seon.error/message final-database)}
+          (await
+           (final-agent-task-result
+            final-database agent-id injected-at elapsed timeout?)))))))
+
 (defn- ^:async run-agent-task!
   "Drive one task and derive its response from one final database value."
   [agent-id input timeout-ms]
@@ -1220,59 +1313,20 @@
                                        "POST /agents/run — task in"
                                        {:agent aid :reused reuse?
                                         :tokens (tokens/estimate (str input))})
-                    (loop []
-                      (await (js/Promise. (fn [resolve]
-                                           (js/setTimeout resolve 1500))))
-                      (let [database (await (db/db))
-                        observations
-                        (when-not (:seon.error/message database)
+                    (let [settlement
                           (await
-                           (js/Promise.all
-                            #js [(derive/derive-state database aid)
-                                 (latest-run-start-ms database aid)
-                                 (task-turns-settled?
-                                  database aid injected-at)])))
-                        [state latest-start turns-settled?]
-                        (when observations (array-seq observations))
-                        error (or (when (:seon.error/message database) database)
-                                  (when (:seon.error/message state) state)
-                                  (when (:seon.error/message latest-start)
-                                    latest-start)
-                                  (when (:seon.error/message turns-settled?)
-                                    turns-settled?))
-                        elapsed (- (js/Date.now) start)
-                        done? (and (= :idle state)
-                                   (>= latest-start injected-at)
-                                   turns-settled?)
-                        timeout? (> elapsed timeout-ms)]
-                    (cond
-                      error {:error (:seon.error/message error)}
-                      (not (or done? timeout?)) (recur)
-                      :else
-                      (let [current
-                            (when timeout?
-                              (await
-                               (run/current-run
-                                {::db/db database :seon.agent/id aid})))
-                            close-result
-                            (cond
-                              (:seon.error/message current) current
-                              current
-                              (await
-                               (run/close-run!
-                                {:seon.agent.run/id
-                                 (:seon.agent.run/id current)
-                                 :seon.agent.run/closed-reason :superseded}))
-                              :else nil)]
-                        (if (:seon.error/message close-result)
-                          {:error (:seon.error/message close-result)}
-                          (let [final-database (await (db/db))]
-                            (if (:seon.error/message final-database)
-                              {:error (:seon.error/message final-database)}
-                              (await
-                               (final-agent-task-result
-                                final-database aid injected-at elapsed
-                                timeout?)))))))))))))))))))
+                           (await-agent-task-settlement!
+                            initial-database aid injected-at timeout-ms))
+                          error (when (:seon.error/message settlement)
+                                  settlement)
+                          timeout? (true? (::timed-out? settlement))
+                          elapsed (- (js/Date.now) start)]
+                      (if error
+                        {:error (:seon.error/message error)}
+                        (let [database (await (db/db))]
+                          (await
+                           (finish-agent-task!
+                            database aid injected-at elapsed timeout?)))))))))))))))
 
 (defn- handle-agent-run! [req res]
   (-> (read-body req)
