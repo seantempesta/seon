@@ -405,12 +405,14 @@
                                        :seon.agent.ctx/priority))))]
           (is (= [[:namespaces 20]
                   [:canvas 35]
+                  [:warnings 40]
                   [:plan 45]
                   [:transcript 100]]
                  (order ordinary))
               "ordinary agents keep the shared context tree")
           (is (= [[:root-role 15]
                   [:namespaces 20]
+                  [:warnings 40]
                   [:core-faults 41]
                   [:instrumentation-gaps 42]
                   [:orphaned-agents 43]
@@ -433,7 +435,7 @@
                                (:seon.eval/home-requires context)))
               blocks   (into #{} (map :seon.agent.ctx/name)
                              (:seon.agent/ctx ordinary))]
-          (is (= #{:namespaces :canvas :plan :transcript} blocks)
+          (is (= #{:namespaces :canvas :warnings :plan :transcript} blocks)
               "experimental function-menu/typeahead blocks stay off")
           (is (every? (targets ordinary) '[acme.brand acme.widget my.ns my.skills]))
           (is (not-any? (targets ordinary) '[acme.helpers acme.notes]))

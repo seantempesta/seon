@@ -2,7 +2,7 @@
 type: issue
 status: open
 tags: [issue, cljs, pod, health]
-severity: crash
+severity: blocker
 ---
 
 # Dev-eval fault scope misses MCP funnels; a REPL typo crashes the pod

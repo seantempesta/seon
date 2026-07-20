@@ -10,7 +10,7 @@ GENERATED FILE — do not hand-edit. Regenerate with `bin/issues-index`.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (40)
+## Blocker (41)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -25,6 +25,7 @@ See `README.md` for the convention.
 | [Content-pin the Inspect source dependency](inspect-source-dependency-is-not-content-pinned.md) | blocker | agent |
 | [Datahike force branch does not preserve secondary root](datahike-force-branch-does-not-preserve-secondary-root.md) | blocker | Core |
 | [Derive read dependencies from Datahike's parsed semantics](datahike-read-dependencies-miss-valid-query-and-pull-inputs.md) | blocker | UI |
+| [Dev-eval fault scope misses MCP funnels; a REPL typo crashes the pod](dev-eval-fault-scope-misses-mcp-funnels.md) | blocker | general |
 | [Fence accepted writes before retained-head preparation](restore-intent-lacks-exclusive-writer-fence.md) | blocker | Core |
 | [Freeze one turn input across provider retries](turn-retries-reread-provider-inputs.md) | blocker | agent |
 | [Freeze the restore pod artifact in confirmed intent](restore-intent-does-not-freeze-client-artifact.md) | blocker | Core |
@@ -84,6 +85,7 @@ See `README.md` for the convention.
 | [Execution child program load omitted instrumentation](execution-child-program-load-omitted-instrumentation.md) | friction | agent |
 | [Execution process proof seeds incomplete schema population](execution-process-proof-seeds-incomplete-schema-population.md) | friction | agent |
 | [Execution result diagnostic retained invalid map key](execution-result-diagnostic-retained-invalid-map-key.md) | friction | agent |
+| [Execution-child GPU allocation dominates its memory footprint](execution-child-gpu-allocation-dominates-footprint.md) | friction | agent |
 | [Give Inspect live callers an ownership-fenced cluster lease](inspect-live-cluster-caller-drift.md) | friction | agent |
 | [Give root a dedicated system layout](root-page-is-an-ordinary-agent-layout.md) | friction | UI |
 | [Idle transcript misreports the mode-specific work budget](configured-turn-limit-masks-mode-specific-budget.md) | friction | agent |
@@ -126,12 +128,11 @@ See `README.md` for the convention.
 | [Transact output schema crashed child on ordinary error](transact-output-schema-crashed-child-on-ordinary-error.md) | friction | agent |
 | [Transcript decay does not bound total context](transcript-decay-does-not-bound-total-context.md) | friction | agent |
 | [Turn debug treated a database error as an entity id](turn-debug-treated-database-error-as-entity-id.md) | friction | Core |
-| [Warn check guidance names removed `seon.db/*conn*` var](warn-check-guidance-names-removed-conn-var.md) | friction | UI |
 | [Watcher status conflates artifact drift with failure](watcher-status-conflates-drift-with-failure.md) | friction | general |
 | [`my.ns/compact!` can hide the selected namespace](my-ns-compact-can-hide-namespace.md) | friction | agent |
 | [`my.ns/functions` points to a removed namespace renderer](my-ns-functions-points-to-removed-renderer.md) | friction | general |
 
-## Cleanup (13)
+## Cleanup (12)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -147,4 +148,3 @@ See `README.md` for the convention.
 | [Unify the two AsyncLocalStorage stores; rename with-tx-context → with-tx-meta](als-unify-tx-meta.md) | cleanup | Core |
 | [eval/transact on a non-primary (scratch) conn returns ok? but doesn't commit](eval-scratch-conn-no-commit.md) | cleanup | agent |
 | [parse-forms entries: missing :malli/schema + bare keys](parse-forms-entry-schema-and-bare-keys.md) | cleanup | agent |
-| [record-error warning check reads a dead attribute](record-error-warning-check-reads-dead-attribute.md) | cleanup | Core |

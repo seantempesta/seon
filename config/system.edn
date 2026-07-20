@@ -322,6 +322,16 @@
     :seon.render/ai seon.agent.ctx.namespaces/namespaces-block}
    {:seon.agent.ctx/name :canvas :seon.agent.ctx/priority 35
     :seon.render/ai seon.agent.ctx.canvas/canvas-block}
+   ;; The derived seon.warn registry (15 checks: spec hygiene, failed evals,
+   ;; bad-ref translation, fs denials, hop dead-letters, slow evals, failing
+   ;; tests, unresolved canvases). Re-enabled by owner ruling 2026-07-20 —
+   ;; the block being absent was drift from the context-tree cutover, not
+   ;; intent (docs/seon/issues/warnings-block-not-installed-by-manifest.md).
+   ;; Renders NOTHING when every check is clean; sits just ahead of root's
+   ;; derived fault blocks (41-43) so the warning-ish sections cluster.
+   {:seon.agent.ctx/name :warnings :seon.agent.ctx/priority 40
+    :seon.agent.ctx/token-cap 1024
+    :seon.render/ai seon.agent.ctx.warnings/warnings-block}
    {:seon.agent.ctx/name :plan :seon.agent.ctx/priority 45
     :seon.render/ai my.plan.internal/plan-block
     :seon.render/html my.plan.internal/plan-block-html}
