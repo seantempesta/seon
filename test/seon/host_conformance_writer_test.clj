@@ -46,7 +46,12 @@
       protocol/query-operation
       {::protocol/success? true
        ::protocol/request-id request-id
-       :datahike.query/result fake-agent-rows}
+       :datahike.query/result fake-agent-rows
+       :datahike.query/resource-evidence
+       {:datahike.resource/work 42
+        :datahike.resource/result-count 3
+        :datahike.resource/result-weight 9
+        :datahike.resource/limits {}}}
 
       protocol/pull-operation
       {::protocol/success? true
@@ -245,6 +250,24 @@
         (is (= 3 (get-in result [:seon.host/results 0 :seon.eval/value])))
         (is (= "root" (get-in result [:seon.host/results 1
                                       :seon.eval/value]))))
+      (finally (close! session)))))
+
+(deftest context-query-with-evidence-returns-its-own-cost
+  (let [[session _ready] (open-session! "cost-agent")]
+    (try
+      (send! session
+             (invoke-value
+              "cost-agent" "invocation-cost"
+              [(form (str "(:datahike.query/resource-evidence"
+                          " (seon.db/query-with-evidence"
+                          " '[:find ?e ?id :where [?e :seon.agent/id ?id]]))"))]))
+      (let [result (:seon.execution/result (recv! session))]
+        (is (= {:datahike.resource/work 42
+                :datahike.resource/result-count 3
+                :datahike.resource/result-weight 9
+                :datahike.resource/limits {}}
+               (get-in result [:seon.host/results 0 :seon.eval/value]))
+            "a host-context query surfaces the writer's own cost evidence"))
       (finally (close! session)))))
 
 (deftest failed-forms-are-error-values-inside-an-ok-result
