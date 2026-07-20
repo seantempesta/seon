@@ -177,7 +177,8 @@
            :seon.error/basis-t 41
            :seon.error/args-edn "[{:probe/value 1}]"
            :seon.error/data-edn
-           "{:seon.error.malli/fn-sym probe/run}"
+           (str "{:probe/note \"rendered :seon.error.malli/fn-sym fake/run\", "
+                ":seon.error.malli/fn-sym probe/run}")
            :seon.error/frames
            [{:seon.error.frame/index 0
              :seon.error.frame/fn "probe/run"
@@ -229,3 +230,15 @@
              (set! db/query original-query)
              (set! db/pull original-pull)
              (done)))))))
+
+(deftest repro-function-symbol-comes-from-structured-error-data
+  (is (= 'probe/run
+         (#'debug/fn-sym-from-data-edn
+          (str "{:probe/note \"rendered :seon.error.malli/fn-sym fake/run\", "
+               ":seon.error.malli/fn-sym probe/run}"))))
+  (is (nil? (#'debug/fn-sym-from-data-edn
+             "{:probe/note \"rendered :seon.error.malli/fn-sym fake/run\"}"))
+      "rendered prose cannot impersonate the structured key")
+  (is (nil? (#'debug/fn-sym-from-data-edn
+             "{:seon.error.malli/fn-sym probe/run"))
+      "a token-clipped unreadable map cannot fabricate a repro target"))

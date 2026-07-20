@@ -52,17 +52,11 @@
       (tokens/clip-str first-line result-summary-truncate))))
 
 (defn- short-error
-  "One-line summary of a failed eval's `:seon.eval/error` (a `pr-str`
-   string of a `seon.error/->map`). Best-effort: find `:seon.error/message`
-   if present, otherwise the first line of the whole thing. Truncated."
+  "One-line summary of a failed eval's `:seon.eval/error` guidance text."
   [error-str]
   (when error-str
     (let [s (str error-str)
-          ;; Cheap regex extraction so we don't read-string an arbitrary
-          ;; tagged-literal-bearing payload.
-          msg (when-let [m (re-find #":seon\.error/message\s+\"((?:[^\"\\]|\\.)*)\"" s)]
-                (second m))
-          line (or msg (first (str/split-lines s)) s)]
+          line (or (first (str/split-lines s)) s)]
       (tokens/clip-str line error-summary-truncate))))
 
 (defn render-ai
@@ -98,16 +92,9 @@
     (str/join "\n" lines)))
 
 (defn- full-error
-  "The FULL error message (untruncated, unlike `short-error`) of a stored
-   `:seon.eval/error` pr-str string — the text the agent READS to
-   self-correct. Pulls `:seon.error/message` by the same cheap regex — no
-   `read-string` of an arbitrary tagged payload — and falls back to the
-   whole string when the shape isn't recognized. Nil-safe."
+  "The full stored `:seon.eval/error` guidance text."
   [error-str]
-  (let [s (str error-str)
-        msg (when-let [m (re-find #":seon\.error/message\s+\"((?:[^\"\\]|\\.)*)\"" s)]
-              (second m))]
-    (or msg s)))
+  (str error-str))
 
 (defn- compact-operation
   "A short operation label derived from eval source, never its arguments."

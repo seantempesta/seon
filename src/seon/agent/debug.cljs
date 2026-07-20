@@ -528,12 +528,14 @@
    [::note               {:optional true} ::note]])
 
 (defn- fn-sym-from-data-edn
-  "The `:seon.error.malli/fn-sym` embedded in a stored data-edn string."
+  "The structured `:seon.error.malli/fn-sym` in stored data-edn."
   [data-edn]
   (when (string? data-edn)
-    (when-let [[_ s] (re-find #":seon\.error\.malli/fn-sym\s+([^\s,}\]\)\"]+)"
-                              data-edn)]
-      (symbol s))))
+    (try
+      (let [data (reader/read-string data-edn)
+            fn-sym (:seon.error.malli/fn-sym data)]
+        (when (qualified-symbol? fn-sym) fn-sym))
+      (catch :default _ nil))))
 
 (defn- readable-args-edn
   "`args-edn` when it read-strings back to the args VECTOR, else nil.
