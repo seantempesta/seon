@@ -139,6 +139,49 @@
              (set! execution.host/invoke! original-invoke)
              (done)))))))
 
+(deftest failed-child-invocation-preserves-the-structured-error-value
+  (async done
+    (let [original-prepare execution/prepare-invocations!
+          original-invoke execution.host/invoke!
+          failure {:seon.error/message "Quantity must be positive."
+                   :seon.error/kind :user-input
+                   :seon.error/data {:my.order/quantity -1}}]
+      (set! execution/prepare-invocations!
+            (fn [_]
+              (js/Promise.resolve
+               [{::execution/message execution/invoke-message
+                 ::execution/protocol-version execution/protocol-version
+                 ::execution/agent-id agent-id
+                 ::execution/invocation-id "call-failure"
+                 :seon.db/db database
+                 ::execution/function-identity
+                 {::execution/function-symbol granted-sym
+                  ::execution/source-digest (apply str (repeat 64 "b"))}
+                 ::execution/arguments [{:my.order/quantity -1}]
+                 ::execution/deadline-ms 9999999999999
+                 ::execution/result-limit-bytes 4096}])))
+      (set! execution.host/invoke!
+            (fn [_]
+              (js/Promise.resolve
+               {::execution/message execution/error-message
+                ::execution/protocol-version execution/protocol-version
+                ::execution/invocation-id "call-failure"
+                :seon.db/db database
+                ::execution/error failure})))
+      (-> (call/invoke! database agent-id granted-sym
+                        [{:my.order/quantity -1}])
+          (.then
+           (fn [result]
+             (is (false? (::call/ok? result)))
+             (is (= failure (::call/error result))
+                 "message, kind, and raw error data survive the call boundary")))
+          (.catch (fn [error] (is false (str error))))
+          (.finally
+           (fn []
+             (set! execution/prepare-invocations! original-prepare)
+             (set! execution.host/invoke! original-invoke)
+             (done)))))))
+
 ;; ---------------------------------------------------------------------------
 ;; (d) HTTP boundary — agent-call injection is refused and malformed args end.
 ;; The PoC sends a transit value that decodes to a list.

@@ -18,10 +18,20 @@
     (is (= "Approve" label))
     (is (str/includes? (:class attrs) "cursor-pointer"))
     (let [wired (transform/transform-hiccup "x" 'my.agent.x h)
-          action (:data-on:click (second wired))]
+          attrs (second wired)
+          action (:data-on:click attrs)]
       (is (str/includes? action "/agent/x/call?fn=my.agent.x%2Fapprove!"))
       (is (str/includes? action "args="))
-      (is (nil? (:on-click (second wired)))))))
+      (is (str/includes? action "retry:'never'"))
+      (is (string? (:data-indicator attrs)))
+      (is (= (str "$" (:data-indicator attrs))
+             ((keyword "data-attr:disabled") attrs)))
+      (is (str/includes? ((keyword "data-on:datastar-fetch") attrs)
+                         "evt.detail.type==='error'"))
+      (is (some #(and (vector? %)
+                      (= " working…" (last %)))
+                (drop 2 wired)))
+      (is (nil? (:on-click attrs))))))
 
 (deftest controls-compose-as-hiccup-without-envelope-extraction
   (let [input (canvas/input {:my.canvas/field :my.demo/note
@@ -42,7 +52,11 @@
     (is (some #(and (vector? %) (= :button (first %))) (drop 2 form)))
     (let [wired (transform/transform-hiccup "x" 'my.agent.x form)]
       (is (str/includes? (:data-on:submit (second wired))
-                         "/agent/x/call?fn=my.agent.x%2Fsave-note!")))))
+                         "/agent/x/call?fn=my.agent.x%2Fsave-note!"))
+      (is (string? (:data-indicator (second wired))))
+      (is (= 2 (count (filter #(and (vector? %)
+                                    (= :span (first %)))
+                              (drop 2 wired))))))))
 
 (deftest view-is-the-one-dual-render-boundary
   (let [h [:section [:h2 "Status"]]

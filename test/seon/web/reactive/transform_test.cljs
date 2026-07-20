@@ -15,7 +15,7 @@
   "The URL inside a rewritten `@post('<url>')` action string."
   [action]
   (js/URL. (str "http://x"
-                (second (re-find #"@post\('([^']*)'\)" action)))))
+                (second (re-find #"@post\('([^']*)'" action)))))
 
 (defn- action->params
   "The URLSearchParams inside a rewritten Datastar action."
@@ -39,6 +39,7 @@
     (testing "the value is a standard Datastar @post(…) to the one action door"
       (is (string? action))
       (is (str/starts-with? action "@post('"))
+      (is (str/includes? action "retry:'never'"))
       (is (= "/agent/tst/call" (.-pathname (action->url action)))))
     (let [sp (action->params action)]
       (testing "a bare handler qualifies to the ordinary authoring namespace"

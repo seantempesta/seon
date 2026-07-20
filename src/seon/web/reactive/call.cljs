@@ -104,6 +104,15 @@
 (defn- err->msg [e]
   (or (ex-message e) (str e)))
 
+(defn- error-value
+  "Normalize one call failure to the standard structured error value."
+  ([value] (error-value value :agent))
+  ([value kind]
+   (if (and (map? value) (string? (:seon.error/message value)))
+     value
+     {:seon.error/message (str value)
+      :seon.error/kind kind})))
+
 (defn ^:async invoke!
   "Invoke a granted authored function in its supervised Bun child.
 
@@ -112,7 +121,7 @@
    vector through `seon.execution.host/invoke!`. The child applies the function
    inside its agent and database transaction context, awaits async work, and
    returns one bounded ordinary result. Child or preparation failures become
-   `{::ok? false ::error <message>}` values; arguments are never source text."
+   `{::ok? false ::error <structured-error>}` values; arguments are never source text."
   {:malli/schema [:=> [:catn [::db :seon.db/db] [::agent-id :string]
                        [::fn-sym :symbol]
                        [::args [:sequential :any]]]
@@ -122,7 +131,7 @@
     (let [refusal (admission/unavailable)]
       {::ok? false
        ::unavailable? true
-       ::error (get-in refusal [:seon/error :seon.error/message])})
+       ::error (error-value (get refusal :seon/error) :core)})
     (try
       (let [plan (execution/invocation-plan agent-id fn-sym (vec args))
             prepared
@@ -131,19 +140,21 @@
               {:seon.db/db database
                ::execution/invocation-plans [plan]}))]
         (if (:seon.error/message prepared)
-          {::ok? false ::error (:seon.error/message prepared)}
+          {::ok? false ::error prepared}
           (if-let [invocation (first prepared)]
             (let [result (await (execution.host/invoke! invocation))]
               (if (= execution/result-message (::execution/message result))
                 {::ok? true ::value (::execution/result result)}
                 {::ok? false
                  ::error
-                 (or (get-in result [::execution/error :seon.error/message])
-                     "The execution child returned no result.")}))
+                 (error-value
+                  (or (::execution/error result)
+                      "The execution child returned no result."))}))
             {::ok? false
-             ::error "Invocation preparation returned no invocation."})))
+             ::error (error-value
+                      "Invocation preparation returned no invocation.")})))
       (catch :default e
-        {::ok? false ::error (err->msg e)}))))
+        {::ok? false ::error (error-value (err->msg e))}))))
 
 ;; ============================================================
 ;; HTTP handler — POST /agent/{id}/call. The Ring request carries the native
@@ -228,13 +239,16 @@
                      {::ok? false
                       ::unavailable? true
                       ::error
-                      (get-in (admission/unavailable)
-                              [:seon/error :seon.error/message])})
+                      (error-value
+                       (get (admission/unavailable) :seon/error)
+                       :core)})
       (let [fn-str (query-val req "fn")
             route-agent-id (get-in request [:path-params :id])]
        (if (or (str/blank? route-agent-id) (str/blank? fn-str))
          (json-response 400 {::ok? false
-                             ::error "missing route agent id or 'fn' query param"})
+                             ::error (error-value
+                                      "missing route agent id or 'fn' query param"
+                                      :user-input)})
          (try
            (let [fn-sym (symbol fn-str)
                  database (await (db/db))
@@ -246,13 +260,15 @@
                (:seon.error/message cap)
                (json-response 503 {::ok? false
                                    ::unavailable? true
-                                   ::error (:seon.error/message cap)})
+                                   ::error cap})
 
                (::refused cap)
                (let [reason (::refused cap)]
                  (log/info-console! "seon.web.reactive.call" "agent call REFUSED"
                                     {:seon.web.call/fn fn-str})
-                 (json-response 403 {::ok? false ::refused reason}))
+                 (json-response 403 {::ok? false
+                                     ::refused reason
+                                     ::error (error-value reason :user-input)}))
 
                :else
                (let [agent-id (::agent-id cap)
@@ -269,7 +285,9 @@
                                         {:seon.web.call/fn fn-str
                                          :seon.web.call/error arg-error})
                      (json-response 422 {::ok? false
-                                         ::error (str "bad args: " arg-error)}))
+                                         ::error
+                                         (error-value (str "bad args: " arg-error)
+                                                      :user-input)}))
                    (let [{ok? ::ok? err ::error}
                          (await (invoke! database agent-id fn-sym args))]
                      (if ok?
@@ -280,9 +298,11 @@
                          (success-response req))
                        (do
                          (log/error-console! "seon.web.reactive.call"
-                                             "agent call invoke error" (str err))
+                                             "agent call invoke error"
+                                             (:seon.error/message err))
                          (json-response 422 {::ok? false
-                                             ::error (str err)}))))))))
+                                             ::error err}))))))))
            (catch :default e
              (log/error-console! "seon.web.reactive.call" "agent call threw" e)
-             (json-response 500 {::ok? false ::error (str e)}))))))))
+             (json-response 500 {::ok? false
+                                 ::error (error-value (err->msg e) :core)}))))))))

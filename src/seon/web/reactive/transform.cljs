@@ -45,6 +45,7 @@
    (`(transform-hiccup agent-id ns hiccup)`) rather than map-in/map-out: it is a pure
    transformation library where that call shape is the natural one."
   (:require
+    ["node:crypto" :as crypto]
     [clojure.string :as str]
     [clojure.walk :as walk]
     [cognitect.transit :as t]))
@@ -130,7 +131,44 @@
     (str (if (seq args)
            (str base "&args=" (url-enc (encode-args args)))
            base)
-         "')")))
+         "', {retry:'never'})")))
+
+(defn- control-signals
+  "Stable Datastar signal names for one exact action descriptor."
+  [action]
+  (let [digest (-> (.createHash crypto "sha256")
+                   (.update action "utf8")
+                   (.digest "hex"))
+        stem (str "seon_canvas_" (subs digest 0 16))]
+    {:pending (str stem "_pending")
+     :error (str stem "_error")}))
+
+(defn- lifecycle-attrs
+  "Datastar lifecycle bindings for one canvas action."
+  [action]
+  (let [{:keys [pending error]} (control-signals action)
+        p (str "$" pending)
+        e (str "$" error)]
+    {:data-signals (str "{" pending ":false," error ":''}")
+     :data-indicator pending
+     (keyword "data-attr:disabled") p
+     (keyword "data-attr:aria-busy") p
+     (keyword "data-on:datastar-fetch")
+     (str "evt.detail.el===el && ("
+          "evt.detail.type==='started' ? " e "='' : "
+          "evt.detail.type==='error' ? " e
+          "='Action failed (HTTP '+evt.detail.argsRaw.status+'). Correct the input or handler and retry.' : null)")}))
+
+(defn- lifecycle-status
+  "Visible pending and retry guidance for one canvas action."
+  [action]
+  (let [{:keys [pending error]} (control-signals action)]
+    [[:span {:class "text-2xs text-text-400"
+             (keyword "data-show") (str "$" pending)}
+      " working…"]
+     [:span {:class "text-2xs text-error"
+             (keyword "data-show") (str "$" error)
+             (keyword "data-text") (str "$" error)}]]))
 
 ;; ============================================================
 ;; Handler-slot detection + rewrite.
@@ -208,7 +246,22 @@
   (walk/postwalk
     (fn [form]
       (if (hiccup-element? form)
-        (let [[tag attrs & children] form]
-          (into [tag (rewrite-attrs agent-id ns-sym attrs)] children))
+        (let [[tag attrs & children] form
+              canvas-control? (true? (:data-seon-canvas-control attrs))
+              rewritten (dissoc (rewrite-attrs agent-id ns-sym attrs)
+                                :data-seon-canvas-control)
+              action (when canvas-control?
+                       (some (fn [[k v]]
+                             (when (and (keyword? k)
+                                        (str/starts-with? (name k) "data-on:")
+                                        (string? v)
+                                        (str/starts-with? v "@post('/agent/"))
+                               v))
+                           rewritten))
+              rewritten (cond-> rewritten
+                          action (merge (lifecycle-attrs action)))
+              children (cond-> (vec children)
+                         action (into (lifecycle-status action)))]
+          (into [tag rewritten] children))
         form))
     hiccup))

@@ -231,6 +231,7 @@
   {:malli/schema [:=> [:cat ::button-request] ::control]}
   [{::keys [label handler data]}]
   [:button {:type "button"
+            :data-seon-canvas-control true
             :on-click (list handler (or data {}))
             :class button-class}
    label])
@@ -298,6 +299,8 @@
    adapter."
   {:malli/schema [:=> [:cat ::form-request] ::control]}
   [{::keys [handler label controls]}]
-  (into [:form {:on-submit handler :class "flex flex-col gap-2"}]
+  (into [:form {:on-submit handler
+                :data-seon-canvas-control true
+                :class "flex flex-col gap-2"}]
         (conj controls
               [:button {:type "submit" :class button-class} label])))
