@@ -108,6 +108,11 @@ ownership refusal, and honest unavailable rendering after child retirement.
 
 ### Stage 1.6 — corrective steering gaps
 
+In progress (2026-07-20): root task `/root` owns the strict directive-error
+unit B (G1/G2, the three maintained nilable registrations, transact-response
+error union, and G8-G11 steering extensions). Protected execution/eval paths
+remain outside this unit.
+
 From [[research/corrective-steering-audit-2026-07-20]] (all persist-time or
 pure-render, single execution, byte-identity safe):
 
@@ -145,6 +150,11 @@ dependency-owned terminology. No active authority may continue teaching
 
 ### Stage 3 — one logging convention
 
+In progress (2026-07-20): subagent lane `logging_stage3` owns unit C under
+[[logging-unification]], including vendored Timbre 6.5.0 grounding and the
+writer formatter proof. Turn retry and canvas round-trip sites are protected
+from this lane.
+
 From the logging report's remaining plan: adopt the `seon.log/console!`
 line shape on the JVM writer via a timbre output-fn; route the residual
 non-agent console sites; decide the two value->throw->value round-trips
@@ -171,6 +181,10 @@ lifecycle, debug, and data-browser routes; launch capabilities own optional
 operator doors; only proven pre-database assets/readiness may remain static.
 
 ### Stage 5 — deletions and small unifications
+
+In progress (2026-07-20): subagent lane `managed_identity_h5` owns fragile
+index unit H5 only, deriving reconciled identity attributes from
+`:seon.entity/id-attr`; route/config and execution owners are protected.
 
 Outcome (2026-07-20): fragile-index H6 is implemented by `6246181b`.
 `seon.schema-test` now derives every AI/HTML handler from the complete entity

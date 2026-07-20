@@ -138,6 +138,13 @@ passed configuration map (`config.cljs:769-777,1100-1130`);
 
 ## Implementation order
 
+Authorized source-cleanup partial lane (2026-07-20): subagent
+`frozen_inputs_i1_i5` owns I1-I5 only. The source-cleanup assignment explicitly
+defers I6-I8 and `seon.agent.turn` retry internals; this lane may implement the
+independent result-handle, clock-purity, free-tail, and file-fingerprint
+contracts without crossing those protected paths. Any dependency on I6-I8 is
+recorded as a collision rather than worked around.
+
 Each stage is one coherent commit series; gates are `bin/test-cljs` focused
 suites plus the named live proof. One stage in progress at a time.
 
