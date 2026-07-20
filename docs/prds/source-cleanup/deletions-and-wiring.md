@@ -73,12 +73,31 @@ usage); submodule removal leaves `git submodule status` clean and
    not delete the namespace merely because it was temporarily orphaned.
 2. Archive the namespace-ui PRD folder (ruled).
 
-## New owner question (from the docstring fix, 2026-07-20)
+## file-block — RULED 2026-07-20: KEEP as the general mechanism
 
-`seon.agent.ctx/file-block{,-ai,-html}` is a live MECHANISM with ZERO
-usage: the only file-backed context-section capability, but no shipped
-manifest declares one since the identity-file-block seeding was deleted
-(`c35677fa`, soul-off default). False DEPRECATED markers are fixed
-(`f5c145ed`); keep-or-delete remains open: keep = retain the only
-file-backed-section capability for future manifests; delete = three fewer
-unreferenced fns, restore from Git when a manifest wants files again.
+`seon.agent.ctx/file-block{,-ai,-html}` had zero usage after the
+identity-file-block seeding deletion (`c35677fa`); false DEPRECATED
+markers were fixed in `f5c145ed`. Owner ruling: KEEP — it is the GENERAL
+mechanism for users to load any files into named, prioritized context
+blocks via the config manifest (SOUL.md/AGENTS.md are just two such
+declarations).
+
+Proof the manifest path already works end to end (no decode fix needed):
+
+- `resolve-agent-context` preserves a block map carrying
+  `:seon.agent.ctx/file-path` + the two render symbols verbatim (loose
+  `[:vector :map]` leaf; `file-path` is a registered attribute, so
+  seed-copy transacts it and the wildcard `{:seon.agent/ctx [*]}` prompt
+  pull hands it to the slot fns in the execution child).
+- Behavioral test:
+  `seon.ctx-test/manifest-file-block-renders-fresh-and-omits-when-absent`
+  — decode preserved, present → renders priority-ordered, edited →
+  fresh re-read, absent → omitted (no fallback).
+- Live: `bin/seon config apply` of a manifest declaring a `:notes`
+  file block (priority 30) seeded a fresh default-cluster agent whose
+  `ctx-preview` showed `┌─ notes ─` between `:namespaces` (20) and
+  `:canvas` (35); an edit landed on the next render; deleting the file
+  removed the section. Cluster restored to `config/system.edn` after.
+- A commented-out example of the general shape lives in the CONTEXT
+  TREE section of `config/system.edn`. Issue note:
+  `docs/seon/issues/archive/file-block-mechanism-unused-keep-or-delete.md`.

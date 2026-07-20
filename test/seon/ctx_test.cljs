@@ -1,9 +1,10 @@
 (ns seon.ctx-test
   "Pure context formatting after database-value-pinned acquisition."
   (:require
-    [cljs.test :refer [deftest is]]
+    [cljs.test :refer [deftest is testing]]
     [clojure.string :as str]
-    [seon.agent.ctx :as ctx]))
+    [seon.agent.ctx :as ctx]
+    [seon.config :as config]))
 
 (deftest selected-blocks-are-ordinary-data
   (let [entity {:seon.agent/ctx
@@ -65,6 +66,74 @@
     (is (not (str/includes? (:seon.render/text rendered) "two")))
     (is (not (str/includes? (:seon.render/text rendered)
                             ctx/stable-boundary)))))
+
+(deftest manifest-file-block-renders-fresh-and-omits-when-absent
+  ;; The GENERAL manifest→file-block path (owner ruling 2026-07-20: KEEP):
+  ;; a manifest block map carrying :seon.agent.ctx/file-path + the two
+  ;; file-block render symbols survives the ONE decode
+  ;; (config/resolve-agent-context) verbatim, renders the file FRESH each
+  ;; render, orders by priority, and OMITS the section while the file is
+  ;; absent (reactive, no fallback).
+  (let [fs   (js/require "fs")
+        cwd  (.cwd js/process)
+        path "tmp/ctx-file-block-test.md"
+        abs  (str cwd "/" path)]
+    (.mkdirSync fs (str cwd "/tmp") #js {:recursive true})
+    (.writeFileSync fs abs "# Notes\nremember the falsifier")
+    (try
+      (let [configuration
+            {:seon.config/id config/cluster-config-id
+             :seon.config/agent-context
+             {:seon.agent/ctx
+              [{:seon.agent.ctx/name      :notes
+                :seon.agent.ctx/priority  30
+                :seon.agent.ctx/file-path path
+                :seon.render/ai   'seon.agent.ctx/file-block-ai
+                :seon.render/html 'seon.agent.ctx/file-block-html}
+               {:seon.agent.ctx/name     :tail
+                :seon.agent.ctx/priority 100
+                :seon.render/ai          "tail body"}]}}
+            resolved (config/resolve-agent-context
+                       "worker-fb" nil configuration)
+            [fb tail] (:seon.agent/ctx resolved)
+            ;; Mirror the async prompt owner: each symbol slot resolves to
+            ;; its literal result before the pure assembly tail runs.
+            render-selected
+            (fn []
+              (ctx/rendered-context-from-entity
+                {:seon.agent/entity {:seon.agent/ctx []}
+                 :seon.agent.ctx/selected-blocks
+                 [(assoc fb :seon.render/ai
+                         (ctx/file-block-ai {:seon.render/node fb}))
+                  tail]}))]
+        (testing "the decode preserves the file-block declaration verbatim"
+          (is (= path (:seon.agent.ctx/file-path fb)))
+          (is (= 'seon.agent.ctx/file-block-ai (:seon.render/ai fb)))
+          (is (= 'seon.agent.ctx/file-block-html (:seon.render/html fb))))
+        (testing "file present → section renders, priority-ordered"
+          (let [rendered (render-selected)
+                text     (:seon.render/text rendered)]
+            (is (str/includes? text "; remember the falsifier")
+                "file content arrives `;`-quoted in the prompt")
+            (is (= [:notes :tail]
+                   (mapv :seon.agent.ctx/name
+                         (:seon.agent.ctx/rendered-blocks rendered))))
+            (is (< (str/index-of text "remember the falsifier")
+                   (str/index-of text "tail body"))
+                "priority 30 renders before priority 100")))
+        (testing "file edited → next render re-reads fresh"
+          (.writeFileSync fs abs "an edited line")
+          (is (str/includes? (:seon.render/text (render-selected))
+                             "; an edited line")))
+        (testing "file absent → section omitted, no fallback"
+          (.unlinkSync fs abs)
+          (let [rendered (render-selected)]
+            (is (= [:tail]
+                   (mapv :seon.agent.ctx/name
+                         (:seon.agent.ctx/rendered-blocks rendered))))
+            (is (not (str/includes? (:seon.render/text rendered) "notes"))))))
+      (finally
+        (when (.existsSync fs abs) (.unlinkSync fs abs))))))
 
 (deftest split-context-without-boundary-is-all-volatile
   (is (= {:seon.render/stable-text ""

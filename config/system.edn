@@ -304,6 +304,18 @@
  ;; tested blocks per context-rebuild.md). Blocks: namespaces
  ;; (repl+namespaces milestones) · plan (plan milestone, html twin = the
  ;; human's live plan surface) · transcript (the spine).
+ ;;
+ ;; FILE-BACKED BLOCK (general mechanism, owner ruling 2026-07-20: KEEP) —
+ ;; any on-disk markdown file becomes a named context section by declaring
+ ;; a block with :seon.agent.ctx/file-path (repo-relative) plus the two
+ ;; seon.agent.ctx render symbols. The file is read FRESH every render (an
+ ;; edit lands next turn, no restart); an ABSENT file renders NO section
+ ;; (reactive, no fallback). SOUL.md/AGENTS.md are declared the same way.
+ ;; Add an entry like this to the :seon.agent/ctx vector below:
+ ;;   {:seon.agent.ctx/name :notes :seon.agent.ctx/priority 30
+ ;;    :seon.agent.ctx/file-path "NOTES.md"
+ ;;    :seon.render/ai seon.agent.ctx/file-block-ai
+ ;;    :seon.render/html seon.agent.ctx/file-block-html}
  :seon.config/agent-context
  {:seon.agent/ctx
   [{:seon.agent.ctx/name :namespaces :seon.agent.ctx/priority 20
