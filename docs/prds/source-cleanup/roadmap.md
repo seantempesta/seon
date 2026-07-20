@@ -105,6 +105,24 @@ the same projection. Gate: invalid missing-key and wrong-type probes, ambiguous
 valid matches, a no-schema value, a large child-owned value with paging, route
 ownership refusal, and honest unavailable rendering after child retirement.
 
+### Stage 1.6 — corrective steering gaps
+
+From [[research/corrective-steering-audit-2026-07-20]] (all persist-time or
+pure-render, single execution, byte-identity safe):
+
+- **Directive error text unit (G1+G2)**: database error values render with
+  the corrected next form, `seon.db.internal` thrower messages show the
+  working idiom; `schema/register!` rejects banned shapes (`[:maybe X]`,
+  stored nil, `:any`) at registration with a shared predicate and a
+  directive message — the standing register!-accepted-banned-shape smell
+  closes here.
+- **Stream-tail visibility (G3)**: a deterministic narration line frozen at
+  record time states which forms after the first were not run; rides the
+  stream/turn work.
+- **Transact coercion contract (G4, ruled 2026-07-20)**: strict rejection
+  with a directive message naming the canonical shape — never a silent
+  coercion that teaches non-canonical calls, never ok-on-wrong-input.
+
 ### Stage 2 — pod-term retirement (atomic rename)
 
 Execute [[../database-authority-mesh/research/pod-term-retirement-plan-2026-07-20]]
