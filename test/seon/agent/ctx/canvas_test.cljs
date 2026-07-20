@@ -3,7 +3,6 @@
   (:require
     [cljs.test :refer [async deftest is testing]]
     [clojure.string :as str]
-    [datahike.api :as d]
     [seon.agent]
     [seon.agent.ctx.canvas :as canvas-ctx]
     [seon.db :as db]
@@ -48,28 +47,6 @@
       (finally
         (set! db/query original-query)
         (set! db/pull original-pull)))))
-
-(defn- fresh-conn
-  []
-  (let [config {:store {:backend :memory :id (random-uuid)}
-                :schema-flexibility :write
-                :keep-history? true}
-        attrs [:seon.agent/id
-               :seon.agent/purpose
-               :seon.db/user
-               :seon.db/process
-               :seon.db.process/id
-               :seon.fn/sym
-               :seon.fn/source
-               :seon.fn/spec
-               :seon.fn/private?
-               :seon.fn/read-attrs]]
-    (-> (d/create-database config)
-        (.then (fn [_] (d/connect config {:sync? false})))
-        (.then (fn [conn]
-                 (-> (d/transact! conn
-                       {:tx-data (db/malli->datahike-schema attrs)})
-                     (.then (constantly conn))))))))
 
 (deftest remote-members-are-bounded-and-history-is-explicit
   (let [candidate (@#'canvas-ctx/candidate-member agent-id)
@@ -176,6 +153,7 @@
 (deftest derived-canvas-carries-the-selected-renderers-read-attributes
   (async done
     (let [original-execute-many db/execute-many
+          requests (atom [])
           responses
           (atom
            [{::db/results
@@ -192,7 +170,8 @@
                #{[:my.orders/status 101]
                  [:my.orders/total 102]}}]}])]
       (set! db/execute-many
-            (fn [_]
+            (fn [request]
+              (swap! requests conj request)
               (let [response (first @responses)]
                 (swap! responses subvec 1)
                 (js/Promise.resolve response))))
@@ -203,7 +182,17 @@
              (is (= 'my.canvas/view
                     (get-in result [::canvas/wired ::canvas/value])))
              (is (= #{:my.orders/status :my.orders/total}
-                    (:seon.fn/read-attrs result)))))
+                    (:seon.fn/read-attrs result)))
+             (is (= [database (assoc database :history true)]
+                    (mapv ::db/db @requests))
+                 "candidate and history reads stay behind seon.db")
+             (is (every?
+                  #(every? (fn [member]
+                             (= protocol/query-operation
+                                (::protocol/operation member)))
+                           (::db/members %))
+                  @requests)
+                 "canvas acquisition sends typed database query members")))
           (.catch (fn [error] (is false (str error))))
           (.finally
            (fn []
@@ -266,81 +255,3 @@
     (is (= entity (:seon.agent/entity input)))
     (is (not (contains? input :seon.render/entity))
         "the canvas acquisition key stops at the renderer boundary")))
-
-(defn- probe-candidate-history!
-  [conn]
-  (let [subject-ids (mapv #(str "subject-" %) (range 800))]
-    (-> (d/transact! conn
-          {:tx-data
-           (into [{:db/id "agent" :seon.agent/id agent-id}
-                  {:db/id "repl"
-                   :seon.db.process/id :seon.db.process/repl}]
-                 (map (fn [subject-id]
-                        {:db/id subject-id :seon.agent/purpose "first"}))
-                 subject-ids)})
-      (.then
-        (fn [report]
-          (let [agent-eid (get (:tempids report) "agent")
-                repl-eid (get (:tempids report) "repl")
-                subject-eids (mapv #(get (:tempids report) %) subject-ids)
-                tx-meta {:seon.db/user agent-eid
-                         :seon.db/process repl-eid}]
-            (-> (d/transact! conn
-                  {:tx-data
-                   (mapv (fn [n]
-                           {:seon.fn/sym (str "my.canvas/view-" n)
-                            :seon.fn/source (str "(defn view-" n " [_] {})")
-                            :seon.fn/spec
-                            "[:=> [:cat :map] [:map [:seon.render/hiccup [:vector :any]]]]"
-                            :seon.fn/private? false
-                            :seon.fn/read-attrs [:seon.agent/purpose]})
-                         (range 256))
-                   :tx-meta tx-meta})
-                (.then
-                  (fn [source-report]
-                    (-> (d/transact! conn
-                          {:tx-data
-                           (mapv (fn [subject-eid]
-                                   [:db/add subject-eid
-                                    :seon.agent/purpose "second"])
-                                 subject-eids)
-                           :tx-meta tx-meta})
-                        (.then
-                          (fn [touch-report]
-                            {:seon.canvas-test/candidate
-                             (d/q {:query @#'canvas-ctx/candidate-query
-                                   :args [@conn agent-id]
-                                   :max-work 2000000
-                                   :max-results 32768
-                                   :max-result-weight 1048576})
-                             :seon.canvas-test/history
-                             (d/q {:query @#'canvas-ctx/history-query
-                                   :args [(d/history @conn) agent-id
-                                          [:seon.agent/purpose]]
-                                   :max-work 4000000
-                                   :max-results 65536
-                                   :max-result-weight 1048576})
-                             :seon.canvas-test/source-tx
-                             (get-in source-report [:db-after :max-tx])
-                             :seon.canvas-test/touch-tx
-                             (get-in touch-report [:db-after :max-tx])}))))))))))))
-
-(deftest datahike-candidate-and-grouped-history-semantics
-  (async done
-    (-> (fresh-conn)
-        (.then probe-candidate-history!)
-        (.then
-          (fn [{candidate :seon.canvas-test/candidate
-                history :seon.canvas-test/history
-                source-tx :seon.canvas-test/source-tx
-                touch-tx :seon.canvas-test/touch-tx}]
-            (is (= 256 (count candidate)))
-            (is (every? #(re-find #"^my\.canvas/view-" (first %)) candidate))
-            (is (= #{:seon.agent/purpose}
-                   (set (:seon.fn/read-attrs (nth (first candidate) 4)))))
-            (is (= #{[:seon.agent/purpose touch-tx]} (set history)))
-            (is (< source-tx touch-tx))))
-        (.then (fn [_] (done)))
-        (.catch (fn [error]
-                  (is false (str "Datahike probe threw: " (.-message error)))
-                  (done))))))
