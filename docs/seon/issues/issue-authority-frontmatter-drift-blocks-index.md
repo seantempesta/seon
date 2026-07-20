@@ -1,6 +1,6 @@
 ---
 type: issue
-status: superseded
+status: open
 severity: friction
 tags: [issue, architecture, index]
 ---
@@ -35,6 +35,17 @@ do not weaken validation or hand-edit the generated index.
 - `bin/issues-index` regenerates the projection.
 - `bin/issues-index --check` succeeds immediately afterward.
 
-## Closed 2026-07-20
+## Prior disposition
 
 Verified stale by the issues triage (docs/prds/source-cleanup/research/issues-triage-2026-07-20.md §STALE): the described code or behavior no longer exists at HEAD; rg evidence in the triage doc.
+
+## Regression (2026-07-20)
+
+`bin/issues-index --check` again refuses the authority. The current report
+contains invalid severities `risk`, `reliability`, and `minor`, missing
+severities, open notes carrying status `closed`, and an archived note carrying
+status `closed`. Two source-cleanup-owned `reliability` severities were repaired
+in `6c81f026`; the remaining named notes belong to their current issue owners
+and require one coordinated metadata-only repair before the index can be
+regenerated. This is authority drift, not evidence that the underlying product
+issues are resolved or invalid.
