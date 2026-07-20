@@ -1,7 +1,8 @@
 ---
 type: issue
-status: archived
+status: resolved
 tags: [issue, database, agent]
+severity: friction
 ---
 
 # AI seed reported failure after a successful transaction

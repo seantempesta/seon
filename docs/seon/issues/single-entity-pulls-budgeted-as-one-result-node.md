@@ -2,6 +2,7 @@
 type: issue
 status: open
 tags: [database, issue, agent]
+severity: friction
 ---
 
 # Single-entity pulls budgeted as one result node

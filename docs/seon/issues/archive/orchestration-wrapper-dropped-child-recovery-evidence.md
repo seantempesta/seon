@@ -2,6 +2,7 @@
 type: issue
 status: resolved
 tags: [issue, agent, cljs, health, pod]
+severity: friction
 ---
 
 # Orchestration wrapper dropped child recovery evidence

@@ -5,6 +5,8 @@ tags:
   - database
   - schema
   - initialization
+severity: friction
+tags: [issue]
 ---
 
 # Database management fields lacked canonical schemas

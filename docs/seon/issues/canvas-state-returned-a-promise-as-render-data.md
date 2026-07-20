@@ -1,7 +1,8 @@
 ---
 type: issue
-status: active
+status: open
 tags: [issue, cljs, database, web]
+severity: friction
 ---
 
 # Canvas state returned a Promise as render data

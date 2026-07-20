@@ -2,6 +2,7 @@
 type: issue
 status: resolved
 tags: [issue, database, cljs]
+severity: friction
 ---
 
 # Complete gates retain pre-v11 listener assumptions

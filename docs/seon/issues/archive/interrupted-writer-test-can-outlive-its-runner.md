@@ -2,6 +2,7 @@
 type: issue
 status: resolved
 tags: [issue, cljs, flow, health]
+severity: friction
 ---
 
 # Interrupted writer test can outlive its runner

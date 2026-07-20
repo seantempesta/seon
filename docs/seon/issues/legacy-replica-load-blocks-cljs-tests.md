@@ -2,6 +2,7 @@
 type: issue
 status: open
 tags: [database, cljs, issue]
+severity: friction
 ---
 
 # Legacy replica load blocks CLJS tests

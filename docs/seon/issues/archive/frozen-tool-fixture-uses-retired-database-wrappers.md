@@ -2,6 +2,7 @@
 type: issue
 status: resolved
 tags: [issue, milestone, database]
+severity: friction
 ---
 
 # Frozen tool fixture uses retired database wrappers

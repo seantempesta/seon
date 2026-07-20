@@ -1,7 +1,8 @@
 ---
 type: issue
-status: closed
+status: open
 tags: [issue, component]
+severity: friction
 ---
 
 # Stray repo-root `locks/stack.lock` from operator test

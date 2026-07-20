@@ -1,7 +1,8 @@
 ---
 type: issue
-status: active
+status: open
 tags: [issue, agent, web, cljs]
+severity: friction
 ---
 
 # Nested authored render hides child reload

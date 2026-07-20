@@ -1,6 +1,6 @@
 ---
 type: issue
-status: archived
+status: resolved
 severity: blocker
 tags: [issue, database, schema, flow]
 ---

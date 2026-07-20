@@ -1,7 +1,8 @@
 ---
 type: issue
-status: active
+status: open
 tags: [issue, agent, web, cljs, health]
+severity: friction
 ---
 
 # Core selected render errors bypass crash policy

@@ -1,7 +1,8 @@
 ---
 type: issue
 status: open
-tags: [agent, database, web]
+tags: [issue, agent, database, web]
+severity: friction
 ---
 
 # Warn check guidance names removed `seon.db/*conn*` var

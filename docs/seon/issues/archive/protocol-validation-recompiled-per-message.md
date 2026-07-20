@@ -1,7 +1,8 @@
 ---
 type: issue
-status: completed
+status: resolved
 tags: [issue, database, flow]
+severity: friction
 ---
 
 # Protocol validation recompiled schemas per message

@@ -1,7 +1,8 @@
 ---
 type: issue
-status: closed
+status: resolved
 tags: [issue, database, pod, flow]
+severity: friction
 ---
 
 # Pod does not reconnect after writer replacement

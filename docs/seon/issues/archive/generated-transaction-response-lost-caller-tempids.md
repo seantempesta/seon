@@ -5,6 +5,8 @@ tags:
   - database
   - transaction
   - generated-ids
+severity: friction
+tags: [issue]
 ---
 
 # Generated transaction response lost caller tempids

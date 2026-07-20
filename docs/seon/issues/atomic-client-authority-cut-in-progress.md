@@ -1,7 +1,8 @@
 ---
 type: issue
-status: active
+status: open
 tags: [issue, database, pod, flow]
+severity: friction
 ---
 
 # Atomic client authority cut is in progress

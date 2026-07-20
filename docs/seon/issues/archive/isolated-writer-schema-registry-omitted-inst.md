@@ -5,6 +5,8 @@ tags:
   - database
   - schema
   - initialization
+severity: friction
+tags: [issue]
 ---
 
 # Isolated writer schema registry omitted `:inst`

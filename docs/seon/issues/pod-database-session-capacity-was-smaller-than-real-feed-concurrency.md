@@ -1,7 +1,8 @@
 ---
 type: issue
-status: resolved
+status: open
 tags: [database, issue, pod, web]
+severity: friction
 ---
 
 # Pod database session capacity was smaller than real feed concurrency

@@ -5,6 +5,8 @@ tags:
   - database
   - schema
   - runtime
+severity: friction
+tags: [issue]
 ---
 
 # Query contract required a source the function did not

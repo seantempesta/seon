@@ -1,7 +1,7 @@
 ---
 type: issue
 status: open
-severity: high
+severity: blocker
 tags: [issue, database, flow]
 ---
 

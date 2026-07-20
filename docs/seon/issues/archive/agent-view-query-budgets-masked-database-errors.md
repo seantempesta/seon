@@ -2,6 +2,7 @@
 type: issue
 status: resolved
 tags: [issue, database, web, flow]
+severity: friction
 ---
 
 # Agent view query budgets masked database errors

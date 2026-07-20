@@ -1,7 +1,7 @@
 ---
 type: issue
 status: resolved
-severity: blocks
+severity: blocker
 tags: [issue, component, cljs, flow]
 ---
 

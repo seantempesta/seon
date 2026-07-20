@@ -1,7 +1,7 @@
 ---
 type: issue
-status: active
-severity: reliability
+status: open
+severity: friction
 tags: [issue, cljs, mcp, component]
 ---
 

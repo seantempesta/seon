@@ -1,7 +1,7 @@
 ---
 type: issue
 status: resolved
-severity: major
+severity: blocker
 tags: [issue, cljs, schema, index]
 ---
 

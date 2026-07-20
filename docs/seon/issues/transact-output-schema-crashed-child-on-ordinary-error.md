@@ -2,6 +2,7 @@
 type: issue
 status: open
 tags: [database, agent, issue]
+severity: friction
 ---
 
 # Transact output schema crashed child on ordinary error

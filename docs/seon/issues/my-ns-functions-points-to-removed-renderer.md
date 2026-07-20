@@ -5,6 +5,8 @@ tags:
   - agent
   - context
   - namespaces
+severity: friction
+tags: [issue]
 ---
 
 # `my.ns/functions` points to a removed namespace renderer

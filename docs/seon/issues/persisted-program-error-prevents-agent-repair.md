@@ -2,6 +2,7 @@
 type: issue
 status: open
 tags: [issue, agent, health, cljs]
+severity: friction
 ---
 
 # Persisted program error prevents agent repair

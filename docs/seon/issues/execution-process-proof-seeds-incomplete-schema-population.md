@@ -2,6 +2,7 @@
 type: issue
 status: open
 tags: [issue, agent, cljs]
+severity: friction
 ---
 
 # Execution process proof seeds incomplete schema population

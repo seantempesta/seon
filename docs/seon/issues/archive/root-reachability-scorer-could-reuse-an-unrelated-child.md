@@ -1,7 +1,7 @@
 ---
 type: issue
-status: archived
-severity: high
+status: resolved
+severity: blocker
 tags: [issue, agent, capability]
 ---
 

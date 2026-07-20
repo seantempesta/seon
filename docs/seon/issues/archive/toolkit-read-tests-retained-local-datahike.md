@@ -5,6 +5,8 @@ tags:
   - testing
   - database
   - toolkit
+severity: friction
+tags: [issue]
 ---
 
 # Toolkit read tests retained local Datahike

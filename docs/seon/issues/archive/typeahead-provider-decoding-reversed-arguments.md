@@ -2,6 +2,7 @@
 type: issue
 status: resolved
 tags: [issue, agent, cljs, database]
+severity: friction
 ---
 
 # Typeahead provider decoding reversed arguments

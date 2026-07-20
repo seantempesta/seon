@@ -2,6 +2,7 @@
 type: issue
 status: resolved
 tags: [issue, cljs, flow]
+severity: friction
 ---
 
 # Changed-test omitted the program-source artifact identity

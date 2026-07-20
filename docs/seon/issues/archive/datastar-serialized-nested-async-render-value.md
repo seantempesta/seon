@@ -5,6 +5,8 @@ tags:
   - web
   - rendering
   - async
+severity: friction
+tags: [issue]
 ---
 
 # Datastar serialized a nested asynchronous render value

@@ -1,7 +1,7 @@
 ---
 type: issue
 status: resolved
-severity: bug
+severity: friction
 tags: [issue, database]
 ---
 

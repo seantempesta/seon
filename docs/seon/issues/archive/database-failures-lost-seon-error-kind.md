@@ -1,7 +1,7 @@
 ---
 type: issue
-status: archived
-severity: reliability
+status: resolved
+severity: friction
 tags: [issue, database, flow]
 ---
 

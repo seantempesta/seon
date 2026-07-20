@@ -2,6 +2,7 @@
 type: issue
 status: resolved
 tags: [issue, health, pod]
+severity: friction
 ---
 
 # Status requires the up environment to recognize healthy processes

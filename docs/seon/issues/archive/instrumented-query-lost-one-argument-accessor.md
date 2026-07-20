@@ -5,6 +5,8 @@ tags:
   - database
   - instrumentation
   - web
+severity: friction
+tags: [issue]
 ---
 
 # Instrumented query lost its one-argument accessor

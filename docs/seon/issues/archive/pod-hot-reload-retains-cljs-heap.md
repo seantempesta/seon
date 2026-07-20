@@ -1,7 +1,7 @@
 ---
 type: issue
 status: resolved
-severity: high
+severity: blocker
 tags: [issue, pod, cljs, health]
 ---
 

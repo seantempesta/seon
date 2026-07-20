@@ -2,6 +2,7 @@
 type: issue
 status: resolved
 tags: [issue, pod, cljs]
+severity: friction
 ---
 
 # Production execution child bootstrap misses `goog`

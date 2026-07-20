@@ -5,6 +5,8 @@ tags:
   - bun
   - process
   - testing
+severity: friction
+tags: [issue]
 ---
 
 # Bun-only pod was launched with Node

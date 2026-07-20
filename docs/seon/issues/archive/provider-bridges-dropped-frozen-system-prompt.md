@@ -1,7 +1,8 @@
 ---
 type: issue
-status: complete
+status: resolved
 tags: [agent, flow, issue]
+severity: friction
 ---
 
 # Provider bridges dropped the frozen system prompt

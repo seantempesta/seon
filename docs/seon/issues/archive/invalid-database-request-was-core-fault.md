@@ -1,7 +1,7 @@
 ---
 type: issue
 status: resolved
-severity: reliability
+severity: friction
 tags: [issue, database, agent]
 ---
 

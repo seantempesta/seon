@@ -1,6 +1,6 @@
 ---
 type: issue
-status: closed
+status: open
 severity: friction
 tags: [issue, mcp, cljs]
 ---

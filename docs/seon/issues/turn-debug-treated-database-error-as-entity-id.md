@@ -2,6 +2,7 @@
 type: issue
 status: open
 tags: [database, issue]
+severity: friction
 ---
 
 # Turn debug treated a database error as an entity id

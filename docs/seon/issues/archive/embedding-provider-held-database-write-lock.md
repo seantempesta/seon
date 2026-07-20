@@ -1,7 +1,8 @@
 ---
 type: issue
-status: completed
+status: resolved
 tags: [issue, database, flow]
+severity: friction
 ---
 
 # Embedding provider held the database write lock

@@ -4,6 +4,8 @@ status: resolved
 tags:
   - agent-runtime
   - reliability
+severity: friction
+tags: [issue]
 ---
 
 # Incomplete eval row retires execution child

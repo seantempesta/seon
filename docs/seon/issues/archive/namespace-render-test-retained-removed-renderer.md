@@ -5,6 +5,8 @@ tags:
   - rendering
   - testing
   - database
+severity: friction
+tags: [issue]
 ---
 
 # Namespace render test retained a removed renderer

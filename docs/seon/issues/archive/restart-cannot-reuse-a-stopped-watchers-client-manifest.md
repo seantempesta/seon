@@ -1,7 +1,8 @@
 ---
 type: issue
-status: closed
+status: resolved
 tags: [issue, cljs, pod, flow]
+severity: friction
 ---
 
 # Restart cannot reuse a stopped watcher's client manifest

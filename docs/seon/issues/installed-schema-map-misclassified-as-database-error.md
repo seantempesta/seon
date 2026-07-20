@@ -2,6 +2,7 @@
 type: issue
 status: open
 tags: [agent, database, issue]
+severity: friction
 ---
 
 # Installed schema map misclassified as database error

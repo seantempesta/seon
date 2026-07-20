@@ -2,6 +2,7 @@
 type: issue
 status: open
 tags: [agent, cljs, issue]
+severity: friction
 ---
 
 # Preflight repair consumed referred macros

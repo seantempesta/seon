@@ -5,6 +5,8 @@ tags:
   - database
   - api
   - runtime
+severity: friction
+tags: [issue]
 ---
 
 # Public pull map used transport field names

@@ -6,6 +6,8 @@ tags:
   - schema
   - indexing
   - database
+severity: friction
+tags: [issue]
 ---
 
 # Namespace summary misses cold schema and index publication

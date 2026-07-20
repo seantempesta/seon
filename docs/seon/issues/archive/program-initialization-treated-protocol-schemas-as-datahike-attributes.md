@@ -5,6 +5,8 @@ tags:
   - database
   - initialization
   - schema
+severity: friction
+tags: [issue]
 ---
 
 # Program initialization treated protocol schemas as Datahike attributes

@@ -5,6 +5,8 @@ tags:
   - database
   - startup
   - llm
+severity: friction
+tags: [issue]
 ---
 
 # LLM config pull used an entity count as a retained-node budget

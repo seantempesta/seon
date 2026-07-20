@@ -2,6 +2,7 @@
 type: issue
 status: open
 tags: [database, agent, issue]
+severity: friction
 ---
 
 # Agent turns lack database read-cost attribution

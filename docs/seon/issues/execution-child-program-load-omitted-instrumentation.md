@@ -2,6 +2,7 @@
 type: issue
 status: open
 tags: [agent, cljs, issue]
+severity: friction
 ---
 
 # Execution child program load omitted instrumentation

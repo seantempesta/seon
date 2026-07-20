@@ -5,6 +5,8 @@ tags:
   - testing
   - database
   - runtime
+severity: friction
+tags: [issue]
 ---
 
 # Test runner fixture opened a local Datahike database

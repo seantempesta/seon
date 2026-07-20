@@ -1,6 +1,6 @@
 ---
 type: issue
-status: resolved
+status: open
 severity: blocker
 tags: [issue, database, agent]
 ---

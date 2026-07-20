@@ -1,6 +1,6 @@
 ---
 type: issue
-status: closed
+status: resolved
 severity: blocker
 tags: [issue, database, flow, pod]
 ---

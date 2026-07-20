@@ -2,6 +2,7 @@
 type: issue
 status: open
 tags: [agent, pod, issue]
+severity: friction
 ---
 
 # Execution result diagnostic retained invalid map key

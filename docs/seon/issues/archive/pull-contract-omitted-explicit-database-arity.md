@@ -5,6 +5,8 @@ tags:
   - database
   - schema
   - runtime
+severity: friction
+tags: [issue]
 ---
 
 # Pull contract omitted the explicit database arity

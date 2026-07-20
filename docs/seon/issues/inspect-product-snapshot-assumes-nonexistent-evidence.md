@@ -1,7 +1,8 @@
 ---
 type: issue
-status: active
+status: open
 tags: [issue, database, agent, health]
+severity: friction
 ---
 
 # Inspect product snapshot assumes nonexistent evidence

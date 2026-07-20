@@ -5,6 +5,8 @@ tags:
   - runtime
   - process
   - web
+severity: friction
+tags: [issue]
 ---
 
 # Execution host was not configured at runtime start

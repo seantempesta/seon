@@ -1,7 +1,7 @@
 ---
 type: issue
-status: closed
-severity: high
+status: resolved
+severity: blocker
 tags: [issue, architecture, database, agent]
 ---
 

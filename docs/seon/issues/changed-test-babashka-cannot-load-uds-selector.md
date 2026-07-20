@@ -1,6 +1,6 @@
 ---
 type: issue
-status: resolved
+status: open
 severity: friction
 tags: [issue, database, flow]
 ---

@@ -1,7 +1,7 @@
 ---
 type: issue
 status: open
-severity: blocking
+severity: blocker
 tags: [issue, pod, agent]
 ---
 

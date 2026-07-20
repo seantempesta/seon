@@ -1,7 +1,7 @@
 ---
 type: issue
-status: active
-severity: feature
+status: open
+severity: cleanup
 tags: [issue, agent]
 ---
 

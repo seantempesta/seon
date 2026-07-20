@@ -1,7 +1,8 @@
 ---
 type: issue
-status: archived
+status: resolved
 tags: [issue, agent, capability, pod]
+severity: friction
 ---
 
 # Operator read-only filesystem grant was unlocked
