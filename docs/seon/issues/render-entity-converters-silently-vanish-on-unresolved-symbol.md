@@ -21,3 +21,21 @@ Part of the single unresolved-symbol semantics proposed in
 §B: nil-as-value surfaced legibly, one generalized unresolved-symbol
 warning derivation. Rides source-cleanup stage 5 (or the data-browser
 implementation, whichever touches render.cljs first).
+
+## Grounded boundary and sibling defect
+
+[[../../prds/source-cleanup/research/unresolved-render-symbol-boundary-2026-07-20]]
+(`4f4dbd95`) freezes the dependency order and one semantic: a selected symbol
+must resolve to a function; absent and non-function values become the same
+visible standard error value in AI and HTML and never fall through to generic
+rendering. The current render error-card calls also use unregistered
+`:seon.error/symbol`, `:seon.error/where`, and `:seon.error/hint` keys while
+omitting the required `:seon.error/kind`. That schema mismatch is part of the
+same owner cut: registered presentation keys live inside
+`:seon.error/data`, and the standard message/kind/data error shape feeds both
+views.
+
+Closure additionally requires the canvas-only unresolved warning to be
+replaced by one derived, self-healing `:unresolved-symbol` family over final
+context slots, canvas, activated schema properties, and Stage-4 route rows,
+with the focused and frozen live proofs named by the boundary report.

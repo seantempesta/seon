@@ -473,6 +473,16 @@ that return arbitrary user data require a closed outer explicit
 infer failure from keys inside raw domain data. The migration waits for the
 active database/UDS lane and proceeds by inventoried owner groups.
 
+The unresolved-symbol owner is grounded by
+[[research/unresolved-render-symbol-boundary-2026-07-20]] (`4f4dbd95`). A
+selected symbol must resolve to a function; absence and non-function values
+produce the same visible standard error value in AI and HTML and never fall
+through to generic rendering. After Stage 1.5 freezes property dispatch and
+Stage 4 freezes route rows, Stage 5 replaces the canvas-only warning with one
+derived `:unresolved-symbol` family. The same cut repairs the current
+error-card schema mismatch by using required message/kind/data and registered
+presentation fields inside error data.
+
 The `/agents/run` polling row is closed by `6f157a3a`: one request-scoped
 `seon.reactive` registration observes the unchanged completion predicate,
 settles on the committing database value, preserves timeout closure as
