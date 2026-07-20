@@ -64,6 +64,20 @@
   [::session ::session]
   [::message ::message]
   [::timeout-ms {:optional true} ::timeout-ms]])
+(schema/register! ::on-text! 'fn?)
+(schema/register! ::send-text! 'fn?)
+(schema/register!
+ ::stream
+ [:map {:closed true}
+  [::connected? ::connected?]
+  [::send-text! ::send-text!]
+  [::close! ::close!]])
+(schema/register!
+ ::stream-request
+ [:map {:closed true}
+  [::socket-path ::socket-path]
+  [::on-text! ::on-text!]
+  [::on-close! {:optional true} ::on-close!]])
 
 (defn- failure
   ([message kind]
@@ -134,9 +148,8 @@
                    (+ chunk-offset copied)
                    payloads)))))))
 
-(defn- encode-frame [message]
-  (let [^js payload (.encode text-encoder
-                             ^String (t/write transit-writer message))
+(defn- text-frame [text]
+  (let [^js payload (.encode text-encoder ^String text)
         payload-bytes (.-byteLength payload)]
     (when (or (zero? payload-bytes)
               (> payload-bytes maximum-frame-bytes))
@@ -152,8 +165,14 @@
       (.set frame payload 4)
       frame)))
 
+(defn- encode-frame [message]
+  (text-frame (t/write transit-writer message)))
+
+(defn- payload-text [^js payload]
+  (.decode text-decoder payload))
+
 (defn- decode-payload [^js payload]
-  (t/read transit-reader (.decode text-decoder payload)))
+  (t/read transit-reader (payload-text payload)))
 
 (defn- empty-output []
   {::frames []
@@ -600,3 +619,162 @@
   {:malli/schema [:=> [:catn [::session ::session]] :boolean]}
   [session]
   ((::connected? session)))
+
+(defn connect-stream!
+  "Open one framed text-payload session on the shared four-byte codec.
+
+   The execution boundary owns its own Transit message codec, so this
+   session carries its already-encoded payload text verbatim: outbound
+   text is length-prefixed onto the socket and every inbound frame's
+   utf-8 text reaches `on-text!` in arrival order without request
+   correlation. `on-close!` receives the terminal error exactly once
+   after a successful open."
+  {:malli/schema [:=> [:catn [::request ::stream-request]] :any]}
+  [{::keys [socket-path on-text! on-close!]
+    :or {on-close! (fn [_])}}]
+  (js/Promise.
+   (fn [resolve-connect reject-connect]
+     (let [!socket (atom nil)
+           !connected? (atom false)
+           !terminal? (atom false)
+           !connect-settled? (atom false)
+           !output (atom (empty-output))
+           !parser (atom (fresh-parser))]
+       (letfn [(as-error [reason]
+                 (if (instance? js/Error reason)
+                   reason
+                   (failure (str reason)
+                            :seon.db.transport.uds.failure/closed)))
+               (settle-connect! [error stream]
+                 (when-not @!connect-settled?
+                   (reset! !connect-settled? true)
+                   (if error
+                     (reject-connect error)
+                     (resolve-connect stream))))
+               (terminate! [reason]
+                 (if @!terminal?
+                   false
+                   (let [error (as-error reason)
+                         socket @!socket
+                         connected? @!connected?]
+                     (reset! !terminal? true)
+                     (reset! !connected? false)
+                     (reset! !output (empty-output))
+                     (settle-connect! error nil)
+                     (when socket
+                       (try
+                         (js-invoke socket "close")
+                         (catch :default _)))
+                     (when connected?
+                       (js/setTimeout
+                        (fn []
+                          (try
+                            (on-close! error)
+                            (catch :default _)))
+                        0))
+                     true)))
+               (flush-output! []
+                 (when (and @!connected? (not @!terminal?))
+                   (loop []
+                     (when-let [{::keys [frame offset]}
+                                (first (::frames @!output))]
+                       (let [remaining (- (.-byteLength ^js frame) offset)
+                             accepted
+                             (try
+                               (js-invoke @!socket "write"
+                                          frame offset remaining)
+                               (catch :default error
+                                 (terminate! error)
+                                 -1))]
+                         (cond
+                           (neg? accepted)
+                           (terminate!
+                            (failure "Native database socket write failed."
+                                     :seon.db.transport.uds.failure/write))
+
+                           (zero? accepted)
+                           nil
+
+                           :else
+                           (do
+                             (try
+                               (swap! !output advance-output accepted)
+                               (catch :default error
+                                 (terminate! error)))
+                             (when-not @!terminal?
+                               (recur)))))))))
+               (enqueue-text! [text]
+                 (if @!terminal?
+                   (failure "The stream session is closed."
+                            :seon.db.transport.uds.failure/closed)
+                   (try
+                     (swap! !output append-output (text-frame text))
+                     (flush-output!)
+                     (when @!terminal?
+                       (failure "The stream session is closed."
+                                :seon.db.transport.uds.failure/closed))
+                     (catch :default error
+                       (terminate! error)
+                       error))))
+               (receive! [chunk]
+                 (when-not @!terminal?
+                   (try
+                     (let [{::keys [parser payloads]}
+                           (consume-chunk @!parser chunk)]
+                       (reset! !parser parser)
+                       (doseq [payload payloads]
+                         (when-not @!terminal?
+                           (on-text! (payload-text payload)))))
+                     (catch :default error
+                       (terminate! error)))))
+               (stream-map []
+                 {::connected? (fn [] @!connected?)
+                  ::send-text!
+                  (fn [text]
+                    (when-let [error (enqueue-text! text)]
+                      {:seon.error/message (str (.-message ^js error))}))
+                  ::close! #(terminate!
+                             (failure
+                              "The stream session was closed by its owner."
+                              :seon.db.transport.uds.failure/closed
+                              {::closed-by-owner? true}))})
+               (opened! [socket]
+                 (when (and (not @!terminal?) (not @!connected?))
+                   (reset! !socket socket)
+                   (reset! !connected? true)
+                   (settle-connect! nil (stream-map))
+                   (flush-output!)))]
+         (let [handler
+               (js-obj
+                "binaryType" "uint8array"
+                "open" (fn [socket] (opened! socket))
+                "data" (fn [_socket chunk] (receive! chunk))
+                "drain" (fn [_socket] (flush-output!))
+                "error" (fn [_socket error] (terminate! error))
+                "end" (fn [_socket]
+                        (terminate!
+                         (failure "The stream peer ended the session."
+                                  :seon.db.transport.uds.failure/closed)))
+                "close" (fn [_socket error]
+                          (terminate!
+                           (or error
+                               (failure "The stream session closed."
+                                        :seon.db.transport.uds.failure/closed))))
+                "connectError" (fn [_socket error]
+                                 (terminate! error)))
+               options (js-obj "unix" socket-path
+                               "allowHalfOpen" false
+                               "socket" handler)]
+           (try
+             (-> (@!connect-native options)
+                 (.then opened!)
+                 (.catch (fn [error]
+                           (terminate! error))))
+             (catch :default error
+               (terminate! error)))))))))
+
+(defn close-stream!
+  "Close a stream session and release its socket once."
+  {:malli/schema [:=> [:catn [::stream ::stream]] :boolean]}
+  [stream]
+  ((::close! stream)))

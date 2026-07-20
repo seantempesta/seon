@@ -23,8 +23,8 @@ transition ledger.
 |---|---|---|
 | U1 | seon.host skeleton + kill drill | **DONE** `cd239b79` |
 | U2 | wrapper registry + capability op-id receipts | **DONE** |
-| U1.5 | pod dials the host: tier-as-data dispatch, one REAL turn end-to-end (pod renders, host evals) | ready |
-| U4 | eval-record/receipt/corpus integration over the marked seams (subsumes register R2 — the program-row rejection diagnosis) | after U1.5 |
+| U1.5 | pod dials the host: tier-as-data dispatch, one REAL turn end-to-end (pod renders, host evals) | **DONE** |
+| U4 | eval-record/receipt/corpus integration over the marked seams (subsumes register R2 — the program-row rejection diagnosis) | ready |
 | U5 | toolkit port: .cljc the db-boundary 46%; capability proxies for the js-bound tail | parallel-safe |
 | U3 | graduation walking skeleton (one corpus fn: fingerprint → both-tier tests → JVM eval → epoch re-link) | after U2 |
 | U6 | instrumentation over sci vars (B1 deferred item 5) | after U4 |
@@ -301,6 +301,97 @@ fact count still 1 (4 tests / 24 assertions). Full `bin/test-writer`
 255 tests / 1982 assertions green; the §7 kill drill re-ran PASS on
 the registry-backed host (fleet restore + zero fact loss, registry
 rebuilt by re-registration).
+
+### U1.5 — pod dials the host: tier-as-data + one real turn — DONE (2026-07-20)
+
+Tier assignment is DATA on the agent entity:
+`:seon.execution.host/eval-socket-path` (registered by
+`seon.execution.host`, `[:string {:min 1}]`). Presence of the host
+coordinate routes that agent's `eval-batch!` invocations to the JVM
+`seon.host` at that UDS socket; absence keeps today's Bun child for
+every invocation — no `:type` taxonomy, no enum, default unchanged for
+every existing agent. The dispatch reads the fact at the invocation's
+pinned database value (injectable per configure! for tests); a failed
+tier read errors loudly, never a silent child fallback.
+
+One dispatch mechanism, two transports, strengthened IN PLACE in
+`seon.execution.host`: the claim/settle/exit/retire/cancel state
+machinery is lane-keyed (`::children` for Bun IPC children,
+`::host-sessions` for host sessions) and shared; the host session is a
+child-shaped control over `seon.db.transport.uds/connect-stream!` — a
+new framed text-payload layer in the ONE transport codec namespace
+(shared four-byte framing, transit payload text; `execution`'s message
+codec unchanged on both ends). The startup value a child receives as
+argv[2] is the session's FIRST frame; ready validation, invoke,
+result-currency, cancel, shutdown, and exit synthesis reuse the child
+lane's exact functions. Startup sends the launch descriptor's honest
+artifact identity; the host echoes it (the documented U1 trust-root
+divergence, carried in evidence as
+`:seon.execution.host/eval-socket-path` + echoed digest). Host
+sessions never idle-stop (park would drop context defs until the
+U2/U4 corpus tee + replay; U7 owns the policy).
+
+Contract parity checklist (the `seon.host` docstring inventory), each
+proven by focused pod tests
+(`test/seon/execution/host_test.cljs`, 21 tests / 107 assertions
+green) and/or the live drive: startup-as-first-frame ✓; ready echo
+validated by the same `ready-message-valid?` ✓; invoke/result with
+db-value echo + result-currency ✓; error frames ✓; one active
+invocation per agent (shared `!invocation-tails` queue) ✓; cancel
+(session ends, context survives host-side — favorable divergence,
+comment recorded) ✓; shutdown (host parks context) ✓; session death →
+the exact contract child-exited error value with
+`::execution/child-retired? true` and host evidence ✓.
+
+Real-turn proof (branch `default-u15`, harness
+`tmp/sci-probe/exec/{run-u15.sh,out/u15*-drive.log}` +
+`tmp/sci-probe/exec-src/seon/execution/u15_driver.cljs`, normal
+execution artifact for renders): real agent minted, tier fact + its
+canonical `:seon.schema` row transacted, five REAL turns through
+`seon.agent.turn/run-turn!` with a scripted llm-fn. Every turn
+rendered its prompt in the Bun child and evaled on the JVM host.
+Value-level wire evidence (captured per-form envelopes): turn 1
+`#'user/u15-double` + `42`; turn 2 cross-turn reuse — `(u15-double
+21)` resolved inside a `db/transact!` built in-context (the write
+reached the writer; it was rejected only by the writer's new managed
+identity policy for the harness's literal `:seon.agent.message/id`,
+returned as an ordinary `:seon/error` VALUE — errors-as-values held
+end to end). Kill drill first slice (U10): kill -9 the host mid-turn
+→ the turn recorded `:error` with the contract child-exited error
+value (message, `child-retired? true`, socket-path evidence, pinned
+db); driver respawned the host (~10 s) → turn 4 `:done` with a fresh
+def; turn 5 honestly showed `Unable to resolve symbol: u15-double`
+(pre-kill defs are NOT replayed — the U2/U4 seam). A direct
+`invoke-compiled!` eval-batch through the same dispatch returned
+`n-ok 2` with per-form values, and a JVM-side two-invocation probe
+proved cross-invocation def persistence plus a successful
+writer-committed fact (`u15-probe-fact`, op-id receipt present from
+U2's registry).
+
+Honest limits inherited by U4/U6 (visible in the drive):
+
+- `:seon.eval/ids` stays empty — NO eval rows, receipts, corpus tee,
+  program-graph tee, or transcript eval rendering for host-tier turns;
+  the turn closes `:done` with eval counts only, and eval failures are
+  invisible to the transcript (the drive had to capture wire envelopes
+  itself). U4 owns recording.
+- No def replay on context loss (host restart, shutdown-park): the
+  next turn starts from the shared base; agent-visible defs silently
+  vanish. U2's corpus tee + `replay-defs!` wiring closes this.
+- Renders (prompt/agent-view) and authored invocations still run in
+  the per-agent Bun child — a host-tier agent keeps a child alive for
+  rendering (render-in-child is the recorded design divergence until
+  U4/U11); `setup-agent-ns!`/starting-ns is ignored by the host batch
+  (evals land in the context's current ns, `user`).
+- No instrumentation over sci vars (U6), no repair sub-loop/preflight
+  resolution queries, no ALS print capture (B1 deferred items).
+- Timeout/child-exited synthesis: a host-side timeout error carries no
+  `child-retired?` claim (context survives — favorable divergence).
+- Cross-lane observation during the drive (not U1.5 defects): the
+  writer restarted mid-window by a concurrent lane produced honest
+  session EOFs until reconnect, and a protocol v11/v12 skew between a
+  freshly compiled driver and the older running writer failed
+  admission loudly; both resolved by version-consistent processes.
 
 ### Decision gate
 

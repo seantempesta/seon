@@ -1,6 +1,7 @@
 (ns seon.execution.host-test
   (:require
    [cljs.test :refer [async deftest is testing]]
+   [seon.db.transport.uds :as uds]
    [seon.execution :as execution]
    [seon.execution.host :as host]
    [seon.launch :as launch]
@@ -861,3 +862,278 @@
            (fn []
              (set! host/invoke! original-invoke)
              (done)))))))
+
+;; ============================================================
+;; JVM agent host lane — the same message contract over Transit-UDS.
+;; Tier assignment is data (`::host/eval-socket-path` on the agent);
+;; these tests inject the tier lookup and fake the native socket through
+;; the one `seon.db.transport.uds` connect seam.
+;; ============================================================
+
+(def ^:private !connect-native @#'uds/!connect-native)
+(def ^:private frame-text-encoder (js/TextEncoder.))
+(def ^:private frame-text-decoder (js/TextDecoder. "utf-8"))
+
+(defn- host-frame
+  "One length-prefixed frame carrying an encoded execution message."
+  [message]
+  (let [payload (.encode frame-text-encoder
+                         (execution/encode-message message))
+        n (.-byteLength payload)
+        frame (js/Uint8Array. (+ 4 n))]
+    (aset frame 0 (bit-and (unsigned-bit-shift-right n 24) 255))
+    (aset frame 1 (bit-and (unsigned-bit-shift-right n 16) 255))
+    (aset frame 2 (bit-and (unsigned-bit-shift-right n 8) 255))
+    (aset frame 3 (bit-and n 255))
+    (.set frame payload 4)
+    frame))
+
+(defn- written-message
+  "Decode one complete written frame back into its execution message."
+  [{::keys [frame]}]
+  (execution/decode-message
+   (.decode frame-text-decoder (.subarray ^js frame 4))))
+
+(defn- fake-host-socket []
+  (let [!handler (atom nil)
+        !socket (atom nil)
+        !options (atom nil)
+        !writes (atom [])
+        !close-count (atom 0)
+        socket (js-obj
+                "write"
+                (fn [frame offset byte-count]
+                  (swap! !writes conj
+                         {::frame (.slice ^js frame offset
+                                          (+ offset byte-count))})
+                  byte-count)
+                "close" (fn [] (swap! !close-count inc)))
+        connect (fn [options]
+                  (let [handler (aget options "socket")]
+                    (reset! !options options)
+                    (reset! !handler handler)
+                    (reset! !socket socket)
+                    ((aget handler "open") socket)
+                    (js/Promise.resolve socket)))]
+    {::connect connect
+     ::handler !handler
+     ::socket !socket
+     ::options !options
+     ::writes !writes
+     ::close-count !close-count}))
+
+(defn- host-inject!
+  "Deliver one framed message as a native data chunk."
+  [fixture message]
+  ((aget @(::handler fixture) "data") @(::socket fixture)
+   (host-frame message)))
+
+(defn- host-close!
+  "Fire the native close event — the host process died."
+  [fixture]
+  ((aget @(::handler fixture) "close") @(::socket fixture) nil))
+
+(defn- host-ready-message []
+  (assoc (ready-message) ::execution/bun-version "jvm-21.0.2"))
+
+(defn- eval-batch-invocation [invocation-id]
+  {::execution/message execution/invoke-message
+   ::execution/protocol-version execution/protocol-version
+   ::execution/agent-id "agent-1"
+   ::execution/invocation-id invocation-id
+   :seon.db/db database
+   ::execution/function-identity
+   {::execution/function-symbol 'seon.execution.runtime/eval-batch!
+    ::execution/artifact-digest digest}
+   ::execution/arguments [{:seon.eval/parsed []}]
+   ::execution/deadline-ms 9999999999999
+   ::execution/result-limit-bytes 4096})
+
+(defn- configure-with-host! [spawn!]
+  (host/configure!
+   {::host/launch-descriptor (descriptor)
+    ::host/javascript-runtime "bun"
+    ::host/ready-timeout-ms 1000
+    ::host/idle-timeout-ms 60000
+    ::host/cancel-grace-ms 5
+    ::host/eval-host-coordinate!
+    (fn [_invocation] (js/Promise.resolve "tmp/fake-agent-host.sock"))
+    ::host/spawn!
+    (fn [request]
+      (subprocess/start!
+       (assoc request ::subprocess/spawn!
+              (fn [^js options]
+                (spawn! {::host/cmd (vec (js->clj (.-cmd options)))
+                         ::host/ipc (.-ipc options)})))))}))
+
+(defn- turn* []
+  (js/Promise. (fn [resolve-promise _] (js/setTimeout resolve-promise 10))))
+
+(deftest host-tier-eval-batch-rides-the-uds-stream-not-a-child
+  (async done
+    (let [fixture (fake-host-socket)
+          prior-connect @!connect-native
+          spawned (atom [])
+          child (fake-process 401)
+          spawn! (fn [value]
+                   (swap! spawned conj value)
+                   (:process child))]
+      (reset! !connect-native (::connect fixture))
+      (configure-with-host! spawn!)
+      (let [completion (host/invoke! (eval-batch-invocation "host-eval-1"))]
+        (-> (turn*)
+            (.then
+             (fn [_]
+               (testing "the session opens at the agent's host coordinate
+                         and the startup value is the FIRST frame"
+                 (is (empty? @spawned)
+                     "no Bun child spawns for a host-tier eval batch")
+                 (is (= "tmp/fake-agent-host.sock"
+                        (aget @(::options fixture) "unix")))
+                 (let [startup (written-message (first @(::writes fixture)))]
+                   (is (= "agent-1" (::execution/agent-id startup)))
+                   (is (= digest (::execution/artifact-digest startup)))
+                   (is (= "execution"
+                          (::execution/shadow-build-id startup)))
+                   (is (= "test-cluster"
+                          (get-in startup
+                                  [::execution/database-selection
+                                   :seon.db/database-name])))))
+               (host-inject! fixture (host-ready-message))
+               (turn*)))
+            (.then
+             (fn [_]
+               (testing "the ready echo admits the session and the invoke
+                         frame follows on the same stream"
+                 (is (= execution/invoke-message
+                        (::execution/message
+                         (written-message (second @(::writes fixture))))))
+                 (let [processes (host/processes)
+                       session (first processes)]
+                   (is (= 1 (count processes)))
+                   (is (= "tmp/fake-agent-host.sock"
+                          (::host/eval-socket-path session)))
+                   (is (not (contains? session ::host/pid))
+                       "a host session has no child pid to sample")))
+               (host-inject! fixture
+                             (result-message "host-eval-1"
+                                             {:seon.eval/ids []}))
+               completion))
+            (.then
+             (fn [result]
+               (is (= execution/result-message
+                      (::execution/message result)))
+               (is (= {:seon.eval/ids []} (::execution/result result)))
+               (is (= database (:seon.db/db result)))))
+            (.catch
+             (fn [error]
+               (is false (str "host lane invocation failed: " error))))
+            (.finally
+             (fn []
+               (reset! !connect-native prior-connect)
+               (done))))))))
+
+(deftest host-session-death-mid-invocation-records-child-exited
+  (async done
+    (let [fixture (fake-host-socket)
+          prior-connect @!connect-native
+          spawn! (fn [_] (:process (fake-process 402)))]
+      (reset! !connect-native (::connect fixture))
+      (configure-with-host! spawn!)
+      (let [completion (host/invoke! (eval-batch-invocation "host-eval-2"))]
+        (-> (turn*)
+            (.then
+             (fn [_]
+               (host-inject! fixture (host-ready-message))
+               (turn*)))
+            (.then
+             (fn [_]
+               (is (= execution/invoke-message
+                      (::execution/message
+                       (written-message (second @(::writes fixture))))))
+               ;; kill -9 on the JVM host: the stream closes mid-invocation.
+               (host-close! fixture)
+               completion))
+            (.then
+             (fn [result]
+               (testing "the pod synthesizes the contract child-exited
+                         error value for the in-flight invocation"
+                 (is (= execution/error-message
+                        (::execution/message result)))
+                 (is (= "The execution child exited before returning a result."
+                        (get-in result [::execution/error
+                                        :seon.error/message])))
+                 (is (true? (get-in result [::execution/error
+                                            :seon.error/data
+                                            ::execution/child-retired?])))
+                 (is (= database (:seon.db/db result))))
+               (testing "the dead session is removed; the next invocation
+                         reconnects instead of reusing it"
+                 (is (empty? (host/processes)))
+                 (let [next-completion
+                       (host/invoke! (eval-batch-invocation "host-eval-3"))]
+                   (-> (turn*)
+                       (.then
+                        (fn [_]
+                          (let [startup (written-message
+                                         (nth @(::writes fixture) 2))]
+                            (is (= "agent-1"
+                                   (::execution/agent-id startup))
+                                "a fresh session re-sends startup"))
+                          (host-inject! fixture (host-ready-message))
+                          (turn*)))
+                       (.then
+                        (fn [_]
+                          (host-inject!
+                           fixture
+                           (result-message "host-eval-3"
+                                           {:seon.eval/ids []}))
+                          next-completion))
+                       (.then
+                        (fn [next-result]
+                          (is (= {:seon.eval/ids []}
+                                 (::execution/result next-result))
+                              "the agent's next turn works after restart"))))))))
+            (.catch
+             (fn [error]
+               (is false (str "host death drill failed: " error))))
+            (.finally
+             (fn []
+               (reset! !connect-native prior-connect)
+               (done))))))))
+
+(deftest render-invocations-stay-on-the-bun-child-for-host-tier-agents
+  (async done
+    (let [fixture (fake-host-socket)
+          prior-connect @!connect-native
+          spawned (atom [])
+          child (fake-process 403)
+          options (atom nil)
+          spawn! (fn [value]
+                   (reset! options value)
+                   (swap! spawned conj value)
+                   (:process child))]
+      (reset! !connect-native (::connect fixture))
+      (configure-with-host! spawn!)
+      (let [completion (host/invoke! (invocation "render-1"))]
+        (is (= 1 (count @spawned))
+            "a non-eval invocation spawns the Bun child synchronously")
+        (feed! @options (:process child) (ready-message))
+        (-> (turn*)
+            (.then
+             (fn [_]
+               (is (zero? (count @(::writes fixture)))
+                   "no host session opens for a render invocation")
+               (feed! @options (:process child)
+                      (result-message "render-1" {:my.render/value 7}))
+               completion))
+            (.then
+             (fn [result]
+               (is (= {:my.render/value 7} (::execution/result result)))))
+            (.catch
+             (fn [error]
+               (is false (str "render lane failed: " error))))
+            (.finally
+             (fn []
+               (reset! !connect-native prior-connect)
+               (done))))))))

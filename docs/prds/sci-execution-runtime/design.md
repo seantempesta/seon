@@ -185,6 +185,24 @@ loss). Recorded seams: def-persistence/corpus tee + `register!`
 admission (U2), authored invocation, `seon.execution` `.cljc`
 promotion, render entrypoints stay pod-served. Evidence: the U1
 section of [[roadmap]].
+U1.5 pod dials the host: tier-as-data dispatch + one real turn.
+**DONE (2026-07-20)** — tier assignment is the agent entity fact
+`:seon.execution.host/eval-socket-path` (presence of the host
+coordinate routes that agent's `eval-batch!` to the JVM host; absence
+keeps today's Bun child for everything). `seon.execution.host` remains
+the ONE dispatch mechanism with two transports: children on Bun IPC,
+host sessions on length-prefixed Transit-UDS through the new
+`seon.db.transport.uds/connect-stream!` (same codec, no second
+client); the startup value a child gets as argv[2] is the session's
+first frame, and the ready/invoke/result/error/cancel/shutdown
+semantics are shared with the child lane (shared claim/settle/exit
+state machinery, lane-keyed). Proven with real turns through
+`seon.agent.turn/run-turn!` on branch `default-u15` (prompt rendered
+in the Bun child, forms evaled on `seon.host`, values round-tripped),
+plus the U10 first slice: kill -9 mid-turn -> the turn records the
+contract child-exited error value with host evidence; restart -> the
+next turn works. Evidence and honest limits: the U1.5 section of
+[[roadmap]].
 U2 wrapper registry + capability envelope op-id: the seam study's
 registry-backed load-fn as the one provisioning mechanism; gates =
 cross-context lazy provisioning + idempotent-receipt proof.

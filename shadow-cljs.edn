@@ -399,4 +399,19 @@
    :devtools         {:enabled false}
    :compiler-options {:warnings-as-errors false
                       :optimizations      :simple
+                      :externs           ["externs/node_fs.js"]}}
+
+  ;; U1.5-EXPERIMENTAL real-turn drive (docs/prds/sci-execution-runtime).
+  ;; Drives the PRODUCTION pod dispatch (tier-as-data → JVM seon.host over
+  ;; Transit-UDS) with real turns on a branch database, including the host
+  ;; kill drill. Compiled one-off in the same separate Shadow cache as the
+  ;; B2 blocks; no operator flavor selects it. Delete with the B2 blocks
+  ;; when the PRD's decision gate lands.
+  :u15-driver
+  {:target           :node-script
+   :output-to        "out-b2/u15-driver/main.js"
+   :main             seon.execution.u15-driver/-main
+   :devtools         {:enabled false}
+   :compiler-options {:warnings-as-errors false
+                      :optimizations      :simple
                       :externs           ["externs/node_fs.js"]}}}}

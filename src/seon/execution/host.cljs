@@ -1,11 +1,28 @@
 (ns seon.execution.host
-  "Supervise flavor-owned agent execution children with Bun.
+  "Supervise flavor-owned agent execution over one dispatch mechanism.
 
-   The host owns spawning, request correlation, liveness, and shutdown for
-   child processes while execution semantics stay inside each child runtime."
+   The host owns spawning/connecting, request correlation, liveness, and
+   shutdown while execution semantics stay inside each serving runtime.
+   ONE dispatch mechanism serves TWO transports speaking the same message
+   contract (`seon.execution`'s startup/ready, invoke/result/error,
+   cancel, shutdown):
+
+   - the Bun execution child, spawned per agent, messages over Bun IPC
+     strings (today's default for every agent);
+   - the JVM agent host (`seon.host`), reached over a length-prefixed
+     Transit-UDS stream through `seon.db.transport.uds/connect-stream!`.
+
+   Tier assignment is DATA on the agent entity: an agent carrying
+   `::eval-socket-path` has its `eval-batch!` invocations served by the
+   JVM agent host at that socket; every other invocation (prompt/view
+   rendering, authored calls) stays on the Bun child until the U4/U11
+   seams move them. Absence of the fact keeps today's child for
+   everything (sci-execution-runtime design §9 step 1)."
   (:require
+   [seon.db :as db]
    [seon.db.branch :as branch]
    [seon.db.protocol :as db.protocol]
+   [seon.db.transport.uds :as uds]
    [seon.execution :as execution]
    [seon.launch :as launch]
    [seon.schema :as schema]
@@ -16,7 +33,13 @@
 (def ^:private default-cancel-grace-ms 1000)
 (def ^:private maximum-tail-characters (* 16 1024))
 
+;; Tier assignment as data: an agent entity carrying this host coordinate
+;; has its eval batches served by the JVM agent host at that UDS socket
+;; path; absence keeps today's Bun execution child. The coordinate IS the
+;; fact — no :type taxonomy, no enum, no second registry.
+(schema/register! ::eval-socket-path [:string {:min 1}])
 (schema/register! ::javascript-runtime [:string {:min 1}])
+(schema/register! ::eval-host-coordinate! 'fn?)
 (schema/register! ::ready-timeout-ms [:int {:min 1}])
 (schema/register! ::idle-timeout-ms [:int {:min 1}])
 (schema/register! ::cancel-grace-ms [:int {:min 1}])
@@ -51,7 +74,10 @@
  ::process
  [:map {:closed true}
   [::execution/agent-id ::execution/agent-id]
-  [::pid ::pid]
+  ;; A Bun child carries its pid; a JVM host session carries the host's
+  ;; socket path instead (there is no child process to sample).
+  [::pid {:optional true} ::pid]
+  [::eval-socket-path {:optional true} ::eval-socket-path]
   [::artifact-digest ::execution/artifact-digest]
   [::ready? ::ready?]
   [::retiring? ::retiring?]
@@ -69,9 +95,16 @@
   [::idle-timeout-ms {:optional true} ::idle-timeout-ms]
   [::cancel-grace-ms {:optional true} ::cancel-grace-ms]
   [::spawn! {:optional true} ::spawn!]
-  [::run-fence-current? {:optional true} ::run-fence-current?]])
+  [::run-fence-current? {:optional true} ::run-fence-current?]
+  [::eval-host-coordinate! {:optional true} ::eval-host-coordinate!]])
 
-(defonce ^:private !host (atom {::generation 0 ::children {}}))
+;; One state atom, two transport lanes with identical entry shapes. The
+;; lane keyword is the top-level key selecting the entry map.
+(def ^:private child-lane ::children)
+(def ^:private host-lane ::host-sessions)
+
+(defonce ^:private !host
+  (atom {::generation 0 ::children {} ::host-sessions {}}))
 (defonce ^:private !invocation-tails (atom {}))
 
 (defn- deferred []
@@ -120,15 +153,18 @@
   ((::subprocess/kill! control) "SIGKILL"))
 
 (defn- host-configuration [] (::configuration @!host))
-(defn- child [agent-id] (get-in @!host [::children agent-id]))
+(defn- entry [lane agent-id] (get-in @!host [lane agent-id]))
+(defn- child [agent-id] (entry child-lane agent-id))
 
 (defn- child-evidence [current]
   (let [usage ((::subprocess/resource-usage! (::control current)))
         started-at (get-in current [::active ::started-at])]
-    (cond-> {::pid (::pid current)
-             ::artifact-digest (::artifact-digest current)
+    (cond-> {::artifact-digest (::artifact-digest current)
              ::stdout-tail (::stdout-tail current)
              ::stderr-tail (::stderr-tail current)}
+      (some? (::pid current)) (assoc ::pid (::pid current))
+      (::eval-socket-path current)
+      (assoc ::eval-socket-path (::eval-socket-path current))
       usage (assoc ::resource-usage usage)
       started-at (assoc ::elapsed-ms
                         (max 0 (- (.now js/Date) (.getTime started-at)))))))
@@ -149,18 +185,20 @@
    loop to cooperate and does not retain or transact healthy measurements."
   {:malli/schema [:=> [:cat] ::processes]}
   []
-  (->> (::children @!host)
+  (->> (concat (::children @!host) (::host-sessions @!host))
        (map (fn [[agent-id current]]
               (let [active (::active current)
                     invocation (::invocation active)
                     usage ((::subprocess/resource-usage! (::control current)))]
                 (cond-> {::execution/agent-id agent-id
-                         ::pid (::pid current)
                          ::artifact-digest (::artifact-digest current)
                          ::ready? (boolean (::ready? current))
                          ::retiring? (boolean (::retiring? current))
                          ::stdout-tail (::stdout-tail current)
                          ::stderr-tail (::stderr-tail current)}
+                  (some? (::pid current)) (assoc ::pid (::pid current))
+                  (::eval-socket-path current)
+                  (assoc ::eval-socket-path (::eval-socket-path current))
                   usage (assoc ::resource-usage usage)
                   active
                   (assoc ::invocation
@@ -175,25 +213,25 @@
        vec))
 
 (defn- same-child?
-  [agent-id generation child-id]
-  (let [current (child agent-id)]
+  [lane agent-id generation child-id]
+  (let [current (entry lane agent-id)]
     (and (= generation (::generation current))
          (= child-id (::child-id current)))))
 
 (declare cancel! stop-child! settle-active!)
 
 (defn- remove-child!
-  [agent-id generation child-id]
+  [lane agent-id generation child-id]
   (swap! !host
          (fn [host]
-           (if (same-child? agent-id generation child-id)
-             (update host ::children dissoc agent-id)
+           (if (same-child? lane agent-id generation child-id)
+             (update host lane dissoc agent-id)
              host))))
 
 (defn- exit-child!
-  [agent-id generation child-id result]
-  (when (same-child? agent-id generation child-id)
-    (let [current (child agent-id)
+  [lane agent-id generation child-id result]
+  (when (same-child? lane agent-id generation child-id)
+    (let [current (entry lane agent-id)
           active (::active current)
           exit (::exit current)]
       (when-let [timer (::ready-timer current)] (js/clearTimeout timer))
@@ -215,26 +253,33 @@
                  ::execution/child-retired? true
                  :seon.db/db
                  (get-in active [::invocation :seon.db/db])))))
-      (remove-child! agent-id generation child-id)
+      (remove-child! lane agent-id generation child-id)
       ((::resolve! exit) (::subprocess/exit result)))))
 
 (defn- schedule-idle-stop!
-  [agent-id generation child-id]
-  (let [timeout-ms (get-in (host-configuration) [::idle-timeout-ms])
-        timer (js/setTimeout
-               (fn []
-                 (when (and (same-child? agent-id generation child-id)
-                            (nil? (::active (child agent-id))))
-                   (stop-child! agent-id)))
-               timeout-ms)]
-    (swap! !host assoc-in [::children agent-id ::idle-timer] timer)))
+  "Schedule the Bun child's idle shutdown; host sessions never idle-stop.
+
+   Parking a JVM host context today drops the agent's in-context defs —
+   the corpus tee that would make park/restore lossless is the recorded
+   U2/U4 seam, and the park/idle policy itself is U7. Until then an idle
+   host session stays open (C1 measured ~118 KB working set per context)."
+  [lane agent-id generation child-id]
+  (when (= child-lane lane)
+    (let [timeout-ms (get-in (host-configuration) [::idle-timeout-ms])
+          timer (js/setTimeout
+                 (fn []
+                   (when (and (same-child? lane agent-id generation child-id)
+                              (nil? (::active (entry lane agent-id))))
+                     (stop-child! agent-id)))
+                 timeout-ms)]
+      (swap! !host assoc-in [lane agent-id ::idle-timer] timer))))
 
 (defn- settle-active!
-  [agent-id generation child-id message]
+  [lane agent-id generation child-id message]
   (let [accepted (atom nil)]
     (swap! !host
            (fn [host]
-             (let [current (get-in host [::children agent-id])
+             (let [current (get-in host [lane agent-id])
                    active (::active current)]
                (if (and (= generation (::generation current))
                         (= child-id (::child-id current))
@@ -246,12 +291,12 @@
                    (reset! accepted
                            {::active active
                             ::retiring? (::retiring? current)})
-                   (update-in host [::children agent-id] dissoc ::active))
+                   (update-in host [lane agent-id] dissoc ::active))
                  host))))
     (when-let [{::keys [active retiring?]} @accepted]
       ((::resolve! active) message)
       (when-not retiring?
-        (schedule-idle-stop! agent-id generation child-id))
+        (schedule-idle-stop! lane agent-id generation child-id))
       true)))
 
 (defn- ready-message-valid?
@@ -280,18 +325,19 @@
              (current-run-fence? (::execution/run-fence invocation))))))
 
 (defn- receive!
-  [agent-id generation child-id encoded]
-  (when (and (string? encoded) (same-child? agent-id generation child-id))
+  [lane agent-id generation child-id encoded]
+  (when (and (string? encoded)
+             (same-child? lane agent-id generation child-id))
     (try
       (let [message (execution/decode-message encoded)
-            current (child agent-id)]
+            current (entry lane agent-id)]
         (case (::execution/message message)
           :seon.execution.message/ready
           (let [ready (::ready current)]
             (if (ready-message-valid? (host-configuration) agent-id message)
               (do
                 (js/clearTimeout (::ready-timer current))
-                (swap! !host assoc-in [::children agent-id ::ready?] true)
+                (swap! !host assoc-in [lane agent-id ::ready?] true)
                 ((::resolve! ready) current))
               (do
                 ((::resolve! ready)
@@ -306,15 +352,15 @@
             ((get-in current [::ready ::resolve!]) message)
             (when-let [active (::active current)]
               (if (result-current? (host-configuration) active message)
-                (settle-active! agent-id generation child-id message)
+                (settle-active! lane agent-id generation child-id message)
                 (settle-active!
-                 agent-id generation child-id
+                 lane agent-id generation child-id
                  (host-error (::invocation active)
                              "The execution result is no longer current.")))))
 
           nil))
       (catch :default _
-        (when-let [control (::control (child agent-id))]
+        (when-let [control (::control (entry lane agent-id))]
           (kill-process! control))))))
 
 (defn- startup-value
@@ -355,7 +401,7 @@
               (execution/encode-message startup)]
              ::subprocess/ipc
              (fn [message child-id]
-               (receive! agent-id generation child-id message))
+               (receive! child-lane agent-id generation child-id message))
              ::subprocess/on-out
              #(swap! !host update-in [::children agent-id ::stdout-tail]
                      append-tail %)
@@ -367,7 +413,7 @@
           timeout
           (js/setTimeout
            (fn []
-             (when (and (same-child? agent-id generation child-id)
+             (when (and (same-child? child-lane agent-id generation child-id)
                         (not (::ready? (child agent-id))))
                ((::resolve! ready)
                 (host-error {::execution/invocation-id "startup"}
@@ -388,8 +434,8 @@
                  ::stderr-tail ""}]
       (swap! !host assoc-in [::children agent-id] state)
       (-> (::subprocess/exited control)
-          (.then #(exit-child! agent-id generation child-id %))
-          (.catch #(exit-child! agent-id generation child-id
+          (.then #(exit-child! child-lane agent-id generation child-id %))
+          (.catch #(exit-child! child-lane agent-id generation child-id
                                 {::subprocess/exit -1})))
       (::promise ready))
     (catch :default error
@@ -397,6 +443,85 @@
        (host-error {::execution/invocation-id "startup"}
                    "The execution child could not be spawned."
                    {:seon.error/cause (ex-message error)})))))
+
+(defn- connect-host-session!
+  "Open one agent's session on the JVM agent host at its coordinate.
+
+   Same message contract as the Bun child, one transport difference: the
+   startup value that a child receives as argv[2] is the session's FIRST
+   frame, and messages ride length-prefixed Transit-UDS text through the
+   one `seon.db.transport.uds` stream codec. The startup carries the
+   launch descriptor's honest artifact identity; the JVM host trusts its
+   classpath and ECHOES those fields (the documented U1 trust-root
+   divergence), so the ready validation passes on the echo."
+  [agent-id socket-path]
+  (let [config (host-configuration)
+        generation (::generation @!host)
+        startup (startup-value config agent-id)
+        runtime (get-in config [::launch-descriptor ::launch/runtime])
+        session-id (str (random-uuid))
+        ready (deferred)
+        exit (deferred)]
+    (-> (uds/connect-stream!
+         {::uds/socket-path socket-path
+          ::uds/on-text!
+          (fn [text]
+            (receive! host-lane agent-id generation session-id text))
+          ::uds/on-close!
+          (fn [_error]
+            (exit-child! host-lane agent-id generation session-id
+                         {::subprocess/exit nil}))})
+        (.then
+         (fn [stream]
+           (let [control {::subprocess/id session-id
+                          ::subprocess/send!
+                          (fn [encoded] ((::uds/send-text! stream) encoded))
+                          ::subprocess/kill!
+                          (fn [_signal] (uds/close-stream! stream))
+                          ::subprocess/resource-usage! (constantly nil)
+                          ::subprocess/exited (::promise exit)}
+                 timeout
+                 (js/setTimeout
+                  (fn []
+                    (when (and (same-child? host-lane agent-id generation
+                                            session-id)
+                               (not (::ready? (entry host-lane agent-id))))
+                      ((::resolve! ready)
+                       (host-error
+                        {::execution/invocation-id "startup"}
+                        "The agent host session did not become ready."
+                        {::eval-socket-path socket-path}))
+                      (uds/close-stream! stream)))
+                  (::ready-timeout-ms config))
+                 state {::generation generation
+                        ::child-id session-id
+                        ::control control
+                        ::exit exit
+                        ::eval-socket-path socket-path
+                        ::artifact-digest
+                        (::launch/execution-digest runtime)
+                        ::ready ready
+                        ::ready-timer timeout
+                        ::ready? false
+                        ::stdout-tail ""
+                        ::stderr-tail ""}]
+             (swap! !host assoc-in [host-lane agent-id] state)
+             (when-let [send-error
+                        (send-message! control startup)]
+               ((::resolve! ready)
+                (host-error {::execution/invocation-id "startup"}
+                            "The agent host startup could not be sent."
+                            {::eval-socket-path socket-path
+                             :seon.error/cause
+                             (:seon.error/message send-error)}))
+               (uds/close-stream! stream))
+             (::promise ready))))
+        (.catch
+         (fn [error]
+           (host-error {::execution/invocation-id "startup"}
+                       "The agent host session could not be opened."
+                       {::eval-socket-path socket-path
+                        :seon.error/cause (ex-message error)}))))))
 
 (defn- retire-child!
   [current grace-ms]
@@ -421,26 +546,29 @@
       (kill-process! control))
     (js/setTimeout #(kill-process! control) grace-ms)))
 
-(defn- ensure-child!
-  [agent-id]
-  (if-let [current (child agent-id)]
+(defn- ensure-entry!
+  [lane agent-id socket-path]
+  (if-let [current (entry lane agent-id)]
     (cond
       (::retiring? current)
       (-> (::promise (::exit current))
-          (.then (fn [_] (ensure-child! agent-id))))
+          (.then (fn [_] (ensure-entry! lane agent-id socket-path))))
 
       (::ready? current)
       (js/Promise.resolve current)
 
       :else
       (::promise (::ready current)))
-    (spawn-child! agent-id)))
+    (if (= host-lane lane)
+      (connect-host-session! agent-id socket-path)
+      (spawn-child! agent-id))))
 
 (defn configure!
   "Configure the one Bun execution-child supervisor."
   {:malli/schema [:=> [:cat ::configure-request] :boolean]}
   [{::keys [launch-descriptor javascript-runtime ready-timeout-ms
-            idle-timeout-ms cancel-grace-ms spawn! run-fence-current?]}]
+            idle-timeout-ms cancel-grace-ms spawn! run-fence-current?
+            eval-host-coordinate!]}]
   (let [runtime (::launch/runtime launch-descriptor)]
     (when-not (and (::launch/execution-build-id runtime)
                    (::launch/execution-output runtime)
@@ -451,7 +579,8 @@
     (let [previous @!host
           grace-ms (or (get-in previous [::configuration ::cancel-grace-ms])
                        default-cancel-grace-ms)]
-      (doseq [current (vals (::children previous))]
+      (doseq [current (concat (vals (::children previous))
+                              (vals (::host-sessions previous)))]
         (retire-child! current grace-ms)))
     (swap! !host
            (fn [host]
@@ -464,17 +593,18 @@
                ::idle-timeout-ms (or idle-timeout-ms default-idle-timeout-ms)
                ::cancel-grace-ms (or cancel-grace-ms default-cancel-grace-ms)
                ::spawn! spawn!
-               ::run-fence-current? (or run-fence-current? (constantly true))}
-              ::children {}}))
+               ::run-fence-current? (or run-fence-current? (constantly true))
+               ::eval-host-coordinate! eval-host-coordinate!}
+              ::children {}
+              ::host-sessions {}}))
     (reset! !invocation-tails {})
     true))
 
 (defn- invoke-once!
-  "Run one invocation in its agent's supervised Bun child."
-  {:malli/schema [:=> [:cat :seon.execution/invoke] :any]}
-  [invocation]
+  "Run one invocation on its agent's serving transport lane."
+  [lane socket-path invocation]
   (let [agent-id (::execution/agent-id invocation)]
-    (-> (ensure-child! agent-id)
+    (-> (ensure-entry! lane agent-id socket-path)
         (.then
          (fn [ready]
            (if (::execution/message ready)
@@ -484,7 +614,7 @@
                    completion (deferred)]
                (swap! !host
                       (fn [host]
-                        (let [current (get-in host [::children agent-id])]
+                        (let [current (get-in host [lane agent-id])]
                           (if (and current
                                    (::ready? current)
                                    (not (::retiring? current))
@@ -499,7 +629,7 @@
                                 (reset! claimed current)
                                 (when-let [timer (::idle-timer current)]
                                   (js/clearTimeout timer))
-                                (assoc-in host [::children agent-id ::active]
+                                (assoc-in host [lane agent-id ::active]
                                           {::invocation invocation
                                            ::artifact-digest
                                            (::artifact-digest current)
@@ -517,15 +647,19 @@
                            (host-error
                             invocation
                             "The execution invocation could not be sent."
-                            {:seon.error/cause
-                             (or (:seon.error/message send-error)
-                                 (get-in send-error
-                                         [:seon.error/data
-                                          :seon.error/cause]))
-                             ::pid (::pid current)
-                             ::stdout-tail (::stdout-tail current)
-                             ::stderr-tail (::stderr-tail current)})]
-                       (settle-active! agent-id (::generation current)
+                            (cond-> {:seon.error/cause
+                                     (or (:seon.error/message send-error)
+                                         (get-in send-error
+                                                 [:seon.error/data
+                                                  :seon.error/cause]))
+                                     ::stdout-tail (::stdout-tail current)
+                                     ::stderr-tail (::stderr-tail current)}
+                              (some? (::pid current))
+                              (assoc ::pid (::pid current))
+                              (::eval-socket-path current)
+                              (assoc ::eval-socket-path
+                                     (::eval-socket-path current))))]
+                       (settle-active! lane agent-id (::generation current)
                                        child-id message)
                        (kill-process! control)
                        (::promise completion))
@@ -542,21 +676,40 @@
   (true? (get-in message [::execution/error :seon.error/data
                           ::execution/reload-required?])))
 
-(defn- invoke-now!
-  "Run the head invocation, replacing a source-stale child once."
+(def ^:private eval-batch-symbol 'seon.execution.runtime/eval-batch!)
+
+(defn- eval-batch-invocation? [invocation]
+  (= eval-batch-symbol
+     (get-in invocation [::execution/function-identity
+                         ::execution/function-symbol])))
+
+(defn- ^:async pull-eval-host-coordinate!
+  "Read the agent's eval host coordinate fact at the pinned database value."
   [invocation]
+  (let [pulled (await
+                (db/pull (:seon.db/db invocation)
+                         [::eval-socket-path]
+                         [:seon.agent/id
+                          (::execution/agent-id invocation)]))]
+    (if (:seon.error/message pulled)
+      {::coordinate-error pulled}
+      (::eval-socket-path pulled))))
+
+(defn- invoke-in-lane!
+  "Run the head invocation on one lane, replacing a source-stale child once."
+  [lane socket-path invocation]
   (let [agent-id (::execution/agent-id invocation)]
-    (-> (invoke-once! invocation)
+    (-> (invoke-once! lane socket-path invocation)
         (.then
          (fn [message]
            (if-not (reload-required? message)
              message
-             (let [current (child agent-id)]
+             (let [current (entry lane agent-id)]
                (when current
                  (kill-process! (::control current))
-                 (remove-child! agent-id (::generation current)
+                 (remove-child! lane agent-id (::generation current)
                                 (::child-id current)))
-               (invoke-once! invocation)))))
+               (invoke-once! lane socket-path invocation)))))
         (.catch
          (fn [exception]
            (let [diagnostic (get (ex-data exception) :seon.error/data)]
@@ -565,6 +718,33 @@
               "The execution host invocation failed."
               (cond-> {:seon.error/cause (ex-message exception)}
                 (map? diagnostic) (merge diagnostic)))))))))
+
+(defn- invoke-now!
+  "Route the head invocation by the agent's tier data, then run it.
+
+   Only `eval-batch!` consults the tier fact in U1.5: prompt/view
+   rendering and authored calls stay on the Bun child (synchronous spawn
+   preserved) until their seams move (U4 recording, U11 retirement). A
+   failed tier read surfaces loudly as an error frame — never a silent
+   child fallback that could run a host-tier agent's eval in a fresh
+   empty child context."
+  [invocation]
+  (if-not (eval-batch-invocation? invocation)
+    (invoke-in-lane! child-lane nil invocation)
+    (let [lookup (or (::eval-host-coordinate! (host-configuration))
+                     pull-eval-host-coordinate!)]
+      (-> (lookup invocation)
+          (.then
+           (fn [coordinate]
+             (if (::coordinate-error coordinate)
+               (host-error invocation
+                           "The agent's execution tier fact could not be read."
+                           {:seon.error/cause
+                            (get-in coordinate
+                                    [::coordinate-error
+                                     :seon.error/message])})
+               (invoke-in-lane! (if coordinate host-lane child-lane)
+                                coordinate invocation))))))))
 
 (defn invoke!
   "Queue one invocation in its agent's child; agents remain parallel."
@@ -691,72 +871,91 @@
   ([agent-id invocation-id]
    (cancel! agent-id invocation-id false))
   ([agent-id invocation-id child-retired?]
-  (if-let [current (child agent-id)]
-    (if (= invocation-id
-           (get-in current [::active ::invocation
-                            ::execution/invocation-id]))
-      (let [control (::control current)
-            child-id (::child-id current)
-            generation (::generation current)
-            timer (js/setTimeout
-                   (fn []
-                     (when (same-child? agent-id generation child-id)
-                       (kill-process! control)))
-                   (get-in (host-configuration) [::cancel-grace-ms]))]
-        (swap! !host
-               (fn [host]
-                 (-> host
-                     (assoc-in [::children agent-id ::retiring?] true)
-                     (assoc-in [::children agent-id ::kill-timer] timer))))
-        (settle-active! agent-id generation child-id
-                        (canceled-error
-                         (get-in current [::active ::invocation])
-                         (when child-retired?
-                           (assoc (child-evidence current)
-                                  ::execution/child-retired? true))))
-        (when
-         (send-message!
-          control
-          {::execution/message execution/cancel-message
-           ::execution/protocol-version execution/protocol-version
-           ::execution/invocation-id invocation-id})
-          (kill-process! control))
-        true)
-      false)
-    false)))
+   (let [cancel-in-lane!
+         (fn [lane]
+           (if-let [current (entry lane agent-id)]
+             (if (= invocation-id
+                    (get-in current [::active ::invocation
+                                     ::execution/invocation-id]))
+               (let [control (::control current)
+                     child-id (::child-id current)
+                     generation (::generation current)
+                     timer (js/setTimeout
+                            (fn []
+                              (when (same-child? lane agent-id generation
+                                                 child-id)
+                                (kill-process! control)))
+                            (get-in (host-configuration)
+                                    [::cancel-grace-ms]))]
+                 (swap! !host
+                        (fn [host]
+                          (-> host
+                              (assoc-in [lane agent-id ::retiring?] true)
+                              (assoc-in [lane agent-id ::kill-timer] timer))))
+                 (settle-active! lane agent-id generation child-id
+                                 (canceled-error
+                                  (get-in current [::active ::invocation])
+                                  (when child-retired?
+                                    (assoc (child-evidence current)
+                                           ::execution/child-retired? true))))
+                 ;; A Bun child exits after cancel; the JVM host ends only
+                 ;; the SESSION while the agent's context survives in the
+                 ;; host process (the documented favorable divergence).
+                 (when
+                  (send-message!
+                   control
+                   {::execution/message execution/cancel-message
+                    ::execution/protocol-version execution/protocol-version
+                    ::execution/invocation-id invocation-id})
+                   (kill-process! control))
+                 true)
+               false)
+             false))]
+     (or (cancel-in-lane! child-lane)
+         (cancel-in-lane! host-lane)))))
 
 (defn stop-child!
-  "Ask one agent child to stop and kill it after the shutdown grace."
+  "Ask one agent's execution resources to stop with the shutdown grace.
+
+   Both transport lanes stop: the Bun child receives shutdown then a kill
+   after the grace, and a JVM host session receives shutdown (the host
+   parks the agent's context and acknowledges) then a socket close."
   {:malli/schema [:=> [:cat ::execution/agent-id] :boolean]}
   [agent-id]
-  (if-let [current (child agent-id)]
-    (let [control (::control current)
-          child-id (::child-id current)
-          generation (::generation current)]
-      (swap! !host assoc-in [::children agent-id ::retiring?] true)
-      (when
-       (send-message!
-        control
-        {::execution/message execution/shutdown-message
-         ::execution/protocol-version execution/protocol-version})
-        (kill-process! control))
-      (js/setTimeout
-       (fn []
-         (when (same-child? agent-id generation child-id)
-           (kill-process! control)))
-       (get-in (host-configuration) [::cancel-grace-ms]))
-      true)
-    false))
+  (let [stop-in-lane!
+        (fn [lane]
+          (if-let [current (entry lane agent-id)]
+            (let [control (::control current)
+                  child-id (::child-id current)
+                  generation (::generation current)]
+              (swap! !host assoc-in [lane agent-id ::retiring?] true)
+              (when
+               (send-message!
+                control
+                {::execution/message execution/shutdown-message
+                 ::execution/protocol-version execution/protocol-version})
+                (kill-process! control))
+              (js/setTimeout
+               (fn []
+                 (when (same-child? lane agent-id generation child-id)
+                   (kill-process! control)))
+               (get-in (host-configuration) [::cancel-grace-ms]))
+              true)
+            false))
+        stopped-child? (stop-in-lane! child-lane)
+        stopped-session? (stop-in-lane! host-lane)]
+    (or stopped-child? stopped-session?)))
 
 (defn ^:async stop!
-  "Stop every supervised execution child."
+  "Stop every supervised execution child and agent host session."
   {:malli/schema [:=> [:cat] :int]}
   []
-  (let [children (::children @!host)
-        agent-ids (keys children)]
+  (let [current @!host
+        entries (concat (::children current) (::host-sessions current))
+        agent-ids (distinct (map first entries))]
     (doseq [agent-id agent-ids] (stop-child! agent-id))
     (await
      (js/Promise.all
       (clj->js
-       (mapv #(get-in % [::exit ::promise]) (vals children)))))
+       (mapv #(get-in (second %) [::exit ::promise]) entries))))
     (count agent-ids)))
