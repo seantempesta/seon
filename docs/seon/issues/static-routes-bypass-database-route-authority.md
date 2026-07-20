@@ -7,6 +7,15 @@ tags: [issue, architecture, web, database]
 
 # Move product routes out of the static router supplement
 
+## Design
+
+Implementation-ready design (owner ruling 2026-07-20 — route datoms are the
+single authority; symbol-resolved handlers; router re-derives through
+`seon.reactive`; tested-closed bootstrap set = readiness + assets; operator
+doors gate on launch capabilities at dispatch; `/feed` → `/sse` rides the
+collapse in stage 4):
+[[../../prds/source-cleanup/research/route-authority-collapse-2026-07-20]].
+
 ## Problem
 
 The active router has two route authorities: database-derived
