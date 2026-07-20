@@ -172,6 +172,10 @@ operator doors; only proven pre-database assets/readiness may remain static.
 
 ### Stage 5 — deletions and small unifications
 
+Claim (2026-07-20): Codex task `/root` owns fragile-index H6, the
+render-handler symbol-resolution completeness test, through focused/full CLJS
+proof and live default-cluster resolution evidence.
+
 Additional stage-5 items from
 [[research/bespoke-reactive-sweep-2026-07-20]] and
 [[research/envelope-symbol-conformance-2026-07-20]]: replace the
