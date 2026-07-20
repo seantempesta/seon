@@ -68,6 +68,22 @@ unchanged. Gate: the full existing CLJS eval/repl test selection green
 against the sci engine in the harness (not yet wired into production);
 divergence list written.
 
+**Status: DONE — green with divergences (2026-07-20).** Evidence:
+[[research/b1-eval-corpus-divergence-2026-07-20]]. The adapter
+(`tmp/sci-probe/src/probe/adapter.cljs`) satisfies the production eval
+envelope over `sci/eval-string+`; the ported corpus
+(`src/probe/corpus.cljs`, 33 tests / 80 assertions naming their
+production sources) is green 3/3 runs under the vendored bun.
+0 blockers; 9 adapter-work items (error-prose synthesis,
+warning→catch-site classification, binding-table provisioning replaces
+guarded-load's bundle trick, sci resolution queries for
+prose/preflight, instrumentation over sci vars, print-fn→ALS bridge,
+setup-agent-ns! sci form, cljs.test-in-ctx, timeout prose);
+5 improvements (value defs persist, in-process loop interrupt,
+async-try quirk absent, direct defmacro, defs-as-data); 3 cosmetic.
+Perf: 200-form burst 37–43 ms through the full envelope path vs
+143 ms self-host (raw sci 8.8–13.6 ms).
+
 ### B2 — retention + perf at production anchoring
 
 One real agent driven end-to-end on a sci child (branch cluster):
