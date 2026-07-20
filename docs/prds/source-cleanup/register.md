@@ -73,8 +73,11 @@ grounded in vendored Bun source; fork-after-warm definitively impossible;
 Workers strictly worse for containment). The 91 MB "projection" band is
 not shipped data (wire caps at 6 MB) — it is `schema/build-projection`
 EAGERLY compiling every Malli schema (`schema.cljc:307-315`). Efficient
-"sharing" therefore means not duplicating: (1) turn-scoped child pool —
-memory proportional to concurrent turns, not agents; (2) burst-retention
+"sharing" therefore means not duplicating: (1) OWNER-CORRECTED: not turn-scoped swapping — a child is the agent's
+stable live runtime (defs, result vars, in-flight work) and active
+agents keep theirs; the lever is PARKING idle agents (child reaped;
+agents are restart-safe database data) with 1-2 warm spares — memory
+proportional to ACTIVE agents; (2) burst-retention
 fix + `BUN_JSC_forceRAMSize` backstop; (3) lazy validator compilation at
 admission (kills most of the 91 MB Seon-side); (4) require-closure
 shrink. Deferred as non-major: bytecode (latency only), mmap (no byte
