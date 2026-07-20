@@ -1,7 +1,7 @@
 ---
 type: prd
 status: active
-tags: [prd, database, config]
+tags: [prd, database, architecture]
 ---
 
 # Config through aero into database facts PRD
@@ -101,3 +101,15 @@ is a boot snapshot — refresh it from the existing committed-transaction
 delivery when a transaction touches the singleton. Every other consumer
 already acquires per operation, so live transaction adjustability already
 works there.
+
+## Async-context proof required
+
+The proposed committed-transaction refresh of
+`db/install-configuration-context!` is not settled merely because
+`AsyncLocalStorage.enterWith` exists. It updates the current async context and
+work descended from it; existing independent fibers may retain the prior map.
+Before implementation, an executable probe must create two long-lived fibers,
+install the initial configuration, refresh from a separate committed-delivery
+fiber, and prove both original fibers read the replacement. If that falsifier
+fails, live configuration belongs at the operation/session acquisition owner;
+do not add a second ambient configuration cache or listener-specific fallback.

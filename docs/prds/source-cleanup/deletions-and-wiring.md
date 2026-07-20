@@ -14,16 +14,20 @@ permitting.
 
 ## Quality assessment of the orphans
 
-**`src/seon/agent/ctx/usage.cljs` (70 lines) — well written, wire it in.**
+**`src/seon/agent/ctx/usage.cljs` (70 lines) — useful, retain and wire it in.**
 Registered schemas, errors-as-values (nil on absent/garbage EDN), correct
 per-provider normalization with the semantics documented (DeepSeek
 `prompt_tokens` includes cached; Anthropic `input_tokens` excludes, cache
 fields add). Two fixes while wiring: it uses `[:maybe ::usage-edn]` /
 `[:maybe ::usage]` in the fn schema (banned; model absence as absent key /
-omitted projection) and it must gain a consumer + test.
+omitted projection) and it must gain a consumer + test. Tighten the provider
+boundary at the same time: counts must be non-negative integers; malformed or
+unknown provider shapes must omit the normalized projection and surface a
+debug diagnostic rather than silently becoming plausible all-zero usage.
 
-Wiring recommendation: a derived line in the existing transcript/usage
-surface — render `extract` of the turn's persisted
+Wiring ruling: a derived line in the existing debug turn projection, with the
+agent-page transcript showing compact actual total/cached/output values. Render
+`extract` of the turn's persisted
 `:seon.agent.turn/llm-usage` next to the token estimates the UI already
 shows; omit when `extract` yields nothing. One render fn in the owning ctx
 block; no new block family unless the owner wants usage as its own block.
@@ -65,6 +69,6 @@ usage); submodule removal leaves `git submodule status` clean and
    cached, Anthropic `input_tokens` excludes + cache fields add). It is
    tokens, not characters — it complements `seon.ai.tokens/estimate`
    (estimates) with provider-reported actuals. Owner direction: likely the
-   debug view; the observability researcher confirms the exact surface
-   (debug turn projection + agent page) before wiring.
+   debug turn projection plus compact agent-page usage. This is settled: do
+   not delete the namespace merely because it was temporarily orphaned.
 2. Archive the namespace-ui PRD folder (ruled).

@@ -6,6 +6,13 @@ tags: [research, schema, web, architecture]
 
 # Schema-aware data inspector — design research
 
+> Superseded detail: the later adversarial correction in
+> [[universal-data-browser-design-2026-07-20]] replaces this report's single
+> presence matcher with one derived index serving `candidate-shapes` for
+> diagnostics and validated `matching-shapes` for custom-render dispatch. In
+> particular, a missing-required-key value remains a diagnostic candidate but
+> never selects that schema's renderer.
+
 Owner ask (2026-07-20, vocabulary-unification §Owner rulings item 1): ONE
 component that detects which registered Malli schemas are present in a
 structure (a structure may satisfy several), renders the value with that

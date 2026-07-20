@@ -24,7 +24,9 @@ tree: every remaining synchronous consumer of the asynchronous `seon.db`
 facade fixed in place, one logging surface per process, one config/default
 owner per fact, the retired "pod" vocabulary gone from active source and
 living docs, and dead namespaces deleted. No stage adds a mechanism; every
-stage removes or unifies one.
+stage removes or unifies one, except the universal browser's required bounded
+child-sampling protocol operation, which extends the existing execution IPC
+rather than creating another value transport.
 
 Evidence base (all dated 2026-07-20, committed):
 
@@ -34,6 +36,7 @@ Evidence base (all dated 2026-07-20, committed):
 - [[../database-authority-mesh/research/cleanup-audit-vocabulary-2026-07-20]]
 - [[../runtime-reliability/research/cleanup-audit-config-startup-2026-07-20]]
 - [[../database-authority-mesh/research/pod-term-retirement-plan-2026-07-20]]
+- [[research/fresh-source-cleanup-gaps-2026-07-20]]
 
 ## Live bug ledger
 
@@ -69,11 +72,10 @@ Dependency-ordered; each stage is one coherent commit series with its own
 gate, and stages 2-5 are safe to interleave with other program lanes only at
 the named boundaries. One stage in progress at a time at the top level.
 
-### Stage 0 — land the in-flight lanes (now)
+### Stage 0 — integrate the initial cleanup lanes (graduated)
 
-B1, B2+B3-verify, B6, B7 lanes return; review, integrate, close ledger rows.
-Gate: three green suites (`bin/test-cljs`, `bin/test-writer`,
-`bin/seon test operator`), no `locks/` reappearance, MCP `await` proof.
+B1, B2, B6, B7, B10, and B13 are integrated with their recorded proofs. B3's
+remaining transaction-fault verification and sync reads belong to Stage 1.
 
 ### Stage 1 — finish the async-facade migration (B3-B5)
 
@@ -86,15 +88,28 @@ the current facade idiom. Gate: full CLJS suite plus one live cluster
 proof that a warn check, a render, and an eval each round-trip through the
 authority; the report's inventory rechecked to zero.
 
+### Stage 1.5 — universal data browser contract and transport
+
+Implement [[data-browser]] after the stage-1 render/schema overlap is closed:
+generic bounded rendering remains available when no schema matches; structural
+diagnostic candidates are distinct from validated custom-render matches; live
+eval drill requests address the owning execution child over the existing
+Transit ordinary-data IPC; `/data` samples an acquired database value through
+the same projection. Gate: invalid missing-key and wrong-type probes, ambiguous
+valid matches, a no-schema value, a large child-owned value with paging, route
+ownership refusal, and honest unavailable rendering after child retirement.
+
 ### Stage 2 — pod-term retirement (atomic rename)
 
 Execute [[../database-authority-mesh/research/pod-term-retirement-plan-2026-07-20]]
 steps 1-4 as one orchestrator-owned unit during a lane freeze: code
 identities (`client`/`cluster` mapping, `pod.js` -> `client.js`,
 `pod-events.log` -> `client-events.log`, `:seon.dev.process/pod` ->
-`/client`), then `acme`/`src-inspect-ai`, then living docs and skills
-(resync adapters), then the sweep. Gate: three suites, `bin/seon restart`
-live proof, sweep returns only `pod-host/` and deliberate history.
+`/client`), then `acme`/`src-inspect-ai`, then living docs, localized
+`AGENTS.md` authorities, and skills (resync adapters), then the sweep. Gate:
+three suites, `bin/seon restart` live proof, and a sweep returning only
+`pod-host/`, dated research/history, and dependency-owned terminology. No
+active authority may continue teaching “pod” as the current process name.
 
 ### Stage 3 — one logging convention
 
@@ -115,22 +130,36 @@ and `db/server.clj`; migrate runtime env gates (`SEON_WEB`, `SEON_SHELL`,
 `db/transport/uds.cljs:28`) to database facts or the launch descriptor;
 deduplicate the `SEON_EMBED` scrub with `bin/acme`; absolutize env dir
 coordinates in `config/load!`. Gate: operator suite, `bin/seon up` from a
-clean checkout, acme cluster boot, config-apply idempotence proof.
+clean checkout, acme cluster boot, config-apply idempotence proof. Before the
+ambient configuration refresh is selected, prove that two already-created
+independent async fibers observe the update; otherwise keep live acquisition
+at the owning operation/session boundary. Collapse the second product-route
+catalog in `seon.web.router/static-supplement`: route facts own product,
+lifecycle, debug, and data-browser routes; launch capabilities own optional
+operator doors; only proven pre-database assets/readiness may remain static.
 
 ### Stage 5 — deletions and small unifications
 
-Delete `src/seon/agent/ctx/usage.cljs` and `src/seon/ui/components.cljc`
-(dead: no consumer, test, or config reference); fix B9 to go through
+Retain and wire `src/seon/agent/ctx/usage.cljs` into the debug turn projection
+and compact agent-page usage, with validated non-negative provider counts and
+diagnostics for malformed/unknown shapes. Delete `src/seon/ui/components.cljc`
+(dead parallel UI layer); fix B9 to go through
 `seon.db`; extract the two namespace predicates `seon/dev/docstring.clj:193`
 duplicates into the owning `.cljc`; rename test-only "tile"/"verbs" fixture
-strings; owner-decides: `dev/storage-shootout.js`, `reference-code/integrant`
-submodule removal, downstream `bin/acme` gym naming. Gate: three suites;
-require-graph re-scan shows no orphan regressions.
+strings; resolve
+[[../../seon/issues/deprecated-skill-render-functions-indexed]] by removing
+false deprecation claims from canonical live render functions and deleting any
+actually retired function after caller migration; delete
+`dev/storage-shootout.js`, remove the `reference-code/integrant`
+submodule and its `.gitmodules` entry, and archive `docs/prds/namespace-ui/` as
+already ruled; downstream `bin/acme` gym naming remains downstream-owned. Gate:
+three suites; require-graph re-scan shows no orphan regressions, and no
+deprecated function remains eligible for the callable program index.
 
 ## Graduation
 
-All ledger rows closed with proof; the six evidence reports' fix plans each
-either executed or explicitly moved to a successor PRD; three suites green
+All ledger rows closed with proof; every evidence report's fix plan either
+executed or explicitly moved to a successor PRD; three suites green
 twice consecutively (intermittents B8 included); one live cluster session
 demonstrating: a warn check, a recovery decision on a real interrupted run,
 an MCP `await` round-trip, and same-shape log lines from both processes.

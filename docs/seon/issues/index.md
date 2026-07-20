@@ -128,7 +128,7 @@ See `README.md` for the convention.
 | [`my.ns/compact!` can hide the selected namespace](my-ns-compact-can-hide-namespace.md) | friction | agent |
 | [`my.ns/functions` points to a removed namespace renderer](my-ns-functions-points-to-removed-renderer.md) | friction | general |
 
-## Cleanup (12)
+## Cleanup (13)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -137,6 +137,7 @@ See `README.md` for the convention.
 | [Deprecated skills and context functions remain eligible for program indexing](deprecated-skill-render-functions-indexed.md) | cleanup | agent |
 | [Inspect concurrent attributed agent messages](inspect-concurrent-agent-messages.md) | cleanup | agent |
 | [Make the preflight repair test declare its schema dependencies](preflight-repair-focused-selector-relies-on-ambient-schemas.md) | cleanup | agent |
+| [Move product routes out of the static router supplement](static-routes-bypass-database-route-authority.md) | cleanup | UI |
 | [Partially-Stale Reference Docs Need Updates](stale-reference-docs.md) | cleanup | docs |
 | [Subagents block is implemented but not installed](subagents-block-is-implemented-but-not-installed.md) | cleanup | agent |
 | [Surface recency may be recomputed globally](surface-recency-recomputed.md) | cleanup | UI |

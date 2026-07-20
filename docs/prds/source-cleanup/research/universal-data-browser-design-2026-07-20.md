@@ -102,10 +102,11 @@ registered shapes without re-fingerprinting.
 
 1. per-entity attr override (`:seon.render/html` / `:seon.render/ai` value
    on the entity — `entity-render` step 1, unchanged);
-2. most-specific matched schema (via `schema/matching-shapes`, §4) that
+2. most-specific validated schema (via `schema/matching-shapes`, §4) that
    carries a registered renderer symbol for the requested view;
 3. the generic schema-aware tree (`render-html-data` → `data-panel` for
-   html; `value/render-ai` for ai) — annotated with the matches it did find.
+   html; `value/render-ai` for ai) — annotated with matches or diagnostic
+   near-matches when present. No schema match is a normal generic-tree state.
 
 Guarding is unchanged: dispatch through `block`/the walker keeps the
 strict-dial guard (`render.cljs:594-605`) — a throwing custom renderer
@@ -148,8 +149,11 @@ holding `{::validator f ::explainer f}` built lazily from
 Pipeline, per rendered value (top level + drilled nodes only, never every
 node of the walk):
 
-1. **Presence match** (free set ops, §4) → matched schema keys.
-2. **Validate** the primary match with the memoized validator → status enum
+1. **Candidate lookup** (free set ops, §4) → bounded plausible schema keys.
+2. **Validate** candidates with memoized validators. Successful validations
+   become `matching-shapes`; failed candidates remain diagnostic-only and can
+   never select a custom renderer. The primary diagnostic candidate yields
+   status enum
    `:seon.render.value/status` ∈ `#{:valid :invalid}`; when the confirm
    dial is off (prior report open-Q1 default), status is `:shape-only`.
 3. **Explain only on invalid**: run the memoized explainer, then
@@ -215,10 +219,18 @@ stored):
   (a) register the re-sample fn as an agent-authored shared fn (wrong: it
   is core machinery, not agent code); (b) one core GET route
   `/agent/{id}/value?id=<eval-id>&path=…&offset=…` returning the
-  `render-html-data` projection of that slice — an ordinary read-only page
-  route beside `/agent/{id}/debug`, same admission gate, no eval, no
-  capability question because nothing is invoked (the eval-id names a value
-  the agent's page already displays). Recommend (b).
+  `render-html-data` projection of that slice. The route joins the eval to
+  `{id}` and addresses that agent's retained execution child. The child runs
+  `lookup-result` plus bounded path sampling and returns an eager ordinary-data
+  projection through the existing Transit execution IPC. The parent cannot
+  dereference the child's process-local `globalThis.result` slot. Bun's
+  advanced IPC can structured-clone supported objects
+  (`reference-code/bun/docs/runtime/child-process.mdx:232-284`), but Seon's
+  maintained boundary is deliberately narrower
+  (`src/seon/execution.cljs:163-195`): Transit strings containing eager
+  ordinary data only. A retired child returns the existing honest
+  prior-session/eviction value; the browser does not add arbitrary value
+  persistence.
 
 Nav-style laziness (brief item 2 of the vendored list): re-examined and the
 prior report's call stands — `nav`'s re-contextualization is exactly what
@@ -226,17 +238,25 @@ the path re-sample does (`(get-in result/<id> path)` against the LIVE
 value), but as an explicit server round-trip on wire-safe data rather than
 a process-local protocol. Click-to-dive needs no more laziness than that.
 
-## 4. Fingerprinting unification — one matcher for everything
+## 4. Fingerprinting unification — one index, two queries
 
-`schema/matching-shapes` (prior report §6.1) is confirmed as the ONE
-matcher; this section extends its coverage beyond maps so "any value" holds:
+There are two deliberately different queries over one derived index:
+
+- `schema/candidate-shapes` finds bounded structural near-matches for
+  diagnostics, including schemas missing a required key;
+- `schema/matching-shapes` validates those candidates and returns only valid
+  matches for labels and custom-render dispatch.
+
+Both use the same projection/index and compiled-validator cache. This section
+extends their coverage beyond maps so "any value" holds:
 
 - **Maps** (incl. entities): inverted required-key index
   `{required-attr #{schema-key}}` derived in `build-projection` over ALL
   registered map forms with ≥1 required key (not only entity-catalog rows);
-  prefilter = key-set intersection, full-match = every required attr
-  present; specificity order = required-count desc, key asc — the verbatim
-  `entity-primary-schema` rule (`render.cljs:199-224`), which becomes
+  candidate prefilter = key-set intersection, with a bounded score for present
+  and missing required attrs. Full match = the memoized Malli validator accepts
+  the complete value; specificity order applies only among valid matches. The
+  `entity-primary-schema` rule (`render.cljs:199-224`) becomes
   `(first (filter :seon.schema/entity? (matching-shapes v)))`.
 - **Vectors/sets/seqs**: matched through their ELEMENTS — when the
   homogeneous-shape probe (`shared-keys`, `value.cljs:240-247`, already
@@ -257,9 +277,9 @@ matcher; this section extends its coverage beyond maps so "any value" holds:
   render as badges. Multiple-schemas-satisfied is thus first-class, not a
   discarded intermediate.
 
-One function, one index, derived per projection; entity dispatch, the value
-tree annotation, the `/data` browser, and custom-renderer resolution all
-consume it. No second matcher anywhere.
+One derived index and validator cache serve both queries; entity dispatch,
+value-tree diagnostics, the `/data` browser, and custom-renderer resolution do
+not grow private copies.
 
 ## 5. Extensibility proof — the acceptance example
 
@@ -291,7 +311,8 @@ Acceptance evidence, all mechanical:
 1. an eval returning a plan map renders the plan tree in the transcript's
    html view WITHOUT any code in `block`/`data-panel` naming plans;
 2. the drill-down header shows `:my.plan/plan` with a green dot; deleting a
-   required key from a probe copy flips it red, hover shows
+   required key removes it from `matching-shapes`, retains it as the primary
+   diagnostic candidate, flips the generic browser red, and hover shows
    `me/humanize`'s ":my.plan/steps missing" text;
 3. the "as data" switch still shows the generic bounded skeleton of the
    same value;
@@ -309,7 +330,7 @@ Extends the prior report's 7 steps (its 1–3 remain the contract base);
 each step is a small path-limited commit with its named gate.
 
 1. **`schema.cljc`** — shape index over ALL registered map forms +
-   `matching-shapes` + validator/explainer memo keyed
+   `candidate-shapes` + validated `matching-shapes` + validator/explainer memo keyed
    `[fingerprint schema-key]` (prior step 1, unchanged).
 2. **`schema.cljc`** — widen the catalog derivation: rows for ANY map form
    carrying a render property (entity rows keep `entity?`+id-attr extras).
@@ -327,8 +348,11 @@ each step is a small path-limited commit with its named gate.
    registered renderer via §2.2 before falling to the generic tree;
    `generic-default-renderer` (`render.cljs:691`) delegates to `block`
    (kills the unbounded pprint — prior step 4).
-6. **web** — the core `/agent/{id}/value` re-sample route (path + offset →
-   `render-html-data` slice, §3.3) with elided-tail paging.
+6. **execution + web** — one bounded child `sample-value` request over the
+   existing Transit IPC, then the core `/agent/{id}/value` route (eval id +
+   path + offset → ordinary `render-html-data` slice, §3.3) with ownership
+   check and elided-tail paging. `/data` uses the same projection over an
+   acquired database value without involving a child.
 7. **Leak closures** (prior steps 5–6): `/data`
    (`web/debug.cljs:157-168` pr-str) → `block`; eval result card
    (`handlers/eval.cljs:210-225`) → data projection when the live value
