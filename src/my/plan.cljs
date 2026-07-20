@@ -408,7 +408,11 @@
     [?root :my.plan/id ?root-id]])
 
 (def ^:private generated-namespace-for-run-query
-  '[:find [?root-id ?step-id ?namespace] .
+  ;; find-tuple (`:find [?a ?b ?c]`) already returns ONE tuple; the scalar
+  ;; `.` belongs only to find-scalar and made the whole query unparseable
+  ;; ("Cannot parse :find" at every run-attached turn close, B2 drive
+  ;; 2026-07-20 — live-proven against the default writer).
+  '[:find [?root-id ?step-id ?namespace]
     :in $ % ?run-id
     :where
     [?run :seon.agent.run/id ?run-id]
@@ -556,7 +560,9 @@
              ::db/query generated-namespace-for-run-query
              ::db/args [generated-root-rules run-id]
              ::db/max-work 250000
-             ::db/max-results 2
+             ;; A find-tuple result consumes the relation container plus one
+             ;; node per tuple element (three here).
+             ::db/max-results 4
              ::db/max-result-weight 4096})))
         [namespace-root-id namespace-step namespace-name]
         (when (vector? namespace-match) namespace-match)

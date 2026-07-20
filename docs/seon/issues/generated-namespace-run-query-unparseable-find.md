@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: closed
 tags: [issue, agent, database]
 severity: friction
 ---
@@ -16,6 +16,7 @@ severity: friction
 [:find [?root-id ?step-id ?namespace] .
  :in $ % ?run-id
  ...]
+
 ```
 
 `[?a ?b ?c]` is find-tuple; the trailing `.` belongs only to find-scalar.
@@ -42,3 +43,15 @@ pattern uses.
 
 - `generated-namespace-for-run-query` parses and returns the tuple for a
   live generated run; no new `:parser/find` fault datoms.
+
+## Resolution (2026-07-20, B2 lane)
+
+Fixed in `src/my/plan.cljs`: the scalar `.` removed (find-tuple already
+returns one tuple) and the query's `::db/max-results` budget raised to 4
+(relation container plus three tuple elements). Independently hit by the
+B2 production-anchoring drive, where EVERY run-attached turn close
+errored on this parse — severity was blocking for run-attached turns,
+not only friction. Live proof: the same find clause re-probed against
+the default writer parses past `:find` after the fix, and the B2 rerun's
+run-attached turns close `:done` with recorded evals
+([[../../prds/sci-execution-runtime/research/b2-production-anchoring-2026-07-20]]).
