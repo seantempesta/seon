@@ -12,6 +12,7 @@
    [seon.db.protocol :as protocol]
    [seon.db.transport.uds :as uds]
    [seon.error :as error]
+   [seon.log :as seon-log]
    [seon.schema :as schema]))
 
 ;;; Public data contracts
@@ -352,11 +353,16 @@
         (when (instance? js/Promise result)
           (.catch result
                   (fn [exception]
-                    (js/console.warn "[seon.db/listen!] async-rejected:"
-                                     (error/->message exception))))))
+                    (seon-log/warn!
+                     {:seon.log/source ::listen!
+                      :seon.log/message
+                      (str "handler async-rejected: "
+                           (error/->message exception))})))))
       (catch :default exception
-        (js/console.warn "[seon.db/listen!] threw:"
-                         (error/->message exception))))))
+        (seon-log/warn!
+         {:seon.log/source ::listen!
+          :seon.log/message
+          (str "handler threw: " (error/->message exception))})))))
 
 (defn- active-session []
   (let [state @!session]
