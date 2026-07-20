@@ -116,6 +116,17 @@ closed; expansion uses one new core read-only route
 `/agent/{id}/value?path=&offset=` with orchard-style elided-tail paging.
 Prior grounding: [[research/schema-aware-inspector-2026-07-20]].
 
+## First implementation boundary
+
+[[research/activated-schema-projection-boundary-2026-07-20]] is the
+implementation handoff after Stage 1.6 freezes its schema/render overlap. Unit
+1A owns only `src/seon/schema.cljc` and `test/seon/schema_test.cljs`: derive the
+activated required-attribute index and projection-scoped
+`candidate-shapes`/`matching-shapes`, then prove projection-identity cache
+rotation, deterministic all-match ordering, bounded near matches, open-map
+wrong-type rejection, and elision honesty. It does not reopen Unit 0 or touch
+rendering, web routes, database access, or execution-child transport.
+
 ## Problems this closes
 
 - Three value-rendering leaks bypassing the one mechanism (unbounded

@@ -123,6 +123,12 @@ sampler, and arbitrary opaque printers are never invoked. Focused sampler and
 HTML gates passed 39 tests / 132 assertions and 6 tests / 25 assertions with
 zero warnings. The issue is archived; Stage 1.5 may now advance to the
 activated schema projection after Stage 1.6's frozen integration gate.
+The post-freeze Unit 1A boundary is grounded durably in
+[[research/activated-schema-projection-boundary-2026-07-20]] (`c952c793`):
+only `schema.cljc` and `schema_test.cljs` derive and freeze the activated
+required-attribute index plus `candidate-shapes`/`matching-shapes` APIs, keyed
+by projection object identity. Render/value/web/execution consumers wait until
+that two-file contract and its ambiguity/open-map/elision falsifiers pass.
 
 ### Stage 1.6 — corrective steering gaps
 
