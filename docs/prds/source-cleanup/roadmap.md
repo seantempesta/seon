@@ -306,6 +306,10 @@ Two requested fixture repairs were stale because their integration-test owners
 were intentionally deleted; their issues are archived against maintained
 receipt and repair-batch coverage. The pre-existing `bin/test-parser`
 Babashka/Malli classpath failure is recorded separately and remains open.
+Follow-up `58fb020d` closes that gate without widening the parser runtime: the
+single transport-specific require/assertion is CLJS-only, while Babashka and
+CLJS continue to share the same parser corpus. `bin/test-parser` passed 46
+tests / 368 assertions and the CLJS selector passed 46 / 369.
 
 Fragile-index H2's safe consumer portion is implemented by `3ebc9e9b`:
 stored eval guidance is no longer reparsed as a serialized error envelope and

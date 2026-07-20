@@ -72,6 +72,8 @@ Precise parser schemas and stale fixture reconciliation are closed by
 `3a0dbd31` (46 tests / 369 assertions). The separate Babashka parser-gate
 classpath failure is recorded in
 [[../../seon/issues/parser-corpus-babashka-gate-misses-malli-dependency]].
+That gate is subsequently closed by `58fb020d`: Babashka passes 46 tests / 368
+assertions and CLJS retains the transport assertion at 46 / 369.
 
 ## Scheduled — claimed by a stage, awaiting execution order
 
