@@ -68,6 +68,10 @@ counts unexecuted complete stream-tail forms while preserving reply/blob bytes
 (15 tests / 40 assertions). G10's record-time query-shape framing is
 implemented by `418a3844` (18 tests / 75 assertions); its Stage-1.5 renderer
 consumer and behavioral agent acceptance remain open.
+Precise parser schemas and stale fixture reconciliation are closed by
+`3a0dbd31` (46 tests / 369 assertions). The separate Babashka parser-gate
+classpath failure is recorded in
+[[../../seon/issues/parser-corpus-babashka-gate-misses-malli-dependency]].
 
 ## Scheduled — claimed by a stage, awaiting execution order
 

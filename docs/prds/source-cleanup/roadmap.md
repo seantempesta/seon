@@ -298,6 +298,15 @@ debug 7 / 28, and transcript 12 / 38. Live agent-page proof waits for the
 coordinated frozen client because the default operator currently reports a
 retained source-intent ownership mismatch and port 7890 is down.
 
+Outcome (2026-07-20): `3a0dbd31` gives `strip-code-fences` and `parse-forms`
+precise Malli boundaries over the existing byte-identical parser behavior,
+including closed discriminated form/read/comment entries and the one documented
+polymorphic reader value. Focused CLJS proof passed 46 tests / 369 assertions.
+Two requested fixture repairs were stale because their integration-test owners
+were intentionally deleted; their issues are archived against maintained
+receipt and repair-batch coverage. The pre-existing `bin/test-parser`
+Babashka/Malli classpath failure is recorded separately and remains open.
+
 Fragile-index H2's safe consumer portion is implemented by `3ebc9e9b`:
 stored eval guidance is no longer reparsed as a serialized error envelope and
 debug reproduction reads EDN before selecting the qualified function symbol.
