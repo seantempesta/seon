@@ -152,6 +152,12 @@ same Malli closed-map semantics, the registry-derived audit covers all 35
 request maps, and the combined canvas/audit gate passed 9 tests / 104
 assertions. No parallel runtime key guard was introduced.
 
+Corrective-steering G6 is closed by `cd7ffdf0`+`5aae790b`: an incomplete eval
+row now names its eval ID, states that no result was recorded, and directs the
+agent to re-run the form instead of emitting the dead-end `<no result>`
+placeholder. The focused context gate passed 11 tests / 44 assertions and the
+issue is archived.
+
 From [[research/corrective-steering-audit-2026-07-20]] (all persist-time or
 pure-render, single execution, byte-identity safe):
 
@@ -312,7 +318,7 @@ Collapse-hunt items (adversarial review 2026-07-20):
   stays green (turn.cljs + diffusiongemma consume the promoted `.cljc`
   unchanged), `bin/test-writer` for embed, one writer REPL probe that the
   strategy seq realizes (~500/1000/2000/4000/8000 within jitter bounds).
-- `seon.render/value-leaf` (render.cljs:414-443) and `pruned-marker`
+- **CLOSED `6920227b`**: `seon.render/value-leaf` (render.cljs:414-443) and `pruned-marker`
   (:496-510) hand-mirror `seon.render.value/emit-leaf`'s marker token
   strings and have already drifted (leading-space `" ⟨"` vs `"⟨"`). Fix:
   extract the four emit-leaf branches into pure formatters
@@ -321,6 +327,8 @@ Collapse-hunt items (adversarial review 2026-07-20):
   compact no-leading-space `"⟨"` form is canonical (the ai token budget's
   shape) with the html gap restored via CSS; one render test pins that the
   html leaf's flattened text equals the corresponding emit-leaf string.
+  The four canonical formatters now live in `seon.render.value`; both focused
+  render suites passed 52 tests / 185 assertions.
 - The stored-rows -> schema-projection decode is duplicated between
   `seon.runtime.admission/committed-projection`
   (admission.cljs:209-232) and the execution-child load path

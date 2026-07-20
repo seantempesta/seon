@@ -50,6 +50,11 @@ Stage-5 retry collapse is closed by `84ab7097`: portable `retry.cljc` owns the
 turn/JVM embedding delay strategy, focused CLJS 14 tests / 31 assertions and
 JVM 6 tests / 18 assertions are green, and the full CLJS gate passed 1,304
 tests / 6,021 assertions.
+Corrective-steering G6 is closed by `cd7ffdf0`+`5aae790b`: incomplete eval rows
+name the eval ID and direct a re-run (focused context 11 tests / 44
+assertions). Stage-5 marker-token mirroring is closed by `6920227b`: AI and
+HTML share canonical datom, opaque, clipped-string, and pruned token formatters
+with 52 focused tests / 185 assertions green.
 
 ## Scheduled — claimed by a stage, awaiting execution order
 
