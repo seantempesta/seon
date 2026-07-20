@@ -15,7 +15,8 @@
      (fix {::content \"...\"})"
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
-            [seon.schema :as schema]))
+            [seon.schema :as schema])
+  (:import [java.io File]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schema Registration
@@ -68,12 +69,11 @@
                    [::line-end ::line-end]])
 
 (schema/register! ::tag
-                  [:enum
-                   :component :concept :issue :architecture :vision :reference
-                   :database :schema :flow :web :agent :trading :health
-                   :prd :decision :research
-                   :dashboard :index
-                   :capability :milestone :orchestrator :archive])
+                  [:keyword
+                   {:description
+                    "Frontmatter tag. The vocabulary is derived from live
+                     vault usage (a tag counts once at least two documents
+                     carry it), never a hand-maintained list."}])
 
 (schema/register! ::frontmatter
                   [:map-of :keyword :string])
@@ -552,16 +552,6 @@
                 ::fix "Add 'status: <value>' to frontmatter"}))
       (persistent! violations))))
 
-(def ^:private valid-tags
-  "Set of valid tag values from the ::tag enum."
-  #{:component :concept :issue :architecture :vision :reference
-    :database :schema :flow :web :agent :trading :health
-    :prd :decision :research
-    :dashboard :index
-    :capability :milestone :orchestrator :archive
-    ;; Core / pod domain (Phase 3 WASM containment work).
-    :pod :wasm :cljs :mcp})
-
 (defn- parse-tag-list
   "Parse a frontmatter tags value like '[database, schema]' into keywords."
   [tags-str]
@@ -571,34 +561,63 @@
                       (str/replace #"\]$" ""))]
       (mapv (comp keyword str/trim) (str/split cleaned #",")))))
 
+(def ^:private vault-vocabulary
+  "Corpus-derived frontmatter vocabulary for one vault root.
+
+   The vocabulary IS live usage: a tag or type value belongs once at least
+   two documents in the vault carry it, so a singleton is either a typo or
+   vocabulary nothing else has adopted. Computed, never a literal name set.
+   Memoized per vault root; a fresh process re-derives it from the files."
+  (memoize
+   (fn [vault-root]
+     (let [documents
+           (into []
+                 (comp (filter (fn [^File file] (.isFile file)))
+                       (filter (fn [^File file]
+                                 (str/ends-with? (.getName file) ".md")))
+                       (keep (fn [file] (first (parse-frontmatter (slurp file))))))
+                 (file-seq (io/file vault-root)))
+           adopted (fn [values]
+                     (into #{}
+                           (keep (fn [[value uses]] (when (<= 2 uses) value)))
+                           (frequencies values)))]
+       {::tag-vocabulary
+        (adopted (mapcat (fn [fm] (distinct (parse-tag-list (:tags fm))))
+                         documents))
+        ::type-vocabulary
+        (adopted (keep (comp keyword :type) documents))}))))
+
 (defn- rule-valid-tags
-  "Tags (if present) must be from ::tag enum."
-  [frontmatter]
-  (when-let [tags-str (:tags frontmatter)]
-    (let [tags (parse-tag-list tags-str)]
+  "Every tag must belong to the vault's corpus-derived tag vocabulary."
+  [frontmatter vault-root]
+  (when-let [tags-str (and vault-root (:tags frontmatter))]
+    (let [vocabulary (::tag-vocabulary (vault-vocabulary vault-root))]
       (into []
             (keep (fn [tag]
-                    (when-not (contains? valid-tags tag)
+                    (when-not (contains? vocabulary tag)
                       {::rule :valid-tags
                        ::severity :warning
                        ::line 1
-                       ::message (format "Invalid tag: %s (valid: %s)"
-                                         (name tag)
-                                         (str/join ", " (sort (map name valid-tags))))
-                       ::fix (format "Use a valid tag instead of '%s'" (name tag))})))
-            tags))))
+                       ::message (format "Tag not in vault vocabulary: %s (no second document uses it)"
+                                         (name tag))
+                       ::fix (format "Fix the typo, or adopt '%s' in a second document"
+                                     (name tag))})))
+            (parse-tag-list tags-str)))))
 
 (defn- rule-valid-type
-  "type field must be one of the known tag values."
-  [frontmatter]
-  (when-let [type-val (:type frontmatter)]
-    (let [type-kw (keyword type-val)]
-      (when-not (contains? valid-tags type-kw)
+  "type must belong to the vault's corpus-derived type vocabulary."
+  [frontmatter vault-root]
+  (when-let [type-val (and vault-root (:type frontmatter))]
+    (let [vocabulary (::type-vocabulary (vault-vocabulary vault-root))
+          type-kw (keyword type-val)]
+      (when-not (contains? vocabulary type-kw)
         [{::rule :valid-type
           ::severity :warning
           ::line 1
-          ::message (format "Invalid type: %s" type-val)
-          ::fix (format "Use one of: %s" (str/join ", " (sort (map name valid-tags))))}]))))
+          ::message (format "Type not in vault vocabulary: %s (no second document uses it)"
+                            type-val)
+          ::fix (format "Fix the typo, or adopt '%s' in a second document"
+                        type-val)}]))))
 
 (defn- find-in-vault
   "Search vault for a file matching target (Obsidian-style shortest path).
@@ -787,8 +806,8 @@
            (when (run? :list-style) (rule-list-style lines code-lines))
            (when (run? :has-frontmatter) (rule-has-frontmatter frontmatter))
            (when (run? :required-fields) (rule-required-fields frontmatter))
-           (when (run? :valid-tags) (rule-valid-tags frontmatter))
-           (when (run? :valid-type) (rule-valid-type frontmatter))
+           (when (run? :valid-tags) (rule-valid-tags frontmatter vault-root))
+           (when (run? :valid-type) (rule-valid-type frontmatter vault-root))
            (when (run? :wikilink-target-exists) (rule-wikilink-target-exists links vault-root))
            (when (run? :no-bare-urls) (rule-no-bare-urls links))
            (when (run? :skill-floor-duplication) (rule-skill-floor-duplication lines code-lines file-path))])))

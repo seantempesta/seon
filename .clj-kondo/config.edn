@@ -48,6 +48,13 @@
   :docstring-no-summary {:level :off}
   :docstring-leading-trailing-whitespace {:level :off}}
 
+ ;; Macros whose binding forms clj-kondo cannot infer. `with-authority`
+ ;; binds only the first element of its 3-element vector, so no builtin
+ ;; binding shape applies; def-catch-all keeps unresolved-symbol trustworthy
+ ;; everywhere else.
+ :lint-as
+ {seon.db.remote-contract-test/with-authority clj-kondo.lint-as/def-catch-all}
+
  ;; Output format configuration
  :output
  {:format :text

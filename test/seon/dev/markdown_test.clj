@@ -125,14 +125,21 @@
       (is (::md/valid? result)))))
 
 (deftest validate-valid-tags-test
-  (testing "flags invalid tags"
-    (let [result (md/validate {::md/content "---\ntype: component\nstatus: active\ntags: [database, invalid-tag]\n---\n# Title\n"
+  (testing "flags a tag no second vault document uses"
+    (let [result (md/validate {::md/content "---\ntype: component\nstatus: active\ntags: [database, tag-no-other-document-uses]\n---\n# Title\n"
+                               ::md/vault-root "docs"
                                ::md/rules #{:valid-tags}})]
       (is (not (::md/valid? result)))
       (is (= :valid-tags (::md/rule (first (::md/violations result)))))))
 
-  (testing "passes with valid tags"
+  (testing "passes with corpus-adopted tags"
     (let [result (md/validate {::md/content "---\ntype: component\nstatus: active\ntags: [database, schema]\n---\n# Title\n"
+                               ::md/vault-root "docs"
+                               ::md/rules #{:valid-tags}})]
+      (is (::md/valid? result))))
+
+  (testing "membership needs a vault; without one only shape rules apply"
+    (let [result (md/validate {::md/content "---\ntype: component\nstatus: active\ntags: [tag-no-other-document-uses]\n---\n# Title\n"
                                ::md/rules #{:valid-tags}})]
       (is (::md/valid? result)))))
 

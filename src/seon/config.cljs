@@ -46,6 +46,7 @@
    `transact!` validates each skill row)."
   (:require
     [aero.core :as aero]
+    [clojure.string :as str]
     [malli.core :as m]
     [malli.transform :as mt]
     [seon.platform :as platform]
@@ -1375,7 +1376,7 @@
   {:malli/schema [:=> [:cat] :boolean]}
   []
   (contains? #{"1" "true" "on" "yes"}
-             (some-> (env "SEON_RENDER_STRICT") clojure.string/lower-case)))
+             (some-> (env "SEON_RENDER_STRICT") str/lower-case)))
 
 ;;; --- Agent + test bounds (not render caps — kept on their own prefixes).
 
