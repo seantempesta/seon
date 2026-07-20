@@ -60,8 +60,9 @@ the audit report in the same series.
    async-facade files); dead `feed-behind-status` deleted after
    `bin/test-writer` proof; "stream" survives only at seams that own it
    (LLM stream/chunk/delta, SSE transport, Web Streams). **Owner ruled
-   2026-07-20: the public URL `/agent/{id}/feed` renames to `/sse`** in the
-   stage-2 freeze (route facts + shipped shim + downstream acme in the same
-   series).
+   2026-07-20: the public URL `/agent/{id}/feed` renames to `/sse`.**
+   Sequencing moved to stage 4: once the route-authority collapse makes the
+   route a database seed row, the rename is one seed-row edit riding that
+   collapse — one touch instead of two (stage-2 freeze skips the URL).
 3. `docs/seon/pod/REPL-WORKFLOW.md` folds into `docs/seon/architecture/`
    (ruled).
