@@ -25,10 +25,11 @@ probes, context measurements, and paid Kimi K3 results live in
 [[research/design-seam-audit-2026-07-19]]. This roadmap is the implementation
 ledger for the staged implementation below.
 
-Stages 1–4 and the projected-root portion of the Stage 5 scheduler are now
-source-complete. The remaining workflow is not yet public or end-to-end:
-root-only planner recovery, progressive repair context, evidence-derived
-completion, the public wrapper, and live graduation remain open.
+Stages 1–5, root-only scheduler recovery, and atomic addressed terminal
+delivery are now source-complete and live-proven. The remaining workflow is
+not yet public or end-to-end: evidence-derived namespace completion,
+embedding-ranked context augmentation, the public wrapper, and live graduation
+remain open.
 
 The preparatory context cleanup is complete at `e205dc9e`: namespace rendering
 has one configuration owner, the `:namespaces` block. Cluster
@@ -74,6 +75,25 @@ can follow the existing run/message/plan connections without inferring from
 global latest-test timestamps or storing a second generation result. The
 affected gate passed 610 tests/2,791 assertions; live current-artifact proof
 remains part of the Stage 3 checkpoint.
+
+The parse-once planner handoff landed at `62663283`. The ordinary turn passes
+its exact in-memory program projection and ordered eval batch to the
+database-owning `my.plan` publisher. An unrelated turn returns the ordinary
+`{:my.plan/ok? true}` no-op; an applicable generated root publishes its
+namespace DAG without reparsing the reply or storing another result entity.
+
+Root-only recovery and terminal delivery landed at `119c47dd`, followed by the
+reactive database-boundary correction at `00c2fc45`. The focused
+`my.plan`/`seon.ai.generate-code` gate passes 47 tests/187 assertions. On the
+exact rebuilt artifact, a generated root with no namespace child restored as
+the only reactive consumer while remaining open with progress 0/1. Terminal
+delivery advanced from basis transaction 536871766 to 536871767 and one query
+returned `[:done 536871767 536871767 "root" "user"]`: the root status and
+ordinary addressed message were committed in the same transaction. Replay
+left both basis transaction and commit ID unchanged and the terminal content
+still identified exactly one message. The observer returned to zero consumers,
+and cleanup at basis transaction 536871768 left the root, assignment message,
+and terminal message identity queries empty.
 
 Ordinary agent replies pass through `parse-forms` once and `eval-batch!`
 consumes the shared multi-namespace execution projection. Each whole top-level
@@ -576,10 +596,10 @@ Exit:
 
 ### Stage 5 — reactive scheduler and atomic assignment
 
-**Projected-root scheduler complete 2026-07-19 at `92bfccfd`, `3bfe78da`,
-`2dbb0fce`, plus the startup-restoration slice.** The stable root observer,
+**Scheduler and root-only recovery complete 2026-07-19 at `92bfccfd`,
+`3bfe78da`, `2dbb0fce`, `119c47dd`, and `00c2fc45`.** The stable root observer,
 atomic claim transaction, namespace-resident scheduling callback, and cold/hot
-restoration of roots that already have namespace children are implemented. One transaction
+restoration of generated roots are implemented. One transaction
 contains the claim CAS, ordinary addressed assignment message, and plan-message
 connection. Competing claim attempts reread the committed claim to classify a
 benign loss without parsing writer errors. The namespace's unique resident is
@@ -587,14 +607,12 @@ ensured idle before assignment; only the winning addressed message starts work.
 New residents copy the named execution model variant, while an existing or
 concurrently won resident retains its committed model attributes.
 
-The restoration query currently discovers a generation through a child carrying
-`:my.plan/namespace`. It therefore cannot recover the root-only interval after a
-planner assignment/reply is durable but before `compile-namespace-dag` commits
-the first child. Stage 7 must make a generation root recognizable from its own
-claim/message/goal facts and reproject the retained reply blob without
-re-evaluating accepted forms. The original awaited Promise cannot survive a pod
-restart; recovery also needs an addressed terminal result plus root-id
-inspection.
+The root's own message/claim/goal facts identify the generation before any
+namespace child exists. Startup restores that root and lets it wait for the
+parse-once DAG publication. One terminal owner atomically fences the root status
+and builds one ordinary addressed result message from the generated root's
+coordinator to its required caller. Later reactive notifications and explicit
+replay reread the committed terminal status and write nothing.
 
 Focused scheduler proof passes 183 tests/916 assertions; the recovery/client
 gate passes 55 tests/348 assertions. Together they cover one committed message
@@ -718,33 +736,31 @@ Exit:
 
 ## Next implementation boundary
 
-Stage 6 progressive repair context is the dependency-ready boundary. Finish
-assignment-time reconciliation of the resident's existing `:plan` and
-`:namespaces` blocks. The plan renderer derives its development view from the
-cause-linked assignment even when the namespace step remains owned by the
-coordinator. The namespaces renderer owns the complete production catalog and
-the exact full-source set for the target, selected owners, and their explicit
-`.internal` descendants. Prove an initial planner sees broad summaries and
-selected source, a repair resident sees its exact durable contract plus
-relevant full source, reassignment replaces stale selection, and an inactive
-resident returns to ordinary plan rendering. The scheduler and named execution
-variant are settled inputs; this stage must not add another context block,
-registry, parser, or worker-selection path.
+The earliest unsettled contract is evidence-derived namespace completion. A
+namespace step closes only from its causally linked immutable evals and the
+behavioral-test facts already stored on those evals. Planner first-pass evidence
+is reached through root message → run cause → turn → eval; repair evidence is
+reached through namespace assignment message → worker run cause → turn → eval.
+The completion projection must use the ordered eval identities, namespace and
+status facts, skipped entries, and native `:seon.test.runner/tests`, `/test`,
+`/pass`, `/fail`, and `/error` attributes. It must never trust worker prose,
+`n-ok`, a latest-test timestamp, or a second test/result entity.
 
-After that assignment-time reconciliation lands, the next two bounded Stage 6
-slices are the `my.ns` full/compact operations plus stale-guidance repair, then
-embedding-ranked namespace augmentation. The first is complete at `15acdaf9`.
-The embedding slice must first add explicit compact inclusion to the existing
-namespaces block; current selection cannot render an unrelated ranked hit as a
-compact card. Search the existing function-source corpus only, scope to usable
-function rows, pull each hit's owning namespace, group by namespace using its
-best distance with deterministic tie-breaking, and reconcile exact compact
-and full presence-sets. Disabled or failed embedding search returns the
-deterministic selection unchanged. Do not add namespace-summary embeddings,
-fake require edges, or another context renderer.
+Exit for this boundary:
 
-After Stage 6, Stage 7 begins with the parse-once planner-turn handoff and
-database-owning DAG publication described above, not a standalone public
-wrapper. The AI-only effective-definition transcript projection remains its
-own evidence slice because it touches history acquisition and must prove the
-HTML/debug transcript remains raw.
+- a green first-pass namespace closes atomically and launches no repair worker;
+- that transaction exposes newly ready dependents through the existing root
+  observer;
+- failed eval or behavioral-test evidence leaves only its namespace repairable
+  with exact eval/test handles;
+- absent or skipped required evidence remains incomplete rather than passing;
+- restart and replay write no duplicate status, message, or evidence; and
+- the implementation derives completion through existing IDs/refs without a
+  second result schema, runner, callback registry, or timestamp inference.
+
+After completion is settled, add embedding-ranked namespace augmentation
+through the existing namespaces block. Search the existing function-source
+corpus only, filter usable function rows, rank each namespace by its best
+distance with deterministic tie-breaking, and reconcile exact compact/full
+presence sets. Disabled or failed search leaves deterministic selection
+unchanged. The public wrapper remains downstream of both contracts.
