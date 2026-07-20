@@ -80,6 +80,23 @@
     (testing (str note " — " (pr-str in))
       (is (= expected (strip-form-span (parse/parse-forms in)))))))
 
+(deftest public-parser-schemas-pin-the-exact-boundary
+  (let [strip-schema (:malli/schema (meta #'parse/strip-code-fences))
+        parse-schema (:malli/schema (meta #'parse/parse-forms))
+        entry-union (-> parse-schema (nth 2) second)]
+    (is (= [:=> [:cat :string] :string] strip-schema))
+    (is (= :vector (first (nth parse-schema 2))))
+    (is (= :multi (first entry-union)))
+    (is (= #{:form :read :comment}
+           (set (map first (drop 2 entry-union)))))
+    (is (= "\n(+ 1 2)\n"
+           (parse/strip-code-fences "```clojure\n(+ 1 2)\n```"))
+        "schema metadata does not alter the established fence-strip bytes")
+    (is (= "(+ 1 2)"
+           (:seon.repl/source
+            (first (parse/parse-forms "(+ 1 2)"))))
+        "schema metadata does not alter byte-faithful form source")))
+
 (deftest namespace-program-is-one-projection-of-the-ordinary-parse
   (let [source (str ";; shared model first\n"
                     "(ns my.orders.model\n"

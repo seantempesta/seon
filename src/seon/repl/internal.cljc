@@ -125,6 +125,7 @@
   "Remove markdown code-fence LINES (` ``` ` and ` ~~~ `, with optional
    language tag) from `text`. Content between fences stays put.
    Comments + forms outside fences are untouched. Idempotent."
+  {:malli/schema [:=> [:cat :string] :string]}
   [text]
   (str/replace text fence-line-re ""))
 
@@ -1156,6 +1157,43 @@
    Delegates the token loop to [[parse-forms*]] on the rewritten text
    (`:strip-fences?` false — this fn already stripped), then rebases every
    entry onto the original text via the segment map."
+  {:malli/schema
+   [:=>
+    [:cat
+     :string
+     [:? [:map {:closed true}
+          [:strip-fences? :boolean]]]]
+    [:vector
+     [:multi {:dispatch :seon.repl/kind}
+      [:form
+       [:map {:closed true}
+        [:seon.repl/kind [:= :form]]
+        [:seon.repl/narration :string]
+        [:seon.repl/source :string]
+        [:seon.repl/eval-source {:optional true} :string]
+        ;; A read sexpr is the genuinely polymorphic rewrite-clj boundary.
+        [:seon.repl/form :any]
+        [:seon.repl/span
+         [:tuple [:int {:min 0}] [:int {:min 0}]]]]]
+      [:read
+       [:map {:closed true}
+        [:seon.repl/kind [:= :read]]
+        [:seon.repl/ok? [:= false]]
+        [:seon.repl/narration :string]
+        [:seon.repl/source :string]
+        [:seon.repl/eval-source {:optional true} :string]
+        [:seon/error
+         [:map {:closed true}
+          [:seon.error/kind
+           [:enum :eof :unmatched-delimiter :odd-map :bad-metadata
+            :invalid-token :read]]
+          [:seon.error/message :string]]]
+        [:seon.repl/span
+         [:tuple [:int {:min 0}] [:int {:min 0}]]]]]
+      [:comment
+       [:map {:closed true}
+        [:seon.repl/kind [:= :comment]]
+        [:seon.repl/narration :string]]]]]]}
   [text & [{:keys [strip-fences?] :or {strip-fences? true}}]]
   (let [orig     (if strip-fences? (strip-code-fences text) text)
         pieces   (scan-heredoc-pieces orig)]
