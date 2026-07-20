@@ -411,33 +411,49 @@
     (let [code ((requiring-resolve 'seon.embed.preflight/run-preflight!))]
       (flush)
       (System/exit code))
+    ;; The shutdown hook is registered BEFORE start!. start! advertises
+    ;; readiness (binds the request socket) mid-flight, so a TERM arriving
+    ;; between the bind and a post-start! registration would exit with no
+    ;; hooks and lose the terminal-result publication. The hook awaits the
+    ;; started promise so a TERM during start waits for start! to finish,
+    ;; then runs the one ordered shutdown + publish path.
     (let [terminal-config (terminal-configuration (System/getenv))
-          server (start! arguments)
+          started (promise)
           shutdown-hook
           (Thread.
            ^Runnable
            (fn []
-             (try
-               (let [result (run-shutdown! server terminal-config)
-                     stop-response
-                     (if terminal-config
-                       (:seon.db.terminal/stop-response result)
-                       result)]
-                 (cond
-                   (and terminal-config
-                        (false? (:seon.db.terminal/completed? result)))
-                   (binding [*out* *err*]
-                     (println "[database] shutdown failed:"
-                              (:seon.db.terminal/stop-error result)))
-
-                   (not (::stopped? stop-response))
-                   (binding [*out* *err*]
-                     (println "[database] shutdown incomplete:"
-                              (pr-str stop-response)))))
-               (catch Throwable throwable
+             (let [server (deref started (* 5 60 1000) ::start-timed-out)]
+               (if-not (map? server)
                  (binding [*out* *err*]
-                   (println "[database] shutdown failed:"
-                            (.toString throwable))))))
+                   (println "[database] shutdown before start completed:"
+                            (name server)))
+                 (try
+                   (let [result (run-shutdown! server terminal-config)
+                         stop-response
+                         (if terminal-config
+                           (:seon.db.terminal/stop-response result)
+                           result)]
+                     (cond
+                       (and terminal-config
+                            (false? (:seon.db.terminal/completed? result)))
+                       (binding [*out* *err*]
+                         (println "[database] shutdown failed:"
+                                  (:seon.db.terminal/stop-error result)))
+
+                       (not (::stopped? stop-response))
+                       (binding [*out* *err*]
+                         (println "[database] shutdown incomplete:"
+                                  (pr-str stop-response)))))
+                   (catch Throwable throwable
+                     (binding [*out* *err*]
+                       (println "[database] shutdown failed:"
+                                (.toString throwable))))))))
            "seon-database-shutdown")]
       (.addShutdownHook (Runtime/getRuntime) shutdown-hook)
+      (try
+        (deliver started (start! arguments))
+        (catch Throwable throwable
+          (deliver started ::start-failed)
+          (throw throwable)))
       (.. (Thread/currentThread) join)))))
