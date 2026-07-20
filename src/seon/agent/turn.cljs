@@ -547,11 +547,28 @@
                     (if (= :form (:seon.repl/kind entry))
                       (reduced index)
                       (inc index)))
-                  0 parsed)]
+                  0 parsed)
+          retained
+          (if (< first-form-index (count parsed))
+            (vec (take (inc first-form-index) parsed))
+            parsed)
+          remaining-form-count
+          (->> (drop (inc first-form-index) parsed)
+               (filter #(= :form (:seon.repl/kind %)))
+               count)
+          retained
+          (if (pos? remaining-form-count)
+            (update-in
+             retained [first-form-index :seon.repl/narration]
+             (fn [narration]
+               (str (when (seq narration) (str narration "\n"))
+                    "; stream mode executed the first complete form; "
+                    remaining-form-count " further "
+                    (if (= 1 remaining-form-count) "form was" "forms were")
+                    " not executed — resend the next form.")))
+            retained)]
       {:seon.repl/eval-entries
-       (if (< first-form-index (count parsed))
-         (vec (take (inc first-form-index) parsed))
-         parsed)
+       retained
        :seon.repl/errors []})))
 
 (defn ^:async ^:private ask-and-eval-reply!
