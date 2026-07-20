@@ -6,6 +6,16 @@ tags: [prd, architecture, database, agent, web]
 
 # Source cleanup and vocabulary unification roadmap
 
+This is the index of the source-cleanup PRD collection. Each domain PRD lays
+out its problems, recommended solutions, acceptance, and the open owner
+questions:
+
+- [[async-facade]] — finish the async `seon.db` migration (B3-B5)
+- [[config-through-aero]] — every knob through aero into database facts
+- [[logging-unification]] — one line shape, agent-readable faults
+- [[vocabulary-unification]] — pod retirement + remaining term rulings
+- [[deletions-and-wiring]] — orphans: wire `ctx.usage`, delete the rest
+
 ## Outcome
 
 Finish the runtime-reliability refactor's deletion promise across the working
@@ -32,13 +42,15 @@ clean loop of the owning gate.
 
 | # | Bug | Owner file(s) | State |
 |---|---|---|---|
-| B1 | `later-run?` booleans a Promise (always true); whole ns reads async facade synchronously | `src/seon/runtime/recovery.cljs` | fix lane in flight |
+| B1 | `later-run?` booleans a Promise (always true); whole ns reads async facade synchronously | `src/seon/runtime/recovery.cljs` | **CLOSED** `a2b0c815`: ns fully async, regression tests, live `.then` proof |
 | B2 | Agent-loop failure reports bypass `seon.log`; `seon.log/tail` blind to loop faults (16 sites + turn/run/schedule/db/ai clusters) | `src/seon/agent/loop.cljs` + report list | fix lane in flight |
 | B3 | `eval.cljs` "record-eval! tx FAILED" may print without persisting a fault datom (contract check in flight); plus 7 sync-read clusters | `src/seon/eval.cljs` | verify in B2 lane; sync reads stage 1 |
 | B4 | `seon.warn` repair guidance names removed `seon.db/*conn*`; ~15 sync facade reads across check registry | `src/seon/warn.cljs:1064` | issue filed; stage 1 |
 | B5 | Remaining sync facade reads: `render.cljs:684`, `agent/testrun.cljs:192,205`, `agent/web/internal.cljs:528-536`, `handlers/message.cljs:43`, `my/skills.cljs:324-331`, `my/canvas.cljs:149-153` | listed files | stage 1 |
-| B6 | Stray repo-root `locks/` from `cli_test` fixture running real `state/with-lock` with nil process-dir | `script/seon/dev/state.clj`, `test/seon/dev/cli_test.clj` | fix lane in flight |
-| B7 | MCP/dev CLJS REPL cannot use `await`/`^:async`; Promises returned unresolved | `bin/mcp-server-cljs` path | fix lane in flight |
+| B6 | Stray repo-root `locks/` from `cli_test` fixture running real `state/with-lock` with nil process-dir | `script/seon/dev/state.clj`, `test/seon/dev/cli_test.clj` | **CLOSED** `3d4aee61` + `a850b343` (relative env coordinates absolutized after the guard exposed `bin/acme`) |
+| B7 | MCP/dev CLJS REPL cannot use `await`/`^:async`; Promises returned unresolved | `bin/mcp-server-cljs` path | **CLOSED** `8116ba1c`: transport bridge mirrors agent auto-await; five-point live proof; MCP clients must restart |
+| B10 | Default client crash-loops on reload rehost: `:seon.runtime.admission/status :publishing` -> `on-core-error :crash`; required a default cluster reset on 2026-07-20 | `seon.runtime.admission` / reload path | OPEN — `docs/seon/issues/reload-rehost-crash-loop-on-publishing-admission.md` |
+| B11 | Operator intermittent: `contained-one-shot-drains-a-foreign-generation-without-overlap` fails order-dependently (containment-uncertain; leaked `sleep 300` workloads suspected via shared `tmp/seon-containment`) — 1 occurrence, green in isolation and on full rerun | `test/seon/dev/process_test.clj:503` | OPEN intermittent — track with B8 |
 | B8 | Writer gate intermittents: `writer-integration` release path + `query-admission` injected-release (1 occurrence each, order-dependent) | `src/seon/db/writer.clj` tests | task chip filed |
 | B9 | `test/seon/agent/ctx/canvas_test.cljs` calls `datahike.api` `create-database` directly (boundary violation) | that test | stage 5 |
 
