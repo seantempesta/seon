@@ -160,8 +160,8 @@
 ;;; Datahike defines `max-work` as charged execution steps, `max-results` as
 ;;; retained result nodes (including nested pull values), and
 ;;; `max-result-weight` as shallow scalar/container weight. The latter is not a
-;;; byte count; the shipped value stays below the protocol's 4 MiB frame cap so
-;;; a successful bounded read can still be encoded and delivered.
+;;; byte count. The protocol's 4 MiB encoded-frame cap is a separate hard
+;;; boundary because Transit overhead and string encoding are data-dependent.
 (schema/register! :seon.config.database.query/max-work :seon.config/cap)
 (schema/register! :seon.config.database.query/max-results :seon.config/cap)
 (schema/register! :seon.config.database.query/max-result-weight :seon.config/cap)

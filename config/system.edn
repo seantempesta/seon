@@ -83,10 +83,11 @@
  ;; Datahike `max-work` counts charged execution steps. `max-results` counts
  ;; retained result NODES, including nested pull values—not top-level rows or
  ;; requested entities. `max-result-weight` counts Datahike's shallow scalar
- ;; and container weight, not bytes; the default remains below the 4 MiB wire
- ;; frame ceiling. A caller may explicitly request a smaller bound for a known
- ;; operation. Aero resolves environment overrides once before these become
- ;; ordinary attributes on the database configuration singleton.
+ ;; and container weight, not bytes. The 4 MiB encoded wire-frame ceiling is a
+ ;; separate hard boundary because Transit and string encoding sizes are
+ ;; data-dependent. A caller may explicitly request a smaller bound for a
+ ;; known operation. Aero resolves environment overrides once before these
+ ;; become ordinary attributes on the database configuration singleton.
  :seon.config/database
  {:seon.config.database.query/max-work
   #long #or [#env SEON_DB_QUERY_MAX_WORK 100000000]
