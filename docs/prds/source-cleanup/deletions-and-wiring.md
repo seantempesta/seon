@@ -72,3 +72,13 @@ usage); submodule removal leaves `git submodule status` clean and
    debug turn projection plus compact agent-page usage. This is settled: do
    not delete the namespace merely because it was temporarily orphaned.
 2. Archive the namespace-ui PRD folder (ruled).
+
+## New owner question (from the docstring fix, 2026-07-20)
+
+`seon.agent.ctx/file-block{,-ai,-html}` is a live MECHANISM with ZERO
+usage: the only file-backed context-section capability, but no shipped
+manifest declares one since the identity-file-block seeding was deleted
+(`c35677fa`, soul-off default). False DEPRECATED markers are fixed
+(`f5c145ed`); keep-or-delete remains open: keep = retain the only
+file-backed-section capability for future manifests; delete = three fewer
+unreferenced fns, restore from Git when a manifest wants files again.
