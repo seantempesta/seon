@@ -1,7 +1,8 @@
 (ns seon.dev.state
   "Atomic filesystem state and lifecycle locks for the Seon operator."
   (:require [babashka.fs :as fs]
-            [clojure.edn :as edn])
+            [clojure.edn :as edn]
+            [clojure.string :as string])
   (:import [java.io RandomAccessFile]
            [java.nio.channels FileChannel]
            [java.nio.file OpenOption StandardOpenOption]
@@ -73,6 +74,13 @@
 (defn with-lock
   "Run a lifecycle transition under one kernel-owned file lock."
   [config lock-name timeout-ms transition]
+  (let [process-dir (:seon.dev.config/process-dir config)]
+    (when-not (and (string? process-dir)
+                   (not (string/blank? process-dir))
+                   (fs/absolute? process-dir))
+      (throw (ex-info "with-lock requires an absolute :seon.dev.config/process-dir"
+                      {:seon.dev.lock/name lock-name
+                       :seon.dev.config/process-dir process-dir}))))
   (let [directory (fs/path (:seon.dev.config/process-dir config) "locks")
         path (fs/path directory (str (name lock-name) ".lock"))
         deadline (+ (System/currentTimeMillis) timeout-ms)]

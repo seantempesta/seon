@@ -706,7 +706,8 @@
                       ::branch/lifecycle-path "/retained/default-proof.edn"}
         calls (atom [])]
     (with-redefs-fn
-      {#'branch/request
+      {#'state/with-lock (fn [_ _ _ transition] (transition))
+       #'branch/request
        (fn [request]
          (swap! calls conj [:request request])
          open-request)
