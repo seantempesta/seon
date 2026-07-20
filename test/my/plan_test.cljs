@@ -456,6 +456,8 @@
              (is (= {:my.plan/ok? true} result))
              (is (false? @downstream?))
              (is (= 2 (count @cause-queries)))
+             (is (= [2 2] (mapv ::db/max-results @cause-queries))
+                 "both scalar cause queries reserve their measured two nodes")
              (is (some #{'generated-root}
                        (tree-seq coll? seq
                                  (::db/args (second @cause-queries)))))))

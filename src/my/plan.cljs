@@ -544,7 +544,9 @@
            ::db/query generated-root-for-run-query
            ::db/args [generated-root-rules run-id]
            ::db/max-work 250000
-           ::db/max-results 1
+           ;; A scalar Datalog result consumes two result nodes: the relation
+           ;; container plus its value. One fails closed before applicability.
+           ::db/max-results 2
            ::db/max-result-weight 4096}))
         namespace-match
         (when-not (or (:seon.error/message root-id) root-id)
@@ -554,7 +556,7 @@
              ::db/query generated-namespace-for-run-query
              ::db/args [generated-root-rules run-id]
              ::db/max-work 250000
-             ::db/max-results 1
+             ::db/max-results 2
              ::db/max-result-weight 4096})))
         [namespace-root-id namespace-step namespace-name]
         (when (vector? namespace-match) namespace-match)
