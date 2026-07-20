@@ -176,13 +176,18 @@ identical bodies); warnings/subagents suites.
 
 Confine the readline's live line (and any future load/memory line) to the
 one root-only tail after every cache boundary under a hard token cap;
-prompt-blob capture keeps the original tail bytes. Rule the file-block
-question with the owner: identity files either become database facts
-reconciled by the config manifest (config-through-DB precedent) or are
-explicitly documented as a non-cacheable declared exception above the
-boundary — a silent fresh disk read in the cacheable body is not an
-option. Gate: acceptance 4 and 5; `seon-context-config` docs updated in the
-same commit.
+prompt-blob capture keeps the original tail bytes. File-block question RULED (owner,
+2026-07-20): content stays a file on disk or in the content-addressed
+blob tier — the ~65k practical ceiling on stored values makes inlining
+wrong either way. The FINGERPRINT (content hash) is the database fact: a
+file-backed section renders pure over (database value + fingerprint), and
+a file edit changes the fingerprint datom, making the cache bust a
+visible transacted event with provenance rather than silent drift. The
+implementation settles where the fingerprint reconciles
+(operation-boundary hash-on-read vs a watcher) — never inside a render
+fn; a silent fresh disk read in the cacheable body remains not an option.
+Gate: acceptance 4 and 5; `seon-context-config` docs updated in the same
+commit.
 
 ### Stage 5 — the standing byte-identity gate
 
