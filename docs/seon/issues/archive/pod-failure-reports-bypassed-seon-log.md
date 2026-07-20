@@ -1,7 +1,7 @@
 ---
 type: issue
 status: resolved
-severity: major
+severity: friction
 tags: [issue, pod, health]
 ---
 

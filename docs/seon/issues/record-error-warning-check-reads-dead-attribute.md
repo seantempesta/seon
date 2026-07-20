@@ -1,7 +1,7 @@
 ---
 type: issue
 status: open
-severity: minor
+severity: cleanup
 tags: [issue, pod, database]
 ---
 

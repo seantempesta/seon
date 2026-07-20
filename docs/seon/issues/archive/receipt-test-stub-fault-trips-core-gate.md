@@ -1,7 +1,7 @@
 ---
 type: issue
-status: open
-severity: minor
+status: resolved
+severity: cleanup
 tags: [issue, cljs, pod]
 ---
 
@@ -28,3 +28,14 @@ runner.
 
 A green full `bin/test-cljs` run prints no CORE-FAULT GATE block from
 deliberately injected test faults.
+
+## Resolution
+
+Closed in commit `b109266e` (seon.log routing unit, 2026-07-20):
+`failed-program-publication-does-not-commit-a-transcript` now wraps its
+provoked `record-eval!` call in `seon.error/expecting-core-fault!` — the
+designed test-side bracket that writes the fault datom but marks it
+EXPECTED so the gate does not count it. Proof: full `bin/test-cljs`
+2026-07-20 10:20 — `Ran 1284 tests containing 5817 assertions. 0
+failures, 0 errors. PASS` with no CORE-FAULT GATE block
+(`tmp/test-cljs-20260720-102037-1035.log`).
