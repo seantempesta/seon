@@ -190,34 +190,34 @@
   ;; Live-drive finding 2026-07-13: a Muse agent ran
   ;; (register! :my.reading/rating [:maybe :int]) and it returned ok — a
   ;; "false ok". seon bans nilable value schemas (a stored value is never
-  ;; nil; absent = the key is simply omitted). Complete projection admission
-  ;; refuses a top-level [:maybe <builtin>] with a guiding :user-input ex-info.
+  ;; nil; absent = the key is simply omitted). Registration refuses every
+  ;; top-level [:maybe X] immediately with a guiding :user-input ex-info.
   (testing "the smell shape — [:maybe :int]"
-    (let [before (schema/snapshot-state)]
-      (try
-        (schema/register! :my.reading/rating [:maybe :int])
-        (let [e (try (schema/build-projection (schema/snapshot))
-                     nil
-                     (catch :default e e))]
-          (is (some? e) "the complete candidate must be rejected")
-          (is (= :seon.schema/nilable-value-schema
-                 (:seon.schema/error (ex-data e))))
-          (is (= :user-input (:seon.error/kind (ex-data e)))
-              "agent-input error kind — surfaced to agents as an error envelope")
-          (is (str/includes? (ex-message e) "(schema/register! :my.reading/rating :int)")
-              "the error GUIDES: names the copy-pasteable base-type registration")
-          (is (str/includes? (ex-message e) "{:optional true}")
-              "the error teaches the fix: mark the FIELD optional, don't store nil"))
-        (finally
-          (schema/restore-state! before)))))
-  (testing "a :maybe around a REGISTERED domain type is a nullable fn-slot — allowed"
-    ;; [:maybe ::registered] and [:maybe [:or …]] are deliberate nullable
-    ;; return/arg schemas (e.g. :my.plan/tree-response); only a :maybe around
-    ;; a raw builtin is the mis-modeled-attr case register! rejects.
+    (let [e (try (schema/register! :my.reading/rating [:maybe :int])
+                 nil
+                 (catch :default e e))]
+      (is (some? e) "register! must reject before mutating the candidate")
+      (is (not (schema/registered? :my.reading/rating)))
+      (is (= :seon.schema/nilable-value-schema
+             (:seon.schema/error (ex-data e))))
+      (is (= :user-input (:seon.error/kind (ex-data e)))
+          "agent-input error kind — surfaced to agents as an error envelope")
+      (is (str/includes? (ex-message e)
+                         "(schema/register! :my.reading/rating :int)")
+          "the error GUIDES: names the copy-pasteable base-type registration")
+      (is (str/includes? (ex-message e) "{:optional true}")
+          "the error teaches the fix: mark the FIELD optional, don't store nil")))
+  (testing "a registered domain type is still forbidden under top-level :maybe"
     (schema/register! :schematest.slot/base :string)
-    (is (= :schematest.slot/opt
-           (schema/register! :schematest.slot/opt [:maybe :schematest.slot/base])))
-    (unregister! :schematest.slot/opt :schematest.slot/base))
+    (let [e (try
+              (schema/register! :schematest.slot/opt
+                                [:maybe :schematest.slot/base])
+              nil
+              (catch :default e e))]
+      (is (= :seon.schema/nilable-value-schema
+             (:seon.schema/error (ex-data e))))
+      (is (not (schema/registered? :schematest.slot/opt))))
+    (unregister! :schematest.slot/base))
   (testing "the base type still registers cleanly"
     (is (= :my.reading/rating (schema/register! :my.reading/rating :int)))
     (unregister! :my.reading/rating)))

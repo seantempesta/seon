@@ -251,6 +251,7 @@
   ;; CLJS-only until the JVM's legacy `:form/*` registrations are renamed.
   #?(:cljs (internal/assert-multi-segment-namespace! k)
      :clj  nil)
+  (internal/assert-non-nilable-value-schema! (candidate-forms) k v)
   (let [encoded (pr-str v)
         decoded (try
                   (#?(:clj edn/read-string :cljs reader/read-string) encoded)

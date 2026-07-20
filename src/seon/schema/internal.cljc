@@ -151,17 +151,15 @@
                 :seon.error/kind   :user-input}
                e)))))
 
-(defn maybe-inner
-  "The child form of a top-level `[:maybe X]` schema, else nil.
+(defn nilable-value-schema?
+  "True when `v` is a top-level `[:maybe X]` value registration.
 
-   Skips an optional leading props map (`[:maybe {…} X]`). nil when `v`
-   is not a top-level nilable form — the caller treats nil as 'nothing to
-   reject'."
+   Optionality belongs at a map entry or function slot, never in the
+   registered value shape itself. This predicate is shared by registration
+   admission and the Malli→Datahike bridge so the two boundaries cannot
+   drift."
   [v]
-  (when (and (vector? v) (= :maybe (first v)))
-    (let [body (rest v)
-          body (if (and (seq body) (map? (first body))) (rest body) body)]
-      (first body))))
+  (and (vector? v) (= :maybe (first v))))
 
 (defn assert-non-nilable-value-schema!
   "Projection-build gate: reject a top-level nilable value schema whose inner
@@ -171,25 +169,22 @@
    `:user-input` ex-info that hands back the copy-pasteable fix: register
    the base type, then mark the FIELD optional at its map site.
 
-   `schemas` is the seon registry map — a keyword NOT in it is a Malli
-   built-in (`:int`/`:string`/…), which is exactly the mis-modeled-attr
-   case; a `:maybe` around an already-registered DOMAIN type (`::view-id`)
-   or a composite (`[:or …]`) is a deliberate nullable fn-slot/return type
-   and is permitted here. A stored nilable that slips past this narrow
-   check is still rejected by the datahike bridge
-   (`seon.db.internal/form->datahike-value-type`)."
-  [schemas k v]
-  (when-let [inner (maybe-inner v)]
-    (when (and (keyword? inner) (not (contains? schemas inner)))
+   `schemas` is accepted because projection validation passes the complete
+   population through the same gate; the decision depends only on `v`."
+  [_schemas k v]
+  (when (nilable-value-schema? v)
+    (let [body (rest v)
+          body (if (and (seq body) (map? (first body))) (rest body) body)
+          inner (first body)]
       (throw (ex-info
                (str "schema/register! " k ": " (pr-str v)
-                    " — a stored value is never nil in seon (absent = the key "
-                    "is simply omitted, never stored as nil), so a value schema "
-                    "may not be nilable/[:maybe …]. Register the BASE type: "
-                    "(schema/register! " k " " (pr-str inner) ") — then mark the "
-                    "FIELD optional where it appears in a :map schema: [" k
-                    " {:optional true} " (pr-str inner) "], or just omit the key "
-                    "entirely when there is no value.")
+                    " — a registered value is never nil in seon (absent = the "
+                    "key is omitted), so a value schema may not be "
+                    "nilable/[:maybe …]. Register the non-nil BASE shape: "
+                    "(schema/register! " k " " (pr-str inner) "). Where a map "
+                    "field may be absent, write [" k " {:optional true} "
+                    (pr-str inner) "]. Where a function slot may return nil, "
+                    "put [:maybe " k "] directly in that function schema.")
                {:seon.schema/error :seon.schema/nilable-value-schema
                 :seon.schema/key   k
                 :seon.schema/definition v

@@ -1,8 +1,10 @@
 (ns seon.db-remote-contract-test
   "Selective public-facade contracts derived from Datahike's remote tests."
   (:require
+   [clojure.string :as str]
    [cljs.test :refer [async deftest is testing]]
    [seon.db :as db]
+   [seon.db.internal :as internal]
    [seon.db.protocol :as protocol]
    [seon.db.transport.uds :as uds]
    [seon.instrument :as instrument]
@@ -26,6 +28,33 @@
        {:seon.error/message "transaction refused"
         :seon.error/kind :core-bug
         :seon.error/data {:seon.db.protocol/request-id "request-1"}})))
+
+(defn- thrown-message [f]
+  (try
+    (f)
+    nil
+    (catch :default error
+      (ex-message error))))
+
+(deftest database-directive-errors-show-the-corrected-next-form
+  (testing "an unregistered attribute names its registration form"
+    (let [message (thrown-message
+                    #(internal/validate-attrs!
+                       #{:my.directive/missing}))]
+      (is (str/includes? message ":my.directive/missing"))
+      (is (str/includes? message
+                         "(schema/register! :my.directive/missing :string)"))))
+  (testing "a malformed transaction shows the canonical call shape"
+    (let [message (thrown-message
+                    #(internal/assert-invocation-shape! {}))]
+      (is (str/includes? message "(seon.db/transact!"))
+      (is (str/includes? message ":seon.db/tx-data"))))
+  (testing "a non-keyword enum shows a storable enum registration"
+    (let [message (thrown-message
+                    #(internal/form->datahike-value-type
+                       [:enum "open" "done"]))]
+      (is (str/includes? message
+                         "(schema/register! :my.domain/status [:enum :open :done])")))))
 
 (deftest error-evidence-uses-the-authoritative-transaction-path
   (async done

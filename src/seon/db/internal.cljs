@@ -8,7 +8,8 @@
    [seon.ai.tokens :as tokens]
    [seon.db :as-alias db]
    [seon.error :as error]
-   [seon.schema :as schema]))
+   [seon.schema :as schema]
+   [seon.schema.internal :as schema.internal]))
 
 ;;; Process-local execution context. Ordinary database descriptors may pin
 ;;; reads; native Datahike database values never enter these scopes.
@@ -123,6 +124,16 @@
   [form]
   (if (vector? form) (first form) form))
 
+(defn- registration-form
+  [attr schema-form]
+  (pr-str (list 'schema/register! attr schema-form)))
+
+(defn- transaction-form
+  [tx-data]
+  (pr-str
+    (list 'seon.db/transact!
+          {:seon.db/tx-data tx-data})))
+
 (declare form->datahike-value-type)
 
 (defn form->datahike-value-type
@@ -135,7 +146,11 @@
       (= :enum head)
       (if (every? keyword? (form-children resolved))
         :db.type/keyword
-        (throw (ex-info "Only keyword Malli enums are storable."
+        (throw (ex-info
+                 (str "Only keyword Malli enums are storable. Register keyword "
+                      "members, for example "
+                      (registration-form :my.domain/status
+                                         [:enum :open :done]) ".")
                         {::db/form resolved :seon.error/kind :user-input})))
       (= :and head)
       (form->datahike-value-type (first (form-children resolved)))
@@ -147,12 +162,17 @@
         (if (and (= 1 (count types)) (not (contains? types ::unmappable)))
           (first types)
           :db.type/string))
-      (= :maybe head)
-      (throw (ex-info "Stored attributes cannot use `:maybe`; omit absent values."
+      (schema.internal/nilable-value-schema? resolved)
+      (throw (ex-info (str "Stored attributes cannot use `:maybe`. Register the "
+                           "non-nil base shape, then omit an absent key or mark "
+                           "its entity-map entry `{:optional true}`.")
                       {::db/form resolved :seon.error/kind :user-input}))
       :else
       (or (malli-type->datahike-type head)
-          (throw (ex-info "The Malli form has no Datahike value type."
+          (throw (ex-info
+                   (str "The Malli form has no Datahike value type. Register a "
+                        "concrete storable shape, for example "
+                        (registration-form :my.domain/value :string) ".")
                           {::db/form resolved :seon.error/kind :user-input}))))))
 
 (defn form->cardinality
@@ -173,14 +193,21 @@
   "Derive one ordinary Datahike attribute declaration."
   [attr]
   (let [raw (or (schema/schema-definition attr)
-                (throw (ex-info "The attribute has no registered schema."
+                (throw (ex-info
+                         (str "The attribute has no registered schema. Run "
+                              (registration-form attr :string)
+                              " with the intended concrete type before "
+                              "transacting it.")
                                 {::db/attr attr :seon.error/kind :user-input})))
         props (form-properties raw)
         value-form (-> raw resolve-malli-form form->child-form resolve-malli-form)
         secondary? (boolean (:db.secondary/only props))]
     (when (and secondary?
                (not (contains? #{:float :double} (form-head value-form))))
-      (throw (ex-info "A secondary-only attribute must contain floats."
+      (throw (ex-info
+               (str "A secondary-only attribute must contain floats. Register "
+                    (registration-form attr
+                                       [:float {:db.secondary/only true}]) ".")
                       {::db/attr attr :seon.error/kind :user-input})))
     (cond-> {:db/ident attr
              :db/valueType (if secondary?
@@ -285,9 +312,19 @@
 (defn validate-attrs!
   "Reject transaction attributes absent from the schema registry."
   [attrs]
-  (let [unknown (into [] (remove #(or (system-attr? %) (schema/registered? %))) attrs)]
+  (let [unknown (->> attrs
+                     (remove #(or (system-attr? %)
+                                  (schema/registered? %)))
+                     (sort-by str)
+                     vec)]
     (when (seq unknown)
-      (throw (ex-info "Transaction data names unregistered attributes."
+      (throw (ex-info
+               (str "Transaction data names unregistered attributes "
+                    (pr-str unknown) ". Register each intended attribute first, "
+                    "for example "
+                    (pr-str (list 'schema/register! (first unknown) :string))
+                    " (replace `:string` with the intended concrete type), then "
+                    "retry the unchanged `seon.db/transact!` form.")
                       {::db/unregistered unknown :seon.error/kind :user-input}))))
   nil)
 
@@ -302,7 +339,11 @@
   (cond
     (map? value) (validate-entity-values! value)
     (schema/valid-candidate-value? :seon.db/ref value) nil
-    :else (throw (ex-info "A ref attribute contains an invalid reference."
+    :else (throw (ex-info
+                   (str "A ref attribute contains an invalid reference. Use an "
+                        "entity id or lookup ref, for example "
+                        (transaction-form
+                          [{attr [:seon.agent/id "agent-id"]}]) ".")
                           {::db/attr attr ::db/actual-value value
                            :seon.error/kind :user-input}))))
 
@@ -315,7 +356,15 @@
       :one (validate-ref! attr value)
       :many (doseq [child value] (validate-ref! attr child))
       (when-not (schema/valid-candidate-value? attr value)
-        (throw (ex-info "Transaction data fails its registered schema."
+        (throw (ex-info
+                 (str "Transaction data fails its registered schema "
+                      (pr-str (schema/schema-definition attr)) ". "
+                      (if (nil? value)
+                        (str "Omit the absent key; for example "
+                             (transaction-form [(dissoc entity attr)]) ".")
+                        (str "Transact a matching value; for example "
+                             (transaction-form
+                               [{attr 'value-matching-registered-schema}]) ".")))
                         {::db/attr attr ::db/actual-value value
                          ::db/expected-schema (schema/schema-definition attr)
                          :seon.error/kind :user-input})))))
@@ -396,12 +445,19 @@
                 normalized
                 (let [ref (::db/ref normalized)]
                   (when-not (schema/valid-candidate-value? :seon.db/ref ref)
-                    (throw (ex-info "`:seon.db/ref` contains an invalid entity reference."
+                    (throw (ex-info
+                             (str "`:seon.db/ref` contains an invalid entity "
+                                  "reference. Use one identity lookup ref, for "
+                                  "example [:seon.agent/id \"agent-id\"].")
                                     {::db/actual-value ref
                                      :seon.error/kind :user-input})))
                   (when (and (contains? normalized :db/id)
                              (not= (:db/id normalized) ref))
-                    (throw (ex-info "An entity map names two different entities."
+                    (throw (ex-info
+                             (str "An entity map names two different entities. "
+                                  "Keep one canonical `:db/id`; for example "
+                                  (transaction-form
+                                    [(dissoc normalized ::db/ref)]) ".")
                                     {::db/actual-value normalized
                                      :seon.error/kind :user-input})))
                   (-> normalized (dissoc ::db/ref) (assoc :db/id ref))))))]
@@ -419,7 +475,10 @@
   (when-not (and (map? request)
                  (contains? request ::db/tx-data)
                  (sequential? (::db/tx-data request)))
-    (throw (ex-info "`seon.db/transact!` requires `:seon.db/tx-data`."
+    (throw (ex-info
+             (str "`seon.db/transact!` requires sequential "
+                  "`:seon.db/tx-data`. Use "
+                  (transaction-form [{:my.domain/id "value"}]) ".")
                     {::db/actual-value request :seon.error/kind :user-input})))
   nil)
 

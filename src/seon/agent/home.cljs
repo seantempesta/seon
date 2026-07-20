@@ -10,7 +10,6 @@
     [seon.schema :as schema]))
 
 (schema/register! ::agent-id [:string {:min 1}])
-(schema/register! ::id [:maybe ::agent-id])
 (schema/register! ::home-ns :symbol)
 (schema/register! ::require-spec
   [:cat :symbol [:enum :as :refer] [:or :symbol [:vector :symbol]]])
@@ -136,8 +135,9 @@
         the selected requires before this reader can observe the agent."
   {:malli/schema
    [:function
-    [:=> [:catn [::id ::id]] ::home-requires-result]
-    [:=> [:catn [::database :seon.db/db] [::id ::id]]
+    [:=> [:catn [::id [:maybe ::agent-id]]] ::home-requires-result]
+    [:=> [:catn [::database :seon.db/db]
+                 [::id [:maybe ::agent-id]]]
      ::home-requires-result]]}
   ([id]
    (if-not id

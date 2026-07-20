@@ -178,7 +178,7 @@
    [:seon.agent/id {:optional true} :seon.agent/id]])  ; injected: you (omit)
 
 ;; ::root → one subtree map; else → a vector of root subtrees; nil when nothing.
-(schema/register! ::tree-response [:maybe [:or :map [:vector :map]]])
+(schema/register! ::tree-result [:or :map [:vector :map]])
 
 ;; reconcile! — edit your whole OPEN plan as ONE document. A document node is
 ;; `tree`/`document`'s shape (children under ::_parent; ::children accepted
@@ -1646,7 +1646,7 @@
    Children under `:my.plan/_parent`, dep ids inline. {::root id} → that
    subtree; {::all? true} → every agent's forest; default → the calling
    agent's forest."
-  {:malli/schema [:=> [:cat ::tree-request] ::tree-response]}
+  {:malli/schema [:=> [:cat ::tree-request] [:maybe ::tree-result]]}
   [{::keys [root all?] agent-id :seon.agent/id :as request}]
   (let [acquired (await (cond
                           root (acquire-root-plan-rows request root)
@@ -1671,7 +1671,7 @@
    away. Every node keeps its `:my.plan/id`, so the edit round-trips:
    (my.plan/reconcile! {:my.plan/tree (my.plan/document {})}) is a no-op.
    {::root id} → that open subtree; default → your whole open forest."
-  {:malli/schema [:=> [:cat ::tree-request] ::tree-response]}
+  {:malli/schema [:=> [:cat ::tree-request] [:maybe ::tree-result]]}
   [request]
   (internal/prune-done (await (tree request))))
 

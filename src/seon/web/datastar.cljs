@@ -41,7 +41,6 @@
 ;; ============================================================
 
 (schema/register! ::view-id [:string {:min 1 :max 128}])
-(schema/register! ::optional-view-id [:maybe ::view-id])
 (schema/register! ::element :seon.render.canvas/hiccup)
 (schema/register! ::event :string)
 (schema/register! ::view-state
@@ -870,7 +869,7 @@
 
 (defn request-view-id
   "The validated ephemeral `view` query value from one Ring request."
-  {:malli/schema [:=> [:cat ::ring-request] ::optional-view-id]}
+  {:malli/schema [:=> [:cat ::ring-request] [:maybe ::view-id]]}
   [r]
   (requested-view-id (:seon.http/request r)))
 
