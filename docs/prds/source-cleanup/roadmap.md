@@ -313,6 +313,17 @@ frozen-source writer/client live lines, loop-fault tail, and safe shared-log
 cleanup remain program integration proofs; protected turn/canvas round trips
 remain assigned to their owning stage.
 
+The exact remaining boundary is
+[[research/logging-live-graduation-boundary-2026-07-20]] (`417c2b4f`). The
+frozen proof selects current-generation logs from operator records, requires
+one client and one writer line to satisfy the same byte-shape predicate, and
+drives the real `seon.agent.loop/await-bounded` timeout through an ordinary
+error value into `seon.log/tail`. Current managed logs live under the launch
+descriptor's `logs/operator` root; old top-level `pod*.log` files cannot count.
+Legacy probe output is moved only through a reviewed, NUL-delimited,
+recoverable quarantine after protecting every live/retained owner—never a
+filename deletion glob.
+
 From the logging report's remaining plan: adopt the `seon.log/console!`
 line shape on the JVM writer via a timbre output-fn; route the residual
 non-agent console sites; decide the two value->throw->value round-trips
