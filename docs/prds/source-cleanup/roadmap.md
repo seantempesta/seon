@@ -368,6 +368,12 @@ settles on the committing database value, preserves timeout closure as
 `:superseded`, and releases unconditionally. Independent focused proof passed
 serve 26 tests / 103 assertions and reactive 7 / 49; the issue is archived.
 
+Stage-5 test-runner resolution is unified by `8aeadd3d`: test thunks, fixture
+vars, and namespace enumeration all use ClojureScript's maintained
+`find-ns-obj` owner instead of three direct Google-global lookups, without
+introducing an eval/runner cycle or changing selectors. Independent focused
+proof passed 17 tests / 59 assertions and the issue is archived.
+
 Collapse-hunt items (adversarial review 2026-07-20):
 
 - **CLOSED `84ab7097`**: `src/seon/embed.clj:611-679` hand-rolled the complete `seon.retry`

@@ -77,6 +77,8 @@ assertions and CLJS retains the transport assertion at 46 / 369.
 The `/agents/run` poll is closed by `6f157a3a`: request settlement now uses one
 released reactive registration with preserved timeout semantics; focused serve
 and reactive proof passed 33 tests / 152 assertions.
+The runner's three direct global namespace lookups are closed by `8aeadd3d`:
+all use `cljs.core/find-ns-obj`, with 17 focused tests / 59 assertions green.
 
 ## Scheduled — claimed by a stage, awaiting execution order
 
