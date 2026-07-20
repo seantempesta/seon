@@ -119,8 +119,15 @@ at N=100; 100 real turns in 164 ms wall (p50 12 ms, 4 GC/6 ms); 805
 live UDS round-trips to the real writer at ~2 ms; interrupts 10/10 with
 90/90 bystanders unaffected; OOME 20/20 survivals with all 500
 survivor/concurrent evals ok; N=100 host ≈55 MB used heap. B1 GREEN
-zero blockers, 3.4-3.9x envelope perf. B2 (production anchoring) in
-flight; then the owner's B vs B+C decision.
+zero blockers, 3.4-3.9x envelope perf. B2 PASS (`470d1451`): real-agent A/B on a branch cluster — retention
+returns (231 MB vs 446 MB, −211 MB), non-burst turns 2728 vs 4258 ms
+median, 202-form burst 5.4× faster (64 s vs 346 s), semantic parity
+proven incl. identical error envelopes; iso-context caveat and deferred
+adapter punch list recorded in the research doc. Bonus: a my.plan
+find-clause bug silently erroring EVERY run-attached turn close since
+`f457232a` found and fixed in passing. ALL exploration gates (B1, B2,
+C1, seam) now PASS — the decision packet is complete; U1 (seon.host)
+building.
 
 ## Independent backlog (87 notes, themed)
 
