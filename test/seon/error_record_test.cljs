@@ -23,7 +23,8 @@
     [seon.error.instrument :as ei]
     [seon.instrument :as si]))
 
-(declare tick install-capture-hooks! clear-error-hooks!)
+(declare tick install-capture-hooks! clear-error-hooks!
+         captured-errors with-captured-errors)
 
 (deftest operation-configuration-is-isolated-across-async-fibers
   (async done
