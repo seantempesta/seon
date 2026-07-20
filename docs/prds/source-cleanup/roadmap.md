@@ -166,11 +166,14 @@ issue is archived.
 
 Frozen-source CLJS checkpoint at `286180f7` passes 1,331 tests / 6,151
 assertions with zero failures, errors, or compiler warnings. This closes the
-Stage-1.6 integrated code gate only; the default runtime reached readiness but
-an immediate status check then found all default processes absent while U4
-retained lifecycle ownership. The cause is under read-only review, so fresh
-directive/narration/query-shape and G11 browser proof remain uncounted until
-that owner releases the default checkpoint.
+Stage-1.6 integrated code gate only. A status check immediately after readiness
+observed all default processes absent because a second explicit lifecycle
+reconciliation had entered its clean stop phase before publishing replacement
+generations; logs falsify workload crash, control EOF, and record loss. U4 now
+owns active `turn.cljs`/`ai.cljs` edits and the retained `u15` branch, so its
+replacement default generation is intentionally not a source-clean checkpoint.
+Fresh directive/narration/query-shape and G11 browser proof remain uncounted
+until U4 releases the lifecycle and tracked source is frozen again.
 
 Corrective-steering G10's record-time half is implemented by `418a3844`:
 successful `db/query` results carry a deterministic readable-EDN comment that
