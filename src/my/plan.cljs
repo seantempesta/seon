@@ -407,6 +407,38 @@
     (generated-root ?root ?message)
     [?root :my.plan/id ?root-id]])
 
+(def ^:private generated-namespace-for-run-query
+  '[:find [?root-id ?step-id ?namespace] .
+    :in $ % ?run-id
+    :where
+    [?run :seon.agent.run/id ?run-id]
+    [?run :seon.agent.run/cause ?message]
+    [?step :my.plan/message ?message]
+    [?step :my.plan/id ?step-id]
+    [?step :my.plan/namespace ?namespace-entity]
+    [?namespace-entity :seon.ns/name ?namespace]
+    [?step :my.plan/parent ?root]
+    (generated-root ?root ?root-message)
+    [?root :my.plan/id ?root-id]])
+
+(def ^:private generated-eval-selector
+  '[:seon.eval/id :seon.eval/ns :seon.eval/source :seon.eval/status
+    :seon.eval/progress?
+    :seon.test.runner/test :seon.test.runner/pass
+    :seon.test.runner/fail :seon.test.runner/error
+    {:seon.test.runner/tests [:seon.test/sym]}])
+
+(def ^:private generated-eval-evidence-query
+  '[:find ?status-tx (pull ?eval ?selector)
+    :in $ ?selector ?run-id ?turn-id [?eval-id ...]
+    :where
+    [?run :seon.agent.run/id ?run-id]
+    [?turn :seon.agent.turn/id ?turn-id]
+    [?turn :seon.agent.turn/run ?run]
+    [?turn :seon.agent.turn/evals ?eval]
+    [?eval :seon.eval/id ?eval-id]
+    [?eval :seon.eval/status _ ?status-tx]])
+
 (def ^:private generated-root-candidates-query
   '[:find ?root-id ?coordinator-id
     :in $ %
@@ -495,12 +527,16 @@
            :seon.error/kind :core-bug})))))
 
 (defn ^:async ^:private acquire-generated-root-plan-rows
-  "Find a generated planner root at the turn's pinned database value.
+  "Find a generated planner root or namespace assignment at the pinned value.
 
    Ordinary turns stop after the indexed cause query. Once applicable, acquire
    exactly one current value for the named database after eval recording and
-   use that same value for the complete subtree read and fenced write."
-  [{database ::db/db run-id :seon.agent.run/id}]
+   use that same value for the subtree, exact-ID eval evidence, and fenced
+   write."
+  [{database ::db/db
+    run-id :seon.agent.run/id
+    turn-id :seon.agent.turn/id
+    batch ::eval-batch}]
   (let [root-id
         (await
          (db/query
@@ -509,9 +545,23 @@
            ::db/args [generated-root-rules run-id]
            ::db/max-work 250000
            ::db/max-results 1
-           ::db/max-result-weight 4096}))]
+           ::db/max-result-weight 4096}))
+        namespace-match
+        (when-not (or (:seon.error/message root-id) root-id)
+          (await
+           (db/query
+            {::db/db database
+             ::db/query generated-namespace-for-run-query
+             ::db/args [generated-root-rules run-id]
+             ::db/max-work 250000
+             ::db/max-results 1
+             ::db/max-result-weight 4096})))
+        [namespace-root-id namespace-step namespace-name]
+        (when (vector? namespace-match) namespace-match)
+        root-id (or root-id namespace-root-id)]
     (cond
       (:seon.error/message root-id) root-id
+      (:seon.error/message namespace-match) namespace-match
       (nil? root-id) {::db/db database ::root nil ::rows []}
       :else
       (let [current
@@ -522,7 +572,29 @@
                 (await (acquire-root-plan-rows {::db/db current} root-id))]
             (if (:seon.error/message acquired)
               (assoc acquired ::db/db current ::root root-id)
-              (assoc acquired ::root root-id))))))))
+              (let [eval-ids (vec (:seon.eval/ids batch))
+                    evidence
+                    (if (seq eval-ids)
+                      (await
+                       (db/query
+                        {::db/db current
+                         ::db/query generated-eval-evidence-query
+                         ::db/args [generated-eval-selector run-id turn-id
+                                    eval-ids]
+                         ::db/max-work 1000000
+                         ::db/max-results (max 1 (count eval-ids))
+                         ::db/max-result-weight 1048576}))
+                      [])]
+                (if (:seon.error/message evidence)
+                  (assoc evidence ::db/db current ::root root-id)
+                  (assoc acquired
+                         ::root root-id
+                         ::namespace-step namespace-step
+                         :seon.ns/name namespace-name
+                         ::eval-rows
+                         (mapv (fn [[status-tx row]]
+                                 (assoc row ::internal/status-tx status-tx))
+                               evidence)))))))))))
 
 (defn ^:async ^:no-doc generated-root-candidates
   "Find every durable generated root from its own assignment marker.
@@ -1010,15 +1082,15 @@
      ::root root-id)))
 
 (defn ^:async ^:no-doc publish-generated-program!
-  "Publish one planner turn's already-parsed namespace DAG.
+  "Publish one generated turn's already-parsed namespace evidence.
 
    The turn supplies its exact pinned database value, parsed program, and
-   eval-batch result. The pinned value identifies an applicable generated root
-   through the ordinary run cause and assignment message. An absent match is
-   the only no-op. Once matched, this operation acquires one current database
-   value after eval recording, reconciles through `compile-namespace-dag`, and
-   fences the one write against that value. The returned eval ids are the
-   evaluator's existing ordered identities; no result facts are copied."
+   eval-batch result. The pinned value identifies either the planner root or an
+   assigned namespace step through the ordinary run cause and message. An
+   absent match is the only no-op. Once matched, this operation acquires one
+   current database value after eval recording, reads only the exact ordered
+   eval identities, and fences one DAG/completion write against that value.
+   No result or derived evidence facts are copied."
   {:malli/schema
    [:=> [:cat ::publish-generated-program-request]
     ::publish-generated-program-response]}
@@ -1027,7 +1099,16 @@
     :as request}]
   (let [acquired (await (acquire-generated-root-plan-rows request))
         root-id (::root acquired)
-        database (::db/db acquired)]
+        database (::db/db acquired)
+        namespace-step (::namespace-step acquired)
+        namespace-name (:seon.ns/name acquired)
+        incomplete-response
+        (fn []
+          (cond-> {::ok? true
+                   ::root root-id
+                   :seon.eval/ids (vec (:seon.eval/ids batch))}
+            namespace-step
+            (assoc ::namespace-ids {namespace-name namespace-step})))]
     (cond
       (:seon.error/message acquired)
       (if (and root-id database)
@@ -1044,76 +1125,105 @@
       {::ok? true}
 
       (:seon.eval/fenced? batch)
-      (await
-       (block-generated-root!
-        database root-id
-        "publish-generated-program!: the planner eval batch lost its run fence."))
+      (if namespace-step
+        (incomplete-response)
+        (await
+         (block-generated-root!
+          database root-id
+          "publish-generated-program!: the planner eval batch lost its run fence.")))
 
       (or (:seon.error/message batch) (:seon/error batch))
-      (await
-       (block-generated-root!
-        database root-id
-        (str "publish-generated-program!: planner evaluation failed: "
-             (or (:seon.error/message batch)
-                 (get-in batch [:seon/error :seon.error/message])
-                 (pr-str (:seon/error batch))))))
+      (if namespace-step
+        (incomplete-response)
+        (await
+         (block-generated-root!
+          database root-id
+          (str "publish-generated-program!: planner evaluation failed: "
+               (or (:seon.error/message batch)
+                   (get-in batch [:seon/error :seon.error/message])
+                   (pr-str (:seon/error batch)))))))
 
       :else
       (let [now (js/Date.)
-            preview
-            (internal/compile-namespace-dag
-             (::rows acquired) root-id program {} now)
-            compile-error (::internal/error preview)]
-        (if compile-error
-          (await
-           (block-generated-root!
-            database root-id
-            (str "publish-generated-program!: " compile-error)))
-          (let [allocation-keys (::internal/allocation-keys preview)
-                transaction-data (::internal/transaction-data preview)
+            completion
+            (internal/namespace-completion
+             program batch (::eval-rows acquired))
+            completed-namespaces (::internal/completed-namespaces completion)]
+        (if namespace-step
+          (let [transaction-data
+                (internal/namespace-completion-transaction
+                 (::rows acquired) namespace-step
+                 (contains? completed-namespaces namespace-name) now)
                 written
-                (cond
-                  (seq allocation-keys)
-                  (await
-                   (db.id/allocate!
-                    {::db/db database
-                     ::db.id/allocations
-                     (allocation-declarations allocation-keys)
-                     ::db.id/transaction-builder
-                     (fn [ids]
-                       (let [compiled
-                             (internal/compile-namespace-dag
-                              (::rows acquired) root-id program ids now)]
-                         (when-let [error (::internal/error compiled)]
-                           (throw
-                            (ex-info
-                             "namespace DAG changed during allocation"
-                             {:my.plan/error error
-                              :seon.error/kind :core-bug})))
-                         (expected-allocation-write
-                          acquired (::internal/transaction-data compiled))))}))
-
-                  (seq transaction-data)
+                (when (seq transaction-data)
                   (await
                    (db/transact!
-                    (expected-write acquired transaction-data)))
-
-                  :else nil)]
+                    (expected-write acquired transaction-data))))]
             (if (:seon.error/message written)
               (assoc
                (internal/fail
                 (str "publish-generated-program!: store failed — "
                      (:seon.error/message written)))
                ::root root-id)
-              (let [compiled
-                    (internal/compile-namespace-dag
-                     (::rows acquired) root-id program
-                     (or (::db.id/ids written) {}) now)]
-                {::ok? true
-                 ::root root-id
-                 ::diff (::internal/diff compiled)
-                 ::namespace-ids (::internal/namespace-ids compiled)
-                 :seon.eval/ids (vec (:seon.eval/ids batch))}))))))))
+              (incomplete-response)))
+          (let [preview
+                (internal/compile-namespace-dag
+                 (::rows acquired) root-id program {} now
+                 completed-namespaces)
+                compile-error (::internal/error preview)]
+            (if compile-error
+              (await
+               (block-generated-root!
+                database root-id
+                (str "publish-generated-program!: " compile-error)))
+              (let [allocation-keys (::internal/allocation-keys preview)
+                    transaction-data (::internal/transaction-data preview)
+                    written
+                    (cond
+                      (seq allocation-keys)
+                      (await
+                       (db.id/allocate!
+                        {::db/db database
+                         ::db.id/allocations
+                         (allocation-declarations allocation-keys)
+                         ::db.id/transaction-builder
+                         (fn [ids]
+                           (let [compiled
+                                 (internal/compile-namespace-dag
+                                  (::rows acquired) root-id program ids now
+                                  completed-namespaces)]
+                             (when-let [error (::internal/error compiled)]
+                               (throw
+                                (ex-info
+                                 "namespace DAG changed during allocation"
+                                 {:my.plan/error error
+                                  :seon.error/kind :core-bug})))
+                             (expected-allocation-write
+                              acquired
+                              (::internal/transaction-data compiled))))}))
+
+                      (seq transaction-data)
+                      (await
+                       (db/transact!
+                        (expected-write acquired transaction-data)))
+
+                      :else nil)]
+                (if (:seon.error/message written)
+                  (assoc
+                   (internal/fail
+                    (str "publish-generated-program!: store failed — "
+                         (:seon.error/message written)))
+                   ::root root-id)
+                  (let [compiled
+                        (internal/compile-namespace-dag
+                         (::rows acquired) root-id program
+                         (or (::db.id/ids written) {}) now
+                         completed-namespaces)]
+                    {::ok? true
+                     ::root root-id
+                     ::diff (::internal/diff compiled)
+                     ::namespace-ids (::internal/namespace-ids compiled)
+                     :seon.eval/ids (vec (:seon.eval/ids batch))}))))))))))
 
 (defn ^{:async true :seon.fn/agent-facing? true} active!
   "Mark a plan step `:active`, the one you are working on now.

@@ -272,19 +272,166 @@
    :seon.repl/namespace-order ['my.generated.model 'my.generated.service]
    :seon.repl/errors []})
 
+(def ^:private completion-projection
+  {:seon.repl/namespaces
+   [{:seon.ns/name 'my.generated.a
+     :seon.ns/require-edges #{}
+     :seon.repl/sections
+     [{:seon.repl/declaration
+       {:seon.repl/source "(ns my.generated.a)"}}]}
+    {:seon.ns/name 'my.generated.b
+     :seon.ns/require-edges #{}
+     :seon.repl/sections
+     [{:seon.repl/declaration
+       {:seon.repl/source "(ns my.generated.b)"}}]}]
+   :seon.repl/namespace-order ['my.generated.a 'my.generated.b]
+   :seon.repl/eval-entries
+   [{:seon.repl/source "(ns my.generated.a)"
+     :seon.repl/namespace 'my.generated.a
+     :seon.repl/phase :namespace}
+    {:seon.repl/source "(deftest a-contract (is true))"
+     :seon.repl/namespace 'my.generated.a
+     :seon.repl/phase :form}
+    {:seon.repl/source "(ns my.generated.b)"
+     :seon.repl/namespace 'my.generated.b
+     :seon.repl/phase :namespace}]
+   :seon.repl/errors []})
+
+(defn- completion-eval
+  [id ns-name source status tx progress? & [test-summary]]
+  (merge {:seon.eval/id id
+          :seon.eval/ns ns-name
+          :seon.eval/source source
+          :seon.eval/status status
+          :my.plan.internal/status-tx tx
+          :seon.eval/progress? progress?}
+         test-summary))
+
+(def green-summary
+  {:seon.test.runner/test 1
+   :seon.test.runner/pass 1
+   :seon.test.runner/fail 0
+   :seon.test.runner/error 0})
+
+(deftest namespace-completion-does-not-blame-a-failed-declaration-on-its-runtime-ns
+  (let [rows
+        [(completion-eval "a-green" 'my.generated.a
+                          "(deftest a-contract (is true))"
+                          :done 10 true green-summary)
+         ;; A failed namespace declaration correctly leaves the runtime in A.
+         ;; The parsed declaration source, not :seon.eval/ns, owns this error.
+         (completion-eval "b-ns-error" 'my.generated.a
+                          "(ns my.generated.b)" :error 11 false)]
+        completion
+        (internal/namespace-completion
+         completion-projection
+         {:seon.eval/ids ["a-green" "b-ns-error"]
+          :seon.repl/failed-namespaces #{'my.generated.b}}
+         rows)]
+    (is (= #{'my.generated.a}
+           (:my.plan.internal/completed-namespaces completion)))
+    (is (= ["b-ns-error"]
+           (get-in completion
+                   [:my.plan.internal/by-namespace 'my.generated.b
+                    :seon.eval/ids])))))
+
+(deftest namespace-completion-requires-latest-tested-progress
+  (let [green (completion-eval "green" 'my.generated.a
+                               "(deftest a-contract (is true))"
+                               :done 10 true green-summary)
+        untested (completion-eval "untested" 'my.generated.a
+                                  "(defn changed [] 2)" :done 11 true)
+        error (completion-eval "error" 'my.generated.a
+                               "(defn changed [] missing)" :error 11 false)
+        later-test-failure
+        (completion-eval "later-test-failure" 'my.generated.a
+                         "(my.test/run)" :done 11 false
+                         {:seon.test.runner/test 1
+                          :seon.test.runner/pass 0
+                          :seon.test.runner/fail 1
+                          :seon.test.runner/error 0})
+        healed (completion-eval "healed" 'my.generated.a
+                                "(deftest a-contract (is true))"
+                                :done 12 true green-summary)
+        classify
+        (fn [ids rows]
+          (internal/namespace-completion
+           (update completion-projection :seon.repl/namespaces subvec 0 1)
+           {:seon.eval/ids ids}
+           rows))]
+    (is (empty? (:my.plan.internal/completed-namespaces
+                 (classify ["green" "untested"] [green untested])))
+        "a later code mutation without green tests is incomplete")
+    (is (empty? (:my.plan.internal/completed-namespaces
+                 (classify ["green" "error"] [green error])))
+        "a later target-scoped error remains repairable")
+    (is (empty? (:my.plan.internal/completed-namespaces
+                 (classify ["green" "later-test-failure"]
+                           [green later-test-failure])))
+        "a later done non-progress eval with failing tests remains repairable")
+    (is (= #{'my.generated.a}
+           (:my.plan.internal/completed-namespaces
+            (classify ["error" "healed"] [error healed])))
+        "a later tested progress eval heals older failure evidence")))
+
+(deftest namespace-completion-fails-closed-on-skipped-or-missing-evidence
+  (let [green (completion-eval "green" 'my.generated.a
+                               "(deftest a-contract (is true))"
+                               :done 10 true green-summary)
+        no-assertions
+        (completion-eval "no-assertions" 'my.generated.a
+                         "(deftest empty-contract)" :done 10 true
+                         (assoc green-summary :seon.test.runner/pass 0))
+        no-status-tx
+        (dissoc green :my.plan.internal/status-tx)
+        projection (update completion-projection
+                           :seon.repl/namespaces subvec 0 1)
+        completed
+        (fn [batch rows]
+          (:my.plan.internal/completed-namespaces
+           (internal/namespace-completion projection batch rows)))]
+    (is (empty?
+         (completed
+          {:seon.eval/ids ["green"]
+           :seon.repl/skipped-entries
+           [{:seon.repl/namespace 'my.generated.a}]}
+          [green])))
+    (is (empty? (completed {:seon.eval/ids ["green" "missing"]}
+                           [green])))
+    (is (empty? (completed {:seon.eval/ids ["no-assertions"]}
+                           [no-assertions])))
+    (is (empty? (completed {:seon.eval/ids ["green"]}
+                           [no-status-tx])))))
+
+(deftest namespace-completion-closes-open-or-active-but-never-rewrites-done
+  (let [now (js/Date. 20)
+        step (fn [status] {:my.plan/id "step" :my.plan/status status})]
+    (doseq [status [:open :active]]
+      (is (= [{:my.plan/id "step"
+               :my.plan/status :done
+               :my.plan/completed-at now}]
+             (internal/namespace-completion-transaction
+              [(step status)] "step" true now))))
+    (is (empty? (internal/namespace-completion-transaction
+                 [(step :done)] "step" true now)))
+    (is (empty? (internal/namespace-completion-transaction
+                 [(step :open)] "step" false now)))))
+
 (deftest generated-program-publication-no-ops-only-without-a-cause-linked-root
   (async done
     (let [original-db db/db
           original-query db/query
           original-execute-many db/execute-many
           original-allocate db.id/allocate!
-          downstream? (atom false)]
+          downstream? (atom false)
+          cause-queries (atom [])]
       (set! db/db
             (fn [& _]
               (reset! downstream? true)
               (js/Promise.reject (js/Error. "unexpected current-db read"))))
       (set! db/query
             (fn [request]
+              (swap! cause-queries conj request)
               (is (= database (::db/db request)))
               (js/Promise.resolve nil)))
       (set! db/execute-many
@@ -307,7 +454,11 @@
           (.then
            (fn [result]
              (is (= {:my.plan/ok? true} result))
-             (is (false? @downstream?))))
+             (is (false? @downstream?))
+             (is (= 2 (count @cause-queries)))
+             (is (some #{'generated-root}
+                       (tree-seq coll? seq
+                                 (::db/args (second @cause-queries)))))))
           (.finally
            (fn []
              (set! db/db original-db)
@@ -509,7 +660,7 @@
           current-requests (atom [])
           success (fn [result]
                     {::protocol/success? true ::protocol/result result})
-          eval-ids ["eval-model" "eval-service"]]
+          eval-ids ["a-green" "b-ns-error"]]
       (set! db/db
             (fn
               ([]
@@ -520,8 +671,25 @@
                (js/Promise.resolve current-db))))
       (set! db/query
             (fn [request]
-              (is (= database (::db/db request)))
-              (js/Promise.resolve "root")))
+              (if (= database (::db/db request))
+                (js/Promise.resolve "root")
+                (do
+                  (is (= current-db (::db/db request)))
+                  (js/Promise.resolve
+                   [[10 {:seon.eval/id "a-green"
+                         :seon.eval/ns 'my.generated.a
+                         :seon.eval/source "(deftest a-contract (is true))"
+                         :seon.eval/status :done
+                         :seon.eval/progress? true
+                         :seon.test.runner/test 1
+                         :seon.test.runner/pass 1
+                         :seon.test.runner/fail 0
+                         :seon.test.runner/error 0}]
+                    [11 {:seon.eval/id "b-ns-error"
+                         :seon.eval/ns 'my.generated.a
+                         :seon.eval/source "(ns my.generated.b)"
+                         :seon.eval/status :error
+                         :seon.eval/progress? false}]])))))
       (set! db/execute-many
             (fn [request]
               (is (= current-db (::db/db request)))
@@ -539,11 +707,12 @@
            {:seon.agent.run/id "planner-run"
             :seon.agent.turn/id "turn-1"
             ::db/db database
-            :my.plan/program namespace-projection
+            :my.plan/program completion-projection
             :my.plan/eval-batch
             {:seon.eval/ids eval-ids
              :seon.eval/n-ok 2
-             :seon.eval/n-fail 0}})
+             :seon.eval/n-fail 1
+             :seon.repl/failed-namespaces #{'my.generated.b}}})
           (.then
            (fn [result]
              (is (true? (:my.plan/ok? result)))
@@ -556,12 +725,144 @@
                     (::db/expected-db
                      ((::db.id/transaction-builder @allocation-request)
                       {:my.plan.namespace/id-0 "model-step"
-                       :my.plan.namespace/id-1 "service-step"}))))))
+                       :my.plan.namespace/id-1 "service-step"}))))
+             (let [tx (::db/tx-data
+                       ((::db.id/transaction-builder @allocation-request)
+                        {:my.plan.namespace/id-0 "model-step"
+                         :my.plan.namespace/id-1 "service-step"}))]
+               (is (= {"my.generated.a" :done
+                       "my.generated.b" :open}
+                      (into {}
+                            (map (juxt :my.plan/title :my.plan/status))
+                            (filter :my.plan/namespace tx))))
+               (is (some :my.plan/completed-at
+                         (filter #(= "my.generated.a" (:my.plan/title %)) tx)))
+               (is (not-any? :my.plan/completed-at
+                             (filter #(= "my.generated.b" (:my.plan/title %))
+                                     tx))))))
           (.finally
            (fn []
              (set! db/db original-db)
              (set! db/query original-query)
              (set! db/execute-many original-execute-many)
+             (set! db.id/allocate! original-allocate)))
+          (.then (fn [_] (done)))
+          (.catch (fn [error] (is false (str error)) (done)))))))
+
+(deftest repair-publication-completes-only-its-assigned-step-and-replays-no-write
+  (async done
+    (let [original-db db/db
+          original-query db/query
+          original-execute-many db/execute-many
+          original-transact db/transact!
+          original-allocate db.id/allocate!
+          query-count (atom 0)
+          current-reads (atom 0)
+          writes (atom [])
+          step-status (atom :active)
+          current-db (assoc database :t 536870920)
+          success (fn [result]
+                    {::protocol/success? true ::protocol/result result})
+          a-row (fn []
+                  {:my.plan/id "a-step"
+                   :my.plan/title "my.generated.a"
+                   :my.plan/status @step-status
+                   :my.plan/parent {:my.plan/id "root"}
+                   :my.plan/namespace {:seon.ns/name 'my.generated.a}})
+          b-row {:my.plan/id "b-step"
+                 :my.plan/title "my.generated.b"
+                 :my.plan/status :open
+                 :my.plan/parent {:my.plan/id "root"}
+                 :my.plan/namespace {:seon.ns/name 'my.generated.b}
+                 :my.plan/needs [{:my.plan/id "a-step"}]}
+          repair-program
+          {:seon.repl/namespaces
+           [(first (:seon.repl/namespaces completion-projection))]
+           :seon.repl/namespace-order ['my.generated.a]
+           :seon.repl/eval-entries
+           [{:seon.repl/source "(deftest a-contract (is true))"
+             :seon.repl/namespace 'my.generated.a
+             :seon.repl/phase :form}]
+           :seon.repl/errors []}
+          request
+          {:seon.agent.run/id "repair-run"
+           :seon.agent.turn/id "repair-turn"
+           ::db/db database
+           :my.plan/program repair-program
+           :my.plan/eval-batch
+           {:seon.eval/ids ["a-green"]}}]
+      (set! db/db
+            (fn
+              ([] (js/Promise.reject (js/Error. "database name required")))
+              ([_]
+               (swap! current-reads inc)
+               (js/Promise.resolve current-db))))
+      (set! db/query
+            (fn [query-request]
+              (case (mod (swap! query-count inc) 3)
+                1 (js/Promise.resolve nil)
+                2 (do
+                    (is (some #{'generated-root}
+                              (tree-seq coll? seq (::db/args query-request))))
+                    (js/Promise.resolve
+                     ["root" "a-step" 'my.generated.a]))
+                0 (js/Promise.resolve
+                   [[20 {:seon.eval/id "a-green"
+                         :seon.eval/ns 'my.generated.a
+                         :seon.eval/source "(deftest a-contract (is true))"
+                         :seon.eval/status :done
+                         :seon.eval/progress? true
+                         :seon.test.runner/test 1
+                         :seon.test.runner/pass 1
+                         :seon.test.runner/fail 0
+                         :seon.test.runner/error 0}]]))))
+      (set! db/execute-many
+            (fn [read-request]
+              (is (= current-db (::db/db read-request)))
+              (js/Promise.resolve
+               {::db/results
+                [(success (first rows))
+                 (success [(a-row) b-row])]})))
+      (set! db/transact!
+            (fn [& [write]]
+              (swap! writes conj write)
+              (reset! step-status :done)
+              (js/Promise.resolve {:db-before current-db
+                                   :db-after current-db
+                                   :tx-data (::db/tx-data write)})))
+      (set! db.id/allocate!
+            (fn [_]
+              (js/Promise.reject
+               (js/Error. "repair completion must not allocate DAG rows"))))
+      (-> (plan/publish-generated-program! request)
+          (.then
+           (fn [result]
+             (is (true? (:my.plan/ok? result)))
+             (is (= {'my.generated.a "a-step"}
+                    (:my.plan/namespace-ids result)))
+             (is (= 1 (count @writes)))
+             (is (= current-db (::db/expected-db (first @writes))))
+             (is (= [{:my.plan/id "a-step"
+                      :my.plan/status :done
+                      :my.plan/completed-at
+                      (:my.plan/completed-at
+                       (first (::db/tx-data (first @writes))))}]
+                    (::db/tx-data (first @writes))))
+             (is (not-any? #(or (= "b-step" (:my.plan/id %))
+                                (some #{[:my.plan/id "b-step"]} %))
+                           (::db/tx-data (first @writes))))
+             (plan/publish-generated-program! request)))
+          (.then
+           (fn [replayed]
+             (is (true? (:my.plan/ok? replayed)))
+             (is (= 1 (count @writes)))
+             (is (= 2 @current-reads))))
+          (.finally
+           (fn []
+             (set! db/db original-db)
+             (set! db/query original-query)
+             (set! db/execute-many original-execute-many)
+             (set! db/transact! original-transact)
              (set! db.id/allocate! original-allocate)))
           (.then (fn [_] (done)))
           (.catch (fn [error] (is false (str error)) (done)))))))

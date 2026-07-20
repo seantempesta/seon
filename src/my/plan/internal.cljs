@@ -769,6 +769,101 @@
        ::namespace-steps namespace-steps
        ::ready-steps (namespace-ready-frontier-from-rows rows root-id)})))
 
+(defn namespace-completion
+  "Derive positively completed generated namespaces from one exact eval batch.
+
+   Eval rows are already cause-fenced to the supplied run and turn. Transaction
+   ids come from each eval's terminal `:seon.eval/status` datom. A namespace is
+   complete only when its latest progress eval is terminal and carries a native
+   green cljs.test summary, with no later target-scoped error. Parsed namespace
+   declaration source assigns a failed `(ns target)` to `target` even though the
+   runtime correctly remains in the previous `:seon.eval/ns`."
+  [projection batch eval-rows]
+  (let [names (mapv :seon.ns/name (:seon.repl/namespaces projection))
+        declaration-owner
+        (into {}
+              (mapcat
+               (fn [{name :seon.ns/name sections :seon.repl/sections}]
+                 (keep (fn [section]
+                         (when-let [source
+                                    (get-in section
+                                            [:seon.repl/declaration
+                                             :seon.repl/source])]
+                           [source name]))
+                       sections)))
+              (:seon.repl/namespaces projection))
+        target-namespace
+        (fn [row]
+          (or (declaration-owner (:seon.eval/source row))
+              (:seon.eval/ns row)))
+        rows (mapv #(assoc % ::target-namespace (target-namespace %))
+                   eval-rows)
+        rows-by-namespace (group-by ::target-namespace rows)
+        requested-ids (vec (:seon.eval/ids batch))
+        returned-ids (mapv :seon.eval/id rows)
+        complete-evidence?
+        (and (= (count requested-ids) (count (distinct requested-ids)))
+             (= (set requested-ids) (set returned-ids))
+             (= (count requested-ids) (count returned-ids))
+             (every? (fn [row]
+                       (let [status-tx (::status-tx row)]
+                         (and (int? status-tx) (pos? status-tx))))
+                     rows))
+        failed-namespaces (set (:seon.repl/failed-namespaces batch))
+        skipped-namespaces
+        (into #{} (keep :seon.repl/namespace)
+              (:seon.repl/skipped-entries batch))
+        row-order (fn [row] (or (::status-tx row) -1))
+        green-tested?
+        (fn [row]
+          (and (= :done (:seon.eval/status row))
+               (true? (:seon.eval/progress? row))
+               (pos? (or (:seon.test.runner/test row) 0))
+               (pos? (or (:seon.test.runner/pass row) 0))
+               (zero? (or (:seon.test.runner/fail row) 0))
+               (zero? (or (:seon.test.runner/error row) 0))))
+        namespace-result
+        (fn [name]
+          (let [target-rows (sort-by row-order (rows-by-namespace name))
+                progress-rows (filter :seon.eval/progress? target-rows)
+                latest-progress (last progress-rows)
+                progress-tx (some-> latest-progress row-order)
+                later-invalid?
+                (boolean
+                 (some (fn [row]
+                         (and progress-tx
+                              (< progress-tx (row-order row))
+                              (or (not= :done (:seon.eval/status row))
+                                  (pos? (or (:seon.test.runner/fail row) 0))
+                                  (pos? (or (:seon.test.runner/error row) 0)))))
+                       target-rows))
+                completed?
+                (and complete-evidence?
+                     (not (failed-namespaces name))
+                     (not (skipped-namespaces name))
+                     (green-tested? latest-progress)
+                     (not later-invalid?))]
+            {::completed? completed?
+             :seon.eval/ids (mapv :seon.eval/id target-rows)}))
+        by-namespace (into {} (map (fn [name] [name (namespace-result name)]))
+                           names)]
+    {::completed-namespaces
+     (into #{} (keep (fn [[name result]]
+                       (when (::completed? result) name)))
+           by-namespace)
+     ::by-namespace by-namespace}))
+
+(defn namespace-completion-transaction
+  "Return the idempotent generated-step completion write for one assignment."
+  [rows step-id completed? now]
+  (let [row (get (rows-by-id rows) step-id)]
+    (if (and completed?
+             (contains? #{:open :active} (:my.plan/status row)))
+      [{:my.plan/id step-id
+        :my.plan/status :done
+        :my.plan/completed-at now}]
+      [])))
+
 (defn compile-namespace-dag
   "Reconcile one parsed-program projection into `root-id`'s namespace leaves.
 
@@ -782,7 +877,7 @@
    pass may omit them to discover allocations; the second pass supplies every
    value. Identical input against its reconciled rows returns an empty flat
    transaction."
-  [rows root-id projection ids now]
+  [rows root-id projection ids now & [completed-namespaces]]
   (let [namespaces (:seon.repl/namespaces projection)
         ordered-names (:seon.repl/namespace-order projection)
         errors (:seon.repl/errors projection)
@@ -847,14 +942,16 @@
             (mapv
               (fn [name]
                 (let [id (step-id name)
-                      needs (generated-needs name)]
+                      needs (generated-needs name)
+                      completed? (contains? completed-namespaces name)]
                   (cond-> {:my.plan/id id
                            :my.plan/title (str name)
-                           :my.plan/status :open
+                           :my.plan/status (if completed? :done :open)
                            :my.plan/agent root-agent
                            :my.plan/parent (step-ref root-id)
                            :my.plan/namespace (namespace-ref name)
                            :my.plan/created-at now}
+                    completed? (assoc :my.plan/completed-at now)
                     (seq needs) (assoc :my.plan/needs (mapv step-ref needs)))))
               new-names)
             updates
@@ -876,7 +973,13 @@
                           (map (fn [need-id]
                                  [:db/retract (step-ref id) :my.plan/needs
                                   (step-ref need-id)])
-                               (sort (remove want have))))))))
+                               (sort (remove want have)))
+                          (when (and (contains? completed-namespaces name)
+                                     (contains? #{:open :active}
+                                                (:my.plan/status row)))
+                            [{:my.plan/id id
+                              :my.plan/status :done
+                              :my.plan/completed-at now}]))))))
                 ordered-names))
             drops
             (into []
