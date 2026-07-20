@@ -69,9 +69,18 @@ owner and deleted spec instead of building it — that is the bar).
 9. Shared tree: check `git status` before editing; other lanes hold
    files. Path-limited commits only (`git commit --only -- <paths>`).
 10. Frame extraction on fault datoms was ExceptionInfo-constructor noise
-    — when recording errors, capture the stack at the FAULT site, not at
-    envelope construction (forensics expansion owns the fix; keep it
-    true).
+    — fixed in `ea031f85` (deepest-cause stack, computed constructor-frame
+    drop); keep it true when touching error recording.
+11. Protocol version bumps follow the v11/v12 pattern exactly: optional
+    fields, input schemas, transport test version constant, and the three
+    `test/seon/dev/*` release fixtures — all in one commit (`d784432e`).
+12. Operator commands (`bin/seon up`/`down`) must run UNSANDBOXED — a
+    sandboxed `killpg` is blocked and leaves stale containment records
+    that break `bin/seon status`.
+13. Host-context reads currently aggregate under the EMPTY identity —
+    per-agent read provenance on the host is an open thread in
+    `agent-turns-lack-database-read-cost-attribution.md`; U4+ should
+    close it when the host learns agent identity per invocation.
 
 ## Per-unit executable briefs (U4-U12)
 
