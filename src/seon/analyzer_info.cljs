@@ -232,7 +232,7 @@
 ;; `[x :as-alias y]` — a READER alias for qualified keywords with NO
 ;; load of the target (Clojure 1.11 semantics; the analyzer stores it
 ;; in the ns entry's `:as-aliases`, never `:requires`). The flag keeps
-;; the edge distinguishable so [[seon.eval/synthesized-ns-head]] emits
+;; the edge distinguishable so [[seon.eval/namespace-head]] emits
 ;; `:as-alias` back (a plain `:as` would LOAD the target on resume) and
 ;; the SCI env never treats the target as a loaded ns.
 (schema/register! :seon.ns.require/as-alias? :boolean)

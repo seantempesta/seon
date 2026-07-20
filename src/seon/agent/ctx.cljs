@@ -38,10 +38,9 @@
 (schema/register! :seon.ns/source  :string)
 ;; The ns dependency edges have ONE persisted representation: the reified
 ;; `:seon.ns/require-edges` component rows (registered in seon.eval,
-;; written by the tee — target/alias/refers per required ns). The flat
-;; "required ns-names" view is DERIVED from them at read time via
-;; `seon.eval/persisted-require-targets` — the parallel flat
-;; `:seon.ns/requires` attr is deleted (C36).
+;; written by the tee — target/alias/refers per required ns). Any flat
+;; "required ns-names" view is DERIVED from them at read time — the
+;; parallel flat `:seon.ns/requires` attr is deleted (C36).
 
 (schema/register! :seon.agent.ctx/name     :keyword)
 (schema/register! :seon.agent.ctx/priority :int)

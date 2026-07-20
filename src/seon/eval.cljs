@@ -744,20 +744,7 @@
   [ns-sym]
   (some? (lookup-ns-object (str ns-sym))))
 
-(defn ns-rows-in-db?
-  "TRUE when `ns-sym` has a `:seon.ns/name` row in `db`.
-
-   `ns-sym` a symbol. The
-   special REPL forms use this while their authority acquisition is being
-   migrated. `db` is a datahike db value (third-party boundary)."
-  {:malli/schema [:=> [:catn [::db :any] [::ns-sym :symbol]] :boolean]}
-  [db ns-sym]
-  (boolean (seq (db/query '[:find ?e
-                            :in $ ?ns
-                            :where [?e :seon.ns/name ?ns]]
-                          db ns-sym))))
-
-(declare persisted-require-edges merge-requires-into-ns-source)
+(declare merge-requires-into-ns-source)
 
 (defn- require-specs
   [edges]
@@ -827,88 +814,6 @@
                   (when-not (str/blank? source)
                     [(:seon.ns/name row) source]))))
         namespace-rows))
-
-(defn- synthesized-ns-head
-  "An `(ns …)` head string rebuilt from `ns-kw`'s persisted require edges.
-
-   For a member-bearing ns row with NO `:seon.ns/source` — the agent's
-   HOME ns, whose aliases are wired at runtime by [[setup-agent-ns!]]
-   (which runs AFTER the boot replay), never by an agent-eval'd `(ns …)`
-   form. Without a head the reconstituted load unit evals from
-   `cljs.user`: its defns land in the WRONG ns and an auto-resolved
-   `::alias/kw` in a member source cannot even READ (live-caught
-   2026-07-03: the first `::db/tx-data` home-ns fn to survive the C37
-   gate failed the whole unit's replay). The persisted edge facts carry
-   exactly the needed facts — rebuild the `(:require …)` clause from
-  `:seon.ns/require-edges` datoms."
-  [db ns-kw]
-  (namespace-head ns-kw (persisted-require-edges db ns-kw)))
-
-(defn reconstitute-ns-source
-  "One loadable source STRING for agent-authored namespace `ns-kw`.
-
-   Read from the DB-layer rows (db-is-the-running-system PRD, shape A):
-
-     `:seon.ns/source`  — the agent's `(ns … (:require [x :as y] …))`
-        form VERBATIM. We use the stored ns form (not a rebuilt one)
-        because it carries the `:as` aliases an aliased ref like `b/bv`
-        needs — a rebuilt form without `:as b` breaks with `b is not
-        defined`. When the row has NO source but DOES have fn/test
-        members (the agent HOME ns — its requires are wired at runtime
-        by `setup-agent-ns!`, which runs after the boot replay), the
-        head is SYNTHESIZED from the stored `:seon.ns/require-edges`
-        ([[synthesized-ns-head]]) so members land in their ns and
-        `::alias/kw` literals read. A member-less sourceless row (a
-        data-ns / schema-key stub, C30) stays headless — synthesizing
-        `(ns seon.fn)`-style heads for keyword-namespace stubs would
-        mint junk analyzer namespaces.
-     + every CURRENT member source for the ns: `:seon.fn/source` and
-       `:seon.test/source` rows. Schema facts are activated as one immutable
-       database projection before program replay; they are never eval'd.
-
-   Pure string CONCATENATION — no parsing. Same-ns forward refs resolve
-   in one `eval-str` pass (LIVE-PROVEN). Member rows are deduped (a batch
-   eval tees the same source onto every member it defined). `cljs.js`'s
-   `*load-fn*` can return this string so
-   the compiler analyzes the requires and loads each transitive dep, in
-   dependency order, with cycle detection + load-once — we write no
-   ordering code here. `db` is a datahike db value (third-party boundary)."
-  {:malli/schema [:=> [:catn [::db :any] [::ns-kw :symbol]] :string]}
-  [db ns-kw]
-  (let [ns-src (-> (db/query '[:find ?src
-                               :in $ ?ns
-                               :where
-                               [?e :seon.ns/name ?ns]
-                               [?e :seon.ns/source ?src]]
-                             db ns-kw)
-                   first first)
-        member (fn [src-attr ns-attr]
-                 (->> (db/query [:find '?src
-                                 :in '$ '?ns
-                                 :where
-                                 ['?n :seon.ns/name '?ns]
-                                 ['?m ns-attr '?n]
-                                 ['?m src-attr '?src]]
-                                db ns-kw)
-                      (map first)))
-        fns     (member :seon.fn/source     :seon.fn/ns)
-        tests   (member :seon.test/source   :seon.test/ns)
-        effective-source
-        (when ns-src
-          (let [edges (persisted-require-edges db ns-kw)]
-            (if (seq edges)
-              (or (merge-requires-into-ns-source
-                   ns-src (require-specs edges))
-                  ns-src)
-              ns-src)))
-        head    (or effective-source
-                    (when (seq (concat fns tests))
-                      (synthesized-ns-head db ns-kw)))]
-    (->> (concat [head] fns tests)
-         (remove str/blank?)
-         (map str/trim)
-         (distinct)
-         (str/join "\n\n"))))
 
 (defn- guarded-load*
   "`:load` fn for cljs.js — `boot/load` plus a post-load invariant
@@ -2817,63 +2722,6 @@
     {::aliases {} ::nses #{} ::refers {} ::refer-all #{}}
     edges))
 
-(defn persisted-require-edges
-  "The persisted `:seon.ns/require-edges` maps for `ns-kw`, as a set.
-
-   Pulled off the `:seon.ns` row and normalized back to the
-   `::analyzer-info/require-edge` shape (refers vector → set, `:db/id`
-   dropped) so it compares `=` against a freshly-derived edge set.
-   `#{}` when the ns row or the attr is absent. Never throws."
-  {:malli/schema [:=> [:catn [::db :any] [::ns-kw :symbol]]
-                  :seon.analyzer-info/require-edges]}
-  [db ns-kw]
-  (try
-    ;; Existence probe FIRST — a pull on a missing lookup-ref makes
-    ;; datahike LOG an :error before throwing (a fresh home-ns setup
-    ;; reads before its ns row exists), so probe cheaply and pull only
-    ;; a real row.
-    (if (or (nil? (ffirst (db/query '[:find ?e :in $ ?ns
-                                      :where [?e :seon.ns/name ?ns]]
-                                    db ns-kw)))
-            (not (contains? (db/installed-schema db)
-                            :seon.ns/require-edges)))
-      #{}
-      (let [installed (db/installed-schema db)
-            edge-attrs [:seon.ns.require/target :seon.ns.require/alias
-                        :seon.ns.require/refers :seon.ns.require/refer-all?
-                        :seon.ns.require/as-alias?]
-            fields (into [:db/id] (filter #(contains? installed %)) edge-attrs)]
-        (into #{}
-              (map (fn [e]
-                     (let [refers (:seon.ns.require/refers e)]
-                       (cond-> (dissoc e :db/id :seon.ns.require/refers)
-                         (seq refers) (assoc :seon.ns.require/refers
-                                             (set refers))))))
-              (:seon.ns/require-edges
-                (db/pull db
-                         [{:seon.ns/require-edges fields}]
-                         [:seon.ns/name ns-kw])))))
-    (catch :default e
-      ;; the existence probes above return #{} for expected missing rows or
-      ;; attrs, so a throw reading OUR persisted require edges is a
-      ;; core defect (:core) — the caller still degrades to the empty set.
-      (error/record! {:seon.error/raw e :seon.error/fault :core})
-      #{})))
-
-(defn persisted-require-targets
-  "The namespace symbols `ns-kw`'s persisted require-edges point at.
-
-   The flat \"what does this ns require\" view, DERIVED from the ONE
-   persisted representation (`:seon.ns/require-edges` — C36; the parallel
-   flat `:seon.ns/requires` attr is deleted). `#{}` when the ns row or
-   its edges are absent."
-  {:malli/schema [:=> [:catn [::db :any] [::ns-kw :symbol]]
-                  [:set :symbol]]}
-  [db ns-kw]
-  (into #{}
-        (map :seon.ns.require/target)
-        (persisted-require-edges db ns-kw)))
-
 (defn ns-require-edges-tx
   "Tx ops making `:seon.ns/require-edges` for `ns-kw` EXACTLY `new-edges`.
 
@@ -2943,37 +2791,13 @@
 ;; sym is denied.
 ;; ----------------------------------------------------------------------------
 
-(defn core-boot-fn-syms
-  "The `syms` subset whose source was written through boot.
-
-   FQ `:seon.fn/sym` strings whose CURRENT
-   `:seon.fn/source` datom's tx refs `:seon.db.process/boot` —
-   i.e. compiled core/third-party fns the agent must not override. A sym
-   with no `:seon.fn` row, or whose latest source was written under any
-   non-boot process is NOT included (it is the
-   agent's own / a free new def). Returns a set. `db` is a datahike db
-   value (third-party boundary)."
-  {:malli/schema
-   [:=> [:catn [::db :any] [::syms [:sequential :string]]]
-        [:set :string]]}
-  [db syms]
-  (let [want (set syms)]
-    (into #{}
-          (comp (map first) (filter want))
-          (db/query '[:find ?sym
-                      :where
-                      [?e :seon.fn/sym ?sym]
-                      [?e :seon.fn/source _ ?tx]
-                      [?tx :seon.db/process ?process]
-                      [?process :seon.db.process/id :seon.db.process/boot]]
-                    db))))
-
 (defn reject-core-overrides
   "Drop `tee-entities` rows that override a `blocked` core sym.
 
    The override guard: drop any `:seon.fn` row
-   whose `:seon.fn/sym` is in `blocked` (a set of core-boot syms from
-   [[core-boot-fn-syms]]) and, for each dropped sym, log a specific,
+   whose `:seon.fn/sym` is in `blocked` (the acquired
+   `::core-boot-function-symbols` set from the eval tee's one database
+   acquisition) and, for each dropped sym, log a specific,
    actionable warning through `seon.log/warn!`. Non-`:seon.fn` rows (`:seon.ns`,
    `:seon.schema`, `:seon.test`, the diff-tx retract vectors)
    pass through untouched. Returns the filtered vector. Pure except for
@@ -3699,7 +3523,7 @@
 
    `[]` when `source` isn't a single require form, the ns has no stored
    source (a sourceless ns — the home ns — already persists via its
-   require-edges + [[synthesized-ns-head]]), the stored declaration is
+   require-edges + [[namespace-head]]), the stored declaration is
    core-seeded, or the merge is a no-op (idempotent)."
   {:malli/schema [:=> [:catn [::ns-kw :symbol]
                        [::source [:maybe :string]]

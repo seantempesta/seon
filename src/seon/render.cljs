@@ -671,21 +671,6 @@
       (:seon.agent.ctx/name node)
       (:db/id node)))
 
-(defn renderable-inst
-  "A node's TIME for sorting — the `:db/txInstant` it was asserted at.
-
-   The `:db/txInstant` the store
-   stamped when the row was first asserted (UNIVERSAL; no per-kind :at attr).
-   Per-node fallback for an arbitrary pulled entity (the events query joins it
-   in once for the whole list)."
-  {:malli/schema [:=> [:cat :any :any] :any]}
-  [db node]
-  (when-let [eid (:db/id node)]
-    (ffirst (db/query {:seon.db/db db
-                       :seon.db/query '[:find (min ?t) :in $ ?e :where
-                                        [?e _ _ ?tx] [?tx :db/txInstant ?t]]
-                       :seon.db/args [eid]}))))
-
 (declare render)
 
 (defn- generic-default-renderer
