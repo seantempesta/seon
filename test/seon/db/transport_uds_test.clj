@@ -592,6 +592,8 @@
 (deftest physical-session-send-owns-one-event-until-full-write
   (let [path (socket-path "transport-addressed-send")
         control (promise)
+        release-encode (CountDownLatch. 1)
+        original-frame @#'seon.db.transport.uds/message-frame
         server
         (uds/start-request-server!
          {::uds/socket-path path
@@ -606,21 +608,29 @@
         {close! ::uds/close! send! ::uds/send!}
         (deref control 2000 ::not-opened)]
     (try
-      (let [first-result (send! {::event 1})]
-        (is (= uds/send-accepted (::uds/send-status first-result)))
-        (is (= uds/send-session-full
-               (::uds/send-status (send! {::event 2}))))
-        (let [input (Channels/newInputStream channel)]
-          (is (= {::event 1} (uds/read-frame input)))
-          (is (= uds/send-accepted
-                 (deref (::uds/send-completion first-result)
-                        2000 ::not-complete)))
-          (let [second-result (send! {::event 2})]
-            (is (= uds/send-accepted (::uds/send-status second-result)))
-            (is (= {::event 2} (uds/read-frame input)))
-            (is (= uds/send-accepted
-                   (deref (::uds/send-completion second-result)
-                          2000 ::not-complete))))))
+      (with-redefs-fn
+        {#'seon.db.transport.uds/message-frame
+         (fn [message]
+           (.await release-encode)
+           (original-frame message))}
+        (fn []
+          (let [first-result (send! {::event 1})]
+            (is (= uds/send-accepted (::uds/send-status first-result)))
+            (is (= uds/send-session-full
+                   (::uds/send-status (send! {::event 2})))
+                "the slot is owned while the first event is still encoding")
+            (.countDown release-encode)
+            (let [input (Channels/newInputStream channel)]
+              (is (= {::event 1} (uds/read-frame input)))
+              (is (= uds/send-accepted
+                     (deref (::uds/send-completion first-result)
+                            2000 ::not-complete)))
+              (let [second-result (send! {::event 2})]
+                (is (= uds/send-accepted (::uds/send-status second-result)))
+                (is (= {::event 2} (uds/read-frame input)))
+                (is (= uds/send-accepted
+                       (deref (::uds/send-completion second-result)
+                              2000 ::not-complete))))))))
       (wait-until! "addressed response slots"
                    #(zero? @(::uds/authority-response-slot-count server)))
       (close!)
@@ -632,6 +642,7 @@
       (is (= uds/send-closed
              (::uds/send-status (send! {::event :after-close}))))
       (finally
+        (.countDown release-encode)
         (.close channel)
         (uds/close-request-server! server)
         (.delete (File. path))))))
