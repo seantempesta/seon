@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: friction
 tags: [issue, database, agent]
 ---
@@ -138,3 +138,7 @@ the lower-risk immediate move.
 **Lean:** do (b) now for the clean boot, and land (a) folded into the #E2 fix
 when embeddings work resumes — the noise will return the instant `SEON_EMBED` is
 re-enabled, so (a) is the durable cure.
+
+## Closed 2026-07-20
+
+Verified stale by the issues triage (docs/prds/source-cleanup/research/issues-triage-2026-07-20.md §STALE): the described code or behavior no longer exists at HEAD; rg evidence in the triage doc.

@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: superseded
 tags: [database, cljs, issue]
 severity: friction
 ---
@@ -36,3 +36,7 @@ consumer cut owns the repair:
 
 Until that cut, Shadow compilation and direct Datahike resource probes remain
 valid evidence, but a zero-namespace Node result is not a passing test gate.
+
+## Closed 2026-07-20
+
+Verified stale by the issues triage (docs/prds/source-cleanup/research/issues-triage-2026-07-20.md §STALE): the described code or behavior no longer exists at HEAD; rg evidence in the triage doc.

@@ -10,13 +10,12 @@ GENERATED FILE — do not hand-edit. Regenerate with `bin/issues-index`.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (41)
+## Blocker (39)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
 | [Accept Datahike collections when building the execution program](database-program-query-results-can-be-sets.md) | blocker | agent |
 | [Arbitrary eval allocation lacks hard process memory containment](eval-process-isolation-memory-containment.md) | blocker | agent |
-| [Attach message-wake failure handling to its Promise](message-wake-attaches-catch-to-the-handler-function.md) | blocker | agent |
 | [Bind clean-or-force evidence to one exact managed generation](clean-or-force-evidence-can-cross-or-falsely-report-absence.md) | blocker | Core |
 | [Capture dependencies when a lazy view unit activates](lazy-view-unit-activation-drops-read-observations.md) | blocker | UI |
 | [Carry one complete database coordinate through the protocol](database-protocol-coordinate-is-incomplete.md) | blocker | Core |
@@ -44,7 +43,6 @@ See `README.md` for the convention.
 | [Pass the agent entity through the renderer's system-input key](welcome-canvas-received-the-agent-under-the-wrong-key.md) | blocker | UI |
 | [Pod remains ready after losing its web listener](pod-remains-ready-after-web-listener-loss.md) | blocker | UI |
 | [Project a turn's rendered transaction ref as its basis transaction](turn-debug-must-project-rendered-transaction-ref.md) | blocker | agent |
-| [Pull run defaults from their owning agent attributes](run-opening-pulls-obsolete-run-default-attributes.md) | blocker | agent |
 | [Put the database value in every transcript query member](transcript-grouped-reads-omitted-their-database-source.md) | blocker | agent |
 | [Reduce retained memory in each execution child](execution-children-retain-hundreds-of-megabytes.md) | blocker | agent |
 | [Restore writer admin transition is unimplemented](restore-writer-admin-transition-is-unimplemented.md) | blocker | Core |
@@ -56,7 +54,7 @@ See `README.md` for the convention.
 | [Skip the receipt reread branch after a successful eval write](successful-eval-receipt-called-state-on-nil.md) | blocker | agent |
 | [Supply the execution artifact to the production container launch](container-launch-omits-execution-artifact.md) | blocker | agent |
 
-## Friction (71)
+## Friction (67)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -81,18 +79,16 @@ See `README.md` for the convention.
 | [Database query tuple results are hard for agents to read](database-query-tuple-shape-legibility.md) | friction | agent |
 | [Datahike execute-many predicate query fails](datahike-execute-many-predicate-query-fails.md) | friction | Core |
 | [Edit-hook feedback can target a different checkout](worktree-edit-hook-checkout-drift.md) | friction | general |
-| [Embedding boot noise — 232 `:entity-id/missing` errors on fresh seed](embedding-first-write-lookup-noise.md) | friction | agent |
 | [Execution child program load omitted instrumentation](execution-child-program-load-omitted-instrumentation.md) | friction | agent |
 | [Execution process proof seeds incomplete schema population](execution-process-proof-seeds-incomplete-schema-population.md) | friction | agent |
 | [Execution result diagnostic retained invalid map key](execution-result-diagnostic-retained-invalid-map-key.md) | friction | agent |
-| [Execution-child GPU allocation dominates its memory footprint](execution-child-gpu-allocation-dominates-footprint.md) | friction | agent |
+| [Execution-child native heap mislabeled as GPU dominates footprint](execution-child-gpu-allocation-dominates-footprint.md) | friction | agent |
 | [Give Inspect live callers an ownership-fenced cluster lease](inspect-live-cluster-caller-drift.md) | friction | agent |
 | [Give root a dedicated system layout](root-page-is-an-ordinary-agent-layout.md) | friction | UI |
 | [Idle transcript misreports the mode-specific work budget](configured-turn-limit-masks-mode-specific-budget.md) | friction | agent |
 | [Include new CLJS namespaces in changed-test runtime artifacts](changed-test-new-cljs-namespace-misses-runtime-file.md) | friction | Core |
 | [Inspect product snapshot assumes nonexistent evidence](inspect-product-snapshot-assumes-nonexistent-evidence.md) | friction | agent |
 | [Installed schema map misclassified as database error](installed-schema-map-misclassified-as-database-error.md) | friction | agent |
-| [Legacy replica load blocks CLJS tests](legacy-replica-load-blocks-cljs-tests.md) | friction | Core |
 | [LoRA audit runner depends on a retired Shadow target and pinned checkout](lora-audit-runner-drift.md) | friction | general |
 | [Make UDS frame accumulation linear](uds-fragment-accumulation-recopies-complete-prefix.md) | friction | Core |
 | [Make dependency preparation deterministic under concurrent development](dependency-preparation-can-crash-inside-clojure-hashmap.md) | friction | Core |
@@ -110,7 +106,6 @@ See `README.md` for the convention.
 | [Preserve distinct large BigInts in cardinality-many attributes](datahike-cljs-cardinality-many-collapses-large-bigints.md) | friction | Core |
 | [Prevent output data from becoming a phantom callable arity](callable-contract-output-data-becomes-phantom-arity.md) | friction | agent |
 | [Prove Kimi K3 completion and continuation compatibility](kimi-k3-continuation-compatibility.md) | friction | agent |
-| [Reconcile issue frontmatter with the maintained lifecycle](issue-authority-frontmatter-drift-blocks-index.md) | friction | general |
 | [Remove local Datahike ownership from execution children](execution-artifact-packages-local-datahike.md) | friction | agent |
 | [Remove the Node module-register deprecation from CSS builds](tailwind-node-module-register-deprecation.md) | friction | UI |
 | [Remove undeclared-var warnings from the self-host bootstrap build](bootstrap-analyzer-api-emits-undeclared-var-warnings.md) | friction | agent |
@@ -130,9 +125,8 @@ See `README.md` for the convention.
 | [Turn debug treated a database error as an entity id](turn-debug-treated-database-error-as-entity-id.md) | friction | Core |
 | [Watcher status conflates artifact drift with failure](watcher-status-conflates-drift-with-failure.md) | friction | general |
 | [`my.ns/compact!` can hide the selected namespace](my-ns-compact-can-hide-namespace.md) | friction | agent |
-| [`my.ns/functions` points to a removed namespace renderer](my-ns-functions-points-to-removed-renderer.md) | friction | general |
 
-## Cleanup (12)
+## Cleanup (11)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -146,5 +140,4 @@ See `README.md` for the convention.
 | [Subagents block is implemented but not installed](subagents-block-is-implemented-but-not-installed.md) | cleanup | agent |
 | [Surface recency may be recomputed globally](surface-recency-recomputed.md) | cleanup | UI |
 | [Unify the two AsyncLocalStorage stores; rename with-tx-context → with-tx-meta](als-unify-tx-meta.md) | cleanup | Core |
-| [eval/transact on a non-primary (scratch) conn returns ok? but doesn't commit](eval-scratch-conn-no-commit.md) | cleanup | agent |
 | [parse-forms entries: missing :malli/schema + bare keys](parse-forms-entry-schema-and-bare-keys.md) | cleanup | agent |

@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: blocker
 tags: [issue, agent, database]
 ---
@@ -45,3 +45,7 @@ pulls and policy fallback.
 - Duplicate run-namespaced default schema keys and branches are deleted.
 - Focused run tests assert the exact pull selector, and a real inbound message
   opens a run.
+
+## Closed 2026-07-20
+
+Verified stale by the issues triage (docs/prds/source-cleanup/research/issues-triage-2026-07-20.md §STALE): the described code or behavior no longer exists at HEAD; rg evidence in the triage doc.

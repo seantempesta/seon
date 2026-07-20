@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: cleanup
 tags: [issue, agent, database]
 ---
@@ -34,3 +34,7 @@ scratch agent).
 ## Related
 
 - [[concepts/reactive-context]]
+
+## Closed 2026-07-20
+
+Verified stale by the issues triage (docs/prds/source-cleanup/research/issues-triage-2026-07-20.md §STALE): the described code or behavior no longer exists at HEAD; rg evidence in the triage doc.

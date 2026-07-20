@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: superseded
 tags:
   - agent
   - context
@@ -39,3 +39,7 @@ and bypasses the intended per-agent `full-source` policy.
   block and compaction returns it to its ordinary density; and
 - no remaining source or durable documentation reference to the removed
   agent-facing renderer.
+
+## Closed 2026-07-20
+
+Verified stale by the issues triage (docs/prds/source-cleanup/research/issues-triage-2026-07-20.md §STALE): the described code or behavior no longer exists at HEAD; rg evidence in the triage doc.
