@@ -20,7 +20,11 @@ locks (first path); file-block proven + example; warnings block live,
 15/15 checks verified current; fragile-index H6 render-handler resolution
 completeness (`6246181b`, 12/12 live handlers resolved, focused gate green);
 fragile-index H5 config-managed identity derivation (`904cf4ab`, focused
-11 tests / 39 assertions green, live synthetic fourth family derived).
+11 tests / 39 assertions green, live synthetic fourth family derived);
+logging Stage 3 source/test unit (`51f28046`, writer 232 tests / 1,896
+assertions green; paired frozen-source live log/tail proof remains at the
+program checkpoint); frozen-inputs I1-I4 (`6032f0b5`, five focused namespaces
+green; I5 remains open at the config/application transaction boundary).
 
 ## Scheduled — claimed by a stage, awaiting execution order
 

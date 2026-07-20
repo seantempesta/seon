@@ -150,10 +150,14 @@ dependency-owned terminology. No active authority may continue teaching
 
 ### Stage 3 — one logging convention
 
-In progress (2026-07-20): subagent lane `logging_stage3` owns unit C under
-[[logging-unification]], including vendored Timbre 6.5.0 grounding and the
-writer formatter proof. Turn retry and canvas round-trip sites are protected
-from this lane.
+Outcome (2026-07-20): logging source/test unit C is implemented by `51f28046`.
+Timbre 6.5.0 is vendored at upstream `b72cc652`; the writer formatter guards
+each value and the whole formatter, matches the client line structure, and all
+bare `[database]` prints use Timbre. Focused proof passed 8 tests / 47
+assertions and the full writer gate passed 232 / 1,896. The paired
+frozen-source writer/client live lines, loop-fault tail, and safe shared-log
+cleanup remain program integration proofs; protected turn/canvas round trips
+remain assigned to their owning stage.
 
 From the logging report's remaining plan: adopt the `seon.log/console!`
 line shape on the JVM writer via a timbre output-fn; route the residual

@@ -39,6 +39,16 @@ makes "pure render over one database value" actually true.
 
 ## Current position — the impurity inventory
 
+Partial implementation outcome (2026-07-20): `6032f0b5` closes I1-I4 within
+the authorized source-cleanup lane. Transcript events no longer consult
+process-local result membership; warnings/subagents derive time from the
+pinned database value; the root-only readline is an explicit priority-1000,
+128-token free dynamic tail. Focused warnings, subagents, transcript, context,
+and config gates are green. I5 remains open: the existing initial-context
+projection is deliberately pure, so the file/blob hash and provenance must be
+transacted at an existing creation/install/config-application boundary. It is
+assigned to that later owner rather than hidden as render-time filesystem I/O.
+
 Source audit 2026-07-20 on `codex/runtime-reliability-refactor`. Much of the
 original issue evidence is already fixed in place and is recorded here so
 the acceptance sweep does not re-litigate it.
