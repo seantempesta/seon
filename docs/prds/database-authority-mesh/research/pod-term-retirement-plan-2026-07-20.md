@@ -32,6 +32,29 @@ Scope per owner: active source and build/config files, this branch's PRDs
 `src-inspect-ai`. Dated research in other PRD folders and archived issues are
 the historical record and stay as written.
 
+## Freeze protocol
+
+The rename is one orchestrator-owned atomic unit. Entry gate, in order:
+
+1. Enumerate active lanes: this session's subagents (must all be returned
+   and reviewed) AND separately launched Codex tasks. Identify Codex tasks
+   through the app thread list by checkout and purpose, and request a
+   coherent commit or explicit path handoff via thread message — do not
+   infer ownership from `git status`.
+2. Receive an explicit ack (thread reply or completed commit) from every
+   lane that owns files inside the rename scope. A lane that cannot ack
+   pauses the freeze; the rename does not start around it.
+3. `git status` clean except acked handoffs; all three suites green at the
+   freeze base commit; record that commit hash in this plan.
+4. Execute the four steps below without interleaving other work; each step
+   commits path-limited and reruns its gate before the next.
+5. Release: announce the completing commit range on the same threads,
+   then other lanes rebase/continue.
+
+Abort rule: any non-rename commit landing mid-freeze from an unacked
+source stops the unit; reconcile, re-green, restart from the last
+completed step.
+
 ## Execution order
 
 This is a cross-cutting rename: one orchestrator-owned atomic unit per the
