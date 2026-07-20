@@ -113,6 +113,14 @@ unit B (G1/G2, the three maintained nilable registrations, transact-response
 error union, and G8-G11 steering extensions). Protected execution/eval paths
 remain outside this unit.
 
+Checkpoint `0b991436` closes the source/test portion of G1/G2: `register!`
+rejects top-level nilable registrations before candidate mutation through the
+shared schema predicate; the three maintained registrations express
+optionality at their function slots; and database failures return copyable
+`schema/register!` or `seon.db/transact!` corrective forms. Focused schema,
+database-remote, home, Datastar, and plan tests are green. Fresh-start/live
+proof and the G8-G11 extensions remain before Stage 1.6 graduates.
+
 From [[research/corrective-steering-audit-2026-07-20]] (all persist-time or
 pure-render, single execution, byte-identity safe):
 
@@ -201,6 +209,24 @@ checkpoint ran 1,294 tests / 5,914 assertions with one unrelated failure:
 `my.plan-test/generated-program-publication-no-ops-only-without-a-cause-linked-root`
 expects max-results `[2 2]` while the concurrent uncommitted `src/my/plan.cljs`
 change supplies `[2 4]`. H6 covers no issue note in the triage's COVERED list.
+
+Outcome (2026-07-20): `4ac2902e` deletes the unreferenced
+`seon.ui.components` namespace (278 lines), with a repository caller sweep at
+zero. `ecb8b4b7` removes B9's direct Datahike/private-database test setup and
+proves the canvas through the public `seon.db/execute-many` boundary (9 tests /
+36 assertions). `87d415e8` gives CLJ, CLJS, and Babashka one portable
+`seon.agent.ctx.ns-name` owner for hidden/test/included namespace predicates;
+the Babashka gates passed 74 assertions and the CLJS consumers passed 265
+assertions with zero warnings.
+
+Fragile-index H2's safe consumer portion is implemented by `3ebc9e9b`:
+stored eval guidance is no longer reparsed as a serialized error envelope and
+debug reproduction reads EDN before selecting the qualified function symbol.
+Focused proof passed 8 tests / 29 assertions and the coordinated full gates
+passed pod 1,300 / 5,934, writer 232 / 1,896, and operator 289 / 1,624. The
+remaining filesystem-denial match is correctly left open: its producer gives
+denials and ordinary I/O failures the same keys, so the open issue owns the
+required producer contract rather than adding another prose heuristic.
 
 Additional stage-5 items from
 [[research/bespoke-reactive-sweep-2026-07-20]] and

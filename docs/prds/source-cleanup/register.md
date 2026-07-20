@@ -24,7 +24,13 @@ fragile-index H5 config-managed identity derivation (`904cf4ab`, focused
 logging Stage 3 source/test unit (`51f28046`, writer 232 tests / 1,896
 assertions green; paired frozen-source live log/tail proof remains at the
 program checkpoint); frozen-inputs I1-I4 (`6032f0b5`, five focused namespaces
-green; I5 remains open at the config/application transaction boundary).
+green; I5 remains open at the config/application transaction boundary);
+Stage-5 dead UI deletion (`4ac2902e`), public-boundary canvas test B9
+(`ecb8b4b7`, 9 tests / 36 assertions), and portable namespace predicates
+(`87d415e8`, Babashka 74 assertions, CLJS 265 assertions); fragile-index H2
+consumer cleanup (`3ebc9e9b`, focused 8 tests / 29 assertions, all three full
+gates green). H2's filesystem-denial classifier remains open behind a missing
+producer discriminator.
 
 ## Scheduled — claimed by a stage, awaiting execution order
 
