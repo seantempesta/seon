@@ -209,13 +209,35 @@ strong evidence not kill-certainty; the shared base is the real
 scope. Blocker 5's GC blast-radius item is closed by this evidence;
 its tier-design and dispatch-protocol items remain open for C2.
 
-### C2 — tier split design
+### C2 — tier split design — DONE, verdict SINGLE-TIER (2026-07-20)
 
 The js-bound 12% inventory hardened into a computed rule (which agent
 programs REQUIRE a JS runtime — detectable from their require/interop
 surface, never a hand list); dispatch design for pure/db agents to the
 JVM host and js-bound agents to a Bun child; one sync contract across
 both.
+
+**Status: DONE — genuinely-needs-js-eval measured EMPTY; recommend
+single-tier C, Bun sci tier stays unbuilt.** Evidence:
+[[research/c2-js-bound-audit-2026-07-20]]. Form-parsed re-derivation of
+the C1 heuristic (125 public `my.*` fns, not 137): pure 61 (48.8%),
+db-boundary family 47 (37.6%, incl. 16 await-idiom-only), real-js hits
+17 (13.6%) — and ALL 17 are stdlib date/number/error shims (`.getTime`
+runs verbatim on `java.util.Date`; `js/Date.`, `js/Math.round`,
+`js/parseInt`, `.toISOString`, `.-message` are one-line reader
+conditionals). `my.canvas` is 0-js (canvas is data). Persisted default-
+cluster corpus: 5 agent namespaces, all bare ns declarations, 0 authored
+defns; 11 eval rows with 0 organic js (6 are this arc's own memory
+probes). Fixtures: 1037 samples across e1/typeahead/tb2 with 0 js; the
+single js fixture form is the deliberate child-crash drill
+`(js/process.exit 17)` (infra, re-point at U11). The tier rule (namespace
+js-eval-bound iff own real-js forms or require-edge reachability to one,
+STOPPING at wrapper-registry capability namespaces) is specified in the
+report and becomes the eval-seam admission guard: real-js forms on the
+host tier get a steering `:seon/error`, computed, never a hand list.
+Residual before U11 closes the B decision: one same-shape query of the
+acme cluster's corpus. Confirms U5 small (17 shims + 3 private
+capability impls) and U9 tiny (0 awaits in persisted agent sources).
 
 ### U1 — host-skeleton productionization — DONE (2026-07-20)
 
