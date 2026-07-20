@@ -24,6 +24,15 @@ IOAccelerator 516.4M virtual / 374.4M resident / 163.2M dirty; JS JIT
 The pod (96960) shows footprint 294.9M against RSS 942M — same
 RSS-overstatement pattern.
 
+## Baseline probe (2026-07-20, decisive)
+
+Bare vendored Bun (`bun -e "setInterval(()=>{},1e4)"`): physical
+footprint **5.9 MB**, IOAccelerator dirty ~2.7 MB. With 1e6 live
+objects: 7.0 MB. The runtime is NOT the cost; the execution child's
+163 MB IOAccelerator dirty is created by Seon's child startup — a ~30x
+inflation with a proven ~6 MB floor. The bisect below now has a clean
+baseline on both ends.
+
 ## Investigation (plan work, not yet a fix)
 
 Find what triggers the IOAccelerator mapping at child startup: suspects
