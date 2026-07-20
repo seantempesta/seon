@@ -237,6 +237,14 @@ passed 29 tests / 99 assertions. The issue remains open pending the coordinated
 real-browser pending/success/failure/corrected-retry/rapid-submit gate on a
 frozen ready client.
 
+Corrective-steering G9 is implemented by `f84a9efc` and its issue is closed by
+`147acef8`. Both transcript and technical eval rendering use the one
+`quote-lines` owner, so every model-authored narration line remains byte-visible
+behind a comment boundary even when it resembles message, masthead, box,
+readline, or result scaffolding. Focused proof passed 13 tests / 47 assertions;
+the full CLJS checkpoint's sole failure was the concurrent G8 inventory test.
+The frozen live render remains part of the Stage-1.6 integration gate.
+
 Additional stage-5 items from
 [[research/bespoke-reactive-sweep-2026-07-20]] and
 [[research/envelope-symbol-conformance-2026-07-20]]: replace the
