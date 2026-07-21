@@ -420,7 +420,13 @@ delivery keeps the root CAS without a whole-database fence, and namespace setup
 targets the agent's home namespace while the batch continues in its derived
 current namespace. The focused plan/eval/runtime gate passes 87 tests / 382
 assertions. An independent review and frozen live recovery proof remain before
-the blocker issue closes. The ruled plan UI migration now owns the released
+the blocker issue closes. Follow-up `d955cad5` resolves the discovered
+`:crash`-dial classification gap: only an unambiguous noncanonical
+REPL-authored home-require override becomes an agent fault, while canonical,
+boot/config, absent, ambiguous, and unreadable provenance remains core. Its
+focused gate passes 18 tests / 91 assertions and independent review accepts the
+classification; one clean live publish must still prove same-batch continuation
+before the issue archives. The ruled plan UI migration now owns the released
 paths, but its shortest proof exposed a prerequisite in generic property
 dispatch: `matching-shapes-in` recursively validates a hostile value before a
 bounded renderer receives control. Issue
