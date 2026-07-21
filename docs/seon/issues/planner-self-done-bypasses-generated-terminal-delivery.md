@@ -44,3 +44,18 @@ branch verifies the terminal message exists and commits the missing
 addressed envelope idempotently. The `:plan` block teaching for planning
 agents must match whichever contract is chosen. No second scheduler,
 registry, or delivery path.
+
+## Ruling
+
+Choose the one-owner refusal contract. A root carrying both its caller
+connection (`:my.plan/from`) and the generated-planning claim is closed only by
+the evidence-derived generated-terminal operation. Ordinary agent-facing plan
+transitions refuse a requested terminal status for that root and return a
+corrective error explaining which operation owns completion.
+
+Do not add a stored delivered flag or result-message connection, search message
+content for the printed root ID, or attempt a terminal-status-to-same-status
+CAS. Content search is not structural identity, and a same-value CAS permits
+concurrent duplicate messages. Historical roots already closed without an
+envelope remain live evidence for this issue; the next fresh generated root
+proves the forward contract.
