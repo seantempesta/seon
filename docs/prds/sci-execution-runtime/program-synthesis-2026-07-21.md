@@ -323,30 +323,24 @@ Also accepted: **W0.3 cancel-ghost `46a304e1`** — Future.cancel(false)
 plus a token-identity check before watchdog/eval/receipt/db; a queued
 cancel leaves zero receipts and zero writes; writer gate 301/2262 green.
 
+Also accepted: **W4a tier-aware teaching `c238ab9e`** — one pure
+tier-aware `render-system-text` (shared body + one tier-selected
+platform section), runtime tier acquisition via presence query on
+`:seon.execution.host/eval-socket-path` (4th acquisition member),
+config override reduced to literal shared body, generate-code contract
+(specs→deps→mains, any order, last version wins) in both texts,
+platform-neutral development-teaching; `runtime_test.cljs:164` updated
+for the added member (`[65536 4096 256 8]`); full gate 1462/7062 green
+(shell-test env noise cleared — machine quiet).
+
 IN FLIGHT / UNCOMMITTED:
-- **W4a tier-aware teaching — round 2, UNCOMMITTED in the tree.**
-  Modified (owned): `src/seon/agent/ctx.cljs`, `src/seon/execution/
-  runtime.cljs`, `config/system.edn`, `src/my/plan/internal.cljc`; new
-  `test/seon/agent/ctx_teaching_test.cljs`. Implemented: one pure
-  tier-aware `system-text` renderer (shared sections + one tier-selected
-  platform section), runtime tier acquisition via presence query, config
-  override kept literal shared-body, generate-code contract in both
-  texts, platform-neutral development-teaching. Focused test 4/27 green.
-  REMAINING TO ACCEPT: `runtime_test.cljs:164` asserts member indices
-  that W4a's new tier member shifted — UPDATE that test (in W4a's scope:
-  runtime.cljs is owned) to expect the added member, then full
-  bin/test-cljs green, then path-limited commit across the five paths.
-  Session id `019f84e1-f0c6-7702-8985-c512e76173ec` (resumable) or just
-  fix runtime_test directly — it's a 1-2 line index update.
-- **shell_test py-run failures are ENVIRONMENTAL, not a regression:**
-  exit 137 = SIGKILL of the python3 subprocess under machine load (5+
-  concurrent codex/fable procs during this session). Not W4a-related
-  (shell doesn't read W4a's paths; gate runs under config/test.edn).
-  Re-run seon.agent.shell-test alone on a quiet machine to confirm
-  green before trusting any full-suite count (env-coupled cljs tests).
-- **Fable W6 package-host design lane still running** (writes
-  `research/w6-package-host-design-2026-07-21.md`); a second Fable
-  lane already RETURNED the error-quality design (committed).
+- **W0.4 writer pool dispatched to Codex** (medium effort) per
+  `specs/w0.4-writer-pool.md`; owns `src/seon/host/context.clj`,
+  `src/seon/host.clj`, new `test/seon/host_pool_writer_test.clj`.
+- **Fable W6 package-host design lane** (writes
+  `research/w6-package-host-design-2026-07-21.md`) — check for the file
+  on restart; a second Fable lane already RETURNED the error-quality
+  design (committed).
 
 If a lane died mid-work: uncommitted changes sit in the shared tree on
 its owned paths — review the diff against `specs/<unit>.md`, finish or
@@ -357,9 +351,9 @@ exact text dispatched). Driving protocol:
 `docs/seon/reference/driving-codex-agents.md` + implementer preamble
 (ruling 10). Review loop: read summary → diff vs spec → rerun the
 focused gate → accept (path-limited commit stands) or resume with
-corrections. Next after in-flight lanes: W0.4 pool (probe recipe),
-WP-A (sci fork error patch), W0.6, W0.7 battery, then W3 authored
-invocation; W6 packages await the Fable design.
+corrections. Next after in-flight lanes: WP-A (sci fork error patch),
+W0.6, W0.7 battery, then W3 authored invocation; W6 packages await the
+Fable design.
 
 ## Sequencing and parallel portfolio
 
