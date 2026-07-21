@@ -260,6 +260,9 @@ an explicit "when" — never chat-only.
 | q12 | `uds.cljc` is JVM-only despite `.cljc`; extension/consumer mismatches generally | namespace-hierarchy design (extension sanity sweep) | with q1's design |
 | q13 | `seon.execution.host` (pod client) vs `seon.host` (JVM host) naming collision | namespace-hierarchy design | with q1; pairs must be renamed atomically |
 | q14 | pool size derives from HOST cores and can exceed a writer started with a smaller selected-processor count; large machines share the writer's global 256-connection budget across all clients | W1 (both become config facts with one coherent derivation) | with W1 implementation; W0.4 residual report |
+| q15 | `seon.web.serve` is the second god-file (2,113 lines) | W10 decomposition unit modeled on NS-4 | after NS-3 settles the render/web layering (its split lines depend on D1) |
+| q16 | 16 duplicate-limit bugs (two invocation deadlines, 16384-vs-8192 result caps, divergent repair policies, canvas cap bypassing its accessor, …) | W1 step 3 (unify duplicate owners) | early in W1 — these are correctness bugs, not just hygiene |
+| q17 | fresh-boot config circularity: writer needs heap/frame/executor limits before the pod can commit facts | W1 step 1 (two-phase boot authority: aero-resolve pre-launch → launch envelope → reconcile → equality proof) | FIRST W1 step; everything else in W1 builds on it |
 
 Then **U10** (integration kill/restart tests with live agents) and
 **U12** (the graduation gate: 100-agent cluster, real work, host kill +
