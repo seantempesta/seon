@@ -1,4 +1,4 @@
-(ns seon.handlers.schema
+(ns seon.render.handlers.schema
   "Render registered schema facts for agent context.
 
    Each entity renders WHAT THE SCHEMA IS (the live shape from the

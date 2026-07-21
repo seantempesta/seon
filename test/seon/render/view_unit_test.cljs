@@ -1,6 +1,6 @@
-(ns seon.web.view-unit-test
+(ns seon.render.view-unit-test
   (:require [cljs.test :refer [deftest is]]
-            [seon.web.view-unit :as unit]))
+            [seon.render.view-unit :as unit]))
 
 (deftest identity-token-is-stable-and-type-sensitive
   (is (= (unit/identity-token {:example/id "a" :example/name :b})

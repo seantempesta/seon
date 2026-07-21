@@ -117,15 +117,15 @@
     [seon.web.brand :as web.brand]
     ;; Default :seon.render/ai + :seon.render/html for :seon.agent.message
     ;; entities. Referenced by symbol from message tx data.
-    [seon.handlers.message]
+    [seon.render.handlers.message]
     ;; Renderers for :seon.eval / :seon.fn / :seon.schema / :seon.ns —
     ;; stamped at the write site (record-eval!, build-tee-entities) so
     ;; each persisted entity appears in the debug view's two panes via
     ;; the core-wide `:seon.render/ai`-walking assembler.
-    [seon.handlers.eval]
-    [seon.handlers.fn]
-    [seon.handlers.schema]
-    [seon.handlers.ns]
+    [seon.render.handlers.eval]
+    [seon.render.handlers.fn]
+    [seon.render.handlers.schema]
+    [seon.render.handlers.ns]
     ;; Shared envelope shapes — the `:seon.result/ok?` discriminator and
     ;; the `:seon.items/*` self-describing-collection envelope. Required
     ;; here (before the my.* scaffold) so their register! calls run before

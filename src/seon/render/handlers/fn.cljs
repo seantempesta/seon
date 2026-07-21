@@ -1,4 +1,4 @@
-(ns seon.handlers.fn
+(ns seon.render.handlers.fn
   "Render captured function facts for agent context.
 
    Each entity renders WHAT THE FN IS (signature, doc, status), not

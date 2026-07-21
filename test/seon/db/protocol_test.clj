@@ -136,7 +136,7 @@
          [{:seon.user/id "user"}
           {:my.kb.shared/id "shared"
            :my.kb.shared/owner [:seon.user/id "user"]
-           :seon.render/html 'seon.handlers.message/render-html}]}
+           :seon.render/html 'seon.render.handlers.message/render-html}]}
         initialized
         (protocol/ensure-database-request
          {::protocol/request-id "ensure/initialized"

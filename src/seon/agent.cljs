@@ -219,8 +219,8 @@
 
 (schema/register! :seon.eval
   [:map {:seon.db/entity   true
-         :seon.render/ai   'seon.handlers.eval/render-ai
-         :seon.render/html 'seon.handlers.eval/render-html}
+         :seon.render/ai   'seon.render.handlers.eval/render-ai
+         :seon.render/html 'seon.render.handlers.eval/render-html}
    [:seon.eval/id          :seon.eval/id]
    [:seon.eval/source      :seon.eval/source]
    [:seon.eval/ok?         :seon.eval/ok?]
@@ -237,8 +237,8 @@
 
 (schema/register! :seon.fn
   [:map {:seon.db/entity   true
-         :seon.render/ai   'seon.handlers.fn/render-ai
-         :seon.render/html 'seon.handlers.fn/render-html}
+         :seon.render/ai   'seon.render.handlers.fn/render-ai
+         :seon.render/html 'seon.render.handlers.fn/render-html}
    [:seon.fn/sym    :seon.fn/sym]
    [:seon.fn/ns     :seon.fn/ns]
    [:seon.fn/source :seon.fn/source]
@@ -265,8 +265,8 @@
 
 (schema/register! :seon.schema
   [:map {:seon.db/entity   true
-         :seon.render/ai   'seon.handlers.schema/render-ai
-         :seon.render/html 'seon.handlers.schema/render-html}
+         :seon.render/ai   'seon.render.handlers.schema/render-ai
+         :seon.render/html 'seon.render.handlers.schema/render-html}
    [:seon.schema/key    :seon.schema/key]
    [:seon.schema/form :seon.schema/form]
    [:seon.schema/ns         {:optional true} :seon.schema/ns]
@@ -274,8 +274,8 @@
 
 (schema/register! :seon.ns
   [:map {:seon.db/entity   true
-         :seon.render/ai   'seon.handlers.ns/render-ai
-         :seon.render/html 'seon.handlers.ns/render-html}
+         :seon.render/ai   'seon.render.handlers.ns/render-ai
+         :seon.render/html 'seon.render.handlers.ns/render-html}
    [:seon.ns/name   :seon.ns/name]
    [:seon.ns/source :seon.ns/source]
    [:seon.ns/doc {:optional true} :seon.ns/doc]

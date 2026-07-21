@@ -55,8 +55,8 @@
 ;; block comment in seon.agent for the discovery/render mechanism.
 (schema/register! :seon.agent.message
   [:map {:seon.db/entity   true
-         :seon.render/ai   'seon.handlers.message/render-ai
-         :seon.render/html 'seon.handlers.message/render-html}
+         :seon.render/ai   'seon.render.handlers.message/render-ai
+         :seon.render/html 'seon.render.handlers.message/render-html}
    [:seon.agent.message/id      :seon.agent.message/id]
    [:seon.agent.message/from    :seon.agent.message/from]
    [:seon.agent.message/to      :seon.agent.message/to]

@@ -1,4 +1,4 @@
-(ns seon.web.view-unit
+(ns seon.render.view-unit
   "Derive stable browser identities for database-backed web units.
 
    Canonical tokens give morph targets deterministic presentation identity.

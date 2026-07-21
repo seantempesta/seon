@@ -1,9 +1,9 @@
-(ns seon.handlers.eval
+(ns seon.render.handlers.eval
   "Render prior evaluation facts for agent context.
 
    Stamped on every `:seon.eval` entity by `seon.eval/record-eval!` via:
-     :seon.render/ai   'seon.handlers.eval/render-ai
-     :seon.render/html 'seon.handlers.eval/render-html
+     :seon.render/ai   'seon.render.handlers.eval/render-ai
+     :seon.render/html 'seon.render.handlers.eval/render-html
 
    The transcript section's html twin (`seon.agent.ctx/transcript-block-html`)
    resolves these per-eval symbols (via `seon.render/render-entity-html` /
@@ -141,10 +141,10 @@
       (.append params "eval" eval-id)
       (.append params "path" "[]")
       (.append params "offset" "0")
-      {:seon.handlers.eval/url
+      {:seon.render.handlers.eval/url
        (str "/agent/" (js/encodeURIComponent agent-id) "/value?"
             (.toString params))
-       :seon.handlers.eval/root-id
+       :seon.render.handlers.eval/root-id
        (render/value-unit-id {:seon.agent/id agent-id} selector [])})))
 
 (defn- live-result-disclosure

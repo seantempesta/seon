@@ -1,4 +1,4 @@
-(ns seon.handlers.ns
+(ns seon.render.handlers.ns
   "Render captured namespace facts for agent context.
 
    The entity card shows what the NAMESPACE CONTAINS (fns + schemas),

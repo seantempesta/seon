@@ -6,7 +6,7 @@
   (:require
    [clojure.string :as str]
    [seon.schema :as schema]
-   [seon.web.view-unit :as view-unit]))
+   [seon.render.view-unit :as view-unit]))
 
 (schema/register! ::selection [:string {:min 1}])
 (schema/register! ::label [:string {:min 1}])

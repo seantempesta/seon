@@ -1,10 +1,10 @@
-(ns seon.handlers.eval-test
+(ns seon.render.handlers.eval-test
   (:require
     [cljs.test :refer [deftest is]]
     [clojure.string :as str]
     [seon.ai.tokens :as tokens]
     [seon.config :as config]
-    [seon.handlers.eval :as eval-handler]
+    [seon.render.handlers.eval :as eval-handler]
     [seon.render :as render]))
 
 (def ^:private failed-eval

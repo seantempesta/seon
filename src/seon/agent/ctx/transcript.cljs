@@ -17,7 +17,7 @@
     [seon.db :as db]
     [seon.db.protocol :as protocol]
     [seon.derive :as derive]
-    [seon.handlers.eval :as eval-handler]
+    [seon.render.handlers.eval :as eval-handler]
     [seon.render :as render]
     [seon.schema :as schema]))
 
@@ -1382,8 +1382,8 @@
 ;; ------------------------------------------------------------
 ;; HTML twin — the debug view's right-pane transcript card. The same flat
 ;; event stream, each event rendered through the recursive html handle via
-;; its kind's html converter (`seon.handlers.message/render-html` /
-;; `seon.handlers.eval/render-html` — resolved by the entity's schema
+;; its kind's html converter (`seon.render.handlers.message/render-html` /
+;; `seon.render.handlers.eval/render-html` — resolved by the entity's schema
 ;; kind), oldest-first.
 ;; ------------------------------------------------------------
 

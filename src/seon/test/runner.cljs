@@ -158,7 +158,7 @@
 ;; KIND (mirrors the `:seon.fn` / `:seon.schema` registrations in
 ;; seon.agent). The `:seon.render/ai` / `:seon.render/html` symbols are
 ;; resolved at render time via seon.eval/lookup-value — quoted here, NOT
-;; required, so there's no cycle on seon.handlers.test.
+;; required, so there's no cycle on seon.render.handlers.test.
 ;;
 ;; `:seon.test/sym` is the identity attr (the only required entry); every
 ;; other attr is `{:optional true}` so BOTH shapes validate + merge on the
@@ -168,8 +168,8 @@
 ;; boot, and renders per-kind in render-namespace + the debug view panes.
 (schema/register! :seon.test
   [:map {:seon.db/entity   true
-         :seon.render/ai   'seon.handlers.test/render-ai
-         :seon.render/html 'seon.handlers.test/render-html}
+         :seon.render/ai   'seon.render.handlers.test/render-ai
+         :seon.render/html 'seon.render.handlers.test/render-html}
    [:seon.test/sym :seon.test/sym]
    [:seon.test/ns                   {:optional true} :seon.test/ns]
    [:seon.test/source               {:optional true} :seon.test/source]

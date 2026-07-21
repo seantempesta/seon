@@ -1,11 +1,11 @@
-(ns seon.handlers.test-test
+(ns seon.render.handlers.test-test
   "Pure tests for the `:seon.test` entity shape and render handler."
   (:require
     [clojure.string :as str]
     [cljs.test :refer [deftest is]]
     [seon.agent.ctx.render-fns]
-    [seon.handlers.fn :as h-fn]
-    [seon.handlers.test :as h-test]
+    [seon.render.handlers.fn :as h-fn]
+    [seon.render.handlers.test :as h-test]
     [seon.render :as render]
     [seon.render.canvas :as canvas]
     [seon.schema :as schema]))

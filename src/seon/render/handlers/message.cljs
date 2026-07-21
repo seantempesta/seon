@@ -1,9 +1,9 @@
-(ns seon.handlers.message
+(ns seon.render.handlers.message
   "Render agent messages for model and human context.
 
    Stored on individual message entities via:
-     :seon.render/ai   'seon.handlers.message/render-ai
-     :seon.render/html 'seon.handlers.message/render-html
+     :seon.render/ai   'seon.render.handlers.message/render-ai
+     :seon.render/html 'seon.render.handlers.message/render-html
 
    The transcript section's html twin (`seon.agent.ctx/transcript-block-html`)
    resolves these per-message symbols (via `seon.render/render-entity-html`

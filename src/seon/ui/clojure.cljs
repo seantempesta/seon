@@ -165,7 +165,7 @@
 ;; ============================================================
 
 (def ^:private pre-class
-  "Matches the existing eval-card `<pre>` (seon.handlers.eval) so the
+  "Matches the existing eval-card `<pre>` (seon.render.handlers.eval) so the
    highlighted block sits identically in every surface."
   "text-xs whitespace-pre-wrap mt-0.5 rounded bg-base-900 p-1.5 overflow-x-auto")
 

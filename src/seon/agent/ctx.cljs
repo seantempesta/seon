@@ -16,7 +16,7 @@
     [seon.db :as db]
     [seon.error.instrument :as einstrument]
     [seon.eval :as seval]
-    [seon.handlers.test :as h-test]
+    [seon.render.handlers.test :as h-test]
     [seon.render.schema]
     [seon.schema :as schema]
     [seon.ui.markdown :as md]))
@@ -1404,9 +1404,9 @@
 (defn- test-block-ai
   "One test rendered for the :ai form — `[test sym]` header, the
    pass/fail status line (✓/✗/•), and clipped source. The status glyph
-   is derived via the shared `seon.handlers.test/status-line` — the
+   is derived via the shared `seon.render.handlers.test/status-line` — the
    SINGLE source of the ✓/✗/• logic — so this whole-ns block and the
-   per-kind `seon.handlers.test/render-ai` never diverge."
+   per-kind `seon.render.handlers.test/render-ai` never diverge."
   [{:seon.test/keys [sym source] :as test}]
   (str "[test " sym "]"
        "\n" (h-test/status-line test)

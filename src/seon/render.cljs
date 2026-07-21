@@ -38,7 +38,7 @@
     [seon.ui.clojure :as cljhl]
     [seon.ui.html :as html]
     [seon.ui.markdown :as md]
-    [seon.web.view-unit :as view-unit]))
+    [seon.render.view-unit :as view-unit]))
 
 ;; ============================================================
 ;; Schemas — every shape this surface reads or writes (spec-05 §15.1).
@@ -335,7 +335,7 @@
    schema's default html symbol. Returns nil when no symbol resolves OR
    the resolved fn returns nil.
 
-   The schema's html symbol IS a converter (`seon.handlers.*/render-html`)
+   The schema's html symbol IS a converter (`seon.render.handlers.*/render-html`)
    that returns BARE hiccup, called with the entity under
    `:seon.render/node`. A renderer that THROWS does NOT vanish (same
    posture as the canvas's `error-response`): the surface becomes a
@@ -360,7 +360,7 @@
           (unwrap-response :seon.render/html r))
         (catch :default e
           ;; Classify by the render symbol (fault-for): an agent-authored
-          ;; converter → :agent, a core `seon.handlers.*` converter → :core.
+          ;; converter → :agent, a core `seon.render.handlers.*` converter → :core.
           ;; Record BEFORE strict-fail! (which re-throws in strict mode,
           ;; bypassing the tail). recorded? skips an inner funnel's datom.
           (when-not (err/recorded? e)
@@ -833,7 +833,7 @@
    primary schema. Returns nil if no symbol resolves OR the fn returns
    nil. Mirror of `render-entity-html` for the AI path.
 
-   The schema's ai symbol IS a converter (`seon.handlers.*/render-ai`)
+   The schema's ai symbol IS a converter (`seon.render.handlers.*/render-ai`)
    returning a BARE String, called with the entity under
    `:seon.render/node` (`:seon.render/entity` tolerated)."
   {:malli/schema [:=> [:cat :seon.render/section-request] [:maybe :string]]}
