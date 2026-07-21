@@ -57,9 +57,15 @@ Remaining for full acceptance below: pull-path resource evidence (the fork's
 `datahike.query`'s `publish-evidence!` at
 `reference-code/datahike/src/datahike/query.cljc:4519` into
 `pull_api.cljc/pull-spec`), turn-level aggregation onto the durable turn, the
-`:off`/`:aggregate`/`:trace` dial, and the debug-page waterfall. Host-context
-reads are still identity-less (the shared wrapper closure has no per-agent
-scope) and aggregate under the empty identity.
+`:off`/`:aggregate`/`:trace` dial, and the debug-page waterfall.
+
+Host-context reads carry per-agent identity since U4 (2026-07-20):
+`seon.host.context/*agent-id*` is bound around every host invocation
+(`seon.host/run-invocation!` eval-batch branch and startup restore), and the
+shared `seon.db` wrappers attach `:seon.db/user [:seon.agent/id id]` +
+`:seon.db/process [:seon.db.process/id :seon.db.process/repl]` to query/pull
+requests and as transaction metadata on writes — the empty-identity
+aggregation gap for host-tier agents is closed.
 
 ## Acceptance
 

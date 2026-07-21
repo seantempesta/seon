@@ -8,6 +8,7 @@
    handler (the same self-contained pattern as `seon.db.transport-uds-test`)
    so the suite needs no live cluster."
   (:require [clojure.test :refer [deftest is use-fixtures]]
+            [seon.db.id :as db.id]
             [seon.db.protocol :as protocol]
             [seon.db.transport.uds :as uds]
             [seon.host :as host]
@@ -44,14 +45,27 @@
        :seon.db/db database}
 
       protocol/query-operation
-      {::protocol/success? true
-       ::protocol/request-id request-id
-       :datahike.query/result fake-agent-rows
-       :datahike.query/resource-evidence
-       {:datahike.resource/work 42
-        :datahike.resource/result-count 3
-        :datahike.resource/result-weight 9
-        :datahike.resource/limits {}}}
+      ;; The recording path issues two host-owned reads: the stored
+      ;; :seon.eval/id generator policy (allocation) and the corpus
+      ;; def-sources replay read (restore). Dispatch structurally on the
+      ;; query form; every other read keeps the generic agent rows.
+      (let [query-form (::protocol/query-form request)
+            result (cond
+                     (= query-form db.id/generator-policy-query)
+                     [[:seon.eval/id :seon.db.id.generator/compact]]
+
+                     (some #{'?source} (flatten (vec query-form)))
+                     []
+
+                     :else fake-agent-rows)]
+        {::protocol/success? true
+         ::protocol/request-id request-id
+         :datahike.query/result result
+         :datahike.query/resource-evidence
+         {:datahike.resource/work 42
+          :datahike.resource/result-count 3
+          :datahike.resource/result-weight 9
+          :datahike.resource/limits {}}})
 
       protocol/pull-operation
       {::protocol/success? true

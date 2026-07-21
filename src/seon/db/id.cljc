@@ -1096,6 +1096,19 @@
        [manifest]
        (into {} (map (juxt ::key ::value)) manifest))
 
+     (defn candidate-manifest
+       "One valid generated-candidate manifest for allocations under policies.
+
+   The public pure seam for callers that transact allocations through the
+   wire protocol's `::generated-candidates` field directly (the JVM agent
+   host); `allocate!` remains the full retrying entry point on each
+   platform. Same grammar validation, same manifest shape."
+       {:malli/schema [:=> [:catn [::generator-policies ::generator-policies]
+                            [::allocations ::allocations]]
+                       ::generated-candidates]}
+       [generator-policies allocations]
+       (candidate-round! generator-policies allocations))
+
      (defn- attach-dependent-identities!
        "Attach the builder's public candidate-key claims to the private generated
    manifest sent through the existing serialized-writer field. This keeps the
@@ -1170,16 +1183,16 @@
                     :seon.error/kind :core-bug})))
        nil)
 
+     (def generator-policy-query
+       "Stored identity-generator policies, parameterized by identity attributes."
+       '[:find ?identity-attr ?generator
+         :in $ [?identity-attr ...]
+         :where
+         [?schema :seon.schema/key ?identity-attr]
+         [?schema :seon.db.id/generator ?generator]])
+
      #?(:cljs
         (do
-          (def generator-policy-query
-            "Stored identity-generator policies, parameterized by identity attributes."
-            '[:find ?identity-attr ?generator
-              :in $ [?identity-attr ...]
-              :where
-              [?schema :seon.schema/key ?identity-attr]
-              [?schema :seon.db.id/generator ?generator]])
-
           (defn- validate-generator-policies!
             [allocations policies]
             (let [required (set (map ::identity-attr allocations))]

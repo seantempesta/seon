@@ -23,28 +23,53 @@
    re-executing — no second receipt entity exists.
 
    The durable agent is database facts. A context is a cache of those
-   facts: park drops it, restore forks the base and replays the agent's def
-   sources through [[replay-defs!]].
+   facts: park drops it, restore forks the base and replays the agent's
+   home-ns corpus def sources ([[restore-context-defs!]] over
+   [[agent-def-sources]] + [[replay-defs!]]).
 
-   TODO SEAM (recorded, deliberately unbuilt — owner:
-   sci-execution-runtime U4 with `seon.eval`'s corpus machinery):
-   - def persistence: successful defs evaluated here must tee into the one
-     `:seon.fn`/`:seon.ns` program corpus exactly as
-     `seon.eval/eval-batch!` records them today. Until that tee exists the
-     caller supplies replay sources from the corpus it already holds.
-   - `seon.schema/register!` inside a context records the request and
-     returns nil; real admission (validator compilation + Datahike bridge)
-     is the same U4 unit."
+   Recording (U4): [[start-eval-receipt!]] allocates a managed
+   `:seon.eval/id` through the wire protocol's generated-candidates
+   field and commits the `:running` receipt before a form may run;
+   [[record-eval-terminal!]] terminalizes behind the receipt's CAS fence
+   in ONE transaction with every program-graph row the form tees
+   (`seon.host.record` builds the exact data the child tee writes).
+   `seon.schema/register!` admits for real through the one bridge, and
+   the registry diff around each form tees the canonical `:seon.schema`
+   row."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [sci.core :as sci]
             [sci.interrupt :as interrupt]
             [seon.ai.tokens :as tokens]
+            [seon.db.id :as db.id]
             [seon.db.protocol :as protocol]
             [seon.db.transport.uds :as uds]
+            [seon.host.record :as record]
             [seon.schema :as schema]))
 
 (set! *warn-on-reflection* true)
+
+(def ^:dynamic *agent-id*
+  "The invocation's agent identity, bound around every host eval.
+
+   Threads per-agent provenance through the shared wrapper closures:
+   reads carry `:seon.db/user`/`:seon.db/process` so the writer's read
+   spend attributes to the exact agent instead of the empty identity,
+   and writes carry the same two references as transaction metadata —
+   the one provenance vocabulary the pod stamps."
+  nil)
+
+(defn- provenance
+  "The two durable provenance references for the bound agent, or nil."
+  []
+  (when *agent-id*
+    {:seon.db/user [:seon.agent/id *agent-id*]
+     :seon.db/process [:seon.db.process/id :seon.db.process/repl]}))
+
+(defn- with-read-provenance
+  "Attach the bound agent's read provenance to one protocol request."
+  [request]
+  (merge request (provenance)))
 
 (schema/register! ::writer-socket-path [:string {:min 1}])
 (schema/register! ::database-name ::protocol/database-name)
@@ -52,6 +77,7 @@
 (schema/register! ::database-path ::protocol/database-path)
 (schema/register! ::channel-state 'some?)
 (schema/register! ::call-lock 'some?)
+(schema/register! ::eval-generator 'some?)
 (schema/register!
  ::writer
  [:map
@@ -60,7 +86,8 @@
   [::backend {:optional true} ::backend]
   [::database-path {:optional true} ::database-path]
   [::channel-state ::channel-state]
-  [::call-lock ::call-lock]])
+  [::call-lock ::call-lock]
+  [::eval-generator ::eval-generator]])
 (schema/register! ::ctx 'some?)
 (schema/register! ::registry 'some?)
 (schema/register! ::lib :symbol)
@@ -129,7 +156,8 @@
   (cond-> {::writer-socket-path writer-socket-path
            ::database-name database-name
            ::channel-state (atom nil)
-           ::call-lock (Object.)}
+           ::call-lock (Object.)
+           ::eval-generator (atom nil)}
     backend (assoc ::backend backend)
     database-path (assoc ::database-path database-path)))
 
@@ -224,10 +252,11 @@
       (let [response (writer-call!
                       writer
                       (protocol/query-request
-                       {::protocol/request-id (str (random-uuid))
-                        :seon.db/db head
-                        ::protocol/query-form query-form
-                        ::protocol/arguments (vec arguments)}))]
+                       (with-read-provenance
+                         {::protocol/request-id (str (random-uuid))
+                          :seon.db/db head
+                          ::protocol/query-form query-form
+                          ::protocol/arguments (vec arguments)})))]
         (if (::protocol/success? response)
           (select-keys response
                        [:datahike.query/result
@@ -254,10 +283,11 @@
       (let [response (writer-call!
                       writer
                       (protocol/pull-request
-                       {::protocol/request-id (str (random-uuid))
-                        :seon.db/db head
-                        ::protocol/selector selector
-                        ::protocol/entity-id entity-id}))]
+                       (with-read-provenance
+                         {::protocol/request-id (str (random-uuid))
+                          :seon.db/db head
+                          ::protocol/selector selector
+                          ::protocol/entity-id entity-id})))]
         (if (::protocol/success? response)
           (::protocol/result response)
           (protocol-error-value response))))))
@@ -332,9 +362,12 @@
           (let [response (writer-call!
                           writer
                           (protocol/transaction-request
-                           {::protocol/request-id op-id
-                            :seon.db/db head
-                            ::protocol/transaction-data (vec tx-data)}))]
+                           (cond-> {::protocol/request-id op-id
+                                    :seon.db/db head
+                                    ::protocol/transaction-data (vec tx-data)}
+                             (provenance)
+                             (assoc ::protocol/transaction-meta
+                                    (provenance)))))]
             (if (::protocol/success? response)
               (cond-> {:seon.db/ok? true
                        :seon.capability/op-id op-id
@@ -440,11 +473,23 @@
                                                               value))
                 ::arglists '([schema-key value])
                 ::doc "True when the value satisfies the registered schema."}
-     ;; TODO SEAM (U4): real admission through the one
-     ;; `seon.schema/register!` bridge; recording only for now.
-     'register! {::wrapper-fn (fn [_key _schema] nil)
+     ;; Real admission through the one `seon.schema/register!` bridge:
+     ;; the host registry validates and admits exactly as the child's,
+     ;; a banned/invalid shape returns the guidance as an error VALUE,
+     ;; and the surrounding form's registry diff tees the canonical
+     ;; `:seon.schema` row into the same transaction as its eval row.
+     'register! {::wrapper-fn
+                 (fn [schema-key schema-form]
+                   (try
+                     (schema/register! schema-key schema-form)
+                     schema-key
+                     (catch Throwable throwable
+                       {:seon/error
+                        {:seon.error/message
+                         (str (.getMessage throwable))
+                         :seon.error/kind :user-input}})))
                  ::arglists '([schema-key schema])
-                 ::doc "Record a schema registration request (admission is the U4 seam)."}}})
+                 ::doc "Register one schema; the eval tee persists the canonical row."}}})
   (register-wrappers!
    {::registry registry
     ::lib 'seon.ai.tokens
@@ -492,6 +537,32 @@
       (str/replace "/" ".")
       symbol))
 
+(defn- synthetic-ns-form
+  "The synthetic `(ns …)` source establishing one context namespace.
+
+   Stands in for the production augment-ns-source aliases, pointed at
+   the host capability namespaces the registry provisions."
+  [ns-sym]
+  (str "(ns " ns-sym
+       " (:require [clojure.string :as str]"
+       " [clojure.set :as set]"
+       " [clojure.edn :as edn]"
+       " [clojure.walk :as walk]"
+       " [seon.db :as db]"
+       " [seon.schema :as schema]"
+       " [seon.ai.tokens :as tokens]))"))
+
+(defn ensure-context-ns!
+  "Ensure `ns-sym` exists in `ctx` with the standard capability aliases.
+
+   Idempotent: an existing namespace is left untouched (re-running the
+   ns form would be harmless but wasteful under the shared load lock)."
+  {:malli/schema [:=> [:catn [::ctx ::ctx] [::ns-sym :symbol]] :nil]}
+  [ctx ns-sym]
+  (when-not (sci/eval-string* ctx (str "(find-ns '" ns-sym ")"))
+    (sci/eval-string* ctx (synthetic-ns-form ns-sym)))
+  nil)
+
 (defn- load-portable-slice!
   "Eval every pure `my.*` defn block from its real source into `ctx`.
 
@@ -506,17 +577,7 @@
                      source (slurp (io/file path))
                      pure (filterv pure-block? (defn-blocks source))]]
            (do
-             ;; A synthetic ns form stands in for the production
-             ;; augment-ns-source aliases, pointed at the host namespaces.
-             (sci/eval-string*
-              ctx (str "(ns " ns-sym
-                       " (:require [clojure.string :as str]"
-                       " [clojure.set :as set]"
-                       " [clojure.edn :as edn]"
-                       " [clojure.walk :as walk]"
-                       " [seon.db :as db]"
-                       " [seon.schema :as schema]"
-                       " [seon.ai.tokens :as tokens]))"))
+             (sci/eval-string* ctx (synthetic-ns-form ns-sym))
              (reduce
               (fn [tally block]
                 (let [outcome
@@ -571,8 +632,9 @@
   "Replay def sources into a context; restore = fork base + this replay.
 
    Each source string evaluates in order; every outcome is a value. The
-   sources come from the one program corpus the caller holds — teeing NEW
-   defs back into that corpus is the recorded U2 seam, not this function."
+   sources come from the one program corpus ([[agent-def-sources]]);
+   replay is reconstruction, never a fresh agent eval, so nothing here
+   re-tees."
   {:malli/schema [:=> [:cat ::ctx ::def-sources] ::replay-envelopes]}
   [ctx def-sources]
   (mapv (fn [source]
@@ -586,3 +648,178 @@
                                          (str (.getMessage throwable)))))
                             :seon.error/kind :agent}})))
         def-sources))
+
+;;; Eval recording — host-tier turns are first-class corpus citizens (U4).
+
+(def ^:private agent-def-sources-query
+  '[:find ?source ?transaction
+    :in $ ?ns-sym
+    :where
+    [?namespace :seon.ns/name ?ns-sym]
+    [?fn :seon.fn/ns ?namespace]
+    [?fn :seon.fn/source ?source ?transaction]])
+
+(defn agent-def-sources
+  "Ordered corpus def sources for one namespace, oldest tee first.
+
+   The durable agent is database facts: restore forks the shared base
+   and replays exactly these `:seon.fn/source` rows. Returns the error
+   value on a failed read — the caller decides whether a restore without
+   replay is acceptable."
+  {:malli/schema [:=> [:catn [::writer ::writer] [::ns-sym :symbol]] :any]}
+  [writer ns-sym]
+  (let [rows (db-query writer agent-def-sources-query ns-sym)]
+    (if (:seon/error rows)
+      rows
+      (into [] (map first) (sort-by second rows)))))
+
+(defn restore-context-defs!
+  "Replay one namespace's corpus defs into a freshly forked context.
+
+   Establishes the namespace with the standard aliases, then replays
+   each stored def source inside it. Returns the replay envelopes (an
+   error value when the corpus read itself failed); individual replay
+   failures are values inside the vector, never throws."
+  {:malli/schema [:=> [:catn [::writer ::writer] [::ctx ::ctx]
+                       [::ns-sym :symbol]] :any]}
+  [writer ctx ns-sym]
+  (let [sources (agent-def-sources writer ns-sym)]
+    (if (:seon/error sources)
+      sources
+      (do (ensure-context-ns! ctx ns-sym)
+          (replay-defs!
+           ctx
+           (mapv #(str "(in-ns '" ns-sym ")\n" %) sources))))))
+
+(defn- record-transact!
+  "One provenance-stamped transaction on the retained writer connection.
+
+   `candidates` ride the protocol's `::generated-candidates` field, so
+   the writer validates and commits managed identity allocation in the
+   same transaction — the exact mechanism `seon.db.id/allocate!` uses."
+  [writer {::keys [tx-data candidates]}]
+  (let [head (resolve-head! writer)]
+    (if (:seon/error head)
+      head
+      (let [response
+            (writer-call!
+             writer
+             (protocol/transaction-request
+              (cond-> {::protocol/request-id (str (random-uuid))
+                       :seon.db/db head
+                       ::protocol/transaction-data (vec tx-data)}
+                (provenance)
+                (assoc ::protocol/transaction-meta (provenance))
+                (seq candidates)
+                (assoc ::protocol/generated-candidates (vec candidates)))))]
+        (if (::protocol/success? response)
+          {:seon.db/ok? true}
+          (protocol-error-value response))))))
+
+(def ^:private eval-allocation-key ::eval-allocation)
+(def ^:private max-allocation-attempts 16)
+
+(defn- eval-id-generator
+  "The stored generator policy for `:seon.eval/id`; cached per session.
+
+   The policy is a database fact on the `:seon.schema` row; process-local
+   caching is safe because a policy change would arrive with a new
+   program, not mid-session."
+  [writer]
+  (or @(::eval-generator writer)
+      (let [rows (db-query writer db.id/generator-policy-query
+                           [:seon.eval/id])]
+        (if (:seon/error rows)
+          rows
+          (if-let [generator (some (fn [[attr generator]]
+                                     (when (= :seon.eval/id attr)
+                                       generator))
+                                   rows)]
+            (reset! (::eval-generator writer) generator)
+            {:seon/error
+             {:seon.error/message
+              "No stored generator policy for :seon.eval/id."
+              :seon.error/kind :core-bug}})))))
+
+(defn start-eval-receipt!
+  "Allocate one managed eval id and commit its `:running` receipt.
+
+   The durable execution boundary: the caller runs the form ONLY after
+   this returns `{:seon.eval/id id}`. Candidate conflicts retry with a
+   fresh candidate, bounded exactly like the allocator."
+  {:malli/schema [:=> [:cat ::writer
+                       [:map [:seon.agent.turn/id :string]
+                        [:seon.eval/at :inst]
+                        [:seon.eval/source :string]
+                        [:seon.eval/narration :string]
+                        [:seon.eval/ns :symbol]
+                        [:seon.agent/id :string]]]
+                  :map]}
+  [writer {turn-id :seon.agent.turn/id
+           at :seon.eval/at
+           source :seon.eval/source
+           narration :seon.eval/narration
+           ns-sym :seon.eval/ns
+           agent-id :seon.agent/id}]
+  (let [generator (eval-id-generator writer)]
+    (if (:seon/error generator)
+      generator
+      (loop [attempt 1]
+        (let [manifest (db.id/candidate-manifest
+                        {:seon.eval/id generator}
+                        [{:seon.db.id/key eval-allocation-key
+                          :seon.db.id/identity-attr :seon.eval/id}])
+              eval-id (:seon.db.id/value (first manifest))
+              outcome
+              (record-transact!
+               writer
+               {::tx-data (record/start-tx-data
+                           {:seon.agent.turn/id turn-id
+                            :seon.eval/id eval-id
+                            :seon.eval/at at
+                            :seon.eval/source source
+                            :seon.eval/narration narration
+                            :seon.eval/ns ns-sym
+                            :seon.eval/agent [:seon.agent/id agent-id]})
+                ::candidates manifest})]
+          (cond
+            (:seon.db/ok? outcome) {:seon.eval/id eval-id}
+
+            (and (= protocol/generated-candidate-conflict-error
+                    (get-in outcome [:seon/error :seon.error/data
+                                     ::protocol/error-kind]))
+                 (< attempt max-allocation-attempts))
+            (recur (inc attempt))
+
+            :else outcome))))))
+
+(defn record-eval-terminal!
+  "Terminalize one receipt with its frozen outcome and program tee.
+
+   One transaction carries the `:running` CAS fence, the complete eval
+   row, and every program-graph row the form tees — the eval's committed
+   transaction IS the transaction that wrote the corpus datom, exactly
+   as the child records."
+  {:malli/schema [:=> [:cat ::writer :map] :map]}
+  [writer {eval-id :seon.eval/id
+           ::keys [envelope at duration-ms source narration ns-sym
+                   agent-id forms var-meta new-schema-keys]}]
+  (let [tx-data
+        (into (record/terminal-tx-data
+               {:seon.eval/id eval-id
+                ::record/envelope envelope
+                ::record/at at
+                ::record/duration-ms duration-ms
+                ::record/source source
+                ::record/narration narration
+                ::record/ns-sym ns-sym
+                ::record/agent-ref [:seon.agent/id agent-id]})
+              (when (:seon.eval/ok? envelope)
+                (record/tee-tx-data
+                 {::record/forms (or forms [])
+                  ::record/source source
+                  ::record/ns-sym ns-sym
+                  ::record/var-meta (or var-meta {})
+                  ::record/new-schema-keys (or new-schema-keys #{})
+                  ::record/at at})))]
+    (record-transact! writer {::tx-data tx-data})))

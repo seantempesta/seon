@@ -46,16 +46,24 @@
    cancel never poisons the process — the agent's context survives in the
    host and the timeout error carries no `child-retired?` claim.
 
-   Seams recorded for U1.5/U2 (deliberately unbuilt here):
+   Eval batches RECORD (U4): each executed form commits a `:running`
+   receipt with a managed `:seon.eval/id` before it runs, terminalizes
+   behind the receipt's CAS fence with the frozen outcome, and tees
+   `:seon.fn`/`:seon.ns`/`:seon.schema` rows through the one corpus
+   mechanism (`seon.host.record` builds the exact child-tee data;
+   `seon.host.context` owns the writer round-trips). A fresh context
+   fork replays the agent's home-ns corpus defs.
+
+   Seams still recorded (deliberately unbuilt here):
    - these message schemas are the JVM projection of `seon.execution`'s
      contract; promoting that namespace to `.cljc` at cutover moves them;
    - `ready`'s runtime-version field is named `bun-version` by the child
      schema — renaming rides the same promotion;
    - the host trusts its JVM classpath instead of hashing a Bun artifact,
      so it echoes the startup's declared artifact identity;
-   - eval-batch database recording (eval rows, receipts, corpus tee, run
-     fence) stays with `seon.eval`; the host returns empty
-     `:seon.eval/ids` until that seam lands;
+   - the run-fence CAS, ALS print capture, preflight repair, and the
+     render-ai result skeleton remain child-path behavior (roadmap U4
+     honest limits);
    - render-prompt!/render-agent-view! stay pod-served by design (the pod
      keeps rendering); routing them here answers with a steering error."
   (:require [clojure.edn :as edn]
@@ -63,6 +71,7 @@
             [sci.core :as sci]
             [seon.db.transport.uds :as uds]
             [seon.host.context :as context]
+            [seon.host.record :as record]
             [seon.schema :as schema])
   (:import [java.io File OutputStream]
            [java.net StandardProtocolFamily UnixDomainSocketAddress]
@@ -220,6 +229,14 @@
 
 ;;; Eval serving
 
+(defn- agent-home-ns
+  "The deterministic home-ns symbol for an agent id.
+
+   Mirrors `seon.agent.home/home-ns` (the pod-side owner of the
+   derivation): `(agent-home-ns \"seon\") => 'my.agent.seon`."
+  [agent-id]
+  (symbol (str "my.agent." agent-id)))
+
 (defn- entry-source [entry]
   (or (:seon.repl/eval-source entry) (:seon.repl/source entry)))
 
@@ -240,56 +257,178 @@
               (dissoc :seon.eval/value)
               (assoc :seon.eval/value-display (pr-str value))))))))
 
-(defn- eval-entry!
-  "Evaluate one parsed entry in the agent context; every outcome a value."
-  [ctx entry]
-  (case (:seon.repl/kind entry)
-    :form
-    (try
-      (wire-safe-value
-       {:seon.eval/ok? true
-        :seon.eval/value (sci/eval-string* ctx (entry-source entry))})
-      (catch Throwable throwable
-        (let [message (str (first (str/split-lines
-                                   (str (.getMessage throwable)))))
-              interrupted? (boolean (re-find #"deadline exceeded|interrupt"
-                                             message))]
-          {:seon.eval/ok? false
-           :seon.eval/interrupted? interrupted?
-           :seon/error (error-value message :agent)})))
+(defn- eval-form!
+  "Evaluate one prepared source in the agent context; every outcome a value.
 
-    :read
-    {:seon.eval/ok? false
-     :seon/error (error-value
-                  (str "The form could not be read: "
-                       (or (:seon.repl/message entry) "read error"))
-                  :agent)}
+   `::var-meta` (a returned sci var's metadata, the tee's projection
+   input) is host-internal and stripped before the envelope crosses the
+   protocol."
+  [ctx source]
+  (try
+    (let [value (sci/eval-string* ctx source)]
+      (cond-> (wire-safe-value {:seon.eval/ok? true
+                                :seon.eval/value value})
+        (instance? sci.lang.Var value)
+        (assoc ::var-meta (meta value))))
+    (catch Throwable throwable
+      (let [message (str (first (str/split-lines
+                                 (str (.getMessage throwable)))))
+            interrupted? (boolean (re-find #"deadline exceeded|interrupt"
+                                           message))]
+        {:seon.eval/ok? false
+         :seon.eval/interrupted? interrupted?
+         :seon/error (error-value message :agent)}))))
 
-    ;; comment/prose entries evaluate nothing.
-    {:seon.eval/ok? true :seon.eval/skipped? true}))
+(defn- read-error-envelope [entry]
+  {:seon.eval/ok? false
+   :seon/error (error-value
+                (str "The form could not be read: "
+                     (or (:seon.repl/message entry) "read error"))
+                :agent)})
 
-(defn- eval-batch-result
-  "Serve `seon.execution.runtime/eval-batch!`'s engine layer over sci.
-
-   Evaluates each parsed entry in order in the agent's context. The
-   database-recording layer (eval rows, receipts, corpus tee, run fence)
-   is `seon.eval`-owned and NOT rebuilt here — `:seon.eval/ids` stays
-   empty until that recorded U2 seam lands; the per-form envelopes ride
-   `:seon.host/results` so callers see every value."
-  [ctx {parsed :seon.eval/parsed}]
-  (let [results
-        (reduce (fn [acc entry]
-                  (let [envelope (eval-entry! ctx entry)]
-                    (if (:seon.eval/interrupted? envelope)
-                      (reduced (conj acc envelope))
-                      (conj acc envelope))))
-                []
-                (or parsed []))
-        evaluated (remove :seon.eval/skipped? results)]
-    {:seon.eval/ids []
+(defn- batch-summary
+  [ids results]
+  (let [evaluated (remove :seon.eval/skipped? results)]
+    {:seon.eval/ids ids
      :seon.eval/n-ok (count (filter :seon.eval/ok? evaluated))
      :seon.eval/n-fail (count (remove :seon.eval/ok? evaluated))
      :seon.host/results (vec results)}))
+
+(defn- declared-next-ns
+  "The ns an executed source moves the batch to, when it moves it.
+
+   An explicit `(ns X …)` or `(in-ns 'X)` as the FIRST form advances the
+   fold; ordinary forms cannot move the REPL namespace."
+  [forms]
+  (let [form (first forms)]
+    (cond
+      (and (seq? form) (= 'ns (first form)) (symbol? (second form)))
+      (second form)
+
+      (and (seq? form) (= 'in-ns (first form))
+           (seq? (second form)) (= 'quote (first (second form)))
+           (symbol? (second (second form))))
+      (second (second form))
+
+      :else nil)))
+
+(defn- eval-batch-result
+  "Serve `seon.execution.runtime/eval-batch!` over sci WITH recording.
+
+   Each executed form records through the one corpus mechanism: a
+   `:running` receipt with a managed `:seon.eval/id` commits BEFORE the
+   form runs (the durable execution boundary — no receipt, no run), and
+   one terminal transaction carries the CAS fence, the frozen eval row,
+   and every program-graph row the form tees (`:seon.fn` for a single
+   defn, `:seon.ns` + require edges for an ns declaration,
+   `:seon.schema` for registrations detected by registry diff). The
+   batch evals in the request's starting ns so defs land in the agent's
+   home namespace, not scratch `user`. Recording engages only when the
+   request names its owning turn; receiptless probes stay engine-only
+   with empty `:seon.eval/ids`."
+  [session {parsed :seon.eval/parsed
+            starting-ns :seon.eval/starting-ns
+            turn-id :seon.agent.turn/id-of-turn}]
+  (let [ctx (::ctx session)
+        writer (::writer session)
+        agent-id (:seon.execution/agent-id @(::startup session))
+        record? (boolean (and writer turn-id agent-id))
+        batch-ns (or starting-ns 'user)]
+    (when-not (contains? record/transient-ns-syms batch-ns)
+      (context/ensure-context-ns! ctx batch-ns))
+    (loop [entries (vec (or parsed []))
+           current-ns batch-ns
+           ids []
+           results []]
+      (if (empty? entries)
+        (batch-summary ids results)
+        (let [entry (first entries)
+              kind (:seon.repl/kind entry)]
+          (if-not (contains? #{:form :read} kind)
+            ;; comment/prose entries evaluate and record nothing.
+            (recur (rest entries) current-ns ids
+                   (conj results {:seon.eval/ok? true
+                                  :seon.eval/skipped? true}))
+            (let [source (or (entry-source entry) "")
+                  narration (or (:seon.repl/narration entry) "")
+                  at (java.util.Date.)
+                  start-ms (now-ms)
+                  started (when record?
+                            (context/start-eval-receipt!
+                             writer
+                             {:seon.agent.turn/id turn-id
+                              :seon.eval/at at
+                              :seon.eval/source source
+                              :seon.eval/narration narration
+                              :seon.eval/ns current-ns
+                              :seon.agent/id agent-id}))]
+              (if (and record? (:seon/error started))
+                ;; The receipt is the durable execution boundary: a form
+                ;; whose receipt cannot commit never runs.
+                (recur (rest entries) current-ns ids
+                       (conj results {:seon.eval/ok? false
+                                      :seon/error (:seon/error started)}))
+                (let [schemas-before (schema/snapshot)
+                      raw-envelope
+                      (if (= :form kind)
+                        (eval-form! ctx (str "(in-ns '" current-ns ")\n"
+                                             source))
+                        (read-error-envelope entry))
+                      ok? (boolean (:seon.eval/ok? raw-envelope))
+                      ;; A failed eval must not leave half a registration:
+                      ;; restore the exact prior registry, as the child does.
+                      _ (when (and (= :form kind) (not ok?))
+                          (schema/restore! schemas-before))
+                      new-schema-keys (if ok?
+                                        (schema/changed-keys schemas-before)
+                                        #{})
+                      forms (if (= :form kind)
+                              (record/read-forms
+                               {::record/source source
+                                ::record/ns-sym current-ns})
+                              [])
+                      var-meta (::var-meta raw-envelope)
+                      envelope (dissoc raw-envelope ::var-meta)
+                      eval-id (:seon.eval/id started)
+                      ;; An interrupted form leaves the worker's interrupt
+                      ;; status set, which would kill the writer channel's
+                      ;; NIO calls mid-record. The form is settled; clear
+                      ;; the flag so the terminal receipt can commit. The
+                      ;; envelope's interrupted? flag still ends the batch
+                      ;; and run-invocation! settles the timeout/cancel.
+                      _ (when (:seon.eval/interrupted? envelope)
+                          (Thread/interrupted))
+                      recorded
+                      (when (and record? eval-id)
+                        (context/record-eval-terminal!
+                         writer
+                         {:seon.eval/id eval-id
+                          ::context/envelope envelope
+                          ::context/at at
+                          ::context/duration-ms (- (now-ms) start-ms)
+                          ::context/source source
+                          ::context/narration narration
+                          ::context/ns-sym current-ns
+                          ::context/agent-id agent-id
+                          ::context/forms forms
+                          ::context/var-meta var-meta
+                          ::context/new-schema-keys new-schema-keys}))
+                      ids (if (and recorded (:seon.db/ok? recorded))
+                            (conj ids eval-id)
+                            ids)
+                      envelope (if (and recorded
+                                        (not (:seon.db/ok? recorded)))
+                                 ;; The outcome could not become durable —
+                                 ;; surface it on the envelope as data.
+                                 (assoc envelope ::record-error
+                                        (:seon/error recorded))
+                                 envelope)
+                      next-ns (or (when ok? (declared-next-ns forms))
+                                  current-ns)]
+                  (if (:seon.eval/interrupted? envelope)
+                    (batch-summary ids (conj results envelope))
+                    (recur (rest entries) next-ns ids
+                           (conj results envelope))))))))))))
 
 (defn- interrupted-batch?
   [result]
@@ -345,8 +484,10 @@
                       {:seon.execution/function-symbol function-symbol})}
 
             (= function-symbol 'seon.execution.runtime/eval-batch!)
-            (let [result (eval-batch-result (::ctx session)
-                                            (first arguments))]
+            (let [result (binding [context/*agent-id*
+                                   (:seon.execution/agent-id
+                                    @(::startup session))]
+                           (eval-batch-result session (first arguments)))]
               (if (and (interrupted-batch? result)
                        @(::cancel-requested? session))
                 {::error (error-value "The invocation was canceled." :agent)}
@@ -493,6 +634,7 @@
           (startup-error session
                          (get-in head [:seon/error :seon.error/message]))
           (let [agent-id (:seon.execution/agent-id startup)
+                existing? (contains? @(::contexts session) agent-id)
                 ctx (-> (swap! (::contexts session)
                                (fn [contexts]
                                  (if (contains? contexts agent-id)
@@ -501,6 +643,16 @@
                                           (context/fork-context
                                            (::base host))))))
                         (get agent-id))]
+            ;; Restore = fork the shared base + replay the agent's corpus
+            ;; defs (design §2): a context is a cache of database facts,
+            ;; so a fresh fork rebuilds the agent's home namespace from
+            ;; its recorded `:seon.fn/source` rows. Replay failures are
+            ;; values; a failed corpus read leaves an honest empty
+            ;; context rather than refusing the session.
+            (when-not existing?
+              (binding [context/*agent-id* agent-id]
+                (context/restore-context-defs!
+                 (::writer host) ctx (agent-home-ns agent-id))))
             (reset! (::startup session) startup)
             (send-frame!
              session
@@ -533,6 +685,7 @@
                  ::active-run (atom nil)
                  ::cancel-requested? (atom false)
                  ::contexts (::contexts host)
+                 ::writer (::writer host)
                  ::eval-pool (::eval-pool host)
                  ::watchdog (::watchdog host)}]
     (try

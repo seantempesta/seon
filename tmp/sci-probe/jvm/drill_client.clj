@@ -161,7 +161,10 @@
 
 ;;; The drill.
 
-;; Phase 0 — schema for the drill facts (idempotent).
+;; Phase 0 — schema for the drill facts (idempotent), PLUS the corpus
+;; recording population a real cluster carries from genesis (U4: host
+;; evals record receipts/tee rows; a database without the :seon.eval/id
+;; generator policy would loudly refuse to run any recorded batch).
 (transact! [{:db/ident :drill/agent
              :db/valueType :db.type/string
              :db/cardinality :db.cardinality/one
@@ -169,6 +172,97 @@
             {:db/ident :drill/fact
              :db/valueType :db.type/long
              :db/cardinality :db.cardinality/one}])
+(transact!
+ (into
+  [{:seon.schema/key :seon.schema/key
+    :seon.schema/form "[:keyword {:seon.db/identity true}]"}
+   {:seon.schema/key :seon.schema/form :seon.schema/form ":string"}
+   {:seon.schema/key :seon.schema/created-at :seon.schema/form ":inst"}
+   {:seon.schema/key :seon.db/lookup-ref-value
+    :seon.schema/form "[:or :string :uuid :keyword :symbol :int]"}
+   {:seon.schema/key :seon.db/ref
+    :seon.schema/form
+    "[:or :int :string [:tuple :keyword :seon.db/lookup-ref-value]]"}
+   {:seon.schema/key :seon.schema/ns :seon.schema/form ":seon.db/ref"}
+   {:seon.schema/key :seon.db.id/generator :seon.schema/form ":keyword"}
+   {:seon.schema/key :seon.db/user :seon.schema/form ":seon.db/ref"}
+   {:seon.schema/key :seon.db/process :seon.schema/form ":seon.db/ref"}
+   {:seon.schema/key :seon.db.process/id
+    :seon.schema/form
+    (str "[:and {:seon.db/identity true}"
+         " [:enum :seon.db.process/boot :seon.db.process/config"
+         " :seon.db.process/repl]]")}
+   {:seon.schema/key :seon.agent/id
+    :seon.schema/form "[:string {:seon.db/identity true}]"}
+   {:seon.schema/key :seon.agent.turn/id
+    :seon.schema/form "[:string {:seon.db/identity true}]"}
+   {:seon.schema/key :seon.agent.turn/evals
+    :seon.schema/form "[:vector {:seon.db/component true} :seon.db/ref]"}
+   {:seon.schema/key :seon.db.id/legacy-value
+    :seon.schema/form "[:string {:min 14 :max 14}]"}
+   {:seon.schema/key :seon.db.id/compact-value
+    :seon.schema/form
+    (str "[:or :seon.db.id/legacy-value"
+         " [:and :string [:re \"^[a-z][a-z0-9]{11}$\"]]]")}
+   {:seon.schema/key :seon.eval/id
+    :seon.schema/form
+    (str "[:and {:seon.db/identity true"
+         " :seon.db.id/generator :seon.db.id.generator/compact}"
+         " :seon.db.id/compact-value]")
+    :seon.db.id/generator :seon.db.id.generator/compact}
+   {:seon.schema/key :seon.eval/at :seon.schema/form ":inst"}
+   {:seon.schema/key :seon.eval/duration-ms :seon.schema/form ":int"}
+   {:seon.schema/key :seon.eval/narration :seon.schema/form ":string"}
+   {:seon.schema/key :seon.eval/source :seon.schema/form ":string"}
+   {:seon.schema/key :seon.eval/status
+    :seon.schema/form "[:enum :running :done :error :interrupted]"}
+   {:seon.schema/key :seon.eval/ok? :seon.schema/form ":boolean"}
+   {:seon.schema/key :seon.eval/result-edn :seon.schema/form ":string"}
+   {:seon.schema/key :seon.eval/output :seon.schema/form ":string"}
+   {:seon.schema/key :seon.eval/error :seon.schema/form ":string"}
+   {:seon.schema/key :seon.eval/ns :seon.schema/form ":symbol"}
+   {:seon.schema/key :seon.eval/agent :seon.schema/form ":seon.db/ref"}
+   {:seon.schema/key :seon.fn/sym
+    :seon.schema/form "[:string {:seon.db/identity true}]"}
+   {:seon.schema/key :seon.fn/ns :seon.schema/form ":seon.db/ref"}
+   {:seon.schema/key :seon.fn/source :seon.schema/form ":string"}
+   {:seon.schema/key :seon.fn/fn-var? :seon.schema/form ":boolean"}
+   {:seon.schema/key :seon.fn/arglists :seon.schema/form ":string"}
+   {:seon.schema/key :seon.fn/doc :seon.schema/form ":string"}
+   {:seon.schema/key :seon.fn/private? :seon.schema/form ":boolean"}
+   {:seon.schema/key :seon.fn/agent-facing? :seon.schema/form ":boolean"}
+   {:seon.schema/key :seon.fn/spec :seon.schema/form ":string"}
+   {:seon.schema/key :seon.fn/schema-error :seon.schema/form ":string"}
+   {:seon.schema/key :seon.fn/created-at :seon.schema/form ":inst"}
+   {:seon.schema/key :seon.fn/read-attrs
+    :seon.schema/form "[:vector :qualified-keyword]"}
+   {:seon.schema/key :seon.ns/name
+    :seon.schema/form "[:symbol {:seon.db/identity true}]"}
+   {:seon.schema/key :seon.ns/source :seon.schema/form ":string"}
+   {:seon.schema/key :seon.ns/require-edges
+    :seon.schema/form "[:vector {:seon.db/component true} :seon.db/ref]"}
+   {:seon.schema/key :seon.ns.require/target :seon.schema/form ":symbol"}
+   {:seon.schema/key :seon.ns.require/alias :seon.schema/form ":symbol"}
+   {:seon.schema/key :seon.ns.require/refers
+    :seon.schema/form "[:set :symbol]"}
+   {:seon.schema/key :seon.ns.require/refer-all?
+    :seon.schema/form ":boolean"}
+   {:seon.schema/key :seon.ns.require/as-alias?
+    :seon.schema/form ":boolean"}
+   {:seon.db.process/id :seon.db.process/repl}]
+  (map (fn [index] {:seon.agent/id (str "drill-" index)})
+       (range agent-count))))
+;; Attributes install on first tx-data assertion; the recorder's
+;; exact-set retractAttribute ops name optional attrs, and provenance
+;; rides tx-meta — assert each once (genesis does this on a real
+;; cluster).
+(transact! [{:seon.db/user [:seon.agent/id "drill-0"]
+             :seon.db/process [:seon.db.process/id :seon.db.process/repl]
+             :seon.fn/sym "seed/install-probe"
+             :seon.fn/agent-facing? true
+             :seon.fn/spec ":int"
+             :seon.fn/schema-error "none"
+             :seon.fn/read-attrs [:seed/attr]}])
 (data! {:phase :schema-installed :head-t (:t (head!))})
 
 ;; Phase 1 — start the host, admit 20 agents with working state + facts.

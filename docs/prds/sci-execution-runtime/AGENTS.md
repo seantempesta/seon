@@ -22,11 +22,15 @@ owner and deleted spec instead of building it — that is the bar).
   active invocation per session, sentinel invocation-ids, bounded results.
   It is the conformance baseline for BOTH transports (Bun IPC to children,
   transit-UDS to the host). Parity means shape-for-shape.
-- U1/U2 seams are marked in source with TODO comments in
-  `src/seon/host.clj` and `src/seon/host/context.clj`: eval-row/receipt/
-  corpus recording (`:seon.eval/ids` stays `[]` until U4), `register!`
-  admission (records-and-nils until U4), authored source-digest
-  invocation, render stays pod-served BY DESIGN.
+- U4 replaced the recording seams: host eval batches commit a `:running`
+  receipt (managed `:seon.eval/id` over the protocol's
+  `::generated-candidates`; `seon.db.id/candidate-manifest`) BEFORE each
+  form runs, terminalize with the frozen row + the program tee
+  (`seon.host.record` pure builders mirror the child tee's DATA), return
+  real `:seon.eval/ids`, eval in the request's starting ns, and replay
+  home-ns corpus defs on context fork. Remaining seams: authored
+  source-digest invocation; render stays pod-served BY DESIGN; no host
+  run-fence CAS/print capture/preflight (roadmap U4 honest limits).
 - The wrapper registry (`seon.host.context`) is the ONLY capability
   provisioning path. Never add a second binding mechanism; register.
   Effectful capability calls carry `:seon.capability/op-id`, translated
@@ -77,10 +81,21 @@ owner and deleted spec instead of building it — that is the bar).
 12. Operator commands (`bin/seon up`/`down`) must run UNSANDBOXED — a
     sandboxed `killpg` is blocked and leaves stale containment records
     that break `bin/seon status`.
-13. Host-context reads currently aggregate under the EMPTY identity —
-    per-agent read provenance on the host is an open thread in
-    `agent-turns-lack-database-read-cost-attribution.md`; U4+ should
-    close it when the host learns agent identity per invocation.
+13. Host-context reads aggregated under the EMPTY identity until U4;
+    `seon.host.context/*agent-id*` now binds per invocation and the
+    wrappers stamp `:seon.db/user`/`:seon.db/process` on reads and as
+    tx-meta on writes. Keep new wrappers on that path.
+14. An interrupted eval leaves the worker's interrupt STATUS set — any
+    NIO writer call after it dies ClosedByInterrupt and closes the
+    retained channel. Clear the flag (`Thread/interrupted`) once the
+    form is settled, before recording the terminal receipt.
+15. Exact-set corpus ops (`:db.fn/retractAttribute` on optional attrs)
+    require the attribute INSTALLED; the writer auto-installs only on
+    assertion. Real clusters carry the population from genesis — a
+    stand-in drill/test database must seed the corpus schema rows,
+    the `:seon.eval/id` generator policy, and one assertion probe (see
+    `test/seon/host_registry_writer_test.clj` corpus-schema-rows and
+    the drill client's Phase 0).
 
 ## Per-unit executable briefs (U4-U12)
 

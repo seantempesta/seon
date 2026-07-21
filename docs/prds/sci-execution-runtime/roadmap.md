@@ -24,7 +24,7 @@ transition ledger.
 | U1 | seon.host skeleton + kill drill | **DONE** `cd239b79` |
 | U2 | wrapper registry + capability op-id receipts | **DONE** |
 | U1.5 | pod dials the host: tier-as-data dispatch, one REAL turn end-to-end (pod renders, host evals) | **DONE** |
-| U4 | eval-record/receipt/corpus integration over the marked seams (subsumes register R2 — the program-row rejection diagnosis) | ready |
+| U4 | eval-record/receipt/corpus integration over the marked seams (subsumes register R2 — the program-row rejection diagnosis) | **DONE** |
 | U5 | toolkit port: .cljc the db-boundary 46%; capability proxies for the js-bound tail | parallel-safe |
 | U3 | graduation walking skeleton (one corpus fn: fingerprint → both-tier tests → JVM eval → epoch re-link) | after U2 |
 | U6 | instrumentation over sci vars (B1 deferred item 5) | after U4 |
@@ -415,6 +415,83 @@ Honest limits inherited by U4/U6 (visible in the drive):
   session EOFs until reconnect, and a protocol v11/v12 skew between a
   freshly compiled driver and the older running writer failed
   admission loudly; both resolved by version-consistent processes.
+
+### U4 — host eval recording through the one corpus mechanism — DONE (2026-07-20)
+
+Host-tier turns are first-class recorded citizens. The marked U1/U2
+seams are replaced, not rebuilt elsewhere:
+
+- **Recording data parity.** `seon.host.record` (pure builders) mirrors
+  the DATA the child's detect-and-tee writes — `:seon.eval` receipt
+  rows (`:running` start, CAS-fenced terminal with outcome,
+  duration, bounded result-edn/error, ending ns, agent connection,
+  turn `:seon.agent.turn/evals` component), `:seon.fn` rows for a
+  strict single-defn source (sym/ns-upsert/source/arglists/doc/private?/
+  spec-or-schema-error from the returned sci var's metadata + the read
+  form), `:seon.fn/read-attrs` exact-set ops, `:seon.ns` +
+  require-edge rows for explicit ns declarations, and `:seon.schema`
+  rows from the registry diff around each form. Transient scratch nses
+  (`user`, `cljs.user`, …) stay untee'd (C14). The child's `seon.eval`
+  owners remain authoritative for the Bun tier.
+- **The receipt is the durable execution boundary.** `seon.host.context`
+  allocates managed `:seon.eval/id`s over the wire protocol's
+  `::generated-candidates` field (new public
+  `seon.db.id/candidate-manifest` seam; same grammar, policy read from
+  the database, bounded conflict retry) and commits the `:running`
+  receipt BEFORE the form runs — no receipt, no run. The batch returns
+  real ordered `:seon.eval/ids`; receiptless probes (no turn id) stay
+  engine-only.
+- **Home-ns evals.** The batch establishes and evals in the request's
+  `:seon.eval/starting-ns` (synthetic ns form with the standard
+  capability aliases), so defs land in `my.agent.<id>`, not scratch.
+- **Def replay closes the U1.5 turn-5 gap.** A fresh context fork at
+  startup replays the agent's home-ns `:seon.fn/source` rows in tee
+  order (`agent-def-sources` + `restore-context-defs!`).
+- **`register!` admission is real**: the host wrapper calls the one
+  `seon.schema/register!` bridge (errors as values) and the tee writes
+  the canonical `:seon.schema` row.
+- **Provenance threads per invocation** (closes handbook gotcha 13's
+  host half): `seon.host.context/*agent-id*` binds around every
+  invocation; reads carry `:seon.db/user`/`:seon.db/process`, writes
+  carry the same references as transaction metadata.
+
+Gates and evidence:
+
+- `bin/test-writer` 261 tests / 2016 assertions green, including the new
+  real-memory-writer parity test
+  (`host-evals-record-the-same-corpus-data-as-the-child-tee`): 3 forms →
+  3 receipts under the turn with agent refs; eval-row content parity;
+  `:seon.fn` row (source/arglists/doc/ns); `:seon.schema` row from
+  `register!`; then `host/stop!` + fresh `host/start!` → the pre-restart
+  def replays from the corpus and evaluates. `bin/test-cljs` 1336 tests /
+  6170 assertions green.
+- §7 kill drill PASS on the recording host (20/20 in-flight EOFs →
+  child-exited values, 20/20 fleet replay + verification, zero fact
+  loss). The drill database now seeds the corpus schema/policy a real
+  cluster carries from genesis; recording loudly refuses to run a form
+  whose receipt cannot commit, exactly as designed. Honest cost: fleet
+  context rebuild through recorded batches is ~14 s for 20 agents × 3
+  forms on the file backend (2 writer transactions per recorded form —
+  the child pays the same shape); restore replay itself does not record.
+- U1.5 driver rerun (`tmp/sci-probe/exec/out/u4-proof-drive.log`, fresh
+  `default-u15` fork): turns 1/2/4/5 `:done` WITH eval rows (turn 1:
+  2 rows), turn 3 the kill slice unchanged; post-kill turn 5 evaluated
+  `u15-double` — no "Unable to resolve symbol" (def replay live); the
+  branch database holds all six host eval rows in
+  `my.agent.forty-dots-count` plus `:seon.fn` rows for both defs; turn
+  5's captured prompt (turn debug blob) contains the turn-1 def source
+  and its `42` result — the transcript renders host evals.
+- R2 resolved as fixture noise, not a live defect:
+  [[../../seon/issues/archive/dev-eval-program-row-rejection-was-fixture-noise]].
+  Live falsifier on default: a real agent eval turn records
+  (`["(+ 20 22)" true "42"]`).
+
+Honest limits carried forward: no run-fence CAS assertion host-side (the
+§8b fence stays with the child path; U6/U10 own parity), no ALS print
+capture (`:seon.eval/output` absent), result-edn is a capped `pr-str`
+(no render-ai skeleton or `result/<id>` binding), no repair
+sub-loop/preflight, renders stay pod-served, and `record-eval-terminal!`
+failures surface as `::record-error` on the envelope (batch continues).
 
 ### Decision gate
 
