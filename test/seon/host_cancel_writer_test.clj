@@ -6,6 +6,7 @@
             [seon.db.writer :as writer]
             [seon.host :as host]
             [seon.host.context :as context]
+            [seon.host.invoke :as host.invoke]
             [seon.host-registry-writer-test :as registry-test])
   (:import [java.io File]
            [java.nio.channels Channels SocketChannel]))
@@ -21,7 +22,7 @@
   (var-get (ns-resolve 'seon.host-registry-writer-test sym)))
 
 (defn- host-private [sym]
-  (ns-resolve 'seon.host sym))
+  (ns-resolve 'seon.host.invoke sym))
 
 (defn- socket-path [label]
   ((registry-value 'socket-path) label))

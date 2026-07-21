@@ -4,6 +4,7 @@
             [seon.db.protocol :as protocol]
             [seon.host :as host]
             [seon.host.context :as context]
+            [seon.host.sample :as host.sample]
             [seon.schema :as schema]))
 
 (defn- projection [k form]
@@ -33,7 +34,7 @@
                :seon.error/kind :core-bug}
         state (atom {::context/fault fault
                      ::context/committed-basis 11})
-        result (host/drill-value
+        result (host.sample/drill-value
                  {::host/projection-state state}
                  {:projection.test/id 1}
                  {:seon.render.value/path []

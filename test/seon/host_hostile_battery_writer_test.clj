@@ -10,6 +10,7 @@
             [seon.error.sci :as error.sci]
             [seon.host :as host]
             [seon.host.context :as context]
+            [seon.host.eval :as host.eval]
             [seon.host-registry-writer-test :as registry-test])
   (:import [java.io ByteArrayOutputStream DataOutputStream File OutputStream
             PrintStream]
@@ -513,13 +514,13 @@
         turn-id "battery-late-interrupt-turn"
         attacker (open-session! attacker-id)
         survivor (open-session! survivor-id)
-        original (var-get (host-private 'finish-evaluation!))
+        original (var-get #'host.eval/finish-evaluation!)
         fired? (atom false)]
     (seed-turn! attacker-id turn-id)
     (try
       (let [response
             (with-redefs-fn
-              {(host-private 'finish-evaluation!)
+              {#'host.eval/finish-evaluation!
                (fn [session envelope]
                  (when (compare-and-set! fired? false true)
                    (.interrupt (Thread/currentThread)))

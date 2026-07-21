@@ -16,6 +16,10 @@
             [seon.db.transport.uds :as uds]
             [seon.host :as host]
             [seon.host.context :as context]
+            [seon.host.eval :as host.eval]
+            [seon.host.invoke :as host.invoke]
+            [seon.host.sample :as host.sample]
+            [seon.host.session :as host.session]
             [seon.render.value :as render.value])
   (:import [java.io ByteArrayInputStream ByteArrayOutputStream DataOutputStream
             File IOException OutputStream PrintStream]
@@ -249,10 +253,10 @@
 
 (deftest sampling-policy-is-read-at-the-invocation-basis-and-fails-closed
   (is (some? (datalog.parser/parse
-              (var-get #'host/sampling-policy-query)))
+              (var-get #'host.sample/sampling-policy-query)))
       "the maintained seven-value tuple query parses at the writer boundary")
   (let [seen (atom [])
-        acquire (var-get #'host/acquire-sampling-policy!)
+        acquire (var-get #'host.sample/acquire-sampling-policy!)
         invalid [nil
                  [32 4096 1024 3 80 2]
                  [32 4096 1024 3 80 2 12 99]
@@ -276,12 +280,12 @@
         "every refusal queries the exact invocation database before eval")))
 
 (deftest frame-preflight-falls-back-before-consuming-the-settle-cas
-  (let [token {::host/invocation {}}
+  (let [token {::host.invoke/invocation {}}
         active (atom token)
         bytes (ByteArrayOutputStream.)
-        session {::host/active active
-                 ::host/output bytes
-                 ::host/write-lock (Object.)}
+        session {::host.session/active active
+                 ::host.session/output bytes
+                 ::host.session/write-lock (Object.)}
         huge (apply str (repeat (+ protocol/maximum-frame-bytes 1024) "x"))
         frame {:seon.execution/message :seon.execution.message/error
                :seon.execution/protocol-version 3
@@ -290,7 +294,7 @@
                {:seon.error/message huge
                 :seon.error/kind :agent
                 :seon.error/data {:huge huge}}}]
-    (is (true? (#'host/settle! session token frame)))
+    (is (true? (#'host.invoke/settle! session token frame)))
     (is (nil? @active))
     (let [response (uds/read-frame
                     (ByteArrayInputStream. (.toByteArray bytes)))]
@@ -302,7 +306,7 @@
 
 (deftest physical-frame-write-failure-records-one-fault-and-does-not-retry
   (reset! transaction-requests [])
-  (let [token {::host/invocation {}}
+  (let [token {::host.invoke/invocation {}}
         active (atom token)
         writes (atom 0)
         output (proxy [OutputStream] []
@@ -313,11 +317,11 @@
                    ([_ _ _]
                     (swap! writes inc)
                     (throw (IOException. "closed transport")))))
-        session {::host/active active
-                 ::host/output output
-                 ::host/write-lock (Object.)}]
+        session {::host.session/active active
+                 ::host.session/output output
+                 ::host.session/write-lock (Object.)}]
     (is (false?
-         (#'host/settle!
+         (#'host.invoke/settle!
           session token
           {:seon.execution/message :seon.execution.message/error
            :seon.execution/protocol-version 3
@@ -514,11 +518,11 @@
 (deftest late-interrupt-after-eval-return-records-and-leaves-next-form-clean
   (reset! transaction-requests [])
   (let [[session _ready] (open-session! "late-interrupt-agent")
-        original (var-get #'host/finish-evaluation!)
+        original (var-get #'host.eval/finish-evaluation!)
         fired? (atom false)]
     (try
       (with-redefs-fn
-        {#'host/finish-evaluation!
+        {#'host.eval/finish-evaluation!
          (fn [session envelope]
            (when (compare-and-set! fired? false true)
              (.interrupt (Thread/currentThread)))
@@ -564,9 +568,9 @@
                             :seon.render.value/page-size] 3))]]
         (is (string? eval-id))
         (let [raw-lookups (atom 0)
-              original (var-get #'host/retained-live-value)]
+              original (var-get #'host.sample/retained-live-value)]
           (with-redefs-fn
-            {#'host/retained-live-value
+            {#'host.sample/retained-live-value
              (fn [& args] (swap! raw-lookups inc) (apply original args))}
             (fn []
               (doseq [[field maximum] trusted-sample-limits]
@@ -583,10 +587,10 @@
               "a widened policy is refused before raw slot access"))
         (let [raw-lookups (atom 0)]
           (with-redefs-fn
-            {#'host/retained-live-entry
-             (fn [_ _] {::host/found? true
-                        ::host/limits sample-limits})
-             #'host/retained-live-value
+            {#'host.sample/retained-live-entry
+             (fn [_ _] {::host.session/found? true
+                        ::host.session/limits sample-limits})
+             #'host.sample/retained-live-value
              (fn [& _] (swap! raw-lookups inc) :forbidden)}
             (fn []
               (send! session valid)

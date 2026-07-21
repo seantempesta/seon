@@ -5,6 +5,7 @@
             [sci.core :as sci]
             [seon.host :as host]
             [seon.host.context :as context]
+            [seon.host.eval :as host.eval]
             [seon.host.graduate :as graduate]))
 
 (defn- unconnected-writer []
@@ -17,10 +18,10 @@
 
 (defn- eval-form!
   [ctx home-ns source]
-  ((var-get (ns-resolve 'seon.host 'eval-form!))
-   {::host/interrupt-lock (Object.)
-    ::host/interrupt-fired? (atom false)
-    ::host/worker-phase (atom :idle)}
+  ((var-get #'host.eval/eval-form!)
+   {:seon.host.session/interrupt-lock (Object.)
+    :seon.host.session/interrupt-fired? (atom false)
+    :seon.host.session/worker-phase (atom :idle)}
    ctx home-ns source))
 
 (defn- refusal?
