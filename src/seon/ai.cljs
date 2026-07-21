@@ -246,7 +246,7 @@
 ;; Each provider is DEFINED here with its declared wire locality —
 ;; :frontier = a hosted frontier chat LLM; :local-worker = the LOCAL
 ;; diffusion-worker family, whose endpoint/key resolve from
-;; SEON_DG_ENDPOINT (seon.ai.diffusiongemma owns that wire; the worker
+;; SEON_DG_ENDPOINT (seon.diffusion.gemma owns that wire; the worker
 ;; owns its own model + gen-config caps, which is also why
 ;; [[shipped-defaults]] ships none of the five for it). The ::provider
 ;; enum derives from this map's keys, so a provider CANNOT be added
@@ -268,7 +268,7 @@
 ;; names are kept for continuity; the local process is `diffusion-server`).
 ;; (DB-ownable like
 ;; ::provider). :control = the transformers RunPod worker that keeps the
-;; per-step LogitsProcessor seam (seon.ai.diffusiongemma); :vllm = an
+;; per-step LogitsProcessor seam (seon.diffusion.gemma); :vllm = an
 ;; OpenAI-compatible serving endpoint (reuses seon.ai.openai-compat).
 ;; Only consulted when ::provider is :diffusiongemma; default :control.
 (schema/register! ::dg-backend [:enum :vllm :control])
