@@ -227,6 +227,8 @@
         (is (and exited? (zero? (.exitValue child))) output)
         (is (map? evidence) output)
         (is (not (:seon.execution-proof/failed? evidence)) output)
+        (is (pos-int? (:seon.execution-proof/schema-row-count evidence))
+            (pr-str evidence))
         (is (= 2 (count before)))
         (is (= #{"agent-a" "agent-b"}
                (set (map #(get-in % [:seon.execution.integration-driver/value

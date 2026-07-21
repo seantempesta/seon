@@ -3,6 +3,7 @@
   (:require
    [cljs.reader :as reader]
    [seon.agent]
+   [seon.agent.runtime]
    [seon.db :as db]
    [seon.db.protocol :as protocol]
    [seon.execution :as execution]
@@ -105,6 +106,17 @@
       ::host/cancel-grace-ms 1000})
     (try
       (let [registered-schemas (schema/registered-schemas)
+            namespace-name-form (get registered-schemas :seon.ns/name)
+            _ (when-not (= [:symbol {:seon.db/identity true}]
+                           namespace-name-form)
+                (throw
+                 (ex-info
+                  "The compiled driver must carry the canonical namespace identity schema."
+                  {:seon.execution-proof/schema-key :seon.ns/name
+                   :seon.execution-proof/expected-schema
+                   [:symbol {:seon.db/identity true}]
+                   :seon.execution-proof/registered-schema
+                   namespace-name-form})))
             keyword-schema-count
             (count (filter (comp keyword? key) registered-schemas))
             schema-rows
