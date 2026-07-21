@@ -58,9 +58,11 @@ with-ctx lazy-forcing requirement; perf tax accepted at agent scale).
    running in their own gate. The namespace-hierarchy design owns the
    relocation plan (boundary rule: main `src/` never requires the
    diffusion tree; diffusion may require main; providers stay
-   explicit-config opt-in). `seon.ai.typeahead` needs a require-graph
-   verdict first — it serves the active repl-autosuggest program and
-   may be core, not diffusion.
+   explicit-config opt-in). OWNER VERDICT: `seon.ai.typeahead` is CORE
+   — typeahead is implementable without diffusion; the diffusion-backed
+   path is one opt-in provider behind the existing provider dispatch
+   (config/registry indirection, never a static require). The diffusion
+   typeahead research stays valuable and preserved.
 7. Config: no magic numbers in source. Every operational limit is a
    named aero key → database fact at boot; agent-relevant limits render
    into context; defaults computed from hardware where sensible; caps
