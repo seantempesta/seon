@@ -41,6 +41,30 @@ The generate-code lane's live graduation (its roadmap's checkpoint) IS
 this leg: caller agent -> generate-code! -> two-namespace goal ->
 ordered evaluation -> delegated failure -> evidence-derived completion.
 
+## Status 2026-07-20 night (honest, incomplete)
+
+L1 PARTIAL: on the live default cluster the full chain proved through
+the provider call — agent minted (lovely-flowers-knock), message
+accepted, run opened, turn started, LLM attempt in flight against the
+configured model (deepseek-v4-pro — NOTE: the reset database's config
+default contradicts the owner's Muse ruling; fold the provider
+selection into the next config apply). COMPLETION UNPROVEN: the pod
+was repeatedly torn down mid-drive by concurrent lanes rebuilding
+(settlement fix, U5 graduation, gencode cluster) — the battery cannot
+run to completion on a contested cluster. Acme fallback blocked on its
+writer during the same churn.
+
+FINDING (earlier, to re-verify as L5): messages sent pre-restart did
+not wake the agent post-restart on one boot; may have been the
+settlement bug — the battery's L5 decides.
+
+CONTINUATION (mechanical): wait for a quiet tree (no uncommitted lane
+edits), bin/seon up, then L1→L8, M1→M4 in order; one circumstance at a
+time; provider = Muse per the owner ruling (transact :seon.ai config or
+config apply first); file every failure. Leg 3 = the generate-code
+lane's live graduation (its first commit landed: ranked augmentation +
+public generate-code! at 68d19cca).
+
 ## Standing rules
 
 Real provider or recorded-as-blocked; one circumstance at a time; facts
