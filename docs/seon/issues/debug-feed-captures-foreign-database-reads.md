@@ -73,3 +73,20 @@ ambient database and producer-free closed debug bodies. The issue stays open
 until the top-level coordinated restart repeats the live observation audit and
 shows replayable reads are retained as replayable, unrelated transactions do
 no debug work, and relevant transactions update only the affected unit.
+
+## Re-audit correction (2026-07-20)
+
+[[../../prds/source-cleanup/research/debug-feed-live-graduation-boundary-2026-07-20]]
+(`4ab23c10`) proves this is not yet only a live-evidence gap. The immutable
+database value is threaded correctly, and execution IPC already transports
+the child's `:seon.db/read-evidence`, but `seon.agent.turn/render-prompt`
+returns only the child result. `seon.agent.debug/ctx-preview` and the debug
+renderer consequently cannot embed prompt-child evidence for
+`seon.web.datastar/render-read`; the installed reactive interest may miss a
+commit relevant only to the prompt.
+
+The remaining source repair preserves that existing child evidence through
+the rendered-prompt schema, context preview, and the established observed
+render shape. It does not add a second prompt call, feed, or dependency
+parser. Closure requires the focused installed-plan regression and the
+server-side unrelated/relevant/closed SSE matrix in the report.

@@ -509,6 +509,17 @@ settles on the committing database value, preserves timeout closure as
 `:superseded`, and releases unconditionally. Independent focused proof passed
 serve 26 tests / 103 assertions and reactive 7 / 49; the issue is archived.
 
+The remaining debug-feed/turn-debug boundary is grounded by
+[[research/debug-feed-live-graduation-boundary-2026-07-20]] (`4ab23c10`). Turn
+ref projection (`bab67136`) and failed-query short-circuit (`0a15a116`) have
+focused coverage but still need their frozen `/agents/run` proofs; the latter
+also waits for the ruled result union. More importantly, debug prompt child
+read evidence is currently dropped between `turn/render-prompt` and the
+observed render, so prompt-only relevant commits may not reach the reactive
+interest. Stage 5 must preserve the already transported evidence through that
+one existing handoff after Stage 4 freezes reactive ownership, then run the
+server-side unrelated/relevant/closed SSE matrix.
+
 Stage-5 test-runner resolution is unified by `8aeadd3d`: test thunks, fixture
 vars, and namespace enumeration all use ClojureScript's maintained
 `find-ns-obj` owner instead of three direct Google-global lookups, without
