@@ -2,7 +2,7 @@
 type: issue
 status: open
 tags: [agent, cljs, issue]
-severity: blocking
+severity: blocker
 ---
 
 # Toolkit current-ns wedges the agent since the cljc packaging window

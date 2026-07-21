@@ -56,12 +56,12 @@ See `README.md` for the convention.
 | [Share one driver for an open agent run](wake-and-replay-can-drive-the-same-open-run.md) | blocker | agent |
 | [Skip the receipt reread branch after a successful eval write](successful-eval-receipt-called-state-on-nil.md) | blocker | agent |
 | [Supply the execution artifact to the production container launch](container-launch-omits-execution-artifact.md) | blocker | agent |
+| [Toolkit current-ns wedges the agent since the cljc packaging window](toolkit-current-ns-wedges-agent-after-cljc-packaging.md) | blocker | agent |
 | [Value drill has no total work bounds](value-drill-has-no-total-work-bounds.md) | blocker | UI |
 | [Value-drill result literals failed boot schema admission](value-drill-result-literals-failed-boot-schema-admission.md) | blocker | Core |
 | [ensure-database silently creates a fresh store at any requested path](ensure-database-creates-fresh-store-at-any-path.md) | blocker | Core |
-| [message! can resolve a recipient at a stale basis to a dangling entity](message-resolves-recipient-at-stale-basis.md) | blocker | agent |
 
-## Friction (72)
+## Friction (74)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -117,6 +117,7 @@ See `README.md` for the convention.
 | [Preserve distinct large BigInts in cardinality-many attributes](datahike-cljs-cardinality-many-collapses-large-bigints.md) | friction | Core |
 | [Prevent output data from becoming a phantom callable arity](callable-contract-output-data-becomes-phantom-arity.md) | friction | agent |
 | [Prove Kimi K3 completion and continuation compatibility](kimi-k3-continuation-compatibility.md) | friction | agent |
+| [Register namespace identity before home schemas reference it](home-schema-references-namespace-name-before-registration.md) | friction | Core |
 | [Remove local Datahike ownership from execution children](execution-artifact-packages-local-datahike.md) | friction | agent |
 | [Remove the Node module-register deprecation from CSS builds](tailwind-node-module-register-deprecation.md) | friction | UI |
 | [Remove undeclared-var warnings from the self-host bootstrap build](bootstrap-analyzer-api-emits-undeclared-var-warnings.md) | friction | agent |
@@ -124,6 +125,7 @@ See `README.md` for the convention.
 | [Render logical Malli arities for pure-variadic functions](compact-pure-variadic-contract-mislabels-logical-arities.md) | friction | agent |
 | [Restore focused agent edge-case coverage](removed-embedded-multiagent-coverage-needs-owner.md) | friction | agent |
 | [Root context replaces inherited capability requirements](root-context-replaces-base-capability-requires.md) | friction | agent |
+| [Root warnings block renders 146k tokens before its cap clips it](root-warnings-block-renders-146k-tokens-before-cap.md) | friction | agent |
 | [Self-host `cljs.test/is` throws inside a dynamically-evaled `:test` thunk](selfhost-cljs-test-is-thunk-resolution.md) | friction | agent |
 | [Shadow deps-mode declarations imply inactive build paths](shadow-deps-mode-declaration-drift.md) | friction | docs |
 | [Shadow runtime stops reconnecting](shadow-runtime-stops-reconnecting.md) | friction | docs |
