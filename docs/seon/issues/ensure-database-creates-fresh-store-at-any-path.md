@@ -1,7 +1,7 @@
 ---
 type: issue
 status: open
-severity: risk
+severity: blocker
 tags: [issue, database, architecture]
 ---
 

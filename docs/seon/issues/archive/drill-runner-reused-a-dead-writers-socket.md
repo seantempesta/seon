@@ -1,7 +1,7 @@
 ---
 type: issue
 status: resolved
-severity: minor
+severity: friction
 tags: [issue, architecture]
 ---
 

@@ -1,6 +1,6 @@
 ---
 type: issue
-status: closed
+status: resolved
 tags: [issue, agent, database]
 severity: friction
 ---
