@@ -459,12 +459,21 @@ named W1-relocation defaults; focused 7/41 + full writer gate
 308/2303 green (implementer), focused rerun verified by orchestrator.
 Two-round stop-and-report worked exactly as designed.
 
+Also accepted: **WP-A `0a79ada3`** + sci fork `8fac6e8` (pushed to
+seantempesta/sci branch `seon`) — `seon.error.sci`
+classify/steering-head/detail over the authorized request map;
+resolution/arity/interrupt/refusal/runtime classes structural; all
+three error-classification regexes REMOVED (refusal fallback safely
+dropped — hostile tests prove the structural `:var` path); runtime
+frames in public `sci/stacktrace` terms; head cap named for W1.
+Focused 9/86 rerun by orchestrator; full writer gate 313/2351 green.
+Round-1 stop caught the classify-needs-ctx spec gap (authorized).
+
 IN FLIGHT / UNCOMMITTED:
-- **WP-A dispatched to Codex** (medium effort) per
-  `specs/wp-a-sci-error-classify.md`; owns `reference-code/sci` (fork
-  `seon` branch), new `src/seon/error/sci.clj`, `src/seon/host.clj`,
-  `src/seon/host/context.clj`, writer-gate tests. W0.6 queues behind
-  it (host.clj overlap).
+- **W0.6 dispatched** per `specs/w0.6-host-escape-hardening.md`
+  (host.clj + record.clj); NS-0.5 internals extraction queued next
+  (no W0.6 overlap, held for lane-count cap); CLJC portability audit
+  running read-only.
 - **W6 package-host design RETURNED and accepted**
   (`research/w6-package-host-design-2026-07-21.md`): ledger-first
   per-cluster packages/, two disposable `seon.packages.host` platform
