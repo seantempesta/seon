@@ -301,6 +301,10 @@ Use discoverable code names, not umbrella nouns or synonyms:
 | subagents | collaboration system | agents connected through database refs |
 | cluster | environment | one database, pod, root, and task agents |
 | attributes + connections | entity kind/type | the Datahike model |
+| build, operator, artifact | flavor | shadow-cljs's build; the `bin/seon`/`bin/acme` supervisor scope; the digested output |
+| get-in, path | drill | paged navigation into a nested value by `get-in` path |
+| packages/, package.json, deps.edn, node_modules | npm-pkgs, maven-pkgs | per-cluster `data/clusters/<name>/packages/` using each ecosystem's own manifest names |
+| contexts on hosts, binding tables | sandbox, VM, jail | sci's own vocabulary for agent execution |
 
 Database vocabulary is the dependency's vocabulary, never a Seon wrapper noun:
 
