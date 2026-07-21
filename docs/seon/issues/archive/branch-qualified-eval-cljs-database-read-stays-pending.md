@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, agent, database, tooling]
 ---
@@ -61,3 +61,25 @@ that one path rather than add a branch-only database API or timeout fallback.
   ambiguous bare agent still fails rather than selecting a branch.
 - Closing both branches leaves no retained intent, session, route, or process;
   default's basis and readiness remain unchanged.
+
+## Resolution
+
+Current source does not reproduce the recorded hang. Two simultaneous retained
+branches, `default-brfix/root` and `default-brfixb/root`, each resolved the exact
+top-level `(await (seon.db/db))` form in about 0.5 seconds and returned its own
+database name at basis 536875961. A same-session sequence separately proved
+branch attachment, ordinary Promise awaiting, database awaiting, and manual
+cross-eval `globalThis` settlement. After both exact branches closed, their
+intent and process records were absent and default returned the identical
+database name, basis transaction, and commit ID.
+
+The static audit established that a selectable runtime has already awaited its
+database during advertisement, and that the MCP owner carries the selected
+Shadow port and nREPL session through every async-bridge evaluation. A focused
+regression now freezes that invariant across the initial eval, wrapper, pending
+poll, resolved poll, and fetch. A second regression proves an ambiguous bare
+agent never reaches nREPL. The complete operator gate passes 292 tests and
+1,634 assertions.
+
+The earlier transient cannot be attributed to a surviving source defect, so no
+database timeout workaround or second branch read path was added.

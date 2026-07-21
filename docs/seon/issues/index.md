@@ -61,7 +61,7 @@ See `README.md` for the convention.
 | [Value-drill result literals failed boot schema admission](value-drill-result-literals-failed-boot-schema-admission.md) | blocker | Core |
 | [ensure-database silently creates a fresh store at any requested path](ensure-database-creates-fresh-store-at-any-path.md) | blocker | Core |
 
-## Friction (77)
+## Friction (76)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -103,7 +103,6 @@ See `README.md` for the convention.
 | [Installed schema map misclassified as database error](installed-schema-map-misclassified-as-database-error.md) | friction | agent |
 | [LoRA audit runner depends on a retired Shadow target and pinned checkout](lora-audit-runner-drift.md) | friction | general |
 | [Make UDS frame accumulation linear](uds-fragment-accumulation-recopies-complete-prefix.md) | friction | Core |
-| [Make branch-qualified eval_cljs database reads resolve](branch-qualified-eval-cljs-database-read-stays-pending.md) | friction | agent |
 | [Make dependency preparation deterministic under concurrent development](dependency-preparation-can-crash-inside-clojure-hashmap.md) | friction | Core |
 | [Make multi-form eval order a durable database fact](multi-form-eval-order-is-not-durable.md) | friction | agent |
 | [Make program indexing independent of the active schema projection](program-indexer-drops-valid-specs-outside-active-schema-projection.md) | friction | agent |

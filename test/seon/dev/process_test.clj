@@ -2625,6 +2625,14 @@
              (#'process/selected-process-generation
               (test-config) process/pod-id))))))
 
+(deftest detached-launch-diagnostics-are-bounded-and-preserve-empty-evidence
+  (is (= "" (#'process/bounded-launch-diagnostic nil)))
+  (is (= "helper failed"
+         (#'process/bounded-launch-diagnostic "  helper failed\n")))
+  (is (= 4096
+         (count (#'process/bounded-launch-diagnostic
+                 (apply str (repeat 5000 "x")))))))
+
 (deftest branch-descriptor-publishes-one-pod-with-real-external-owners
   (let [configuration (test-config)
         directory (:seon.dev.test/directory configuration)

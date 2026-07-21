@@ -936,6 +936,13 @@
   (let [value (str generation)]
     (str (subs value 0 (min 16 (count value))) ".sock")))
 
+(def ^:private launch-diagnostic-character-limit 4096)
+
+(defn- bounded-launch-diagnostic
+  [value]
+  (let [value (str/trim (or value ""))]
+    (subs value 0 (min launch-diagnostic-character-limit (count value)))))
+
 (defn- spawn-detached!
   ([config spec] (spawn-detached! config spec {}))
   ([config spec {:seon.dev.process/keys [gated? application-result-path]}]
@@ -1002,7 +1009,22 @@
                      (string? adoption-path))
         (throw (ex-info "Failed to launch a detached Seon process."
                         {:seon.dev.process/id id
-                         :seon.dev.process/error (str/trim (:err result))})))
+                         :seon.dev.process/exit (:exit result)
+                         :seon.dev.process/error
+                         (bounded-launch-diagnostic (:err result))
+                         :seon.dev.process/output
+                         (bounded-launch-diagnostic (:out result))
+                         :seon.dev.process/launch-result launch-result
+                         :seon.dev.process/expected
+                         {:seon.dev.process.containment/generation
+                          (str generation)
+                          :seon.dev.process.containment/control-socket
+                          control-socket
+                          :seon.dev.process.containment/result-path result-path
+                          :seon.dev.process.containment/application-result-path
+                          application-result-path
+                          :seon.dev.process.containment/shutdown-grace-ms
+                          (:seon.dev.process/shutdown-grace-ms spec)}})))
       (let [start-instants
             (loop [attempt 0]
               (let [values (mapv state/process-start-instant

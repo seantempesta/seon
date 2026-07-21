@@ -1079,6 +1079,17 @@ deprecated function remains eligible for the callable program index.
 
 ## Graduation
 
+The previously recorded branch-qualified MCP database-read hang is resolved on
+current source. Two simultaneous retained branches each returned its own
+immutable database value through the exact top-level `await` form in about 0.5
+seconds; cross-eval Promise settlement, exact session pinning through every
+bridge state, bare-agent ambiguity refusal, branch cleanup, and unchanged
+default database identity are now proven. The adjacent transient detached
+launch failure also retains bounded structured handshake evidence instead of
+an empty stderr-only report. The operator gate passes 292 tests / 1,634
+assertions. The unrelated retained `trial` record names an older source owner
+and remains untouched.
+
 The requirement-by-requirement proof ledger is
 [[research/program-graduation-matrix-2026-07-20]] (`e61e90ad` plus the
 cap-ruling reconciliation now branch-visible in `e27ada04`). It projects the

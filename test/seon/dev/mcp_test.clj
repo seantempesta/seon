@@ -135,6 +135,74 @@
                 (#'mcp/ensure-agent-session! "default/root"))))
         (is (= [[41002 ":client" 2] [41002 ":client" 9]] @pinned))))))
 
+(deftest branch-agent-async-bridge-stays-on-the-selected-session
+  (let [calls (atom [])
+        poll-count (atom 0)
+        selected {:nrepl-session "branch-session"
+                  :port 41002
+                  :client-id 29
+                  :build ":client"
+                  :cluster "default-proof"}
+        response-for
+        (fn [code]
+          (cond
+            (= "(await (seon.db/db))" code)
+            {:value nil
+             :err "await can only be used in async contexts"
+             :status ["done"]}
+
+            (str/includes? code ":seon.dev.mcp/awaiting")
+            {:value ":seon.dev.mcp/awaiting" :err "" :status ["done"]}
+
+            (str/includes? code ":seon.dev.mcp/pending")
+            (if (= 1 (swap! poll-count inc))
+              {:value ":seon.dev.mcp/pending" :err "" :status ["done"]}
+              {:value ":seon.dev.mcp/resolved" :err "" :status ["done"]})
+
+            (str/includes? code "js-delete")
+            {:value "{:db-name \"default-proof\", :t 42}"
+             :ns "cljs.user" :err "" :status ["done"]}
+
+            :else
+            {:value nil :err "unexpected form" :status ["error"]}))]
+    (with-redefs-fn
+      {#'mcp/ensure-agent-session! (constantly selected)
+       #'mcp/sleep-ms! (constantly nil)
+       #'mcp/nrepl-eval
+       (fn [port session code _timeout]
+         (swap! calls conj [port session code])
+         (response-for code))}
+      (fn []
+        (let [response (#'mcp/execute-eval
+                        {:code "(await (seon.db/db))"
+                         :agent_id "default-proof/root"
+                         :timeout_ms 30000})]
+          (is (not (:isError response)))
+          (is (str/includes? (get-in response [:content 0 :text])
+                             ":db-name \"default-proof\""))
+          (is (= 5 (count @calls)))
+          (is (every? #(= [41002 "branch-session"] (subvec % 0 2))
+                      @calls)
+              "initial eval, wrapper, polls, and fetch stay on one session"))))))
+
+(deftest ambiguous-bare-agent-never-reaches-nrepl
+  (let [calls (atom 0)]
+    (with-redefs-fn
+      {#'mcp/ensure-agent-session!
+       (constantly {:ambiguous
+                    [{:seon.dev.runtime-id/cluster "default"
+                      :build ":client" :client-id 1}
+                     {:seon.dev.runtime-id/cluster "default-proof"
+                      :build ":client" :client-id 2}]})
+       #'mcp/nrepl-eval (fn [& _] (swap! calls inc))}
+      (fn []
+        (let [response (#'mcp/execute-eval
+                        {:code "(seon.db/attached?)" :agent_id "root"})]
+          (is (:isError response))
+          (is (str/includes? (get-in response [:content 0 :text])
+                             "is AMBIGUOUS"))
+          (is (zero? @calls)))))))
+
 (deftest writer-prepl-sessions-are-stateful-bounded-and-restart-aware
   (let [directory (.toFile (java.nio.file.Files/createTempDirectory
                             "seon-mcp-test" (make-array java.nio.file.attribute.FileAttribute 0)))
