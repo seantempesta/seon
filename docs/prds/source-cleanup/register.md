@@ -105,7 +105,7 @@ normalized, two resolved notes archived, the projection regenerated, and
 | Steering gaps G1-G4 + proposed G8-G11 extensions | 1.6 | [[research/corrective-steering-audit-2026-07-20]], triage §gaps |
 | Pod→client/cluster rename (freeze protocol, persisted forms; current owner/process/worktree/port blockers) | 2 | pod plan, [[research/stage2-freeze-readiness-delta-2026-07-20]] |
 | Logging format unification, timbre grounding; paired current-generation live/tail/hygiene gate | 3 | [[logging-unification]], [[research/logging-live-graduation-boundary-2026-07-20]] |
-| Config through aero, per-op ALS (probe-validated), grants seam | 4 | [[config-through-aero]] |
+| Config through aero, pinned database/config operation pair on Bun and JVM, grants seam | 4 | [[config-through-aero]], [[research/per-operation-config-boundary-2026-07-20]] |
 | Route-authority collapse + /sse + crossing runbook | 4 | [[research/route-authority-collapse-2026-07-20]] |
 | Route/config readiness reconciliation (current owner groups, rollback and ALS gates) | 4 | [[research/route-authority-readiness-reconciliation-2026-07-20]], [[research/config-authority-readiness-reconciliation-2026-07-20]] |
 | Reactive fold-ins: client advertisement with runtime controls, serve poll, close! at shutdown | 4-5 | [[research/bespoke-reactive-sweep-2026-07-20]], [[research/client-reactive-shutdown-boundary-2026-07-20]] |

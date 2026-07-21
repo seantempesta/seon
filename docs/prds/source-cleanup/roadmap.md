@@ -358,6 +358,19 @@ begins with one per-operation pinned database-value + full-config ALS contract;
 existing Aero reconciliation, high-natural limits, managed identities, and
 additive home-requires are retained rather than rebuilt.
 
+The exact operation boundary is grounded by
+[[research/per-operation-config-boundary-2026-07-20]] (`c4d148d5`). One shared
+database-owned acquisition returns the immutable database value and the full
+decoded singleton from that same basis; every root enters both through
+`.run` plus the existing error scope, while nested work inherits the pair.
+Compiled Bun child calls acquire at invocation rather than program preparation,
+and database-only nested overrides are removed or upgraded to a matching pair.
+The post-U4 reread also makes JVM parity part of this contract: the parent sends
+the certified pair, and the host binds ordinary immutable operation data so its
+query/pull/transact wrappers use the invocation database and singleton limits
+instead of resolving a fresh head per call. The boot `enterWith` installer is
+deleted only after every root boundary is covered.
+
 Home-requires readiness is grounded by
 [[research/home-requires-merge-boundary-2026-07-20]] (`fa158957`). The additive
 manifest/root merge is already implemented by `3c08c176`, and `e187284f`
