@@ -10,11 +10,12 @@ GENERATED FILE — do not hand-edit. Regenerate with `bin/issues-index`.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (45)
+## Blocker (47)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
 | [Accept Datahike collections when building the execution program](database-program-query-results-can-be-sets.md) | blocker | agent |
+| [Admit the committed schema projection before JVM value drill](jvm-value-drill-lacks-committed-schema-projection.md) | blocker | agent |
 | [Agent-run settlement used wrong reactive database key](agents-run-settlement-used-wrong-reactive-database-key.md) | blocker | UI |
 | [Arbitrary database results collide with the error shape](arbitrary-database-results-collide-with-error-shape.md) | blocker | Core |
 | [Arbitrary eval allocation lacks hard process memory containment](eval-process-isolation-memory-containment.md) | blocker | agent |
@@ -59,11 +60,13 @@ See `README.md` for the convention.
 | [Value drill has no total work bounds](value-drill-has-no-total-work-bounds.md) | blocker | UI |
 | [Value-drill result literals failed boot schema admission](value-drill-result-literals-failed-boot-schema-admission.md) | blocker | Core |
 | [ensure-database silently creates a fresh store at any requested path](ensure-database-creates-fresh-store-at-any-path.md) | blocker | Core |
+| [message! can resolve a recipient at a stale basis to a dangling entity](message-resolves-recipient-at-stale-basis.md) | blocker | agent |
 
-## Friction (71)
+## Friction (72)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [A failed planner run leaves a generated root open with no re-drive](generated-root-has-no-planner-retry-path.md) | friction | agent |
 | [ACME cannot migrate safely through the current operator](acme-operator-migration-drift.md) | friction | UI |
 | [ACME typeahead worker is unavailable during live Inspect runs](acme-typeahead-worker-unavailable.md) | friction | agent |
 | [AI and HTML render twins may run one derivation twice](render-twin-runs-function-twice.md) | friction | UI |
