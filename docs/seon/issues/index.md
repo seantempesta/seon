@@ -10,7 +10,7 @@ GENERATED FILE — do not hand-edit. Regenerate with `bin/issues-index`.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (47)
+## Blocker (46)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -35,7 +35,6 @@ See `README.md` for the convention.
 | [Keep a running target's bootstrap artifact immutable](shared-bootstrap-output-mutates-running-artifact.md) | blocker | Core |
 | [Keep a stable owner until the pod execution subtree drains](dead-process-group-leader-blocks-safe-subtree-drain.md) | blocker | Core |
 | [Keep database control entry independent of occupied handlers](uds-codec-capacity-can-delay-control-entry.md) | blocker | Core |
-| [Keep grown transcripts renderable within database result bounds](grown-transcript-exceeds-result-weight-budget.md) | blocker | UI |
 | [Keep restore publication closed through completion](restore-completion-cannot-precede-admission.md) | blocker | Core |
 | [Key multi-source query sharing by every database value](multi-source-query-cache-retains-foreign-database-values.md) | blocker | Core |
 | [Let the common Inspect pod solver address an existing agent](inspect-pod-solver-cannot-address-existing-agent.md) | blocker | agent |

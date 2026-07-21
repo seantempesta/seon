@@ -492,26 +492,28 @@ mocked index assumption: reverse AVET for `:seon.agent.turn/at` returned an
 empty complete page and direct acquisition returned zero of the known 330 root
 turns. The isolated branch was aborted before seeding and closed cleanly.
 
-The **earliest unsettled contract** is therefore the timestamp index migration
-needed by bounded acquisition. Grounding found that both Malli bridges already
-translate `:seon.db/index`, but pinned Datahike rejects an existing attribute's
-nil→true index change and would not backfill current or temporal AVET even if
-that guard were merely relaxed; Seon's writer also rejects every installed
-schema mismatch. The selected one-mechanism correction has two occupied lanes:
-the maintained Datahike fork owns atomic additive-index backfill for current and
-temporal datoms, and Seon's writer owns the narrow same-shape/missing-index-only
-admission plus the turn timestamp annotation. Its **integrated proof** is an
-empty-before/nonempty-after AVET dependency probe, rejected incompatible schema
-changes, idempotent writer admission, and reopen/history preservation, followed
-by divergent entity IDs/timestamps, a real incomplete page/cursor, one hostile
-historical usage scalar, and the fixed scan envelope. The top level owns
-cross-repository review, parent gitlink integration, and repeated exact root
-feed/browser proof. The **next refill** after either lane returns is independent
-review of the integrated migration; after live acceptance it is the remaining
-Stage 1.5 live sampler/retirement/route/UI matrix. The
-**final graduation gate** remains the complete Stage 1.5 live
-sampler/retirement/route/UI matrix and then the ordered A-H program gates;
-neither live defect displaces the later ledger.
+The timestamp index migration and bounded transcript acquisition are now
+closed. At default database value `t=536875959`, the installed timestamp has
+`:db/index true`, reverse AVET returns a real 50-row incomplete page/cursor,
+and direct root acquisition returns 50 ordered turns with honest omission. The
+identity SSE and browser are healthy. An isolated 17-run/68-turn branch placed
+a 300,000-character usage scalar on the unique year-2100 first-created low-ID
+turn; its complete identity SSE emitted both history and usage omission with
+no error, proving timestamp selection and non-critical hostile telemetry. The
+branch closed and default remained unchanged. The separate branch-qualified
+MCP pending defect is durable in
+[[../../seon/issues/branch-qualified-eval-cljs-database-read-stays-pending]].
+
+The **earliest unsettled contract** returns to the remaining Stage 1.5 frozen
+live sampler/retirement/route/UI matrix. Its **integrated proof** must combine
+the already frozen generic renderer, child sampler/retirement behavior, value
+route authorization and path transport, `/data`, eval disclosure, direct
+child execution, identity SSE, and real-browser interactions on one admitted
+artifact. The **next refill** is a ledger audit that separates already proven
+cells from the shortest remaining live falsifiers before any new source edit.
+The **final graduation gate** remains that complete Stage 1.5 matrix and then
+the ordered A-H program gates; neither closed live defect displaces the later
+ledger.
 
 Initial integration commits are Datahike `58764d90`, parent gitlink `e042cb0e`,
 and Seon `88d35f77` + implicit-index correction `7e752954`. Independent review

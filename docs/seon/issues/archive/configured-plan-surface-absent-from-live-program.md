@@ -66,3 +66,12 @@ Focused proof:
 - `seon.execution.runtime-test` remains green, including the visible
   structured error for a genuinely missing selected function.
 - Combined focused gate: 69 tests, 340 assertions, zero failures or errors.
+
+Live closure at frozen HEAD `3d5fa23f`: explicit config apply migrated all
+twelve exact obsolete plan blocks in place while preserving every component
+entity ID. A second apply reported `changed: false`, zero operations, and left
+database value `t=536875957` plus its commit ID unchanged. The direct compiled
+child render succeeded without the obsolete symbol. Identity-encoded root SSE
+returned a complete `app-view` containing the plan surface and no render error;
+the real browser showed the plan, retained completion content, and an empty
+console after the clean restart.
