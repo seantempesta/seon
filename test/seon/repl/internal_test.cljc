@@ -865,7 +865,23 @@
     :note "bare-prose preamble DROPPED; real `;;` comment kept; defn parses (episode turn-2)"
     :form-count 1
     :no-read? true
-    :narration-includes ["Define the tile"]}])
+    :narration-includes ["Define the tile"]}
+
+   {:in "Got the denial for /etc/hosts as expected (seon.agent.fs/grants)"
+    :note "stray-token recovery is TOKEN-granular: `/etc/hosts` throws mid-prose but the SAME-line form still parses (battery L4 2026-07-21 — line recovery swallowed the corrective form and the run closed :no-forms)"
+    :form-count 1
+    :entry-count 1
+    :no-read? true}
+
+   {:in "denied /etc/hosts — falling through now.(seon.agent.fs/read-file {:seon.agent.fs/path \"/x\"})"
+    :note "glued prose + stray token + same-line map-arg form: only the unreadable token drops"
+    :form-count 1
+    :no-read? true}
+
+   {:in "80s arcade/start screen."
+    :note "token-granular recovery still drops the WHOLE clean remainder as prose — entry-count stays 0"
+    :entry-count 0
+    :no-read? true}])
 
 (deftest prose-tokens-dropped-not-read-failures
   (doseq [{:keys [in note entry-count form-count no-read?

@@ -634,6 +634,30 @@
       (+ offset nl 1)
       (count text))))
 
+(defn- prose-token-recovery
+  "Recovery point for a PROSE-classified throwing TOKEN (A.1): just past
+   the token itself — the maximal run of characters from `offset` up to
+   the next whitespace, comma, comment start, string open, or list/
+   vector/map opener, always advancing at least one character.
+
+   Token-granular (not line-granular) recovery preserves the clean-read
+   invariant — forms AFTER a failure still parse — on the SAME line:
+   \"denied for /etc/hosts — retrying (fs/read-file …)\" drops only the
+   unreadable `/etc/hosts` token and still evaluates the trailing form,
+   exactly as the identical sentence WITHOUT the stray token already
+   does. Line recovery silently swallowed such same-line corrective
+   forms, which read back as a formless turn and closed live runs
+   `:no-forms` (observed: battery L4, 2026-07-21). Backtick-led
+   narration spans keep [[next-newline-recovery]] — their drop unit is
+   the quoted-prose span, not one token."
+  [text offset]
+  (let [n (count text)
+        boundary? #{\space \tab \newline \return \, \( \[ \{ \" \;}]
+    (loop [i (inc offset)]
+      (if (or (>= i n) (boundary? (nth text i)))
+        i
+        (recur (inc i))))))
+
 ;; ============================================================
 ;; Prose-vs-code classification (A.1) — a reader THROW on a token like
 ;; `80s`, `to:`, `detail:`, `v1.0` reaches the `:error` branch before any
@@ -1097,9 +1121,15 @@
             (let [nl-recovery (next-newline-recovery text offset)
                   prose-span  (subs text offset nl-recovery)]
               (if (prose-failure? (::error token) prose-span)
-                ;; Prose tokenized as an invalid token — DROP it; recover
-                ;; at the next newline; carry `pending`.
-                (recur nl-recovery pending out)
+                ;; Prose tokenized as an invalid token — DROP it and
+                ;; recover just past the TOKEN so a form later on the
+                ;; same line still parses; a backtick-led narration span
+                ;; drops through the next newline (its unit is the quoted
+                ;; prose, not one token). Carry `pending`.
+                (recur (if (backtick-prose-at-start? prose-span)
+                         nl-recovery
+                         (prose-token-recovery text offset))
+                       pending out)
                 ;; Broken code — record a :read failure; recover at the
                 ;; next genuine top-level boundary (error-kind-aware: an
                 ;; :eof unclosed form never splits at an interior `;`).
