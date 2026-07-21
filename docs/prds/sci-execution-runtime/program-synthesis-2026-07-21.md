@@ -648,15 +648,24 @@ decisions batch for their return.
   step-backing contract, gemma relocated into the diffusion tree,
   dev-only preload door, fence zero ai-side edges. Full suite
   1485/7168 green in-lane. Release door = the batched owner decision.
-- **NS-4 host decomposition** — sol medium, codex thread
-  `019f868c-da14-7012-834c-28f0ef00c0a1`, spec
-  `specs/ns-4-host-decomposition.md` (see its Amendment section), logs
-  `tmp/orchestrator/ns-4-*`. Stopped on a real DAG flaw (band-A wire
-  constants feed the leaf bands); resumed with band A moving wholesale
-  into `seon.host.session`, one owner, W5-deletion comment intact.
-  W5 EVIDENCE: the implementer independently concluded the honest seam
-  is promoting the `seon.execution` wire contract to `.cljc` — exactly
-  the planned W5 promotion; strengthens that unit's rationale.
+- **NS-4 DONE `d4b0d0d8`** — host.clj → 303 lines + host/{session
+  281, sample 242, eval 332, invoke 224}; band A rides session until
+  W5; behavior-identical (writer 342/2584 green before AND after,
+  wire keys unchanged, DAG verified acyclic). W5 EVIDENCE: implementer
+  independently derived the `.cljc` contract promotion as the honest
+  eventual seam.
+- **RENAME+RESET CHECKPOINT DONE (2026-07-21 night):** `bin/seon up`
+  green on the fully renamed tree; `cluster reset default` clean (new
+  generations both processes); LIVE PROOF — root//data/agent pages 200;
+  fresh `:seon.eval` schema form carries
+  `seon.render.handlers.eval/render-ai` with zero `seon.handlers`
+  sources anywhere; `:seon.agent.lifecycle/wake?` registered, old key
+  absent; provider registry live with `(:anthropic :deepseek
+  :openai-compat :typeahead)` self-registered. NS-1/2/3/4 + registry
+  are integrated and proven as one system.
+- **sol design review (read-only)** of NS-0.5/NS-5 + fresh-tree
+  critique in flight — logs `tmp/orchestrator/ns-design-review-*`;
+  report to be persisted under `research/` and judged on return.
   (First dispatch `019f868c-5d79-…` died instantly — a shell-`&`
   background does not survive the orchestrator's tool-call exit; use
   the harness background mechanism for every codex run.)
