@@ -133,6 +133,29 @@ NOTE: the orchestrator's own sol-refactor loop already embodies
 review-then-integrate (diff-vs-spec → rerun gates → path-limited commit);
 this ruling governs the RUNTIME agents' code path, not that loop.
 
+## W1 boot design accepted + W0.7 landed (2026-07-21 PM)
+
+- **W0.7 hostile battery DONE `61736060`** (Fable — sol's cyber filter
+  blocked it): 12 vectors green, full writer 338/2575. KEY FINDING:
+  gap-7 (q6) CONFIRMED reproduces → W0.8 required. Steering smell → q19.
+  Live-cluster second-agent drive for CPU-runaway/shared-var (q10)
+  still to schedule.
+- **W1 boot design accepted**
+  (`research/w1-boot-contract-design-2026-07-21.md`): resolve operator-
+  side (aero added to `bb.edn` — the "aero not loadable in bb" blocker
+  was FALSIFIED live); launch envelope threads heap/selected-processors/
+  uds-caps NOW, frame-bytes/executor-families at W1 step 5; hardware
+  formulas concrete (heap = clamp(RAM/16, 512, 4096) MiB, etc.);
+  **live reconstruction split to its own unit W1.2** (heap is
+  process-immutable → supervised writer replacement, reuses W0.4 pool
+  `replace-member!`, zero new mechanism). W1.1 (boot resolution) first,
+  then W1.2 ∥ step-5 surfaces.
+- **W1 design's 4 owner decisions (BATCHED, recommendations noted):**
+  (i) config-free boot retains resolved VALUE vs path (rec: value);
+  (ii) heap ceiling 4096 MiB (rec: yes); (iii) FD-derived connection
+  clamp `min(1024, fd/4)` (rec: yes); (iv) drift on a config-free boot
+  is fault-only steering to `config apply`, no auto-repair (rec: yes).
+
 ## Owner rulings — W1 boot contract (2026-07-21 PM)
 
 - **There is NO config-free boot.** Config is always resolved at boot;
@@ -368,6 +391,8 @@ an explicit "when" — never chat-only.
 | q3 | `wire-safe-value`/`bounded-result` realize O(value) before bounding | PARTIAL: W0.6 fixed terminal `pr-str` (capped JVM writer); `wire-safe-value`/`bounded-result` transit probes STILL realize | remaining half → W10; before U12 (100-agent heap pressure) |
 | q16 | 16 duplicate-limit bugs | W1.3a | DONE `593b4a89` — unified under one owner each |
 | q18 | real process-contained OOME recovery can't run in-process (would kill the test runner) | supervised-process drill under the q2 host-supervisor work | with q2 / WP-S; W0.7 covers only bounded allocation pressure |
+| q6 | concurrent schema register race — CONFIRMED by W0.7 gap-7 vector: `schema/restore!` (schema.cljc:632) wholesale `(constantly before)` on process-global state drops a concurrent agent's successful registration when a failed eval restores its stale snapshot (host.clj:740-751). NOT mitigated by W0.2/W0.6. FLEET DATA-SAFETY bug | **W0.8** (revert-own-delta, not global reset) | NOW — confirmed silent data loss at fleet scale; next W0 unit |
+| q19 | steering smell: pool exhaustion during invocation sampling-policy acquisition surfaces to the agent as "lacks a complete value-sampling policy" (class `:runtime`), masking the real `:pool-exhausted` cause at host.clj:566 (containment intact, steering wrong) | q5/W0.4 follow-up | with the q5 fairness work |
 | R1 | agent-authored code must not auto-persist to disk; needs a review-and-integrate mechanism (staging → human review → commit, later gate-flippable to auto-persist) | new design pass → its own unit; shapes WP-W graduation | design after the packages line settles; no runtime auto-persist exists today, so not urgent, but WP-W must not add one |
 | q4 | no derived fleet-health view (faults exist, no "is the cluster healthy" query/render) | new W10 row; derived render per reactive-context law | design at W0.7 (battery needs the same observations); land before U10 |
 | q5 | executor head-of-line: unbounded per-agent queueing, no fairness/busy answer (audit §1b.1, gap 3 tail) | W0 family — W0.8 if W0.4's pool doesn't subsume it | decide when W0.4 returns (its bounded-wait may cover the client side; server side re-audit) |
