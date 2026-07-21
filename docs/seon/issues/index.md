@@ -144,4 +144,4 @@ See `README.md` for the convention.
 | [Partially-Stale Reference Docs Need Updates](stale-reference-docs.md) | cleanup | docs |
 | [Subagents block is implemented but not installed](subagents-block-is-implemented-but-not-installed.md) | cleanup | agent |
 | [Surface recency may be recomputed globally](surface-recency-recomputed.md) | cleanup | UI |
-| [Unify the two AsyncLocalStorage stores; rename with-tx-context → with-tx-meta](als-unify-tx-meta.md) | cleanup | Core |
+| [Unify agent and operation AsyncLocalStorage](als-unify-tx-meta.md) | cleanup | Core |

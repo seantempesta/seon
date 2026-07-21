@@ -52,3 +52,20 @@ registration active then released; shutdown calls `reactive/close!` before
 
 Owner: source-cleanup PRD (router = stage 4; serve poll + client
 advertisement + close! call = stage 5, ordered after the router fold).
+
+## Corrected client boundary (2026-07-20)
+
+[[../../prds/source-cleanup/research/client-reactive-shutdown-boundary-2026-07-20]]
+(`33293b06`) corrects the earlier IDs-only sketch. Agent membership is
+unchanged when `:seon.agent.runtime/wake?` or a run's `paused-at` changes; an
+observer returning only resumable IDs would equality-suppress the notification
+and lose required runtime reconciliation. The one observed value therefore
+contains both the sorted advertisement IDs and a deterministic runtime-control
+projection covering the existing lifecycle trigger families.
+
+After the route reactive cut, the client replaces its direct listener with
+that one registration, deletes all advertisement owner/refresh/freshness
+machinery, and calls `reactive/close!` after hosts/runtime inputs stop but
+before admission detach and database-session close. The issue remains open for
+the route, corrected advertisement, shutdown ordering, adversarial stale-resume
+tests, and frozen live proof named by the report.

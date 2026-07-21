@@ -558,6 +558,16 @@ settles on the committing database value, preserves timeout closure as
 `:superseded`, and releases unconditionally. Independent focused proof passed
 serve 26 tests / 103 assertions and reactive 7 / 49; the issue is archived.
 
+The remaining client advertisement and shutdown fold is grounded by
+[[research/client-reactive-shutdown-boundary-2026-07-20]] (`33293b06`). The
+observed value must include deterministic runtime controls as well as resumable
+IDs: `wake?` and `paused-at` changes preserve membership and an IDs-only value
+would be equality-suppressed. After the Stage-4 router cut, the client deletes
+its direct listener/freshness machinery, reconciles only changed runtimes, and
+awaits the one `reactive/close!` after hosts stop but before admission and the
+database session close. Stale-resume ordering and quiesce/full-stop release are
+hard focused/live gates.
+
 The remaining debug-feed/turn-debug boundary is grounded by
 [[research/debug-feed-live-graduation-boundary-2026-07-20]] (`4ab23c10`). Turn
 ref projection (`bab67136`) and failed-query short-circuit (`0a15a116`) have
