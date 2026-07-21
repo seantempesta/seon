@@ -513,6 +513,17 @@ Stage 1.5 live sampler/retirement/route/UI matrix. The
 sampler/retirement/route/UI matrix and then the ordered A-H program gates;
 neither live defect displaces the later ledger.
 
+Initial integration commits are Datahike `58764d90`, parent gitlink `e042cb0e`,
+and Seon `88d35f77` + implicit-index correction `7e752954`. Focused dependency
+proof passed 39 tests / 279 assertions across three index backends; focused
+Seon writer initialization passed 6/36 and transcript/turn/retry passed 42/142.
+Independent review has not accepted the dependency yet: direct
+`[:db/retract <attr> :db/index true]` bypasses entity-map schema validation,
+can remove the schema facet while leaving stale AVET, and would stop later
+writes from maintaining it. The dependency lane is closing that monotonicity
+hole and must prove unchanged basis/schema/current+temporal AVET after every
+facet-removal route before the parent advances again.
+
 The final consumer cut is grounded by
 [[research/universal-data-browser-ui-migration-boundary-2026-07-20]]
 (`e7cc6f94`). It extends the existing render dispatcher, migrates `/data` and
