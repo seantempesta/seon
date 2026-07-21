@@ -529,126 +529,108 @@ the named boundaries.
 - **Three surfaces only**: `bin/test-cljs`, `bin/test-writer` +
   `bin/seon test operator`, and `src-inspect-ai/`. No new runners.
 
-## Execution state (2026-07-21, restart anchor)
+## Execution state (2026-07-21 evening, restart anchor)
 
-Accepted and committed: W8a (PRD archival, `607147a6`+`fa81d07c`),
-W0.1 (`82a0c4b4`), W0.2 (`3346e54f`), W0.5 (`7cab9119`),
-**W2 (`bd357aa5`)** — fallback `:seon.ai/agent-fallback-variant`
-keyword, `:muse` variant with minimal thinking, fallback inside
-`call-llm!`, full CLJS gate 1458/7035 green. sci forked to
-seantempesta/sci at `be4021d`, submodule repointed (`3c11679c`).
-Error-quality design accepted:
-[[research/error-quality-u6-w3-design-2026-07-21]] with WP-A..WP-D cut.
+READ THIS FIRST on restart. Nothing is running; the tree is clean
+(except untracked build cruft `.shadow-cljs-b2/`, `out-b2/`). All work
+below is committed on branch `codex/runtime-reliability-refactor`.
 
-Also accepted: **W0.3 cancel-ghost `46a304e1`** — Future.cancel(false)
-plus a token-identity check before watchdog/eval/receipt/db; a queued
-cancel leaves zero receipts and zero writes; writer gate 301/2262 green.
+### DONE — accepted + committed this program
 
-Also accepted: **W4a tier-aware teaching `c238ab9e`** — one pure
-tier-aware `render-system-text` (shared body + one tier-selected
-platform section), runtime tier acquisition via presence query on
-`:seon.execution.host/eval-socket-path` (4th acquisition member),
-config override reduced to literal shared body, generate-code contract
-(specs→deps→mains, any order, last version wins) in both texts,
-platform-neutral development-teaching; `runtime_test.cljs:164` updated
-for the added member (`[65536 4096 256 8]`); full gate 1462/7062 green
-(shell-test env noise cleared — machine quiet).
+- **W0 CONTAINMENT SERIES COMPLETE** (the program's earliest contract —
+  "an agent cannot take down or lock up the cluster" — is CLOSED with a
+  green robustness battery):
+  W0.1 interrupt merge `82a0c4b4` · W0.2 var-stamping `3346e54f` ·
+  W0.3 cancel-ghost `46a304e1` · W0.4 writer pool `efbce79e`
+  (+ typed `::uds/eof` in uds.cljc) · W0.5 writer ceilings `7cab9119` ·
+  W0.6 escape hardening `dd335338` (bounded frames, immortal acceptor,
+  per-form print capture, interrupt hygiene, **seon.error promoted
+  .cljs→.cljc** so the JVM host shares the one record! mechanism) ·
+  W0.7 robustness battery `61736060` + gap-7 flip `7a9b7ce9`
+  (12 vectors, 342/2584 writer green) ·
+  W0.8 schema-race fix `c7c04247` (per-eval staging overlay, no global
+  lock — CLOSED q6, the confirmed fleet data-loss bug).
+- **WP-A** structural error classification `0a79ada3` + sci fork patch
+  `8fac6e8` (pushed to seantempesta/sci branch `seon`): `seon.error.sci`
+  classify/steering-head/detail, all 3 message-regexes removed.
+- **W2** LLM fallback `bd357aa5`. **W4a** tier teaching `c238ab9e`.
+  **W1.3a** duplicate-limits unified `593b4a89` (q16 closed).
+  **W8a** PRD archival `607147a6`+`fa81d07c`.
+- **WP-K** package data layer `19654064` — `seon.packages.cljc`
+  (ledger schemas, install/update/remove/converged planning, byte-stable
+  npm+deps manifest generators, `:all` trust expansion, host routing),
+  14 config accessors, per-cluster `packages/` skeleton.
+- **W1.1 CONFIG-OVERHAUL SPINE `baeac2ee`** — pure `config/resolve.cljc`
+  (1083 LOC, both-tier portable), operator resolves once +
+  `--launch-envelope`, heap/processors enforced now, connection-cap
+  carried-for-W1.5, retained-vs-selected boot, post-reconcile equality
+  proof + divergence fault; 3 gates green + live up/status/down cycle.
 
-Also accepted: **W0.4 writer pool `efbce79e`** — lazy retained pool
-with exclusive member leasing, bounded waits, per-call deadlines
-(120s default), member eviction/replacement, same-request-id write
-recovery with active-conflict re-poll, typed `::uds/eof` transport
-condition (authorized round-2 seam; mismatch throw untouched), four
-named W1-relocation defaults; focused 7/41 + full writer gate
-308/2303 green (implementer), focused rerun verified by orchestrator.
-Two-round stop-and-report worked exactly as designed.
+### DONE — accepted designs (research/, all grounded, file:line-cited)
 
-Also accepted: **WP-A `0a79ada3`** + sci fork `8fac6e8` (pushed to
-seantempesta/sci branch `seon`) — `seon.error.sci`
-classify/steering-head/detail over the authorized request map;
-resolution/arity/interrupt/refusal/runtime classes structural; all
-three error-classification regexes REMOVED (refusal fallback safely
-dropped — hostile tests prove the structural `:var` path); runtime
-frames in public `sci/stacktrace` terms; head cap named for W1.
-Focused 9/86 rerun by orchestrator; full writer gate 313/2351 green.
-Round-1 stop caught the classify-needs-ctx spec gap (authorized).
+- `namespace-hierarchy-design-2026-07-21` (renames + host.clj 5-band
+  split; NS-0..NS-5 cut) · `cljc-portability-audit-2026-07-21` (62%
+  portable; Wave-1 order) · `w6-package-host-design-2026-07-21` ·
+  `packages-boundary-naming-flows-2026-07-21` (mapping-is-data;
+  WP-B/WP-W scope) · `w1-boot-contract-design-2026-07-21` (aero-in-bb,
+  W1.2 split, hardware formulas) · `error-quality-u6-w3-design`
+  (WP-A done; WP-B/C/D pending) · `probe-evalfree-playwright` (PASS) ·
+  `w1-config-limits-inventory` (the full W1 sweep target).
+- NS-0 hygiene done `6171bd5d`.
 
-Also accepted: **CLJC portability audit**
-(`research/cljc-portability-audit-2026-07-21.md`) — 62% of 83.7K LOC
-can join the portable canon; 11 falsely-portable `.cljc` files; the
-program rule: portable namespaces synchronously transform ordinary
-immutable data, platform edges acquire/resolve/wait/publish/transport.
-Wave 1 = leaf bundle + eval/internal + toolkit `.cljc` repairs,
-replacing the host's regex-selected portable slice.
+### OWNER DIRECTION (answers to the 2 questions asked at wind-down)
 
-Also accepted: **W1.3a duplicate limits `593b4a89`** — the 16
-duplicate-limit bugs (q16) unified under one owner each: LLM deadline,
-source inline threshold, subprocess kill grace, shell stream bytes,
-canvas AI-twin cap (now reads its accessor), recovery tail, generated-ID
-attempts (schema owns), invocation deadline (host.clj dup deferred),
-read-profiles split into agent-entity/config-singleton/ai-singleton
-profiles. Two spec-gap catches corrected (require cycle, distinct read
-shapes). Full cljs 1469/7076 + writer 326/2399 green (implementer);
-orchestrator reran both on the settled tree.
+1. **NEXT LANE LEADS WITH: namespace renames NS-1/2/3** — NS-1a/1b
+   (diffusion fence + provider registry: `seon.ai.dispatch` is a static
+   case not a registry, so build a provider self-registration registry;
+   `seon.ai.diffusiongemma`→`seon.diffusion.gemma`; typeahead stays
+   CORE), NS-2 (lifecycle grouping: `state`→`runtime.state`,
+   `indexing`→`client.indexing`, merge `agent.runtime`→`agent.lifecycle`),
+   NS-3 (render subtree: `handlers.*`→`render.handlers.*`,
+   `web.view-unit`→`render.view-unit`). All D1-D12 decisions accepted
+   (see the round-2 batch above). Mechanical, no-lock-in (rename + reset).
+2. **PACING: keep 2 concurrent sol lanes going.** Robustness-framed
+   specs (never adversarial vocabulary — sol's cyber filter). Fable only
+   for deep design sol can't do (owner low on orchestrator tokens).
 
-Also accepted: **W1.1 boot resolution `baeac2ee`** — pure
-`config/resolve.cljc` (1083 LOC, both-tier portable), operator resolves
-once + `--launch-envelope`, heap/processors enforced now, connection-cap
-carried-for-W1.5, retained-vs-selected boot distinction, post-reconcile
-equality proof + divergence fault. Gates cljs 1481/7161 + writer
-342/2584 + operator 293/1645 green, AND a live `up`/`status`/`down`
-cycle (faulted correctly on a pre-W1 retained db, then clean boot). The
-config-overhaul SPINE is in; W1.2 (live writer reconstruction) + W1.5
-(connection-cap/executor enforcement) + the config-facts sweep follow.
+### REFILL QUEUE (dependency order, after NS-1/2/3)
 
-Also accepted since: **WP-K `19654064`** (package data layer:
-`seon.packages.cljc` ledger/planning/manifests, 14 config accessors,
-per-cluster skeleton; CLJS 1478/7153 + operator 293/1644 green) and
-**W0.8 `c7c04247`** (schema-race fix, q6 closed). W0 CONTAINMENT SERIES
-COMPLETE: W0.1-0.8 + WP-A all landed; the hostile/robustness battery is
-green with gap-7 now a containment-pass. Remaining W0 follow-ups are
-q5/q19 (pool fairness/steering) and the q10 live-cluster drive.
+NS-0.5 internals extraction (repl.internal→repl.parse ×13, plan×9,
+db×7, schema×6, eval×2, agent×1 — only a parent may require its
+.internal) · NS-4 host.clj 5-band split (host.clj now FREE; before W3) ·
+NS-5 W5-window renames (`execution.host`→`execution.dispatch`) ·
+W1.2 live writer reconstruction (own unit; reuses W0.4 pool
+replace-member) · W1.5 connection-cap/executor enforcement (the writer
+pass-through W1.1 deferred) · W1 config-facts sweep (the inventory) ·
+WP-B Bun package host (playwright op set + handle-subscribe; **reword
+robustness-framed**) ∥ WP-J JVM host · WP-H handles · WP-W install flow
++ boundary graduation (routes through R1 review-integrate, NO
+auto-persist) · WP-S supervision + q2 host-supervisor · W3 host parity
+(instrumentation/preflight/authored-invocation) · CLJC Wave-1 · then
+W5 cutover, U10/U12 graduation.
 
-PRIOR IN-FLIGHT (now historical):
-- **W0.6 round 2 COMPLETE, commit pending settled-tree gates** —
-  expanded ownership landed: `seon.error` promoted `.cljs`→`.cljc`
-  (JVM host now shares the one record! mechanism — first CLJC-direction
-  win), bounded frames, immortal acceptor + startup-read timeout,
-  per-form sci/out+sci/err capture into `::output`, interrupt hygiene,
-  capped JVM pr-str. Named defaults for W1: startup-read 10000ms,
-  error-frame 120tok, per-form/persisted output 2048tok. q3 partially
-  closed. Orchestrator running bin/test-cljs + bin/test-writer on the
-  now-settled tree before the path-limited commit.
-- **W1.1 boot-contract spec READY** (`specs/w1.1-boot-contract.md`) —
-  config.cljs now free (W1.3a committed); dispatch after W0.6 commits.
-- **WP-K spec READY** (`specs/wp-k-package-roots.md`). NS-0.5 + W0.7
-  (draft reviewed) unblock when W0.6 commits (frees host test paths).
-  Autonomous loop active; task list carries the refill order.
-- **W6 package-host design RETURNED and accepted**
-  (`research/w6-package-host-design-2026-07-21.md`): ledger-first
-  per-cluster packages/, two disposable `seon.packages.host` platform
-  impls over the one UDS envelope, `seon.handle` decided
-  functions-first, WP-K→(WP-B∥WP-J)→WP-H→WP-W→WP-S cut; WP-K is
-  parallel-safe NOW (no W0.x file overlap). Five owner decisions
-  batched with the error-quality design's three — awaiting the owner.
-- **Namespace-hierarchy design lane running** (owner-requested
-  refactor of all namespaces + host.clj decomposition; writes
-  `research/namespace-hierarchy-design-2026-07-21.md`). Sequencing
-  law: host-file moves land only after W0.4/WP-A/W0.6; zero effort on
-  W5 death-row bands.
+### STANDING RULES learned this session (all in-doc above)
 
-If a lane died mid-work: uncommitted changes sit in the shared tree on
-its owned paths — review the diff against `specs/<unit>.md`, finish or
-re-dispatch.
+Spec-grounding before sol dispatch (verify interfaces vs source; sol
+stop-and-report is the net not the plan — 8+ good catches this session).
+Robustness-framed specs for sol (cyber filter). Fable sparingly. Every
+weakness → the Weakness queue with a WHEN. No namespace lock-in
+(rename+reset). No auto-persist of agent code (ruling R1). Owner
+decisions batch for their return.
 
-Work-order specs are durable under `specs/` (one file per unit, the
-exact text dispatched). Driving protocol:
-`docs/seon/reference/driving-codex-agents.md` + implementer preamble
-(ruling 10). Review loop: read summary → diff vs spec → rerun the
-focused gate → accept (path-limited commit stands) or resume with
-corrections. Next after in-flight lanes: WP-A (sci fork error patch),
-W0.6, W0.7 battery, then W3 authored invocation; W6 packages await the
-Fable design.
+### NO PENDING OWNER DECISIONS
+
+The 4 W1-boot decisions were folded as recommendations into the shipped
+W1.1. The packages/naming decisions are all settled. Nothing is
+blocked on the owner.
+
+If a future lane dies mid-work: uncommitted changes sit on its owned
+paths — review the diff vs `specs/<unit>.md`, finish or re-dispatch.
+Work-order specs are durable under `specs/`. Driving protocol:
+`docs/seon/reference/driving-codex-agents.md` (capture thread_id from
+`--json`; resume by explicit id; sed-extract the id, don't pipe-hang).
+Review loop: read summary → diff vs spec → rerun focused gate → accept
+(path-limited commit) or resume with corrections.
 
 ## Sequencing and parallel portfolio
 
