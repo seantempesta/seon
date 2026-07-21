@@ -394,7 +394,7 @@ an explicit "when" — never chat-only.
 | q3 | `wire-safe-value`/`bounded-result` realize O(value) before bounding | PARTIAL: W0.6 fixed terminal `pr-str` (capped JVM writer); `wire-safe-value`/`bounded-result` transit probes STILL realize | remaining half → W10; before U12 (100-agent heap pressure) |
 | q16 | 16 duplicate-limit bugs | W1.3a | DONE `593b4a89` — unified under one owner each |
 | q18 | real process-contained OOME recovery can't run in-process (would kill the test runner) | supervised-process drill under the q2 host-supervisor work | with q2 / WP-S; W0.7 covers only bounded allocation pressure |
-| q6 | concurrent schema register race — CONFIRMED by W0.7 gap-7 vector: `schema/restore!` (schema.cljc:632) wholesale `(constantly before)` on process-global state drops a concurrent agent's successful registration when a failed eval restores its stale snapshot (host.clj:740-751). NOT mitigated by W0.2/W0.6. FLEET DATA-SAFETY bug | **W0.8** (revert-own-delta, not global reset) | NOW — confirmed silent data loss at fleet scale; next W0 unit |
+| q6 | concurrent schema register race dropping a concurrent agent's registration | **W0.8 DONE `c7c04247`** — per-eval staging overlay (register! → isolated overlay; success merges its delta, failure discards; no global lock); gap-7 battery vector flipped to containment-pass `7a9b7ce9`; full writer 342/2584 green. CLOSED. |
 | q19 | steering smell: pool exhaustion during invocation sampling-policy acquisition surfaces to the agent as "lacks a complete value-sampling policy" (class `:runtime`), masking the real `:pool-exhausted` cause at host.clj:566 (containment intact, steering wrong) | q5/W0.4 follow-up | with the q5 fairness work |
 | R1 | agent-authored code must not auto-persist to disk; needs a review-and-integrate mechanism (staging → human review → commit, later gate-flippable to auto-persist) | new design pass → its own unit; shapes WP-W graduation | design after the packages line settles; no runtime auto-persist exists today, so not urgent, but WP-W must not add one |
 | q4 | no derived fleet-health view (faults exist, no "is the cluster healthy" query/render) | new W10 row; derived render per reactive-context law | design at W0.7 (battery needs the same observations); land before U10 |
@@ -591,7 +591,15 @@ profiles. Two spec-gap catches corrected (require cycle, distinct read
 shapes). Full cljs 1469/7076 + writer 326/2399 green (implementer);
 orchestrator reran both on the settled tree.
 
-IN FLIGHT / UNCOMMITTED:
+Also accepted since: **WP-K `19654064`** (package data layer:
+`seon.packages.cljc` ledger/planning/manifests, 14 config accessors,
+per-cluster skeleton; CLJS 1478/7153 + operator 293/1644 green) and
+**W0.8 `c7c04247`** (schema-race fix, q6 closed). W0 CONTAINMENT SERIES
+COMPLETE: W0.1-0.8 + WP-A all landed; the hostile/robustness battery is
+green with gap-7 now a containment-pass. Remaining W0 follow-ups are
+q5/q19 (pool fairness/steering) and the q10 live-cluster drive.
+
+PRIOR IN-FLIGHT (now historical):
 - **W0.6 round 2 COMPLETE, commit pending settled-tree gates** —
   expanded ownership landed: `seon.error` promoted `.cljs`→`.cljc`
   (JVM host now shares the one record! mechanism — first CLJC-direction
