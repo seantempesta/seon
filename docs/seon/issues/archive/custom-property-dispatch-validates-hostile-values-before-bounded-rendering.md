@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 tags: [issue, rendering, schema]
 severity: blocker
 ---
@@ -56,3 +56,18 @@ one boundary rather than adding a plan-specific matcher or a second sampler.
   `schema-projection-in` completeness handling.
 - `reference-code/malli/src/malli/core.cljc` at the mirrored revision above —
   map and collection validator traversal.
+
+## Resolution
+
+Commits `9887ab64` and `82349b58` make the one generic dispatch boundary
+prepare one bounded value projection before decoding explicit overrides or
+running schema matching. Only sampler-proven complete values may validate and
+invoke custom code; incomplete values reuse the exact sampled tree in the
+universal fallback with shape-only status.
+
+Independent review accepted the implementation with no findings. The focused
+dispatch proof passed 6 tests / 37 assertions and the value renderer suite
+passed 69 tests / 444 assertions. A raw Malli control traversed all 200
+recursive children, while million-root and million-child inputs each visited
+at most 40 items, sampled exactly once, and invoked neither matching nor custom
+code. A 10,000-deep chain stopped with an honest pruned marker.

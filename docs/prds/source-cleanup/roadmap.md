@@ -424,12 +424,15 @@ the blocker issue closes. The ruled plan UI migration now owns the released
 paths, but its shortest proof exposed a prerequisite in generic property
 dispatch: `matching-shapes-in` recursively validates a hostile value before a
 bounded renderer receives control. Issue
-[[../../seon/issues/custom-property-dispatch-validates-hostile-values-before-bounded-rendering]]
+[[../../seon/issues/archive/custom-property-dispatch-validates-hostile-values-before-bounded-rendering]]
 (`6c7343a8`) records the Malli call path and work-bound acceptance. The one
-generic dispatch boundary must admit only sampler-proven complete values and
-reuse the bounded projection for incomplete fallback before the recursive plan
-schema can graduate. Exact-source restart, integrated browser proof, and
-closure of the retained value issues remain after that handoff.
+generic dispatch boundary now admits only sampler-proven complete values and
+reuses the bounded projection for incomplete fallback (`9887ab64` +
+`82349b58`). The work proof bounded million-root and million-child traversal at
+40 visits, stopped a 10,000-deep chain honestly, and passed 69 value-renderer
+tests / 444 assertions; independent review accepted it with no findings. The
+recursive plan schema may now resume. Exact-source restart, integrated browser
+proof, and closure of the retained value issues remain after that handoff.
 
 The final consumer cut is grounded by
 [[research/universal-data-browser-ui-migration-boundary-2026-07-20]]
