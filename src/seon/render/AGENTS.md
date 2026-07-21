@@ -31,7 +31,7 @@ Skills: `ui-canvas` (the agent-facing canvas how-to), `datastar-web-ui`.
 - Sizes rendered anywhere are TOKENS (`seon.ai.tokens/estimate`).
 
 `sci.cljs` runs agent-authored render fns inside the cage — agent renders
-are data in, data out, guarded like everything else. `value.cljs` /
+are data in, data out, guarded like everything else. `value.cljc` /
 `chat.cljs` / `default.cljs` are the typed-value renderers the block
 renderer dispatches to.
 

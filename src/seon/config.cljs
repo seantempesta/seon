@@ -1210,6 +1210,8 @@
   [configuration]
   (get configuration :seon.config.render/value-max-realized-items 1024))
 
+(declare value-max-string value-shape-sample)
+
 (defn effective-value-drill-limits
   "Effective value-drill limits under host and operation policy."
   {:malli/schema
@@ -1229,6 +1231,15 @@
      :seon.config.render/value-max-realized-items
      (narrowed :seon.config.render/value-max-realized-items
                (value-max-realized-items configuration))
+     :seon.config.render/value-max-depth
+     (narrowed :seon.config.render/value-max-depth
+               (value-max-depth configuration))
+     :seon.config.render/value-max-string
+     (narrowed :seon.config.render/value-max-string
+               (value-max-string configuration))
+     :seon.config.render/value-shape-sample
+     (narrowed :seon.config.render/value-shape-sample
+               (value-shape-sample configuration))
      :seon.render.value/page-size
      (narrowed :seon.render.value/page-size
                (value-max-items configuration))}))

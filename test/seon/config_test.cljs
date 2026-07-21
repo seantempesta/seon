@@ -137,6 +137,9 @@
                {:seon.config.render/value-max-path-segments 20
                 :seon.config.render/value-max-path-bytes 2000
                 :seon.config.render/value-max-realized-items 200
+                :seon.config.render/value-max-depth 12
+                :seon.config.render/value-max-string 160
+                :seon.config.render/value-shape-sample 16
                 :seon.config.render/value-max-items 10})
         normalize (fn [operation-limits]
                     (config/effective-value-drill-limits
@@ -147,10 +150,16 @@
         host {:seon.config.render/value-max-path-segments 20
               :seon.config.render/value-max-path-bytes 2000
               :seon.config.render/value-max-realized-items 200
+              :seon.config.render/value-max-depth 12
+              :seon.config.render/value-max-string 160
+              :seon.config.render/value-shape-sample 16
               :seon.render.value/page-size 10}
         narrowed {:seon.config.render/value-max-path-segments 8
                   :seon.config.render/value-max-path-bytes 500
                   :seon.config.render/value-max-realized-items 100
+                  :seon.config.render/value-max-depth 6
+                  :seon.config.render/value-max-string 80
+                  :seon.config.render/value-shape-sample 8
                   :seon.render.value/page-size 4}]
     (is (= host (normalize nil)) "absence resolves exactly to host policy")
     (is (= narrowed (normalize narrowed)) "every smaller field narrows")
@@ -158,10 +167,16 @@
            (normalize {:seon.config.render/value-max-path-segments 200
                        :seon.config.render/value-max-path-bytes 20000
                        :seon.config.render/value-max-realized-items 2000
+                       :seon.config.render/value-max-depth 120
+                       :seon.config.render/value-max-string 1600
+                       :seon.config.render/value-shape-sample 160
                        :seon.render.value/page-size 100})))
     (is (= {:seon.config.render/value-max-path-segments 8
             :seon.config.render/value-max-path-bytes 2000
             :seon.config.render/value-max-realized-items 200
+            :seon.config.render/value-max-depth 12
+            :seon.config.render/value-max-string 160
+            :seon.config.render/value-shape-sample 16
             :seon.render.value/page-size 10}
            (normalize {:seon.config.render/value-max-path-segments 8}))
         "fields normalize independently")

@@ -65,49 +65,47 @@
     [clojure.string :as str]
     [malli.error :as me]
     [seon.ai.tokens :as tokens]
-    [seon.config :as config]
+    #?(:cljs [seon.config :as config])
     [seon.schema :as schema]))
 
 ;; The eval loop can allocate a different id on retry. Preparation therefore
 ;; owns every touch of the raw value; formatting owns only the later id. These
 ;; are transient rendering contracts, not stored entities.
 (schema/register! ::value :any)
-(schema/register! ::eval-id :string)
-(schema/register! ::body :string)
-(schema/register! ::top-type-size :string)
-(schema/register! ::string-token-estimate [:int {:min 0}])
-(schema/register! ::render-error-message :string)
-(schema/register! ::drill-hint
-                  [:map {:closed true}
-                   [::top-type-size {:optional true} ::top-type-size]])
-(schema/register! ::prepared-complete
-                  [:map {:closed true}
-                   [::body ::body]])
-(schema/register! ::prepared-drill
-                  [:map {:closed true}
-                   [::body ::body]
-                   [::drill-hint ::drill-hint]])
-(schema/register! ::prepared-string-partial
-                  [:map {:closed true}
-                   [::body ::body]
-                   [::string-token-estimate ::string-token-estimate]])
-(schema/register! ::prepared-error
-                  [:map {:closed true}
-                   [::body ::body]
-                   [::render-error-message ::render-error-message]])
-(schema/register! ::prepared-ai
-                  [:or ::prepared-drill
-                   ::prepared-string-partial
-                   ::prepared-error
-                   ::prepared-complete])
-(schema/register! ::prepare-ai-request
-                  [:map {:closed true}
-                   [:seon.config/configuration :seon.config/singleton]
-                   [::value ::value]])
-(schema/register! ::format-ai-request
-                  [:map {:closed true}
-                   [::eval-id ::eval-id]
-                   [::prepared ::prepared-ai]])
+#?(:cljs
+   (do
+     (schema/register! ::eval-id :string)
+     (schema/register! ::body :string)
+     (schema/register! ::top-type-size :string)
+     (schema/register! ::string-token-estimate [:int {:min 0}])
+     (schema/register! ::render-error-message :string)
+     (schema/register! ::drill-hint
+                       [:map {:closed true}
+                        [::top-type-size {:optional true} ::top-type-size]])
+     (schema/register! ::prepared-complete
+                       [:map {:closed true} [::body ::body]])
+     (schema/register! ::prepared-drill
+                       [:map {:closed true}
+                        [::body ::body] [::drill-hint ::drill-hint]])
+     (schema/register! ::prepared-string-partial
+                       [:map {:closed true}
+                        [::body ::body]
+                        [::string-token-estimate ::string-token-estimate]])
+     (schema/register! ::prepared-error
+                       [:map {:closed true}
+                        [::body ::body]
+                        [::render-error-message ::render-error-message]])
+     (schema/register! ::prepared-ai
+                       [:or ::prepared-drill ::prepared-string-partial
+                        ::prepared-error ::prepared-complete])
+     (schema/register! ::prepare-ai-request
+                       [:map {:closed true}
+                        [:seon.config/configuration :seon.config/singleton]
+                        [::value ::value]])
+     (schema/register! ::format-ai-request
+                       [:map {:closed true}
+                        [::eval-id ::eval-id]
+                        [::prepared ::prepared-ai]])))
 
 ;; Value-drill wire contracts stay producer-neutral and pure EDN. Recursive
 ;; sampler invariants are checked by bounded public validators at the later
@@ -131,12 +129,21 @@
                     {:optional true} :seon.config/cap]
                    [:seon.config.render/value-max-realized-items
                     {:optional true} :seon.config/cap]
+                   [:seon.config.render/value-max-depth
+                    {:optional true} :seon.config/cap]
+                   [:seon.config.render/value-max-string
+                    {:optional true} :seon.config/cap]
+                   [:seon.config.render/value-shape-sample
+                    {:optional true} :seon.config/cap]
                    [::page-size {:optional true} ::page-size]])
 (schema/register! ::effective-limits
                   [:map {:closed true}
                    [:seon.config.render/value-max-path-segments :seon.config/cap]
                    [:seon.config.render/value-max-path-bytes :seon.config/cap]
                    [:seon.config.render/value-max-realized-items :seon.config/cap]
+                   [:seon.config.render/value-max-depth :seon.config/cap]
+                   [:seon.config.render/value-max-string :seon.config/cap]
+                   [:seon.config.render/value-shape-sample :seon.config/cap]
                    [::page-size ::page-size]])
 (schema/register! ::limit-normalization-request
                   [:map {:closed true}
@@ -208,8 +215,13 @@
   {:malli/schema [:=> [:catn [::candidate ::value]] :boolean]}
   [x]
   (and (number? x)
-       (js/Number.isSafeInteger x)
-       (not (js/Object.is x (js/Number "-0")))
+       #?(:clj (and (integer? x)
+                    (<= -9007199254740991 x 9007199254740991))
+          :cljs (js/Number.isSafeInteger x))
+       #?(:clj (not (and (number? x)
+                         (zero? x)
+                         (neg? (Double/doubleToRawLongBits (double x)))))
+          :cljs (not (js/Object.is x (js/Number "-0"))))
        (<= 0 x)))
 
 (defn safe-positive-int?
@@ -228,22 +240,26 @@
       (keyword? x)
       (symbol? x)
       (and (number? x)
-           (js/Number.isFinite x)
-           (not (js/Object.is x (js/Number "-0"))))))
+           #?(:clj (Double/isFinite (double x))
+              :cljs (js/Number.isFinite x))
+           #?(:clj (not (and (zero? x)
+                             (neg? (Double/doubleToRawLongBits (double x)))))
+              :cljs (not (js/Object.is x (js/Number "-0")))))))
 
 ;; ============================================================
 ;; Sampling bounds — every one overridable by env (the `SEON_RENDER_VALUE_*`
 ;; sub-family) for token economy, read through `seon.config`.
 ;; ============================================================
 
-(defn- render-options [configuration]
-  (let [max-keys (config/value-max-keys configuration)]
-    {:max-depth      (config/value-max-depth configuration)
-     :max-keys       max-keys
-     :max-map-visits (* 4 max-keys)
-     :max-items      (config/value-max-items configuration)
-     :max-string     (config/value-max-string configuration)
-     :shape-sample   (config/value-shape-sample configuration)}))
+#?(:cljs
+   (defn- render-options [configuration]
+     (let [max-keys (config/value-max-keys configuration)]
+       {:max-depth      (config/value-max-depth configuration)
+        :max-keys       max-keys
+        :max-map-visits (* 4 max-keys)
+        :max-items      (config/value-max-items configuration)
+        :max-string     (config/value-max-string configuration)
+        :shape-sample   (config/value-shape-sample configuration)})))
 
 (defn- verbatim-probe-options
   "Generous bounds used ONLY to test — LAZY-SAFELY — whether `value` is small
@@ -276,8 +292,9 @@
 (defn- bounded-record-label
   "Compiler-owned record constructor label without invoking record printing."
   [x]
-  (let [ctor (type x)
-        label (or (.-cljs$lang$ctorStr ctor) (.-name ctor) "record")]
+  (let [label #?(:clj (.getName (class x))
+                 :cljs (let [ctor (type x)]
+                         (or (.-cljs$lang$ctorStr ctor) (.-name ctor) "record")))]
     (subs label 0 (min 80 (count label)))))
 
 (defn opaque?
@@ -293,7 +310,11 @@
     (or (datahike-handle? x)
         (record? x)
         (datom-shape? x)
-        (object? x)
+        #?(:clj (and (some? x)
+                     (not (or (coll? x) (string? x) (number? x)
+                              (keyword? x) (symbol? x) (boolean? x)
+                              (char? x) (uuid? x) (inst? x))))
+           :cljs (object? x))
         (fn? x))))
 
 (defn- opaque-marker
@@ -325,12 +346,16 @@
       (fn? x)
       {:seon.eval/opaque "fn"}
 
-      (object? x)
-      {:seon.eval/opaque "js/Object"}
+      #?(:clj (and (some? x)
+                   (not (or (coll? x) (string? x) (number? x)
+                            (keyword? x) (symbol? x) (boolean? x)
+                            (char? x) (uuid? x) (inst? x))))
+         :cljs (object? x))
+      {:seon.eval/opaque #?(:clj "jvm/Object" :cljs "js/Object")}
 
       :else
       {:seon.eval/opaque "unknown"})
-    (catch :default _
+    (catch #?(:clj Throwable :cljs :default) _
       {:seon.eval/opaque "unknown" :seon.eval/summary "<unprintable>"})))
 
 (declare project-plain)
@@ -367,7 +392,8 @@
   {:malli/schema [:=> [:catn [:seon.render.value/value :any]] :any]}
   [value]
   (try (project-plain* value)
-       (catch :default _ (opaque-marker value project-plain*))))
+       (catch #?(:clj Throwable :cljs :default) _
+         (opaque-marker value project-plain*))))
 
 ;; ============================================================
 ;; SAMPLE — depth + breadth bounded skeleton of plain data + markers.
@@ -396,9 +422,12 @@
   [k max-string]
   (or (nil? k)
       (boolean? k)
-      (and (number? k)
-           (js/Number.isFinite k)
-           (not (and (zero? k) (= js/-Infinity (/ 1 k)))))
+    (and (number? k)
+           #?(:clj (Double/isFinite (double k))
+              :cljs (js/Number.isFinite k))
+           #?(:clj (not (and (zero? k)
+                             (neg? (Double/doubleToRawLongBits (double k)))))
+              :cljs (not (and (zero? k) (= js/-Infinity (/ 1 k))))))
       (and (string? k) (<= (count k) max-string))
       (and (or (keyword? k) (symbol? k))
            (<= (+ (count (name k))
@@ -455,7 +484,8 @@
 ;; byte-identical to today. Reads `seon.config` once per call.
 ;; ============================================================
 
-(defn- whitespace-active?
+#?(:cljs
+   (defn- whitespace-active?
   "True iff any explicit-whitespace knob is off its default — the ONLY case
    where [[visible-whitespace]] diverges from `s`. Lets a caller bypass the
    pr-str/quote path for a string value ONLY when the operator asked for it,
@@ -464,7 +494,7 @@
   (not (and (= (config/render-whitespace configuration) :raw)
             (= (config/render-tabs configuration) :literal)
             (= (config/render-trailing-ws configuration) :off)
-            (not (config/render-line-numbers? configuration)))))
+            (not (config/render-line-numbers? configuration))))))
 
 (defn- mark-trailing-ws
   "Glyph only the TRAILING whitespace run of one line (`·` per space, `→` per
@@ -474,7 +504,8 @@
   (str/replace line #"[ \t]+$"
                (fn [m] (-> m (str/replace " " "·") (str/replace "\t" "→")))))
 
-(defn visible-whitespace
+#?(:cljs
+   (defn visible-whitespace
   "Render explicit-whitespace glyphs on string content `s` per the render
    config — the one central place tab/space/indent/trailing-ws become visible.
 
@@ -502,9 +533,13 @@
                              (and (not= ws :visible)
                                   (= trail :dot))             mark-trailing-ws)]
                  (if lines? (str (inc i) "  " line*) line*))))
-           (str/join "\n")))))
+           (str/join "\n"))))))
 
 (declare sample*)
+
+(defn- exception-message [e]
+  #?(:clj (.getMessage ^Throwable e)
+     :cljs (.-message e)))
 
 (defn- sample-seqish
   "Breadth + lazy-safe element sampling of a vector/set/seq. Realizes at
@@ -522,11 +557,12 @@
    run inside an allocator retry and therefore cannot report side effects."
   [coll {:keys [max-items shape-sample] :as opts} depth kind]
   (let [forced (try {::head+1 (vec (take (inc max-items) coll))}
-                 (catch :default e {::realize-error e}))]
+                 (catch #?(:clj Throwable :cljs :default) e
+                   {::realize-error e}))]
     (if-some [e (::realize-error forced)]
       {:seon.eval/opaque  (str (name kind) " realization threw")
        :seon.eval/summary (tokens/clip-str
-                            (or (some-> ^js e .-message) (str e)) 60)}
+                            (or (exception-message e) (str e)) 60)}
       (let [head+1 (::head+1 forced)
             over?  (> (count head+1) max-items)
             shown  (mapv #(sample* % opts (inc depth)) (take max-items head+1))
@@ -607,7 +643,8 @@
 
     :else x))
 
-(defn sample
+#?(:cljs
+   (defn sample
   "Depth + breadth bounded SKELETON of `x` (plain data + marker maps).
    `opts` overrides `default-opts`. Admitted map keys and vector indices are
    preserved as paths; display-only map keys carry output-local non-drillable
@@ -618,8 +655,8 @@
                              [:seon.render.value/opts :map]] :any]}
   [configuration x opts]
   (let [opts (merge (render-options configuration) opts)]
-    (sample* x (update opts :max-map-visits
-                       #(max (:max-keys opts) (or % (:max-keys opts)))) 0)))
+     (sample* x (update opts :max-map-visits
+                        #(max (:max-keys opts) (or % (:max-keys opts)))) 0))))
 
 ;; ============================================================
 ;; EMIT — render the skeleton to structure-revealing comment text.
@@ -796,7 +833,7 @@
           n (if (counted? x)
               (count x)
               (try (str "≥" (count (take 1001 x)))
-                (catch :default _ "?")))]
+                (catch #?(:clj Throwable :cljs :default) _ "?")))]
       (str t " " n (if (map? x) " keys" " items")))))
 
 (def ^:private dominant-string-fraction
@@ -839,9 +876,10 @@
                    (pos? total)
                    (>= (/ n total) dominant-string-fraction))
           [k v]))
-      (catch :default _ nil))))
+      (catch #?(:clj Throwable :cljs :default) _ nil))))
 
-(defn- prepare-bounded-view
+#?(:cljs
+   (defn- prepare-bounded-view
   "Prepare the bounded body and ID-independent drill facts for a value too
    large, deep, or opaque to print whole."
   [configuration value]
@@ -866,11 +904,12 @@
         body  (emit skel 0 width)
         tsz   (top-type+size value)]
     (cond-> {::body body}
-      clip? (assoc ::drill-hint
-                   (cond-> {}
-                     tsz (assoc ::top-type-size tsz))))))
+       clip? (assoc ::drill-hint
+                    (cond-> {}
+                      tsz (assoc ::top-type-size tsz)))))))
 
-(defn prepare-ai
+#?(:cljs
+   (defn prepare-ai
   "Prepare one raw eval value for agent-facing text.
 
    This is the ONLY phase allowed to realize, sample, print, or otherwise
@@ -917,7 +956,7 @@
       (catch :default e
         {::body (emit (sample configuration value {}) 0 width)
          ::render-error-message
-         (or (some-> ^js e .-message) (str e))}))))
+         (or (some-> e .-message) (str e))})))))
 
 (defn format-ai
   "Format immutable prepared render data under one allocated eval id.
@@ -955,7 +994,8 @@
 
       :else body)))
 
-(defn render-ai
+#?(:cljs
+   (defn render-ai
   "Agent-facing TEXT for an eval value.
 
    `eval-id` names the live var the
@@ -978,7 +1018,7 @@
   (format-ai {::eval-id eval-id
               ::prepared (prepare-ai
                            {:seon.config/configuration configuration
-                            ::value value})}))
+                            ::value value})})))
 
 ;; ============================================================
 ;; RENDER-HTML-DATA — the DATA CONTRACT for the interactive drill-down
@@ -1042,11 +1082,17 @@
          #{:seon.config.render/value-max-path-segments
            :seon.config.render/value-max-path-bytes
            :seon.config.render/value-max-realized-items
+           :seon.config.render/value-max-depth
+           :seon.config.render/value-max-string
+           :seon.config.render/value-shape-sample
            ::page-size})
        (every? safe-positive-int?
                ((juxt :seon.config.render/value-max-path-segments
                       :seon.config.render/value-max-path-bytes
                       :seon.config.render/value-max-realized-items
+                      :seon.config.render/value-max-depth
+                      :seon.config.render/value-max-string
+                      :seon.config.render/value-shape-sample
                       ::page-size)
                 limits))))
 
@@ -1286,7 +1332,7 @@
                            (max 16 (* 4 page-size))
                            (:seon.config.render/value-max-path-bytes
                              effective-limits))))
-    (catch :default _ false)))
+    (catch #?(:clj Throwable :cljs :default) _ false)))
 
 (defn- bounded-ordinary-node
   [value remaining depth max-depth max-collection max-string]
@@ -1457,16 +1503,14 @@
               (projection-result-valid? (::projection result) effective-limits))
 
            :else false))
-    (catch :default _ false)))
+    (catch #?(:clj Throwable :cljs :default) _ false)))
 
 (defn drill-value
   "Project one admitted path and bounded page from a live value."
-  {:malli/schema [:=> [:catn [:seon.config/configuration
-                              :seon.config/singleton]
-                             [::value ::value]
+  {:malli/schema [:=> [:catn [::value ::value]
                              [::request ::value]]
                   ::drill-result]}
-  [configuration value request]
+  [value request]
   (try
     (if-not (admitted-drill-request? request)
       (drill-failure "Invalid or over-budget value drill request.")
@@ -1487,10 +1531,16 @@
                          pageable? (::page page-result)
                          :else value)
                   more? (boolean (and pageable? (::more? page-result)))
-                  opts (if (map? value)
-                         {:max-keys page-size :max-map-visits page-size}
-                         {:max-items page-size})
-                  sampled (sample configuration page opts)
+                  opts {:max-depth
+                        (:seon.config.render/value-max-depth effective-limits)
+                        :max-keys page-size
+                        :max-map-visits page-size
+                        :max-items page-size
+                        :max-string
+                        (:seon.config.render/value-max-string effective-limits)
+                        :shape-sample
+                        (:seon.config.render/value-shape-sample effective-limits)}
+                  sampled (sample* page opts 0)
                   sampled (if-some [elided (::elided-keys map-result)]
                             (assoc sampled
                                    :seon.render.value/elided-keys elided)
@@ -1517,10 +1567,11 @@
                   result
                   (drill-failure
                     "Value drill projection exceeded its bounds."))))))))
-    (catch :default _
+    (catch #?(:clj Throwable :cljs :default) _
       (drill-failure "Value drill failed while reading the selected value."))))
 
-(defn render-html-data
+#?(:cljs
+   (defn render-html-data
   "DATA CONTRACT the interactive HTML value-browser consumes.
 
    Returns:
@@ -1552,7 +1603,7 @@
                                          "scalar")
        :seon.render.value/truncated? incomplete?
        :seon.render.value/tree       skel}
-      (schema-projection value incomplete?))))
+      (schema-projection value incomplete?)))))
 
 ;; ============================================================
 ;; Live integration:
