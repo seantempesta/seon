@@ -750,13 +750,24 @@ decisions batch for their return.
   executor-family, codec workers/queue, and existing request-server
   options; flip only those dispositions; frame-bytes +
   max-connections stay `:carried` with unchanged decline steering.
-  **W1.5b (queued, needs a design pass):** session-open admission
+  **W1.5b (design pass IN FLIGHT):** session-open admission
   exchange — a small opening frame carrying the configured frame
   ceiling, incompatible-peer rejection, and the cap+1 steering error;
   rides the sanctioned protocol-extension mechanism (transit tagged
   types + new ops); expands into `db/protocol.cljc`, `db.cljs`, and
   the host handshake. Refill after W1.5a: W1.5b design → W1.2b
   graduation (owns q20) → W1 config-facts sweep → packages WP-B∥WP-J.
+- **W1.5a DONE `85cdd68e`** — 28 keys flipped :enforced (six executor
+  families, transport request-server options, codec workers/queue)
+  via one envelope-consumer translation into the owners' existing
+  shapes; frame-bytes/max-connections honestly stay :carried.
+  Live-driven (selected-processors 18→4→18, codec/executor caps
+  observably followed, converged apply idempotent). Gates: writer
+  344/2591, operator 296/1654, cljs 1488/7176. Minor note: the closed
+  manifest schema has no direct codec-workers override (derives from
+  processors) — fine under hardware-computed defaults; revisit only if
+  a real need appears. W1.5b read-only design lane dispatched — logs
+  `tmp/orchestrator/w15b-design-*`.
 - **sol W1.2 grounding research (read-only, live-probe enabled)** in
   flight — logs `tmp/orchestrator/w12-grounding-*`; interface ledger
   for the live-writer-reconstruction spec (W0.4 pool member lifecycle,
