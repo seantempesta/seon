@@ -626,6 +626,14 @@ decisions batch for their return.
 - **NS-1b provider registry** — sol medium, codex thread
   `019f8681-b944-7532-952f-8bd179cce5c7`, spec
   `specs/ns-1b-provider-registry.md`, logs `tmp/orchestrator/ns-1b-*`.
+  STOPPED with 3 grounded corrections, HELD for NS-3 (needs
+  `client.cljs`, which NS-3 owns right now). Resume plan, accepted:
+  ai.cljs comment-only grant; owned paths + `client.cljs`/
+  `anthropic.cljs`/`openai_compat.cljs` (client loads providers,
+  providers self-register with dispatch); enum stays the closed
+  `provider-locality` CLJC authority with registration asserting
+  membership; `stub` is dispatch's fallback descriptor, never an enum
+  value; D12 = dev preload door now, release seam batched for owner.
 - **NS-2 DONE `5e0720f2`** — state→runtime.state, indexing→
   client.indexing, agent.runtime merged into agent.lifecycle with the
   persisted wake? dial renamed to `:seon.agent.lifecycle/wake?`
@@ -653,7 +661,21 @@ decisions batch for their return.
 - NS-3 spec written + grounded: `specs/ns-3-render-subtree.md` —
   dispatch AFTER NS-2 integrates (shared `client.cljs`).
 
-### NO PENDING OWNER DECISIONS
+### OWNER DECISION BATCH (2026-07-21 night — D12 release door)
+
+NS-1b's implementer proved the shadow `:devtools {:preloads …}` door is
+DEVELOPMENT-ONLY (release builds clear preloads). So the D12 opt-in for
+the diffusion provider splits: dev builds get the preload door now
+(`--config-merge '{:devtools {:preloads [seon.diffusion.gemma]}}'`,
+additively preserving `seon.demo`); a diffusion-enabled RELEASE artifact
+needs a real seam. Options for the owner: (i) a diffusion artifact
+flavor with its own build entry (matches the "own build(s) if it
+burdens the main system" language — RECOMMENDED); (ii) one sanctioned
+entry require in the default client build, config-gated (weaker
+separation, D12's recorded alternative). No release diffusion artifact
+exists today, so nothing is blocked; NS-1b ships the dev door.
+
+### NO PENDING OWNER DECISIONS (other than the batch above)
 
 The 4 W1-boot decisions were folded as recommendations into the shipped
 W1.1. The packages/naming decisions are all settled. Nothing is
