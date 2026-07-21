@@ -33,14 +33,17 @@
    docs/prds/agent-ctx/research/error-blame-strict-gate-2026-07-03.md for
    the fault/record!/dial design (RULED 2026-07-04)."
   (:require
-    [cljs.stacktrace :as stacktrace]
+    #?(:cljs [cljs.stacktrace :as stacktrace])
+    #?(:cljs [goog.object :as gobj])
+    #?(:cljs [seon.config :as config])
     [clojure.string :as str]
-    [goog.object :as gobj]
     [seon.ai.tokens :as tokens]
-    [seon.config :as config]
     [seon.db.branch :as branch]
     [seon.error.instrument :as ei]
-    [seon.schema :as schema]))
+    [seon.schema :as schema])
+  #?(:clj
+     (:import [java.io PrintWriter StringWriter]
+              [java.util Collections WeakHashMap])))
 
 ;; ============================================================
 ;; Persisted error-datom schema — the EDN-safe PROJECTION of the
@@ -94,11 +97,26 @@
 (schema/register! ::frames
   [:vector {:seon.db/component true} :seon.db/ref]) ; of ::frame entities
 
+(defn- throwable-message [e]
+  #?(:cljs (when (some? e) (.-message e))
+     :clj (when (instance? Throwable e) (.getMessage ^Throwable e))))
+
+(defn- throwable-stack [e]
+  #?(:cljs (when (some? e) (.-stack e))
+     :clj (when (instance? Throwable e)
+            (let [writer (StringWriter.)]
+              (.printStackTrace ^Throwable e (PrintWriter. writer))
+              (str writer)))))
+
+(defn- exception-info? [e]
+  #?(:cljs (instance? cljs.core/ExceptionInfo e)
+     :clj (instance? clojure.lang.ExceptionInfo e)))
+
 (defn ->message
   "Best-effort human-readable message for any error-ish value."
   {:malli/schema [:=> [:cat :any] :string]}
   [e]
-  (or (when (some? e) (.-message e)) (str e)))
+  (or (throwable-message e) (str e)))
 
 (defn- ex-data-chain
   "Walk e and its ex-cause chain (bounded depth 5), collecting each
@@ -110,7 +128,7 @@
   (loop [e e depth 0 acc []]
     (if (or (nil? e) (>= depth 5))
       acc
-      (let [data (when (instance? cljs.core/ExceptionInfo e) (ex-data e))
+      (let [data (when (exception-info? e) (ex-data e))
             acc' (if (seq data) (conj acc data) acc)]
         (recur (ex-cause e) (inc depth) acc')))))
 
@@ -140,9 +158,9 @@
    (when (some? e)
      (let [base   {:seon.error/message (->message e)
                    :seon.error/raw     e}
-           data   (when (instance? cljs.core/ExceptionInfo e) (ex-data e))
-           stack  (when (some? (.-stack e))
-                    (let [s (str (.-stack e))]
+           data   (when (exception-info? e) (ex-data e))
+           stack  (when-some [raw-stack (throwable-stack e)]
+                    (let [s (str raw-stack)]
                       (subs s 0 (min 4096 (count s)))))
            cause  (when (< depth 5) (some-> (ex-cause e) (->map (inc depth))))
            trunc? (and (>= depth 5) (some? (ex-cause e)))
@@ -293,17 +311,18 @@
   [stack-str]
   (when (string? stack-str)
     (try
-      (let [normalized (str/replace stack-str
-                                    #"(^|\n)(\s+at\s+)(?:new|async)\s+"
-                                    "$1$2")
-            named (mapv (fn [frame]
-                          (if (string? (:function frame))
-                            (update frame :function
-                                    #(str/replace % #"^undefined\." ""))
-                            frame))
-                        (stacktrace/parse-stacktrace
-                          {} normalized {:ua-product :nodejs}
-                          {:output-dir "out"}))
+      #?(:cljs
+         (let [normalized (str/replace stack-str
+                                       #"(^|\n)(\s+at\s+)(?:new|async)\s+"
+                                       "$1$2")
+               named (mapv (fn [frame]
+                             (if (string? (:function frame))
+                               (update frame :function
+                                       #(str/replace % #"^undefined\." ""))
+                               frame))
+                           (stacktrace/parse-stacktrace
+                            {} normalized {:ua-product :nodejs}
+                            {:output-dir "out"}))
             fs (into []
                      (map-indexed
                        (fn [i {:keys [file function line column]}]
@@ -315,8 +334,26 @@
                            (int? column)      (assoc :seon.error.frame/column column))))
                      (take max-frames
                            (drop (construction-prefix-count named) named)))]
-        (not-empty fs))
-      (catch :default _ nil))))
+           (not-empty fs))
+         :clj nil)
+      (catch #?(:clj Throwable :cljs :default) _ nil))))
+
+(defn- throwable-frames [raw envelope]
+  #?(:cljs (some-> (deepest-stack envelope) parse-frames)
+     :clj
+     (when (instance? Throwable raw)
+       (not-empty
+        (into []
+              (map-indexed
+               (fn [index ^StackTraceElement frame]
+                 (cond-> {:seon.error.frame/index index
+                          :seon.error.frame/fn
+                          (str (.getClassName frame) "/" (.getMethodName frame))}
+                   (.getFileName frame)
+                   (assoc :seon.error.frame/file (.getFileName frame))
+                   (pos? (.getLineNumber frame))
+                   (assoc :seon.error.frame/line (.getLineNumber frame)))))
+              (take max-frames (.getStackTrace ^Throwable raw)))))))
 
 ;; ============================================================
 ;; DB hooks — the late-bound persistence seam. seon.db.internal requires
@@ -357,9 +394,11 @@
          (fn [v]
            (let [v (conj v entity)]
              (if (> (count v) pending-cap)
-               (do (js/console.warn
-                     (str "seon.error/record!: pending-error buffer full ("
-                          pending-cap ") — dropping the oldest unpersisted error"))
+               (do #?(:cljs
+                      (js/console.warn
+                       (str "seon.error/record!: pending-error buffer full ("
+                            pending-cap ") — dropping the oldest unpersisted error"))
+                      :clj nil)
                    (subvec v (- (count v) pending-cap)))
                v)))))
 
@@ -367,12 +406,17 @@
 ;; incorrect in the pod: while one Promise is pending, another agent can run on
 ;; the same event loop and must not inherit its expected-fault/dev-eval/persist
 ;; state. AsyncLocalStorage follows only the async work spawned in a scope.
-(defonce ^:private scope-als
-  (let [AsyncLocalStorage (.-AsyncLocalStorage (js/require "node:async_hooks"))]
-    (AsyncLocalStorage.)))
+#?(:cljs
+   (defonce ^:private scope-als
+     (let [AsyncLocalStorage (.-AsyncLocalStorage
+                              (js/require "node:async_hooks"))]
+       (AsyncLocalStorage.)))
+   :clj
+   (def ^:dynamic *scope* {}))
 
 (defn- current-scope []
-  (or (.getStore scope-als) {}))
+  #?(:cljs (or (.getStore scope-als) {})
+     :clj *scope*))
 
 (defn- in-scope?
   [scope-key]
@@ -381,7 +425,9 @@
 (defn- run-with-scope-value
   "Run `thunk` with one fiber-local scope value; nested scopes merge."
   [scope-key scope-value thunk]
-  (.run scope-als (assoc (current-scope) scope-key scope-value) thunk))
+  #?(:cljs (.run scope-als (assoc (current-scope) scope-key scope-value) thunk)
+     :clj (binding [*scope* (assoc (current-scope) scope-key scope-value)]
+            (thunk))))
 
 (defn- run-in-scope
   "Run `thunk` with `scope-key` true in this fiber; nested scopes merge."
@@ -410,13 +456,18 @@
         p   (when tx!
               (try
                 (run-in-scope :seon.error.scope/persist? #(tx! entities))
-                (catch :default _ nil)))]
-    (if (and p (fn? (.-then p)))
-      (-> p
-          (.then (fn [{ok? :seon.db/ok?}]
-                   (when-not ok? (run! buffer! entities))))
-          (.catch (fn [_] (run! buffer! entities))))
-      (do (run! buffer! entities) nil))))
+                (catch #?(:clj Throwable :cljs :default) _ nil)))]
+    #?(:cljs
+       (if (and p (fn? (.-then p)))
+         (-> p
+             (.then (fn [{ok? :seon.db/ok?}]
+                      (when-not ok? (run! buffer! entities))))
+             (.catch (fn [_] (run! buffer! entities))))
+         (do (run! buffer! entities) nil))
+       :clj
+       (if (true? (:seon.db/ok? p))
+         p
+         (do (run! buffer! entities) p)))))
 
 (defn- branch-head-now
   "Complete Proximum branch head via the injected hook, or nil."
@@ -426,7 +477,7 @@
       (let [branch-head (f)]
         (when (schema/valid-candidate-value? ::branch/head branch-head)
           branch-head))
-      (catch :default _ nil))))
+      (catch #?(:clj Throwable :cljs :default) _ nil))))
 
 (def ^:private branch-head->error-attr
   {::branch/store-id ::store-id
@@ -562,19 +613,20 @@
   {:malli/schema [:=> [:cat fn?] :any]}
   [thunk]
   (let [value (run-in-scope :seon.error.scope/dev-eval? thunk)]
-    (when (and (some? value) (fn? (.-then value)))
-      (.catch value
-              (fn [e]
-                (when-not (recorded? e)
-                  (js/console.warn
-                    (str "seon.error/dev-eval!: the eval's Promise rejected — "
-                         (->message e)
-                         " — recorded as an :agent fault (a dev REPL mistake"
-                         " never crashes the pod). Fix the form and re-run;"
-                         " remember a `^:async` call returns a Promise that"
-                         " only the agent eval path auto-awaits."))
-                  (record! {::raw e ::fault :agent}))
-                nil)))
+    #?(:cljs
+       (when (and (some? value) (fn? (.-then value)))
+         (.catch value
+                 (fn [e]
+                   (when-not (recorded? e)
+                     (js/console.warn
+                      (str "seon.error/dev-eval!: the eval's Promise rejected — "
+                           (->message e)
+                           " — recorded as an :agent fault (a dev REPL mistake"
+                           " never crashes the pod). Fix the form and re-run;"
+                           " remember a `^:async` call returns a Promise that"
+                           " only the agent eval path auto-awaits."))
+                     (record! {::raw e ::fault :agent}))
+                   nil))))
     value))
 
 (defn- escalate!
@@ -588,24 +640,30 @@
    tripped, `:crash` NOT taken). Under `:crash` (and not expected) exits
    the pod AFTER the persist Promise settles (datom first, then loud exit)."
   [projection persist-promise]
-  (let [expected? (expecting-a-core-fault?)
-        configuration (:seon.error.scope/configuration (current-scope))
-        policy (config/on-core-error configuration)]
-    (js/console.error
-      (str (if expected? "SEON-EXPECTED-CORE-FAULT" "SEON-CORE-FAULT") " "
-           (:seon.error/message projection)
-           (when-let [data-edn (:seon.error/data-edn projection)]
-             (str " " data-edn))
-           (when-let [basis-t (::basis-t projection)]
-             (str " @basis-t=" basis-t))))
-    (when (and (not expected?) (= :crash policy))
-      (let [exit! (fn [& _]
-                    (js/console.error
-                      "seon.error/record!: on-core-error :crash — exiting after persisting the fault datom")
-                    (.exit js/process 1))]
-        (if (and persist-promise (fn? (.-then persist-promise)))
-          (.then persist-promise exit! exit!)
-          (exit!))))))
+  #?(:cljs
+     (let [expected? (expecting-a-core-fault?)
+           configuration (:seon.error.scope/configuration (current-scope))
+           policy (config/on-core-error configuration)]
+       (js/console.error
+        (str (if expected? "SEON-EXPECTED-CORE-FAULT" "SEON-CORE-FAULT") " "
+             (:seon.error/message projection)
+             (when-let [data-edn (:seon.error/data-edn projection)]
+               (str " " data-edn))
+             (when-let [basis-t (::basis-t projection)]
+               (str " @basis-t=" basis-t))))
+       (when (and (not expected?) (= :crash policy))
+         (let [exit! (fn [& _]
+                       (js/console.error
+                        "seon.error/record!: on-core-error :crash — exiting after persisting the fault datom")
+                       (.exit js/process 1))]
+           (if (and persist-promise (fn? (.-then persist-promise)))
+             (.then persist-promise exit! exit!)
+             (exit!)))))
+     :clj nil))
+
+#?(:clj
+   (defonce ^:private recorded-errors
+     (Collections/synchronizedMap (WeakHashMap.))))
 
 (defn recorded?
   "True when `e` already produced its datom via [[record!]].
@@ -617,16 +675,19 @@
    worst case a duplicate datom, never a lost one."
   {:malli/schema [:=> [:cat :any] :boolean]}
   [e]
-  (boolean (and (some? e)
-                (try (gobj/get e "seon$error$recorded")
-                     (catch :default _ false)))))
+  (boolean
+   (and (some? e)
+        #?(:cljs (try (gobj/get e "seon$error$recorded")
+                      (catch :default _ false))
+           :clj (.containsKey ^java.util.Map recorded-errors e)))))
 
 (defn- mark-recorded!
   "Tag the raw error object so later funnels skip it ([[recorded?]])."
   [e]
   (when (some? e)
-    (try (gobj/set e "seon$error$recorded" true)
-         (catch :default _ nil)))
+    #?(:cljs (try (gobj/set e "seon$error$recorded" true)
+                  (catch :default _ nil))
+       :clj (.put ^java.util.Map recorded-errors e true)))
   nil)
 
 (schema/register! ::record-request
@@ -670,8 +731,7 @@
                      :always  (as-> m (if-let [branch-head (branch-head-now)]
                                         (merge m (branch-head-error-attrs branch-head)) m))
                      args-edn (assoc :seon.error/args-edn args-edn)
-                     :always  (as-> m (if-let [fs (some-> (deepest-stack m)
-                                                          parse-frames)]
+                     :always  (as-> m (if-let [fs (throwable-frames raw m)]
                                         (assoc m :seon.error/frames fs) m)))
           projection (datom-projection envelope)
           p          (when-not self-persist-failure?
@@ -680,14 +740,17 @@
                                      (conj pend projection))]
                          (persist! batch)))]
       (if self-persist-failure?
-        (js/console.error
-          "SEON-CORE-FAULT (unpersistable — error-persist transact violated its own contract):"
-          (:seon.error/message projection))
+        #?(:cljs
+           (js/console.error
+            "SEON-CORE-FAULT (unpersistable — error-persist transact violated its own contract):"
+            (:seon.error/message projection))
+           :clj nil)
         (when (= :core fault)
           (escalate! projection p)))
       envelope)
-    (catch :default e
+    (catch #?(:clj Throwable :cljs :default) e
       ;; record! must never throw — last-resort console trace only.
-      (js/console.error "seon.error/record! itself failed:" e)
+      #?(:cljs (js/console.error "seon.error/record! itself failed:" e)
+         :clj nil)
       {:seon.error/message (->message raw)
        :seon.error/fault   fault})))

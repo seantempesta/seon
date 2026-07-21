@@ -70,6 +70,10 @@
    (def ^:private bounded-print-sentinel
      (js/Error. "bounded print complete")))
 
+#?(:clj
+   (def ^:private bounded-print-sentinel
+     (ex-info "bounded print complete" {::bounded-print-complete? true})))
+
 #?(:cljs
    (deftype CappedWriter [chunks limit written truncated? sentinel]
      IWriter
@@ -137,6 +141,49 @@
        {::text (str (.join chunks "") (when @truncated? "…"))
         ::character-truncated? @truncated?})))
 
+#?(:clj
+   (defn- capped-pr-str
+     "Print `value` through a capped JVM Writer without full realization."
+     [value limit]
+     (let [text (StringBuilder. (int (min limit 1024)))
+           written (volatile! 0)
+           truncated? (volatile! false)
+           retain!
+           (fn [x offset length]
+             (let [remaining (max 0 (- limit @written))
+                   retained (min remaining length)]
+               (when (pos? retained)
+                 (if (string? x)
+                   (.append text ^CharSequence x (int offset)
+                            (int (+ offset retained)))
+                   (.append text ^chars x (int offset) (int retained)))
+                 (vswap! written + retained))
+               (when (> length retained)
+                 (vreset! truncated? true)
+                 (throw bounded-print-sentinel))))
+           writer
+           (proxy [java.io.Writer] []
+             (write
+               ([x]
+                (if (string? x)
+                  (retain! x 0 (count x))
+                  (retain! (char-array [(char x)]) 0 1)))
+               ([x offset length]
+                (retain! x offset length)))
+             (flush [] nil)
+             (close [] nil))]
+       (try
+         (binding [*out* writer
+                   *print-length* 256
+                   *print-level* 64
+                   *print-readably* true]
+           (pr value))
+         (catch Throwable throwable
+           (when-not (identical? throwable bounded-print-sentinel)
+             (throw throwable))))
+       {::text (str text (when @truncated? "…"))
+        ::character-truncated? @truncated?})))
+
 (defn- ellipsis-marker
   "The default cut marker — a bare ellipsis."
   [_budget _total]
@@ -174,11 +221,7 @@
   {:malli/schema [:=> [:catn [::value :any] [::budget ::budget]]
                   ::bounded-print-result]}
   [v budget]
-  #?(:cljs (capped-pr-str v (estimate-chars budget))
-     :clj  (binding [*print-length* 256 *print-level* 64]
-             (let [full (pr-str v)
-                   clipped (clip-str full budget)]
-               {::text clipped ::character-truncated? (not= full clipped)}))))
+  (capped-pr-str v (estimate-chars budget)))
 
 (defn bounded-pr-str
   "Bounded printed text for `v` within token `budget`."

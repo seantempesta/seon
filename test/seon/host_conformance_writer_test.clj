@@ -7,15 +7,18 @@
    shape-for-shape. The writer is a local fake `uds/start-request-server!`
    handler (the same self-contained pattern as `seon.db.transport-uds-test`)
    so the suite needs no live cluster."
-  (:require [clojure.test :refer [deftest is use-fixtures]]
+  (:require [clojure.string :as str]
+            [clojure.test :refer [deftest is use-fixtures]]
             [datalog.parser :as datalog.parser]
+            [seon.ai.tokens :as tokens]
             [seon.db.id :as db.id]
             [seon.db.protocol :as protocol]
             [seon.db.transport.uds :as uds]
             [seon.host :as host]
             [seon.host.context :as context]
             [seon.render.value :as render.value])
-  (:import [java.io File]
+  (:import [java.io ByteArrayInputStream ByteArrayOutputStream DataOutputStream
+            File IOException OutputStream PrintStream]
            [java.nio.channels Channels SocketChannel]))
 
 (def ^:private artifact-digest (apply str (repeat 64 "a")))
@@ -37,6 +40,8 @@
 
 (def ^:private fake-agent-rows
   #{[1 "root"] [2 "task-a"] [3 "task-b"]})
+
+(def ^:private transaction-requests (atom []))
 
 (defn- fake-writer-response [request]
   (let [request-id (::protocol/request-id request)]
@@ -93,13 +98,15 @@
        ::protocol/result {:seon.agent/id "root"}}
 
       protocol/transact-operation
-      {::protocol/success? true
-       ::protocol/request-id request-id
-       :db-before database
-       :db-after (update database :t inc)
-       :tx-data []
-       :tempids {}
-       :tx-meta {}}
+      (do
+        (swap! transaction-requests conj request)
+        {::protocol/success? true
+         ::protocol/request-id request-id
+         :db-before database
+         :db-after (update database :t inc)
+         :tx-data []
+         :tempids {}
+         :tx-meta {}})
 
       {::protocol/success? false
        ::protocol/request-id request-id
@@ -230,6 +237,16 @@
 (defn- error-of [message] (get-in message [:seon.execution/error
                                            :seon.error/message]))
 
+(defn- recorded-tx-data []
+  (mapcat ::protocol/transaction-data @transaction-requests))
+
+(defn- await-condition! [predicate label]
+  (loop [remaining 100]
+    (cond
+      (predicate) true
+      (zero? remaining) (is false (str "timed out waiting for " label))
+      :else (do (Thread/sleep 10) (recur (dec remaining))))))
+
 (deftest sampling-policy-is-read-at-the-invocation-basis-and-fails-closed
   (is (some? (datalog.parser/parse
               (var-get #'host/sampling-policy-query)))
@@ -258,6 +275,59 @@
     (is (= (repeat (count invalid) [database ["cluster"]]) @seen)
         "every refusal queries the exact invocation database before eval")))
 
+(deftest frame-preflight-falls-back-before-consuming-the-settle-cas
+  (let [token {::host/invocation {}}
+        active (atom token)
+        bytes (ByteArrayOutputStream.)
+        session {::host/active active
+                 ::host/output bytes
+                 ::host/write-lock (Object.)}
+        huge (apply str (repeat (+ protocol/maximum-frame-bytes 1024) "x"))
+        frame {:seon.execution/message :seon.execution.message/error
+               :seon.execution/protocol-version 3
+               :seon.execution/invocation-id "oversize"
+               :seon.execution/error
+               {:seon.error/message huge
+                :seon.error/kind :agent
+                :seon.error/data {:huge huge}}}]
+    (is (true? (#'host/settle! session token frame)))
+    (is (nil? @active))
+    (let [response (uds/read-frame
+                    (ByteArrayInputStream. (.toByteArray bytes)))]
+      (is (= "oversize" (:seon.execution/invocation-id response)))
+      (is (= :seon.execution.message/error
+             (:seon.execution/message response)))
+      (is (<= (tokens/estimate (error-of response)) 120))
+      (is (< (alength (uds/encode response)) protocol/maximum-frame-bytes)))))
+
+(deftest physical-frame-write-failure-records-one-fault-and-does-not-retry
+  (reset! transaction-requests [])
+  (let [token {::host/invocation {}}
+        active (atom token)
+        writes (atom 0)
+        output (proxy [OutputStream] []
+                 (write
+                   ([_]
+                    (swap! writes inc)
+                    (throw (IOException. "closed transport")))
+                   ([_ _ _]
+                    (swap! writes inc)
+                    (throw (IOException. "closed transport")))))
+        session {::host/active active
+                 ::host/output output
+                 ::host/write-lock (Object.)}]
+    (is (false?
+         (#'host/settle!
+          session token
+          {:seon.execution/message :seon.execution.message/error
+           :seon.execution/protocol-version 3
+           :seon.execution/invocation-id "physical"
+           :seon.execution/error
+           {:seon.error/message "bounded" :seon.error/kind :core-bug}})))
+    (is (nil? @active))
+    (is (= 1 @writes) "a physical write failure never attempts a second frame")
+    (is (some #(= :core (:seon.error/fault %)) (recorded-tx-data)))))
+
 ;;; Contract: startup handshake
 
 (deftest ready-echoes-startup-identity-and-carries-the-database-value
@@ -270,6 +340,66 @@
       (is (= artifact-digest (:seon.execution/artifact-digest ready)))
       (is (string? (:seon.execution/bun-version ready)))
       (is (= database (:seon.db/db ready)))
+      (finally (close! session)))))
+
+(deftest one-session-thread-start-failure-does-not-end-accepting
+  (reset! transaction-requests [])
+  (let [original (var-get #'host/start-session-thread!)
+        first? (atom true)
+        failed (promise)]
+    (with-redefs-fn
+      {#'host/start-session-thread!
+       (fn [& arguments]
+         (if (compare-and-set! first? true false)
+           (do (deliver failed true)
+               (throw (ex-info "session thread start failed" {})))
+           (apply original arguments)))}
+      (fn []
+        (let [abandoned (session!)]
+          (try
+            (is (= true (deref failed 1000 false)))
+            (await-condition!
+             #(some (fn [row] (= :core (:seon.error/fault row)))
+                    (recorded-tx-data))
+             "acceptor fault record")
+            (let [[replacement ready] (open-session! "after-thread-failure")]
+              (try
+                (is (= :seon.execution.message/ready
+                       (:seon.execution/message ready)))
+                (finally (close! replacement))))
+            (finally (close! abandoned))))))))
+
+(deftest silent-startup-is-released-and-the-acceptor-remains-live
+  (with-redefs-fn
+    {#'host/startup-read-timeout-ms 50}
+    (fn []
+      (let [silent (session!)]
+        (try
+          (is (nil? (recv! silent)))
+          (let [[replacement ready] (open-session! "after-silent-startup")]
+            (try
+              (is (= :seon.execution.message/ready
+                     (:seon.execution/message ready)))
+              (finally (close! replacement))))
+          (finally (close! silent)))))))
+
+(deftest session-reader-throw-records-a-fault-and-only-that-session-dies
+  (reset! transaction-requests [])
+  (let [[session _ready] (open-session! "reader-fault-agent")
+        raw (DataOutputStream. ^OutputStream (::output session))]
+    (try
+      (.writeInt raw -1)
+      (.flush raw)
+      (is (nil? (recv! session)))
+      (await-condition!
+       #(some (fn [row] (= :core (:seon.error/fault row)))
+              (recorded-tx-data))
+       "session reader fault record")
+      (let [[replacement ready] (open-session! "after-reader-fault")]
+        (try
+          (is (= :seon.execution.message/ready
+                 (:seon.execution/message ready)))
+          (finally (close! replacement))))
       (finally (close! session)))))
 
 (deftest invalid-startup-errors-with-the-startup-invocation-id
@@ -324,6 +454,88 @@
       (send! session (invoke-value "eval-agent" "invocation-2"
                                    [(form "(count working-state)")]))
       (is (= 10 (get-in (recv! session)
+                        [:seon.execution/result :seon.host/results 0
+                         :seon.eval/value])))
+      (finally (close! session)))))
+
+(deftest oversized-eval-error-is-bounded-and-the-session-survives
+  (let [[session _ready] (open-session! "oversize-error-agent")]
+    (try
+      (send! session
+             (invoke-value
+              "oversize-error-agent" "oversize-error"
+              [(form "(throw (ex-info (apply str (repeat 1100000 \"xxxx\")) {}))")]))
+      (let [response (recv! session)]
+        (is (contains? #{:seon.execution.message/error
+                         :seon.execution.message/result}
+                       (:seon.execution/message response)))
+        (let [message (or (error-of response)
+                          (get-in response
+                                  [:seon.execution/result :seon.host/results 0
+                                   :seon/error :seon.error/message]))]
+          (is (<= (tokens/estimate message) 120)))
+        (is (< (alength (uds/encode response)) protocol/maximum-frame-bytes)))
+      (send! session
+             (invoke-value "oversize-error-agent" "after-oversize"
+                           [(form "(+ 20 22)")]))
+      (is (= 42 (get-in (recv! session)
+                        [:seon.execution/result :seon.host/results 0
+                         :seon.eval/value])))
+      (finally (close! session)))))
+
+(deftest sci-output-is-per-form-capped-persisted-and-absent-from-host-stdout
+  (reset! transaction-requests [])
+  (let [[session _ready] (open-session! "printing-agent")
+        host-bytes (ByteArrayOutputStream.)
+        original-out System/out]
+    (try
+      (System/setOut (PrintStream. host-bytes true "UTF-8"))
+      (send! session
+             (invoke-value
+              "printing-agent" "printing"
+              [(form "(do (print \"first-only\") 1)")
+               (form "(do (print (apply str (repeat 20000 \"flood\"))) 2)")]))
+      (let [response (recv! session)]
+        (is (= :seon.execution.message/result
+               (:seon.execution/message response))))
+      (System/setOut original-out)
+      (let [outputs (into [] (keep :seon.eval/output) (recorded-tx-data))]
+        (is (= 2 (count outputs)))
+        (is (str/includes? (first outputs) "first-only"))
+        (is (not (str/includes? (second outputs) "first-only"))
+            "output attribution is per form, not cumulative")
+        (is (str/includes? (second outputs) "truncated"))
+        (is (<= (tokens/estimate (second outputs)) 2048)))
+      (is (zero? (.size host-bytes)) "SCI prints never reach host stdout")
+      (finally
+        (System/setOut original-out)
+        (close! session)))))
+
+(deftest late-interrupt-after-eval-return-records-and-leaves-next-form-clean
+  (reset! transaction-requests [])
+  (let [[session _ready] (open-session! "late-interrupt-agent")
+        original (var-get #'host/finish-evaluation!)
+        fired? (atom false)]
+    (try
+      (with-redefs-fn
+        {#'host/finish-evaluation!
+         (fn [session envelope]
+           (when (compare-and-set! fired? false true)
+             (.interrupt (Thread/currentThread)))
+           (original session envelope))}
+        (fn []
+        (send! session
+               (invoke-value "late-interrupt-agent" "late-interrupt"
+                             [(form "(+ 1 1)")]))
+        (is (= :seon.execution.message/error
+               (:seon.execution/message (recv! session))))))
+      (is (some #(= :interrupted (:seon.eval/status %))
+                (recorded-tx-data))
+          "the terminal record commits despite the late interrupt")
+      (send! session
+             (invoke-value "late-interrupt-agent" "after-late-interrupt"
+                           [(form "(+ 20 22)")]))
+      (is (= 42 (get-in (recv! session)
                         [:seon.execution/result :seon.host/results 0
                          :seon.eval/value])))
       (finally (close! session)))))
@@ -426,6 +638,34 @@
                    (get-in retired [:seon.render.value/result
                                     :seon.render.value/recompute?]))))
             (finally (close! replacement)))))
+      (finally (close! session)))))
+
+(deftest sample-render-throw-answers-an-error-and-keeps-the-session-live
+  (let [[session _ready] (open-session! "sample-throw-agent")]
+    (try
+      (send! session
+             (invoke-value "sample-throw-agent" "sample-throw-source"
+                           [(form "{:payload [1 2 3]}")]))
+      (let [eval-id (first (get-in (recv! session)
+                                   [:seon.execution/result :seon.eval/ids]))
+            sample (sample-value "sample-throw-agent" "sample-throw"
+                                 eval-id [:payload])]
+        (with-redefs [render.value/drill-value
+                      (fn [& _] (throw (ex-info "sample failed" {})))]
+          (send! session sample)
+          (let [response (recv! session)]
+            (is (= :seon.execution.message/value-sample-error
+                   (:seon.execution/message response)))
+            (is (= "sample-throw" (:seon.execution/request-id response)))))
+        (send! session (assoc sample :seon.execution/request-id "still-live"
+                             :host.test/extra true))
+        (is (= "still-live" (:seon.execution/request-id (recv! session))))
+        (send! session
+               (invoke-value "sample-throw-agent" "after-sample-throw"
+                             [(form "(+ 20 22)")]))
+        (is (= 42 (get-in (recv! session)
+                          [:seon.execution/result :seon.host/results 0
+                           :seon.eval/value]))))
       (finally (close! session)))))
 
 (deftest context-reaches-the-writer-through-the-one-db-binding

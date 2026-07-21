@@ -17,7 +17,11 @@
 
 (defn- eval-form!
   [ctx home-ns source]
-  ((var-get (ns-resolve 'seon.host 'eval-form!)) ctx home-ns source))
+  ((var-get (ns-resolve 'seon.host 'eval-form!))
+   {::host/interrupt-lock (Object.)
+    ::host/interrupt-fired? (atom false)
+    ::host/worker-phase (atom :idle)}
+   ctx home-ns source))
 
 (defn- refusal?
   [envelope home-ns]

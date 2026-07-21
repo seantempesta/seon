@@ -333,19 +333,14 @@
        :seon.eval/ns eval-ns}
        agent (assoc :seon.eval/agent agent))]}])
 
-(def ^:private result-edn-cap-chars
-  "Character cap on a persisted result projection (~2k tokens)."
-  8192)
+(def ^:private result-edn-token-cap
+  "Persisted result/output budget; W1 moves it to a config fact."
+  2048)
 
 (defn- cap-edn
-  "Truncate a string with the elision marker the child's cap-edn appends."
+  "Token-clip text stored on an eval row."
   [s]
-  (let [n (count s)]
-    (if (> n result-edn-cap-chars)
-      (str (subs s 0 result-edn-cap-chars) " …⟨"
-           (tokens/chars->tokens (- n result-edn-cap-chars))
-           " tokens elided⟩")
-      s)))
+  (tokens/clip-str s result-edn-token-cap))
 
 (defn terminal-tx-data
   "The CAS-fenced terminal transition plus the frozen eval row.
@@ -369,8 +364,9 @@
             output]}]
   (let [ok? (boolean (:seon.eval/ok? envelope))
         value-text (if (contains? envelope :seon.eval/value-display)
-                     (str (:seon.eval/value-display envelope))
-                     (pr-str (:seon.eval/value envelope)))
+                     (cap-edn (str (:seon.eval/value-display envelope)))
+                     (tokens/bounded-pr-str (:seon.eval/value envelope)
+                                            result-edn-token-cap))
         row (cond-> {:seon.eval/id eval-id
                      :seon.eval/status (cond
                                          (:seon.eval/interrupted? envelope)
@@ -384,7 +380,7 @@
                      :seon.eval/narration narration
                      :seon.eval/ns ns-sym}
               agent-ref (assoc :seon.eval/agent agent-ref)
-              ok? (assoc :seon.eval/result-edn (cap-edn value-text))
+              ok? (assoc :seon.eval/result-edn value-text)
               (not ok?)
               (assoc :seon.eval/error
                      (cap-edn (str (get-in envelope

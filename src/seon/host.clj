@@ -71,14 +71,17 @@
             [seon.db.protocol :as db.protocol]
             [sci.core :as sci]
             [sci.ctx-store]
+            [seon.ai.tokens :as tokens]
+            [seon.db.branch :as db.branch]
             [seon.db.transport.uds :as uds]
+            [seon.error :as error]
             [seon.error.sci :as error.sci]
             [seon.host.context :as context]
             [seon.host.graduate :as graduate]
             [seon.host.record :as record]
             [seon.render.value :as render.value]
             [seon.schema :as schema])
-  (:import [java.io File OutputStream]
+  (:import [java.io File OutputStream Writer]
            [java.net StandardProtocolFamily UnixDomainSocketAddress]
            [java.nio.channels Channels ServerSocketChannel SocketChannel]
            [java.util.concurrent ExecutorService Executors
@@ -176,6 +179,16 @@
   [::projection-state ::context/projection-state]])
 
 (def ^:private default-eval-threads 10)
+(def ^:private startup-read-timeout-ms
+  "Startup-frame deadline; W1 moves it to a config fact."
+  10000)
+(def ^:private error-frame-token-cap
+  "Wire error-message budget; W1 moves it to a config fact."
+  120)
+(def ^:private output-token-cap
+  "Per-form SCI output budget; W1 moves it to a config fact."
+  2048)
+(def ^:private output-truncation-marker "…⟨output truncated⟩")
 
 (defn drill-value
   "Project a host value against the exact retained committed generation."
@@ -202,13 +215,17 @@
    (cond-> {:seon.error/message message :seon.error/kind kind}
      (seq data) (assoc :seon.error/data data))))
 
+(defn- bounded-error-value [error]
+  (update error :seon.error/message
+          #(tokens/clip-str % error-frame-token-cap)))
+
 (defn- error-frame
   ([invocation-id error] (error-frame invocation-id error nil))
   ([invocation-id error database]
    (cond-> {:seon.execution/message error-message
             :seon.execution/protocol-version protocol-version
             :seon.execution/invocation-id invocation-id
-            :seon.execution/error error}
+            :seon.execution/error (bounded-error-value error)}
      database (assoc :seon.db/db database))))
 
 (defn- result-frame
@@ -362,12 +379,57 @@
      :seon.execution/request-id
      (if (and (string? request-id) (seq request-id)) request-id "invalid")}))
 
-(defn- send-frame!
-  "Write one frame on the session under its write lock."
-  [session message]
+(defn- fallback-error-frame [message]
+  (let [execution-error (:seon.execution/error message)
+        invocation-id (or (:seon.execution/invocation-id message) "invalid")]
+    (if (contains? message :seon.execution/request-id)
+      (sample-error-frame
+       {:seon.execution/agent-id
+        (or (:seon.execution/agent-id message) "invalid")
+        :seon.execution/request-id
+        (or (:seon.execution/request-id message) "invalid")}
+       (or (:seon.error/message execution-error)
+           "The execution response could not cross its frame boundary."))
+      (error-frame
+       invocation-id
+       (error-value
+        (or (:seon.error/message execution-error)
+            "The execution response could not cross its frame boundary.")
+        (or (:seon.error/kind execution-error) :core-bug))
+       (:seon.db/db message)))))
+
+(defn- encodable-frame? [message]
+  (let [^bytes payload (uds/encode message)]
+    (<= (alength payload) db.protocol/maximum-frame-bytes)))
+
+(defn- guaranteed-fallback-frame [message]
+  (let [fallback (fallback-error-frame message)]
+    (if (try (encodable-frame? fallback) (catch Throwable _ false))
+      fallback
+      (error-frame (or (:seon.execution/invocation-id message) "invalid")
+                   (error-value "The execution response was unavailable."
+                                :core-bug)))))
+
+(defn- prepare-frame [message]
+  (let [message (cond-> message
+                  (:seon.execution/error message)
+                  (update :seon.execution/error bounded-error-value))]
+    (try
+      (if (encodable-frame? message)
+        message
+        (guaranteed-fallback-frame message))
+      (catch Throwable _
+        (guaranteed-fallback-frame message)))))
+
+(defn- write-prepared-frame! [session message]
   (locking (::write-lock session)
     (uds/write-frame! ^OutputStream (::output session) message))
   nil)
+
+(defn- send-frame!
+  "Prepare and write one bounded frame under the session write lock."
+  [session message]
+  (write-prepared-frame! session (prepare-frame message)))
 
 (defn- bounded-result
   "Return `{::ok? true ::value ::result-bytes}` or a bounded error value.
@@ -504,29 +566,86 @@
       (throw (ex-info "The invocation database lacks a complete value-sampling policy."
                       {:seon.error/kind :core-bug})))))
 
+(defn- output-capture []
+  (let [limit (max 0 (- (tokens/estimate-chars output-token-cap)
+                        (count output-truncation-marker)))
+        text (StringBuilder.)
+        truncated? (volatile! false)
+        retain!
+        (fn [x offset length]
+          (let [remaining (max 0 (- limit (.length text)))
+                retained (min remaining length)]
+            (when (pos? retained)
+              (if (string? x)
+                (.append text ^CharSequence x (int offset)
+                         (int (+ offset retained)))
+                (.append text ^chars x (int offset) (int retained))))
+            (when (> length retained)
+              (vreset! truncated? true))))
+        writer
+        (proxy [Writer] []
+          (write
+            ([x]
+             (if (string? x)
+               (retain! x 0 (count x))
+               (retain! (char-array [(char x)]) 0 1)))
+            ([x offset length]
+             (retain! x offset length)))
+          (flush [] nil)
+          (close [] nil))]
+    {::output-writer writer
+     ::output-text (fn []
+                     (str text (when @truncated?
+                                 output-truncation-marker)))}))
+
+(defn- finish-evaluation! [session envelope]
+  (let [interrupted?
+        (locking (::interrupt-lock session)
+          (reset! (::worker-phase session) :recording)
+          (let [fired? @(::interrupt-fired? session)
+                flagged? (Thread/interrupted)]
+            (or fired? flagged?)))]
+    (if (and interrupted? (not (:seon.eval/interrupted? envelope)))
+      {:seon.eval/ok? false
+       :seon.eval/interrupted? true
+       :seon/error
+       (error-value "The invocation was interrupted." :agent
+                    {:seon.error.sci/class :interrupt})}
+      envelope)))
+
 (defn- eval-form!
   "Evaluate one prepared source in the agent context; every outcome a value.
 
    `::var-meta` (a returned sci var's metadata, the tee's projection
    input) is host-internal and stripped before the envelope crosses the
    protocol."
-  [ctx home-ns source]
-  (try
-    (let [value (sci/eval-string* ctx source)]
-      (cond-> (assoc (sci.ctx-store/with-ctx ctx
-                       (wire-safe-value {:seon.eval/ok? true
-                                         :seon.eval/value value}))
-                     ::live-value value)
-        (instance? sci.lang.Var value)
-        (assoc ::var-meta (meta value))))
-    (catch Throwable throwable
-      (let [error (classified-error-value ctx home-ns throwable)
-            interrupted? (= :interrupt
-                            (get-in error [:seon.error/data
-                                           :seon.error.sci/class]))]
-        {:seon.eval/ok? false
-         :seon.eval/interrupted? interrupted?
-         :seon/error error}))))
+  [session ctx home-ns source]
+  (let [{::keys [output-writer output-text]} (output-capture)]
+    (locking (::interrupt-lock session)
+      (reset! (::worker-phase session) :evaluating))
+    (let [envelope
+          (try
+            (let [value (sci/with-bindings {sci/out output-writer
+                                            sci/err output-writer}
+                          (sci/eval-string* ctx source))]
+              (cond-> (assoc (sci.ctx-store/with-ctx ctx
+                               (wire-safe-value {:seon.eval/ok? true
+                                                 :seon.eval/value value}))
+                             ::live-value value)
+                (instance? sci.lang.Var value)
+                (assoc ::var-meta (meta value))))
+            (catch Throwable throwable
+              (let [error (classified-error-value ctx home-ns throwable)
+                    interrupted? (= :interrupt
+                                    (get-in error [:seon.error/data
+                                                   :seon.error.sci/class]))]
+                {:seon.eval/ok? false
+                 :seon.eval/interrupted? interrupted?
+                 :seon/error error})))
+          envelope (finish-evaluation! session envelope)
+          output (output-text)]
+      (cond-> envelope
+        (seq output) (assoc ::output output)))))
 
 (defn- read-error-envelope [entry]
   {:seon.eval/ok? false
@@ -621,7 +740,7 @@
                 (let [schemas-before (schema/snapshot)
                       raw-envelope
                       (if (= :form kind)
-                        (eval-form! ctx (agent-home-ns agent-id)
+                        (eval-form! session ctx (agent-home-ns agent-id)
                                     (str "(in-ns '" current-ns ")\n"
                                          source))
                         (read-error-envelope entry))
@@ -640,16 +759,10 @@
                               [])
                       var-meta (::var-meta raw-envelope)
                       live-value (::live-value raw-envelope)
-                      envelope (dissoc raw-envelope ::var-meta ::live-value)
+                      output (::output raw-envelope)
+                      envelope (dissoc raw-envelope ::var-meta ::live-value
+                                       ::output)
                       eval-id (:seon.eval/id started)
-                      ;; An interrupted form leaves the worker's interrupt
-                      ;; status set, which would kill the writer channel's
-                      ;; NIO calls mid-record. The form is settled; clear
-                      ;; the flag so the terminal receipt can commit. The
-                      ;; envelope's interrupted? flag still ends the batch
-                      ;; and run-invocation! settles the timeout/cancel.
-                      _ (when (:seon.eval/interrupted? envelope)
-                          (Thread/interrupted))
                       recorded
                       (when (and record? eval-id)
                         (context/record-eval-terminal!
@@ -664,7 +777,8 @@
                           ::context/agent-id agent-id
                           ::context/forms forms
                           ::context/var-meta var-meta
-                          ::context/new-schema-keys new-schema-keys}))
+                          ::context/new-schema-keys new-schema-keys
+                          ::context/output output}))
                       projection-change?
                       (true? (::context/projection-changed? recorded))
                       projection-refresh
@@ -713,13 +827,34 @@
 
 ;;; Invocation dispatch
 
+(defn- record-core-fault! [throwable]
+  (error/record! {:seon.error/raw throwable :seon.error/fault :core})
+  nil)
+
+(defn- close-session-channel! [session]
+  (try (.close ^SocketChannel (::channel session)) (catch Throwable _ nil))
+  nil)
+
+(defn- interrupt-evaluation! [session worker]
+  (locking (::interrupt-lock session)
+    (reset! (::interrupt-fired? session) true)
+    (when (= :evaluating @(::worker-phase session))
+      (.interrupt ^Thread worker)))
+  nil)
+
 (defn- settle!
   "Send one terminal frame for the active invocation exactly once."
   [session token message]
-  (let [active (::active session)]
+  (let [active (::active session)
+        prepared (prepare-frame message)]
     (when (compare-and-set! active token nil)
-      (send-frame! session message)
-      true)))
+      (try
+        (write-prepared-frame! session prepared)
+        true
+        (catch Throwable throwable
+          (record-core-fault! throwable)
+          (close-session-channel! session)
+          false)))))
 
 (defn- run-invocation!
   "Execute one claimed invocation on the calling pool thread."
@@ -742,7 +877,7 @@
                                    (now-ms))))
           watchdog ^ScheduledExecutorService (::watchdog session)
           deadline-task (.schedule watchdog
-                                   ^Runnable #(.interrupt worker)
+                                   ^Runnable #(interrupt-evaluation! session worker)
                                    (long remaining) TimeUnit/MILLISECONDS)
           outcome
           (try
@@ -795,7 +930,9 @@
                 throwable)})
             (finally
               (.cancel deadline-task false)
-              (Thread/interrupted)))]
+              (locking (::interrupt-lock session)
+                (reset! (::worker-phase session) :idle)
+                (Thread/interrupted))))]
       (settle!
        session token
        (if-let [error (::error outcome)]
@@ -843,6 +980,7 @@
       (let [token {::invocation invocation ::started-at (now-ms)}]
         (reset! (::active session) token)
         (reset! (::cancel-requested? session) false)
+        (reset! (::interrupt-fired? session) false)
         (let [worker-holder (promise)
               submitted
               (.submit ^ExecutorService (::eval-pool session)
@@ -867,7 +1005,7 @@
                       (get-in token [::invocation :seon.db/db])))
         (when-let [{::keys [worker future]} @(::active-run session)]
           (if (realized? worker)
-            (.interrupt ^Thread @worker)
+            (interrupt-evaluation! session @worker)
             (.cancel ^java.util.concurrent.Future future false))
           ;; Bound the wait so a wedged native call cannot wedge the reader.
           (try (.get ^java.util.concurrent.Future future
@@ -976,14 +1114,25 @@
                  ::active (atom nil)
                  ::active-run (atom nil)
                  ::cancel-requested? (atom false)
+                 ::interrupt-lock (Object.)
+                 ::interrupt-fired? (atom false)
+                 ::worker-phase (atom :idle)
                  ::live-values (atom {::order [] ::values {}})
                  ::contexts (::contexts host)
                  ::writer (::writer host)
                  ::projection-state (::projection-state host)
                  ::eval-pool (::eval-pool host)
                  ::watchdog (::watchdog host)}]
-    (try
-      (let [startup (uds/read-frame input)]
+    (let [startup-timed-out? (atom false)
+          timeout-task
+          (.schedule ^ScheduledExecutorService (::watchdog host)
+                     ^Runnable
+                     #(do (reset! startup-timed-out? true)
+                          (try (.close channel) (catch Throwable _ nil)))
+                     (long startup-read-timeout-ms) TimeUnit/MILLISECONDS)]
+      (try
+      (let [startup (try (uds/read-frame input)
+                         (finally (.cancel timeout-task false)))]
         (when-let [ready-session
                    (and (map? startup)
                         (accept-startup! session host startup))]
@@ -1008,7 +1157,15 @@
 
                   :seon.execution.message/value-sample
                   (do (if (valid-value-sample? message)
-                        (serve-value-sample! host ready-session message)
+                        (try
+                          (serve-value-sample! host ready-session message)
+                          (catch Throwable throwable
+                            (record-core-fault! throwable)
+                            (send-frame!
+                             ready-session
+                             (sample-error-frame
+                              (safe-sample-correlation ready-session message)
+                              "The value sample could not be produced."))))
                         (let [safe-sample
                               (safe-sample-correlation ready-session message)]
                           (send-frame!
@@ -1029,10 +1186,22 @@
                           "The parent sent an invalid value sample.")
                          (invalid-message-frame message)))
                       (recur))))))))
-      (catch Throwable _ nil)
+      (catch Throwable throwable
+        (when-not @startup-timed-out?
+          (record-core-fault! throwable)))
       (finally
+        (.cancel timeout-task false)
         (reset! (::live-values session) {::order [] ::values {}})
-        (try (.close channel) (catch Throwable _))))))
+        (try (.close channel) (catch Throwable _)))))))
+
+(defn- accept-channel! [^ServerSocketChannel server]
+  (.accept server))
+
+(defn- start-session-thread! [host ^SocketChannel channel database-name]
+  (doto (Thread. ^Runnable #(serve-session! host channel)
+                 (str "seon-host-session-" database-name))
+    (.setDaemon true)
+    (.start)))
 
 (defn start!
   "Start the agent host: shared base, contexts, and the UDS acceptor."
@@ -1044,9 +1213,18 @@
                                       ::context/database-name
                                       ::context/backend
                                       ::context/database-path]))
+        _ (error/set-db-hooks!
+           {:seon.error/transact!
+            #(context/transact-writer! writer %)
+            :seon.error/branch-head
+            (fn []
+              (let [database (context/resolve-head! writer)]
+                (when-not (:seon/error database)
+                  (db.branch/head-from-database-value database))))})
         acquired-projection (context/acquire-committed-projection! writer)
         _ (when (:seon/error acquired-projection)
             (context/close-session! writer)
+            (error/set-db-hooks! {})
             (throw
               (ex-info
                 (get-in acquired-projection
@@ -1082,16 +1260,22 @@
         (Thread.
          ^Runnable
          (fn []
-           (try
-             (loop []
-               (let [channel (.accept server)]
-                 (doto (Thread. ^Runnable #(serve-session! host channel)
-                                (str "seon-host-session-"
-                                     (::context/database-name writer)))
-                   (.setDaemon true)
-                   (.start))
-                 (recur)))
-             (catch Throwable _ nil)))
+           (loop []
+             (when (.isOpen server)
+               (let [accepted (atom nil)]
+                 (try
+                   (let [channel (accept-channel! server)]
+                     (reset! accepted channel)
+                     (start-session-thread!
+                      host channel (::context/database-name writer))
+                     (reset! accepted nil))
+                   (catch Throwable throwable
+                     (when-let [channel @accepted]
+                       (try (.close ^SocketChannel channel)
+                            (catch Throwable _ nil)))
+                     (when (.isOpen server)
+                       (record-core-fault! throwable))))
+                 (recur)))))
          "seon-host-acceptor")]
     (.bind server address)
     (.setDaemon acceptor true)
@@ -1105,6 +1289,7 @@
   (try (.close ^ServerSocketChannel server) (catch Throwable _))
   (.shutdownNow ^ExecutorService eval-pool)
   (.shutdownNow ^ScheduledExecutorService watchdog)
+  (error/set-db-hooks! {})
   (when writer (context/close-session! writer))
   (when socket-path
     (try (.delete (File. ^String socket-path)) (catch Throwable _)))
