@@ -620,12 +620,17 @@ decisions batch for their return.
 
 ### IN-FLIGHT LANES (2026-07-21 night)
 
-- **NS-1a diffusion fence** — sol medium, codex thread
-  `019f867a-8477-7673-8fef-9b06f74c2968`, spec
-  `specs/ns-1a-diffusion-fence.md`, logs `tmp/orchestrator/ns-1a-*`.
+- **NS-1a DONE `30bbe8be`** — fence gate + levenshtein ownership move
+  accepted; diff reviewed vs spec; focused suites + both worker bundles
+  green in-lane. (Thread was `019f867a-8477-…c2968`.)
+- **NS-1b provider registry** — sol medium, codex thread
+  `019f8681-b944-7532-952f-8bd179cce5c7`, spec
+  `specs/ns-1b-provider-registry.md`, logs `tmp/orchestrator/ns-1b-*`.
 - **NS-2 lifecycle grouping** — sol low, codex thread
   `019f867a-86dc-7630-90b6-0789166b0eeb`, spec
-  `specs/ns-2-lifecycle-grouping.md`, logs `tmp/orchestrator/ns-2-*`.
+  `specs/ns-2-lifecycle-grouping.md`, logs `tmp/orchestrator/ns-2-*`;
+  resumed with expanded scope after its wake?-is-persisted stop; its
+  `git mv` renames sit in the shared index — commits stay `--only`.
 - Neither lane runs `bin/seon`; the orchestrator does ONE live boot
   proof after integrating both. NS-3 follows NS-2 (shared
   `client.cljs`); NS-1b follows NS-1a.
