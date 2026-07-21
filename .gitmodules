@@ -303,3 +303,35 @@
 [submodule "reference-code/timbre"]
 	path = reference-code/timbre
 	url = https://github.com/taoensso/timbre.git
+[submodule "reference-code/clojure"]
+	path = reference-code/clojure
+	url = https://github.com/clojure/clojure.git
+	shallow = true
+[submodule "reference-code/tools.deps"]
+	path = reference-code/tools.deps
+	url = https://github.com/clojure/tools.deps.git
+	shallow = true
+[submodule "reference-code/playwright"]
+	path = reference-code/playwright
+	url = https://github.com/microsoft/playwright.git
+	shallow = true
+[submodule "reference-code/pdf.js"]
+	path = reference-code/pdf.js
+	url = https://github.com/mozilla/pdf.js.git
+	shallow = true
+[submodule "reference-code/cheerio"]
+	path = reference-code/cheerio
+	url = https://github.com/cheeriojs/cheerio.git
+	shallow = true
+[submodule "reference-code/sheetjs"]
+	path = reference-code/sheetjs
+	url = https://git.sheetjs.com/sheetjs/sheetjs.git
+	shallow = true
+[submodule "reference-code/mammoth.js"]
+	path = reference-code/mammoth.js
+	url = https://github.com/mwilliamson/mammoth.js.git
+	shallow = true
+[submodule "reference-code/sharp"]
+	path = reference-code/sharp
+	url = https://github.com/lovell/sharp.git
+	shallow = true
