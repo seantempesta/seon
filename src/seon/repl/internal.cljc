@@ -1164,7 +1164,7 @@
     [:cat
      :string
      [:? [:map {:closed true}
-          [:seon.repl/strip-fences? :boolean]]]]
+          [:seon.repl/strip-fences? {:optional true} :boolean]]]]
     [:vector
      [:multi {:dispatch :seon.repl/kind}
       [:form
@@ -1476,6 +1476,12 @@
      :seon.repl/errors errors}))
 
 (defn parse-program
-  "Parse `text` exactly once and return its namespace-aware program projection."
+  "Parse `text` exactly once and return its namespace-aware program projection.
+
+   `options` is the combined caller map: [[parse-forms]] receives only its
+   own `:seon.repl/strip-fences?` key, while the complete map (including
+   `:seon.repl/current-ns`) reaches [[project-program]]."
   [text & [options]]
-  (project-program (parse-forms text options) options))
+  (project-program
+   (parse-forms text (select-keys options [:seon.repl/strip-fences?]))
+   options))

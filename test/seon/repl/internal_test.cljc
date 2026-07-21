@@ -16,6 +16,7 @@
     [clojure.test.check.generators :as gen]
     #?(:clj  [clojure.test.check.properties :as prop]
        :cljs [clojure.test.check.properties :as prop :include-macros true])
+    [malli.core :as m]
     #?(:cljs [seon.db.protocol :as protocol])
     [seon.repl.internal :as parse]))
 
@@ -86,9 +87,9 @@
         entry-union (-> parse-schema (nth 2) second)]
     (is (= [:=> [:cat :string] :string] strip-schema))
     (is (= [:? [:map {:closed true}
-                  [:seon.repl/strip-fences? :boolean]]]
+                  [:seon.repl/strip-fences? {:optional true} :boolean]]]
            (nth (second parse-schema) 2))
-        "the public option map has one qualified key and no legacy seam")
+        "the public option map has one qualified OPTIONAL key and no legacy seam")
     (is (= :vector (first (nth parse-schema 2))))
     (is (= :multi (first entry-union)))
     (is (= #{:form :read :comment}
@@ -1343,3 +1344,31 @@
     (is (parse/contains-heredoc-opener? "(f #code/py <<X\nbody\nX\n)"))
     (is (not (parse/contains-heredoc-opener? "(f {:a 1})")))
     (is (not (parse/contains-heredoc-opener? "(f #code/py no-arrows)")))))
+
+(deftest parse-forms-declared-schema-accepts-parse-program-forwarding
+  ;; Live regression 2026-07-21: the pod instruments parse-forms from its
+  ;; declared :malli/schema, and parse-program forwarded its COMBINED options
+  ;; (including :seon.repl/current-ns) into the closed strip-fences-only map,
+  ;; so every :batch turn failed :malli.core/invalid-input. parse-program now
+  ;; forwards only the parser-owned key; this validates that exact forwarding
+  ;; against the declared metadata schema, which plain test bundles never
+  ;; instrument.
+  (let [declared (:malli/schema
+                  (meta #?(:clj #'parse/parse-forms
+                           :cljs (var parse/parse-forms))))
+        input-schema (nth declared 1)
+        combined-options {:seon.repl/current-ns 'my.agent.active
+                          :seon.repl/strip-fences? false}]
+    (is (m/validate input-schema
+                    ["(def local 1)"
+                     (select-keys combined-options
+                                  [:seon.repl/strip-fences?])])
+        "the forwarded strip-fences selection must satisfy the closed map")
+    (is (m/validate input-schema
+                    ["(def local 1)"
+                     (select-keys {:seon.repl/current-ns 'my.agent.active}
+                                  [:seon.repl/strip-fences?])])
+        "an empty selection (options without strip-fences) must validate")
+    (is (not (m/validate input-schema
+                         ["(def local 1)" combined-options]))
+        "the combined caller options must NOT reach parse-forms directly")))
