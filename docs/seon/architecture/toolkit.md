@@ -34,9 +34,13 @@ protected implementation or invent a second tool protocol.
   signature copy that can drift.
 - Agent-callable eligibility is explicit colocated function metadata, persisted
   as the optional positive `:seon.fn/agent-facing?` program fact. Public source
-  remains indexed for inspection, but compact cards and function menus include
-  only eligible, non-private functions with complete schemas. Redefinition
-  without the metadata retracts stale eligibility.
+  remains indexed for inspection. Function menus and program export include
+  only eligible, non-private functions with complete schemas; redefinition
+  without the metadata retracts stale eligibility. Compact namespace cards are
+  a different projection: persisted `:refer` edges select exactly their named
+  public schema-complete functions, while `:as` edges select the public
+  schema-complete namespace surface. They do not add a second marker gate over
+  the require-edge authority.
 
 ## Two layers
 

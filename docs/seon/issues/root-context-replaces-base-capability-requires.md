@@ -50,17 +50,11 @@ late `:canvas` block; the seven earlier root blocks remain byte-identical. Live
 persisted-edge and prompt proof waits for the next coordinated ACME rebuild
 after the runtime lane releases the source checkpoint.
 
-One compact-card gap remains before that live proof. Required namespaces are
-present through the correct context edges, but
-`seon.agent.ctx.namespaces/render-one-ns-compact` still filters public
-functions through the rejected `:seon.fn/agent-facing?` fact. Root refers
-`seon.agent/set-purpose!`, yet that function has no marker and therefore
-disappears from the compact required-namespace card. The repair must remove
-this parallel presentation allowlist and derive visibility from the existing
-current/required namespace context plus ordinary public/private semantics. Do
-not add markers to patch individual functions. Focused proof must resolve the
-root context and show all explicitly referred public functions, including
-`set-purpose!`, through the one namespace-context mechanism.
+The compact-card source gap was subsequently closed by `e187284f`: required
+namespace cards derive selection from persisted require edges rather than the
+`:seon.fn/agent-facing?` marker. One explicit marker-free `set-purpose!`
+regression and the frozen ACME proof remain before closure. Do not add markers
+to patch referred functions.
 
 The persisted require edge already carries the required selection data through
 `:seon.ns.require/alias` and `:seon.ns.require/refers`. The globally consistent
@@ -74,6 +68,12 @@ compact rule is therefore:
 
 Implementation should replace the required-namespace set with a target-to-edge
 projection and thread the optional refers set into `render-one-ns-compact`.
-After every consumer uses that derivation, marker persistence can be removed
-mechanically. This keeps namespace requirements as the sole capability and
-presentation selection mechanism while reducing referred cards globally.
+That implementation is now present. Marker persistence remains independently
+owned by function menus and program export; it is not globally deleted by this
+home-requires issue. This keeps namespace requirements as the sole compact-card
+selection mechanism without silently changing the separate callable catalog.
+
+[[../../prds/source-cleanup/research/home-requires-merge-boundary-2026-07-20]]
+(`fa158957`) records the current source, the corrected architecture
+distinction, the missing focused regression, and the exact frozen ACME
+persisted-edge/prompt/idempotence proof required for archive.

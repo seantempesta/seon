@@ -346,6 +346,15 @@ begins with one per-operation pinned database-value + full-config ALS contract;
 existing Aero reconciliation, high-natural limits, managed identities, and
 additive home-requires are retained rather than rebuilt.
 
+Home-requires readiness is grounded by
+[[research/home-requires-merge-boundary-2026-07-20]] (`fa158957`). The additive
+manifest/root merge is already implemented by `3c08c176`, and `e187284f`
+already makes persisted require edges the compact-card selector. The owner
+ruling distinguishes that projection from `:seon.fn/agent-facing?`, which
+remains the function-menu/export selector. Remaining work is one explicit
+marker-free referred-function regression plus the frozen ACME persisted-edge,
+prompt, and idempotent-apply proof; configuration merge is not rebuilt.
+
 The later carrier convergence is grounded by
 [[research/als-tx-meta-unification-boundary-2026-07-20]] (`5c140e9a`). Stage 4
 first establishes the final per-operation database/config population. Stage 5
