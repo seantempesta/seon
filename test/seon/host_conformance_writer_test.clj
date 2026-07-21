@@ -513,7 +513,10 @@
                (error-of busy))))
       (let [timeout (recv! session)]
         (is (= "invocation-long" (:seon.execution/invocation-id timeout)))
-        (is (= "The invocation timed out." (error-of timeout))))
+        (is (= :interrupt
+               (get-in timeout [:seon.execution/error
+                                :seon.error/data
+                                :seon.error.sci/class]))))
       (finally (close! session)))))
 
 (deftest untrusted-artifact-digest-errors-core-bug
@@ -590,7 +593,10 @@
             elapsed (- (System/currentTimeMillis) started)]
         (is (= :seon.execution.message/error
                (:seon.execution/message response)))
-        (is (= "The invocation timed out." (error-of response)))
+        (is (= :interrupt
+               (get-in response [:seon.execution/error
+                                 :seon.error/data
+                                 :seon.error.sci/class])))
         (is (= :agent (get-in response [:seon.execution/error
                                         :seon.error/kind])))
         (is (< elapsed 5000)))

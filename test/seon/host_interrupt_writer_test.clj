@@ -88,12 +88,28 @@
         (pr-str response))
     (is (map? error) (pr-str response))
     (is (= :agent (:seon.error/kind error)) (pr-str response))
+    (is (= :interrupt
+           (get-in error [:seon.error/data :seon.error.sci/class]))
+        (pr-str response))
+    (is (= :timeout
+           (get-in error [:seon.error/data :seon.error/kind]))
+        (pr-str response))
     (is (<= elapsed-ms (+ deadline-duration-ms 200))
         (str label " exceeded deadline + 200ms: " elapsed-ms " ms"))
     ;; The host has one eval worker, so success here proves the interrupted
     ;; worker returned to the pool rather than a sibling masking its loss.
     (assert-normal-eval! session agent-id)
     elapsed-ms))
+
+(defn- eval-error
+  [session agent-id source]
+  (let [{:keys [response]} (invoke! session agent-id source 2000)]
+    (is (= :seon.execution.message/result
+           (:seon.execution/message response))
+        (pr-str response))
+    (get-in response [:seon.execution/result
+                      :seon.host/results 0
+                      :seon/error])))
 
 (use-fixtures
   :once
@@ -179,6 +195,45 @@
                (:seon.execution/message response))
             (pr-str response))
         (is (= '(1 1) (eval-value response)) (pr-str response)))
+      (finally
+        (close-host-session! session)))))
+
+(deftest hostile-errors-retain-their-structural-class-through-the-host
+  (let [agent-id "structural-errors"
+        session (open-host-session! agent-id
+                                    (::context/database-name *writer-session*))]
+    (try
+      (is (= :seon.execution.message/ready
+             (:seon.execution/message (::ready session)))
+          (pr-str (::ready session)))
+      (assert-normal-eval! session agent-id)
+      (let [defined (invoke! session agent-id "(defn total [row] row)" 2000)]
+        (is (= :seon.execution.message/result
+               (get-in defined [:response :seon.execution/message]))
+            (pr-str defined)))
+      (let [resolution (eval-error session agent-id "(totl {:amount 1})")
+            arity (eval-error session agent-id "(total)")
+            refusal (eval-error
+                     session agent-id
+                     "(alter-var-root (var clojure.core/+) (fn [_] 1))")
+            runtime (eval-error session agent-id "(/ 1 0)")]
+        (is (= :resolution
+               (get-in resolution [:seon.error/data
+                                   :seon.error.sci/class])))
+        (is (= 'totl
+               (get-in resolution [:seon.error/data
+                                   :seon.error.sci/symbol])))
+        (is (seq (get-in resolution [:seon.error/data
+                                    :seon.repair/suggestions])))
+        (is (= :arity
+               (get-in arity [:seon.error/data :seon.error.sci/class])))
+        (is (= :refusal
+               (get-in refusal [:seon.error/data :seon.error.sci/class])))
+        (is (= :runtime
+               (get-in runtime [:seon.error/data :seon.error.sci/class])))
+        (is (vector?
+             (get-in runtime [:seon.error/data
+                              :seon.error.sci/callstack-head]))))
       (finally
         (close-host-session! session)))))
 

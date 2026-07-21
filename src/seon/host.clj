@@ -72,6 +72,7 @@
             [sci.core :as sci]
             [sci.ctx-store]
             [seon.db.transport.uds :as uds]
+            [seon.error.sci :as error.sci]
             [seon.host.context :as context]
             [seon.host.graduate :as graduate]
             [seon.host.record :as record]
@@ -404,38 +405,19 @@
   [agent-id]
   (symbol (str "my.agent." agent-id)))
 
-(defn- built-in-var-refusal?
-  "True when SCI refused an eval-side root mutation of a shared var."
-  [^Throwable throwable]
-  (let [causes (take-while some? (iterate ex-cause throwable))
-        structural-data (some (fn [cause]
-                                (let [data (ex-data cause)]
-                                  (when (contains? data :var) data)))
-                              causes)]
-    (if structural-data
-      (let [shared-var (:var structural-data)]
-        (boolean
-         (and (instance? sci.lang.Var shared-var)
-              (:sci/built-in (meta shared-var)))))
-      (boolean
-       (some #(re-find #"^Built-in var #'[^ ]+ is read-only\.$"
-                       (or (.getMessage ^Throwable %) ""))
-             causes)))))
-
-(defn- eval-error-value
-  "Classify one SCI eval throwable into the standard agent error value."
-  [^Throwable throwable home-ns]
-  (let [message (str (first (str/split-lines
-                             (str (.getMessage throwable)))))]
-    (if (built-in-var-refusal? throwable)
-      (error-value
-       (str "That name is a shared built-in and is read-only. Define your "
-            "own function in your home namespace `" home-ns "` instead.")
-       :agent)
-      (error-value message :agent))))
-
 (defn- entry-source [entry]
   (or (:seon.repl/eval-source entry) (:seon.repl/source entry)))
+
+(defn- classified-error-value
+  [ctx home-ns throwable]
+  (let [classified
+        (error.sci/classify
+         {:seon.error.sci/throwable throwable
+          :seon.error.sci/context ctx
+          :seon.error.sci/home-ns home-ns})]
+    (assoc classified :seon.error/message
+           (error.sci/steering-head
+            classified error.sci/default-error-head-token-cap))))
 
 (defn- wire-safe-value
   "Keep a transit-encodable value; project anything else to its print form.
@@ -538,13 +520,13 @@
         (instance? sci.lang.Var value)
         (assoc ::var-meta (meta value))))
     (catch Throwable throwable
-      (let [message (str (first (str/split-lines
-                                 (str (.getMessage throwable)))))
-            interrupted? (boolean (re-find #"deadline exceeded|interrupt"
-                                           message))]
+      (let [error (classified-error-value ctx home-ns throwable)
+            interrupted? (= :interrupt
+                            (get-in error [:seon.error/data
+                                           :seon.error.sci/class]))]
         {:seon.eval/ok? false
          :seon.eval/interrupted? interrupted?
-         :seon/error (eval-error-value throwable home-ns)}))))
+         :seon/error error}))))
 
 (defn- read-error-envelope [entry]
   {:seon.eval/ok? false
@@ -722,6 +704,13 @@
   [result]
   (boolean (some :seon.eval/interrupted? (:seon.host/results result))))
 
+(defn- interrupted-error
+  [result]
+  (some (fn [envelope]
+          (when (:seon.eval/interrupted? envelope)
+            (:seon/error envelope)))
+        (:seon.host/results result)))
+
 ;;; Invocation dispatch
 
 (defn- settle!
@@ -787,7 +776,7 @@
                        @(::cancel-requested? session))
                 {::error (error-value "The invocation was canceled." :agent)}
                 (if (interrupted-batch? result)
-                  {::error (error-value "The invocation timed out." :agent)}
+                  {::error (interrupted-error result)}
                   {::value result})))
 
             :else
@@ -798,10 +787,12 @@
                            "; prompt and view rendering stay on the pod.")
                       :core-bug)})
             (catch Throwable throwable
-              {::error (error-value
-                        (str (first (str/split-lines
-                                     (str (.getMessage throwable)))))
-                        (or (:seon.error/kind (ex-data throwable)) :agent))})
+              {::error
+               (classified-error-value
+                (::ctx session)
+                (agent-home-ns
+                 (:seon.execution/agent-id @(::startup session)))
+                throwable)})
             (finally
               (.cancel deadline-task false)
               (Thread/interrupted)))]

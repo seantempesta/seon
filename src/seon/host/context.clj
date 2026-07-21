@@ -1222,12 +1222,13 @@
   nil)
 
 (defn- block-row
-  [unit block status reason]
+  [unit block status reason unresolved-symbol]
   (cond-> {::source-path (::source-path unit)
            ::namespace (::namespace unit)
            ::block-name (::block-name block)
            ::status status}
-    reason (assoc ::reason reason)))
+    reason (assoc ::reason reason)
+    unresolved-symbol (assoc ::unresolved-symbol unresolved-symbol)))
 
 (defn load-portable-slice!
   "Eval every pure `my.*` defn block from its real source into `ctx`.
@@ -1248,7 +1249,8 @@
                        excluded-blocks (remove (comp pure-block? ::host-source) blocks)
                        excluded-rows
                        (mapv #(block-row unit % :excluded
-                                         "The block is outside the portable C1 class (async, JS, database, or blob capability evidence).")
+                                         "The block is outside the portable C1 class (async, JS, database, or blob capability evidence)."
+                                         nil)
                              excluded-blocks)
                        ns-error
                        (try
@@ -1261,17 +1263,18 @@
                                    (str (.getMessage throwable))))))]
                    (into excluded-rows
                          (if ns-error
-                           (map #(block-row unit % :failed ns-error) portable)
+                           (map #(block-row unit % :failed ns-error nil) portable)
                            (map (fn [{::keys [host-source] :as block}]
                                   (try
                                     (sci/eval-string*
                                      ctx (str "(in-ns '" namespace ")\n" host-source))
-                                    (block-row unit block :loaded nil)
+                                    (block-row unit block :loaded nil nil)
                                     (catch Throwable throwable
                                       (block-row
                                        unit block :failed
                                        (first (str/split-lines
-                                               (str (.getMessage throwable))))))))
+                                               (str (.getMessage throwable))))
+                                       (:sci.impl/symbol (ex-data throwable))))))
                                 portable))))))
               ordered)
         cycle-rows
@@ -1281,7 +1284,8 @@
                  (let [unit (first (filter #(= namespace (::namespace %)) units))]
                    (map #(block-row unit % :failed
                                     (str "Namespace require cycle: "
-                                         (str/join ", " cycle)))
+                                         (str/join ", " cycle))
+                                    nil)
                         (filter (comp pure-block? ::host-source) (::blocks unit)))))
                cycle))
         initial-rows (into loaded-rows cycle-rows)
@@ -1296,18 +1300,17 @@
         rows
         (mapv
          (fn [row]
-           (if-let [[_ dependency]
-                    (and (= :failed (::status row))
-                         (re-matches #"Unable to resolve symbol: (.+)"
-                                     (::reason row)))]
+           (if-let [dependency (and (= :failed (::status row))
+                                    (::unresolved-symbol row))]
              (if (contains? (get excluded-names (::namespace row) #{})
-                            dependency)
-               (assoc row
-                      ::status :excluded
-                      ::reason (str "Depends on excluded non-portable helper `"
-                                    dependency "`."))
-               row)
-             row))
+                            (name dependency))
+               (-> row
+                   (assoc ::status :excluded
+                          ::reason (str "Depends on excluded non-portable helper `"
+                                        dependency "`."))
+                   (dissoc ::unresolved-symbol))
+               (dissoc row ::unresolved-symbol))
+             (dissoc row ::unresolved-symbol)))
          initial-rows)
         failures (into []
                        (comp (filter #(= :failed (::status %)))
@@ -1345,7 +1348,8 @@
               :interrupt-fn
               (fn []
                 (when (.isInterrupted (Thread/currentThread))
-                  (interrupt/interrupt! "eval deadline exceeded")))})
+                  (interrupt/interrupt! "eval deadline exceeded"
+                                        {:seon.error/kind :timeout})))})
         report (load-portable-slice! ctx wrapper-registry)
         _ (stamp-shared-base-vars! ctx)]
     {::ctx ctx ::report report ::registry wrapper-registry}))
