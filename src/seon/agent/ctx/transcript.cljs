@@ -734,6 +734,15 @@
    :datahike.resource/max-results max-results
    :datahike.resource/max-result-weight max-result-weight})
 
+(defn- pull-member
+  [selector entity-id max-work max-results max-result-weight]
+  {::protocol/operation protocol/pull-operation
+   ::protocol/selector selector
+   ::protocol/entity-id entity-id
+   :datahike.resource/max-work max-work
+   :datahike.resource/max-results max-results
+   :datahike.resource/max-result-weight max-result-weight})
+
 (defn- member-value
   [member]
   (cond
@@ -877,20 +886,27 @@
   '[:db/id
     :seon.agent.turn/at
     :seon.agent.turn/scheduled?
-    :seon.agent.turn/llm-usage
     :seon.agent.turn/usage-estimated?
     {:seon.agent.turn/run [:db/id :seon.agent.run/id]}])
 
-(def ^:private run-page-size 16)
-(def ^:private max-run-pages 4)
+(def ^:private turn-candidate-pattern
+  '[:db/id :seon.agent.turn/at
+    {:seon.agent.turn/run
+     [:db/id {:seon.agent.run/agent [:seon.agent/id]}]}])
+
+(def ^:private usage-pull-pattern
+  '[:db/id :seon.agent.turn/llm-usage])
+
+(def ^:private turn-scan-page-size 64)
+(def ^:private max-turn-scan-pages 4)
 
 (defn- index-member
-  [database attribute value limit & [cursor]]
+  [database index prefix limit & [cursor]]
   (cond->
     {::protocol/operation protocol/index-page-operation
      ::db/db database
-     ::protocol/index :avet
-     ::protocol/prefix [attribute value]
+     ::protocol/index index
+     ::protocol/prefix prefix
      ::protocol/direction :reverse
      ::protocol/limit limit
      :datahike.resource/max-result-weight 131072}
@@ -900,99 +916,107 @@
   (and (= expected (count (::db/results response)))
        (every? #(true? (::protocol/success? %)) (::db/results response))))
 
-(defn- turn-row [turn]
+(defn- turn-row [turn usage]
   (let [run (:seon.agent.turn/run turn)]
     [(:db/id turn)
      (:seon.agent.turn/at turn)
      (boolean (:seon.agent.turn/scheduled? turn))
      (:db/id run)
      (:seon.agent.run/id run)
-     (or (:seon.agent.turn/llm-usage turn) "")
+     (or (:seon.agent.turn/llm-usage usage) "")
      (boolean (:seon.agent.turn/usage-estimated? turn))]))
 
+(defn- matching-agent-turn? [agent-id turn]
+  (= agent-id
+     (get-in turn [:seon.agent.turn/run :seon.agent.run/agent :seon.agent/id])))
+
 (defn- ^:async acquire-recent-turns
-  "Acquire newest agent turns through bounded ref indexes and one payload pull."
+  "Acquire certified newest agent turns through a fixed global-time scan."
   [database agent-id window-size]
   (loop [page-number 0
          cursor nil
          retained []]
-    (let [run-response
+    (let [index-response
           (await
            (db/execute-many
             {::db/db database
              ::db/members
-             [(index-member database :seon.agent.run/agent
-                            [:seon.agent/id agent-id]
-                            run-page-size cursor)]
+             [(index-member database :aevt [:seon.agent.turn/at]
+                            turn-scan-page-size cursor)]
              ::db/max-result-weight 196608}))]
-      (if-not (successful-members? run-response 1)
-        {::error (or (::error run-response)
-                     (first (::db/results run-response))
-                     run-response)}
-        (let [run-member (first (::db/results run-response))
-              run-ids (mapv first (:datahike.index-page/datoms run-member))
-              turn-response
-              (if (seq run-ids)
-                (await
-                 (db/execute-many
-                  {::db/db database
-                   ::db/members
-                   (mapv #(index-member database :seon.agent.turn/run %
-                                        window-size)
-                         run-ids)
-                   ::db/max-result-weight 4194304}))
-                {::db/results []})]
-          (if-not (successful-members? turn-response (count run-ids))
-            {::error (or (::error turn-response)
-                         (some #(when-not (true? (::protocol/success? %)) %)
-                               (::db/results turn-response))
-                         turn-response)}
-            (let [turn-members (::db/results turn-response)
-                  turn-ids (->> turn-members
-                                (mapcat :datahike.index-page/datoms)
-                                (map first))
-                  candidate-ids (->> (concat retained turn-ids)
-                                     distinct
-                                     (sort >)
-                                     vec)
-                  retained (->> candidate-ids
+      (if-not (successful-members? index-response 1)
+        {::error (or (::error index-response)
+                     (first (::db/results index-response))
+                     index-response)}
+        (let [index-member (first (::db/results index-response))
+              candidate-ids (mapv first (:datahike.index-page/datoms index-member))
+              candidates (if (seq candidate-ids)
+                           (await (db/pull-many
+                                   {::db/db database
+                                    ::db/pull-pattern turn-candidate-pattern
+                                    ::db/refs candidate-ids
+                                    ::db/max-result-weight 262144}))
+                           [])]
+          (if (and (map? candidates) (:seon.error/message candidates))
+            {::error candidates}
+            (let [retained (->> candidates
+                                (filter #(matching-agent-turn? agent-id %))
+                                (concat retained)
+                                (sort-by (juxt :seon.agent.turn/at :db/id)
+                                         #(compare %2 %1))
                                 (take window-size)
                                 vec)
-                  complete? (:datahike.index-page/complete? run-member)
-                  cursor (:datahike.index-page/cursor run-member)
-                  more-turns? (some #(false?
-                                      (:datahike.index-page/complete? %))
-                                    turn-members)
-                  page-limit? (= (inc page-number) max-run-pages)
-                  omitted? (or (> (count candidate-ids) window-size)
-                               more-turns?
-                               (and (not complete?)
-                                    (or (>= (count retained) window-size)
-                                        page-limit?)))]
+                  complete? (:datahike.index-page/complete? index-member)
+                  page-limit? (= (inc page-number) max-turn-scan-pages)]
               (if (and (< (count retained) window-size)
                        (not complete?)
                        (not page-limit?))
-                (recur (inc page-number) cursor retained)
-                (let [turns
-                      (if (seq retained)
+                (recur (inc page-number)
+                       (:datahike.index-page/cursor index-member)
+                       retained)
+                (let [refs (mapv :db/id retained)
+                      turns (if (seq refs)
+                              (await (db/pull-many
+                                      {::db/db database
+                                       ::db/pull-pattern turn-pull-pattern
+                                       ::db/refs refs
+                                       ::db/max-result-weight 262144}))
+                              [])
+                      usage-response
+                      (if (seq refs)
                         (await
-                         (db/pull-many
+                         (db/execute-many
                           {::db/db database
-                           ::db/pull-pattern turn-pull-pattern
-                           ::db/refs retained
-                           ::db/max-work 100000
-                           ::db/max-results 4096
+                           ::db/members
+                           (mapv #(assoc (pull-member usage-pull-pattern %
+                                                      1000 32 4096)
+                                         ::db/db database)
+                                 refs)
                            ::db/max-result-weight 262144}))
-                        [])]
-                  (if (and (map? turns)
-                           (string? (:seon.error/message turns)))
+                        {::db/results []})]
+                  (if (and (map? turns) (:seon.error/message turns))
                     {::error turns}
-                    {::turn-history-omitted? (boolean omitted?)
-                     ::turn-rows
-                     (->> turns
-                          (remove nil?)
-                          (sort-by (juxt :seon.agent.turn/at :db/id))
-                          (mapv turn-row))}))))))))))
+                    (let [usage-members (::db/results usage-response)
+                          usage-omitted? (or (not= (count refs)
+                                                   (count usage-members))
+                                             (some #(not (true? (::protocol/success? %)))
+                                                   usage-members))
+                          usages-by-id
+                          (into {}
+                                (keep #(when (true? (::protocol/success? %))
+                                         (let [usage (::protocol/result %)]
+                                           [(:db/id usage) usage])))
+                                usage-members)]
+                      {::turn-history-omitted?
+                       (boolean (and (not complete?)
+                                     (or (= (count retained) window-size)
+                                         page-limit?)))
+                       ::usage-history-omitted? (boolean usage-omitted?)
+                       ::turn-rows
+                       (->> turns
+                            (map #(turn-row % (get usages-by-id (:db/id %))))
+                            (sort-by (juxt second first))
+                            vec)})))))))))))
 
 (defn- messages-query [cutoff-at run-id]
   (let [base {:find [(list 'pull '?message message-selector)]
@@ -1183,6 +1207,8 @@
                     :seon.eval/ns current-ns
                     ::turn-count turn-count
                     ::turn-history-omitted? (boolean omitted?)
+                    ::usage-history-omitted?
+                    (boolean (::usage-history-omitted? recent-turns))
                     ::turns turns
                     ::messages (mapv first (or (query-result message-member) []))
                     ::last-action-at (query-result action-member)
@@ -1330,10 +1356,15 @@
              (str/join "\n"))
         head (masthead ns-str (or (:seon.config/repl-mode input) :batch))
         history-note
-        (when (::turn-history-omitted? input)
-          (str "; transcript history before this bounded newest-" window-size
-               "-turn window is omitted; durable plans, knowledge, and blobs "
-               "remain queryable."))
+        (->> [(when (::turn-history-omitted? input)
+                (str "; transcript history before this bounded newest-"
+                     window-size
+                     "-turn window is omitted; durable plans, knowledge, "
+                     "and blobs remain queryable."))
+              (when (::usage-history-omitted? input)
+                "; oversized or unavailable usage telemetry is omitted.")]
+             (remove nil?)
+             (str/join "\n"))
         ;; ::readline? false (node first, stored block fallback) drops the
         ;; folded live readline — the ONE moving (`now`-reading) line — so a
         ;; profile render is a pure function of the db value. Default true.
@@ -1472,13 +1503,31 @@
        [:div {:class "seon-card-compact"}
         (or latest-reply (last cards))]
       (into [:div {:class "seon-card-expanded flex flex-col"}
-              (when (::turn-history-omitted? input)
+              (when (or (::turn-history-omitted? input)
+                        (::usage-history-omitted? input))
                 [:div {:class "text-text-500 italic px-3 py-2 text-xs font-mono"}
-                 "older transcript history omitted; durable data remains queryable"])]
+                 (str
+                  (when (::turn-history-omitted? input)
+                    "older transcript history omitted; durable data remains queryable")
+                  (when (and (::turn-history-omitted? input)
+                             (::usage-history-omitted? input))
+                    " · ")
+                  (when (::usage-history-omitted? input)
+                    "oversized or unavailable usage telemetry omitted"))])]
              cards)]
       [:div {:class "text-text-500 italic p-2 text-xs font-mono"}
-       (if (::turn-history-omitted? input)
+       (cond
+         (and (::turn-history-omitted? input)
+              (::usage-history-omitted? input))
+         "older transcript history and usage telemetry omitted; no retained events"
+
+         (::turn-history-omitted? input)
          "older transcript history omitted; no retained events"
+
+         (::usage-history-omitted? input)
+         "usage telemetry omitted; no retained events"
+
+         :else
          "no events yet — every message and eval this agent makes appears here live")])))
 
 (defn ^:async transcript-block-html

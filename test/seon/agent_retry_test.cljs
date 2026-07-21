@@ -252,7 +252,8 @@
           (.then
            (fn [result]
              (is (= :error (:seon.agent.turn/status result)))
-             (is (= (pr-str usage) (:seon.agent.turn/llm-usage result)))
+             (is (= (pr-str (dissoc usage :total_tokens))
+                    (:seon.agent.turn/llm-usage result)))
              (let [attempt (first (:seon.agent.turn/llm-attempts result))]
                (is (= :provider-error (:seon.ai.attempt/outcome attempt)))
                (is (= "length" (:seon.ai.attempt/finish-reason attempt)))
@@ -262,3 +263,19 @@
                       (:seon.ai.attempt/completion-limit-field attempt))))))
           (.then (fn [_] (done)))
           (.catch (fn [error] (is false (str error)) (done)))))))
+
+(deftest persisted-usage-is-finite-and-does-not-walk-unknown-values
+  (let [walked? (atom false)
+        hostile (map (fn [_]
+                       (reset! walked? true)
+                       "x")
+                     (range 100000000))
+        usage {:prompt_tokens 10
+               :completion_tokens 2
+               :prompt_tokens_details {:cached_tokens 8
+                                       :hostile hostile}
+               :hostile hostile}
+        stored (@#'turn/persisted-usage-edn usage)]
+    (is (= "{:prompt_tokens 10, :completion_tokens 2, :prompt_tokens_details {:cached_tokens 8}}"
+           stored))
+    (is (false? @walked?))))

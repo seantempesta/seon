@@ -481,7 +481,7 @@ The run model + FSM live in [[agent-runtime]].
 | `:seon.agent.turn/reply-blob` | `:seon.db/ref` | ref / one | optional ref to the raw provider reply blob |
 | `:seon.agent.turn/error` | `:string` | string / one | optional bounded failure headline |
 | `:seon.agent.turn/llm-retries` | `:int` | long / one | |
-| `:seon.agent.turn/llm-usage` | `:string` | string / one | |
+| `:seon.agent.turn/llm-usage` | `:string` | string / one | valid EDN containing only the finite nonnegative numeric provider fields consumed by usage derivation; arbitrary raw provider maps are not stored |
 | `:seon.agent.turn/llm-meta` | `:string` | string / one | optional EDN provider metadata |
 | `:seon.agent.turn/usage-estimated?` | `:boolean` | boolean / one | usage came from the canonical token estimator |
 | `:seon.agent.turn/llm-attempts` | `[:vector {:seon.db/component true} :seon.db/ref]` | ref / many / **component** | ordered bounded provider-attempt evidence; absence means no attempt |

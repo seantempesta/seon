@@ -180,3 +180,32 @@ Closure still requires the cold live/default acquisition and real grown page
 proof. The shared watcher was rebuild-pending and the pod drained during this
 unit because of an unrelated parse failure in another owned source path, so
 that evidence is intentionally not claimed here.
+
+## Independent-review correction
+
+Review rejected the first bounded walk because reverse run and turn entity IDs
+did not preserve the established `:seon.agent.turn/at` ordering, an incomplete
+page fact could be lost across recursion, and the final bulk pull still carried
+an arbitrarily large `:seon.agent.turn/llm-usage` scalar.
+
+The corrected acquisition reverse-pages the global
+`:seon.agent.turn/at` AEVT range through at most four 64-datom pages. Each page
+uses a bounded minimal pull to test the existing turn → run → agent connection.
+Finding the configured number of matches certifies the global newest window;
+exhausting the fixed scan first returns only the certified prefix and marks the
+older/incomplete history honestly. The regression intentionally makes entity
+IDs disagree with timestamps across 50 distinct runs and proves the result is
+ordered by timestamp, with the same four authority calls and 64 index visits
+for histories labeled 50 and 1,000,000. Four full pages containing no matching
+agent turn stop at eight authority calls and 256 index visits with omission
+preserved.
+
+Usage is absent from both bulk pull patterns. Each retained turn receives one
+fixed, 4,096-weight non-critical usage pull member; a failed member omits only
+that telemetry and sets an AI/HTML omission fact. Future writes project usage
+to valid EDN containing only the finite nonnegative numeric OpenAI-compatible
+or Anthropic fields consumed by `seon.agent.ctx.usage`. A lazy 100,000,000-item
+unknown value proves the writer projection never walks arbitrary provider
+payloads. The corrected transcript and retry gates pass 25 tests and 92
+assertions; the retained report is
+`tmp/test-cljs-20260721-023519-9718.report.edn`.

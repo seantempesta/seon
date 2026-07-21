@@ -82,8 +82,8 @@
 ;; present; ABSENT = no retry — optional-is-absent).
 (schema/register! :seon.agent.turn/llm-retries  :int)
 ;; Tier-2 provider telemetry, EDN-stringified (:map is unbridgeable — a :map
-;; close-tx fails the schema bridge): the usage map + the unrecognized
-;; top-level provider fields. Both ABSENT on a stub-LLM turn.
+;; close-tx fails the schema bridge): only the finite numeric provider fields
+;; consumed by usage derivation. Unrecognized raw fields are not persisted.
 (schema/register! :seon.agent.turn/llm-usage    :string)
 (schema/register! :seon.agent.turn/llm-meta     :string)
 ;; repl-mode telemetry. In `:stream`, the turn's
@@ -93,6 +93,40 @@
 (schema/register! :seon.agent.turn/usage-estimated? :boolean)
 (schema/register! :seon.agent.turn/evals        [:vector {:seon.db/component true} :seon.db/ref])
 (schema/register! :seon.agent.turn/llm-attempts [:vector {:seon.db/component true} :seon.db/ref])
+
+(defn- usage-count [usage key]
+  (let [value (get usage key)]
+    (when (and (int? value) (not (neg? value))) value)))
+
+(defn- persisted-usage
+  "Project provider usage to the finite numeric fields consumed by readers."
+  [usage]
+  (cond
+    (contains? usage :prompt_tokens)
+    (cond-> {}
+      (usage-count usage :prompt_tokens)
+      (assoc :prompt_tokens (usage-count usage :prompt_tokens))
+      (usage-count usage :completion_tokens)
+      (assoc :completion_tokens (usage-count usage :completion_tokens))
+      (usage-count usage :prompt_cache_hit_tokens)
+      (assoc :prompt_cache_hit_tokens
+             (usage-count usage :prompt_cache_hit_tokens))
+      (usage-count (:prompt_tokens_details usage) :cached_tokens)
+      (assoc :prompt_tokens_details
+             {:cached_tokens
+              (usage-count (:prompt_tokens_details usage) :cached_tokens)}))
+
+    (contains? usage :input_tokens)
+    (into {}
+          (keep (fn [key]
+                  (when-some [value (usage-count usage key)] [key value])))
+          [:input_tokens :output_tokens :cache_read_input_tokens
+           :cache_creation_input_tokens])
+
+    :else {}))
+
+(defn- persisted-usage-edn [usage]
+  (pr-str (persisted-usage usage)))
 
 ;; One bounded, queryable transport fact per provider attempt. The turn owns
 ;; these component rows; the effective config remains derived from the parent
@@ -931,14 +965,16 @@
            :seon.agent.turn/error  (turn-error-str err)
            :seon.agent.turn/llm-attempts attempts}
           retries (assoc :seon.agent.turn/llm-retries retries)
-          (seq usage) (assoc :seon.agent.turn/llm-usage (pr-str usage))
+          (seq usage) (assoc :seon.agent.turn/llm-usage
+                             (persisted-usage-edn usage))
           estimated? (assoc :seon.agent.turn/usage-estimated? true)
           (seq pfields) (assoc :seon.agent.turn/llm-meta (pr-str pfields))))
       (cond-> (await (ask-and-eval-reply! resp id id-of-turn run-id
                                           (boolean stream?) start-ns database))
         true        (assoc :seon.agent.turn/llm-attempts attempts)
         retries     (assoc :seon.agent.turn/llm-retries retries)
-        (seq usage) (assoc :seon.agent.turn/llm-usage (pr-str usage))
+        (seq usage) (assoc :seon.agent.turn/llm-usage
+                           (persisted-usage-edn usage))
         estimated?  (assoc :seon.agent.turn/usage-estimated? true)
         (seq pfields) (assoc :seon.agent.turn/llm-meta (pr-str pfields))))))
 

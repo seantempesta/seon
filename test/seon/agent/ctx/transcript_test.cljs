@@ -57,6 +57,27 @@
             :seon.agent.run/id (str "run-" turn)}})
         (range 1 (inc turn-count))))
 
+(defn- candidate-turn-payloads [turn-count]
+  (mapv (fn [turn]
+          {:db/id turn
+           :seon.agent.turn/at (js/Date. turn)
+           :seon.agent.turn/run
+           {:db/id (+ 1000 turn)
+            :seon.agent.run/agent {:seon.agent/id "agent"}}})
+        (range turn-count 0 -1)))
+
+(defn- turn-pull-responder [turn-count]
+  (fn
+    ([request]
+     (let [candidate? (str/includes? (pr-str (::db/pull-pattern request))
+                                     "seon.agent.run/agent")]
+       (js/Promise.resolve
+        (if candidate?
+          (candidate-turn-payloads turn-count)
+          (turn-payloads turn-count)))))
+    ([_database _selector _refs]
+     (js/Promise.reject (js/Error. "unexpected positional pull")))))
+
 (defn- transcript-responder
   ([requests turn-count eval-row]
    (transcript-responder requests turn-count eval-row
@@ -74,22 +95,18 @@
            (= operation protocol/index-page-operation)
            {::db/results
             (mapv
-             (fn [member]
-               (let [attribute (-> member ::protocol/prefix first)]
-                 (protocol/success
-                  {:datahike.index-page/datoms
-                   (case attribute
-                     :seon.agent.run/agent
-                     [[100 :seon.agent.run/agent 1 1 true]]
-
-                     :seon.agent.turn/run
-                     (mapv (fn [turn]
-                             [turn :seon.agent.turn/run 100 turn true])
-                           (range turn-count 0 -1))
-
-                     [])
-                   :datahike.index-page/complete? true})))
+             (fn [_member]
+               (protocol/success
+                {:datahike.index-page/datoms
+                 (mapv (fn [turn]
+                         [turn :seon.agent.turn/at (js/Date. turn) turn true])
+                       (range turn-count 0 -1))
+                 :datahike.index-page/complete? true}))
              members)}
+
+           (= operation protocol/pull-operation)
+           {::db/results
+            (mapv (fn [_] (protocol/success {})) members)}
 
            (> (count members) 2)
            (execute-many-result
@@ -178,50 +195,54 @@
           (fn [history-size]
             (let [authority-calls (atom 0)
                   index-visits (atom 0)
-                  pulled (atom nil)]
+                  ;; Eids deliberately disagree with timestamps across 20 runs.
+                  newest (mapv (fn [offset]
+                                 {:db/id (+ 1000 (mod (* offset 37) 997))
+                                  :seon.agent.turn/at
+                                  (js/Date. (- history-size offset))
+                                  :seon.agent.turn/run
+                                  {:db/id (+ 2000 offset)
+                                   :seon.agent.run/agent
+                                   {:seon.agent/id "agent"}}})
+                               (range 50))]
               (set! db/execute-many
                     (fn [request]
                       (swap! authority-calls inc)
                       (let [members (::db/members request)
-                            attribute (-> members first ::protocol/prefix first)]
+                            operation (-> members first ::protocol/operation)]
                         (js/Promise.resolve
-                         {::db/results
-                          (mapv
-                           (fn [_member]
-                             (protocol/success
-                              {:datahike.index-page/datoms
-                               (case attribute
-                                 :seon.agent.run/agent
-                                 (do
-                                   (swap! index-visits inc)
-                                   [[100 :seon.agent.run/agent 1 1 true]])
-
-                                 :seon.agent.turn/run
-                                 (let [ids (range history-size
-                                                  (- history-size 50) -1)]
-                                   (swap! index-visits + 51)
-                                   (mapv (fn [id]
-                                           [id :seon.agent.turn/run 100 id true])
-                                         ids))
-
-                                 [])
-                               :datahike.index-page/complete? true}))
-                           members)}))))
+                         (if (= operation protocol/index-page-operation)
+                           (do
+                             (swap! index-visits + 64)
+                             {::db/results
+                              [(protocol/success
+                                {:datahike.index-page/datoms
+                                 (mapv (fn [{:keys [db/id]
+                                             at :seon.agent.turn/at}]
+                                         [id :seon.agent.turn/at at id true])
+                                       newest)
+                                 :datahike.index-page/complete? false})]})
+                           {::db/results
+                            (mapv (fn [_] (protocol/success {})) members)})))))
               (set! db/pull-many
                     (fn
                       ([request]
                        (swap! authority-calls inc)
-                       (reset! pulled (::db/refs request))
-                       (js/Promise.resolve
-                        (mapv (fn [id]
-                                {:db/id id
-                                 :seon.agent.turn/at (js/Date. id)
-                                 :seon.agent.turn/run
-                                 {:db/id 100 :seon.agent.run/id "run"}})
-                              (reverse (::db/refs request)))))
+                       (let [candidate? (str/includes?
+                                         (pr-str (::db/pull-pattern request))
+                                         "seon.agent.run/agent")]
+                         (js/Promise.resolve
+                          (if candidate?
+                            newest
+                            (mapv #(-> %
+                                       (assoc-in [:seon.agent.turn/run
+                                                  :seon.agent.run/id]
+                                                 (str "run-" (:db/id %)))
+                                       (update :seon.agent.turn/run
+                                               dissoc :seon.agent.run/agent))
+                                  newest)))))
                       ([_database _selector _refs]
-                       (js/Promise.reject
-                        (js/Error. "unexpected positional pull")))))
+                       (js/Promise.reject (js/Error. "unexpected pull")))))
               (-> (js/Promise.resolve
                    ((deref #'transcript/acquire-recent-turns)
                     database "agent" 50))
@@ -229,23 +250,27 @@
                            {:rows (:seon.agent.ctx.transcript/turn-rows result)
                             :authority-calls @authority-calls
                             :index-visits @index-visits
-                            :pulled @pulled})))))]
+                            :omitted? (:seon.agent.ctx.transcript/turn-history-omitted?
+                                       result)})))))]
       (-> (run-one 50)
           (.then (fn [small]
                    (-> (run-one 1000000)
                        (.then (fn [large]
                                 (is (= 50 (count (:rows small))))
                                 (is (= 50 (count (:rows large))))
-                                (is (= [3 3]
+                                (is (= [4 4]
                                        [(:authority-calls small)
                                         (:authority-calls large)]))
-                                (is (= [52 52]
+                                (is (= [64 64]
                                        [(:index-visits small)
                                         (:index-visits large)]))
-                                (is (= (range 999951 1000001)
-                                       (map first (:rows large))))
-                                (is (= (range 1000000 999950 -1)
-                                       (:pulled large))))))))
+                                (is (every? true? [(:omitted? small)
+                                                   (:omitted? large)]))
+                                (is (apply >
+                                           (map #(.getTime ^js (second %))
+                                                (reverse (:rows large)))))
+                                (is (not (apply > (map first (:rows large))))
+                                    "eid order intentionally diverges from :at"))))))
           (.catch (fn [error] (is false (str error))))
           (.finally (fn []
                       (set! db/execute-many original-execute-many)
@@ -257,37 +282,38 @@
     (let [original-execute-many db/execute-many
           original-pull-many db/pull-many
           calls (atom 0)
-          members-seen (atom 0)
-          run-page (atom 0)]
+          index-visits (atom 0)]
       (set! db/execute-many
             (fn [request]
               (swap! calls inc)
-              (swap! members-seen + (count (::db/members request)))
-              (let [members (::db/members request)
-                    attribute (-> members first ::protocol/prefix first)]
+              (let [members (::db/members request)]
                 (js/Promise.resolve
                  {::db/results
                   (mapv
                    (fn [_member]
+                     (swap! index-visits + 64)
                      (protocol/success
-                      (if (= :seon.agent.run/agent attribute)
-                        (let [page (swap! run-page inc)
-                              base (* page 100)]
-                          {:datahike.index-page/datoms
-                           (mapv (fn [offset]
-                                   [(+ base offset)
-                                    :seon.agent.run/agent 1 offset true])
-                                 (range 16))
-                           :datahike.index-page/complete? false
-                           :datahike.index-page/cursor
-                           [(+ base 15) :seon.agent.run/agent 1 page true]})
-                        {:datahike.index-page/datoms []
-                         :datahike.index-page/complete? true})))
+                      {:datahike.index-page/datoms
+                       (mapv (fn [offset]
+                               [offset :seon.agent.turn/at
+                                (js/Date. offset) offset true])
+                             (range 64))
+                       :datahike.index-page/complete? false
+                       :datahike.index-page/cursor [63 :seon.agent.turn/at]}))
                    members)}))))
       (set! db/pull-many
-            (fn [& _]
-              (js/Promise.reject
-               (js/Error. "empty bounded history must not pull payloads"))))
+            (fn
+              ([_request]
+               (swap! calls inc)
+               (js/Promise.resolve
+                (mapv (fn [offset]
+                        {:db/id offset
+                         :seon.agent.turn/at (js/Date. offset)
+                         :seon.agent.turn/run
+                         {:seon.agent.run/agent {:seon.agent/id "other"}}})
+                      (range 64))))
+              ([_database _selector _refs]
+               (js/Promise.reject (js/Error. "unexpected pull")))))
       (-> (js/Promise.resolve
            ((deref #'transcript/acquire-recent-turns) database "agent" 50))
           (.then (fn [result]
@@ -296,9 +322,58 @@
                          result)))
                    (is (= [] (:seon.agent.ctx.transcript/turn-rows result)))
                    (is (= 8 @calls)
-                       "four run pages and four matching turn-index batches")
-                   (is (= 68 @members-seen)
-                       "four run members plus exactly 64 bounded turn members")))
+                       "four index pages and four bounded candidate pulls")
+                   (is (= 256 @index-visits))))
+          (.catch (fn [error] (is false (str error))))
+          (.finally (fn []
+                      (set! db/execute-many original-execute-many)
+                      (set! db/pull-many original-pull-many)
+                      (done)))))))
+
+(deftest oversized-usage-is-non-critical-and-marked-honestly
+  (async done
+    (let [original-execute-many db/execute-many
+          original-pull-many db/pull-many
+          main-patterns (atom [])]
+      (set! db/execute-many
+            (fn [request]
+              (let [members (::db/members request)
+                    operation (-> members first ::protocol/operation)]
+                (js/Promise.resolve
+                 (if (= operation protocol/index-page-operation)
+                   {::db/results
+                    [(protocol/success
+                      {:datahike.index-page/datoms
+                       [[1 :seon.agent.turn/at (js/Date. 1) 1 true]]
+                       :datahike.index-page/complete? true})]}
+                   {::db/results
+                    (mapv (fn [_]
+                            {::protocol/success? false
+                             ::protocol/error "result weight exceeded"})
+                          members)})))))
+      (set! db/pull-many
+            (fn
+              ([request]
+               (swap! main-patterns conj (::db/pull-pattern request))
+               (js/Promise.resolve
+                (if (str/includes? (pr-str (::db/pull-pattern request))
+                                   "seon.agent.run/agent")
+                  (candidate-turn-payloads 1)
+                  (turn-payloads 1))))
+              ([_database _selector _refs]
+               (js/Promise.reject (js/Error. "unexpected pull")))))
+      (-> (js/Promise.resolve
+           ((deref #'transcript/acquire-recent-turns) database "agent" 50))
+          (.then (fn [result]
+                   (is (= 1 (count
+                             (:seon.agent.ctx.transcript/turn-rows result))))
+                   (is (true?
+                        (:seon.agent.ctx.transcript/usage-history-omitted?
+                         result)))
+                   (is (every? #(not (str/includes? (pr-str %)
+                                                    "llm-usage"))
+                               @main-patterns)
+                       "hostile usage is absent from every bulk pull")))
           (.catch (fn [error] (is false (str error))))
           (.finally (fn []
                       (set! db/execute-many original-execute-many)
@@ -319,16 +394,7 @@
                 :seon.eval/at (js/Date. turn)
                 :seon.eval/ok? true
                 :seon.eval/ns 'my.agent.test})))
-      (set! db/pull-many
-            (fn
-              ([_request]
-               (js/Promise.resolve
-                [{:db/id 1
-                  :seon.agent.turn/at (js/Date. 1)
-                  :seon.agent.turn/run
-                  {:db/id 201 :seon.agent.run/id "run-1"}}]))
-              ([_database _selector _refs]
-               (js/Promise.reject (js/Error. "unexpected positional pull")))))
+      (set! db/pull-many (turn-pull-responder 1))
       (-> (transcript/transcript-block
             {:seon.agent/id "agent"
              :seon.agent.run/id "run-1"
@@ -385,11 +451,7 @@
                  :seon.eval/ok? true
                  :seon.eval/duration-ms 3
                  :seon.eval/ns 'my.agent.test})))
-      (set! db/pull-many
-            (fn
-              ([_request] (js/Promise.resolve (turn-payloads 1)))
-              ([_database _selector _refs]
-               (js/Promise.reject (js/Error. "unexpected positional pull")))))
+      (set! db/pull-many (turn-pull-responder 1))
       (-> (transcript/transcript-block-html
             {:seon.agent/id "agent"
              :seon.agent/entity {:db/id 1 :seon.agent/id "agent"}
@@ -466,6 +528,16 @@
                         :seon.agent.ctx.transcript/events []))]
     (is (str/includes? (pr-str hiccup) "older transcript history omitted"))))
 
+(deftest transcript-marks-history-and-usage-omission-together
+  (let [input (assoc acquired-empty
+                     :seon.agent.ctx.transcript/turn-history-omitted? true
+                     :seon.agent.ctx.transcript/usage-history-omitted? true)
+        ai (@#'transcript/format-transcript-block input)
+        html (@#'transcript/format-transcript-html input)]
+    (is (str/includes? ai "transcript history"))
+    (is (str/includes? ai "usage telemetry"))
+    (is (str/includes? (pr-str html) "history and usage telemetry omitted"))))
+
 (deftest max-content-evals-are-read-in-bounded-cacheable-pages
   (async done
     (let [requests (atom [])
@@ -486,11 +558,7 @@
                  :seon.eval/result-edn maximum-projection
                  :seon.eval/ns 'my.agent.test})
               eval-pairs))
-      (set! db/pull-many
-            (fn
-              ([_request] (js/Promise.resolve (turn-payloads 1)))
-              ([_database _selector _refs]
-               (js/Promise.reject (js/Error. "unexpected positional pull")))))
+      (set! db/pull-many (turn-pull-responder 1))
       (-> (transcript/transcript-block
             {:seon.agent/id "agent"
              :seon.agent/entity {:db/id 1 :seon.agent/id "agent"}
