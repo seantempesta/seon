@@ -89,7 +89,9 @@
    bb `bin/oracle-server` `parse-raw` op (closed-loop renoise). See
    `closed-loop-span-alignment-2026-06-28.md`."
   [code & [strip-fences?]]
-  (let [entries (internal/parse-forms code {:strip-fences? (not (false? strip-fences?))})
+  (let [entries (internal/parse-forms
+                  code
+                  {:seon.repl/strip-fences? (not (false? strip-fences?))})
         forms   (filterv #(= :form (:seon.repl/kind %)) entries)
         errors  (->> entries
                      (filter #(= :read (:seon.repl/kind %)))

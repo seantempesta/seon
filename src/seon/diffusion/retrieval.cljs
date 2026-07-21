@@ -385,7 +385,8 @@
                                   [::aliases {:optional true} ::aliases]]]
                   [:vector ::symbol-ref]]}
   [{::keys [code-buffer-text aliases]}]
-  (let [entries (internal/parse-forms code-buffer-text {:strip-fences? false})
+  (let [entries (internal/parse-forms code-buffer-text
+                                      {:seon.repl/strip-fences? false})
         forms   (->> entries (filter #(= :form (:seon.repl/kind %))) (map :seon.repl/form))
         aliases (merge (code-buffer-aliases forms) (or aliases {}))
         acc     (atom {:candidates [] :bound #{}})]
@@ -527,7 +528,8 @@
 
 (defn- unresolved-references-in
   [functions code-buffer-text aliases]
-  (let [entries (internal/parse-forms code-buffer-text {:strip-fences? false})
+  (let [entries (internal/parse-forms code-buffer-text
+                                      {:seon.repl/strip-fences? false})
         forms   (->> entries (filter #(= :form (:seon.repl/kind %)))
                      (map :seon.repl/form))
         aliases (merge (code-buffer-aliases forms) (or aliases {}))
@@ -569,7 +571,8 @@
 
 (defn- retrieve-for-code-buffer-in
   [functions code-buffer-text aliases k]
-  (let [entries (internal/parse-forms code-buffer-text {:strip-fences? false})
+  (let [entries (internal/parse-forms code-buffer-text
+                                      {:seon.repl/strip-fences? false})
         forms   (->> entries (filter #(= :form (:seon.repl/kind %)))
                      (map :seon.repl/form))
         aliases (merge (code-buffer-aliases forms) (or aliases {}))

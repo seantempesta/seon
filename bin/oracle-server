@@ -69,7 +69,9 @@
    `parse-raw` op below + closed-loop-span-alignment-2026-06-28.md)."
   ([code] (validate code true))
   ([code strip-fences?]
-  (let [entries (internal/parse-forms code {:strip-fences? strip-fences?})
+  (let [entries (internal/parse-forms
+                  code
+                  {:seon.repl/strip-fences? strip-fences?})
         forms   (filterv #(= :form (:seon.repl/kind %)) entries)
         errors  (->> entries
                      (filter #(= :read (:seon.repl/kind %)))
@@ -99,7 +101,8 @@
    `\"phase\"` when a phase gate ran). Form `:span`s come from `parse-forms`."
   ([code] (refine-parse code nil))
   ([code phase]
-   (let [entries (internal/parse-forms code {:strip-fences? false})
+   (let [entries (internal/parse-forms code
+                                       {:seon.repl/strip-fences? false})
          forms   (filter #(= :form (:seon.repl/kind %)) entries)
          reads   (filter #(= :read (:seon.repl/kind %)) entries)
          ;; broken-syntax spans (PARSE tier)
@@ -487,7 +490,9 @@
     (let [{spliced :text prefix :prefix token :token} (splice-prefix code cursor)
           rs      (delimiter-repair spliced)          ; analysis basis (sentinel)
           ro      (delimiter-repair code)             ; caller basis (no sentinel)
-          entries (internal/parse-forms (:text rs) {:strip-fences? false})
+          entries (internal/parse-forms
+                    (:text rs)
+                    {:seon.repl/strip-fences? false})
           src     (or (some (fn [e]
                               (let [s (:seon.repl/source e)]
                                 (when (and s (str/includes? s (name prefix-placeholder)))

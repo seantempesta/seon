@@ -36,7 +36,8 @@
 
 (deftest frame-parses-as-valid-clojure
   (testing "the scaffold is well-formed Clojure — three top-level forms, no read error"
-    (let [entries (internal/parse-forms frame {:strip-fences? false})
+    (let [entries (internal/parse-forms frame
+                                        {:seon.repl/strip-fences? false})
           kinds   (map :seon.repl/kind entries)
           forms   (filter #(= :form (:seon.repl/kind %)) entries)]
       (is (not-any? #{:read :error} kinds)

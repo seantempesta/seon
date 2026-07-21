@@ -1017,14 +1017,15 @@
    Markdown code-fence lines (` ``` `, ` ```clojure `, ` ~~~ `, …)
    are stripped before reading — see `strip-code-fences`.
 
-   `:strip-fences?` (opts, default true) controls that strip. Pass
+   `:seon.repl/strip-fences?` (opts, default true) controls that strip. Pass
    `false` to keep every `:seon.repl/span [s e]` an ABSOLUTE char offset into the
    EXACT input string (no fence-line removal shifting later spans). The
    closed-loop renoise path needs this: the diffusion worker's
    `offset_map` indexes the RAW `code_buffer_text`, so its parser spans must
    share that basis — see
    `docs/prds/diffusion-dynamic-context/research/closed-loop-span-alignment-2026-06-28.md`."
-  [text & [{:keys [strip-fences?] :or {strip-fences? true}}]]
+  [text & [{strip-fences? :seon.repl/strip-fences?
+            :or {strip-fences? true}}]]
   (let [text (if strip-fences? (strip-code-fences text) text)]
     ;; `pending` accumulates REAL `;;` comment lines (`;` stripped) — the
     ;; taught reasoning preamble. Bare prose is DROPPED, not accumulated,
@@ -1155,14 +1156,15 @@
    silently dropped.
 
    Delegates the token loop to [[parse-forms*]] on the rewritten text
-   (`:strip-fences?` false — this fn already stripped), then rebases every
+   (`:seon.repl/strip-fences?` false — this fn already stripped), then
+   rebases every
    entry onto the original text via the segment map."
   {:malli/schema
    [:=>
     [:cat
      :string
      [:? [:map {:closed true}
-          [:strip-fences? :boolean]]]]
+          [:seon.repl/strip-fences? :boolean]]]]
     [:vector
      [:multi {:dispatch :seon.repl/kind}
       [:form
@@ -1194,15 +1196,16 @@
        [:map {:closed true}
         [:seon.repl/kind [:= :comment]]
         [:seon.repl/narration :string]]]]]]}
-  [text & [{:keys [strip-fences?] :or {strip-fences? true}}]]
+  [text & [{strip-fences? :seon.repl/strip-fences?
+            :or {strip-fences? true}}]]
   (let [orig     (if strip-fences? (strip-code-fences text) text)
         pieces   (scan-heredoc-pieces orig)]
     (if-not pieces
       ;; No `#code/` — identity fast-path: the loop reads `orig` directly
       ;; (spans/source already on the original basis).
-      (parse-forms* orig {:strip-fences? false})
+      (parse-forms* orig {:seon.repl/strip-fences? false})
       (let [{::keys [rewritten segments markers]} (assemble orig pieces)
-            base (parse-forms* rewritten {:strip-fences? false})]
+            base (parse-forms* rewritten {:seon.repl/strip-fences? false})]
         (heredoc-remap orig (seq segments) (seq markers) base)))))
 
 ;; ============================================================

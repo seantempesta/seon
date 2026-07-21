@@ -85,6 +85,10 @@
         parse-schema (:malli/schema (meta #'parse/parse-forms))
         entry-union (-> parse-schema (nth 2) second)]
     (is (= [:=> [:cat :string] :string] strip-schema))
+    (is (= [:? [:map {:closed true}
+                  [:seon.repl/strip-fences? :boolean]]]
+           (nth (second parse-schema) 2))
+        "the public option map has one qualified key and no legacy seam")
     (is (= :vector (first (nth parse-schema 2))))
     (is (= :multi (first entry-union)))
     (is (= #{:form :read :comment}
@@ -1067,12 +1071,14 @@
     (is (= "(foo (bar" (parse/form-source-at "(foo (bar" 0)))))
 
 ;; ============================================================
-;; Generative property — the `:strip-fences?` span BASIS (renoise loop).
+;; Generative property — the `:seon.repl/strip-fences?` span BASIS.
 ;;
 ;; The closed-loop renoise driver relies on a precise relationship between the
-;; two parse bases. Parsing a `form` UNFENCED with `:strip-fences? false`
+;; two parse bases. Parsing a `form` UNFENCED with
+;; `:seon.repl/strip-fences? false`
 ;; gives its raw span [0 L]; parsing the SAME form FENCED with the default
-;; `:strip-fences? true` must give a span shifted by EXACTLY the fence-prefix
+;; `:seon.repl/strip-fences? true` must shift its span by EXACTLY the
+;; fence-prefix
 ;; length the strip leaves before the form — a uniform shift on BOTH
 ;; endpoints, nothing distorted. That is what lets the driver translate a
 ;; good-form clamp span between the stripped basis and the raw `code_buffer_text`
@@ -1080,7 +1086,8 @@
 ;;
 ;; (Note the asymmetry the strip exists to absorb: a BARE ``` fence with no
 ;; language tag is a syntax-quote reader-macro that swallows the form, so a
-;; raw `:strip-fences? false` parse of fenced text only recovers the form when
+;; a raw `:seon.repl/strip-fences? false` parse of fenced text only recovers
+;; the form when
 ;; the fence carries a lang tag — asserted CONDITIONALLY below. The default
 ;; strip path always recovers it.) Proven over GENERATED forms × fence shapes,
 ;; not a fixture pair — a failure shrinks to the smallest form+fence.
@@ -1113,7 +1120,8 @@
    when the parse yields anything other than exactly one form."
   [text strip?]
   (let [forms (filter #(= :form (:seon.repl/kind %))
-                      (parse/parse-forms text {:strip-fences? strip?}))]
+                      (parse/parse-forms text
+                                         {:seon.repl/strip-fences? strip?}))]
     (when (= 1 (count forms)) (:seon.repl/span (first forms)))))
 
 (deftest strip-fences-span-basis-property

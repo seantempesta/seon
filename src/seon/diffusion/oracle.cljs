@@ -135,7 +135,8 @@
    - `::legs` = `[:parse :retrieve]`, plus `:eval` when verdicts were folded."
   {:malli/schema [:=> [:cat ::checkpoint] ::control-set]}
   [{::keys [code-buffer-text aliases k eval-verdicts phase db]}]
-  (let [entries  (internal/parse-forms code-buffer-text {:strip-fences? false})
+  (let [entries  (internal/parse-forms code-buffer-text
+                                       {:seon.repl/strip-fences? false})
         forms    (filter #(= :form (:seon.repl/kind %)) entries)
         reads    (filter #(= :read (:seon.repl/kind %)) entries)
         ;; RETRIEVE leg — hallucinated-symbol injections (reads the graph).
