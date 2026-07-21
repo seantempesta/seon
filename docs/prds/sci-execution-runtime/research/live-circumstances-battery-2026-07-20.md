@@ -18,8 +18,8 @@ every claim is proven by database facts + rendered context, not logs.
 | # | Circumstance | Proof |
 |---|---|---|
 | L1 | Fresh agent, simple task | **PASS 2026-07-21T02:59Z** — live Muse, run opened, 3 turns, reply "done 42" (messages onke1lqp2puv/qifokquqmxiu); closing found+fixed a real class: open message-request map silently defaulted missing `to` to the USER (`4c5e288a`) — the night's three L1 blockers were all real defects (settlement key, gateway variant drift, silent recipient default) |
-| L2 | Toolkit db write (my.kb/remember) then recall NEXT turn | note datom; second turn's recall returns it (cross-turn memory) |
-| L3 | Capability call (my.fs read of an allowlisted file) | envelope in eval row; gating honored |
+| L2 | Toolkit db write (my.kb/remember) then recall NEXT turn | **PASS 2026-07-21T03:57Z** — live Muse. Part 1 (run 8321): note datom `:my.kb/claim "battery-L2 favorite=turquoise"` stored, reply "stored." (message 8388). Part 2 (run 8706, human-origin wake u6xmy0pfg5g4): recall turn queried `[?e :my.kb/claim ?c]`, eval returned `#{["battery-L2 favorite=turquoise"]}`, reply message 8800 = "turquoise". Cross-run database memory proven. A follow-up human nudge superseded the wandering run and run 9040 closed `:completed` result "turquoise" (agent called complete). Behavior note: after answering, Muse wanders (my.kb exploration) instead of completing until told — steering data, not a runtime defect |
+| L3 | Capability call (my.fs read of an allowlisted file) | **PASS 2026-07-21T04:0xZ** — live Muse, run 9093, single pass: eval row holds the full `seon.agent.fs/read-file` envelope (`:seon.agent.fs/ok? true`, file-sha `1c196adf…`, content paged honestly with token estimate + result-symbol keep path); grants at the time `{allowed-roots ["/Users/sean/src/seon"] read-only? true locked? true}`; agent replied and called `(seon.agent.lifecycle/complete "# Seon Code Conventions")` — run closed `:completed` with exactly the file's first heading |
 | L4 | Error steering: task designed to provoke one wrong call | :seon/error with directive text in transcript; agent self-corrects in the SAME run |
 | L5 | Restart mid-conversation: bin/seon restart between two messages | pending/second message wakes the agent post-restart; context renders prior transcript (THE FINDING TO VERIFY: pre-restart pending messages must wake — earlier probe suggests they may not) |
 | L6 | Concurrent agents: 3 agents driven simultaneously | all runs close :done; writer read-spend shows 3 identities |
@@ -32,7 +32,7 @@ every claim is proven by database facts + rendered context, not logs.
 |---|---|---|
 | M1 | Root delegates: message! root->task agent with a subtask | task agent's turn runs; reply hops back; root's subagents block renders it |
 | M2 | Agent spawns a subagent via the toolkit and consumes its result | spawn depth respected; run results section shows the child outcome |
-| M3 | Hop cap: a message chain hits the cap | REFUSED with the hop-exhausted warning rendering in context |
+| M3 | Hop cap: a message chain hits the cap | **PASS 2026-07-21T03:56Z** (organic) — the root↔real-hats-wave drive chain accumulated hops 1→3→5; wake trigger REFUSED message e8yov6xye7jv (root→real-hats-wave, hops 5/4) and z0dxqec1d8a2 (real-hats-wave→root, hops 4/4): no run opened for either. The hop-exhausted dead-letter renders in the live compiled-child context ("REFUSED at hops 5/4 (recipient never ran)") — proof required fixing a real defect first: the warnings block was entirely dead on grown databases (scalar results budget, fixed cd3c2d6e, issue note `warnings-instant-scalar-results-budget.md`). A human message (hops 0) demonstrably reset the chain and re-woke the agent |
 | M4 | Two agents share database state (one writes, other reads next turn) | cross-agent visibility via ordinary queries |
 
 ## Leg 3 — generate-code
