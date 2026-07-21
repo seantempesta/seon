@@ -57,6 +57,8 @@ See `README.md` for the convention.
 | [Skip the receipt reread branch after a successful eval write](successful-eval-receipt-called-state-on-nil.md) | blocker | agent |
 | [Supply the execution artifact to the production container launch](container-launch-omits-execution-artifact.md) | blocker | agent |
 | [Toolkit current-ns wedges the agent since the cljc packaging window](toolkit-current-ns-wedges-agent-after-cljc-packaging.md) | blocker | agent |
+| [Configured plan surface is absent from the live database program](configured-plan-surface-absent-from-live-program.md) | blocker | plan, rendering |
+| [Keep grown transcripts renderable within database result bounds](grown-transcript-exceeds-result-weight-budget.md) | blocker | agent, database, web, cljs |
 | [Value drill has no total work bounds](value-drill-has-no-total-work-bounds.md) | blocker | UI |
 | [Value-drill result literals failed boot schema admission](value-drill-result-literals-failed-boot-schema-admission.md) | blocker | Core |
 | [ensure-database silently creates a fresh store at any requested path](ensure-database-creates-fresh-store-at-any-path.md) | blocker | Core |

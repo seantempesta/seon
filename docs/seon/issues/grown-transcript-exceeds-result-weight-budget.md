@@ -1,6 +1,6 @@
 ---
 type: issue
-status: resolved
+status: open
 severity: blocker
 tags: [issue, agent, database, web, cljs]
 ---
@@ -123,3 +123,13 @@ executed form remains `:seon.eval/source`, and structured error datoms are
 bounded projections under the architecture's storage rule. The earlier
 suggestion that complete arbitrary eval results were already blob-backed was
 not true and is not relied upon by this correction.
+
+## Reopened evidence (2026-07-21)
+
+The exact-head Stage 1.5 restart at `c977e774` opened the root feed and again
+rendered `transcript render failed: ... datahike result-weight budget exceeded`.
+The same server-side connection successfully delivered an 18,634-byte
+Datastar patch, so transport and stale hot-reload caching are not the cause.
+The current default root history has outgrown at least one maintained paged or
+grouped member bound. Re-run instrumented acquisition against this immutable
+database value and identify the exact failing member before changing any cap.
