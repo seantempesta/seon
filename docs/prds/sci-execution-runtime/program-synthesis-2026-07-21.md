@@ -101,8 +101,16 @@ with-ctx lazy-forcing requirement; perf tax accepted at agent scale).
 4. `my.packages` (not `my.pkg`). YES.
 5. Ledger-first package authority, manifests derived. YES.
 6. Client-driven lazy respawn; `bin/seon` reaps recorded children. YES.
-7. Eval-free package hosts — PENDING (owner asked for a fuller
-   explanation before deciding).
+7. Eval-free package hosts — YES (decided after explanation). The host
+   is a runtime, not an evaluator: module graph + handle table +
+   per-call promise awaiting (the host awaits and answers with data or
+   a handle; agents never see a promise), zero code-eval surface.
+   Composition/logic stays on the sci host. Escape hatch if round-trips
+   ever bite: a batched op, never eval-in-the-host. The
+   package-capabilities P1–P7 ladder (cheerio, playwright-core,
+   pdfjs-dist, xlsx, mammoth, sharp, native-Bun teaching) is the proof
+   surface: every package built and its remote calls tested to work as
+   intended, hostile + restart gates included.
 8. Lifecycle scripts: allowlist machinery ships, but for NOW agents can
    do whatever they want — default policy is OPEN (install policy
    `:open`, lifecycle scripts trusted by default). Tighten to the
