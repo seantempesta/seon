@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 tags: [issue, test, database]
 severity: blocker
 ---
@@ -26,3 +26,10 @@ suite deterministically contaminates all later database tests.
 - The focused plan/generate-code gate remains green.
 - The complete CLJS gate has no `"terminal-message"` database-contract
   contamination.
+
+## Resolution
+
+Commit `c86ce5cf` restores `seon.db/query` in the test's existing `finally`.
+The changed-test hook passed 53 plan tests / 241 assertions, and the complete
+CLJS gate then passed 1,444 tests / 6,979 assertions with zero failures, errors,
+or compiler warnings.

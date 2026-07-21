@@ -57,7 +57,6 @@ See `README.md` for the convention.
 | [Skip the receipt reread branch after a successful eval write](successful-eval-receipt-called-state-on-nil.md) | blocker | agent |
 | [Supply the execution artifact to the production container launch](container-launch-omits-execution-artifact.md) | blocker | agent |
 | [Toolkit current-ns wedges the agent since the cljc packaging window](toolkit-current-ns-wedges-agent-after-cljc-packaging.md) | blocker | agent |
-| [Generated terminal test leaks the global database query function](generated-terminal-test-leaks-global-db-query.md) | blocker | test, database |
 | [Full writer host fixtures lack the required value-sampling policy](full-writer-host-fixtures-lack-value-sampling-policy.md) | blocker | test, rendering |
 | [Value drill has no total work bounds](value-drill-has-no-total-work-bounds.md) | blocker | UI |
 | [Value-drill result literals failed boot schema admission](value-drill-result-literals-failed-boot-schema-admission.md) | blocker | Core |
