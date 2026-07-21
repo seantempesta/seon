@@ -373,7 +373,31 @@ Unit 1G's recorded-owner sampler. Successful and honestly unavailable reads
 return one server-rendered `text/html` subtree through Datastar's existing
 non-SSE patch path; bounded 400/404/503 errors remain EDN. No ambient config,
 ambient projection, browser EDN parser, new feed, or fresh runtime selection is
-authorized. This route/auth unit is the earliest unsettled source contract.
+authorized. The implementation below consumes this frozen contract.
+
+The render crossing prerequisite is implemented by `53a77b15`. One closed
+render-owned value request carries trusted agent, selector, route base, and the
+frozen drilled projection without widening that producer contract. Stable DOM
+identity derives from agent + selector + canonical path, while paging URLs are
+JSON-safe Datastar expressions over retained original paths; offset, response
+bytes, and status never change the target id. The four-argument `render/block`
+contract now passes ordinary section context to late schema-property renderers,
+preserves tagged and explicit per-value precedence, and makes invalid,
+missing, or throwing custom dispatch visible. Focused render and migrated
+caller proof passed 59 tests / 245 assertions with zero warnings.
+
+The bounded authorized route is implemented by `4d5f3e4a`. The database-seeded
+`GET /agent/{id}/value` performs strict two-read canonical EDN and raw-percent
+framing, one mandatory immutable-database policy acquisition, configured
+admission before domain or value work, uniform missing/cross-agent absence,
+same-basis entity/schema/function projection, and recorded-owner eval sampling.
+Available and honestly unavailable results return one stable `text/html`
+subtree with `no-store` and no CORS/selector header; bounded input, absence,
+and core failures remain distinct 400/404/503 EDN. The combined route, router,
+renderer, and execution integration gate passed 183 tests / 1,035 assertions
+with zero warnings. The universal UI consumer migration is now the earliest
+dependency-ready source contract; route live proof remains part of the later
+frozen Stage 1.5 checkpoint.
 
 The final consumer cut is grounded by
 [[research/universal-data-browser-ui-migration-boundary-2026-07-20]]
