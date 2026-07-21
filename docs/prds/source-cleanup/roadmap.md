@@ -56,7 +56,7 @@ clean loop of the owning gate.
 | B7 | MCP/dev CLJS REPL cannot use `await`/`^:async`; Promises returned unresolved | `bin/mcp-server-cljs` path | **CLOSED** `8116ba1c`: transport bridge mirrors agent auto-await; five-point live proof; MCP clients must restart |
 | B10 | Default client crash-loops on reload rehost: `:seon.runtime.admission/status :publishing` -> `on-core-error :crash`; required a default cluster reset on 2026-07-20 | `seon.runtime.admission` / reload path | **CLOSED** `1098c061`: publication-scoped mark-unavailable + refusal-value prepare; reproduced twice pre-fix, reload-storm survived post-fix; issue archived |
 | B12 | dead `:seon.eval/record-error` warn check | `src/seon/warn.cljs` | **CLOSED** `0887b1ea`: check DELETED (reviewed deviation — fault datoms carry no structural discriminator, and a rewrite would duplicate `core-faults-block` as a second derived surface over the same datoms); issue archived |
-| B13 | `bin/issues-index` blocked repo-wide by illegal issue `status`/`severity` values | `docs/seon/issues/` | **REGRESSED** after `927d5b6e`+`9d638b57`: `bin/issues-index --check` again reports invalid/missing severities and misplaced `closed` notes. Source-cleanup-owned drift repaired in `6c81f026`; remaining owner-coordinated repair tracked by [[../../seon/issues/issue-authority-frontmatter-drift-blocks-index]] |
+| B13 | `bin/issues-index` blocked repo-wide by illegal issue `status`/`severity` values | `docs/seon/issues/` | **CLOSED AGAIN** `0d4169ed` after the regression: seven notes normalized, two resolved notes archived, index regenerated; `bin/issues-index --check` passes with 123 open / 362 archived |
 | B11 | Operator intermittent: `contained-one-shot-drains-a-foreign-generation-without-overlap` fails order-dependently (containment-uncertain; leaked `sleep 300` workloads suspected via shared `tmp/seon-containment`) — 1 occurrence, green in isolation and on full rerun | `test/seon/dev/process_test.clj:503` | OPEN intermittent — track with B8; unrelated to the 2026-07-20 writer terminal-result race (operator gate, not exercised by the 6x `bin/test-writer` loop), no new occurrence |
 | B8 | Writer gate intermittents: `writer-integration` release path + `query-admission` injected-release (1 occurrence each, order-dependent) | `src/seon/db/writer.clj` tests | task chip filed; 6x full-gate loop 2026-07-20: neither original recurred. The loop instead exposed a distinct race — TERM between socket bind and shutdown-hook registration lost the terminal-result publication (2/6; 20/20 in a targeted repro) — **CLOSED** `b34548b0`: hook registered before `start!`, awaits the started promise; repro 0/30, focused ns 10x green under load; note archived at `docs/seon/issues/archive/writer-terminal-result-lost-when-term-precedes-shutdown-hook.md`. Originals remain OPEN single sightings, separate in-process mechanism |
 | B9 | `test/seon/agent/ctx/canvas_test.cljs` calls `datahike.api` `create-database` directly (boundary violation) | that test | stage 5 |
@@ -75,9 +75,8 @@ the named boundaries. One stage in progress at a time at the top level.
 
 ### Stage 0 — integrate the initial cleanup lanes (graduated)
 
-B1, B2, B6, B7, and B10 are integrated with their recorded proofs. B13's
-original repair regressed as new notes entered invalid metadata; its reopened
-issue owns the bounded authority repair. B3's
+B1, B2, B6, B7, B10, and B13 are integrated with their recorded proofs. B13's
+regression is repaired by `0d4169ed` and its issue is archived again. B3's
 remaining transaction-fault verification and sync reads belong to Stage 1.
 
 ### Stage 1 — finish the async-facade migration (B3-B5)

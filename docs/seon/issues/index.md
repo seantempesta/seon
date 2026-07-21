@@ -57,7 +57,7 @@ See `README.md` for the convention.
 | [Value drill has no total work bounds](value-drill-has-no-total-work-bounds.md) | blocker | UI |
 | [ensure-database silently creates a fresh store at any requested path](ensure-database-creates-fresh-store-at-any-path.md) | blocker | Core |
 
-## Friction (72)
+## Friction (71)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -112,7 +112,6 @@ See `README.md` for the convention.
 | [Preserve distinct large BigInts in cardinality-many attributes](datahike-cljs-cardinality-many-collapses-large-bigints.md) | friction | Core |
 | [Prevent output data from becoming a phantom callable arity](callable-contract-output-data-becomes-phantom-arity.md) | friction | agent |
 | [Prove Kimi K3 completion and continuation compatibility](kimi-k3-continuation-compatibility.md) | friction | agent |
-| [Reconcile issue frontmatter with the maintained lifecycle](issue-authority-frontmatter-drift-blocks-index.md) | friction | general |
 | [Remove local Datahike ownership from execution children](execution-artifact-packages-local-datahike.md) | friction | agent |
 | [Remove the Node module-register deprecation from CSS builds](tailwind-node-module-register-deprecation.md) | friction | UI |
 | [Remove undeclared-var warnings from the self-host bootstrap build](bootstrap-analyzer-api-emits-undeclared-var-warnings.md) | friction | agent |

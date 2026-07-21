@@ -19,7 +19,7 @@ order without replacing this decision surface.
 
 ## Closed today (proof in ledger/commits)
 
-B1-B7, B10, B12 (see [[roadmap]] ledger); skills drift x2; my.data
+B1-B7, B10, B12, B13 (see [[roadmap]] ledger); skills drift x2; my.data
 envelope swallow; writer TERM-race publish loss; release --help; stray
 locks (first path); file-block proven + example; warnings block live,
 15/15 checks verified current; fragile-index H6 render-handler resolution
@@ -92,11 +92,9 @@ The four error-record test forward-reference warnings are closed by
 `ab6831a8`+`a498882a`; the focused selector passed 19 tests / 86 assertions
 with zero compiler warnings.
 
-B13's earlier metadata repair has regressed as newer issue notes entered
-invalid lifecycle/severity values. The reopened
-[[../../seon/issues/issue-authority-frontmatter-drift-blocks-index]] owns the
-bounded repair; `bin/issues-index --check` must be green again before B13
-returns to this closed section.
+B13's metadata regression is closed again by `0d4169ed`: seven notes were
+normalized, two resolved notes archived, the projection regenerated, and
+`bin/issues-index --check` passes with 123 open / 362 archived.
 
 ## Scheduled — claimed by a stage, awaiting execution order
 

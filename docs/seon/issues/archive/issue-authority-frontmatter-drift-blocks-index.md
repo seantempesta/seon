@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, architecture, index]
 ---
@@ -49,3 +49,12 @@ in `6c81f026`; the remaining named notes belong to their current issue owners
 and require one coordinated metadata-only repair before the index can be
 regenerated. This is authority drift, not evidence that the underlying product
 issues are resolved or invalid.
+
+## Resolution (2026-07-20)
+
+Commit `0d4169ed` normalized the seven remaining reported notes, moved two
+resolved top-level notes into the archive, and regenerated the derived index.
+`bin/issues-index --check` passes with 123 open and 362 archived notes; all
+eight affected Markdown files validate with zero violations and
+`git diff --check` is clean. No issue substance or unrelated source ownership
+changed.
