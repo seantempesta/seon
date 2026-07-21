@@ -560,7 +560,10 @@
              (is (= [[:seon.agent/id "caller"]]
                     (:seon.agent.message/to @message-request)))
              (let [write (first @writes)]
-               (is (= database (::db/expected-db write)))
+               ;; The root-status CAS is the ONE delivery fence — a
+               ;; whole-database expected value would fail the terminal for
+               ;; any unrelated concurrent datom and strand the root :open.
+               (is (not (contains? write ::db/expected-db)))
                (is (= [:db.fn/cas [:my.plan/id "root"]
                        :my.plan/status :open :done]
                       (first (::db/tx-data write))))

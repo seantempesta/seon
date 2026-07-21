@@ -574,6 +574,50 @@
              (set! admission/available? original-available)
              (done)))))))
 
+(deftest eval-batch-records-failed-forms-in-the-current-namespace
+  (async done
+    (let [original-start seval/start-eval!
+          original-eval seval/eval
+          original-record seval/record-eval!
+          original-available admission/available?
+          recorded-request (atom nil)
+          compile-state (atom {:cljs.analyzer/namespaces {}})]
+      (set! admission/available? (constantly true))
+      (set! seval/start-eval!
+            (fn [_]
+              (js/Promise.resolve
+               (assoc transaction-report :seon.eval/id "EVLfailed00001"))))
+      (set! seval/eval
+            (fn [_ _ _]
+              (js/Promise.resolve
+               {::seval/ok? false
+                ::seval/error {:seon.error/message "expected failure"}})))
+      (set! seval/record-eval!
+            (fn [request]
+              (reset! recorded-request request)
+              (js/Promise.resolve
+               (assoc transaction-report :seon.eval/id (::seval/eval-id request)))))
+      (-> (seval/eval-batch!
+           compile-state
+           [{:seon.repl/kind :form :seon.repl/source "(broken)"}]
+           'my.agent.receipt "AGTreceipt0001" "TRNreceipt0001" nil
+           {:seon.config/configuration configuration
+            ::seval/authored-sources {}
+            ::db/db database})
+          (.then
+           (fn [_]
+             (is (= 'my.agent.receipt (::seval/ending-ns @recorded-request)))
+             (is (nil? (::seval/require-edges @recorded-request))
+                 "a failed form records its namespace without publishing edges")))
+          (.catch (fn [error] (is false (str error))))
+          (.finally
+           (fn []
+             (set! seval/start-eval! original-start)
+             (set! seval/eval original-eval)
+             (set! seval/record-eval! original-record)
+             (set! admission/available? original-available)
+             (done)))))))
+
 (deftest unreadable-source-records-the-error-without-program-data
   (async done
     (let [original-record seval/record-eval!

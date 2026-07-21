@@ -574,7 +574,16 @@
                       (if (= :running (page-state entity)) 1 0)}}))))))))))
 
 (defn ^:async eval-batch!
-  "Evaluate one parsed batch in this agent's retained child compiler."
+  "Evaluate one parsed batch in this agent's retained child compiler.
+
+   Namespace setup targets the agent's OWN home namespace, never the derived
+   `starting-ns` — an agent that `in-ns`'d into a host-bundled toolkit ns
+   (e.g. `my.kb`) must not re-declare it with the home require vector (a
+   self-require that rewires a namespace the agent does not own). The batch
+   still evaluates in `starting-ns`; host-bundled nses need no declaration.
+   A setup failure is recorded as a fault datom with the underlying eval
+   error preserved and the batch proceeds — a broken home declaration never
+   wedges the agent."
   {:malli/schema [:=> [:cat ::eval-batch-request :any] :map]}
   [{:seon.eval/keys [parsed starting-ns]
     turn-id :seon.agent.turn/id-of-turn
@@ -584,8 +593,16 @@
         {::execution/keys [compile-state program configuration]}
         (await (prepare-program!))
         agent-id (db/current-agent-id)
-        _ (await (eval/setup-agent-ns! configuration compile-state
-                                       starting-ns agent-id))]
+        setup-ns (if agent-id (home/home-ns agent-id) starting-ns)
+        setup (await (eval/setup-agent-ns! configuration compile-state
+                                           setup-ns agent-id))
+        _ (when (and (map? setup) (string? (:seon.error/message setup)))
+            (error/with-configuration
+             configuration
+             #(error/record!
+               {::error/raw (ex-info (:seon.error/message setup)
+                                     (or (:seon.error/data setup) {}))
+                ::error/fault :core})))]
     (error/with-configuration
       configuration
       #(db/with-agent

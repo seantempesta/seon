@@ -1749,8 +1749,17 @@
    live vars into this compile-state immediately before the ns form. The clean emit also
    materializes the home ns's runtime JS object, so a later `(defn …)` has a
    path to write into — hence NO bare-`(ns)` prime and NO `(fn? complete)`
-   probe. A non-`::ok?` result now signals a REAL failure (the seed missing, or a
-   toolkit ns gone) and throws.
+   probe.
+
+   Errors are values: a non-`::ok?` result signals a REAL failure (the seed
+   missing, or a toolkit ns gone) and returns a `:seon.error/message` map
+   whose message and `:seon.error/data` PRESERVE the underlying eval error —
+   the caller records the fault and keeps the turn alive (nothing throws into
+   the agent loop, and a setup failure must never permanently wedge an agent).
+   Callers must therefore only ever pass the agent's OWN home namespace as
+   `agent-ns-sym` — re-declaring a host-bundled toolkit ns the agent merely
+   `in-ns`'d into self-requires it (the resolved home require vector names the
+   toolkit nses) and rewires a namespace the agent does not own.
 
    This is deliberately process-local reconstruction only. Durable home source
    and require-edge facts are part of `seon.agent`'s atomic birth transaction;
@@ -1760,25 +1769,26 @@
                 [::compile-state :any] [::agent-ns-sym :any]
                 [::agent-id :any]] :any]}
   [configuration compile-state agent-ns-sym agent-id]
-  (let [require-specs (await (home/home-requires-for agent-id))
-        _             (when (and (map? require-specs)
-                                 (string? (:seon.error/message require-specs)))
-                        (throw
-                         (ex-info (:seon.error/message require-specs)
-                                  require-specs)))
-        _             (seed-toolkit-refers! compile-state require-specs)
-        setup-src     (home/home-ns-form agent-ns-sym require-specs)
-        r (await (eval compile-state setup-src
-                       {:seon.config/configuration configuration
-                        ::starting-ns user-ns-sym
-                        ::analyze-deps? true}))]
-    (when-not (::ok? r)
-      (throw (ex-info
-               (str "setup-agent-ns! failed — the home-ns require/refer did not "
-                    "analyze cleanly for " agent-ns-sym ". The resolved "
-                    "home require vector must name compiled :refer members.")
-               {:agent-ns agent-ns-sym :result r})))
-    agent-ns-sym))
+  (let [require-specs (await (home/home-requires-for agent-id))]
+    (if (and (map? require-specs)
+             (string? (:seon.error/message require-specs)))
+      require-specs
+      (let [_         (seed-toolkit-refers! compile-state require-specs)
+            setup-src (home/home-ns-form agent-ns-sym require-specs)
+            r (await (eval compile-state setup-src
+                           {:seon.config/configuration configuration
+                            ::starting-ns user-ns-sym
+                            ::analyze-deps? true}))]
+        (if (::ok? r)
+          agent-ns-sym
+          {:seon.error/message
+           (str "setup-agent-ns! failed — the home-ns require/refer did not "
+                "analyze cleanly for " agent-ns-sym ": "
+                (or (some-> r :seon/error :seon.error/message)
+                    "(the eval returned no underlying error message)"))
+           :seon.error/data
+           {:seon.eval/agent-ns agent-ns-sym
+            :seon/error (:seon/error r)}})))))
 
 ;; ============================================================
 ;; eval-batch! — the REPL harness primitive. Takes parsed pairs from
@@ -4495,9 +4505,15 @@
                                 ::eval-ns        @current-ns}))
               changed-schemas (schema/changed-keys schemas-before)
               old-projection (schema/current-projection)
-              ending-ns (when (::ok? result) @current-ns)
+              ;; The recorded row's `:seon.eval/ns` (registered `:symbol`)
+              ;; is the batch's current namespace for FAILED evals too — a
+              ;; nil here made every failed-eval recording transaction fail
+              ;; schema validation and silently drop the row (live gencode
+              ;; drives 2026-07-21). Require-edge publication stays gated
+              ;; on success: a failed form moves no namespace edges.
+              ending-ns @current-ns
               require-edges
-              (when (symbol? ending-ns)
+              (when (and (::ok? result) (symbol? ending-ns))
                 (analyzer-info/ns-require-edges compile-state ending-ns))
               frozen
               {::tee-entities (vec tee-entities)

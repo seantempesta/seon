@@ -171,12 +171,22 @@
                       '[[seon.agent :refer [not-a-real-seon-agent-var]]])))]
                 (-> (seval/setup-agent-ns!
                       configuration @!cs 'my.agent.invalid-root "invalid-root")
-                    (.then (fn [_]
-                             (is false "a nonexistent referred var must fail")))
+                    (.then
+                      (fn [result]
+                        ;; Errors are values: setup returns the failure map
+                        ;; (never throws into the agent loop) and PRESERVES
+                        ;; the underlying eval error in message + data.
+                        (is (map? result)
+                            "a nonexistent referred var must fail as a value")
+                        (is (str/includes?
+                              (str (:seon.error/message result))
+                              "setup-agent-ns! failed"))
+                        (is (contains? (:seon.error/data result) :seon/error)
+                            "the underlying eval error is preserved")))
                     (.catch
                       (fn [error]
-                        (is (str/includes? (str error)
-                                           "setup-agent-ns! failed"))))))))
+                        (is false (str "setup-agent-ns! must not throw — "
+                                       error))))))))
           (.then (fn [_] (done)))
           (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
 

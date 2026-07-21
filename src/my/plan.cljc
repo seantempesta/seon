@@ -596,10 +596,15 @@
                          ::db/args [generated-eval-selector run-id turn-id
                                     eval-ids]
                          ::db/max-work 1000000
-                         ;; One result node per matched eval row PLUS the
-                         ;; relation container (live-measured 2026-07-21:
-                         ;; five eval ids observed 6 nodes).
-                         ::db/max-results (+ 2 (count eval-ids))
+                         ;; Result NODES vary with each row's pulled shape,
+                         ;; not the row count: live drives observed 6 nodes
+                         ;; for five eval ids, 16 for thirteen, and 45 for
+                         ;; eighteen (2026-07-21), so any exact per-row
+                         ;; formula strands real programs. The input is
+                         ;; already bounded by the exact ordered eval-id
+                         ;; list and the result-weight cap; this bound only
+                         ;; fails closed on a runaway relation.
+                         ::db/max-results 4096
                          ::db/max-result-weight 1048576}))
                       [])]
                 (if (:seon.error/message evidence)
@@ -959,23 +964,28 @@
     [:seon.user/id (:seon.user/id participant)]))
 
 (defn- generated-terminal-transaction-builder
-  [database message-transaction root-id terminal-status completed-at]
+  ;; The root-status CAS is the one delivery fence: it commits in the same
+  ;; transaction as the result message, so a committed terminal status always
+  ;; means its message committed, and a lost race is classified by rereading
+  ;; the committed status. A whole-database expected-value fence would fail
+  ;; the terminal for ANY unrelated concurrent datom (fault records, turn
+  ;; capture), stranding the root `:open` — the live 2026-07-21 strand.
+  [message-transaction root-id terminal-status completed-at]
   (let [build-message
         (:seon.agent.message/transaction-builder message-transaction)]
     (fn [ids]
       (let [message-request (build-message ids)]
-        (-> message-request
-            (assoc ::db/expected-db database)
-            (update
-             ::db/tx-data
-             (fn [message-data]
-               (into
-                [[:db.fn/cas [::id root-id]
-                  ::status :open terminal-status]]
-                (concat
-                 (when (= :done terminal-status)
-                   [{::id root-id ::completed-at completed-at}])
-                 message-data)))))))))
+        (update
+         message-request
+         ::db/tx-data
+         (fn [message-data]
+           (into
+            [[:db.fn/cas [::id root-id]
+              ::status :open terminal-status]]
+            (concat
+             (when (= :done terminal-status)
+               [{::id root-id ::completed-at completed-at}])
+             message-data))))))))
 
 (defn ^:async ^:private generated-terminal-race-result
   [database root-id allocation-error]
@@ -998,8 +1008,9 @@
   "Atomically close one generated root and address its caller.
 
    Root status is the delivery fence. The ordinary message row and the
-   `:open` to terminal CAS share one expected-database allocation transaction,
-   so a committed terminal status always means its result message committed."
+   `:open` to terminal CAS share one allocation transaction, so a committed
+   terminal status always means its result message committed; a lost CAS is
+   classified by rereading the committed status."
   {:malli/schema [:=> [:cat ::generated-terminal-request]
                   ::generated-terminal-response]}
   [{database ::db/db
@@ -1062,7 +1073,7 @@
                    (:seon.agent.message/allocations message-transaction)
                    ::db.id/transaction-builder
                    (generated-terminal-transaction-builder
-                    database message-transaction root-id terminal-status
+                    message-transaction root-id terminal-status
                     #?(:clj (java.util.Date.) :cljs (js/Date.)))}))]
             (if (:seon.error/message allocation)
               (await

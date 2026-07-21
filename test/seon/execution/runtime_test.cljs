@@ -8,6 +8,7 @@
    [seon.db :as db]
    [seon.db.branch :as branch]
    [seon.db.protocol :as protocol]
+   [seon.error :as error]
    [seon.eval :as eval]
    [seon.execution :as execution]
    [seon.execution.runtime :as runtime]
@@ -568,6 +569,127 @@
              (set! eval/eval-batch! original-eval)
              (set! eval/setup-agent-ns! original-setup)
              (set! db/current-agent-id original-agent)
+             (done)))))))
+
+(deftest toolkit-starting-ns-sets-up-home-and-evals-in-place
+  ;; Regression (issue toolkit-current-ns-wedges-agent-after-cljc-packaging):
+  ;; an agent whose derived current ns is a host-bundled toolkit ns (my.kb)
+  ;; must NOT have that ns re-declared with the home require vector (a
+  ;; self-require). Setup targets the agent's OWN home ns; the batch still
+  ;; evaluates in the toolkit ns.
+  (async done
+    (let [original-eval eval/eval-batch!
+          original-setup eval/setup-agent-ns!
+          original-agent db/current-agent-id
+          compile-state (atom {})
+          setup-ns (atom nil)
+          batch-ns (atom nil)
+          request
+          {:seon.eval/parsed [{:seon.repl/kind :form
+                               :seon.repl/source "(+ 1 2)"}]
+           :seon.eval/starting-ns 'my.kb
+           :seon.agent.turn/id-of-turn "turn-1"
+           :seon.agent.run/id-of-run "run-1"}]
+      (set! db/current-agent-id (fn [] "agent-1"))
+      (set! eval/setup-agent-ns!
+            (fn [_configuration _compile-state agent-ns-sym _agent-id]
+              (reset! setup-ns agent-ns-sym)
+              (js/Promise.resolve agent-ns-sym)))
+      (set! eval/eval-batch!
+            (fn [_compile-state _parsed starting-ns & _]
+              (reset! batch-ns starting-ns)
+              (js/Promise.resolve {:seon.eval/n-ok 1
+                                   :seon.eval/n-fail 0
+                                   :seon.eval/ids ["eval-1"]})))
+      (-> (db/with-tx-context
+           {::db/db database}
+           #(runtime/eval-batch!
+             request
+             (fn []
+               (js/Promise.resolve
+                {::execution/compile-state compile-state
+                 ::execution/program {}
+                 ::execution/configuration configuration}))))
+          (.then
+           (fn [result]
+             (is (= 'my.agent.agent-1 @setup-ns)
+                 "setup targets the agent's OWN home ns, never the toolkit ns")
+             (is (= 'my.kb @batch-ns)
+                 "the batch still evaluates in the derived current ns")
+             (is (= ["eval-1"] (:seon.eval/ids result)))))
+          (.catch
+           (fn [error]
+             (is false (str "eval adapter rejected: " error))))
+          (.finally
+           (fn []
+             (set! eval/eval-batch! original-eval)
+             (set! eval/setup-agent-ns! original-setup)
+             (set! db/current-agent-id original-agent)
+             (done)))))))
+
+(deftest ns-setup-failure-records-a-fault-and-still-runs-the-batch
+  ;; The runtime contract: a ns-setup failure becomes a recorded :seon/error
+  ;; fault value carrying the underlying eval error — the batch still runs,
+  ;; so the agent is never permanently wedged by its stored current ns.
+  (async done
+    (let [original-eval eval/eval-batch!
+          original-setup eval/setup-agent-ns!
+          original-agent db/current-agent-id
+          original-record error/record!
+          compile-state (atom {})
+          recorded (atom nil)
+          batch-ran (atom false)
+          setup-failure
+          {:seon.error/message "setup-agent-ns! failed — probe"
+           :seon.error/data {:seon.eval/agent-ns 'my.agent.agent-1
+                             :seon/error {:seon.error/message "underlying"}}}
+          request
+          {:seon.eval/parsed [{:seon.repl/kind :form
+                               :seon.repl/source "(+ 1 2)"}]
+           :seon.eval/starting-ns 'my.kb
+           :seon.agent.turn/id-of-turn "turn-1"
+           :seon.agent.run/id-of-run "run-1"}]
+      (set! db/current-agent-id (fn [] "agent-1"))
+      (set! error/record!
+            (fn [envelope] (reset! recorded envelope) envelope))
+      (set! eval/setup-agent-ns!
+            (fn [& _] (js/Promise.resolve setup-failure)))
+      (set! eval/eval-batch!
+            (fn [& _]
+              (reset! batch-ran true)
+              (js/Promise.resolve {:seon.eval/n-ok 1
+                                   :seon.eval/n-fail 0
+                                   :seon.eval/ids ["eval-1"]})))
+      (-> (db/with-tx-context
+           {::db/db database}
+           #(runtime/eval-batch!
+             request
+             (fn []
+               (js/Promise.resolve
+                {::execution/compile-state compile-state
+                 ::execution/program {}
+                 ::execution/configuration configuration}))))
+          (.then
+           (fn [result]
+             (is (true? @batch-ran)
+                 "the batch still runs after a setup failure (no wedge)")
+             (is (= ["eval-1"] (:seon.eval/ids result)))
+             (is (some? @recorded) "the setup failure is recorded as a fault")
+             (is (= :core (::error/fault @recorded)))
+             (let [raw (::error/raw @recorded)]
+               (is (= "setup-agent-ns! failed — probe" (ex-message raw)))
+               (is (= {:seon.error/message "underlying"}
+                      (:seon/error (ex-data raw)))
+                   "the underlying eval error is preserved in the fault"))))
+          (.catch
+           (fn [error]
+             (is false (str "eval adapter rejected: " error))))
+          (.finally
+           (fn []
+             (set! eval/eval-batch! original-eval)
+             (set! eval/setup-agent-ns! original-setup)
+             (set! db/current-agent-id original-agent)
+             (set! error/record! original-record)
              (done)))))))
 
 (deftest agent-view-projection-resolves-literal-and-async-authored-surfaces
