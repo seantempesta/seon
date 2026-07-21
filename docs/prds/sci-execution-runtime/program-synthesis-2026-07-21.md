@@ -719,21 +719,30 @@ decisions batch for their return.
   `.internal` required only by its parent. Full gates: cljs 1486/7171,
   writer 342/2584. Remaining NS-0.5c (repl.parse rename + my.plan seam
   repairs) still waits for the repl-lane handoff.
-- **W1.2a in flight** — sol medium, SOLE lane (live drive granted on
-  the default cluster), codex thread
-  `019f86b8-e932-74b2-ba6b-fdc7541157ca`, spec
-  `specs/w1.2a-writer-reconstruction.md` (`27f59bdb` — the three
-  critical gaps settled: immutable generation-named envelopes,
-  single-resolution typed handoff, narrow writer-replacement phase in
-  the one lifecycle owner; carried keys decline naming W1.5;
-  selected-processors override fix folded in). Logs
-  `tmp/orchestrator/w12a-*`. Refill after: W1.5 enforcement surfaces,
-  then W1.2b graduation, then the W1 config-facts sweep.
-  STOP 1 resolved: `agent-runtime.md:652` ("config apply does not
-  replace … processes") predates the owner's live-reconstruction
-  ruling — the lane was granted that file to reconcile the target
-  passage in the same unit (architecture updates ride the design
-  change; the ruling is authoritative).
+- **W1.2a DONE `17414541`** — config apply live-reconstructs the
+  writer for boot-critical changes: operator sequence under the stack
+  lock, immutable generation-named envelopes, single-resolution typed
+  payload (pod no longer re-reads Aero on apply), narrow
+  writer-replacement phase riding the existing admission publication
+  transition + reconnect/listener/resync path + launch equality proof;
+  selected-processors manifest override (clamped); carried keys
+  decline naming W1.5; architecture target reconciled (its stop 1).
+  LIVE-DRIVEN twice (heap 4096→3072→4096: writer pid/generation
+  swapped, pod pid stable, post-swap transactions advanced);
+  orchestrator independently proved converged-apply idempotency
+  (changed:false, ops:0, writer pid unchanged). Gates green: writer
+  342/2584, cljs 1487/7174, operator 296/1653.
+- **Weakness q20**: each writer reconstruction has a ~1-second
+  request-unavailability window (curl `000`, no 503) before recovery.
+  Owner package: W1.2b graduation (decide accept-and-document vs
+  request-parking during the swap). Observed in the W1.2a live drive.
+- **W1.5 in flight** — sol medium, sole lane (live drives granted),
+  codex thread `019f86d4-5237-7bb0-80ca-04e55db05cf0`, spec
+  `specs/w1.5-enforcement-surfaces.md` (`e92385f9`): connection
+  cap/UDS options, frame ceiling both peers (host-side path may force
+  a stop — database-free host), executor families, codec settings,
+  dispositions flip key-by-key. Refill after: W1.2b graduation → W1
+  config-facts sweep → packages WP-B∥WP-J.
 - **sol W1.2 grounding research (read-only, live-probe enabled)** in
   flight — logs `tmp/orchestrator/w12-grounding-*`; interface ledger
   for the live-writer-reconstruction spec (W0.4 pool member lifecycle,
