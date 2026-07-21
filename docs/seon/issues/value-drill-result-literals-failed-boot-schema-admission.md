@@ -10,15 +10,14 @@ severity: blocker
 ## Evidence
 
 The first restart after Unit 1E (`c1618e22` / `099f7e99`) failed before pod
-readiness. Complete boot schema admission rejected
-`:seon.render.value/available-result`: its closed map referenced literal child
-`[:= true]`, which the maintained storable-schema compiler reports as
-`:malli.core/child-error`. The unavailable and failed result branches use the
-same literal pattern and are implicated.
+readiness. Complete boot schema admission surfaced the failure at
+`:seon.render.value/available-result` as `:malli.core/child-error`, initially
+implicating its `[:= true]` child. The unavailable and failed branches used the
+same literal pattern.
 
 Unit 1E's focused 78 tests / 492 assertions did not exercise the exact complete
 boot population. The operator exited the pod cleanly with no fallback; default
-is down and no Stage 1.6 evidence from this artifact counts.
+was left down and no Stage 1.6 evidence from that artifact counted.
 
 ## Expected owner and acceptance
 
@@ -30,3 +29,25 @@ store and compile, then test all three exact result branches.
 Acceptance requires candidate and complete boot-population compilation, the
 focused renderer/config gates, a successful exact-HEAD `bin/seon up`, and the
 real `/agents/run` checkpoint after all concurrent source owners release.
+
+## Implementation evidence
+
+Commit `dc968c35` corrects the source defect. The exact indexed-population
+falsifier showed that the literal attribution was wrong: `::bounded-data`
+contained bare Malli `:vector`, whose constructor requires exactly one child.
+The recursive projection made that defect surface while compiling
+`::available-result`. The established `[:= true]` / `[:= false]`
+discriminators were already valid and remain intact.
+
+The shallow container slots now reference registered pure-EDN `vector?` and
+`map?` predicates from Malli's built-in registry. They neither enumerate child
+values nor introduce an unbounded recursive schema walk; deep validation stays
+at the later bounded producer/transport boundaries. The exact boot-indexed EDN
+round trip compiles the complete population and validates all three result
+branches. A million-entry poison map proves shallow validation performs zero
+entry visits. The focused renderer/config gate passes 80 tests and 510
+assertions.
+
+The issue remains open for the orchestrator-owned exact-HEAD startup and real
+`/agents/run` proof after concurrent source owners release. Archive it only
+with that live evidence.
