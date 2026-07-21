@@ -57,7 +57,7 @@
     ;; run before `agent-bootstrap-attrs` installs them, and so the ticker's
     ;; `fire-due-schedules!` is in the build.
     [seon.agent.schedule]
-    [seon.agent.ctx]
+    [seon.agent.ctx :as agent.ctx]
     [seon.ai :as ai]
     [seon.ai.dispatch :as ai.dispatch]
     [seon.ai.generate-code :as generate-code]
@@ -1956,12 +1956,26 @@
              :seon.db/process
              (db.process/lookup-ref :seon.db.process/config)}
             (fn ^:async reconcile-declarative! []
-              (state/reconcile!
-                {:seon.state/desired desired
-                 :seon.db/managed-scope
-                 #{:seon.db.process/boot :seon.db.process/config}
-                 :seon.db/managed-identity-attrs
-                 (desired-identity-attrs desired)}))))))))
+              (let [reconciled
+                    (await
+                     (state/reconcile!
+                      {:seon.state/desired desired
+                       :seon.db/managed-scope
+                       #{:seon.db.process/boot :seon.db.process/config}
+                       :seon.db/managed-identity-attrs
+                       (desired-identity-attrs desired)}))]
+                (if-not (:seon.state/ok? reconciled)
+                  reconciled
+                  (let [migrated
+                        (await (agent.ctx/migrate-plan-surface-default!))]
+                    (if-not (::agent.ctx/ok? migrated)
+                      {:seon.error/message (::agent.ctx/error migrated)
+                       :seon.error/kind :core-bug}
+                      (-> reconciled
+                          (update :seon.state/changed?
+                                  #(or % (::agent.ctx/changed? migrated)))
+                          (update :seon.state/operations +
+                                  (::agent.ctx/operations migrated))))))))))))))
 
 (schema/register! ::start-runtime-request
   [:map {:closed true}

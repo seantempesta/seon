@@ -4,6 +4,7 @@
    [malli.core :as m]
    [my.skills :as skills]
    [seon.agent :as agent]
+   [seon.agent.ctx :as ctx]
    [seon.agent.loop :as agent-loop]
    [seon.agent.runtime :as agent-runtime]
    [seon.ai.generate-code :as generate-code]
@@ -248,6 +249,7 @@
           original-open client/open-database-session!
           original-skills skills/seed-skills-tx-data
           original-reconcile state/reconcile!
+          original-migrate ctx/migrate-plan-surface-default!
           resolved (assoc configuration :seon.config.render/eval-cap 42)
           resolve-count (atom 0)
           opened-configuration (atom nil)
@@ -259,6 +261,7 @@
             (set! client/open-database-session! original-open)
             (set! skills/seed-skills-tx-data original-skills)
             (set! state/reconcile! original-reconcile)
+            (set! ctx/migrate-plan-surface-default! original-migrate)
             (done))
           manifest {:seon.config/render
                     {:seon.config.render/eval-cap 42}}]
@@ -284,6 +287,10 @@
                 :seon.state/changed? false
                 :seon.state/operations 0
                 :seon.state/attempts 1})))
+      (set! ctx/migrate-plan-surface-default!
+            (fn []
+              (js/Promise.resolve
+               {::ctx/ok? true ::ctx/changed? false ::ctx/operations 0})))
       (try
         (let [selected (select-configuration manifest)]
           (-> (open-startup! true selected)

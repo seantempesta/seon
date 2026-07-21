@@ -492,6 +492,12 @@
                   [:transcript 100]]
                  (order ordinary))
               "ordinary agents keep the shared context tree")
+          (is (= 'my.plan/plan-surface
+                 (->> (:seon.agent/ctx ordinary)
+                      (filter #(= :plan (:seon.agent.ctx/name %)))
+                      first
+                      :seon.render/html))
+              "new agents seed the current plan surface directly")
           (is (= [[:root-role 15]
                   [:namespaces 20]
                   [:warnings 40]

@@ -1,10 +1,71 @@
 (ns seon.ctx-test
   "Pure context formatting after database-value-pinned acquisition."
   (:require
-    [cljs.test :refer [deftest is testing]]
+    [cljs.test :refer [deftest is testing async]]
     [clojure.string :as str]
     [seon.agent.ctx :as ctx]
-    [seon.config :as config]))
+    [seon.config :as config]
+    [seon.db :as db]))
+
+(deftest plan-default-migration-is-exact-and-idempotent
+  (async done
+    (let [original-db db/db
+          original-query db/query
+          original-transact db/transact!
+          database {:db-name "default" :t 42 :as-of nil :since nil
+                    :history false
+                    :datahike/commit-id
+                    #uuid "00000000-0000-0000-0000-000000000042"}
+          queries (atom [])
+          transactions (atom [])
+          query-count (atom 0)
+          restore! (fn []
+                     (set! db/db original-db)
+                     (set! db/query original-query)
+                     (set! db/transact! original-transact)
+                     (done))]
+      (set! db/db
+            (fn
+              ([] (js/Promise.resolve database))
+              ([_] (js/Promise.resolve database))))
+      (set! db/query
+            (fn [request]
+              (swap! queries conj request)
+              (js/Promise.resolve
+               (if (= 1 (swap! query-count inc))
+                 #{[41 "my.plan.internal/plan-block-html"]}
+                 #{}))))
+      (set! db/transact!
+            (fn [& [request]]
+              (swap! transactions conj request)
+              (js/Promise.resolve
+               {:db-before database :db-after (assoc database :t 43)
+                :tx-data (::db/tx-data request)})))
+      (-> (ctx/migrate-plan-surface-default!)
+          (.then
+           (fn [first-result]
+             (is (= {::ctx/ok? true ::ctx/changed? true ::ctx/operations 1}
+                    first-result))
+             (ctx/migrate-plan-surface-default!)))
+          (.then
+           (fn [second-result]
+             (is (= {::ctx/ok? true ::ctx/changed? false ::ctx/operations 0}
+                    second-result))
+             (is (= 1 (count @transactions)))
+             (let [query (first @queries)
+                   transaction (first @transactions)]
+               (is (= [(pr-str 'my.plan.internal/plan-block-html)]
+                      (::db/args query)))
+               (is (some #{'[?block :seon.agent.ctx/name :plan]}
+                         (tree-seq coll? seq (::db/query query))))
+               (is (= [[:db.fn/cas 41 :seon.render/html
+                        "my.plan.internal/plan-block-html"
+                        "my.plan/plan-surface"]]
+                      (::db/tx-data transaction)))
+               (is (identical? database (::db/db transaction)))
+               (is (identical? database (::db/expected-db transaction))))))
+          (.catch (fn [error] (is false (str error))))
+          (.finally restore!)))))
 
 (deftest selected-blocks-are-ordinary-data
   (let [entity {:seon.agent/ctx

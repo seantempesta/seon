@@ -1560,6 +1560,8 @@
 (schema/register! ::ok?   :boolean)
 (schema/register! ::error :string)
 (schema/register! ::names [:vector :seon.agent.ctx/name])
+(schema/register! ::changed? :boolean)
+(schema/register! ::operations [:int {:min 0}])
 
 (schema/register! ::install-request
   [:or :seon.agent.ctx/block [:vector :seon.agent.ctx/block]])
@@ -1567,6 +1569,14 @@
 (schema/register! ::result
   [:or
    [:map [::ok? [:= true]]  [::names ::names]]
+   [:map [::ok? [:= false]] [::error ::error]]])
+
+(schema/register! ::migration-result
+  [:or
+   [:map
+    [::ok? [:= true]]
+    [::changed? ::changed?]
+    [::operations ::operations]]
    [:map [::ok? [:= false]] [::error ::error]]])
 
 (schema/register! ::initial-context-request
@@ -1624,6 +1634,57 @@
   (if-let [message (:seon.error/message result)]
     {::ok? false ::error (str operation " transact failed: " message)}
     {::ok? true ::names names}))
+
+(def ^:private obsolete-plan-surface 'my.plan.internal/plan-block-html)
+(def ^:private current-plan-surface 'my.plan/plan-surface)
+
+(defn ^:async migrate-plan-surface-default!
+  "Replace the obsolete platform plan renderer on copied context blocks.
+
+   This is the narrow config-apply migration for the former platform default.
+   It matches both `:plan` and the exact encoded obsolete symbol, preserving
+   customized renderers, component identity, and every other block fact."
+  {:malli/schema [:=> [:cat] ::migration-result]}
+  []
+  (let [database (await (db/db))]
+    (if-let [message (:seon.error/message database)]
+      {::ok? false ::error message}
+      (let [rows
+            (await
+             (db/query
+              {::db/db database
+               ::db/query
+               '[:find ?block ?stored
+                 :in $ ?stored
+                 :where
+                 [?block :seon.agent.ctx/name :plan]
+                 [?block :seon.render/html ?stored]]
+               ::db/args [(pr-str obsolete-plan-surface)]
+               ::db/max-work 20000
+               ::db/max-results 4096
+               ::db/max-result-weight 262144}))]
+        (if-let [message (:seon.error/message rows)]
+          {::ok? false ::error message}
+          (let [tx-data
+                (into []
+                      (mapcat
+                       (fn [[block stored]]
+                         [[:db.fn/cas block :seon.render/html stored
+                           (pr-str current-plan-surface)]]))
+                      (sort-by first rows))]
+            (if (empty? tx-data)
+              {::ok? true ::changed? false ::operations 0}
+              (let [result
+                    (await
+                     (db/transact!
+                      {::db/db database
+                       ::db/expected-db database
+                       ::db/tx-data tx-data}))]
+                (if-let [message (:seon.error/message result)]
+                  {::ok? false ::error message}
+                  {::ok? true
+                   ::changed? true
+                   ::operations (count tx-data)})))))))))
 
 (defn ^:async install!
   "Install context BLOCK(S) into the agent in scope.
