@@ -241,7 +241,16 @@ the named boundaries.
   the get-in/path value browser — never inlined. A 20-page stack trace
   is a reference the agent can follow, not a payload the agent must
   scroll past. Applies to the sci fork's error patches (W3), capability
-  host errors (W6), and every hostile-gate error shape.
+  host errors (W6), and every hostile-gate error shape. Mechanism: NOT
+  a new shape — the abridged head is the value's `:seon.render/ai` view
+  and the rich web view its `:seon.render/html` view, through the ONE
+  existing render-slot dispatch (view-bound recursion in `seon.render`;
+  slots registered in `seon.render.schema:29`; `seon.handlers.eval`'s
+  render-ai/render-html pair is the first-party idiom; ai renders
+  already clip to a token budget, `seon.config:1278`). Handles render
+  the same way: ai → compact remote reference, html → interactive
+  channel/host card — the transcript's remote annotation falls out of
+  the dispatcher.
 - **Robustness DNA**: `:seon.config/on-core-error` stays the dev
   fast-loud dial; production layering = errors-as-values (exceptions),
   interrupt merge + watchdog + pool fairness (runaways), disposable
