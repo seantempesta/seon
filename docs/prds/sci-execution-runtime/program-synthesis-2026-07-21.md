@@ -639,9 +639,21 @@ decisions batch for their return.
   persisted wake? dial renamed to `:seon.agent.lifecycle/wake?`
   (no-lock-in ruling). Full suite 1482/7163 green in-lane; rg-proven
   zero old references. Reset boundary now PENDING at integration.
-- **NS-3 render subtree** — sol low, codex thread
-  `019f8684-61ca-7d30-af4d-1874e27711fc`, spec
-  `specs/ns-3-render-subtree.md`, logs `tmp/orchestrator/ns-3-*`.
+- **NS-3 DONE `8ceaa32a`** — handlers→render.handlers, view-unit→
+  render.view-unit; rename-only, full suite 1482/7163 green, rg-proven
+  clean. Rides the same pending reset boundary as NS-2.
+- **NS-1b RESUMED** (same thread `019f8681-…cce5c7`) with the accepted
+  loader/enum/stub seams and expanded owned paths now that client.cljs
+  is free.
+- **NS-4 host decomposition** — sol medium, codex thread
+  `019f868c-da14-7012-834c-28f0ef00c0a1`, spec
+  `specs/ns-4-host-decomposition.md`, logs `tmp/orchestrator/ns-4-*`.
+  (First dispatch `019f868c-5d79-…` died instantly — a shell-`&`
+  background does not survive the orchestrator's tool-call exit; use
+  the harness background mechanism for every codex run.)
+- NS-0.5 deliberately SKIPPED for now: its repl/plan `.internal`
+  surfaces are coordinated with the repl-autosuggest lane
+  (seon-stable checkout); pick it up at a coordinated boundary.
 - Neither lane runs `bin/seon`; the orchestrator does ONE live boot
   proof after integrating both. NS-3 follows NS-2 (shared
   `client.cljs`); NS-1b follows NS-1a.
