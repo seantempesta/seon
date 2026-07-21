@@ -268,6 +268,34 @@ honest narrower-child result reserved for the later frame-consistency refusal.
 No descent, paging, lookup, transport, route, or UI behavior lands in this
 unit; deep bounded validators remain owned by those public boundaries.
 
+Unit 1F is implemented by `9c22de90`. The one `seon.render.value` producer now
+performs exact scalar map/vector descent, sequence/set head-plus-one paging,
+and honest non-pageable map windows. Rejected requests touch no live value;
+accepted sequence pages touch at most `offset + page-size + 1` items, including
+the exact shipped 1,025-touch ceiling, while a million-entry map touches five
+entries for a four-entry page and never trusts or calls the source's count.
+Hostile request maps, lookups, counts, lazy realization, marker trees, and
+result envelopes are capped or become closed failure values. Deep result
+validation is total and bounds path/scalar volume, schema rows at the owning
+32-candidate cap, explanations, errors, and sampled marker structure. Schema
+validation/explanation runs only for complete slices, and all three result
+branches round-trip through the existing Transit codec. The focused gate was
+independently rerun at 66 tests / 437 assertions with zero warnings, failures,
+or errors; an adversarial review accepted the final diff with no P0/P1.
+
+The dependency-ready transport boundary is grounded by
+[[research/unit-1g-value-sampling-transport-implementation-readiness-2026-07-20]]
+(`cfadf4e9`). Unit 1G extends the one lane-keyed execution dispatcher and both
+existing serving tiers; it does not parse HTTP. Bun samples through its
+existing child-local result slot. JVM-hosted evals currently retain no
+addressable live value after invocation, so
+[[../../seon/issues/retain-live-eval-values-in-the-owning-jvm-host]]
+(`cb64b7a1`) records the blocker and ruling: add one bounded process-local
+managed-eval-id slot inside the existing JVM host session lifecycle and sample
+there. No raw value crosses to the parent, no persisted result is reparsed, and
+retirement or tier mismatch returns honest unavailability. The later route
+unit continues to own canonical EDN and exact raw percent-encoded byte checks.
+
 Unit 1D's configuration leaves are implemented in the existing config owner:
 the closed render policy and flat singleton now carry the ruled
 32-segment/4,096-byte/1,024-item defaults, the shipped manifest states the same
