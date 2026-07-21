@@ -319,15 +319,38 @@ seantempesta/sci at `be4021d`, submodule repointed (`3c11679c`).
 Error-quality design accepted:
 [[research/error-quality-u6-w3-design-2026-07-21]] with WP-A..WP-D cut.
 
-IN FLIGHT (Codex `codex exec` sessions; resume by id with
-`codex exec resume <id> --dangerously-bypass-approvals-and-sandbox`):
-W0.3 cancel-ghost (spec `specs/w0.3-cancel-ghost.md`); W4a tier-aware
-teaching round 2, session `019f84e1-f0c6-7702-8985-c512e76173ec`,
-authorized seam = `runtime.cljs` system-text resolution + one pure
-tier-selecting renderer. A Fable design lane for W6 package hosts is
-also out. If a lane died mid-work: uncommitted changes sit in the
-shared tree on its owned paths — review the diff against its spec,
-then re-dispatch the spec fresh.
+Also accepted: **W0.3 cancel-ghost `46a304e1`** — Future.cancel(false)
+plus a token-identity check before watchdog/eval/receipt/db; a queued
+cancel leaves zero receipts and zero writes; writer gate 301/2262 green.
+
+IN FLIGHT / UNCOMMITTED:
+- **W4a tier-aware teaching — round 2, UNCOMMITTED in the tree.**
+  Modified (owned): `src/seon/agent/ctx.cljs`, `src/seon/execution/
+  runtime.cljs`, `config/system.edn`, `src/my/plan/internal.cljc`; new
+  `test/seon/agent/ctx_teaching_test.cljs`. Implemented: one pure
+  tier-aware `system-text` renderer (shared sections + one tier-selected
+  platform section), runtime tier acquisition via presence query, config
+  override kept literal shared-body, generate-code contract in both
+  texts, platform-neutral development-teaching. Focused test 4/27 green.
+  REMAINING TO ACCEPT: `runtime_test.cljs:164` asserts member indices
+  that W4a's new tier member shifted — UPDATE that test (in W4a's scope:
+  runtime.cljs is owned) to expect the added member, then full
+  bin/test-cljs green, then path-limited commit across the five paths.
+  Session id `019f84e1-f0c6-7702-8985-c512e76173ec` (resumable) or just
+  fix runtime_test directly — it's a 1-2 line index update.
+- **shell_test py-run failures are ENVIRONMENTAL, not a regression:**
+  exit 137 = SIGKILL of the python3 subprocess under machine load (5+
+  concurrent codex/fable procs during this session). Not W4a-related
+  (shell doesn't read W4a's paths; gate runs under config/test.edn).
+  Re-run seon.agent.shell-test alone on a quiet machine to confirm
+  green before trusting any full-suite count (env-coupled cljs tests).
+- **Fable W6 package-host design lane still running** (writes
+  `research/w6-package-host-design-2026-07-21.md`); a second Fable
+  lane already RETURNED the error-quality design (committed).
+
+If a lane died mid-work: uncommitted changes sit in the shared tree on
+its owned paths — review the diff against `specs/<unit>.md`, finish or
+re-dispatch.
 
 Work-order specs are durable under `specs/` (one file per unit, the
 exact text dispatched). Driving protocol:
