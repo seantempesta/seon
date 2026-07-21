@@ -41,6 +41,22 @@
   (:seon.schema.projection/catalog
     (schema/build-projection (schema/snapshot))))
 
+(deftype DiagnosticCountingMap [n visits poison-touches]
+  IMap
+  (-dissoc [this _] this)
+  ISeqable
+  (-seq [_]
+    (letfn [(entries [i]
+              (lazy-seq
+                (when (< i n)
+                  (swap! visits inc)
+                  (when (= i schema/shape-input-key-limit)
+                    (swap! poison-touches inc)
+                    (throw (js/Error. "poison beyond diagnostic key budget")))
+                  (cons [(keyword "schematest.input" (str "key-" i)) i]
+                        (entries (inc i))))))]
+      (entries 0))))
+
 (deftest every-registered-render-handler-resolves
   (let [handlers
         (for [entry (candidate-catalog)
@@ -244,12 +260,6 @@
                              [:map [shared shared]]]))
                      (range 400))
         forms (assoc shapes shared :string)
-        unrelated (into {}
-                        (map (fn [i]
-                               [(keyword "schematest.bound.input"
-                                         (str "unrelated-" i))
-                                i]))
-                        (range 400))
         visits (atom [])]
     (try
       (schema/activate-projection! (schema/build-projection forms))
@@ -257,7 +267,7 @@
                            (fn [schema-key]
                              (swap! visits conj schema-key))]
                    (schema/candidate-shapes
-                     (assoc unrelated shared "value")))]
+                     {shared "value"}))]
         (is (= schema/shape-candidate-limit (count @visits))
             "instrumented index visits, not only retained output, are capped")
         (is (= schema/shape-candidate-limit (count rows)))
@@ -266,6 +276,62 @@
                               (comp str :seon.schema/key))
                        rows)
                rows)))
+      (finally
+        (schema/restore-state! before)
+        (schema/relink-registry!)))))
+
+(deftest diagnostic-input-key-work-is-bounded-before-sorting
+  (let [before (schema/snapshot-state)
+        first-key :schematest.input/key-0
+        shape :schematest.input/shape
+        forms {first-key :int
+               shape [:map [first-key first-key]]}
+        entry-visits (atom 0)
+        poison-touches (atom 0)
+        value (DiagnosticCountingMap. 1000000 entry-visits poison-touches)]
+    (try
+      (schema/activate-projection! (schema/build-projection forms))
+      (is (= [shape]
+             (mapv :seon.schema/key (schema/candidate-shapes value))))
+      (is (= schema/shape-input-key-limit @entry-visits)
+          "the map walk stops before sorting or schema-index lookup")
+      (is (zero? @poison-touches)
+          "the first entry beyond the diagnostic window is never realized")
+      (finally
+        (schema/restore-state! before)
+        (schema/relink-registry!)))))
+
+(deftest diagnostic-window-is-construction-order-deterministic
+  (let [before (schema/snapshot-state)
+        attrs (mapv #(keyword "schematest.determinism.attr" (str "k-" %))
+                    (range 40))
+        shape-key (fn [attr]
+                    (keyword "schematest.determinism.shape" (name attr)))
+        forms (into {}
+                    (mapcat (fn [attr]
+                              [[attr :int]
+                               [(shape-key attr) [:map [attr attr]]]]))
+                    attrs)
+        entries (mapv vector attrs (range 40))
+        forward (into {} entries)
+        reverse-order (into {} (reverse entries))
+        small-entries (subvec entries 0 6)
+        small-forward (into (array-map) small-entries)
+        small-reverse (into (array-map) (reverse small-entries))]
+    (try
+      (schema/activate-projection! (schema/build-projection forms))
+      (testing "large equal persistent maps produce byte-identical row order"
+        (let [a (schema/candidate-shapes forward)
+              b (schema/candidate-shapes reverse-order)]
+          (is (= forward reverse-order))
+          (is (= a b))
+          (is (= (pr-str a) (pr-str b)))))
+      (testing "small array maps remain deterministic because all keys fit"
+        (let [a (schema/candidate-shapes small-forward)
+              b (schema/candidate-shapes small-reverse)]
+          (is (= small-forward small-reverse))
+          (is (= a b))
+          (is (= (pr-str a) (pr-str b)))))
       (finally
         (schema/restore-state! before)
         (schema/relink-registry!)))))

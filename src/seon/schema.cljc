@@ -588,6 +588,10 @@
   "Maximum schema rows examined and returned for structural diagnostics."
   32)
 
+(def ^:const shape-input-key-limit
+  "Maximum map entries examined for structural diagnostics."
+  32)
+
 (def ^:dynamic *candidate-visit!*
   "Optional test instrumentation called once per diagnostic schema visit."
   (fn [_schema-key] nil))
@@ -659,9 +663,17 @@
   [(- (count (:seon.schema/required-attrs row)))
    (str (:seon.schema/key row))])
 
-(defn- present-attrs [value]
+(defn- complete-present-attrs [value]
   (when (map? value)
     (->> (keys value) (filter keyword?) (sort-by str) vec)))
+
+(defn- diagnostic-present-attrs [value]
+  (when (map? value)
+    (into []
+          (comp (take shape-input-key-limit)
+                (map first)
+                (filter keyword?))
+          value)))
 
 (defn- diagnostic-schema-keys [projection attrs]
   (let [index (:seon.schema.projection/shape-index projection)]
@@ -691,13 +703,15 @@
         selected))))
 
 (defn candidate-shapes
-  "Bounded structural schema candidates from the activated projection.
+  "Bounded diagnostic schema window from the activated projection.
 
-   At most [[shape-candidate-limit]] indexed schema references are examined.
+   Examines at most [[shape-input-key-limit]] map entries and
+   [[shape-candidate-limit]] indexed schema references. Structural candidates
+   outside either window may be omitted, so rows never assert validity.
    Candidate declarations do not affect the result after activation."
   {:malli/schema [:=> [:catn [::value ::value]] [:vector :map]]}
   [value]
-  (if-let [attrs (seq (present-attrs value))]
+  (if-let [attrs (seq (sort-by str (diagnostic-present-attrs value)))]
     (let [{:seon.schema.shape/keys [projection]}
           (ensure-shape-generation!)
           rows (:seon.schema.projection/shape-rows projection)]
@@ -714,7 +728,7 @@
    structurally possible schemas validate and survive in deterministic order."
   {:malli/schema [:=> [:catn [::value ::value]] [:vector :map]]}
   [value]
-  (if-let [attrs (seq (present-attrs value))]
+  (if-let [attrs (seq (complete-present-attrs value))]
     (let [{:seon.schema.shape/keys [projection]}
           (ensure-shape-generation!)
           index (:seon.schema.projection/shape-index projection)
