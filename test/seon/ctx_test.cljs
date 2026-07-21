@@ -56,6 +56,10 @@
                    transaction (first @transactions)]
                (is (= [(pr-str 'my.plan.internal/plan-block-html)]
                       (::db/args query)))
+               (is (= [20000 4096 262144]
+                      [(::db/max-work query)
+                       (::db/max-results query)
+                       (::db/max-result-weight query)]))
                (is (some #{'[?block :seon.agent.ctx/name :plan]}
                          (tree-seq coll? seq (::db/query query))))
                (is (= [[:db.fn/cas 41 :seon.render/html

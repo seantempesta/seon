@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 tags: [issue, plan, rendering]
 severity: blocker
 ---
@@ -44,3 +44,25 @@ stored obsolete symbol but does not identify it in the visible card.
 - The root page and server-side feed render the plan surface without an error
   card, with no compatibility registry or hard-coded render branch.
 - A missing selected function remains a visible structured error.
+
+## Resolution
+
+Resolved by `25152c33`. Explicit configuration apply now invokes the context
+owner's narrow `migrate-plan-surface-default!` after the ordinary
+provenance-scoped state reconciliation succeeds. The migration queries only
+component blocks carrying both `:seon.agent.ctx/name :plan` and the exact
+encoded obsolete HTML symbol, then submits one database-value-fenced
+`:db.fn/cas` per match. It does not replace component entities, reseed context,
+or touch a customized renderer.
+
+Focused proof:
+
+- `seon.ctx-test` proves the exact selector and old value, component-eid CAS,
+  fixed query work/result/weight bounds, and a second apply with zero writes.
+- `seon.config-test` proves newly created agents seed `my.plan/plan-surface`
+  directly.
+- `seon.client-initialization-test` proves configuration apply retains the one
+  resolved configuration and managed state reconciliation path.
+- `seon.execution.runtime-test` remains green, including the visible
+  structured error for a genuinely missing selected function.
+- Combined focused gate: 69 tests, 340 assertions, zero failures or errors.
