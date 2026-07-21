@@ -58,6 +58,7 @@ See `README.md` for the convention.
 | [Supply the execution artifact to the production container launch](container-launch-omits-execution-artifact.md) | blocker | agent |
 | [Toolkit current-ns wedges the agent since the cljc packaging window](toolkit-current-ns-wedges-agent-after-cljc-packaging.md) | blocker | agent |
 | [Full writer host fixtures lack the required value-sampling policy](full-writer-host-fixtures-lack-value-sampling-policy.md) | blocker | test, rendering |
+| [Host sampling policy query has an invalid find shape](host-sampling-policy-query-has-invalid-find-shape.md) | blocker | database, rendering |
 | [Value drill has no total work bounds](value-drill-has-no-total-work-bounds.md) | blocker | UI |
 | [Value-drill result literals failed boot schema admission](value-drill-result-literals-failed-boot-schema-admission.md) | blocker | Core |
 | [ensure-database silently creates a fresh store at any requested path](ensure-database-creates-fresh-store-at-any-path.md) | blocker | Core |
