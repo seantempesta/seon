@@ -294,11 +294,15 @@ confirms the three registrations and registration gate are complete and found
 the two-real-child integration driver still filtering top-level `:maybe` forms
 before seeding. No semantic registration owner is reopened.
 
-Commit `748410dd` now implements the harness half: the filter is gone, complete
-population parity is asserted, and the schema-row count is emitted for the
-process evidence. Static lint reports zero errors. The issue remains open only
-for the coordinated frozen two-child run and fresh-agent rejection/correction
-probe after U4 releases the artifact.
+Commit `748410dd` implements the harness half: the filter is gone, complete
+population parity is asserted, and the schema-row count is emitted for process
+evidence. The first frozen run then exposed a stale pre-symbol-migration driver
+artifact. Commit `95d94666` loads the missing production schema owner and adds
+a direct canonical `:seon.ns/name` assertion before publication. A rebuilt
+driver passed the selective writer gate at 1 test / 27 assertions with 1,807
+unfiltered schema rows, two distinct real children, database advancement,
+bounded stuck-child retirement, and replacement-process proof. The remaining
+G1/G2 exit is the fresh-agent rejection/correction probe.
 
 G8's non-canvas checkpoint is `d883bb05` with issue evidence in `f14219a3`:
 the registry-derived audit covers 25 request maps across `my.blob`, `my.data`,

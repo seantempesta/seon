@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 tags: [testing, runtime, schema, issue]
 severity: blocker
 ---
@@ -49,3 +49,16 @@ Acceptance requires:
   replacement-process proof; and
 - a new exact-HEAD default artifact before Stage 1.6 live/browser observations
   resume.
+
+## Resolution
+
+Resolved by `95d94666`. The driver now loads `seon.agent.runtime`, the missing
+production schema owner in its test-only publisher graph, and fails before its
+transaction unless `:seon.ns/name` is the canonical symbol identity. The
+complete keyword-keyed registry population remains unfiltered and count-equal.
+
+After rebuilding `:execution-integration-client`, the selective writer gate
+passed 1 test / 27 assertions with 1,807 submitted schema rows. The proof used
+two real children with distinct PIDs, advanced the database from basis
+transaction 536870917 to 536870918, retired the bounded stuck child, kept the
+other child responsive, and replaced the retired process with a new PID.
