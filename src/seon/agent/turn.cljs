@@ -134,6 +134,8 @@
 ;; turn's database value and is projected here only as the non-secret values
 ;; actually used. Absence remains absence.
 (schema/register! :seon.ai.attempt/ordinal :int)
+(schema/register! :seon.ai.attempt/fallback-variant
+                  :seon.config/model-variant)
 (schema/register! :seon.ai.attempt/provider :seon.ai/provider)
 (schema/register! :seon.ai.attempt/adapter :seon.ai/adapter)
 (schema/register! :seon.ai.attempt/requested-model :seon.ai/model)
@@ -163,6 +165,8 @@
 (schema/register! :seon.ai.attempt/entity
   [:map {:seon.db/entity true}
    [:seon.ai.attempt/ordinal :seon.ai.attempt/ordinal]
+   [:seon.ai.attempt/fallback-variant
+    {:optional true} :seon.ai.attempt/fallback-variant]
    [:seon.ai.attempt/provider :seon.ai.attempt/provider]
    [:seon.ai.attempt/adapter :seon.ai.attempt/adapter]
    [:seon.ai.attempt/requested-model {:optional true} :seon.ai.attempt/requested-model]
@@ -734,13 +738,24 @@
    a total-duration ceiling. The retry count comes from the same immutable
    ordinary config resolution as the provider request; absent/`:inherit`
    retains the established default of four retries."
-  [resolution]
+  ([resolution]
+   (llm-retry-strategy resolution 0))
+  ([resolution retry-reduction]
   (-> (retry/multiplicative-strategy llm-retry-base-ms llm-retry-factor)
       (retry/randomize-strategy llm-retry-jitter)
       (retry/clamp-delay llm-retry-max-delay-ms)
-      (retry/max-retries (or (:seon.ai/agent-max-retries resolution)
-                             llm-retry-default-n))
-      (retry/max-duration llm-retry-total-cap-ms)))
+      (retry/max-retries
+       (max 0 (- (or (:seon.ai/agent-max-retries resolution)
+                     llm-retry-default-n)
+                 retry-reduction)))
+      (retry/max-duration llm-retry-total-cap-ms))))
+
+(defn- llm-fallback-eligible?
+  "True when exhausted provider work may advance to the configured fallback."
+  [resp]
+  (boolean
+   (or (llm-retryable? resp)
+       (true? (get-in resp [:seon.ai/error :seon.ai/timeout?])))))
 
 (defn- attempt-outcome
   [response outer-timeout?]
@@ -752,7 +767,8 @@
 
 (defn- attempt-row
   "One bounded queryable component row from immutable request evidence."
-  [ordinal resolution outer-timeout-ms stream? response outer-timeout?]
+  [ordinal fallback-variant resolution outer-timeout-ms stream? response
+   outer-timeout?]
   (let [config (:seon.ai/resolved-config resolution)
         raw (or (:seon.ai/raw response) response)
         credential (get-in raw [:seon.ai/config-evidence
@@ -783,6 +799,8 @@
        :seon.ai.attempt/outer-timeout-ms outer-timeout-ms
        :seon.ai.attempt/stream? stream?
        :seon.ai.attempt/outcome (attempt-outcome response outer-timeout?)}
+      fallback-variant
+      (assoc :seon.ai.attempt/fallback-variant fallback-variant)
       (:seon.ai/model config)
       (assoc :seon.ai.attempt/requested-model (:seon.ai/model config))
       (contains? config :seon.ai/temperature)
@@ -861,7 +879,8 @@
    canonical request map. In repl-mode `:stream`, `:seon.ai/stream? true` asks
    the adapter to consume the SDK stream and stop it at the first complete
    form. Every retry gets a fresh controller."
-  [id ordinal resolution llm-fn prompt-text system-prompt stream?]
+  [id ordinal fallback-variant resolution llm-fn prompt-text system-prompt
+   stream?]
   (let [ms         (effective-llm-attempt-timeout-ms resolution)
         controller (js/AbortController.)
         signal     (.-signal controller)
@@ -884,7 +903,8 @@
               :seon.ai/timeout? true}}
             v)]
       (assoc response ::attempt-row
-             (attempt-row ordinal resolution ms (boolean stream?)
+             (attempt-row ordinal fallback-variant resolution ms
+                          (boolean stream?)
                           response outer-timeout?)))))
 
 (defn ^:async ^:private call-llm!
@@ -901,29 +921,46 @@
   `:seon.agent.turn/llm-retries n` so the turn record is honest."
   [id id-of-turn resolution llm-fn prompt-text system-prompt stream?]
   (let [!attempts (atom [])
-        {:seon.retry/keys [result retries]}
-        (await
-          (retry/with-retry!
+        run-resolution!
+        (fn ^:async run-resolution!
+          [fallback-variant active-resolution retry-reduction]
+          (await
+           (retry/with-retry!
             {:seon.retry/thunk
              (fn ^:async run-attempt! []
                (let [ordinal (count @!attempts)
                      response
-                     (await (bounded-llm-attempt! id ordinal resolution
-                                                  llm-fn prompt-text
-                                                  system-prompt stream?))]
+                     (await
+                      (bounded-llm-attempt!
+                       id ordinal fallback-variant active-resolution llm-fn
+                       prompt-text system-prompt stream?))]
                  (swap! !attempts conj (::attempt-row response))
                  (dissoc response ::attempt-row)))
-             :seon.retry/strategy (llm-retry-strategy resolution)
-             :seon.retry/retry?   llm-retryable?
-             :seon.retry/override (fn [resp]
-                                    (some-> (get-in resp [:seon.ai/error
-                                                          :seon.ai/retry-after-ms])
-                                            (min llm-retry-max-delay-ms)))
+             :seon.retry/strategy
+             (llm-retry-strategy active-resolution retry-reduction)
+             :seon.retry/retry? llm-retryable?
+             :seon.retry/override
+             (fn [resp]
+               (some-> (get-in resp [:seon.ai/error
+                                     :seon.ai/retry-after-ms])
+                       (min llm-retry-max-delay-ms)))
              :seon.retry/on-retry
              (fn [{:seon.retry/keys [attempt delay-ms result]}]
                (log id "llm transient error — retry"
                     (str attempt " in " delay-ms "ms — "
-                         (get-in result [:seon.ai/error :seon.ai/msg]))))}))]
+                         (get-in result [:seon.ai/error :seon.ai/msg]))))})))
+        primary (await (run-resolution! nil resolution 0))
+        fallback-variant (:seon.ai/fallback-variant resolution)
+        fallback-resolution (:seon.ai/fallback-config-resolution resolution)
+        fallback
+        (when (and fallback-variant fallback-resolution
+                   (llm-fallback-eligible? (:seon.retry/result primary)))
+          (log id "llm primary exhausted — fallback" (name fallback-variant))
+          (await (run-resolution! fallback-variant fallback-resolution 1)))
+        result (or (:seon.retry/result fallback)
+                   (:seon.retry/result primary))
+        retries (+ (:seon.retry/retries primary)
+                   (or (:seon.retry/retries fallback) 0))]
     (cond-> (assoc result :seon.agent.turn/llm-attempts @!attempts)
       (pos? retries) (assoc :seon.agent.turn/llm-retries retries))))
 

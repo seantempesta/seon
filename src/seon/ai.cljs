@@ -436,6 +436,10 @@
 (schema/register! ::agent-max-retries [:or {:default :inherit} [:enum :inherit] [:int {:min 0}]])
 (schema/register! ::agent-attempt-timeout-ms
                   [:or {:default :inherit} [:enum :inherit] ::timeout-ms])
+(schema/register! ::agent-fallback-variant
+                  [:or {:default :inherit}
+                   [:enum :inherit]
+                   :seon.config/model-variant])
 (schema/register!
  ::agent-config
  [:map {:seon.db/entity true}
@@ -452,7 +456,8 @@
   [::agent-dg-backend {:optional true} ::agent-dg-backend]
   [::agent-extra-body-edn {:optional true} ::agent-extra-body-edn]
   [::agent-max-retries {:optional true} ::agent-max-retries]
-  [::agent-attempt-timeout-ms {:optional true} ::agent-attempt-timeout-ms]])
+  [::agent-attempt-timeout-ms {:optional true} ::agent-attempt-timeout-ms]
+  [::agent-fallback-variant {:optional true} ::agent-fallback-variant]])
 ;; PARKED (decision 21): ::agent-context-window — a NEW input budget,
 ;; nothing enforces it today. Deferred to phase 2.
 
@@ -571,7 +576,8 @@
   "Pull pattern for one agent's ordinary LLM override values."
   {:malli/schema [:=> [:cat] [:vector :keyword]]}
   []
-  (into [:seon.agent/id ::agent-max-retries ::agent-attempt-timeout-ms]
+  (into [:seon.agent/id ::agent-max-retries ::agent-attempt-timeout-ms
+         ::agent-fallback-variant]
         (keys agent-override-attrs)))
 
 (defn- decode-agent-override
@@ -603,6 +609,12 @@
                       decode-agent-override)]
     (when (int? value) value)))
 
+(defn- agent-row-fallback-variant
+  [agent]
+  (let [value (some-> (::agent-fallback-variant agent)
+                      decode-agent-override)]
+    (when (keyword? value) value)))
+
 (schema/register! ::agent-id [:string {:min 1}])
 
 ;; WHERE a resolved value came from — provenance by DERIVATION (the
@@ -624,13 +636,22 @@
    [:seon.config.model-transport/response-identity-cap {:optional true} ::source]
    [:seon.config.model-transport/endpoint-cap {:optional true} ::source]
    [::extra-body-digest {:optional true} ::source]])
-(schema/register! ::resolved-config-response
+(schema/register! ::provider-config-resolution
   [:map
    [::resolved-config ::resolved-config]
    [::provenance      ::provenance]
    [::agent-max-retries {:optional true} ::agent-max-retries]
    [::agent-attempt-timeout-ms {:optional true} ::agent-attempt-timeout-ms]
    [::extra-body      {:optional true} ::extra-body]])
+(schema/register! ::resolved-config-response
+  [:map
+   [::resolved-config ::resolved-config]
+   [::provenance      ::provenance]
+   [::agent-max-retries {:optional true} ::agent-max-retries]
+   [::agent-attempt-timeout-ms {:optional true} ::agent-attempt-timeout-ms]
+   [::extra-body      {:optional true} ::extra-body]
+   [::fallback-variant {:optional true} :seon.config/model-variant]
+   [::fallback-config-resolution {:optional true} ::provider-config-resolution]])
 (schema/register! ::config-resolution ::resolved-config-response)
 (schema/register! ::request
   [:map {:closed true}
@@ -724,21 +745,35 @@
    [:=> [:catn [::config-row ::row] [::agent-row :map]]
     ::resolved-config-response]}
   [config-row agent-row]
-  (cond->
-   (resolve-config-values
-    (select-keys config-row config-attrs)
-    (agent-row-override-values agent-row)
-    (into {}
-          (keep (fn [attr]
-                  (when (contains? config-row attr)
-                    [attr [(get config-row attr) :config-row]])))
-          model-transport-cap-attrs))
-    (some? (agent-row-max-retries agent-row))
-    (assoc ::agent-max-retries (agent-row-max-retries agent-row))
-    true
-    (assoc ::agent-attempt-timeout-ms
-           (or (agent-row-attempt-timeout-ms agent-row)
-               (config/llm-attempt-timeout-ms)))))
+  (let [transport-caps
+        (into {}
+              (keep (fn [attr]
+                      (when (contains? config-row attr)
+                        [attr [(get config-row attr) :config-row]])))
+              model-transport-cap-attrs)
+        attempt-timeout-ms (config/llm-attempt-timeout-ms)
+        provider-resolution
+        (fn [row]
+          (cond->
+           (resolve-config-values
+            (select-keys config-row config-attrs)
+            (agent-row-override-values row)
+            transport-caps)
+            (some? (agent-row-max-retries row))
+            (assoc ::agent-max-retries (agent-row-max-retries row))
+            true
+            (assoc ::agent-attempt-timeout-ms
+                   (or (agent-row-attempt-timeout-ms row)
+                       attempt-timeout-ms))))
+        primary (provider-resolution agent-row)
+        fallback-variant (agent-row-fallback-variant agent-row)
+        fallback-row (get (:seon.config/model-variants config-row)
+                          fallback-variant)]
+    (cond-> primary
+      (and fallback-variant (map? fallback-row))
+      (assoc ::fallback-variant fallback-variant
+             ::fallback-config-resolution
+             (provider-resolution fallback-row)))))
 
 (defn bounded-evidence-error
   "Bound an evidence error using one resolved positive cap."

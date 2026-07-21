@@ -286,6 +286,8 @@
     {:optional true} [:or [:enum :inherit] [:int {:min 0}]]]
    [:seon.ai/agent-attempt-timeout-ms
     {:optional true} [:or [:enum :inherit] :int]]
+   [:seon.ai/agent-fallback-variant
+    {:optional true} [:or [:enum :inherit] :keyword]]
    ;; Turn grammar is launch-role data too. A planning or generated repair
    ;; agent must be able to consume one multi-namespace batch without changing
    ;; the cluster default used by ordinary agents.

@@ -294,7 +294,14 @@
    :seon.ai/agent-api-key-env "MOONSHOT_API_KEY"
    ;; One retry only for the transient 429/5xx/transport class. This follows
    ;; Kimi's reliability guidance while bounding an expensive planning call.
-   :seon.ai/agent-max-retries 1}
+   :seon.ai/agent-max-retries 1
+   :seon.ai/agent-fallback-variant :muse}
+  :muse
+  {:seon.ai/agent-provider :openai-compat
+   :seon.ai/agent-model "muse-spark-1.1"
+   :seon.ai/agent-thinking "minimal"
+   :seon.ai/agent-base-url "https://api.meta.ai/v1"
+   :seon.ai/agent-api-key-env "META_MODEL_API_KEY"}
   :execution
   {:seon.ai/agent-provider :deepseek
    :seon.config/repl-mode :batch
