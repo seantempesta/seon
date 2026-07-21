@@ -102,7 +102,7 @@ normalized, two resolved notes archived, the projection regenerated, and
 | Item | Stage | Evidence |
 |---|---|---|
 | Adversarial strengthened fixes (20, folded) | per PRD | [[research/adversarial-review-findings-2026-07-20]] |
-| Steering gaps G1-G4 + proposed G8-G11 extensions | 1.6 | [[research/corrective-steering-audit-2026-07-20]], triage §gaps |
+| Steering gaps G1-G4 + proposed G8-G11 extensions | 1.6 | [[research/corrective-steering-audit-2026-07-20]], [[research/stage1-6-live-graduation-runbook-2026-07-20]], triage §gaps |
 | Pod→client/cluster rename (freeze protocol, persisted forms; current owner/process/worktree/port blockers) | 2 | pod plan, [[research/stage2-freeze-readiness-delta-2026-07-20]] |
 | Logging format unification, timbre grounding; paired current-generation live/tail/hygiene gate | 3 | [[logging-unification]], [[research/logging-live-graduation-boundary-2026-07-20]] |
 | Config through aero, pinned database/config operation pair on Bun and JVM, grants seam | 4 | [[config-through-aero]], [[research/per-operation-config-boundary-2026-07-20]] |

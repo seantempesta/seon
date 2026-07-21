@@ -250,6 +250,18 @@ integration pass. The independent full writer gate also passes 259 tests /
 paths were CLJS-only. This is useful
 integration evidence, not the final twice-frozen graduation run.
 
+The one-session frozen live procedure is now
+[[research/stage1-6-live-graduation-runbook-2026-07-20]] (`82b5a824`). It
+records one source/artifact digest, runs the focused gates and unfiltered
+two-child count, then uses one fresh real agent for G1/G2 correction, exact-byte
+G3/G9 narration, four native G10 shapes plus behavioral reuse, and the
+agent-authored G11 canvas lifecycle. Narrow/wide browser observations are
+paired with a server-side identity-encoded SSE feed, usage and rendered-turn
+readback, explicit abort conditions, and issue-by-issue dispositions. U4 source
+and `u15` are released; the checkpoint still waits for its three owned drill
+scripts to be committed and handed off. Stage 1.5 generic rendering and Stage
+5 debug/result-union work remain explicitly outside this proof.
+
 Corrective-steering G10's record-time half is implemented by `418a3844`:
 successful `db/query` results carry a deterministic readable-EDN comment that
 distinguishes scalar, tuple, collection, and relation find shapes without
