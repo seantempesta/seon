@@ -22,7 +22,7 @@
     [malli.core :as m]
     [malli.registry :as mr]
     [seon.agent]
-    [seon.agent.runtime]
+    [seon.agent.lifecycle]
     [seon.eval :as seval]
     [seon.handlers.eval]
     [seon.handlers.fn]

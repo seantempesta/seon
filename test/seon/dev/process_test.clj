@@ -1413,7 +1413,7 @@
          :seon.client/quiesced-run-ids []
          :seon.client/completed-turn-ids []
          :seon.client/errored-turn-ids []
-         :seon.agent.runtime/unhosted-ids []}]
+         :seon.agent.lifecycle/unhosted-ids []}]
     (with-redefs [process/read-process (fn [_ _] {:record true})
                   process/stop!
                   (fn [_ id & _]
@@ -1457,7 +1457,7 @@
                       :seon.client/quiesced-run-ids []
                       :seon.client/completed-turn-ids []
                       :seon.client/errored-turn-ids []
-                      :seon.agent.runtime/unhosted-ids []}})]
+                      :seon.agent.lifecycle/unhosted-ids []}})]
       (try
         (process/clean-or-force!
          {:seon.dev.process/configuration configuration
@@ -1563,7 +1563,7 @@
          :seon.client/quiesced-run-ids []
          :seon.client/completed-turn-ids []
          :seon.client/errored-turn-ids []
-         :seon.agent.runtime/unhosted-ids []}
+         :seon.agent.lifecycle/unhosted-ids []}
         configuration {:seon.dev.config/http-port-file port-file}]
     (try
       (with-open [server (ServerSocket. 0)]

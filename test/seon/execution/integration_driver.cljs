@@ -3,7 +3,7 @@
   (:require
    [cljs.reader :as reader]
    [seon.agent]
-   [seon.agent.runtime]
+   [seon.agent.lifecycle]
    [seon.db :as db]
    [seon.db.protocol :as protocol]
    [seon.execution :as execution]

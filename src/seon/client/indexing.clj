@@ -1,4 +1,4 @@
-(ns seon.indexing
+(ns seon.client.indexing
   "Compile-time enumeration of the CLJS build's program-graph surface.
 
    Self-host CLJS has no runtime `resolve` (it's a compile-time macro), so

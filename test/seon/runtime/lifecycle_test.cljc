@@ -11,7 +11,7 @@
    :seon.client/quiesced-run-ids ["f5m5ckg3k2pf"]
    :seon.client/completed-turn-ids ["turn-1"]
    :seon.client/errored-turn-ids []
-   :seon.agent.runtime/unhosted-ids ["root"]})
+   :seon.agent.lifecycle/unhosted-ids ["root"]})
 
 (deftest quiesce-response-is-one-closed-portable-contract
   (testing "both success and failure lifecycle data validate"

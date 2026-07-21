@@ -34,7 +34,6 @@
     [seon.ai.tokens :as tokens]
     [seon.agent.debug :as agent-debug]
     [seon.agent.lifecycle :as lifecycle]
-    [seon.agent.runtime :as agent-runtime]
     [seon.agent.run :as run]
     [seon.config :as config]
     [seon.db :as db]
@@ -522,7 +521,7 @@
       (.then
         (fn [result]
           (write-status! res
-                         (if (:seon.state/ok? result) 200 422)
+                         (if (:seon.runtime.state/ok? result) 200 422)
                          "application/edn; charset=utf-8"
                          (pr-str result))))
       (.catch
@@ -533,8 +532,8 @@
             (log/error-console! "seon.web.serve" "config apply failed"
                                 {:seon.error/message message})
           (write-status! res 422 "application/edn; charset=utf-8"
-                         (pr-str {:seon.state/ok? false
-                                  :seon.state/error
+                         (pr-str {:seon.runtime.state/ok? false
+                                  :seon.runtime.state/error
                                   message})))))))
 
 (defn- ^:async clear-agent! [agent-id]
@@ -652,13 +651,13 @@
                     (agent/start! request))))))))
       (.then
         (fn [{id :seon.agent/id :as result}]
-          (if (and id (not= false (:seon.agent.runtime/resumed? result)))
+          (if (and id (not= false (:seon.agent.lifecycle/resumed? result)))
             (do
               (log/info-console! "seon.web.serve" "POST /agents OK"
                                  {:agent id})
               (write-status! res 200 "text/plain; charset=utf-8" (str id)))
             (let [message (or (:seon.error/message result)
-                              (:seon.agent.runtime/error result)
+                              (:seon.agent.lifecycle/error result)
                               "agent creation returned no id")]
               (log/error-console! "seon.web.serve" "POST /agents refused" message)
               (write-status! res
@@ -1551,7 +1550,7 @@
         (if (or (:seon.error/message minted)
                 (nil? aid))
           {:error (or (:seon.error/message minted)
-                      (:seon.agent.runtime/error minted)
+                      (:seon.agent.lifecycle/error minted)
                       "agent task could not host its durable agent")}
           (let [start (js/Date.now)
                 injected-at start
@@ -1565,10 +1564,10 @@
               {:error (:seon.error/message message-result)}
               (let [resumed (when reuse?
                               (await
-                               (agent-runtime/resume!
+                               (lifecycle/resume!
                                 {:seon.agent/id aid})))]
-                (if (false? (::agent-runtime/resumed? resumed))
-                  {:error (or (::agent-runtime/error resumed)
+                (if (false? (::lifecycle/resumed? resumed))
+                  {:error (or (::lifecycle/error resumed)
                               "agent task could not host its durable agent")}
                   (do
                     (log/info-console! "seon.web.serve"

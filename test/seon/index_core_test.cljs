@@ -373,7 +373,7 @@
   ;; value — the malformed shape the Run-3 findings traced to the second boot.
   ;;
   ;; DERIVED expectations: the indexed vars now come from the compile-time
-  ;; `seon.indexing/public-fn-vars` macro over EVERY public first-party fn
+  ;; `seon.client.indexing/public-fn-vars` macro over EVERY public first-party fn
   ;; in the whole build closure — specced OR not (owner directive 'just
   ;; index everything'; the hand-curated inclusion list is gone). Never
   ;; assert a hardcoded count (the old `= 14` broke whenever the var set

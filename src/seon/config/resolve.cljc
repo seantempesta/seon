@@ -251,7 +251,7 @@
 ;;       declared HERE (referencing their owning ns's registered shape) so the
 ;;       recursive decode validates overrides before `seon.agent` includes
 ;;       them in the atomic birth transaction. Default = today's value ⇒ parity.
-;; The persisted agent-level dials (`:seon.agent.runtime/wake?`, `:seon.eval/home-requires`)
+;; The persisted agent-level dials (`:seon.agent.lifecycle/wake?`, `:seon.eval/home-requires`)
 ;; carry NO schema `:default` here — their DEFAULT lives ONCE at the CONSUMER
 ;; (the runtime's acquired wake value → true; `seon.agent.home/home-requires-for` → the
 ;; `home-ns-require-specs` const). So a no-config agent never gets the datom
@@ -316,7 +316,7 @@
    (into
     [:map
      ;; Persisted agent datoms — override-only (no default; consumer owns it).
-     [:seon.agent.runtime/wake? {:optional true} :boolean]
+     [:seon.agent.lifecycle/wake? {:optional true} :boolean]
      [:seon.eval/home-requires {:optional true} [:vector :any]]
      [:seon.agent/ctx {:optional true :default []} [:vector :map]]]
     agent-model-config-entries)
@@ -464,7 +464,7 @@
 ;;; the established mixed-`:or` EDN-slot bridge. The homogeneous web allowlist
 ;;; keeps its installed cardinality-many string contract; exact config
 ;;; reconciliation retracts removed values before asserting the desired set. The
-;;; singleton is ONE entity in the boot `#{:config}` `seon.state/reconcile!`
+;;; singleton is ONE entity in the boot `#{:config}` `seon.runtime.state/reconcile!`
 ;;; desired set (routes/skills pattern) — upsert-by-identity keeps it current +
 ;;; retract-protected; NO second mechanism.
 ;;; ============================================================

@@ -1,4 +1,4 @@
-(ns seon.state
+(ns seon.runtime.state
   "Reconcile managed database facts with desired system state.
 
    The managed slice is defined by PROVENANCE, not a taxonomy: a row is
@@ -469,9 +469,9 @@
     (await (db/db))))
 
 (defn ^:async reconcile!
-  "Make the MANAGED datoms match `:seon.state/desired`.
+  "Make the MANAGED datoms match `:seon.runtime.state/desired`.
 
-   `:seon.state/desired` is a vector of entity-maps. The authority returns the
+   `:seon.runtime.state/desired` is a vector of entity-maps. The authority returns the
    managed rows and installed schema at ONE immutable database value. The compiler
    consumes that ordinary data and makes these attribute / connection moves —
    no Datahike handle and no entity 'kind' loop:
@@ -495,14 +495,14 @@
    appropriate boot or config process — the
    re-added rows then stay managed for the next reconcile. Errors are values:
    a desired map lacking exactly one identity attr comes back as
-   `{:seon.state/ok? false :seon.state/error …}`. A database failure remains
+   `{:seon.runtime.state/ok? false :seon.runtime.state/error …}`. A database failure remains
    its direct `:seon.error/message` value.
 
      (db/with-tx-context {:seon.db/user [:seon.agent/id \"root\"]
                           :seon.db/process
                           [:seon.db.process/id :seon.db.process/boot]}
-       (fn [] (seon.state/reconcile!
-                {:seon.state/desired    [{:seon.route/name :main …} …]
+       (fn [] (seon.runtime.state/reconcile!
+                {:seon.runtime.state/desired    [{:seon.route/name :main …} …]
                  :seon.db/managed-scope
                  #{:seon.db.process/boot :seon.db.process/config}
                  :seon.db/managed-identity-attrs
@@ -568,7 +568,7 @@
                              "reconcile! transact returned neither a transaction report nor an error."
                              :seon.error/kind :core-bug
                              :seon.error/data
-                             {:seon.state/result result}}))))))))))))
+                             {:seon.runtime.state/result result}}))))))))))))
     (catch :default exception
       (let [value (error/->map exception)]
         (cond-> value

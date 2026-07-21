@@ -831,10 +831,10 @@
                            (thunk))
        #'cli/apply-live-config! (fn [value]
                                   (swap! calls conj [:apply value])
-                                  {:seon.state/ok? true
-                                   :seon.state/changed? false
-                                   :seon.state/operations 0
-                                   :seon.state/basis-t 42})
+                                  {:seon.runtime.state/ok? true
+                                   :seon.runtime.state/changed? false
+                                   :seon.runtime.state/operations 0
+                                   :seon.runtime.state/basis-t 42})
        #'cli/print-config-result! (fn [result]
                                     (swap! calls conj [:print result]))
        #'cli/reconcile-development!
@@ -843,10 +843,10 @@
     (is (= [[:select configuration "config/system.edn"]
             [:lock selected :stack 300000]
             [:apply selected]
-            [:print {:seon.state/ok? true
-                     :seon.state/changed? false
-                     :seon.state/operations 0
-                     :seon.state/basis-t 42}]]
+            [:print {:seon.runtime.state/ok? true
+                     :seon.runtime.state/changed? false
+                     :seon.runtime.state/operations 0
+                     :seon.runtime.state/basis-t 42}]]
            @calls))))
 
 (deftest legacy-database-layout-is-never-silently-replaced

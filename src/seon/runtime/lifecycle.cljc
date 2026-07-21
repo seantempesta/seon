@@ -22,7 +22,7 @@
    [:seon.client/quiesced-run-ids [:vector :string]]
    [:seon.client/completed-turn-ids [:vector :string]]
    [:seon.client/errored-turn-ids [:vector :string]]
-   [:seon.agent.runtime/unhosted-ids [:vector :string]]]
+   [:seon.agent.lifecycle/unhosted-ids [:vector :string]]]
   [:map {:closed true}
    [:seon.client/quiesced? [:= false]]
    [::process-generation {:optional true} ::process-generation]

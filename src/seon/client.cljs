@@ -45,10 +45,9 @@
     ;; schemas are registered before start-runtime! runs.
     [seon.agent :as agent]
     [seon.agent.home :as home]
-    [seon.agent.runtime :as agent-runtime]
+    [seon.agent.lifecycle :as lifecycle]
     ;; Lifecycle functions (wait/complete/terminate) — host-bundled so the agent
     ;; home ns can `:refer` them; required here so the build includes the ns.
-    [seon.agent.lifecycle]
     ;; The agent loop + wake trigger: the client boot path ARMS the wake
     ;; trigger (seon.agent does NOT, to stay acyclic).
     [seon.agent.loop :as agent-loop]
@@ -168,8 +167,8 @@
     ;; Absent means no config reconciliation; present is loaded once.
     [seon.config :as config]
     ;; Holistic declarative-state reconciliation routes config, routes, and
-    ;; skills through `seon.state/reconcile!`, including stale retractions.
-    [seon.state :as state]
+    ;; skills through `seon.runtime.state/reconcile!`, including stale retractions.
+    [seon.runtime.state :as state]
     ;; Local-machine capability surface — A-9. Required so the agent
     ;; can call (seon.agent.fs/read-file ...) from
     ;; bootstrap-CLJS eval.
@@ -225,7 +224,7 @@
   ;; below IS this macro's whole-closure var vector: every public first-party
   ;; fn the build loads, specced or not (owner directive — 'just index
   ;; everything'; never hand-list vars).
-  (:require-macros [seon.indexing :refer [public-fn-vars first-party-ns-strs]]))
+  (:require-macros [seon.client.indexing :refer [public-fn-vars first-party-ns-strs]]))
 
 ;; ---------------------------------------------------------------------------
 ;; Process-lifetime state. `defonce` so reloads don't reset it.
@@ -382,7 +381,7 @@
 (def ^:private runtime-agent-datom-patterns
   [{::db/a :seon.agent/id}
    {::db/a :seon.agent/terminated-at}
-   {::db/a :seon.agent.runtime/wake?}
+   {::db/a :seon.agent.lifecycle/wake?}
    {::db/a :seon.agent.run/paused-at}])
 
 (def ^:private agent-ids-for-entities-query
@@ -413,7 +412,7 @@
           (event-entity-ids
            tx-data
            #{:seon.agent/id :seon.agent/terminated-at
-             :seon.agent.runtime/wake?})
+             :seon.agent.lifecycle/wake?})
           run-entities
           (event-entity-ids tx-data #{:seon.agent.run/paused-at})
           direct-ids
@@ -438,7 +437,7 @@
         (throw (ex-info "Agent runtime projection failed." failure))
         (let [ids (into [] (comp cat (distinct)) [direct-ids run-ids])]
           (doseq [id ids]
-            (await (agent-runtime/resume! {:seon.agent/id id})))
+            (await (lifecycle/resume! {:seon.agent/id id})))
           ids)))))
 
 (defn- runtime-advertisement-event!
@@ -690,7 +689,7 @@
                               (agent-loop/install-ticker! configuration))
                             (do
                               (agent-loop/uninstall-ticker!)
-                              (agent-runtime/unhost-all!)))
+                              (lifecycle/unhost-all!)))
                           (start-heartbeat!))))
                      (.catch
                       (fn [publication-error]
@@ -761,8 +760,9 @@
    :seon.agent/schedules
    :seon.agent/ctx
    ;; Per-agent process reconstruction dials. Both are durable facts read by
-   ;; seon.agent.runtime/home; absent values retain their defaults.
-   :seon.agent.runtime/wake?
+   ;; `seon.agent.lifecycle` and `seon.agent.home`; absent values retain their
+   ;; defaults.
+   :seon.agent.lifecycle/wake?
    :seon.eval/home-requires
 
    ;; --- Schedule (seon.agent.schedule — the cron maps an agent owns via
@@ -1083,7 +1083,7 @@
 
 ;; ---------------------------------------------------------------------------
 ;; index-core! — runtime introspection of compiled core fns
-;; (Step 2 of docs/prds/agent-runtime/coherent-bootstrap-indexing-2026-06-08.md)
+;; (Step 2 of docs/prds/lifecycle/coherent-bootstrap-indexing-2026-06-08.md)
 ;;
 ;; Replaces the old `core-fn-curated` / `synthesize-fn-source` / `seed-core-fns!`
 ;; hand-written table. Drives off a compile-time `#'`-LITERAL var-list (NOT
@@ -1110,7 +1110,7 @@
 (def ^:private core-vars
   "Every var indexed into the corpus at boot: the compile-time vector of
    EVERY public first-party fn across the build's whole require closure
-   (`seon.indexing/public-fn-vars` — owner directive 'just index
+   (`seon.client.indexing/public-fn-vars` — owner directive 'just index
    everything': all functions in the cljs package become `:seon.fn` rows,
    specced or not). No hand-curated inclusion list — the macro supplies the
    complete vector; a new public fn is indexed the moment it loads. Each var's
@@ -1120,14 +1120,14 @@
   (public-fn-vars))
 
 ;; Downstream extra-core vars (task #36 — SEON_EXTRA_SRC; spec:
-;; docs/prds/agent-runtime/research/extra-src-research-2026-06-12.md §d).
+;; docs/prds/lifecycle/research/extra-src-research-2026-06-12.md §d).
 ;; A downstream consumer's entry ns (named by SEON_EXTRA_PRELOAD, loaded
 ;; via the :devtools :preloads slot bin/seon --config-merges in) registers
 ;; its specced surface here:
 ;;
 ;;   (reset! client/!extra-core-vars
 ;;           (filterv #(str/starts-with? (str (:ns (meta %))) "acme.")
-;;                    (seon.indexing/public-fn-vars)))
+;;                    (seon.client.indexing/public-fn-vars)))
 ;;
 ;; The boot indexers consume it alongside `core-vars`: fn-rows +
 ;; FULL-SOURCE ns-rows in [[index-core!]]. Empty in builds without a
@@ -1188,7 +1188,7 @@
 
 (def ^:private compiled-first-party-ns-strs
   "BUILD-DERIVED set of every first-party ns name string compiled into
-   this bundle (`seon.indexing/first-party-ns-strs` over this ns's
+   this bundle (`seon.client.indexing/first-party-ns-strs` over this ns's
    compile-time require closure). The computed replacement for the
    hand-maintained `fn-less-compiled-roots #{\"my.kb\"}` exception: a
    compiled ns gets an [[index-core!]] ns-row BY CONSTRUCTION — whether or not
@@ -1710,7 +1710,7 @@
               "                   (public-fn-vars)))\n"
               "where <prefix> is your source root prefix (e.g. \"acme\"), and "
               "the entry ns needs "
-              "(:require-macros [seon.indexing :refer [public-fn-vars]]) "
+              "(:require-macros [seon.client.indexing :refer [public-fn-vars]]) "
               "so the macro expands in YOUR ns (whose require closure sees your "
               "vars — a seon-side helper could not).")})))
   nil)
@@ -1860,7 +1860,7 @@
 (defn ^:async ^:private rehost-agent-runtimes!
   "Reconstruct every nonterminated agent after a code reload.
 
-   This is process-local work only: [[seon.agent.runtime/resume!]] per
+   This is process-local work only: [[seon.agent.lifecycle/resume!]] per
    database-derived id. Each agent's execution child reconstructs its accepted
    program lazily; the pod owns no compiler or program replay."
   []
@@ -1872,11 +1872,11 @@
           _ (doseq [id ids]
               (vswap! !results conj
                       (await
-                       (agent-runtime/resume!
+                       (lifecycle/resume!
                         {:seon.agent/id id}))))
           results @!results
           failed
-          (some #(when (false? (:seon.agent.runtime/resumed? %)) %) results)
+          (some #(when (false? (:seon.agent.lifecycle/resumed? %)) %) results)
           superseded?
           (and failed
                (= :seon.runtime/unavailable
@@ -1935,11 +1935,11 @@
 
    This is the single declarative operation used by cold boot and the live
    development operator. Routes, skills, and the flattened config singleton
-   land through one provenance-scoped `seon.state/reconcile!`; a converged
+   land through one provenance-scoped `seon.runtime.state/reconcile!`; a converged
    apply submits no transaction. The manifest is already resolved data, never
    ambient process state."
   {:malli/schema [:=> [:cat ::apply-config-request]
-                  :seon.state/reconcile-response]}
+                  :seon.runtime.state/reconcile-response]}
   [{manifest :seon.config/manifest configuration ::configuration}]
   (let [singleton    (or configuration
                          (config/resolve-config-singleton manifest))
@@ -1960,12 +1960,12 @@
               (let [reconciled
                     (await
                      (state/reconcile!
-                      {:seon.state/desired desired
+                      {:seon.runtime.state/desired desired
                        :seon.db/managed-scope
                        #{:seon.db.process/boot :seon.db.process/config}
                        :seon.db/managed-identity-attrs
                        (desired-identity-attrs desired)}))]
-                (if-not (:seon.state/ok? reconciled)
+                (if-not (:seon.runtime.state/ok? reconciled)
                   reconciled
                   (let [migrated
                         (await (agent.ctx/migrate-plan-surface-default!))]
@@ -1973,9 +1973,9 @@
                       {:seon.error/message (::agent.ctx/error migrated)
                        :seon.error/kind :core-bug}
                       (-> reconciled
-                          (update :seon.state/changed?
+                          (update :seon.runtime.state/changed?
                                   #(or % (::agent.ctx/changed? migrated)))
-                          (update :seon.state/operations +
+                          (update :seon.runtime.state/operations +
                                   (::agent.ctx/operations migrated))))))))))))))
 
 (schema/register! ::start-runtime-request
@@ -2218,12 +2218,12 @@
                         {:seon.config/manifest selected-manifest
                          ::configuration selected-configuration}))]
             (when (or (string? (:seon.error/message reconciled))
-                      (false? (:seon.state/ok? reconciled)))
+                      (false? (:seon.runtime.state/ok? reconciled)))
               (throw
                (ex-info "Startup config reconciliation failed."
                         {:seon.error/kind :core-bug
-                         :seon.state/error
-                         (or (:seon.state/error reconciled)
+                         :seon.runtime.state/error
+                         (or (:seon.runtime.state/error reconciled)
                              (:seon.error/message reconciled))})))))
         (when autonomous?
           (let [recovered
@@ -2330,16 +2330,16 @@
                     (doseq [id resumable-ids]
                       (vswap! !results conj
                               (await
-                               (agent-runtime/resume!
+                               (lifecycle/resume!
                                 (cond->
                                   {:seon.agent/id id}
                                   (fn? llm-fn)
-                                  (assoc :seon.agent.runtime/llm-fn llm-fn))))))
+                                  (assoc :seon.agent.lifecycle/llm-fn llm-fn))))))
                     @!results)
                   [])
                 _ (when-let [failed
                              (some #(when (false?
-                                            (:seon.agent.runtime/resumed? %))
+                                            (:seon.agent.lifecycle/resumed? %))
                                       %)
                                    results)]
                     (throw (ex-info "start-runtime!: agent resume failed"
@@ -2434,7 +2434,7 @@
   [:or
    [:map {:closed true}
     [::stopped? [:= true]]
-    [::agent-runtime/unhosted-ids ::agent-runtime/unhosted-ids]]
+    [::lifecycle/unhosted-ids ::lifecycle/unhosted-ids]]
    [:map {:closed true}
     [::stopped? [:= false]]
     [::stop-error ::stop-error]]])
@@ -2584,10 +2584,10 @@
    (vec (sort (set/union
                (set (::errored-turn-ids left))
                (set (::errored-turn-ids right)))))
-   ::agent-runtime/unhosted-ids
+   ::lifecycle/unhosted-ids
    (vec (sort (set/union
-               (set (::agent-runtime/unhosted-ids left))
-               (set (::agent-runtime/unhosted-ids right)))))})
+               (set (::lifecycle/unhosted-ids left))
+               (set (::lifecycle/unhosted-ids right)))))})
 
 (defn- process-generation []
   (some-> js/process .-env (aget "SEON_PROCESS_GENERATION")))
@@ -2600,7 +2600,7 @@
         (agent-loop/uninstall-all-wake-triggers!)
         _ (swap! !state update ::quiesce-progress
                  merge-quiesce-progress
-                 {::agent-runtime/unhosted-ids wake-ids})
+                 {::lifecycle/unhosted-ids wake-ids})
         {::keys [quiesced-run-ids completed-turn-ids errored-turn-ids]}
         (if (true? (::autonomous? capability))
           (await (drain-agent-work! (quiescence-deadline)))
@@ -2612,11 +2612,11 @@
                  {::quiesced-run-ids quiesced-run-ids
                   ::completed-turn-ids completed-turn-ids
                   ::errored-turn-ids errored-turn-ids})
-        {host-ids ::agent-runtime/unhosted-ids}
-        (agent-runtime/unhost-all!)
+        {host-ids ::lifecycle/unhosted-ids}
+        (lifecycle/unhost-all!)
         _ (swap! !state update ::quiesce-progress
                  merge-quiesce-progress
-                 {::agent-runtime/unhosted-ids host-ids})
+                 {::lifecycle/unhosted-ids host-ids})
         _ (await (execution.host/stop!))
         _ (await (detach-runtime-advertisement!))]
     (let [progress (::quiesce-progress @!state)]
@@ -2735,7 +2735,7 @@
     (cond
       wholly-absent?
       {::stopped? true
-       ::agent-runtime/unhosted-ids []}
+       ::lifecycle/unhosted-ids []}
 
       transition-active?
       {::stopped? false
@@ -2751,8 +2751,8 @@
                ::cleanup-requires-connection?
                ::restore-completion-result)
         {::stopped? true
-         ::agent-runtime/unhosted-ids
-         (or (::agent-runtime/unhosted-ids quiesce-result) [])}
+         ::lifecycle/unhosted-ids
+         (or (::lifecycle/unhosted-ids quiesce-result) [])}
         (catch :default error
           (swap! !state assoc
                  ::runtime-phase :seon.client.runtime/cleanup-required)
@@ -2779,7 +2779,7 @@
           (let [drained
                 (if attached?
                   (await (drain-runtime-owners! capability))
-                  {::agent-runtime/unhosted-ids []})]
+                  {::lifecycle/unhosted-ids []})]
             (swap! !state dissoc
                    ::launch-capability
                    ::runtime-phase
@@ -2788,8 +2788,8 @@
                    ::quiesce-result
                    ::restore-completion-result)
             {::stopped? true
-             ::agent-runtime/unhosted-ids
-             (::agent-runtime/unhosted-ids drained)})
+             ::lifecycle/unhosted-ids
+             (::lifecycle/unhosted-ids drained)})
           (catch :default error
             (swap! !state assoc
                    ::runtime-phase :seon.client.runtime/cleanup-required)

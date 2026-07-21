@@ -115,7 +115,7 @@
   (router/install!
     {:seon.web.router/config-apply
      (fn [_request _response]
-       (js/Response. "{:seon.state/ok? true}" #js {:status 200}))
+       (js/Response. "{:seon.runtime.state/ok? true}" #js {:status 200}))
      :seon.web.router/same-origin? (constantly true)})
   (let [response (request! "POST" "/_seon/operator/config")]
     (is (= 200 (.-status response)))))
@@ -233,7 +233,7 @@
         {:seon.web.router/config-apply
          (fn [_request _response]
            (swap! !invocations inc)
-           (js/Response. "{:seon.state/ok? true}" #js {:status 200}))
+           (js/Response. "{:seon.runtime.state/ok? true}" #js {:status 200}))
          :seon.web.router/same-origin? (constantly true)})
       (reset! @#'admission/!state
               {::admission/status :unavailable

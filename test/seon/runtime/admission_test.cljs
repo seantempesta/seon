@@ -6,7 +6,7 @@
     [seon.agent.loop :as loop]
     [seon.agent.message :as message]
     [seon.agent.run :as run]
-    [seon.agent.runtime :as runtime]
+    [seon.agent.lifecycle :as runtime]
     [seon.agent.schedule :as schedule]
     [seon.db :as db]
     [seon.db.id :as db.id]

@@ -6,7 +6,7 @@
    [seon.agent :as agent]
    [seon.agent.ctx :as ctx]
    [seon.agent.loop :as agent-loop]
-   [seon.agent.runtime :as agent-runtime]
+   [seon.agent.lifecycle :as lifecycle]
    [seon.ai.generate-code :as generate-code]
    [seon.client :as client]
    [seon.config :as config]
@@ -18,7 +18,7 @@
    [seon.runtime.admission :as admission]
    [seon.runtime.recovery :as recovery]
    [seon.schema :as schema]
-   [seon.state :as state]
+   [seon.runtime.state :as state]
    [shadow.cljs.devtools.client.env :as shadow-env]
    [shadow.cljs.devtools.client.node :as shadow-node]))
 
@@ -301,12 +301,12 @@
             (fn [request]
               (reset! applied-request request)
               (reset! applied-configuration
-                      (last (:seon.state/desired request)))
+                      (last (:seon.runtime.state/desired request)))
               (js/Promise.resolve
-               {:seon.state/ok? true
-                :seon.state/changed? false
-                :seon.state/operations 0
-                :seon.state/attempts 1})))
+               {:seon.runtime.state/ok? true
+                :seon.runtime.state/changed? false
+                :seon.runtime.state/operations 0
+                :seon.runtime.state/attempts 1})))
       (set! ctx/migrate-plan-surface-default!
             (fn []
               (js/Promise.resolve
@@ -369,9 +369,9 @@
               (swap! migration-calls inc)
               (js/Promise.resolve @migration-result)))
       (reset! reconcile-result
-              {:seon.state/ok? false
-               :seon.state/error "reconcile failed"
-               :seon.state/attempts 1})
+              {:seon.runtime.state/ok? false
+               :seon.runtime.state/error "reconcile failed"
+               :seon.runtime.state/attempts 1})
       (-> (apply!)
           (.then
            (fn [failed-reconcile]
@@ -381,10 +381,10 @@
              (is (zero? @migration-calls))
              (reset! effects [])
              (reset! reconcile-result
-                     {:seon.state/ok? true
-                      :seon.state/changed? false
-                      :seon.state/operations 2
-                      :seon.state/attempts 1})
+                     {:seon.runtime.state/ok? true
+                      :seon.runtime.state/changed? false
+                      :seon.runtime.state/operations 2
+                      :seon.runtime.state/attempts 1})
              (reset! migration-result
                      {::ctx/ok? false ::ctx/error "migration failed"})
              (apply!)))
@@ -402,10 +402,10 @@
              (apply!)))
           (.then
            (fn [combined]
-             (is (= {:seon.state/ok? true
-                     :seon.state/changed? true
-                     :seon.state/operations 5
-                     :seon.state/attempts 1}
+             (is (= {:seon.runtime.state/ok? true
+                     :seon.runtime.state/changed? true
+                     :seon.runtime.state/operations 5
+                     :seon.runtime.state/attempts 1}
                     combined))
              (is (= [:reconcile :migrate] @effects)
                  "migration follows reconciliation inside config apply")))
@@ -474,7 +474,7 @@
           original-begin admission/begin-publication!
           original-publish admission/publish-committed!
           original-unavailable admission/mark-unavailable!
-          original-resume agent-runtime/resume!
+          original-resume lifecycle/resume!
           original-restore generate-code/restore-root-schedulers!
           original-install agent-loop/install-ticker!
           original-heartbeat client/start-heartbeat!
@@ -516,7 +516,7 @@
                 ::admission/instrumentation {}})))
       (set! admission/mark-unavailable!
             (fn [_] (swap! effects conj :unavailable) true))
-      (set! agent-runtime/resume!
+      (set! lifecycle/resume!
             (fn [request]
               (swap! effects conj [::resume request])
               (@rehost-started-resolve true)
@@ -548,7 +548,7 @@
                     @effects)
                  "a running runtime recovers its lost session before rehosting")
              (@finish-resume
-              {:seon.agent.runtime/resumed? true
+              {:seon.agent.lifecycle/resumed? true
                :seon.agent/id "root"})
              finished))
           (.then
@@ -580,7 +580,7 @@
              (set! admission/begin-publication! original-begin)
              (set! admission/publish-committed! original-publish)
              (set! admission/mark-unavailable! original-unavailable)
-             (set! agent-runtime/resume! original-resume)
+             (set! lifecycle/resume! original-resume)
              (set! generate-code/restore-root-schedulers! original-restore)
              (set! agent-loop/install-ticker! original-install)
              (set! client/start-heartbeat! original-heartbeat)
@@ -596,7 +596,7 @@
           original-begin admission/begin-publication!
           original-publish admission/publish-committed!
           original-unavailable admission/mark-unavailable!
-          original-resume agent-runtime/resume!
+          original-resume lifecycle/resume!
           original-install agent-loop/install-ticker!
           original-heartbeat client/start-heartbeat!
           effects (atom [])
@@ -633,10 +633,10 @@
               (swap! effects conj :unavailable)
               (@finish true)
               true))
-      (set! agent-runtime/resume!
+      (set! lifecycle/resume!
             (fn [_]
               (swap! effects conj :rehost)
-              (js/Promise.resolve {:seon.agent.runtime/resumed? true})))
+              (js/Promise.resolve {:seon.agent.lifecycle/resumed? true})))
       (set! agent-loop/install-ticker!
             (fn [_configuration] (swap! effects conj :ticker)))
       (set! client/start-heartbeat!
@@ -663,7 +663,7 @@
              (set! admission/begin-publication! original-begin)
              (set! admission/publish-committed! original-publish)
              (set! admission/mark-unavailable! original-unavailable)
-             (set! agent-runtime/resume! original-resume)
+             (set! lifecycle/resume! original-resume)
              (set! agent-loop/install-ticker! original-install)
              (set! client/start-heartbeat! original-heartbeat)
              (done)))))))

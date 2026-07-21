@@ -6,7 +6,7 @@
     [seon.agent.loop :as loop]
     [seon.agent.message :as message]
     [seon.agent.run :as run]
-    [seon.agent.runtime :as runtime]
+    [seon.agent.lifecycle :as runtime]
     [seon.agent.turn :as turn]
     [seon.db :as db]
     [seon.db.protocol :as db.protocol]
@@ -992,10 +992,10 @@
               nil))
       (-> (runtime/resume!
            {:seon.agent/id "agent-a"
-            :seon.agent.runtime/llm-fn identity})
+            :seon.agent.lifecycle/llm-fn identity})
           (.then
            (fn [result]
-             (is (true? (:seon.agent.runtime/resumed? result)))
+             (is (true? (:seon.agent.lifecycle/resumed? result)))
              (is (= 'my.tax (:seon.agent/ns result)))
              (is (= [:install-start :install-finished :drive] @effects))))
           (.catch (fn [error]

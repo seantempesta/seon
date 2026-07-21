@@ -13,7 +13,7 @@
     [goog.object :as gobj]
     [seon.agent :as agent]
     [seon.agent.debug :as agent-debug]
-    [seon.agent.runtime :as agent-runtime]
+    [seon.agent.lifecycle :as lifecycle]
     [seon.agent.run :as run]
     [seon.ai :as ai]
     [seon.db :as db]
@@ -499,19 +499,19 @@
     (let [run-task (deref #'serve/run-agent-task!)
           original-db db/db
           original-query db/query
-          original-resume agent-runtime/resume!
+          original-resume lifecycle/resume!
           original-message agent/message!
           calls (atom [])]
       (set! db/db (fn ([] (js/Promise.resolve database))
                     ([_] (js/Promise.resolve database))))
       (set! db/query (fn [_] (js/Promise.resolve 42)))
-      (set! agent-runtime/resume!
+      (set! lifecycle/resume!
             (fn [request]
               (swap! calls conj [:resume request])
               (js/Promise.resolve
                {:seon.agent/id "root"
-                ::agent-runtime/resumed? false
-                ::agent-runtime/error "host refused"})))
+                ::lifecycle/resumed? false
+                ::lifecycle/error "host refused"})))
       (set! agent/message!
             (fn [request]
               (swap! calls conj [:message request])
@@ -533,7 +533,7 @@
            (fn []
              (set! db/db original-db)
              (set! db/query original-query)
-             (set! agent-runtime/resume! original-resume)
+             (set! lifecycle/resume! original-resume)
              (set! agent/message! original-message)
              (done)))))))
 
