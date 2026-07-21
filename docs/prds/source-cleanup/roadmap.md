@@ -515,6 +515,26 @@ The **final graduation gate** remains that complete Stage 1.5 matrix and then
 the ordered A-H program gates; neither closed live defect displaces the later
 ledger.
 
+The reconciliation reports `a3cb5cef`, `00b1a1c1`, and `ef94d487` map every
+remaining cell. Focused source proof is complete; the dependency-critical gap
+is a real Bun/JVM retained-value page-and-retirement journey, followed by the
+same-artifact route/browser/SSE crossing and query-shape behavioral probe. A
+first frozen default attempt created and coherently parked two fresh proof
+agents without touching existing owners. It stopped before claiming evidence:
+MCP `eval_cljs` selects a pod REPL rather than submitting a managed eval, the
+maintained compiled invocation remained pending, and production intentionally
+does not expose sampler touches/sends or an exact-owner retire-after-start
+control. Review rejected a standalone integration process because database
+facts cross processes but retained raw values and `execution.host` ownership do
+not; its route would query a different authority. The next implementation
+boundary is therefore a test-only driver inside one isolated complete pod that
+owns both the ordinary web route and execution host. The active grounding lane
+is selecting the smallest normal-client entry/build and trigger seam before an
+edit. The driver owns counter/latch evidence and managed retirement for both
+tiers; it may not add a production debug API, mutate default, revive `u15`, or
+consume the B2 caches. Its acceptance is ordinary EDN evidence plus the real
+HTTP/browser route against those same process-local retained values.
+
 Initial integration commits are Datahike `58764d90`, parent gitlink `e042cb0e`,
 and Seon `88d35f77` + implicit-index correction `7e752954`. Independent review
 then found that direct add/retract/CAS and entity retraction routes could bypass
