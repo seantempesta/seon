@@ -209,3 +209,23 @@ unknown value proves the writer projection never walks arbitrary provider
 payloads. The corrected transcript and retry gates pass 25 tests and 92
 assertions; the retained report is
 `tmp/test-cljs-20260721-024026-12848.report.edn`.
+
+## Cold real-writer falsifier
+
+The frozen `b3fbebb1` checkpoint passed 1,452 CLJS tests / 7,014 assertions,
+281 writer tests / 2,143 assertions, and restarted the default cluster ready.
+The subsequent direct call to `acquire-recent-turns` against default database
+value `t=536875957`, commit ID
+`6a5f15b2-c20a-5e3a-854e-1b64c949912a`, returned zero turns with both omission
+facts false even though the same database has 330 root turns. The raw reverse
+AVET index-page request with prefix `[:seon.agent.turn/at]` returned an empty,
+complete page.
+
+This disproves the mocked AVET proof: `:seon.agent.turn/at` is registered as an
+ordinary `:inst` and is not currently present in AVET. The isolated retained
+branch adversary was aborted before any seed transaction and its branch was
+closed; it supplies no evidence. Closure now additionally requires a grounded
+indexed-attribute migration (or another exact timestamp-ordered fixed-work
+mechanism), a real empty-before/nonempty-after AVET probe on an existing
+database, and then the already specified divergent-ID/cursor/hostile-usage
+proof. Until that succeeds, the source correction is not live-accepted.

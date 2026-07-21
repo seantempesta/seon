@@ -482,15 +482,26 @@ grounding and independent review accept the generic-cursor remap and the real
 lookahead envelope of 65 visits per page / 260 total. The focused transcript
 and retry gate passes 25 tests / 92 assertions.
 
-The **earliest unsettled contract** is now the frozen live integration proof
-for both corrections. Its **integrated proof** uses divergent entity IDs and
-timestamps, a real incomplete AVET page/cursor, and one hostile historical
-usage scalar while measuring the fixed scan envelope, followed by explicit
-plan migration/readback, a no-write second apply, the direct child render, and
-the exact root feed. The first occupied lane owns the isolated retained-branch
-adversary; the top level owns frozen default restart, config apply, server-side
-SSE, and browser proof. The **next refill** after those facts integrate is the
-remaining Stage 1.5 live sampler/retirement/route/UI matrix. The
+The frozen `b3fbebb1` checkpoint passes 1,452 CLJS tests / 7,014 assertions and
+281 writer tests / 2,143 assertions, then restarts default ready. The plan
+migration live proof is complete: all twelve obsolete blocks changed in place,
+the second apply wrote zero operations without advancing the basis, the direct
+child render succeeded, and the identity-encoded root SSE plus browser showed
+the plan with no render error. The transcript live probe instead falsified the
+mocked index assumption: reverse AVET for `:seon.agent.turn/at` returned an
+empty complete page and direct acquisition returned zero of the known 330 root
+turns. The isolated branch was aborted before seeding and closed cleanly.
+
+The **earliest unsettled contract** is therefore the timestamp index migration
+needed by bounded acquisition. Its active research lane is grounding the
+existing Malli→Datahike index annotation and Datahike's existing-database
+backfill/alter semantics before any edit. Its **integrated proof** is an empty
+before/nonempty after AVET probe on the retained database, followed by divergent
+entity IDs/timestamps, a real incomplete page/cursor, one hostile historical
+usage scalar, and the fixed scan envelope. The top level owns integration and
+the repeated exact root feed/browser proof. The **next refill** after those
+facts integrate is the remaining Stage 1.5 live sampler/retirement/route/UI
+matrix. The
 **final graduation gate** remains the complete Stage 1.5 live
 sampler/retirement/route/UI matrix and then the ordered A-H program gates;
 neither live defect displaces the later ledger.
